@@ -153,6 +153,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         payload_digest: "q".repeat(64),
         plan_digest: "p".repeat(64),
         evidence_digest: "e".repeat(64),
+        evidence: { run_id: "9001", provider: "github_actions", checks: [] },
         artifact_record_digest: "a".repeat(64),
         log_record_digest: "l".repeat(64),
         attestation_record_digest: "t".repeat(64),
@@ -174,6 +175,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
           linked_artifact_count: 1,
           linked_log_count: 1,
           attestation_subject_count: 1,
+          evidence: { run_id: "9001", provider: "github_actions", checks: [] },
           ci_evidence: {},
           artifacts: [{ id: "artifact-1", kind: "junit", digest: "d".repeat(64) }],
           logs: [{ id: "log-1", digest: "f".repeat(64) }],
@@ -655,6 +657,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         governance: {},
         release: {},
         ci_evidence: { ci_evidence_ready: true },
+        ci_provider_evidence: { conformance_ready: true },
         execution_provenance: { provenance_ready: true },
         readiness: {
           platform_checks_clean: true,
@@ -668,6 +671,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
           governance_document_clean: true,
           release_audit_ready: true,
           ci_execution_evidence_ready: true,
+          ci_provider_evidence_ready: true,
           execution_provenance_ready: true,
           local_delivery_ready: true,
         },
@@ -685,7 +689,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
           ready: true,
           fail_closed: false,
           no_implicit_release: true,
-          available_target_count: 12,
+          available_target_count: 13,
         },
         guarantees: ["no implicit release"],
         limitations: ["external execution remains outside the workflow"],
@@ -1900,7 +1904,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(leaderboard.mcp.result.structuredContent.schema, "bioprism-mcp/hub-leaderboard/0.1");
   assert.equal(leaderboard.mcp.result.structuredContent.unranked_count, 1);
   const delivery = await client.developerDeliveryAudit({
-    ci_provider: { ci: { workflow: "contracts" }, provider: "github_actions", payload: { run: { id: 9001, conclusion: "success" }, jobs: [{ name: "tests", conclusion: "success" }] } },
+    ci_provider_evidence: { ci: { workflow: "contracts" }, provider: "github_actions", payload: { run: { id: 9001, conclusion: "success" }, jobs: [{ name: "tests", conclusion: "success" }] }, artifacts: [{ id: "artifact-1", kind: "junit", digest: "d".repeat(64) }] },
     execution_provenance: { mission: { plan: { mission_id: "mission-ts" } }, delegated_checks: [] },
     release_request: { id: "delivery-1", targets: ["ci_execution_evidence"] },
   });
@@ -1908,11 +1912,12 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(delivery.mcp.result.structuredContent.readiness.local_delivery_ready, true);
   assert.equal(delivery.mcp.result.structuredContent.ci_evidence.ci_evidence_ready, true);
   assert.equal(delivery.mcp.result.structuredContent.readiness.ci_execution_evidence_ready, true);
+  assert.equal(delivery.mcp.result.structuredContent.readiness.ci_provider_evidence_ready, true);
   assert.equal(delivery.mcp.result.structuredContent.execution_provenance.provenance_ready, true);
   assert.equal(delivery.mcp.result.structuredContent.readiness.execution_provenance_ready, true);
   assert.equal(delivery.mcp.result.structuredContent.release_request.targets[0].target, "ci_execution_evidence");
   const deliveryRequest = JSON.parse(seen.at(-1).init.body);
-  assert.deepEqual(deliveryRequest.ci_provider, { ci: { workflow: "contracts" }, provider: "github_actions", payload: { run: { id: 9001, conclusion: "success" }, jobs: [{ name: "tests", conclusion: "success" }] } });
+  assert.equal(deliveryRequest.ci_provider_evidence.artifacts[0].id, "artifact-1");
   assert.deepEqual(deliveryRequest.execution_provenance, { mission: { plan: { mission_id: "mission-ts" } }, delegated_checks: [] });
   const receipt = await client.developerDeliveryReceipt({
     receipt_id: "receipt-ts-1",

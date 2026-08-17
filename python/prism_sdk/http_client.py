@@ -376,6 +376,7 @@ def _developer_delivery_arguments(
         Mapping[str, Any]
         | CiExecutionEvidenceRequest
         | CiProviderNormalizationRequest
+        | CiProviderEvidenceRequest
         | ExecutionProvenanceRequest
         | None,
     ],
@@ -390,6 +391,7 @@ def _developer_delivery_arguments(
                     (
                         CiExecutionEvidenceRequest,
                         CiProviderNormalizationRequest,
+                        CiProviderEvidenceRequest,
                         ExecutionProvenanceRequest,
                     ),
                 )
@@ -749,6 +751,7 @@ class ApiClient:
         release: Mapping[str, Any] | None = None,
         ci_evidence: CiExecutionEvidenceRequest | Mapping[str, Any] | None = None,
         ci_provider: CiProviderNormalizationRequest | Mapping[str, Any] | None = None,
+        ci_provider_evidence: CiProviderEvidenceRequest | Mapping[str, Any] | None = None,
         execution_provenance: ExecutionProvenanceRequest | Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Run the cross-domain delivery audit through the HTTP gateway."""
@@ -767,6 +770,7 @@ class ApiClient:
                 "release": release,
                 "ci_evidence": ci_evidence,
                 "ci_provider": ci_provider,
+                "ci_provider_evidence": ci_provider_evidence,
                 "execution_provenance": execution_provenance,
             },
         )
@@ -1320,6 +1324,7 @@ class ApiClient:
         release: Mapping[str, Any] | None = None,
         ci_evidence: CiExecutionEvidenceRequest | Mapping[str, Any] | None = None,
         ci_provider: CiProviderNormalizationRequest | Mapping[str, Any] | None = None,
+        ci_provider_evidence: CiProviderEvidenceRequest | Mapping[str, Any] | None = None,
         execution_provenance: ExecutionProvenanceRequest | Mapping[str, Any] | None = None,
     ) -> DeveloperDeliveryAuditReport:
         """Return typed delivery-readiness evidence from the HTTP gateway."""
@@ -1337,6 +1342,8 @@ class ApiClient:
                 governance=governance,
                 release=release,
                 ci_evidence=ci_evidence,
+                ci_provider=ci_provider,
+                ci_provider_evidence=ci_provider_evidence,
                 execution_provenance=execution_provenance,
             )
         )
@@ -3579,6 +3586,8 @@ class AsyncApiClient:
         governance: Mapping[str, Any] | None = None,
         release: Mapping[str, Any] | None = None,
         ci_evidence: CiExecutionEvidenceRequest | Mapping[str, Any] | None = None,
+        ci_provider: CiProviderNormalizationRequest | Mapping[str, Any] | None = None,
+        ci_provider_evidence: CiProviderEvidenceRequest | Mapping[str, Any] | None = None,
         execution_provenance: ExecutionProvenanceRequest | Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Async cross-domain delivery audit through the HTTP gateway."""
@@ -3597,6 +3606,7 @@ class AsyncApiClient:
                 "release": release,
                 "ci_evidence": ci_evidence,
                 "ci_provider": ci_provider,
+                "ci_provider_evidence": ci_provider_evidence,
                 "execution_provenance": execution_provenance,
             },
         )
@@ -4149,6 +4159,8 @@ class AsyncApiClient:
         governance: Mapping[str, Any] | None = None,
         release: Mapping[str, Any] | None = None,
         ci_evidence: CiExecutionEvidenceRequest | Mapping[str, Any] | None = None,
+        ci_provider: CiProviderNormalizationRequest | Mapping[str, Any] | None = None,
+        ci_provider_evidence: CiProviderEvidenceRequest | Mapping[str, Any] | None = None,
         execution_provenance: ExecutionProvenanceRequest | Mapping[str, Any] | None = None,
     ) -> DeveloperDeliveryAuditReport:
         """Async typed delivery-readiness evidence from the HTTP gateway."""
@@ -4166,6 +4178,8 @@ class AsyncApiClient:
                 governance=governance,
                 release=release,
                 ci_evidence=ci_evidence,
+                ci_provider=ci_provider,
+                ci_provider_evidence=ci_provider_evidence,
                 execution_provenance=execution_provenance,
             )
         )

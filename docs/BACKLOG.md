@@ -254,6 +254,10 @@ rows: it preserves the supplied records, checks provider/run/check bindings and 
 computes separate deterministic row-family digests, and fails closed on malformed or unbound rows.
 This is still a local structural handoff; it does not fetch bytes, authenticate a provider, verify
 signatures, execute CI, or establish release authority.
+The delivery audit and content-addressed receipt now accept this conformance result as a separate
+`ci_provider_evidence` target/evidence row. Receipt verification recomputes the complete retained
+projection and distinguishes provider-evidence tampering from target or canonical CI tampering; this
+still does not create a remote artifact verifier or external CI authority.
 The delivery audit now accepts that request directly as `ci_provider`, returning the normalized
 projection and downstream CI evidence audit together while refusing mixed canonical/provider
 evidence inputs. This closes the local composition gap without claiming that an external runner,

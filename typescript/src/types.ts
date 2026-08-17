@@ -1263,6 +1263,7 @@ export interface DeveloperDeliveryAuditArgs extends JsonObject {
   release?: JsonObject;
   ci_evidence?: JsonObject;
   ci_provider?: CiProviderNormalizationArgs;
+  ci_provider_evidence?: CiProviderEvidenceArgs;
   execution_provenance?: JsonObject;
   release_request?: JsonObject;
 }
@@ -1359,6 +1360,7 @@ export interface DeveloperDeliveryReadinessResult extends JsonObject {
   governance_document_clean: boolean;
   release_audit_ready: boolean;
   ci_execution_evidence_ready?: boolean;
+  ci_provider_evidence_ready?: boolean;
   execution_provenance_ready?: boolean;
   local_delivery_ready: boolean;
 }
@@ -1395,6 +1397,7 @@ export interface DeveloperDeliveryAuditResult extends JsonObject {
   release: JsonObject | null;
   ci_evidence: JsonObject | null;
   ci_provider_normalization?: JsonObject | null;
+  ci_provider_evidence?: JsonObject | null;
   execution_provenance: JsonObject | null;
   readiness: DeveloperDeliveryReadinessResult;
   external_surface_posture: DeveloperDeliveryExternalSurfaceResult;
@@ -4022,6 +4025,7 @@ export interface CiProviderEvidenceAuditResult extends JsonObject {
   artifact_record_digest: string;
   log_record_digest: string;
   attestation_record_digest: string;
+  evidence: JsonObject;
   artifact_count: number;
   log_count: number;
   attestation_count: number;
@@ -4056,6 +4060,7 @@ export interface CiProviderEvidenceResult extends JsonObject {
   artifact_record_digest: string;
   log_record_digest: string;
   attestation_record_digest: string;
+  evidence: JsonObject;
   audit: CiProviderEvidenceAuditResult;
   guarantees: string[];
   limitations: string[];

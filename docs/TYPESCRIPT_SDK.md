@@ -102,7 +102,7 @@ Convenience methods currently cover:
 - `bioCapabilityEvidenceAudit`: evidence posture;
 - `bioAtlasPublicationAudit`: atlas, evidence, card, and leaderboard release gates;
 - `developerDeliveryAudit`: developer-platform delivery evidence, with independent opt-in
-  `ci_execution_evidence` and `execution_provenance` targets;
+  `ci_execution_evidence`, `ci_provider_evidence`, and `execution_provenance` targets;
 - `developerWorkbench`: digest-bound authoring/notebook audit, capability dashboard query, and
   review-only CI workflow planning;
 - `ciExecutionEvidenceAudit`: digest-bound reconciliation of a supplied CI run against a freshly
@@ -188,7 +188,8 @@ request state, foreign-surface posture, and optional CI/mission-provenance evide
 `execution_provenance` target requires an explicit mission provenance payload; absence or structural
 failure blocks only the requested target. Neither signal proves provider execution or deployment
 approval. `developerDeliveryReceipt` returns `DeveloperDeliveryReceiptResult` with canonical target rows,
-evidence presence/readiness, and delivery/target/receipt digests. It recomputes the delivery audit
+evidence presence/readiness, including the retained provider artifact/log/attestation projection,
+and delivery/target/receipt digests. It recomputes the delivery audit
 from the nested request so a receipt is a stable structural join key, not a signature, execution
 claim, durable record, deployment approval, or release authority. `bioAtlasPublicationAudit` returns typed
 `BioAtlasPublicationAuditResult` atlas aggregation, score/evidence gates, leaderboard state, and
@@ -200,6 +201,11 @@ external execution or create release authority.
 normalizes the raw payload, audits the resulting plan-bound evidence, and returns the intermediate
 normalization alongside `ci_evidence`. It is mutually exclusive with `ci_evidence` and remains
 caller-supplied structural evidence only.
+`DeveloperDeliveryAuditArgs.ci_provider_evidence` provides the attached-evidence path: the route
+retains canonical provider artifacts, logs, attestations, and their record digests as a separate
+target, then feeds only the canonical run envelope into the independent CI evidence audit. It is
+mutually exclusive with both other provider-evidence inputs. Receipt verification detects changes
+to the retained provider-evidence row separately from target or canonical CI changes.
 `ciProviderNormalize` accepts a GitHub Actions-shaped, GitLab CI, or generic provider payload and returns
 `CiProviderNormalizationResult` with a plan-bound canonical evidence object, provider/source labels,
 payload and derived-check digest metadata, and warnings for missing provider digests. It is an input

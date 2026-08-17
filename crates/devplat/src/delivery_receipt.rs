@@ -156,6 +156,7 @@ fn evidence_rows(delivery: &Value) -> Result<Vec<DeliveryReceiptEvidence>, Strin
         ("release", "release_audit_ready"),
         ("ci_evidence", "ci_execution_evidence_ready"),
         ("execution_provenance", "execution_provenance_ready"),
+        ("ci_provider_evidence", "ci_provider_evidence_ready"),
     ];
     fields
         .into_iter()

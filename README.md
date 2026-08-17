@@ -717,6 +717,10 @@ or cryptographically verify attestation statements.
 `developer_delivery_audit` can compose that normalization directly through an explicit `ci_provider`
 argument; it returns both the normalized provider projection and the downstream `ci_evidence` audit,
 while rejecting simultaneous `ci_provider` and canonical `ci_evidence` inputs.
+The deeper `ci_provider_evidence` argument composes artifact, log, and attestation conformance into
+an independent delivery target; `developer_delivery_receipt` carries its complete projection digest,
+and `developer_delivery_receipt_verify` detects tampering in that retained evidence row. The three
+provider evidence paths remain mutually exclusive and structural-only.
 When a delivery decision needs this signal, `developer_delivery_audit` accepts the exact
 `ci_evidence` payload and exposes a separate `ci_execution_evidence` target; missing evidence blocks
 that target without changing the semantics of other delivery targets.

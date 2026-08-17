@@ -24282,6 +24282,7 @@ impl Server {
             "payload_digest": audit.payload_digest,
             "plan_digest": audit.plan_digest,
             "evidence_digest": audit.evidence_digest,
+            "evidence": audit.evidence,
             "artifact_record_digest": audit.artifact_record_digest,
             "log_record_digest": audit.log_record_digest,
             "attestation_record_digest": audit.attestation_record_digest,
@@ -24728,9 +24729,11 @@ impl Server {
             None => None,
         };
         let ci_provider_normalization = match arguments.get("ci_provider") {
-            Some(_) if arguments.get("ci_evidence").is_some() => {
+            Some(_) if arguments.get("ci_evidence").is_some()
+                || arguments.get("ci_provider_evidence").is_some() =>
+            {
                 return Err(
-                    "ci_provider and ci_evidence are mutually exclusive; supply one evidence source"
+                    "ci_provider, ci_provider_evidence, and ci_evidence are mutually exclusive; supply one evidence source"
                         .into(),
                 )
             }
@@ -24752,8 +24755,43 @@ impl Server {
             }
             None => None,
         };
+        let ci_provider_evidence = match arguments.get("ci_provider_evidence") {
+            Some(_) if arguments.get("ci_evidence").is_some() => {
+                return Err(
+                    "ci_provider_evidence and ci_evidence are mutually exclusive; supply one evidence source"
+                        .into(),
+                )
+            }
+            Some(_) if arguments.get("ci_provider").is_some() => {
+                return Err(
+                    "ci_provider_evidence and ci_provider are mutually exclusive; supply one evidence source"
+                        .into(),
+                )
+            }
+            Some(raw) => {
+                let provider_evidence = self.ci_provider_evidence_audit(raw)?;
+                let ci = raw
+                    .get("ci")
+                    .cloned()
+                    .ok_or("ci_provider_evidence requires the canonical ci request")?;
+                let evidence = provider_evidence
+                    .get("evidence")
+                    .cloned()
+                    .ok_or("ci_provider_evidence returned no canonical CI evidence envelope")?;
+                let audit = self.ci_execution_evidence_audit(&json!({
+                    "ci": ci,
+                    "evidence": evidence,
+                }))?;
+                Some((provider_evidence, audit))
+            }
+            None => None,
+        };
         let ci_evidence = ci_evidence.or_else(|| {
             ci_provider_normalization
+                .as_ref()
+                .map(|(_, audit)| audit.clone())
+        }).or_else(|| {
+            ci_provider_evidence
                 .as_ref()
                 .map(|(_, audit)| audit.clone())
         });
@@ -24910,6 +24948,19 @@ impl Server {
                     .unwrap_or(false)
                     && value
                         .get("ci_evidence_ready")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)
+            })
+            .unwrap_or(false);
+        let ci_provider_evidence_ready = ci_provider_evidence
+            .as_ref()
+            .map(|(value, _)| {
+                value
+                    .get("ok")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                    && value
+                        .get("conformance_ready")
                         .and_then(Value::as_bool)
                         .unwrap_or(false)
             })
@@ -25121,6 +25172,21 @@ impl Server {
                                 .to_string(),
                         ],
                     ),
+                    "ci_provider_evidence" => (
+                        ci_provider_evidence.is_some(),
+                        ci_provider_evidence_ready,
+                        if ci_provider_evidence.is_none() {
+                            vec!["ci_provider_evidence_arguments_missing".to_string()]
+                        } else if ci_provider_evidence_ready {
+                            vec![]
+                        } else {
+                            vec!["ci_provider_evidence_not_conformant".to_string()]
+                        },
+                        vec![
+                            "provider artifact, log, and attestation rows are bound and digest-addressed structurally; remote bytes, provider authority, and signatures remain outside this route"
+                                .to_string(),
+                        ],
+                    ),
                     "execution_provenance" => (
                         execution_provenance.is_some(),
                         execution_provenance_ready,
@@ -25138,7 +25204,7 @@ impl Server {
                     ),
                     other => {
                         return Err(format!(
-                            "unknown release target {other:?}; choose local_delivery, developer_platform, developer_claims, repository_scope, repository_impact, sdk_admission, conformance, provider_capability, governance_schema, release, ci_execution_evidence, or execution_provenance"
+                            "unknown release target {other:?}; choose local_delivery, developer_platform, developer_claims, repository_scope, repository_impact, sdk_admission, conformance, provider_capability, governance_schema, release, ci_execution_evidence, ci_provider_evidence, or execution_provenance"
                         ));
                     }
                 };
@@ -25171,7 +25237,7 @@ impl Server {
                 "no_implicit_release": true,
             })
         };
-        release_request["available_target_count"] = json!(12);
+        release_request["available_target_count"] = json!(13);
 
         let foreign_subject_count = platform
             .get("devplat")
@@ -25193,6 +25259,9 @@ impl Server {
             "ci_provider_normalization": ci_provider_normalization
                 .as_ref()
                 .map(|(normalized, _)| normalized.clone()),
+            "ci_provider_evidence": ci_provider_evidence
+                .as_ref()
+                .map(|(evidence, _)| evidence.clone()),
             "execution_provenance": execution_provenance,
             "readiness": {
                 "platform_checks_clean": platform_ready,
@@ -25206,6 +25275,7 @@ impl Server {
                 "governance_document_clean": governance_ready,
                 "release_audit_ready": release_ready,
                 "ci_execution_evidence_ready": ci_evidence_ready,
+                "ci_provider_evidence_ready": ci_provider_evidence_ready,
                 "execution_provenance_ready": execution_provenance_ready,
                 "local_delivery_ready": local_delivery_ready,
             },
@@ -29347,10 +29417,11 @@ pub fn tool_definitions() -> Vec<Value> {
                     "provider": { "type": "object", "description": "Optional exact arguments for provider_capability_gate. Required for provider_capability readiness." },
                     "governance": { "type": "object", "description": "Optional exact arguments for governance_schema_check. A document-mode conforming result is required for governance_schema readiness; a catalog result is not enough." },
                     "release": { "type": "object", "description": "Optional exact arguments for release_audit. Required for release readiness." },
-                    "ci_evidence": { "type": "object", "description": "Optional exact CiExecutionEvidenceRequest arguments with ci and evidence. Mutually exclusive with ci_provider; it is structurally reconciled and never executed here." },
-                    "ci_provider": { "type": "object", "description": "Optional CiProviderNormalizationRequest with ci, provider (github_actions or generic), payload, and optional source. It is normalized into canonical evidence and then structurally audited; mutually exclusive with ci_evidence and never authenticated or executed here." },
+                    "ci_evidence": { "type": "object", "description": "Optional exact CiExecutionEvidenceRequest arguments with ci and evidence. Mutually exclusive with ci_provider and ci_provider_evidence; it is structurally reconciled and never executed here." },
+                    "ci_provider": { "type": "object", "description": "Optional CiProviderNormalizationRequest with ci, provider (github_actions, gitlab_ci, or generic), payload, and optional source. It is normalized into canonical evidence and then structurally audited; mutually exclusive with ci_evidence and ci_provider_evidence and never authenticated or executed here." },
+                    "ci_provider_evidence": { "type": "object", "description": "Optional CiProviderEvidenceRequest with ci, provider, payload, and bounded artifacts, logs, and attestations. It is normalized, structurally audited, and exposed as its own delivery target; mutually exclusive with ci_evidence and ci_provider." },
                     "execution_provenance": { "type": "object", "description": "Optional exact ExecutionProvenanceRequest arguments with mission and delegated_checks. Required for the execution_provenance target; it reconciles a supplied mission trace without replaying it." },
-                    "release_request": { "type": "object", "description": "Optional explicit request {id, targets}. Targets: local_delivery, developer_platform, developer_claims, repository_scope, repository_impact, sdk_admission, conformance, provider_capability, governance_schema, release, ci_execution_evidence, or execution_provenance. Omit it to receive no readiness claim." }
+                    "release_request": { "type": "object", "description": "Optional explicit request {id, targets}. Targets: local_delivery, developer_platform, developer_claims, repository_scope, repository_impact, sdk_admission, conformance, provider_capability, governance_schema, release, ci_execution_evidence, ci_provider_evidence, or execution_provenance. Omit it to receive no readiness claim." }
                 },
                 "required": []
             }

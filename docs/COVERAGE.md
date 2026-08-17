@@ -64,6 +64,10 @@ rows. It validates unique identities, content-digest syntax, provider/run/check 
 shape, and attestation subjects; preserves every row; emits separate record digests; and reports
 structural `conformance_ready` without fetching remote content, executing checks, authenticating a
 provider, or cryptographically verifying an attestation.
+`developer_delivery_audit` can now carry that audit as the independent `ci_provider_evidence` target,
+while `developer_delivery_receipt` and its verifier preserve and recompute a digest over the complete
+provider-evidence projection. This makes the attached-evidence handoff joinable and tamper-diagnosable
+without merging it into the canonical CI execution claim.
 `developer_delivery_audit` accepts this same request as `ci_provider`, composes normalization and
 the plan-bound evidence audit, and returns both layers. Canonical `ci_evidence` and `ci_provider`
 are mutually exclusive so provenance cannot be silently blended.

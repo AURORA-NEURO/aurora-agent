@@ -76,6 +76,15 @@ predicates. It does not mean the remote artifact exists, a log was downloaded, a
 authenticated, a signature was checked, or a check was executed. Attestation statements remain
 available for a later verifier; this route explicitly reports `verification: structural_only`.
 
+The same request can be supplied as `developer_delivery_audit.ci_provider_evidence`. Delivery then
+keeps the provider-evidence audit, canonical `ci_evidence`, and the existing provider/run target
+separate, and adds an explicit `ci_provider_evidence` release target. When a
+`developer_delivery_receipt` is built from that audit, the receipt carries a dedicated evidence row
+whose digest is computed over the complete provider-evidence projection. Receipt verification
+recomputes that row and reports `evidence_mismatch` if its digest or retained rows are tampered with.
+The provider-evidence input remains mutually exclusive with `ci_evidence` and `ci_provider` so a
+receipt cannot silently blend provenance paths.
+
 ## Result semantics
 
 `valid`/`structurally_valid` means the plan digest and exact check/evidence structure reconcile.
@@ -95,6 +104,8 @@ safe, clinically valid, scientifically valid, or deployed.
   HTTP methods. `CiProviderNormalizationRequest` and `CiProviderNormalizationReport` expose the
   corresponding provider normalizer; `CiProviderEvidenceRequest` and `CiProviderEvidenceReport`
   expose the artifact/log/attestation conformance handoff across all four facades.
+  `developer_delivery_audit(..., ci_provider_evidence=...)` and the typed delivery report expose
+  the independent provider-evidence target; delivery receipts preserve its digest row.
 - TypeScript: `CiExecutionEvidenceArgs`, `CiExecutionEvidenceResult`, and
   `ApiClient.ciExecutionEvidenceAudit(...)`, plus `CiProviderNormalizationArgs`,
   `CiProviderNormalizationResult`, and `ApiClient.ciProviderNormalize(...)`, plus

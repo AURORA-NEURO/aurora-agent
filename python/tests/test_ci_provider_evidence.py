@@ -56,6 +56,7 @@ def payload() -> dict:
         "schema": "bioprism-devplat-ci-provider-evidence/0.1",
         "valid": True,
         "conformance_ready": True,
+        "evidence": {"run_id": "run-42", "provider": "github_actions", "checks": []},
         "audit": audit,
         "guarantees": [],
         "limitations": [],
@@ -93,6 +94,7 @@ class CiProviderEvidenceTests(unittest.TestCase):
         self.assertIsInstance(report, CiProviderEvidenceReport)
         self.assertTrue(report.conformance_ready)
         self.assertEqual(report.attestation_subject_count, 1)
+        self.assertEqual(report.evidence["run_id"], "run-42")
         self.assertEqual(report.verification, "structural_only")
         with self.assertRaises(ArgumentError):
             CiProviderEvidenceRequest({}, "generic", {})

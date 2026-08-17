@@ -14,7 +14,7 @@ use serde_json::Value;
 use thiserror::Error;
 
 use crate::ci_evidence::{
-    audit_ci_execution_evidence, CiEvidenceFinding, CiExecutionEvidenceRequest,
+    audit_ci_execution_evidence, CiEvidenceFinding, CiExecutionEvidenceRequest, CiRunEvidence,
 };
 use crate::ci_provider::{normalize_ci_provider_payload, CiProviderNormalizationRequest};
 use crate::workbench::CiRequest;
@@ -88,6 +88,7 @@ pub struct CiProviderEvidenceAudit {
     pub payload_digest: String,
     pub plan_digest: String,
     pub evidence_digest: String,
+    pub evidence: CiRunEvidence,
     pub artifact_record_digest: String,
     pub log_record_digest: String,
     pub attestation_record_digest: String,
@@ -412,6 +413,8 @@ pub fn audit_ci_provider_evidence(
             .cmp(&right.subject)
             .then_with(|| left.code.cmp(&right.code))
     });
+    let normalized_run_id = normalized.evidence.run_id.clone();
+    let normalized_evidence = normalized.evidence.clone();
     let structurally_valid = ci_evidence.structurally_valid
         && findings
             .iter()
@@ -422,10 +425,11 @@ pub fn audit_ci_provider_evidence(
         workflow: "ci_provider_evidence_audit".into(),
         provider: normalized.provider,
         source: normalized.source,
-        run_id: normalized.evidence.run_id,
+        run_id: normalized_run_id,
         payload_digest: normalized.payload_digest,
         plan_digest: ci_evidence.plan_digest.clone(),
         evidence_digest: ci_evidence.evidence_digest.clone(),
+        evidence: normalized_evidence,
         artifact_record_digest: digest_rows(&request.artifacts)?,
         log_record_digest: digest_rows(&request.logs)?,
         attestation_record_digest: digest_rows(&request.attestations)?,
@@ -524,6 +528,7 @@ mod tests {
         assert_eq!(audit.artifact_count, 1);
         assert_eq!(audit.linked_log_count, 1);
         assert_eq!(audit.attestation_subject_count, 1);
+        assert_eq!(audit.evidence.run_id, "99");
         assert_eq!(audit.verification, "structural_only");
         assert!(audit
             .limitations

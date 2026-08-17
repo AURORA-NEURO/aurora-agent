@@ -410,6 +410,10 @@ invent defaults:
   `conformance_ready` signal across the same four facades. The SDK validates mapping/array bounds
   locally; Rust remains authoritative for digest syntax, identity binding, and attestation subject
   semantics.
+- `developer_delivery_audit(..., ci_provider_evidence=...)` carries that report as an independent
+  fail-closed release target. `DeveloperDeliveryAuditReport` preserves the target readiness and
+  provider-evidence projection, while `DeveloperDeliveryReceiptReport`/verification report expose
+  the content-addressed evidence row and tamper findings.
 - `execution_provenance_audit(...)` reconciles an `agent_mission` report with terminal results,
   contiguous trace identity, and optional delegated checks. `ExecutionProvenanceReport` preserves
   content digests, missingness, non-passing checks, and the structural-only `provenance_ready`
@@ -423,6 +427,9 @@ invent defaults:
   evidence against the regenerated plan, and returns both `ci_provider_normalization` and
   `ci_evidence`. `ci_provider` and `ci_evidence` are mutually exclusive, and neither implies
   provider authentication or external execution.
+- `developer_delivery_audit(..., ci_provider_evidence=...)` composes the complete provider
+  artifact/log/attestation report into the independent `ci_provider_evidence` target; it remains
+  mutually exclusive with both other CI evidence inputs and keeps canonical run evidence separate.
 - `DeveloperDeliveryReceiptRequest` and `developer_delivery_receipt(...)` recompute that audit and
   return `DeveloperDeliveryReceiptReport` with canonical target rows, evidence presence/readiness,
   target/delivery/receipt digests, and structural receipt findings across `Workspace`,

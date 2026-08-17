@@ -899,6 +899,8 @@ class HttpApiClientTests(unittest.TestCase):
             governance=None,
             release=None,
             ci_evidence=None,
+            ci_provider=None,
+            ci_provider_evidence=None,
             execution_provenance=None,
         )
 
@@ -1309,8 +1311,10 @@ class HttpApiClientTests(unittest.TestCase):
                 provider=None,
                 governance=None,
                 release=None,
-                ci_evidence=None,
-                execution_provenance=None,
+            ci_evidence=None,
+            ci_provider=None,
+            ci_provider_evidence=None,
+            execution_provenance=None,
             )
             with patch.object(
                 AsyncApiClient,

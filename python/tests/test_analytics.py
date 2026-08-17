@@ -1628,6 +1628,7 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
             release=None,
             ci_evidence=None,
             ci_provider=None,
+            ci_provider_evidence=None,
             execution_provenance=None,
         )
 
@@ -1709,6 +1710,36 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
         report = DeveloperDeliveryAuditReport.from_wire(payload)
         self.assertTrue(report.readiness.execution_provenance_ready)
         self.assertEqual(report.checks["execution_provenance"]["provenance_ready"], True)
+        self.assertTrue(report.ready_for_requested_release)
+
+    def test_delivery_audit_report_preserves_provider_evidence_target(self) -> None:
+        payload = developer_delivery_audit_payload()
+        payload["ci_provider_evidence"] = {
+            "workflow": "ci_provider_evidence_audit",
+            "conformance_ready": True,
+            "evidence": {"run_id": "run-42", "checks": []},
+        }
+        payload["readiness"]["ci_provider_evidence_ready"] = True
+        payload["release_request"] = {
+            "present": True,
+            "id": "delivery-provider-evidence-1",
+            "targets": [
+                {
+                    "target": "ci_provider_evidence",
+                    "available": True,
+                    "eligible": True,
+                    "blockers": [],
+                    "notes": ["provider rows structurally conformed"],
+                }
+            ],
+            "ready": True,
+            "fail_closed": False,
+            "no_implicit_release": True,
+            "available_target_count": 13,
+        }
+        report = DeveloperDeliveryAuditReport.from_wire(payload)
+        self.assertTrue(report.readiness.ci_provider_evidence_ready)
+        self.assertEqual(report.ci_provider_evidence["conformance_ready"], True)
         self.assertTrue(report.ready_for_requested_release)
 
     def test_sync_workspace_typed_developer_platform_report(self) -> None:
@@ -1936,6 +1967,7 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
             release=None,
             ci_evidence=None,
             ci_provider=None,
+            ci_provider_evidence=None,
             execution_provenance=None,
         )
 

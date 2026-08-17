@@ -74,6 +74,7 @@ class DeliveryReadinessReport:
     governance_document_clean: bool
     release_audit_ready: bool
     ci_execution_evidence_ready: bool
+    ci_provider_evidence_ready: bool
     execution_provenance_ready: bool
     local_delivery_ready: bool
 
@@ -114,6 +115,10 @@ class DeliveryReadinessReport:
             ci_execution_evidence_ready=_delivery_bool(
                 "delivery ci_execution_evidence_ready",
                 raw.get("ci_execution_evidence_ready", False),
+            ),
+            ci_provider_evidence_ready=_delivery_bool(
+                "delivery ci_provider_evidence_ready",
+                raw.get("ci_provider_evidence_ready", False),
             ),
             execution_provenance_ready=_delivery_bool(
                 "delivery execution_provenance_ready",
@@ -255,6 +260,7 @@ class DeveloperDeliveryAuditReport:
     release_request: DeliveryReleaseRequestReport
     checks: dict[str, dict[str, Any] | None]
     ci_provider_normalization: dict[str, Any] | None
+    ci_provider_evidence: dict[str, Any] | None
     guarantees: tuple[str, ...]
     limitations: tuple[str, ...]
 
@@ -293,6 +299,10 @@ class DeveloperDeliveryAuditReport:
             ci_provider_normalization=_optional_mapping(
                 "developer delivery ci_provider_normalization",
                 raw.get("ci_provider_normalization"),
+            ),
+            ci_provider_evidence=_optional_mapping(
+                "developer delivery ci_provider_evidence",
+                raw.get("ci_provider_evidence"),
             ),
             guarantees=_route_strings("developer delivery guarantees", raw.get("guarantees", [])),
             limitations=_route_strings("developer delivery limitations", raw.get("limitations", [])),

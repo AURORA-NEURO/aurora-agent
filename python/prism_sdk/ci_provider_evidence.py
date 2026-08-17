@@ -94,6 +94,7 @@ class CiProviderEvidenceReport:
     artifact_record_digest: str
     log_record_digest: str
     attestation_record_digest: str
+    evidence: dict[str, Any]
     artifact_count: int
     log_count: int
     attestation_count: int
@@ -137,6 +138,7 @@ class CiProviderEvidenceReport:
             artifact_record_digest=_digest("CI provider evidence artifact_record_digest", audit.get("artifact_record_digest")),
             log_record_digest=_digest("CI provider evidence log_record_digest", audit.get("log_record_digest")),
             attestation_record_digest=_digest("CI provider evidence attestation_record_digest", audit.get("attestation_record_digest")),
+            evidence=_route_mapping("CI provider canonical run evidence", raw.get("evidence")),
             artifact_count=_route_count("CI provider evidence artifact_count", audit.get("artifact_count")),
             log_count=_route_count("CI provider evidence log_count", audit.get("log_count")),
             attestation_count=_route_count("CI provider evidence attestation_count", audit.get("attestation_count")),

@@ -4352,6 +4352,107 @@ fn developer_delivery_composes_provider_normalization_into_ci_release_evidence()
 }
 
 #[test]
+fn provider_evidence_flows_into_delivery_receipts_and_tamper_verification() {
+    let mut server = server();
+    let ci = json!({
+        "workflow": "delivery-provider-evidence",
+        "triggers": ["push"],
+        "rust_toolchain": "stable",
+        "offline": true,
+        "checks": [{"name": "tests", "run": "cargo test -p core", "required": true}]
+    });
+    let digest = |label: &str| ContentHash::of_bytes(label.as_bytes()).to_string();
+    let delivery = call(
+        &mut server,
+        "developer_delivery_audit",
+        json!({
+            "ci_provider_evidence": {
+                "ci": ci.clone(),
+                "provider": "github_actions",
+                "payload": {
+                    "run": {"id": 9030, "conclusion": "success"},
+                    "jobs": [{"name": "tests", "conclusion": "success"}]
+                },
+                "artifacts": [{
+                    "id": "artifact-tests", "kind": "junit", "digest": digest("artifact"),
+                    "check": "tests", "run_id": "9030", "provider": "github_actions"
+                }],
+                "logs": [{
+                    "id": "log-tests", "digest": digest("log"), "check": "tests",
+                    "run_id": "9030", "provider": "github_actions"
+                }],
+                "attestations": [{
+                    "id": "attestation-tests", "subject": "artifact-tests", "issuer": "caller",
+                    "statement_digest": digest("statement"), "method": "declared"
+                }]
+            },
+            "release_request": {"id": "delivery-provider-evidence-1", "targets": ["ci_provider_evidence"]}
+        }),
+    );
+    assert_eq!(delivery["readiness"]["ci_provider_evidence_ready"], json!(true));
+    assert_eq!(delivery["ci_provider_evidence"]["conformance_ready"], json!(true));
+    assert_eq!(delivery["ci_evidence"]["ci_evidence_ready"], json!(true));
+    assert_eq!(delivery["release_request"]["available_target_count"], json!(13));
+    assert_eq!(delivery["release_request"]["ready"], json!(true));
+
+    let receipt = call(
+        &mut server,
+        "developer_delivery_receipt",
+        json!({
+            "receipt_id": "receipt-provider-evidence-1",
+            "delivery": {
+                "ci_provider_evidence": {
+                    "ci": ci,
+                    "provider": "github_actions",
+                    "payload": {
+                        "run": {"id": 9030, "conclusion": "success"},
+                        "jobs": [{"name": "tests", "conclusion": "success"}]
+                    },
+                    "artifacts": [{
+                        "id": "artifact-tests", "kind": "junit", "digest": digest("artifact"),
+                        "check": "tests", "run_id": "9030", "provider": "github_actions"
+                    }],
+                    "logs": [{
+                        "id": "log-tests", "digest": digest("log"), "check": "tests",
+                        "run_id": "9030", "provider": "github_actions"
+                    }],
+                    "attestations": [{
+                        "id": "attestation-tests", "subject": "artifact-tests", "issuer": "caller",
+                        "statement_digest": digest("statement"), "method": "declared"
+                    }]
+                },
+                "release_request": {"id": "delivery-provider-evidence-1", "targets": ["ci_provider_evidence"]}
+            }
+        }),
+    );
+    assert_eq!(receipt["valid"], json!(true));
+    assert_eq!(receipt["receipt_ready"], json!(true));
+    assert_eq!(receipt["evidence"][10]["name"], json!("ci_provider_evidence"));
+    assert_eq!(receipt["evidence"][10]["ready"], json!(true));
+    assert_eq!(receipt["evidence"][10]["digest"].as_str().unwrap().len(), 64);
+
+    let verified = call(
+        &mut server,
+        "developer_delivery_receipt_verify",
+        json!({"receipt": receipt.clone(), "delivery": receipt["delivery"].clone()}),
+    );
+    assert_eq!(verified["verified"], json!(true));
+    let mut tampered = receipt.clone();
+    tampered["evidence"][10]["digest"] = json!("0".repeat(64));
+    let rejected = call(
+        &mut server,
+        "developer_delivery_receipt_verify",
+        json!({"receipt": tampered, "delivery": receipt["delivery"].clone()}),
+    );
+    assert_eq!(rejected["verified"], json!(false));
+    assert!(rejected["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|finding| finding["code"] == "evidence_mismatch"));
+}
+
+#[test]
 fn developer_delivery_can_gate_ci_evidence_only_when_explicitly_requested() {
     let mut server = server();
     let ci = json!({
@@ -4386,7 +4487,7 @@ fn developer_delivery_can_gate_ci_evidence_only_when_explicitly_requested() {
     );
     assert_eq!(payload["readiness"]["ci_execution_evidence_ready"], json!(true));
     assert_eq!(payload["ci_evidence"]["ci_evidence_ready"], json!(true));
-    assert_eq!(payload["release_request"]["available_target_count"], json!(12));
+    assert_eq!(payload["release_request"]["available_target_count"], json!(13));
     assert_eq!(payload["release_request"]["ready"], json!(true));
     assert_eq!(payload["release_request"]["targets"][0]["eligible"], json!(true));
 
@@ -4543,7 +4644,7 @@ fn execution_provenance_reconciles_mission_trace_and_delegated_checks() {
     );
     assert_eq!(delivery["readiness"]["execution_provenance_ready"], json!(true));
     assert_eq!(delivery["execution_provenance"]["provenance_ready"], json!(true));
-    assert_eq!(delivery["release_request"]["available_target_count"], json!(12));
+    assert_eq!(delivery["release_request"]["available_target_count"], json!(13));
     assert_eq!(delivery["release_request"]["ready"], json!(true));
     assert_eq!(delivery["release_request"]["targets"][0]["eligible"], json!(true));
 

@@ -2464,6 +2464,7 @@ class Workspace:
         release: Mapping[str, Any] | None = None,
         ci_evidence: CiExecutionEvidenceRequest | Mapping[str, Any] | None = None,
         ci_provider: CiProviderNormalizationRequest | Mapping[str, Any] | None = None,
+        ci_provider_evidence: CiProviderEvidenceRequest | Mapping[str, Any] | None = None,
         execution_provenance: ExecutionProvenanceRequest | Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         arguments: dict[str, Any] = {}
@@ -2493,6 +2494,13 @@ class Workspace:
                 else CiProviderNormalizationRequest(**dict(ci_provider))
             )
             arguments["ci_provider"] = normalized_provider.to_mcp_arguments()
+        if ci_provider_evidence is not None:
+            normalized_provider_evidence = (
+                ci_provider_evidence
+                if isinstance(ci_provider_evidence, CiProviderEvidenceRequest)
+                else CiProviderEvidenceRequest(**dict(ci_provider_evidence))
+            )
+            arguments["ci_provider_evidence"] = normalized_provider_evidence.to_mcp_arguments()
         if execution_provenance is not None:
             normalized_provenance = (
                 execution_provenance
@@ -2833,6 +2841,7 @@ class Workspace:
         release: Mapping[str, Any] | None = None,
         ci_evidence: CiExecutionEvidenceRequest | Mapping[str, Any] | None = None,
         ci_provider: CiProviderNormalizationRequest | Mapping[str, Any] | None = None,
+        ci_provider_evidence: CiProviderEvidenceRequest | Mapping[str, Any] | None = None,
         execution_provenance: ExecutionProvenanceRequest | Mapping[str, Any] | None = None,
     ) -> DeveloperDeliveryAuditReport:
         """Return typed cross-domain delivery gates and explicit release-target blockers."""
@@ -2851,6 +2860,7 @@ class Workspace:
                 release=release,
                 ci_evidence=ci_evidence,
                 ci_provider=ci_provider,
+                ci_provider_evidence=ci_provider_evidence,
                 execution_provenance=execution_provenance,
             )
         )
@@ -5372,6 +5382,7 @@ class AsyncWorkspace:
         release: Mapping[str, Any] | None = None,
         ci_evidence: CiExecutionEvidenceRequest | Mapping[str, Any] | None = None,
         ci_provider: CiProviderNormalizationRequest | Mapping[str, Any] | None = None,
+        ci_provider_evidence: CiProviderEvidenceRequest | Mapping[str, Any] | None = None,
         execution_provenance: ExecutionProvenanceRequest | Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         arguments = _developer_delivery_arguments(
@@ -5388,6 +5399,7 @@ class AsyncWorkspace:
                 "release": release,
                 "ci_evidence": ci_evidence,
                 "ci_provider": ci_provider,
+                "ci_provider_evidence": ci_provider_evidence,
                 "execution_provenance": execution_provenance,
             }
         )
@@ -5717,6 +5729,7 @@ class AsyncWorkspace:
         release: Mapping[str, Any] | None = None,
         ci_evidence: CiExecutionEvidenceRequest | Mapping[str, Any] | None = None,
         ci_provider: CiProviderNormalizationRequest | Mapping[str, Any] | None = None,
+        ci_provider_evidence: CiProviderEvidenceRequest | Mapping[str, Any] | None = None,
         execution_provenance: ExecutionProvenanceRequest | Mapping[str, Any] | None = None,
     ) -> DeveloperDeliveryAuditReport:
         """Async typed cross-domain delivery gates and release-target blockers."""
@@ -5735,6 +5748,7 @@ class AsyncWorkspace:
                 release=release,
                 ci_evidence=ci_evidence,
                 ci_provider=ci_provider,
+                ci_provider_evidence=ci_provider_evidence,
                 execution_provenance=execution_provenance,
             )
         )
