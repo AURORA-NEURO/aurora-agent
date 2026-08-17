@@ -4624,6 +4624,46 @@ export interface CapabilityRouteReviewResult extends JsonObject {
   execution: "not_started";
 }
 
+export interface DomainWorkflowInstantiateArgs extends JsonObject {
+  workflow_id: string;
+  mission_id: string;
+  goal: string;
+  steps: JsonValue[];
+  policy?: JsonObject;
+  claim_requests?: JsonValue[];
+  evaluator_review?: JsonObject;
+}
+
+export interface DomainWorkflowCatalogueResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "domain_workflow_catalogue";
+  catalog_digest: string;
+  workflow_catalog_digest: string;
+  workflow_count: number;
+  workflows: JsonObject[];
+  coverage: JsonObject;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface DomainWorkflowInstantiateResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "domain_workflow_instantiate";
+  workflow_id: string;
+  workflow_digest: string;
+  catalog_digest: string;
+  mission: JsonObject;
+  selection: JsonObject;
+  preflight: JsonObject;
+  preflight_report?: JsonObject;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface AdapterPlanArgs extends JsonObject {
   source_id: string;
   declared_format?: string;

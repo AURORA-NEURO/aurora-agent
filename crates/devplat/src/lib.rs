@@ -231,6 +231,7 @@ pub mod sandbox_runtime;
 pub mod surface;
 pub mod walkthrough;
 pub mod workbench;
+pub mod workflow;
 
 pub use audit::{
     catalogues_are_disjoint, findings, recipes_are_all_in_tree, unimplemented_titles,
@@ -395,4 +396,10 @@ pub use workbench::{
     DashboardRow, EvidencePosture, NotebookPolicy, SessionAudit, StudioCell, StudioChange,
     StudioSession, WorkbenchError, WorkbenchFinding, WorkbenchReport, WorkbenchRequest,
     WORKBENCH_SCHEMA_VERSION,
+};
+pub use workflow::{
+    build_domain_workflow_catalogue, instantiate_domain_workflow, DomainWorkflowError,
+    DOMAIN_WORKFLOW_CATALOGUE_SCHEMA_VERSION, DOMAIN_WORKFLOW_INSTANTIATE_SCHEMA_VERSION,
+    DOMAIN_WORKFLOW_SCHEMA_VERSION, MAX_DOMAIN_WORKFLOW_BYTES, MAX_DOMAIN_WORKFLOW_GROUPS,
+    MAX_DOMAIN_WORKFLOW_STEPS, MAX_DOMAIN_WORKFLOW_TOOLS,
 };

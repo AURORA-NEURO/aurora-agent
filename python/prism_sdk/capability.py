@@ -395,6 +395,136 @@ def capability_route_review_report(value: Mapping[str, Any]) -> CapabilityRouteR
 
 
 @dataclass(frozen=True)
+class DomainWorkflowInstantiateRequest:
+    """Caller-owned selection for one capability-group workflow template."""
+
+    workflow_id: str
+    mission_id: str
+    goal: str
+    steps: Sequence[Mapping[str, Any]]
+    policy: Mapping[str, Any] | None = None
+    claim_requests: Sequence[Mapping[str, Any]] = ()
+    evaluator_review: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        for name, value in (("workflow_id", self.workflow_id), ("mission_id", self.mission_id), ("goal", self.goal)):
+            _route_text(f"workflow {name}", value)
+        if not isinstance(self.steps, Sequence) or isinstance(self.steps, (str, bytes)) or not 1 <= len(self.steps) <= 128:
+            raise ArgumentError("workflow steps must contain between 1 and 128 objects")
+        for index, step in enumerate(self.steps):
+            _route_mapping(f"workflow steps[{index}]", step)
+        if self.policy is not None:
+            _route_mapping("workflow policy", self.policy)
+        if not isinstance(self.claim_requests, Sequence) or isinstance(self.claim_requests, (str, bytes)) or len(self.claim_requests) > 64:
+            raise ArgumentError("workflow claim_requests must contain at most 64 objects")
+        for index, claim in enumerate(self.claim_requests):
+            _route_mapping(f"workflow claim_requests[{index}]", claim)
+        if self.evaluator_review is not None:
+            _route_mapping("workflow evaluator_review", self.evaluator_review)
+
+    def to_arguments(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "workflow_id": self.workflow_id,
+            "mission_id": self.mission_id,
+            "goal": self.goal,
+            "steps": [dict(step) for step in self.steps],
+            "claim_requests": [dict(claim) for claim in self.claim_requests],
+        }
+        if self.policy is not None:
+            result["policy"] = dict(self.policy)
+        if self.evaluator_review is not None:
+            result["evaluator_review"] = dict(self.evaluator_review)
+        return result
+
+
+@dataclass(frozen=True)
+class DomainWorkflowCatalogueReport:
+    """Typed deterministic catalogue of all capability-group workflow templates."""
+
+    raw: dict[str, Any]
+    catalog_digest: str
+    workflow_catalog_digest: str
+    workflow_count: int
+    workflows: tuple[Mapping[str, Any], ...]
+    coverage: Mapping[str, Any]
+    execution: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainWorkflowCatalogueReport":
+        raw = _tool_payload(value, "domain_workflow_catalogue")
+        workflows = raw.get("workflows", [])
+        if not isinstance(workflows, Sequence) or isinstance(workflows, (str, bytes)):
+            raise ArgumentError("domain workflow catalogue workflows must be an array")
+        count = _route_count("domain workflow count", raw.get("workflow_count"))
+        if count != len(workflows):
+            raise ArgumentError("domain workflow count does not match workflows")
+        return cls(
+            raw=raw,
+            catalog_digest=_route_text("domain workflow catalog digest", raw.get("catalog_digest")),
+            workflow_catalog_digest=_route_text("domain workflow catalogue digest", raw.get("workflow_catalog_digest")),
+            workflow_count=count,
+            workflows=tuple(_route_mapping("domain workflow", item) for item in workflows),
+            coverage=_route_mapping("domain workflow coverage", raw.get("coverage", {})),
+            execution=_route_text("domain workflow catalogue execution", raw.get("execution")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class DomainWorkflowInstantiationReport:
+    """Typed group-scoped mission plus authoritative preflight projection."""
+
+    raw: dict[str, Any]
+    workflow_id: str
+    workflow_digest: str
+    catalog_digest: str
+    mission: Mapping[str, Any]
+    selection: Mapping[str, Any]
+    preflight: Mapping[str, Any]
+    preflight_report: Mapping[str, Any] | None
+    execution: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainWorkflowInstantiationReport":
+        raw = _tool_payload(value, "domain_workflow_instantiate")
+        preflight_report = raw.get("preflight_report")
+        if preflight_report is not None:
+            preflight_report = _route_mapping("domain workflow preflight report", preflight_report)
+        return cls(
+            raw=raw,
+            workflow_id=_route_text("domain workflow id", raw.get("workflow_id")),
+            workflow_digest=_route_text("domain workflow digest", raw.get("workflow_digest")),
+            catalog_digest=_route_text("domain workflow catalog digest", raw.get("catalog_digest")),
+            mission=_route_mapping("domain workflow mission", raw.get("mission")),
+            selection=_route_mapping("domain workflow selection", raw.get("selection")),
+            preflight=_route_mapping("domain workflow preflight", raw.get("preflight")),
+            preflight_report=preflight_report,
+            execution=_route_text("domain workflow execution", raw.get("execution")),
+        )
+
+    @property
+    def selected_tools(self) -> tuple[str, ...]:
+        return _route_strings("selected workflow tools", self.selection.get("selected_tools", []))
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+def domain_workflow_catalogue_report(value: Mapping[str, Any]) -> DomainWorkflowCatalogueReport:
+    """Parse a direct REST/MCP workflow catalogue result."""
+
+    return DomainWorkflowCatalogueReport.from_wire(value)
+
+
+def domain_workflow_instantiation_report(value: Mapping[str, Any]) -> DomainWorkflowInstantiationReport:
+    """Parse a direct REST/MCP workflow instantiation result."""
+
+    return DomainWorkflowInstantiationReport.from_wire(value)
+
+
+@dataclass(frozen=True)
 class CapabilityGroupReport:
     """Validated cross-domain catalogue metadata for one ranked group."""
 
@@ -1775,6 +1905,9 @@ def mission_evaluator_discover_report(value: Mapping[str, Any]) -> MissionEvalua
 
 
 __all__ = [
+    "DomainWorkflowInstantiateRequest",
+    "DomainWorkflowCatalogueReport",
+    "DomainWorkflowInstantiationReport",
     "CapabilityQuery",
     "CapabilityGroupReport",
     "CapabilityMatchReport",
@@ -1814,6 +1947,8 @@ __all__ = [
     "MissionEvaluatorCoverageReport",
     "MissionEvaluatorSearchReport",
     "capability_route_report",
+    "domain_workflow_catalogue_report",
+    "domain_workflow_instantiation_report",
     "capability_route_review_report",
     "capability_discover_report",
     "capability_audit_report",

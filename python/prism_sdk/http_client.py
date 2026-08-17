@@ -27,6 +27,9 @@ from .capability import (
     CapabilityRouteReviewReport,
     CapabilityRouteReviewRequest,
     CapabilityRouteRequest,
+    DomainWorkflowCatalogueReport,
+    DomainWorkflowInstantiateRequest,
+    DomainWorkflowInstantiationReport,
     MissionEvaluatorQuery,
     MissionEvaluatorReplayCompareRequest,
     MissionEvaluatorReplayComparisonReport,
@@ -51,6 +54,8 @@ from .capability import (
     capability_route_report,
     capability_discover_report,
     capability_route_review_report,
+    domain_workflow_catalogue_report,
+    domain_workflow_instantiation_report,
     mission_evaluator_discover_report,
     mission_evaluator_review_report,
     mission_evaluator_replay_report,
@@ -628,6 +633,58 @@ class ApiClient:
         if not isinstance(name, str) or not name or "/" in name:
             raise ArgumentError("tool name must be a non-empty path-safe string")
         return self.request("POST", f"/v1/tools/{name}", dict(arguments or {}))
+
+    def domain_workflow_catalogue(self) -> dict[str, Any]:
+        """Read the deterministic workflow template for every capability group."""
+
+        return self.request("GET", "/v1/domain-workflows")
+
+    def domain_workflow_catalogue_report(self) -> DomainWorkflowCatalogueReport:
+        return domain_workflow_catalogue_report(self.domain_workflow_catalogue())
+
+    def domain_workflow_instantiate(
+        self,
+        request: DomainWorkflowInstantiateRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Instantiate and authoritative-preflight one group-scoped workflow without dispatch."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowInstantiateRequest)
+            else DomainWorkflowInstantiateRequest(**dict(request))
+        )
+        return self.request(
+            "POST", "/v1/domain-workflows/instantiate", normalized.to_arguments()
+        )
+
+    def domain_workflow_instantiation_report(
+        self,
+        request: DomainWorkflowInstantiateRequest | Mapping[str, Any],
+    ) -> DomainWorkflowInstantiationReport:
+        return domain_workflow_instantiation_report(self.domain_workflow_instantiate(request))
+
+    def domain_workflow_catalogue_tool(self) -> dict[str, Any]:
+        return self.call_tool("domain_workflow_catalogue", {})
+
+    def domain_workflow_catalogue_tool_report(self) -> DomainWorkflowCatalogueReport:
+        return domain_workflow_catalogue_report(self.domain_workflow_catalogue_tool())
+
+    def domain_workflow_instantiate_tool(
+        self,
+        request: DomainWorkflowInstantiateRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowInstantiateRequest)
+            else DomainWorkflowInstantiateRequest(**dict(request))
+        )
+        return self.call_tool("domain_workflow_instantiate", normalized.to_arguments())
+
+    def domain_workflow_instantiation_tool_report(
+        self,
+        request: DomainWorkflowInstantiateRequest | Mapping[str, Any],
+    ) -> DomainWorkflowInstantiationReport:
+        return domain_workflow_instantiation_report(self.domain_workflow_instantiate_tool(request))
 
     def submit_mission(self, request: MissionRequest | Mapping[str, Any]) -> MissionJob:
         """Submit a validated mission to the cooperative asynchronous HTTP executor."""
@@ -4036,6 +4093,44 @@ class AsyncApiClient:
 
     async def call_tool(self, name: str, arguments: Mapping[str, Any] | None = None) -> dict[str, Any]:
         return await asyncio.to_thread(self.client.call_tool, name, arguments)
+
+    async def domain_workflow_catalogue(self) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.domain_workflow_catalogue)
+
+    async def domain_workflow_catalogue_report(self) -> DomainWorkflowCatalogueReport:
+        return domain_workflow_catalogue_report(await self.domain_workflow_catalogue())
+
+    async def domain_workflow_instantiate(
+        self,
+        request: DomainWorkflowInstantiateRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.domain_workflow_instantiate, request)
+
+    async def domain_workflow_instantiation_report(
+        self,
+        request: DomainWorkflowInstantiateRequest | Mapping[str, Any],
+    ) -> DomainWorkflowInstantiationReport:
+        return domain_workflow_instantiation_report(await self.domain_workflow_instantiate(request))
+
+    async def domain_workflow_catalogue_tool(self) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.domain_workflow_catalogue_tool)
+
+    async def domain_workflow_catalogue_tool_report(self) -> DomainWorkflowCatalogueReport:
+        return domain_workflow_catalogue_report(await self.domain_workflow_catalogue_tool())
+
+    async def domain_workflow_instantiate_tool(
+        self,
+        request: DomainWorkflowInstantiateRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.domain_workflow_instantiate_tool, request)
+
+    async def domain_workflow_instantiation_tool_report(
+        self,
+        request: DomainWorkflowInstantiateRequest | Mapping[str, Any],
+    ) -> DomainWorkflowInstantiationReport:
+        return domain_workflow_instantiation_report(
+            await self.domain_workflow_instantiate_tool(request)
+        )
 
     async def submit_mission(self, request: MissionRequest | Mapping[str, Any]) -> MissionJob:
         return await asyncio.to_thread(self.client.submit_mission, request)

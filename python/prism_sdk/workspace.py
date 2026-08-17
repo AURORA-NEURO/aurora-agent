@@ -25,6 +25,9 @@ from .capability import (
     CapabilityRouteReviewReport,
     CapabilityRouteReviewRequest,
     CapabilityRouteRequest,
+    DomainWorkflowCatalogueReport,
+    DomainWorkflowInstantiateRequest,
+    DomainWorkflowInstantiationReport,
     MissionEvaluatorQuery,
     MissionEvaluatorReplayCompareRequest,
     MissionEvaluatorReplayComparisonReport,
@@ -45,6 +48,8 @@ from .capability import (
     capability_discover_report,
     capability_route_report,
     capability_route_review_report,
+    domain_workflow_catalogue_report,
+    domain_workflow_instantiation_report,
     mission_evaluator_discover_report,
     mission_evaluator_review_report,
     mission_evaluator_replay_report,
@@ -1829,6 +1834,31 @@ class Workspace:
         return capability_route_review_report(
             self.capability_route_review(route, selections, validate_schemas=validate_schemas)
         )
+
+    def domain_workflow_catalogue(self) -> dict[str, Any]:
+        """Return the complete deterministic workflow-template catalogue."""
+
+        return self.tool("domain_workflow_catalogue", {})
+
+    def domain_workflow_catalogue_report(self) -> DomainWorkflowCatalogueReport:
+        return domain_workflow_catalogue_report(self.domain_workflow_catalogue())
+
+    def domain_workflow_instantiate(
+        self,
+        request: DomainWorkflowInstantiateRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowInstantiateRequest)
+            else DomainWorkflowInstantiateRequest(**dict(request))
+        )
+        return self.tool("domain_workflow_instantiate", normalized.to_arguments())
+
+    def domain_workflow_instantiation_report(
+        self,
+        request: DomainWorkflowInstantiateRequest | Mapping[str, Any],
+    ) -> DomainWorkflowInstantiationReport:
+        return domain_workflow_instantiation_report(self.domain_workflow_instantiate(request))
 
     def adapter_plan(
         self,
@@ -4895,6 +4925,33 @@ class AsyncWorkspace:
 
         return capability_route_review_report(
             await self.capability_route_review(route, selections, validate_schemas=validate_schemas)
+        )
+
+    async def domain_workflow_catalogue(self) -> dict[str, Any]:
+        """Async complete deterministic workflow-template catalogue."""
+
+        return await self.tool("domain_workflow_catalogue", {})
+
+    async def domain_workflow_catalogue_report(self) -> DomainWorkflowCatalogueReport:
+        return domain_workflow_catalogue_report(await self.domain_workflow_catalogue())
+
+    async def domain_workflow_instantiate(
+        self,
+        request: DomainWorkflowInstantiateRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowInstantiateRequest)
+            else DomainWorkflowInstantiateRequest(**dict(request))
+        )
+        return await self.tool("domain_workflow_instantiate", normalized.to_arguments())
+
+    async def domain_workflow_instantiation_report(
+        self,
+        request: DomainWorkflowInstantiateRequest | Mapping[str, Any],
+    ) -> DomainWorkflowInstantiationReport:
+        return domain_workflow_instantiation_report(
+            await self.domain_workflow_instantiate(request)
         )
 
     async def adapter_plan(

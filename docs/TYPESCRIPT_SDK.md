@@ -76,6 +76,14 @@ tools before the TypeScript package has a convenience method.
 
 Convenience methods currently cover:
 
+- `domainWorkflowCatalogue` / `domainWorkflowCatalogueQuery`: the MCP and REST projections of
+  one deterministic workflow template per capability group, including missing tool definitions,
+  advisory stages, and catalogue/workflow digests;
+- `domainWorkflowInstantiate` / `domainWorkflowInstantiateQuery`: group-scoped mission
+  instantiation with explicit bounded steps, selected-tool scope, authoritative no-dispatch
+  preflight, and `execution: "not_started"`. These methods do not infer domain arguments or
+  authorize tool execution;
+
 - `traceOtelIngest`: bounded OTLP JSON import with typed normalized events, source-to-IR mapping,
   semantic-loss categories, and compilation-readiness reporting;
 - `qualityGateRun`: typed serialized Dataset/Gate/ReferenceSets with externally tagged check

@@ -15,7 +15,9 @@ mod io;
 
 use args::{Command, CompileOptions, Family, GenerateOptions, Invocation, Parsed, Profile};
 use bioprism_devplat::{EvidenceBundleRegistry, verify_mission_evidence_bundle};
+use bioprism_devplat::{build_domain_workflow_catalogue, instantiate_domain_workflow};
 use bioprism_fiber::compile;
+use bioprism_mcp::{tool_definitions, workspace_capabilities, Server};
 use bioprism_scope::DimensionRegistry;
 use bioprism_section::{CertificateProfile, ContextCertificate, OracleStatus};
 use bioprism_world::{validate, Severity};
@@ -139,7 +141,88 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
             *limit,
             *include_bundles,
         ),
+        Command::WorkflowCatalogue => workflow_catalogue(),
+        Command::WorkflowInstantiate {
+            workflow,
+            mission_id,
+            goal,
+            steps,
+            policy,
+            dry_run,
+        } => workflow_instantiate(workflow, mission_id, goal, steps, policy.as_deref(), *dry_run),
     }
+}
+
+fn workflow_catalogue() -> CliResult<Outcome> {
+    let report = build_domain_workflow_catalogue(
+        &workspace_capabilities(),
+        &Value::Array(tool_definitions()),
+    )
+    .map_err(|error| CliError::internal(error.to_string()))?;
+    let human = format!(
+        "domain workflow catalogue\n  workflows: {}\n  groups with missing tools: {}\n  execution: not started\n\nNext: bioprism workflow instantiate --workflow <id> --mission-id <id> --goal <text> --steps steps.json\n",
+        report["workflow_count"].as_u64().unwrap_or_default(),
+        report["coverage"]["groups_with_missing_tools"]
+            .as_u64()
+            .unwrap_or_default(),
+    );
+    Ok(Outcome::ok(report, human))
+}
+
+fn workflow_instantiate(
+    workflow: &str,
+    mission_id: &str,
+    goal: &str,
+    steps_path: &Path,
+    policy_path: Option<&Path>,
+    dry_run: bool,
+) -> CliResult<Outcome> {
+    let raw_steps = io::read_json(steps_path)?;
+    let steps = raw_steps
+        .get("steps")
+        .cloned()
+        .filter(Value::is_array)
+        .unwrap_or(raw_steps);
+    if !steps.is_array() {
+        return Err(
+            CliError::invalid("--steps must contain a JSON array or an object with a steps array")
+                .about(steps_path.display().to_string()),
+        );
+    }
+    let policy = policy_path.map(io::read_json).transpose()?;
+    let mut request = json!({
+        "workflow_id": workflow,
+        "mission_id": mission_id,
+        "goal": goal,
+        "steps": steps,
+    });
+    if let Some(policy) = policy {
+        request["policy"] = policy;
+    }
+    let mut report = instantiate_domain_workflow(
+        &workspace_capabilities(),
+        &Value::Array(tool_definitions()),
+        &request,
+    )
+    .map_err(|error| CliError::invalid(error.to_string()))?;
+    let server = Server::new(
+        std::env::current_dir().map_err(|error| CliError::internal(error.to_string()))?,
+    );
+    let preflight = server
+        .preflight_agent_mission(&report["mission"])
+        .map_err(|error| {
+            CliError::invalid(format!("authoritative mission preflight refused: {error}"))
+        })?;
+    report["preflight_report"] = preflight;
+    report["dry_run"] = json!(dry_run);
+    let human = format!(
+        "domain workflow {}\n  mission: {}\n  steps: {}\n  preflight: authoritative no-dispatch\n  execution: not started\n\nNext: POST /v1/missions/preflight or `bioprism workflow instantiate --workflow {} --mission-id <id> --goal <text> --steps <path>`\n",
+        workflow,
+        mission_id,
+        report["selection"]["step_count"].as_u64().unwrap_or_default(),
+        workflow,
+    );
+    Ok(Outcome::ok(report, human))
 }
 
 fn evidence_bundle_verify(bundle_path: &Path) -> CliResult<Outcome> {

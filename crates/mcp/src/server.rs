@@ -131,6 +131,7 @@ use bioprism_devplat::{
     apply_binding, audit_ci_execution_evidence, audit_ci_provider_evidence,
     audit_execution_provenance, build_dashboard,
     build_delivery_receipt, plan_mission, run_workbench, verify_delivery_receipt,
+    build_domain_workflow_catalogue, instantiate_domain_workflow,
     normalize_ci_provider_payload,
     standard_walkthroughs,
     CapabilityCatalogue, CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest,
@@ -1524,6 +1525,8 @@ impl Server {
             "mission_evidence_bundle_get" => self.mission_evidence_bundle_get(&arguments),
             "capability_route" => self.capability_route(&arguments),
             "capability_route_review" => self.capability_route_review(&arguments),
+            "domain_workflow_catalogue" => self.domain_workflow_catalogue(&arguments),
+            "domain_workflow_instantiate" => self.domain_workflow_instantiate(&arguments),
             "safety_posture" => self.safety_posture(&arguments),
             "security_redteam_simulate" => self.security_redteam_simulate(&arguments),
             "weave_protocol_catalog" => Ok(weave_protocol_catalog()),
@@ -22178,6 +22181,42 @@ impl Server {
     /// This is intentionally a discovery operation, not a semantic router or permission grant.
     /// Scores only reflect explicit label matches; callers still need to inspect the returned
     /// domain, evidence, policy, and tool contracts before constructing a mission.
+    fn domain_workflow_catalogue(&self, arguments: &Value) -> Result<Value, String> {
+        if !arguments
+            .as_object()
+            .is_some_and(|object| object.is_empty())
+        {
+            return Err("domain_workflow_catalogue accepts an empty arguments object".into());
+        }
+        build_domain_workflow_catalogue(
+            &workspace_capabilities(),
+            &Value::Array(tool_definitions()),
+        )
+        .map_err(|error| format!("domain workflow catalogue refused: {error}"))
+    }
+
+    /// Instantiate one explicitly selected, group-scoped workflow into a validated mission.
+    ///
+    /// The kernel validates mission invariants here; the server then adds the authoritative MCP
+    /// schema preflight report. Neither operation dispatches a selected tool.
+    fn domain_workflow_instantiate(&self, arguments: &Value) -> Result<Value, String> {
+        let mut output = instantiate_domain_workflow(
+            &workspace_capabilities(),
+            &Value::Array(tool_definitions()),
+            arguments,
+        )
+        .map_err(|error| format!("domain workflow instantiation refused: {error}"))?;
+        let mission = output
+            .get("mission")
+            .cloned()
+            .ok_or_else(|| "domain workflow instantiation omitted mission".to_string())?;
+        let preflight_report = self
+            .preflight_agent_mission(&mission)
+            .map_err(|error| format!("domain workflow mission preflight refused: {error}"))?;
+        output["preflight_report"] = preflight_report;
+        Ok(output)
+    }
+
     fn capability_discover(&self, arguments: &Value) -> Result<Value, String> {
         let encoded = serde_json::to_vec(arguments)
             .map_err(|error| format!("cannot encode capability discovery input: {error}"))?;
@@ -27569,7 +27608,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "documentation_and_knowledge",
             "domains": ["repository navigation", "documentation graph", "task routes", "context bundles"],
             "crates": ["bioprism-docgraph", "bioprism-graph", "bioprism-lens"],
-            "mcp_tools": ["workspace_capabilities", "capability_audit", "capability_dashboard", "capability_discover", "capability_route", "capability_route_review", "repository_catalog", "repository_bundle", "repository_impact", "lens_catalogue", "lens_leakage_check", "projection_bundle"],
+            "mcp_tools": ["workspace_capabilities", "capability_audit", "capability_dashboard", "capability_discover", "capability_route", "capability_route_review", "domain_workflow_catalogue", "domain_workflow_instantiate", "repository_catalog", "repository_bundle", "repository_impact", "lens_catalogue", "lens_leakage_check", "projection_bundle"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -30002,6 +30041,32 @@ pub fn tool_definitions() -> Vec<Value> {
                     "include_groups": { "type": "boolean", "default": true, "description": "Include per-domain group coverage rows; set false for a compact invariant report." }
                 },
                 "required": []
+            }
+        }),
+        json!({
+            "name": "domain_workflow_catalogue",
+            "description": "Build the deterministic workflow-template catalogue for every explicit capability group. Each template binds declared domains, crates, CLI entrypoints, available and missing MCP tools, advisory stage hints, and a content digest. This is discovery and planning evidence only: it does not select domain arguments, grant permission, execute tools, or claim scientific, clinical, operational, or release readiness.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }),
+        json!({
+            "name": "domain_workflow_instantiate",
+            "description": "Instantiate a caller-selected domain workflow template into a bounded, group-scoped mission and immediately run authoritative no-dispatch mission preflight. Every selected tool must be declared by the chosen workflow; executable policies are allow-listed from selected steps when needed. This never dispatches a tool, infers domain semantics, or turns a valid plan into a readiness or truth claim.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "workflow_id": { "type": "string", "description": "Capability-group workflow id returned by domain_workflow_catalogue." },
+                    "mission_id": { "type": "string", "description": "Stable caller-owned mission identity." },
+                    "goal": { "type": "string", "description": "Caller-owned objective for the planned mission." },
+                    "steps": { "type": "array", "minItems": 1, "maxItems": 128, "items": { "type": "object" }, "description": "Explicit steps; each tool must belong to the selected workflow and arguments remain domain-specific JSON objects." },
+                    "policy": { "type": "object", "description": "Optional mission execution and resource policy; execution still remains outside this kernel." },
+                    "claim_requests": { "type": "array", "maxItems": 64, "items": { "type": "object" } },
+                    "evaluator_review": { "type": "object" }
+                },
+                "required": ["workflow_id", "mission_id", "goal", "steps"]
             }
         }),
         json!({

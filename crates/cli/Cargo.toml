@@ -21,6 +21,7 @@ bioprism-section = { workspace = true }
 bioprism-store = { workspace = true }
 bioprism-prism = { workspace = true }
 bioprism-mutation = { workspace = true }
+bioprism-mcp = { workspace = true }
 bioprism-world = { workspace = true }
 bioprism-worldgen = { workspace = true }
 serde = { workspace = true }

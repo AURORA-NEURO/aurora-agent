@@ -756,6 +756,14 @@ diagnostics, and keeps mission preflight and execution explicitly separate. Its 
 turning schema conformance into domain readiness. Every review also carries a deterministic,
 content-addressed `review_id` derived from the route provenance, caller selections, and validation
 mode, making the same handoff correlate cleanly across transports and event records.
+`domain_workflow_catalogue` closes the next gap between discovery and planning: it materializes
+one deterministic, digest-bound workflow template for each of the 29 capability groups, including
+available versus missing tool definitions and advisory lexical stages. `domain_workflow_instantiate`
+requires an explicit workflow, mission, goal, and step list; it refuses tools outside that group's
+declared scope, validates the mission DAG, derives a least-scope allow-list for requested execution,
+and attaches authoritative no-dispatch MCP schema preflight. MCP, REST, CLI, Python, and TypeScript
+all expose the same kernel. A valid workflow remains a plan, not permission, scientific evidence,
+clinical guidance, deployment readiness, or execution.
 `mission_evaluator_discover` complements tool routing with a digest-bound catalogue of explicit
 evaluator candidates for every workspace capability group. It filters by intent, group, domain,
 mission level, or adapter ID and returns purpose, candidate evidence tools, and RFC 6901 pointer

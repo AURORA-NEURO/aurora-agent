@@ -56,6 +56,9 @@ from prism_sdk import (
     CapabilityRouteReviewReport,
     CapabilityRouteReviewRequest,
     CapabilitySchemaQualityReport,
+    DomainWorkflowCatalogueReport,
+    DomainWorkflowInstantiateRequest,
+    DomainWorkflowInstantiationReport,
     ConformanceCaseReport,
     ConformancePyramidReport,
     ConformanceReleaseDecisionReport,
@@ -1621,6 +1624,41 @@ class AnalyticsModelTests(unittest.TestCase):
         self.assertEqual(report.resolved_needs[0].candidate_domains, ("oncology",))
         self.assertEqual(report.candidate_domains, ("oncology",))
         self.assertEqual(report.to_dict()["route_id"], "r" * 64)
+
+    def test_domain_workflow_request_and_reports_preserve_scope_and_preflight(self) -> None:
+        request = DomainWorkflowInstantiateRequest(
+            "documentation_and_knowledge",
+            "workflow-python",
+            "discover the repository capabilities",
+            [{"id": "catalog", "tool": "workspace_capabilities", "arguments": {}}],
+            policy={"execute": False},
+        )
+        self.assertEqual(request.to_arguments()["steps"][0]["tool"], "workspace_capabilities")
+        catalogue = DomainWorkflowCatalogueReport.from_wire({
+            "ok": True,
+            "workflow": "domain_workflow_catalogue",
+            "catalog_digest": "c" * 64,
+            "workflow_catalog_digest": "w" * 64,
+            "workflow_count": 1,
+            "workflows": [{"workflow_id": "documentation_and_knowledge", "workflow_digest": "d" * 64}],
+            "coverage": {"group_count": 1},
+            "execution": "not_started",
+        })
+        self.assertEqual(catalogue.workflow_count, 1)
+        instantiation = DomainWorkflowInstantiationReport.from_wire({
+            "ok": True,
+            "workflow": "domain_workflow_instantiate",
+            "workflow_id": "documentation_and_knowledge",
+            "workflow_digest": "d" * 64,
+            "catalog_digest": "c" * 64,
+            "mission": {"mission_id": "workflow-python"},
+            "selection": {"selected_tools": ["workspace_capabilities"]},
+            "preflight": {"required": True},
+            "preflight_report": {"workflow": "agent_mission", "dispatch": "not_started"},
+            "execution": "not_started",
+        })
+        self.assertEqual(instantiation.selected_tools, ("workspace_capabilities",))
+        self.assertEqual(instantiation.preflight_report["dispatch"], "not_started")
 
     def test_capability_discover_report_preserves_cross_domain_context(self) -> None:
         report = CapabilitySearchReport.from_wire(capability_discover_payload())

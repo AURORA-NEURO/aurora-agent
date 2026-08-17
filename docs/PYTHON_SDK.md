@@ -563,6 +563,13 @@ invent defaults:
   `validate_schemas=True` to request authoritative per-tool schema digests and bounded issue paths
   in `report.schema_review`. The resulting `report.review_id` is a deterministic,
   content-addressed correlation key for the route provenance, selections, and validation mode.
+- `DomainWorkflowInstantiateRequest`, `DomainWorkflowCatalogueReport`, and
+  `DomainWorkflowInstantiationReport` expose the complete workflow-template bridge. Sync and async
+  `Workspace` methods call the MCP tools; `ApiClient` and `AsyncApiClient` also expose the dedicated
+  REST routes plus tool-call variants. The request validates bounded explicit steps, while typed
+  reports preserve catalogue/workflow digests, missing-tool coverage, selected-tool scope,
+  authoritative `preflight_report`, and `execution: "not_started"`. No client method dispatches a
+  domain tool through this workflow layer.
 - `ApiClient.route_review_evidence(...)` and `AsyncApiClient.route_review_evidence(...)` expose
   bounded retained event evidence for that exact id as `RouteReviewEvidence`; `event_page(...)`,
   `event_stream(...)`, and raw `events(...)` also accept `review_id=...` for transport-native

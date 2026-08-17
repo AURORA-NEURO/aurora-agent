@@ -623,6 +623,12 @@ impl ApiRouter {
                 self.create_operations_gate_review(&request, &request_id)
             }
             ("POST", "/v1/operations/handoff") => self.operations_handoff(&request, &request_id),
+            ("GET", "/v1/domain-workflows") => {
+                self.domain_workflow_catalogue(&request_id)
+            }
+            ("POST", "/v1/domain-workflows/instantiate") => {
+                self.domain_workflow_instantiate(&request, &request_id)
+            }
             ("POST", "/v1/evidence-bundles/verify") => {
                 self.verify_evidence_bundle(&request, &request_id)
             }
@@ -2317,6 +2323,8 @@ impl ApiRouter {
                     "operations_gates": "/v1/operations/gates",
                     "operations_gate_reviews": "/v1/operations/gate-reviews",
                     "operations_handoff": "/v1/operations/handoff",
+                    "domain_workflows": "/v1/domain-workflows",
+                    "domain_workflow_instantiate": "/v1/domain-workflows/instantiate",
                     "tools": "/v1/tools",
                     "missions": "/v1/missions",
                      "mission_provenance": "/v1/missions/{mission_id}/provenance",
@@ -2376,6 +2384,8 @@ impl ApiRouter {
                     "operations_gates": true,
                     "operations_gate_reviews": true,
                     "operations_handoff": true,
+                    "domain_workflow_catalogue": true,
+                    "domain_workflow_instantiate": true,
                     "max_mission_trace_events": MAX_MISSION_TRACE_EVENTS,
                     "cooperative_mission_cancellation": true,
                     "durable_mission_snapshots": self.config.mission_state_path.is_some(),
@@ -2769,6 +2779,72 @@ impl ApiRouter {
                 "guarantee": "REST and MCP calls share the same in-process tool dispatcher"
             }),
         )
+    }
+
+    fn domain_workflow_catalogue(&self, request_id: &str) -> HttpResponse {
+        self.domain_workflow_tool(request_id, "domain_workflow_catalogue", json!({}))
+    }
+
+    fn domain_workflow_instantiate(
+        &self,
+        request: &HttpRequest,
+        request_id: &str,
+    ) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        self.domain_workflow_tool(
+            request_id,
+            "domain_workflow_instantiate",
+            Value::Object(arguments),
+        )
+    }
+
+    fn domain_workflow_tool(
+        &self,
+        request_id: &str,
+        tool: &str,
+        arguments: Value,
+    ) -> HttpResponse {
+        let call = Request {
+            id: Some(Value::String(request_id.to_string())),
+            method: "tools/call".into(),
+            params: json!({ "name": tool, "arguments": arguments }),
+        };
+        let mut server = self.server.clone();
+        let Some(response) = server.handle(&call) else {
+            return self.error(
+                500,
+                "dispatch_failed",
+                "domain workflow call produced no response",
+                request_id,
+            );
+        };
+        let wire = response.to_json();
+        self.record_tool_event(request_id, tool, &wire);
+        let is_error = wire
+            .pointer("/result/isError")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let payload = wire
+            .pointer("/result/content/0/text")
+            .and_then(Value::as_str)
+            .and_then(|text| serde_json::from_str::<Value>(text).ok())
+            .unwrap_or_else(|| json!({
+                "ok": false,
+                "error": "domain workflow dispatcher returned no structured payload"
+            }));
+        if is_error {
+            let message = payload
+                .get("error")
+                .and_then(Value::as_str)
+                .unwrap_or("domain workflow request was refused");
+            return self.error(422, "invalid_domain_workflow", message, request_id);
+        }
+        let mut payload = payload;
+        payload["request_id"] = json!(request_id);
+        HttpResponse::json(200, &payload)
     }
 
     fn preflight_mission(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
@@ -4975,6 +5051,8 @@ impl ApiRouter {
                     "/v1/operations/gate-reviews": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }, { "name": "review_id", "in": "query" }], "responses": { "200": { "description": "durable cursor page of replayable operations gate reviews" } } }, "post": { "responses": { "201": { "description": "content-addressed operations gate review record" } } } },
                     "/v1/operations/handoff": { "post": { "responses": { "200": { "description": "content-addressed, non-executing domain routing handoff" } } } },
                     "/v1/evidence-bundles/verify": { "post": { "responses": { "200": { "description": "content-addressed mission evidence bundle verification report" }, "413": { "description": "bundle exceeds verification bound" }, "422": { "description": "bundle is malformed" } } } },
+                    "/v1/domain-workflows": { "get": { "responses": { "200": { "description": "deterministic workflow template for every capability group" } } } },
+                    "/v1/domain-workflows/instantiate": { "post": { "responses": { "200": { "description": "group-scoped, authoritative-preflighted, no-dispatch workflow mission" }, "422": { "description": "workflow selection or mission preflight was refused" } } } },
                     "/v1/evidence-bundles": { "get": { "parameters": [{ "name": "mission_id", "in": "query" }, { "name": "domain", "in": "query" }, { "name": "after", "in": "query" }, { "name": "limit", "in": "query" }, { "name": "include_bundles", "in": "query" }], "responses": { "200": { "description": "bounded deterministic evidence registry index" } } }, "post": { "responses": { "201": { "description": "verified evidence bundle imported into the registry" }, "200": { "description": "idempotent re-import" }, "413": { "description": "registry capacity or snapshot bound exceeded" }, "422": { "description": "bundle verification failed" } } } },
                     "/v1/evidence-bundles/{bundle_digest}": { "get": { "parameters": [{ "name": "bundle_digest", "in": "path", "required": true }], "responses": { "200": { "description": "one verified evidence bundle" }, "404": { "description": "bundle digest is not present" } } } },
                     "/v1/evidence-bundles/persistence": { "get": { "responses": { "200": { "description": "restart-aware evidence registry checkpoint status" } } } },
@@ -8224,6 +8302,48 @@ mod tests {
         let restored_query: Value = serde_json::from_slice(&restored_query.body).unwrap();
         assert_eq!(restored_query["rows"].as_array().unwrap().len(), 1);
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn domain_workflow_routes_expose_catalogue_and_scoped_preflight() {
+        let router =
+            ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
+        let catalogue = router.handle(request("GET", "/v1/domain-workflows", json!({})));
+        assert_eq!(catalogue.status, 200);
+        let catalogue: Value = serde_json::from_slice(&catalogue.body).unwrap();
+        assert_eq!(catalogue["workflow"], "domain_workflow_catalogue");
+        assert_eq!(catalogue["workflow_count"], 29);
+        assert_eq!(catalogue["coverage"]["all_groups_have_workflow"], true);
+
+        let instantiated = router.handle(request(
+            "POST",
+            "/v1/domain-workflows/instantiate",
+            json!({
+                "workflow_id": "documentation_and_knowledge",
+                "mission_id": "api-workflow-1",
+                "goal": "discover repository capabilities",
+                "steps": [{"id": "catalog", "tool": "workspace_capabilities", "arguments": {}}]
+            }),
+        ));
+        assert_eq!(instantiated.status, 200);
+        let instantiated: Value = serde_json::from_slice(&instantiated.body).unwrap();
+        assert_eq!(instantiated["workflow"], "domain_workflow_instantiate");
+        assert_eq!(instantiated["preflight_report"]["workflow"], "agent_mission");
+        assert_eq!(instantiated["execution"], "not_started");
+
+        let refused = router.handle(request(
+            "POST",
+            "/v1/domain-workflows/instantiate",
+            json!({
+                "workflow_id": "documentation_and_knowledge",
+                "mission_id": "api-workflow-refused",
+                "goal": "refuse cross-group selection",
+                "steps": [{"id": "compile", "tool": "bioql_compile"}]
+            }),
+        ));
+        assert_eq!(refused.status, 422);
+        let refused: Value = serde_json::from_slice(&refused.body).unwrap();
+        assert_eq!(refused["error"]["code"], "invalid_domain_workflow");
     }
 
     #[test]

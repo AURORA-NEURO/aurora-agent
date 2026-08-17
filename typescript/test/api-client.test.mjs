@@ -4206,3 +4206,66 @@ test("client exposes evidence registry import, query, and get over REST and MCP"
   assert.equal((await mcpClient.missionEvidenceBundleQueryTool({ domain: "oncology" })).mcp.result.structuredContent.rows.length, 1);
   assert.equal((await mcpClient.missionEvidenceBundleGetTool("c".repeat(64))).mcp.result.structuredContent.workflow, "mission_evidence_bundle_get");
 });
+
+test("client exposes scoped domain workflow catalogue and instantiation over REST and MCP", async () => {
+  const catalogue = {
+    ok: true,
+    schema: "bioprism-devplat-domain-workflow-catalogue/0.1",
+    workflow: "domain_workflow_catalogue",
+    catalog_digest: "c".repeat(64),
+    workflow_catalog_digest: "w".repeat(64),
+    workflow_count: 29,
+    workflows: [{ workflow_id: "documentation_and_knowledge", workflow_digest: "d".repeat(64) }],
+    coverage: { group_count: 29, all_groups_have_workflow: true },
+    execution: "not_started",
+    guarantees: [],
+    limitations: [],
+  };
+  const instantiated = {
+    ok: true,
+    schema: "bioprism-devplat-domain-workflow-instantiate/0.1",
+    workflow: "domain_workflow_instantiate",
+    workflow_id: "documentation_and_knowledge",
+    workflow_digest: "d".repeat(64),
+    catalog_digest: "c".repeat(64),
+    mission: { mission_id: "ts-workflow" },
+    selection: { selected_tools: ["workspace_capabilities"] },
+    preflight: { required: true, dispatch: "not_started" },
+    preflight_report: { workflow: "agent_mission", dispatch: "not_started" },
+    execution: "not_started",
+    guarantees: [],
+    limitations: [],
+  };
+  const args = {
+    workflow_id: "documentation_and_knowledge",
+    mission_id: "ts-workflow",
+    goal: "discover capabilities",
+    steps: [{ id: "catalog", tool: "workspace_capabilities", arguments: {} }],
+  };
+  const rest = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/v1/domain-workflows" && init.method === "GET") return jsonResponse(catalogue);
+      assert.equal(url.pathname, "/v1/domain-workflows/instantiate");
+      assert.deepEqual(JSON.parse(init.body), args);
+      return jsonResponse(instantiated);
+    },
+  });
+  assert.equal((await rest.domainWorkflowCatalogueQuery()).workflow_count, 29);
+  assert.equal((await rest.domainWorkflowInstantiateQuery(args)).preflight_report.workflow, "agent_mission");
+
+  const mcp = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      const url = new URL(String(input));
+      const name = url.pathname.split("/").at(-1);
+      assert.equal(url.pathname, `/v1/tools/${name}`);
+      if (name === "domain_workflow_catalogue") return jsonResponse({ ok: true, tool: name, mcp: { result: { structuredContent: catalogue } } });
+      assert.deepEqual(JSON.parse(init.body), args);
+      return jsonResponse({ ok: true, tool: name, mcp: { result: { structuredContent: instantiated } } });
+    },
+  });
+  assert.equal((await mcp.domainWorkflowCatalogue()).mcp.result.structuredContent.workflow_count, 29);
+  assert.equal((await mcp.domainWorkflowInstantiate(args)).mcp.result.structuredContent.execution, "not_started");
+});

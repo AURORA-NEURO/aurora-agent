@@ -320,7 +320,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 183);
+    assert_eq!(tools.len(), 185);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -1225,6 +1225,56 @@ fn workspace_capabilities_are_explicit_about_every_major_domain_surface() {
             "missing domain {domain}"
         );
     }
+}
+
+#[test]
+fn domain_workflow_catalogue_covers_every_capability_group() {
+    let mut server = server();
+    let report = call(&mut server, "domain_workflow_catalogue", json!({}));
+    assert_eq!(report["workflow"], json!("domain_workflow_catalogue"));
+    assert_eq!(report["workflow_count"], json!(29));
+    assert_eq!(report["coverage"]["group_count"], json!(29));
+    assert_eq!(report["coverage"]["all_groups_have_workflow"], json!(true));
+    assert_eq!(report["coverage"]["all_declared_tools_advertised"], json!(true));
+    assert_eq!(report["execution"], json!("not_started"));
+    assert!(report["workflows"].as_array().unwrap().iter().all(|workflow| {
+        workflow["workflow_id"].is_string()
+            && workflow["workflow_digest"].is_string()
+            && workflow["recommended_stages"].is_array()
+    }));
+}
+
+#[test]
+fn domain_workflow_instantiation_is_scoped_and_preflighted_without_dispatch() {
+    let mut server = server();
+    let report = call(
+        &mut server,
+        "domain_workflow_instantiate",
+        json!({
+            "workflow_id": "documentation_and_knowledge",
+            "mission_id": "workflow-test",
+            "goal": "discover the repository capability surface",
+            "steps": [{"id": "catalog", "tool": "workspace_capabilities", "arguments": {}}]
+        }),
+    );
+    assert_eq!(report["workflow"], json!("domain_workflow_instantiate"));
+    assert_eq!(report["mission"]["steps"][0]["tool"], json!("workspace_capabilities"));
+    assert_eq!(report["selection"]["all_selected_tools_declared"], json!(true));
+    assert_eq!(report["execution"], json!("not_started"));
+    assert_eq!(report["preflight_report"]["workflow"], json!("agent_mission"));
+
+    let refused = call(
+        &mut server,
+        "domain_workflow_instantiate",
+        json!({
+            "workflow_id": "documentation_and_knowledge",
+            "mission_id": "workflow-refused",
+            "goal": "must refuse cross-group selection",
+            "steps": [{"id": "compile", "tool": "bioql_compile"}]
+        }),
+    );
+    assert_eq!(refused["__isError"], json!(true));
+    assert!(refused["error"].as_str().unwrap().contains("outside workflow"));
 }
 
 #[test]
@@ -5313,12 +5363,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(183));
-    assert_eq!(result["advertised_tool_count"], json!(183));
+    assert_eq!(result["unique_catalog_tools"], json!(185));
+    assert_eq!(result["advertised_tool_count"], json!(185));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(183));
-    assert_eq!(result["schema_quality"]["valid"], json!(183));
+    assert_eq!(result["schema_quality"]["checked"], json!(185));
+    assert_eq!(result["schema_quality"]["valid"], json!(185));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

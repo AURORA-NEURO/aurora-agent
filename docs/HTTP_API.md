@@ -24,6 +24,8 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `GET /v1/operations/domains?after=N&limit=M` | Per-domain catalogue coverage plus exact local tool activity observed in the requested event page |
 | `GET /v1/operations/gates?after=N&limit=M` | Per-domain catalogue, activity, transport, pooled evaluation, domain-evaluator, safety, and release evidence gates without readiness claims |
 | `POST /v1/operations/handoff` | Build a content-addressed, non-executing domain-to-`capability_route` handoff |
+| `GET /v1/domain-workflows` | Build one deterministic, digest-bound workflow template for every capability group |
+| `POST /v1/domain-workflows/instantiate` | Instantiate a group-scoped mission and attach authoritative no-dispatch preflight |
 | `GET /v1/tools` | The exact MCP tool definitions |
 | `POST /v1/tools/{name}` | Call any tool with a JSON object body; delegates to the MCP dispatcher |
 | `POST /v1/missions` | Validate and submit an asynchronous `agent_mission` job |
@@ -75,6 +77,25 @@ domain mission without inventing a domain-specific subscription path.
 The TCP serving path shares an immutable router across connection threads and allocates request IDs
 atomically. Each stateless REST/JSON-RPC dispatch uses a cloned ready MCP session; mutable mission,
 event, subscription, and delivery state remains independently bounded and synchronized.
+
+## Domain workflow catalogue and instantiation
+
+`GET /v1/domain-workflows` is the transport-neutral bridge between capability discovery and
+`agent_mission`. It returns exactly one workflow template per explicit capability group, currently
+29 groups. Each row carries the group domains, owning crates, CLI entrypoints, declared MCP tools,
+the intersection with authoritative `tools/list`, missing definitions, advisory lexical stages,
+and a `workflow_digest`; the catalogue also carries input and workflow-catalogue digests. Missing
+tool definitions remain visible and never become executable by implication.
+
+`POST /v1/domain-workflows/instantiate` accepts `workflow_id`, `mission_id`, `goal`, and an explicit
+`steps` array, with optional mission policy, claim requests, and evaluator review. Every selected
+tool must be declared by the selected group. The kernel normalizes defaults, validates the mission
+DAG, and when `policy.execute` is true derives `allowed_tools` from the selected steps only if the
+caller did not provide one. The response includes the instantiated mission, selection ledger,
+workflow and catalogue digests, a kernel preflight contract, and the authoritative MCP
+`preflight_report`. `execution` and `dispatch` remain `not_started`; this route never invokes a
+domain tool. Domain-specific arguments still require the authoritative schema report, and a valid
+plan is not a readiness, truth, clinical, or release claim.
 
 ## Restart-aware mission snapshots
 

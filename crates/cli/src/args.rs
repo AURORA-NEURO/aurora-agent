@@ -92,6 +92,14 @@ COMMANDS
                     [--limit <n>] [--include-bundles]
                     Query a local registry checkpoint without executing any mission or tool.
 
+  workflow catalogue
+                    Build one deterministic, digest-bound workflow template for every capability
+                    group. No tool is selected or executed.
+  workflow instantiate --workflow <id> --mission-id <id> --goal <text> --steps <path>
+                    [--policy <path>] [--dry-run]
+                    Instantiate a group-scoped mission and attach authoritative no-dispatch
+                    preflight. The steps file is a JSON array or an object containing `steps`.
+
 GLOBAL OPTIONS
   --json            Emit exactly one JSON document on stdout and nothing else.
   -h, --help        Show this help.
@@ -144,6 +152,15 @@ pub enum Command {
         after: Option<String>,
         limit: usize,
         include_bundles: bool,
+    },
+    WorkflowCatalogue,
+    WorkflowInstantiate {
+        workflow: String,
+        mission_id: String,
+        goal: String,
+        steps: PathBuf,
+        policy: Option<PathBuf>,
+        dry_run: bool,
     },
 }
 
@@ -293,6 +310,21 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
             },
             include_bundles: options.take_switch("--include-bundles"),
         },
+        ("workflow", "catalogue") => Command::WorkflowCatalogue,
+        ("workflow", "instantiate") => Command::WorkflowInstantiate {
+            workflow: options
+                .take_optional("--workflow")
+                .ok_or_else(|| usage("--workflow is required"))?,
+            mission_id: options
+                .take_optional("--mission-id")
+                .ok_or_else(|| usage("--mission-id is required"))?,
+            goal: options
+                .take_optional("--goal")
+                .ok_or_else(|| usage("--goal is required"))?,
+            steps: options.take_path("--steps")?,
+            policy: options.take_optional_path("--policy"),
+            dry_run: options.take_switch("--dry-run"),
+        },
         _ => return Err(usage(format!("unknown command {group:?} {subcommand:?}"))),
     };
 
@@ -430,6 +462,44 @@ mod tests {
                     after: None,
                     limit: 7,
                     include_bundles: true,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn workflow_instantiation_parses_explicit_steps_and_policy_paths() {
+        let parsed = parse(
+            [
+                "workflow",
+                "instantiate",
+                "--workflow",
+                "documentation_and_knowledge",
+                "--mission-id",
+                "m-1",
+                "--goal",
+                "discover capabilities",
+                "--steps",
+                "steps.json",
+                "--policy",
+                "policy.json",
+                "--dry-run",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse workflow instantiate");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::WorkflowInstantiate {
+                    workflow: "documentation_and_knowledge".into(),
+                    mission_id: "m-1".into(),
+                    goal: "discover capabilities".into(),
+                    steps: PathBuf::from("steps.json"),
+                    policy: Some(PathBuf::from("policy.json")),
+                    dry_run: true,
                 },
             })
         );

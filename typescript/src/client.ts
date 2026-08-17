@@ -18,6 +18,9 @@ import type {
   CapabilityRouteReviewArgs,
   CapabilityRouteReviewResult,
   CapabilityRouteResult,
+  DomainWorkflowCatalogueResult,
+  DomainWorkflowInstantiateArgs,
+  DomainWorkflowInstantiateResult,
   AdapterPlanArgs,
   AdapterPlanResult,
   TabularIngestArgs,
@@ -436,6 +439,24 @@ export class ApiClient {
 
   async capabilities(options?: ClientRequestOptions): Promise<CapabilitiesResponse> {
     return this.request<CapabilitiesResponse>("GET", "/v1/capabilities", undefined, options);
+  }
+
+  /** Read one deterministic, digest-bound workflow template for every capability group. */
+  async domainWorkflowCatalogueQuery(options?: ClientRequestOptions): Promise<DomainWorkflowCatalogueResult> {
+    return this.request<DomainWorkflowCatalogueResult>("GET", "/v1/domain-workflows", undefined, options);
+  }
+
+  /** Instantiate and authoritative-preflight a group-scoped mission without dispatch. */
+  async domainWorkflowInstantiateQuery(
+    args: DomainWorkflowInstantiateArgs,
+    options?: ClientRequestOptions,
+  ): Promise<DomainWorkflowInstantiateResult> {
+    if (!isObject(args)) throw new ArgumentError("domain workflow arguments must be an object");
+    if (typeof args.workflow_id !== "string" || args.workflow_id.trim().length === 0) throw new ArgumentError("workflow_id must be a non-empty string");
+    if (typeof args.mission_id !== "string" || args.mission_id.trim().length === 0) throw new ArgumentError("mission_id must be a non-empty string");
+    if (typeof args.goal !== "string" || args.goal.trim().length === 0) throw new ArgumentError("goal must be a non-empty string");
+    if (!Array.isArray(args.steps) || args.steps.length < 1 || args.steps.length > 128) throw new ArgumentError("steps must contain 1..=128 items");
+    return this.request<DomainWorkflowInstantiateResult>("POST", "/v1/domain-workflows/instantiate", args, options);
   }
 
   /** Inspect all restart, secret, and external-effect boundaries in one operator matrix. */
@@ -870,6 +891,20 @@ export class ApiClient {
 
   async capabilityDiscover(args: CapabilityDiscoverArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<CapabilityDiscoverResult>> {
     return this.callTool<CapabilityDiscoverResult>("capability_discover", args, options);
+  }
+
+  async domainWorkflowCatalogue(options?: ClientRequestOptions): Promise<RestToolResponse<DomainWorkflowCatalogueResult>> {
+    return this.callTool<DomainWorkflowCatalogueResult>("domain_workflow_catalogue", {}, options);
+  }
+
+  async domainWorkflowInstantiate(
+    args: DomainWorkflowInstantiateArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainWorkflowInstantiateResult>> {
+    if (!isObject(args) || !Array.isArray(args.steps) || args.steps.length < 1 || args.steps.length > 128) {
+      throw new ArgumentError("domain workflow instantiate requires 1..=128 step objects");
+    }
+    return this.callTool<DomainWorkflowInstantiateResult>("domain_workflow_instantiate", args, options);
   }
 
   async missionEvaluatorDiscover(args: MissionEvaluatorDiscoverArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<MissionEvaluatorDiscoverResult>> {
