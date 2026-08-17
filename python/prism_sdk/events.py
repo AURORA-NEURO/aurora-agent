@@ -29,6 +29,12 @@ def _non_negative(name: str, value: Any) -> int:
     return value
 
 
+def _texts(name: str, value: Any) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        raise ArgumentError(f"{name} must be an array")
+    return tuple(_text(f"{name}[{index}]", item) for index, item in enumerate(value))
+
+
 def _review_id(name: str, value: Any) -> str:
     if (
         not isinstance(value, str)
@@ -269,6 +275,109 @@ class EventPersistenceStatus:
 
 
 @dataclass(frozen=True)
+class RecoveryBoundary:
+    """One explicit restart boundary reported by the gateway recovery matrix."""
+
+    raw: dict[str, Any]
+    id: str
+    configured: bool
+    checkpoint_present: bool
+    schema_version: int | None
+    state_digest: str | None
+    restores: tuple[str, ...]
+    does_not_restore: tuple[str, ...]
+    operator_action: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "RecoveryBoundary":
+        raw = _mapping("recovery boundary", value)
+        boundary_id = _text("recovery boundary id", raw.get("id"))
+        configured = raw.get("configured")
+        checkpoint_present = raw.get("checkpoint_present")
+        if not isinstance(configured, bool) or not isinstance(checkpoint_present, bool):
+            raise ArgumentError("recovery boundary configured and checkpoint_present must be booleans")
+        schema_version = raw.get("schema_version")
+        if schema_version is not None:
+            schema_version = _non_negative("recovery boundary schema_version", schema_version)
+        state_digest = raw.get("state_digest")
+        if state_digest is not None and (
+            not isinstance(state_digest, str)
+            or len(state_digest) != 64
+            or any(character not in "0123456789abcdef" for character in state_digest)
+        ):
+            raise ArgumentError(
+                "recovery boundary state_digest must be 64 lowercase hexadecimal characters"
+            )
+        return cls(
+            raw=raw,
+            id=boundary_id,
+            configured=configured,
+            checkpoint_present=checkpoint_present,
+            schema_version=schema_version,
+            state_digest=state_digest,
+            restores=_texts("recovery boundary restores", raw.get("restores")),
+            does_not_restore=_texts(
+                "recovery boundary does_not_restore", raw.get("does_not_restore")
+            ),
+            operator_action=_text("recovery boundary operator_action", raw.get("operator_action")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class RecoveryMatrix:
+    """Typed operator matrix for restart, secret, and external-effect boundaries."""
+
+    raw: dict[str, Any]
+    schema: str
+    boundaries: tuple[RecoveryBoundary, ...]
+    automatic_resume: bool
+    automatic_external_delivery: bool
+    observed: dict[str, int]
+    guarantees: tuple[str, ...]
+    non_claims: tuple[str, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "RecoveryMatrix":
+        raw = _mapping("recovery matrix", value)
+        boundaries_value = raw.get("boundaries")
+        if not isinstance(boundaries_value, list) or not boundaries_value:
+            raise ArgumentError("recovery matrix boundaries must be a non-empty array")
+        boundaries = tuple(
+            RecoveryBoundary.from_wire(item) for item in boundaries_value
+        )
+        boundary_ids = [boundary.id for boundary in boundaries]
+        if len(set(boundary_ids)) != len(boundary_ids):
+            raise ArgumentError("recovery matrix boundary ids must be unique")
+        automatic_resume = raw.get("automatic_resume")
+        automatic_external_delivery = raw.get("automatic_external_delivery")
+        if not isinstance(automatic_resume, bool) or not isinstance(automatic_external_delivery, bool):
+            raise ArgumentError(
+                "recovery matrix automatic resume and delivery fields must be booleans"
+            )
+        observed_raw = _mapping("recovery matrix observed", raw.get("observed"))
+        observed = {
+            name: _non_negative(f"recovery matrix observed {name}", number)
+            for name, number in observed_raw.items()
+        }
+        return cls(
+            raw=raw,
+            schema=_text("recovery matrix schema", raw.get("schema")),
+            boundaries=boundaries,
+            automatic_resume=automatic_resume,
+            automatic_external_delivery=automatic_external_delivery,
+            observed=observed,
+            guarantees=_texts("recovery matrix guarantees", raw.get("guarantees")),
+            non_claims=_texts("recovery matrix non_claims", raw.get("non_claims")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
 class DeliveryView:
     """One signed webhook delivery plus operator-visible failure and replay state."""
 
@@ -422,6 +531,8 @@ __all__ = [
     "ApiEvent",
     "EventPage",
     "EventPersistenceStatus",
+    "RecoveryBoundary",
+    "RecoveryMatrix",
     "DeliveryView",
     "DeliveryPage",
     "SseEvent",

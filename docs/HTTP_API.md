@@ -19,6 +19,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 |---|---|
 | `GET /healthz`, `GET /readyz` | Liveness/readiness and retention metrics |
 | `GET /v1/capabilities` | Tool/resource counts, transport support, limits, and workspace catalogue |
+| `GET /v1/recovery` | One operator-visible matrix of restart, secret, outbox, and external-effect boundaries |
 | `GET /v1/tools` | The exact MCP tool definitions |
 | `POST /v1/tools/{name}` | Call any tool with a JSON object body; delegates to the MCP dispatcher |
 | `POST /v1/missions` | Validate and submit an asynchronous `agent_mission` job |
@@ -93,6 +94,14 @@ partially rewritten schema-3 document before restoring any rows. Schema 1 and sc
 remain readable as bounded migrations without a digest, and the next successful flush upgrades
 them to schema 3. Event persistence and mission persistence are independent: an operator can
 enable either, both, or neither.
+
+`GET /v1/recovery` joins those independent statuses without joining their guarantees. Its
+`boundaries` rows separately identify mission jobs, event rows, subscription metadata, webhook
+outbox rows, signing secrets, and external delivery effects. Each row reports whether the
+boundary is configured, whether a checkpoint is present, what is restored, what is explicitly not
+restored, and the required operator action. `automatic_resume` and
+`automatic_external_delivery` are always false for this gateway. The matrix is an operational
+decision surface, not a distributed coordination protocol.
 
 ## Asynchronous missions
 

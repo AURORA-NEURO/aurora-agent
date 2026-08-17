@@ -7095,6 +7095,30 @@ export interface EventPersistenceStatus extends JsonObject {
   flush: string;
 }
 
+export interface RecoveryBoundary extends JsonObject {
+  id: string;
+  configured: boolean;
+  checkpoint_present: boolean;
+  schema_version: number | null;
+  state_digest: string | null;
+  restores: string[];
+  does_not_restore: string[];
+  operator_action: string;
+}
+
+export interface RecoveryMatrix extends JsonObject {
+  ok: boolean;
+  schema: string;
+  scope: string;
+  automatic_resume: false;
+  automatic_external_delivery: false;
+  boundaries: RecoveryBoundary[];
+  observed: Record<string, number>;
+  guarantees: string[];
+  non_claims: string[];
+  links: Record<string, string>;
+}
+
 export interface MissionStepPreflight extends JsonObject {
   id: string;
   tool: string;

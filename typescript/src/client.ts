@@ -257,6 +257,7 @@ import type {
   MissionRouteSelection,
   MissionTracePage,
   MissionWaitOptions,
+  RecoveryMatrix,
   RepositoryBundleArgs,
   RepositoryCatalogArgs,
   RepositoryImpactArgs,
@@ -403,6 +404,11 @@ export class ApiClient {
 
   async capabilities(options?: ClientRequestOptions): Promise<CapabilitiesResponse> {
     return this.request<CapabilitiesResponse>("GET", "/v1/capabilities", undefined, options);
+  }
+
+  /** Inspect all restart, secret, and external-effect boundaries in one operator matrix. */
+  async recoveryMatrix(options?: ClientRequestOptions): Promise<RecoveryMatrix> {
+    return this.request<RecoveryMatrix>("GET", "/v1/recovery", undefined, options);
   }
 
   async tools(options?: ClientRequestOptions): Promise<ToolsResponse["tools"]> {

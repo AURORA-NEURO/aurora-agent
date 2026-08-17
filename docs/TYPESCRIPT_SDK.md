@@ -648,6 +648,11 @@ metadata, not a replacement for `developer_delivery_receipt_verify`.
 
 ## Events and webhooks
 
+`recoveryMatrix()` returns the typed `RecoveryMatrix` view before an operator performs restart
+recovery. Its boundary rows distinguish terminal mission restoration, retained event rows,
+subscription metadata, pending outbox evidence, process-local secrets, and external delivery
+effects; `automatic_resume` and `automatic_external_delivery` are explicit `false` values.
+
 ```typescript
 const page = await api.events(0, 100);
 const stream = await api.eventStream(page.page.next_after, 100);

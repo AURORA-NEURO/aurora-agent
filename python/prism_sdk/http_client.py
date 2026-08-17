@@ -75,6 +75,7 @@ from .events import (
     DeliveryReceiptEvents,
     EventPage,
     EventPersistenceStatus,
+    RecoveryMatrix,
     RouteReviewEvidence,
     SseSnapshot,
     parse_sse,
@@ -3357,6 +3358,11 @@ class ApiClient:
 
         return EventPersistenceStatus.from_wire(self.request("GET", "/v1/events/persistence"))
 
+    def recovery_matrix(self) -> RecoveryMatrix:
+        """Return one typed matrix of mission, event, secret, and external-effect boundaries."""
+
+        return RecoveryMatrix.from_wire(self.request("GET", "/v1/recovery"))
+
     def flush_event_persistence(self) -> EventPersistenceStatus:
         """Force an event cursor checkpoint and return typed bounded status."""
 
@@ -3622,6 +3628,11 @@ class AsyncApiClient:
         """Async inspection of the optional event cursor checkpoint."""
 
         return await asyncio.to_thread(self.client.event_persistence)
+
+    async def recovery_matrix(self) -> RecoveryMatrix:
+        """Async typed recovery-boundary matrix."""
+
+        return await asyncio.to_thread(self.client.recovery_matrix)
 
     async def flush_event_persistence(self) -> EventPersistenceStatus:
         """Async forced event cursor checkpoint with typed bounded status."""

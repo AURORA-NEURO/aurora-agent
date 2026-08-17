@@ -158,6 +158,9 @@ and rebind checks so operators can verify the recovery boundary instead of infer
 Schema 3 adds a content SHA-256 digest over the unsigned checkpoint document; schema 1 and
 schema 2 are accepted as migration inputs, while tampered schema-3 files are rejected before
 any state is restored.
+The `/v1/recovery` matrix and SDK projections now join those surfaces into explicit rows for
+mission jobs, event rows, subscription metadata, pending outbox rows, secrets, and external
+effects without collapsing their guarantees.
 The API crate also exposes a bounded `DeliverySender`/`ApiRouter::deliver_once` cycle for embedded
 workers: successful signed sends are acknowledged, retryable failures advance through the existing
 ten-attempt cap, and permanent or exhausted failures remain pending. Network/TLS and egress policy

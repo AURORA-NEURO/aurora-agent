@@ -479,6 +479,7 @@ impl ApiRouter {
             ("GET", "/openapi.json") | ("GET", "/v1/openapi.json") => self.openapi(),
             ("GET", "/v1") => self.index(),
             ("GET", "/v1/capabilities") => self.capabilities(),
+            ("GET", "/v1/recovery") => self.recovery_matrix(),
             ("GET", "/v1/tools") => self.tools(),
             ("GET", "/v1/metrics") => self.metrics(),
             ("GET", "/v1/events") => self.events(&request),
@@ -637,6 +638,160 @@ impl ApiRouter {
         )
     }
 
+    fn recovery_matrix(&self) -> HttpResponse {
+        let mission_enabled = self.config.mission_state_path.is_some();
+        let mission_checkpoint_present = self
+            .config
+            .mission_state_path
+            .as_deref()
+            .and_then(|path| std::fs::metadata(path).ok())
+            .is_some();
+        let event_enabled = self.config.event_state_path.is_some();
+        let event_checkpoint_present = self
+            .config
+            .event_state_path
+            .as_deref()
+            .and_then(|path| std::fs::metadata(path).ok())
+            .is_some();
+        let metrics = self.event_metrics();
+        let state_digest = self
+            .config
+            .event_state_path
+            .as_deref()
+            .and_then(|path| std::fs::read(path).ok())
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+            .and_then(|document| {
+                document
+                    .get("state_digest")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            });
+        HttpResponse::json(
+            200,
+            &json!({
+                "ok": true,
+                "schema": "bioprism-recovery-matrix/0.1",
+                "scope": "single-process-api-instance",
+                "automatic_resume": false,
+                "automatic_external_delivery": false,
+                "boundaries": [
+                    {
+                        "id": "mission_jobs",
+                        "configured": mission_enabled,
+                        "checkpoint_present": mission_checkpoint_present,
+                        "schema_version": MISSION_STATE_SCHEMA_VERSION,
+                        "state_digest": Value::Null,
+                        "restores": [
+                            "terminal mission status, bounded progress, retained trace, and size-limited result metadata"
+                        ],
+                        "does_not_restore": [
+                            "queued or running execution",
+                            "in-flight external effects",
+                            "effect rollback or distributed scheduling"
+                        ],
+                        "operator_action": "inspect recovered_after_restart and re-submit interrupted work explicitly"
+                    },
+                    {
+                        "id": "event_rows",
+                        "configured": event_enabled,
+                        "checkpoint_present": event_checkpoint_present,
+                        "schema_version": EVENT_STATE_SCHEMA_VERSION,
+                        "state_digest": state_digest,
+                        "restores": [
+                            "retained sequence-addressed event rows",
+                            "next cursor and retention-gap accounting"
+                        ],
+                        "does_not_restore": [
+                            "distributed consensus or cross-instance ordering"
+                        ],
+                        "operator_action": "verify the state_digest and treat retention gaps as explicit evidence"
+                    },
+                    {
+                        "id": "subscription_metadata",
+                        "configured": event_enabled,
+                        "checkpoint_present": event_checkpoint_present,
+                        "schema_version": EVENT_STATE_SCHEMA_VERSION,
+                        "state_digest": state_digest,
+                        "restores": [
+                            "subscription id, endpoint, event filters, and creation sequence"
+                        ],
+                        "does_not_restore": [
+                            "active delivery authorization",
+                            "webhook signing secrets"
+                        ],
+                        "operator_action": "POST /v1/webhooks/subscriptions/{id}/rebind before retry, replay, or delivery"
+                    },
+                    {
+                        "id": "webhook_outbox",
+                        "configured": event_enabled,
+                        "checkpoint_present": event_checkpoint_present,
+                        "schema_version": EVENT_STATE_SCHEMA_VERSION,
+                        "state_digest": state_digest,
+                        "restores": [
+                            "pending delivery ids, attempts, signed envelope evidence, and bounded failure metadata"
+                        ],
+                        "does_not_restore": [
+                            "receiver acceptance",
+                            "network sends or automatic acknowledgement"
+                        ],
+                        "operator_action": "rebind secrets, poll the outbox through an egress-controlled worker, then acknowledge accepted ids"
+                    },
+                    {
+                        "id": "webhook_signing_secrets",
+                        "configured": event_enabled,
+                        "checkpoint_present": false,
+                        "schema_version": Value::Null,
+                        "state_digest": Value::Null,
+                        "restores": [],
+                        "does_not_restore": [
+                            "all signing secrets; they remain process-local by policy"
+                        ],
+                        "operator_action": "supply each secret through the explicit in-memory rebind route"
+                    },
+                    {
+                        "id": "external_delivery_effects",
+                        "configured": false,
+                        "checkpoint_present": false,
+                        "schema_version": Value::Null,
+                        "state_digest": Value::Null,
+                        "restores": [],
+                        "does_not_restore": [
+                            "network transport, TLS termination, receiver state, and external side effects"
+                        ],
+                        "operator_action": "keep sending and acknowledgement in an operator-owned delivery worker"
+                    }
+                ],
+                "observed": {
+                    "mission_checkpoint_present": mission_checkpoint_present,
+                    "event_checkpoint_present": event_checkpoint_present,
+                    "retained_events": metrics.retained_events,
+                    "active_subscriptions": metrics.active_subscriptions,
+                    "subscriptions": metrics.subscriptions,
+                    "pending_deliveries": metrics.pending_deliveries,
+                    "dropped_events": metrics.dropped_events,
+                    "dropped_deliveries": metrics.dropped_deliveries
+                },
+                "guarantees": [
+                    "restart boundaries are reported separately for missions, events, subscriptions, outbox rows, secrets, and external effects",
+                    "absence of a checkpoint is visible and never presented as recovered state",
+                    "a successful HTTP response does not claim receiver acceptance or effect completion"
+                ],
+                "non_claims": [
+                    "distributed event storage",
+                    "automatic job resumption",
+                    "secret recovery",
+                    "network delivery or receiver acknowledgement"
+                ],
+                "links": {
+                    "mission_persistence": "/v1/missions/persistence",
+                    "event_persistence": "/v1/events/persistence",
+                    "event_flush": "/v1/events/persistence/flush",
+                    "mission_flush": "/v1/missions/persistence/flush"
+                }
+            }),
+        )
+    }
+
     fn flush_event_persistence(&self, request_id: &str) -> HttpResponse {
         if self.config.event_state_path.is_none() {
             return self.error(
@@ -726,6 +881,7 @@ impl ApiRouter {
                     "ready": "/readyz",
                     "openapi": "/v1/openapi.json",
                     "capabilities": "/v1/capabilities",
+                    "recovery": "/v1/recovery",
                     "tools": "/v1/tools",
                     "missions": "/v1/missions",
                     "mission_persistence": "/v1/missions/persistence",
@@ -760,6 +916,7 @@ impl ApiRouter {
                     "mission_trace": true,
                     "delivery_receipt_events": true,
                     "route_review_evidence": true,
+                    "recovery_matrix": true,
                     "max_mission_trace_events": MAX_MISSION_TRACE_EVENTS,
                     "cooperative_mission_cancellation": true,
                     "durable_mission_snapshots": self.config.mission_state_path.is_some(),
@@ -2171,6 +2328,7 @@ impl ApiRouter {
                     "/healthz": { "get": { "responses": { "200": { "description": "liveness" } } } },
                     "/readyz": { "get": { "responses": { "200": { "description": "readiness" } } } },
                     "/v1/capabilities": { "get": { "responses": { "200": { "description": "capability and limit catalog" } } } },
+                    "/v1/recovery": { "get": { "responses": { "200": { "description": "operator-visible restart recovery matrix" } } } },
                     "/v1/tools": { "get": { "responses": { "200": { "description": "MCP tool catalog" } } } },
                     "/v1/tools/{name}": { "post": { "parameters": [{ "name": "name", "in": "path", "required": true }], "responses": { "200": { "description": "tool result" } } } },
                     "/v1/missions/preflight": { "post": { "responses": { "200": { "description": "authoritative no-dispatch mission plan" } } } },
@@ -2867,6 +3025,48 @@ mod tests {
             (MAX_PERSISTED_MISSION_RESULT_BYTES + 3) as u64
         );
         assert!(persisted["result_omitted"]["sha256"].as_str().is_some());
+    }
+
+    #[test]
+    fn recovery_matrix_separates_restart_boundaries_and_non_claims() {
+        let mission_path = test_state_path("recovery-mission");
+        let event_path = test_state_path("recovery-event");
+        let router = ApiRouter::new(
+            std::env::current_dir().unwrap(),
+            ApiConfig {
+                mission_state_path: Some(mission_path.clone()),
+                event_state_path: Some(event_path.clone()),
+                ..ApiConfig::default()
+            },
+        )
+        .unwrap();
+        let response = router.handle(request("GET", "/v1/recovery", json!({})));
+        assert_eq!(response.status, 200);
+        let matrix: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(matrix["schema"], "bioprism-recovery-matrix/0.1");
+        assert_eq!(matrix["automatic_resume"], false);
+        assert_eq!(matrix["automatic_external_delivery"], false);
+        let boundaries = matrix["boundaries"].as_array().unwrap();
+        let event_rows = boundaries
+            .iter()
+            .find(|boundary| boundary["id"] == "event_rows")
+            .unwrap();
+        assert_eq!(event_rows["configured"], true);
+        assert_eq!(event_rows["checkpoint_present"], true);
+        assert_eq!(event_rows["state_digest"].as_str().unwrap().len(), 64);
+        let secrets = boundaries
+            .iter()
+            .find(|boundary| boundary["id"] == "webhook_signing_secrets")
+            .unwrap();
+        assert_eq!(secrets["checkpoint_present"], false);
+        assert!(secrets["does_not_restore"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value.as_str().unwrap().contains("signing secrets")));
+        assert_eq!(matrix["observed"]["retained_events"], 0);
+        let _ = std::fs::remove_file(mission_path);
+        let _ = std::fs::remove_file(event_path);
     }
 
     #[test]

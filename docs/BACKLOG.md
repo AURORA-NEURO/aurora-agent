@@ -535,3 +535,7 @@ CapabilityGrid denominator coverage, named debt discharge, withheld failure brow
 denominator-safe rate checks, and surface soundness. The remaining item is the blueprint citation
 itself, not a missing grounding, acquisition, estimand, evaluator-health, scoring-plane,
 metamorphic, waiver, design, mesh, burden, reveal, boundary, or atlasx transport wrapper.
+The restart boundary is now also exposed as a single recovery matrix. It deliberately keeps
+mission terminal restoration, event rows, subscription metadata, pending outbox evidence,
+process-local secrets, and external delivery effects in separate rows; it does not turn local
+checkpoints into automatic execution resumption, distributed consensus, or receiver acceptance.

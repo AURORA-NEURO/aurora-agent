@@ -2388,6 +2388,20 @@ test("client parses cursor SSE and validates webhook mutations", async () => {
       if (path.endsWith("/rebind") && init.method === "POST") {
         return jsonResponse({ ok: true, subscription: { id: "sub", endpoint: "https://example.test/hook", events: ["*"], active: true, created_at_sequence: 1, secret_bound: true, rebind_required: false }, resigned_deliveries: 1, secret_policy: "memory-only" });
       }
+      if (path === "/v1/recovery") {
+        return jsonResponse({
+          ok: true,
+          schema: "bioprism-recovery-matrix/0.1",
+          scope: "single-process-api-instance",
+          automatic_resume: false,
+          automatic_external_delivery: false,
+          boundaries: [{ id: "webhook_signing_secrets", configured: true, checkpoint_present: false, schema_version: null, state_digest: null, restores: [], does_not_restore: ["all signing secrets"], operator_action: "rebind" }],
+          observed: { subscriptions: 1, pending_deliveries: 1 },
+          guarantees: ["boundaries are explicit"],
+          non_claims: ["secret recovery"],
+          links: { event_persistence: "/v1/events/persistence" },
+        });
+      }
       if (path.startsWith("/v1/delivery-receipts/")) return jsonResponse({ ok: true, workflow: "developer_delivery_receipt_events", receipt_id: "receipt-ts-1", found: true, page: { events: [{ id: 2, event_type: "tool.completed", subject: "developer_delivery_receipt", request_id: "req-2", payload: { delivery_receipt: { receipt_id: "receipt-ts-1" } } }], after: 0, next_after: 2, oldest: 1, newest: 2, gap: false, dropped_events: 0 } });
       if (path.startsWith("/v1/route-reviews/")) return jsonResponse({ ok: true, workflow: "capability_route_review_evidence", review_id: "a".repeat(64), found: true, page: { events: [{ id: 1, event_type: "tool.completed", subject: "capability_route_review", request_id: "req-1", payload: {} }], after: 0, next_after: 1, oldest: 1, newest: 1, gap: false, dropped_events: 0 } });
       return new Response("id: 4\nevent: tool.completed\ndata: {\"ok\":true}\n\nevent: cursor_gap\ndata: {\"after\":0}\n\n", {
@@ -2418,6 +2432,9 @@ test("client parses cursor SSE and validates webhook mutations", async () => {
   const rebound = await client.rebindSubscription("sub", "a-long-secret");
   assert.equal(rebound.subscription.secret_bound, true);
   assert.equal(rebound.resigned_deliveries, 1);
+  const recovery = await client.recoveryMatrix();
+  assert.equal(recovery.automatic_resume, false);
+  assert.equal(recovery.boundaries[0].checkpoint_present, false);
   await assert.rejects(client.acknowledge("sub", [0]), ArgumentError);
 });
 
