@@ -4427,6 +4427,7 @@ export interface MissionEvaluatorReplayResult extends JsonObject {
   omitted_fixtures: number;
   guarantees: string[];
   limitations: string[];
+  artifact_registry?: JsonObject;
 }
 
 export interface MissionEvaluatorReplayCompareArgs extends JsonObject {
@@ -4789,6 +4790,7 @@ export interface DomainWorkflowReconcileResult extends JsonObject {
   execution: "not_started";
   guarantees: string[];
   limitations: string[];
+  artifact_registry?: JsonObject;
 }
 
 /** Import a digest-bound reconciliation report into the bounded audit registry. */
@@ -4808,6 +4810,7 @@ export interface DomainWorkflowReconciliationImportResult extends JsonObject {
   execution: "not_started";
   guarantees: string[];
   limitations: string[];
+  artifact_registry?: JsonObject;
 }
 
 /** Bounded indexed lookup over retained domain-workflow reconciliation reports. */
@@ -7478,6 +7481,7 @@ export interface AgentMissionReport extends JsonObject {
   preflight?: boolean;
   dispatch?: "not_started";
   workflow_reconciliation?: JsonObject;
+  artifact_registry?: JsonObject;
   plan: JsonObject;
   results: JsonObject[];
   [key: string]: JsonValue | undefined;
@@ -7698,6 +7702,7 @@ export interface MissionEvidenceBundleImportResult extends JsonObject {
   execution: "not_started";
   guarantees: string[];
   limitations: string[];
+  artifact_registry?: JsonObject;
 }
 
 export interface MissionEvidenceBundleQueryOptions extends JsonObject {

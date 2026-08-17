@@ -565,6 +565,14 @@ fn verify_known_artifact(
                 .as_object_mut()
                 .expect("reconciliation object was checked above")
                 .remove("reconciliation_digest");
+            // `artifact_registry` is a transport projection attached after the canonical
+            // reconciliation report has been verified. It is deliberately excluded from the
+            // reconciliation's own digest contract so the returned report can be imported again
+            // without creating a second semantic record.
+            unsigned
+                .as_object_mut()
+                .expect("reconciliation object was checked above")
+                .remove("artifact_registry");
             let recomputed = content_digest(&unsigned)?;
             if declared != recomputed {
                 return Err(ArtifactRegistryError::InvalidInput(

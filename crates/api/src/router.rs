@@ -3696,6 +3696,7 @@ impl ApiRouter {
             // through the asynchronous mission worker. The server writes the shared registry;
             // checkpoint it before returning the transport response when durability is enabled.
             let _ = self.reconciliation_persistence.persist();
+            let _ = self.artifact_persistence.persist();
         }
         HttpResponse::json(response_status(&wire), &wire)
     }
@@ -3730,6 +3731,7 @@ impl ApiRouter {
         let wire = response.to_json();
         self.record_tool_event(request_id, tool, &wire);
         let _ = self.reconciliation_persistence.persist();
+        let _ = self.artifact_persistence.persist();
         let transport_ok = wire.get("error").is_none();
         HttpResponse::json(
             if transport_ok {
@@ -3839,6 +3841,17 @@ impl ApiRouter {
                 );
             }
         }
+        let artifact_projection = self.automatic_artifact_projection(
+            "workflow_reconciliation",
+            record
+                .get("mission_id")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown-mission"),
+            Vec::new(),
+            strip_artifact_transport_fields(record),
+        );
+        let mut report = report;
+        report["artifact_registry"] = artifact_projection;
         HttpResponse::json(
             if report["created"].as_bool().unwrap_or(false) {
                 201
@@ -4069,6 +4082,7 @@ impl ApiRouter {
         let wire = response.to_json();
         self.record_tool_event(request_id, tool, &wire);
         let _ = self.reconciliation_persistence.persist();
+        let _ = self.artifact_persistence.persist();
         let is_error = wire
             .pointer("/result/isError")
             .and_then(Value::as_bool)
@@ -4396,6 +4410,7 @@ impl ApiRouter {
         let executor = Arc::new(self.mission_executor.with_mission_trace_observer(observer));
         let worker_persistence = Arc::clone(&self.mission_persistence);
         let worker_reconciliation_persistence = Arc::clone(&self.reconciliation_persistence);
+        let worker_artifact_persistence = Arc::clone(&self.artifact_persistence);
         let worker_queue_persistence = Arc::clone(&self.mission_queue_persistence);
         let worker_id = mission_id.clone();
         let worker_mission_id = mission_id.clone();
@@ -4413,6 +4428,7 @@ impl ApiRouter {
                 // The MCP executor has already imported any workflow reconciliation. Checkpoint
                 // it before publishing the terminal mission state to the in-memory job registry.
                 let _ = worker_reconciliation_persistence.persist();
+                let _ = worker_artifact_persistence.persist();
                 if let Ok(mut current) = job.state.lock() {
                     match outcome {
                         Ok(result) => {
@@ -5009,6 +5025,17 @@ impl ApiRouter {
                 return self.error(503, "evidence_persistence_unavailable", &error, request_id);
             }
         }
+        let artifact_projection = self.automatic_artifact_projection(
+            "mission_evidence_bundle",
+            bundle
+                .get("mission_id")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown-mission"),
+            evaluator_domains_for_artifact(bundle),
+            bundle.clone(),
+        );
+        let mut report = report;
+        report["artifact_registry"] = artifact_projection;
         let status = if created { 201 } else { 200 };
         HttpResponse::json(status, &report)
     }
@@ -5182,6 +5209,76 @@ impl ApiRouter {
         match self.persist_evidence_registry() {
             Ok(_) => self.evidence_persistence_status(),
             Err(error) => self.error(503, "evidence_persistence_unavailable", &error, request_id),
+        }
+    }
+
+    /// Register a projection produced by an explicit verification boundary and report checkpoint
+    /// health separately from in-memory registration. The source registry operation remains
+    /// successful when this auxiliary projection is unavailable; the response makes that gap
+    /// visible instead of presenting the cross-domain index as complete.
+    fn automatic_artifact_projection(
+        &self,
+        kind: &str,
+        subject_id: &str,
+        domains: Vec<String>,
+        artifact: Value,
+    ) -> Value {
+        let registration = json!({
+            "kind": kind,
+            "subject_id": subject_id,
+            "domains": domains,
+            "parent_digests": [],
+            "artifact": artifact,
+        });
+        let result = self
+            .artifact_registry
+            .lock()
+            .map_err(|_| "artifact registry is unavailable".to_string())
+            .and_then(|mut registry| {
+                registry
+                    .register(&registration)
+                    .map_err(|error| error.to_string())
+            });
+        match result {
+            Ok(report) => {
+                let checkpoint = self.artifact_persistence.persist();
+                let digest = report.get("content_digest").cloned().unwrap_or(Value::Null);
+                json!({
+                    "indexed": true,
+                    "kind": kind,
+                    "subject_id": subject_id,
+                    "content_digest": digest,
+                    "created": report.get("created").cloned().unwrap_or(Value::Null),
+                    "already_present": report.get("already_present").cloned().unwrap_or(Value::Null),
+                    "verification": report.get("verification").cloned().unwrap_or(Value::Null),
+                    "lookup": digest.as_str().map(|value| format!("/v1/artifacts/{value}")).unwrap_or_default(),
+                    "persistence": {
+                        "enabled": self.config.artifact_state_path.is_some(),
+                        "checkpointed": checkpoint.is_ok(),
+                        "error": checkpoint.err()
+                    },
+                    "execution": "not_started",
+                    "does_not_claim": [
+                        "artifact integrity establishes scientific, clinical, regulatory, publication, or external-effect validity",
+                        "automatic indexing establishes causal provenance or external storage authority"
+                    ]
+                })
+            }
+            Err(error) => json!({
+                "indexed": false,
+                "kind": kind,
+                "subject_id": subject_id,
+                "error": error,
+                "persistence": {
+                    "enabled": self.config.artifact_state_path.is_some(),
+                    "checkpointed": false
+                },
+                "execution": "not_started",
+                "does_not_claim": [
+                    "the failed projection means the source record was invalid",
+                    "absence from the artifact registry means the source record never existed"
+                ]
+            }),
         }
     }
 
@@ -8606,6 +8703,49 @@ fn query_bool(
         .unwrap_or(Ok(default))
 }
 
+fn strip_artifact_transport_fields(value: &Value) -> Value {
+    let Some(object) = value.as_object() else {
+        return value.clone();
+    };
+    let mut object = object.clone();
+    object.remove("artifact_registry");
+    object.remove("__isError");
+    object.remove("request_id");
+    Value::Object(object)
+}
+
+fn evaluator_domains_for_artifact(value: &Value) -> Vec<String> {
+    let mut domains = BTreeSet::new();
+    let mut add_binding = |binding: &Value| {
+        if let Some(domain) = binding.get("domain").and_then(Value::as_str) {
+            if !domain.trim().is_empty() {
+                domains.insert(domain.to_string());
+            }
+        }
+    };
+    if let Some(bindings) = value
+        .pointer("/evaluator_replay/bindings")
+        .and_then(Value::as_array)
+    {
+        for binding in bindings {
+            add_binding(binding);
+        }
+    }
+    if let Some(claims) = value
+        .pointer("/evaluator_replay/claims")
+        .and_then(Value::as_array)
+    {
+        for claim in claims {
+            if let Some(bindings) = claim.get("bindings").and_then(Value::as_array) {
+                for binding in bindings {
+                    add_binding(binding);
+                }
+            }
+        }
+    }
+    domains.into_iter().collect()
+}
+
 fn response_status(wire: &Value) -> u16 {
     wire.get("error")
         .and_then(|error| error.get("code"))
@@ -10384,10 +10524,12 @@ mod tests {
         let event_path = test_state_path("async-workflow-events");
         let mission_path = test_state_path("async-workflow-missions");
         let reconciliation_path = test_state_path("async-workflow-reconciliation");
+        let artifact_path = test_state_path("async-workflow-artifacts");
         let config = ApiConfig {
             event_state_path: Some(event_path.clone()),
             mission_state_path: Some(mission_path.clone()),
             reconciliation_state_path: Some(reconciliation_path.clone()),
+            artifact_state_path: Some(artifact_path.clone()),
             ..ApiConfig::default()
         };
         let router = ApiRouter::new(std::env::current_dir().unwrap(), config.clone()).unwrap();
@@ -10482,6 +10624,11 @@ mod tests {
             terminal["result"]["workflow_reconciliation"]["automatic"],
             true
         );
+        assert_eq!(terminal["result"]["artifact_registry"]["indexed"], true);
+        let mission_artifact_digest = terminal["result"]["artifact_registry"]["content_digest"]
+            .as_str()
+            .unwrap()
+            .to_owned();
         let reconciliation_digest = terminal["result"]["workflow_reconciliation"]
             ["reconciliation_digest"]
             .as_str()
@@ -10490,6 +10637,16 @@ mod tests {
 
         let persisted = std::fs::read_to_string(&reconciliation_path).unwrap();
         assert!(persisted.contains("async-workflow-reconcile"));
+        let persisted_artifacts = std::fs::read_to_string(&artifact_path).unwrap();
+        assert!(persisted_artifacts.contains(&mission_artifact_digest));
+        let artifact_query = router.handle(request(
+            "GET",
+            "/v1/artifacts?kind=mission_report&subject_id=async-workflow-reconcile",
+            json!({}),
+        ));
+        assert_eq!(artifact_query.status, 200);
+        let artifact_query: Value = serde_json::from_slice(&artifact_query.body).unwrap();
+        assert_eq!(artifact_query["rows"].as_array().unwrap().len(), 1);
         let query = router.handle(request(
             "GET",
             "/v1/domain-workflows/reconciliations?mission_id=async-workflow-reconcile&completion_status=complete",
@@ -10519,6 +10676,17 @@ mod tests {
             restored_status["result"]["workflow_reconciliation"]["reconciliation_digest"],
             reconciliation_digest
         );
+        let restored_artifact = restored.handle(request(
+            "GET",
+            &format!("/v1/artifacts/{mission_artifact_digest}"),
+            json!({}),
+        ));
+        assert_eq!(restored_artifact.status, 200);
+        let restored_artifact: Value = serde_json::from_slice(&restored_artifact.body).unwrap();
+        assert_eq!(
+            restored_artifact["record"]["content_digest"],
+            mission_artifact_digest
+        );
         let restored_query = restored.handle(request(
             "GET",
             "/v1/domain-workflows/reconciliations?mission_id=async-workflow-reconcile",
@@ -10534,13 +10702,16 @@ mod tests {
         let _ = std::fs::remove_file(event_path);
         let _ = std::fs::remove_file(mission_path);
         let _ = std::fs::remove_file(reconciliation_path);
+        let _ = std::fs::remove_file(artifact_path);
     }
 
     #[test]
     fn evidence_registry_import_is_idempotent_indexed_and_restart_safe() {
         let path = test_state_path("evidence-registry");
+        let artifact_path = test_state_path("evidence-registry-artifacts");
         let config = ApiConfig {
             evidence_state_path: Some(path.clone()),
+            artifact_state_path: Some(artifact_path.clone()),
             ..ApiConfig::default()
         };
         let router = ApiRouter::new(std::env::current_dir().unwrap(), config.clone()).unwrap();
@@ -10567,6 +10738,15 @@ mod tests {
         let imported: Value = serde_json::from_slice(&imported.body).unwrap();
         assert_eq!(imported["workflow"], "mission_evidence_bundle_import");
         assert_eq!(imported["created"], true);
+        assert_eq!(imported["artifact_registry"]["indexed"], true);
+        assert_eq!(
+            imported["artifact_registry"]["kind"],
+            "mission_evidence_bundle"
+        );
+        let artifact_digest = imported["artifact_registry"]["content_digest"]
+            .as_str()
+            .unwrap()
+            .to_owned();
         let digest = imported["bundle_digest"].as_str().unwrap().to_string();
         let duplicate = router.handle(request(
             "POST",
@@ -10576,6 +10756,11 @@ mod tests {
         assert_eq!(duplicate.status, 200);
         let duplicate: Value = serde_json::from_slice(&duplicate.body).unwrap();
         assert_eq!(duplicate["already_present"], true);
+        assert_eq!(duplicate["artifact_registry"]["indexed"], true);
+        assert_eq!(
+            duplicate["artifact_registry"]["content_digest"],
+            artifact_digest
+        );
         let queried = router.handle(request(
             "GET",
             "/v1/evidence-bundles?mission_id=registry-mission&domain=oncology&limit=10",
@@ -10614,6 +10799,14 @@ mod tests {
         let status: Value = serde_json::from_slice(&status.body).unwrap();
         assert_eq!(status["integrity_verified"], true);
         assert_eq!(status["registry_size"], 1);
+        let artifact = restored.handle(request(
+            "GET",
+            &format!("/v1/artifacts/{artifact_digest}"),
+            json!({}),
+        ));
+        assert_eq!(artifact.status, 200);
+        let artifact: Value = serde_json::from_slice(&artifact.body).unwrap();
+        assert_eq!(artifact["record"]["content_digest"], artifact_digest);
         let restored_query = restored.handle(request(
             "GET",
             "/v1/evidence-bundles?mission_id=registry-mission&limit=10",
@@ -10622,13 +10815,16 @@ mod tests {
         let restored_query: Value = serde_json::from_slice(&restored_query.body).unwrap();
         assert_eq!(restored_query["rows"].as_array().unwrap().len(), 1);
         let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_file(artifact_path);
     }
 
     #[test]
     fn workflow_reconciliation_registry_is_idempotent_indexed_and_restart_safe() {
         let path = test_state_path("workflow-reconciliation-registry");
+        let artifact_path = test_state_path("workflow-reconciliation-artifacts");
         let config = ApiConfig {
             reconciliation_state_path: Some(path.clone()),
+            artifact_state_path: Some(artifact_path.clone()),
             ..ApiConfig::default()
         };
         let router = ApiRouter::new(std::env::current_dir().unwrap(), config.clone()).unwrap();
@@ -10658,6 +10854,11 @@ mod tests {
         assert_eq!(imported.status, 201);
         let imported: Value = serde_json::from_slice(&imported.body).unwrap();
         assert_eq!(imported["created"], true);
+        assert_eq!(imported["artifact_registry"]["indexed"], true);
+        let artifact_digest = imported["artifact_registry"]["content_digest"]
+            .as_str()
+            .unwrap()
+            .to_owned();
         let digest = imported["reconciliation_digest"]
             .as_str()
             .unwrap()
@@ -10671,6 +10872,11 @@ mod tests {
         assert_eq!(duplicate.status, 200);
         let duplicate: Value = serde_json::from_slice(&duplicate.body).unwrap();
         assert_eq!(duplicate["already_present"], true);
+        assert_eq!(duplicate["artifact_registry"]["indexed"], true);
+        assert_eq!(
+            duplicate["artifact_registry"]["content_digest"],
+            artifact_digest
+        );
         let queried = router.handle(request(
             "GET",
             "/v1/domain-workflows/reconciliations?mission_id=reconciliation-api-mission&completion_status=complete&limit=10",
@@ -10696,6 +10902,12 @@ mod tests {
         let persistence: Value = serde_json::from_slice(&persistence.body).unwrap();
         assert_eq!(persistence["enabled"], true);
         assert_eq!(persistence["integrity_verified"], true);
+        let artifact = router.handle(request(
+            "GET",
+            &format!("/v1/artifacts/{artifact_digest}"),
+            json!({}),
+        ));
+        assert_eq!(artifact.status, 200);
 
         let restored = ApiRouter::new(std::env::current_dir().unwrap(), config).unwrap();
         let restored_query = restored.handle(request(
@@ -10707,6 +10919,14 @@ mod tests {
         let restored_query: Value = serde_json::from_slice(&restored_query.body).unwrap();
         assert_eq!(restored_query["rows"].as_array().unwrap().len(), 1);
         assert_eq!(restored_query["registry_generation"], 1);
+        let restored_artifact = restored.handle(request(
+            "GET",
+            &format!("/v1/artifacts/{artifact_digest}"),
+            json!({}),
+        ));
+        assert_eq!(restored_artifact.status, 200);
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_file(artifact_path);
     }
 
     #[test]

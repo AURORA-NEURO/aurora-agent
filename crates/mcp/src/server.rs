@@ -1135,6 +1135,7 @@ impl Server {
     ) -> Result<Value, String> {
         let result = self.agent_mission_with_cancellation(arguments, Some(cancellation));
         self.attach_workflow_reconciliation(arguments, result)
+            .and_then(|report| self.index_mission_report(report))
     }
 
     /// Resolves a client-supplied path inside the root.
@@ -1581,7 +1582,10 @@ impl Server {
         };
 
         match outcome {
-            Ok(value) => Response::result(id, tool_content(&value, false)),
+            Ok(mut value) => {
+                self.index_trusted_tool_output(name, &arguments, &mut value);
+                Response::result(id, tool_content(&value, false))
+            }
             Err(message) => Response::result(
                 id,
                 tool_content(&json!({ "ok": false, "error": message }), true),
@@ -2490,6 +2494,162 @@ impl Server {
                 "unknown artifact registry operation {other:?}; choose register, query, get, lineage, or verify_snapshot"
             )),
         }
+    }
+
+    /// Attach an index projection only to outputs that crossed an explicit integrity boundary.
+    ///
+    /// This is intentionally a small allow-list. A generic domain tool result is not silently
+    /// promoted to a durable artifact merely because it happens to contain a `domain` field.
+    /// The projection is appended after registration, so the artifact's content digest remains
+    /// the digest of the canonical report rather than a self-referential response envelope.
+    fn index_trusted_tool_output(&self, tool: &str, arguments: &Value, output: &mut Value) {
+        let (kind, subject_id, domains, parent_digests, artifact) = match tool {
+            "agent_mission" => return,
+            "mission_evidence_bundle_import" => {
+                let Some(bundle) = arguments.get("bundle") else {
+                    return;
+                };
+                (
+                    "mission_evidence_bundle",
+                    bundle
+                        .get("mission_id")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown-mission")
+                        .to_string(),
+                    evaluator_domains(bundle),
+                    Vec::new(),
+                    bundle.clone(),
+                )
+            }
+            "domain_workflow_reconcile" => (
+                "workflow_reconciliation",
+                output
+                    .get("mission_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown-mission")
+                    .to_string(),
+                // The canonical reconciliation record does not carry a domain-label field.
+                // Keep this projection domain-neutral so a later explicit import of the exact
+                // returned record is idempotent rather than metadata-conflicting.
+                Vec::new(),
+                Vec::new(),
+                output.clone(),
+            ),
+            "domain_workflow_reconciliation_import" => {
+                let Some(record) = arguments.get("record") else {
+                    return;
+                };
+                let artifact = without_artifact_projection(record);
+                (
+                    "workflow_reconciliation",
+                    artifact
+                        .get("mission_id")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown-mission")
+                        .to_string(),
+                    explicit_domains(&artifact),
+                    Vec::new(),
+                    artifact,
+                )
+            }
+            "mission_evaluator_replay" => (
+                "evaluator_replay",
+                output
+                    .get("mission_id")
+                    .and_then(Value::as_str)
+                    .or_else(|| {
+                        arguments
+                            .pointer("/mission/plan/mission_id")
+                            .and_then(Value::as_str)
+                    })
+                    .unwrap_or("unknown-mission")
+                    .to_string(),
+                evaluator_domains(output),
+                projection_parent(arguments.pointer("/mission/artifact_registry")),
+                output.clone(),
+            ),
+            _ => return,
+        };
+        let projection =
+            self.index_artifact_projection(kind, &subject_id, domains, parent_digests, artifact);
+        if let Some(object) = output.as_object_mut() {
+            object.insert("artifact_registry".into(), projection);
+        }
+    }
+
+    fn index_artifact_projection(
+        &self,
+        kind: &str,
+        subject_id: &str,
+        domains: Vec<String>,
+        parent_digests: Vec<String>,
+        artifact: Value,
+    ) -> Value {
+        let registration = json!({
+            "kind": kind,
+            "subject_id": subject_id,
+            "domains": domains,
+            "parent_digests": parent_digests,
+            "artifact": artifact,
+        });
+        let result = self
+            .artifact_registry
+            .lock()
+            .map_err(|_| "artifact registry lock is poisoned".to_string())
+            .and_then(|mut registry| {
+                registry
+                    .register(&registration)
+                    .map_err(|error| error.to_string())
+            });
+        match result {
+            Ok(report) => {
+                let digest = report.get("content_digest").cloned().unwrap_or(Value::Null);
+                json!({
+                    "indexed": true,
+                    "kind": kind,
+                    "subject_id": subject_id,
+                    "content_digest": digest,
+                    "created": report.get("created").cloned().unwrap_or(Value::Null),
+                    "already_present": report.get("already_present").cloned().unwrap_or(Value::Null),
+                    "verification": report.get("verification").cloned().unwrap_or(Value::Null),
+                    "lookup": digest.as_str().map(|value| format!("/v1/artifacts/{value}")).unwrap_or_default(),
+                    "execution": "not_started",
+                    "does_not_claim": [
+                        "artifact integrity establishes scientific, clinical, regulatory, publication, or external-effect validity",
+                        "automatic indexing establishes causal provenance or external storage authority"
+                    ]
+                })
+            }
+            Err(error) => json!({
+                "indexed": false,
+                "kind": kind,
+                "subject_id": subject_id,
+                "error": error,
+                "execution": "not_started",
+                "does_not_claim": [
+                    "the failed projection means the source report was invalid",
+                    "absence from the artifact registry means the source report never existed"
+                ]
+            }),
+        }
+    }
+
+    fn index_mission_report(&self, mut result: Value) -> Result<Value, String> {
+        let subject_id = result
+            .pointer("/plan/mission_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "agent mission report omitted plan.mission_id".to_string())?;
+        let parent_digests =
+            projection_parent(result.pointer("/workflow_reconciliation/artifact_registry"));
+        let projection = self.index_artifact_projection(
+            "mission_report",
+            subject_id,
+            mission_domains(&result),
+            parent_digests,
+            result.clone(),
+        );
+        result["artifact_registry"] = projection;
+        Ok(result)
     }
 
     fn context_compare(&self, arguments: &Value) -> Result<Value, String> {
@@ -24224,6 +24384,19 @@ impl Server {
                     .get("reconciliation_digest")
                     .cloned()
                     .unwrap_or(Value::Null);
+                let artifact_projection = self.index_artifact_projection(
+                    "workflow_reconciliation",
+                    reconciliation
+                        .get("mission_id")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown-mission"),
+                    // Reconciliation's canonical digest intentionally contains workflow and
+                    // mission identities, not a second inferred domain taxonomy. Mission-report
+                    // parents retain the concrete step domains separately.
+                    Vec::new(),
+                    Vec::new(),
+                    reconciliation.clone(),
+                );
                 result["workflow_reconciliation"] = json!({
                     "present": true,
                     "automatic": true,
@@ -24238,6 +24411,7 @@ impl Server {
                     },
                     "integrity": reconciliation.get("integrity").cloned().unwrap_or(Value::Null),
                     "registry_import": import_response,
+                    "artifact_registry": artifact_projection,
                     "lookup": format!(
                         "/v1/domain-workflows/reconciliations/{}",
                         reconciliation.get("reconciliation_digest").and_then(Value::as_str).unwrap_or("unknown")
@@ -24261,6 +24435,7 @@ impl Server {
     fn agent_mission(&self, arguments: &Value) -> Result<Value, String> {
         let result = self.agent_mission_with_cancellation(arguments, None);
         self.attach_workflow_reconciliation(arguments, result)
+            .and_then(|report| self.index_mission_report(report))
     }
 
     fn agent_mission_with_cancellation(
@@ -28001,6 +28176,99 @@ fn tool_content(value: &Value, is_error: bool) -> Value {
     })
 }
 
+fn without_artifact_projection(value: &Value) -> Value {
+    let Some(object) = value.as_object() else {
+        return value.clone();
+    };
+    let mut object = object.clone();
+    object.remove("artifact_registry");
+    object.remove("__isError");
+    object.remove("request_id");
+    Value::Object(object)
+}
+
+fn projection_parent(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(|projection| projection.get("content_digest"))
+        .and_then(Value::as_str)
+        .filter(|digest| digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .map(|digest| vec![digest.to_string()])
+        .unwrap_or_default()
+}
+
+fn mission_domains(value: &Value) -> Vec<String> {
+    let mut domains = BTreeSet::new();
+    for path in ["/plan/steps", "/steps"] {
+        if let Some(steps) = value.pointer(path).and_then(Value::as_array) {
+            for step in steps {
+                if let Some(domain) = step.get("domain").and_then(Value::as_str) {
+                    if !domain.trim().is_empty() {
+                        domains.insert(domain.to_string());
+                    }
+                }
+            }
+        }
+    }
+    domains.into_iter().collect()
+}
+
+fn evaluator_domains(value: &Value) -> Vec<String> {
+    let mut domains = BTreeSet::new();
+    let mut add_binding = |binding: &Value| {
+        if let Some(domain) = binding.get("domain").and_then(Value::as_str) {
+            if !domain.trim().is_empty() {
+                domains.insert(domain.to_string());
+            }
+        }
+    };
+    if let Some(bindings) = value
+        .pointer("/evaluator_replay/bindings")
+        .and_then(Value::as_array)
+    {
+        for binding in bindings {
+            add_binding(binding);
+        }
+    }
+    if let Some(claims) = value
+        .pointer("/evaluator_replay/claims")
+        .and_then(Value::as_array)
+    {
+        for claim in claims {
+            if let Some(bindings) = claim.get("bindings").and_then(Value::as_array) {
+                for binding in bindings {
+                    add_binding(binding);
+                }
+            }
+        }
+    }
+    if let Some(bindings) = value.pointer("/bindings").and_then(Value::as_array) {
+        for binding in bindings {
+            add_binding(binding);
+        }
+    }
+    domains.into_iter().collect()
+}
+
+fn explicit_domains(value: &Value) -> Vec<String> {
+    let mut domains = BTreeSet::new();
+    for path in ["/domains", "/domain_contract/domains"] {
+        match value.pointer(path) {
+            Some(Value::String(domain)) if !domain.trim().is_empty() => {
+                domains.insert(domain.clone());
+            }
+            Some(Value::Array(values)) => {
+                for domain in values.iter().filter_map(Value::as_str) {
+                    if !domain.trim().is_empty() {
+                        domains.insert(domain.to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    domains.into_iter().collect()
+}
+
 /// Structured audit record on stderr, keeping stdout a clean protocol channel.
 fn audit(tool: &str, arguments: &Value) {
     eprintln!(
@@ -28501,7 +28769,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "artifact_registry_audit",
-            "description": "Register, query, fetch, and traverse a bounded cross-domain artifact index keyed by exact JSON content digest. Known mission evidence bundles and workflow reconciliation records are independently re-verified before registration; generic mission, evaluator, and domain reports receive content-digest verification only. The registry preserves missing parents and never turns index presence into scientific, clinical, publication, or external-provenance authority.",
+            "description": "Register, query, fetch, and traverse a bounded cross-domain artifact index keyed by exact JSON content digest. Trusted mission, evaluator-replay, verified evidence-bundle, and workflow-reconciliation boundaries also project records automatically; generic domain results remain manual. Known evidence bundles and workflow reconciliation records are independently re-verified before registration. The registry preserves missing parents and never turns index presence into scientific, clinical, publication, or external-provenance authority.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

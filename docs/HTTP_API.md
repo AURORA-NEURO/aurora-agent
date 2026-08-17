@@ -158,6 +158,11 @@ startup rejects a tampered snapshot or report, and `/persistence/flush` is an ex
 operation. Neither import, query, lookup, nor restore dispatches, retries, resumes, or re-evaluates a
 mission, and registry presence is not provenance, scientific validity, clinical safety, or release
 approval.
+Trusted boundaries automatically add `artifact_registry` projections to mission reports,
+verified evidence-bundle imports, evaluator replays, and workflow reconciliations. The projection
+contains the exact cross-domain content digest, verification posture, and checkpoint status where
+applicable. Direct domain-tool results are not automatically registered, and a projection never
+claims causal provenance, scientific validity, authorization, or release readiness.
 An executable mission produced by instantiation is automatically reconciled at the authoritative
 MCP dispatch boundary. The response includes a compact `workflow_reconciliation` object with the
 record digest, completion/evidence/integrity posture, registry import result, and a REST lookup

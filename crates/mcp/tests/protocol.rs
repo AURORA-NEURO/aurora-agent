@@ -1665,6 +1665,11 @@ fn domain_workflow_reconciliation_binds_execution_results_to_the_instantiated_co
     assert_eq!(reconciled["integrity"]["valid"], json!(true));
     assert_eq!(reconciled["completion"]["status"], json!("complete"));
     assert_eq!(reconciled["completion"]["ready"], json!(true));
+    assert_eq!(reconciled["artifact_registry"]["indexed"], json!(true));
+    assert_eq!(
+        reconciled["artifact_registry"]["kind"],
+        json!("workflow_reconciliation")
+    );
     assert_eq!(
         reconciled["evidence"]["rows"][0]["result_retained"],
         json!(true)
@@ -1683,6 +1688,11 @@ fn domain_workflow_reconciliation_binds_execution_results_to_the_instantiated_co
     // import below must therefore exercise the registry's idempotent re-import path.
     assert_eq!(imported["created"], json!(false));
     assert_eq!(imported["already_present"], json!(true));
+    assert_eq!(imported["artifact_registry"]["indexed"], json!(true));
+    assert_eq!(
+        imported["artifact_registry"]["content_digest"],
+        reconciled["artifact_registry"]["content_digest"]
+    );
     let digest = imported["reconciliation_digest"].as_str().unwrap();
     let queried = call(
         &mut server,
@@ -1876,6 +1886,16 @@ fn mission_evaluator_review_builds_claim_bindings_and_blocks_adversarial_rows() 
         json!("mission_evidence_bundle_verify")
     );
     assert_eq!(verified["valid"], json!(true));
+    let imported_bundle = call(
+        &mut server,
+        "mission_evidence_bundle_import",
+        json!({"bundle": bundle.clone()}),
+    );
+    assert_eq!(imported_bundle["artifact_registry"]["indexed"], json!(true));
+    assert_eq!(
+        imported_bundle["artifact_registry"]["kind"],
+        json!("mission_evidence_bundle")
+    );
     bundle["catalog_drift"]["status"] = json!("drifted");
     let tampered = call(
         &mut server,
@@ -5701,6 +5721,15 @@ fn agent_mission_plans_and_executes_allow_listed_cross_domain_steps() {
     );
     assert_eq!(planned["results"].as_array().unwrap().len(), 0);
     assert_eq!(planned["plan"]["digest"].as_str().unwrap().len(), 64);
+    assert_eq!(planned["artifact_registry"]["indexed"], json!(true));
+    assert_eq!(
+        planned["artifact_registry"]["kind"],
+        json!("mission_report")
+    );
+    assert_eq!(
+        planned["artifact_registry"]["subject_id"],
+        json!("mission-plan-1")
+    );
 
     let executed = call(
         &mut server,
@@ -5752,6 +5781,14 @@ fn agent_mission_plans_and_executes_allow_listed_cross_domain_steps() {
     assert_eq!(
         executed["results"][1]["arguments_digest"],
         json!(expected_arguments_digest)
+    );
+    assert_eq!(executed["artifact_registry"]["indexed"], json!(true));
+    assert_eq!(
+        executed["artifact_registry"]["content_digest"]
+            .as_str()
+            .unwrap()
+            .len(),
+        64
     );
 }
 

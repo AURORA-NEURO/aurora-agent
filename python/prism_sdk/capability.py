@@ -698,6 +698,15 @@ class DomainWorkflowReconciliationReport:
     def completion_status(self) -> str:
         return _route_text("workflow reconciliation completion status", self.completion.get("status"))
 
+    @property
+    def artifact_registry(self) -> Mapping[str, Any]:
+        """Return the automatic non-claiming artifact-index projection, when present."""
+
+        value = self.raw.get("artifact_registry")
+        if value is None:
+            return {}
+        return _route_mapping("workflow reconciliation artifact registry projection", value)
+
     def to_dict(self) -> dict[str, Any]:
         return dict(self.raw)
 
@@ -814,6 +823,15 @@ class DomainWorkflowReconciliationImportReport:
             registry_size=_route_count("workflow reconciliation import size", raw.get("registry_size")),
             execution=_route_text("workflow reconciliation import execution", raw.get("execution")),
         )
+
+    @property
+    def artifact_registry(self) -> Mapping[str, Any]:
+        """Return the automatic non-claiming artifact-index projection, when present."""
+
+        value = self.raw.get("artifact_registry")
+        if value is None:
+            return {}
+        return _route_mapping("workflow reconciliation import artifact registry projection", value)
 
     def to_dict(self) -> dict[str, Any]:
         return dict(self.raw)
@@ -1761,6 +1779,15 @@ class MissionEvaluatorReplayReport:
     def catalogue_complete(self) -> bool:
         return self.coverage.get("complete") is True
 
+    @property
+    def artifact_registry(self) -> Mapping[str, Any]:
+        """Return the automatic non-claiming artifact-index projection, when present."""
+
+        value = self.raw.get("artifact_registry")
+        if value is None:
+            return {}
+        return _route_mapping("mission evaluator replay artifact registry projection", value)
+
     def to_dict(self) -> dict[str, Any]:
         return dict(self.raw)
 
@@ -2040,6 +2067,15 @@ class MissionEvidenceBundleImportReport:
             registry_size=_route_count("mission evidence bundle import size", raw.get("registry_size")),
             execution=_route_text("mission evidence bundle import execution", raw.get("execution")),
         )
+
+    @property
+    def artifact_registry(self) -> Mapping[str, Any]:
+        """Return the automatic non-claiming artifact-index projection, when present."""
+
+        value = self.raw.get("artifact_registry")
+        if value is None:
+            return {}
+        return _route_mapping("evidence bundle import artifact registry projection", value)
 
     def to_dict(self) -> dict[str, Any]:
         return dict(self.raw)

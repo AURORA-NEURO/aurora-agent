@@ -18,6 +18,9 @@ query, lookup, lineage, persistence status, and flush methods; `Workspace` and
 `AsyncWorkspace` expose the MCP `artifact_registry_audit` flow. Parent presence remains an index
 observation, missing parents remain explicit, and no client model treats a digest as scientific,
 clinical, publication, causal, or external-effect authority.
+The Rust boundary also appends an `artifact_registry` projection to trusted mission, replay,
+verified-bundle, and workflow-reconciliation responses. The projection is an audit lookup and may
+report an explicit indexing or checkpoint failure; generic tool results are not auto-registered.
 
 ## Lifecycle
 

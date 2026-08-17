@@ -601,6 +601,10 @@ fn normalized_record(record: &Value) -> Result<Value, DomainWorkflowReconciliati
         .expect("record object was checked above");
     object.remove("request_id");
     object.remove("__isError");
+    // The MCP/API projection is appended after the canonical reconciliation digest is created.
+    // Ignore it on re-import so a caller can pass the exact returned report back to this registry
+    // without changing the semantic record identity.
+    object.remove("artifact_registry");
     Ok(normalized)
 }
 

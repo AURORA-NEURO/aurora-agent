@@ -103,9 +103,13 @@ Convenience methods currently cover:
   `domainWorkflowReconciliationGet` expose the durable digest-bound audit registry over REST;
   `domainWorkflowReconciliationImportTool` / `...QueryTool` / `...GetTool` expose the same bounded
   operations through MCP. Query rows are cursor-ordered and filterable by mission, workflow, plan
-  digest, and completion status. Configure `--reconciliation-state` on the API for restart-safe
-  persistence; lookup and restore never resume execution or imply provenance, scientific, clinical,
-  safety, or release validity.
+digest, and completion status. Configure `--reconciliation-state` on the API for restart-safe
+persistence; lookup and restore never resume execution or imply provenance, scientific, clinical,
+safety, or release validity.
+Trusted mission, evaluator-replay, evidence-bundle, and workflow-reconciliation responses may also
+include an `artifact_registry` projection containing the exact cross-domain index digest and
+explicit checkpoint posture. This is a non-claiming audit link; ordinary domain results remain
+unindexed unless explicitly registered.
 
 - `traceOtelIngest`: bounded OTLP JSON import with typed normalized events, source-to-IR mapping,
   semantic-loss categories, and compilation-readiness reporting;
@@ -184,7 +188,9 @@ refer to the same live schema set; the Rust `agent_mission` tool remains the exe
 When a mission carries an instantiation `workflow_binding`, the report additionally exposes a typed
 `workflow_reconciliation` compact link after terminal execution. REST and MCP share the indexed
 record, while the full digest-bound report remains available through reconciliation lookup; the
-link is evidence posture only and never an authorization or readiness claim.
+link is evidence posture only and never an authorization or readiness claim. The report may also
+include an `artifact_registry` link for the exact mission-report bytes and, when available, a
+parent edge to the indexed reconciliation artifact.
 `MissionJob` makes queued, running, planned, succeeded, partial, failed, and cancelled states
 explicit; cancellation is a request to stop future dispatch, not a force-kill or rollback claim.
 Its optional `progress: MissionProgress` field provides one bounded shape for queued, live, and

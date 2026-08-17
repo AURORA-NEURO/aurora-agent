@@ -1116,6 +1116,15 @@ class MissionExecutionReport:
         return _mapping("mission workflow reconciliation", value)
 
     @property
+    def artifact_registry(self) -> Mapping[str, Any]:
+        """Return the non-claiming automatic cross-domain artifact projection, when present."""
+
+        value = self.raw.get("artifact_registry")
+        if value is None:
+            return {}
+        return _mapping("mission artifact registry projection", value)
+
+    @property
     def cancelled(self) -> int:
         value = self.raw.get("cancelled", 0)
         if not isinstance(value, int) or isinstance(value, bool) or value < 0:

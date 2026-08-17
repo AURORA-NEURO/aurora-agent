@@ -581,6 +581,11 @@ artifacts across the capability surface. It preserves verification posture, decl
 missing parents, and bounded lineage traversal while explicitly refusing to infer causal provenance,
 scientific validity, clinical safety, publication authority, or external-effect completion from a
 digest or registry presence.
+Trusted boundaries also project mission reports, evaluator replays, verified evidence-bundle
+imports, and digest-valid workflow reconciliations into this shared index automatically. Each
+response carries an `artifact_registry` projection with the exact registry digest or an explicit
+indexing failure; generic domain-tool outputs remain unindexed unless the caller registers them
+deliberately.
 carry disclosure ratchets, fail-closed score publication, comparability conditions, and typed
 unranked entries into agent-callable public-hub projections. `release_audit` composes required
 registry, bundle, quality, conformance, research-CI, operations, and pack-health gates while
@@ -846,6 +851,9 @@ API synchronous calls checkpoint this shared registry before returning when reco
 persistence is configured; asynchronous mission workers checkpoint it before publishing terminal
 job state. This makes the same post-dispatch audit visible to operations gates and restart recovery
 without making a gate pass automatic.
+The same artifact index is checkpointed by synchronous REST/MCP dispatch and asynchronous mission
+workers when `--artifact-state` is configured. Automatic indexing is an audit projection only: it
+does not add provenance, scientific validity, authorization, or release readiness.
 `mission_evaluator_discover` complements tool routing with a digest-bound catalogue of explicit
 evaluator candidates for every workspace capability group. It filters by intent, group, domain,
 mission level, or adapter ID and returns purpose, candidate evidence tools, and RFC 6901 pointer
