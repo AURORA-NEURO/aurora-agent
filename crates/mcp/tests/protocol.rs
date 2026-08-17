@@ -323,7 +323,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 192);
+    assert_eq!(tools.len(), 193);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -752,6 +752,87 @@ fn artifact_registry_audit_joins_cross_domain_records_without_inventing_provenan
         .unwrap()
         .iter()
         .any(|item| item == "the three stores were read in one atomic transaction"));
+}
+
+#[test]
+fn domain_report_projection_checks_catalogue_indexes_idempotently_and_reports_coverage() {
+    let mut server = server();
+    let arguments = json!({
+        "group_id": "biological_domains",
+        "domains": ["modalities"],
+        "subject_id": "domain-report-subject",
+        "source_tool": "modality_catalog",
+        "report": {"observations": ["caller supplied"], "status": "review_required"},
+        "claim_posture": {
+            "status": "review_required",
+            "does_not_claim": ["clinical validity", "execution completion"],
+            "limitations": ["no external provenance was supplied"]
+        }
+    });
+    let first = call(&mut server, "domain_report_project", arguments.clone());
+    assert_eq!(first["workflow"], json!("domain_report_project"));
+    assert_eq!(first["readiness_claimed"], json!(false));
+    assert_eq!(first["artifact_registry"]["indexed"], json!(true));
+    assert_eq!(
+        first["artifact_registry"]["verification"]["method"],
+        json!("domain_report_projection")
+    );
+    let second = call(&mut server, "domain_report_project", arguments);
+    assert_eq!(
+        first["artifact_registry"]["content_digest"],
+        second["artifact_registry"]["content_digest"]
+    );
+    assert_eq!(second["artifact_registry"]["already_present"], json!(true));
+
+    let coverage = call(
+        &mut server,
+        "domain_report_project",
+        json!({"operation": "coverage", "include_report_digests": true}),
+    );
+    assert_eq!(coverage["workflow"], json!("domain_report_coverage"));
+    assert_eq!(coverage["group_count"], json!(29));
+    assert_eq!(coverage["reported_group_count"], json!(1));
+    assert_eq!(coverage["missing_group_count"], json!(28));
+    assert_eq!(coverage["complete"], json!(false));
+    assert_eq!(coverage["readiness_claimed"], json!(false));
+    assert_eq!(coverage["coverage_digest"].as_str().unwrap().len(), 64);
+}
+
+#[test]
+fn domain_report_projection_refuses_unknown_source_and_domain_claims() {
+    let mut server = server();
+    let refused = call(
+        &mut server,
+        "domain_report_project",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "domain-report-invalid",
+            "source_tool": "not_a_declared_tool",
+            "report": {"status": "review_required"},
+            "claim_posture": {"status": "review_required", "does_not_claim": ["truth"]}
+        }),
+    );
+    assert_eq!(refused["ok"], json!(false));
+    assert!(refused["error"].as_str().unwrap().contains("not declared"));
+
+    let domain_refused = call(
+        &mut server,
+        "domain_report_project",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["not_declared"],
+            "subject_id": "domain-report-invalid-domain",
+            "source_tool": "modality_catalog",
+            "report": {"status": "review_required"},
+            "claim_posture": {"status": "review_required", "does_not_claim": ["truth"]}
+        }),
+    );
+    assert_eq!(domain_refused["ok"], json!(false));
+    assert!(domain_refused["error"]
+        .as_str()
+        .unwrap()
+        .contains("not declared"));
 }
 
 #[test]
@@ -6146,12 +6227,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(192));
-    assert_eq!(result["advertised_tool_count"], json!(192));
+    assert_eq!(result["unique_catalog_tools"], json!(193));
+    assert_eq!(result["advertised_tool_count"], json!(193));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(192));
-    assert_eq!(result["schema_quality"]["valid"], json!(192));
+    assert_eq!(result["schema_quality"]["checked"], json!(193));
+    assert_eq!(result["schema_quality"]["valid"], json!(193));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

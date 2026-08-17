@@ -4850,6 +4850,95 @@ export interface DomainWorkflowReconciliationGetResult extends JsonObject {
   limitations: string[];
 }
 
+export type DomainReportClaimStatus =
+  | "observed"
+  | "derived"
+  | "review_required"
+  | "refused"
+  | "not_applicable";
+
+export interface DomainReportClaimPosture extends JsonObject {
+  status: DomainReportClaimStatus;
+  does_not_claim: string[];
+  limitations?: string[];
+}
+
+export interface DomainReportProjectArgs extends JsonObject {
+  operation?: "project";
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string;
+  report: JsonObject;
+  claim_posture: DomainReportClaimPosture;
+  parent_digests?: string[];
+}
+
+export interface DomainReportArtifactRegistryProjection extends JsonObject {
+  indexed: boolean;
+  kind: "domain_report";
+  subject_id: string;
+  content_digest: string;
+  created?: boolean;
+  already_present?: boolean;
+  verification?: JsonObject;
+  lookup?: string;
+}
+
+export interface DomainReportProjectResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-report-project/0.1";
+  workflow: "domain_report_project";
+  report: JsonObject;
+  artifact_registry: DomainReportArtifactRegistryProjection;
+  coverage: JsonObject;
+  readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export interface DomainReportCoverageOptions extends JsonObject {
+  operation?: "coverage";
+  group_id?: string;
+  domain?: string;
+  max_groups?: number;
+  include_report_digests?: boolean;
+}
+
+export interface DomainReportCoverageGroup extends JsonObject {
+  id: string;
+  domains: string[];
+  status: string;
+  declared_tool_count: number;
+  report_count: number;
+  subject_ids: string[];
+  source_tools: string[];
+  claim_statuses: DomainReportClaimStatus[];
+  report_digests?: string[];
+  coverage_state: "reported" | "missing";
+}
+
+export interface DomainReportCoverageResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-report-coverage/0.1";
+  workflow: "domain_report_coverage";
+  catalogue_digest: string;
+  coverage_digest: string;
+  filters: DomainReportCoverageOptions;
+  group_count: number;
+  reported_group_count: number;
+  missing_group_count: number;
+  missing_group_ids: string[];
+  complete: boolean;
+  groups: DomainReportCoverageGroup[];
+  domain_summary: JsonObject;
+  readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
 export interface AdapterPlanArgs extends JsonObject {
   source_id: string;
   declared_format?: string;

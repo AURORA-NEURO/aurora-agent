@@ -39,6 +39,16 @@ from .artifacts import (
     ArtifactRegistrationReport,
     ArtifactRegistrationRequest,
 )
+from .domain_reports import (
+    DOMAIN_REPORT_CLAIM_STATUSES,
+    DOMAIN_REPORT_COVERAGE_SCHEMA,
+    DOMAIN_REPORT_PROJECT_SCHEMA,
+    DOMAIN_REPORT_SCHEMA,
+    DomainReportCoverageReport,
+    DomainReportCoverageRequest,
+    DomainReportProjectReport,
+    DomainReportProjectRequest,
+)
 from .biological import (
     AdapterDescriptor,
     AdapterDescriptorReport,
@@ -2655,6 +2665,14 @@ __all__ = [
     "CHANNELS",
     "ARTIFACT_KINDS",
     "ArtifactCrossStoreAuditReport",
+    "DOMAIN_REPORT_SCHEMA",
+    "DOMAIN_REPORT_PROJECT_SCHEMA",
+    "DOMAIN_REPORT_COVERAGE_SCHEMA",
+    "DOMAIN_REPORT_CLAIM_STATUSES",
+    "DomainReportProjectRequest",
+    "DomainReportProjectReport",
+    "DomainReportCoverageRequest",
+    "DomainReportCoverageReport",
     "INCIDENT_CLASSES",
     "CONTAINMENT_ACTIONS",
     "AUDIT_EVENTS",

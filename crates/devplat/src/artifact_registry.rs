@@ -11,6 +11,7 @@
 //! separate field. That prevents a bundle's internal digest convention from being confused with
 //! the digest used by this cross-domain index.
 
+use crate::domain_report::{validate_domain_report, DOMAIN_REPORT_SCHEMA_VERSION};
 use crate::evidence_bundle::verify_mission_evidence_bundle;
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -594,6 +595,24 @@ fn verify_known_artifact(
                     "state": "verified_integrity",
                     "method": "workflow_reconciliation_digest",
                     "reconciliation_digest": declared
+                }),
+            ))
+        }
+        "domain_report"
+            if artifact.get("schema").and_then(Value::as_str)
+                == Some(DOMAIN_REPORT_SCHEMA_VERSION) =>
+        {
+            validate_domain_report(artifact).map_err(|error| {
+                ArtifactRegistryError::InvalidInput(format!(
+                    "domain report verification failed: {error}"
+                ))
+            })?;
+            Ok((
+                None,
+                json!({
+                    "state": "verified_integrity",
+                    "method": "domain_report_projection",
+                    "schema": DOMAIN_REPORT_SCHEMA_VERSION
                 }),
             ))
         }

@@ -28,6 +28,12 @@ from .artifacts import (
     ArtifactRegistrationReport,
     ArtifactRegistrationRequest,
 )
+from .domain_reports import (
+    DomainReportCoverageReport,
+    DomainReportCoverageRequest,
+    DomainReportProjectReport,
+    DomainReportProjectRequest,
+)
 from .capability import (
     CapabilityAuditReport,
     CapabilitySearchReport,
@@ -739,6 +745,65 @@ class ApiClient:
         """Call the MCP artifact registry tool while preserving its bounded evidence envelope."""
 
         return self.call_tool("artifact_registry_audit", arguments)
+
+    def domain_report_project(
+        self,
+        request: DomainReportProjectRequest | Mapping[str, Any],
+    ) -> DomainReportProjectReport:
+        """Project and index one explicit caller-supplied report over REST."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainReportProjectRequest)
+            else DomainReportProjectRequest(**dict(request))
+        )
+        return DomainReportProjectReport.from_wire(
+            self.request("POST", "/v1/domain-reports", normalized.to_arguments())
+        )
+
+    def domain_report_coverage(
+        self,
+        request: DomainReportCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> DomainReportCoverageReport:
+        """Report retained structured projections by capability group over REST."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainReportCoverageRequest)
+            else DomainReportCoverageRequest(**dict(request or {}))
+        )
+        return DomainReportCoverageReport.from_wire(
+            self.request(
+                "GET",
+                f"/v1/domain-reports/coverage?{urlencode(normalized.to_query_params())}",
+            )
+        )
+
+    def domain_report_project_tool(
+        self,
+        request: DomainReportProjectRequest | Mapping[str, Any],
+    ) -> DomainReportProjectReport:
+        normalized = (
+            request
+            if isinstance(request, DomainReportProjectRequest)
+            else DomainReportProjectRequest(**dict(request))
+        )
+        return DomainReportProjectReport.from_wire(
+            self.call_tool("domain_report_project", normalized.to_arguments())
+        )
+
+    def domain_report_coverage_tool(
+        self,
+        request: DomainReportCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> DomainReportCoverageReport:
+        normalized = (
+            request
+            if isinstance(request, DomainReportCoverageRequest)
+            else DomainReportCoverageRequest(**dict(request or {}))
+        )
+        return DomainReportCoverageReport.from_wire(
+            self.call_tool("domain_report_project", normalized.to_arguments())
+        )
 
     def domain_workflow_catalogue(self) -> dict[str, Any]:
         """Read the deterministic workflow template for every capability group."""
@@ -4463,6 +4528,30 @@ class AsyncApiClient:
 
     async def artifact_registry_audit(self, arguments: Mapping[str, Any] | None = None) -> dict[str, Any]:
         return await asyncio.to_thread(self.client.artifact_registry_audit, arguments)
+
+    async def domain_report_project(
+        self,
+        request: DomainReportProjectRequest | Mapping[str, Any],
+    ) -> DomainReportProjectReport:
+        return await asyncio.to_thread(self.client.domain_report_project, request)
+
+    async def domain_report_coverage(
+        self,
+        request: DomainReportCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> DomainReportCoverageReport:
+        return await asyncio.to_thread(self.client.domain_report_coverage, request)
+
+    async def domain_report_project_tool(
+        self,
+        request: DomainReportProjectRequest | Mapping[str, Any],
+    ) -> DomainReportProjectReport:
+        return await asyncio.to_thread(self.client.domain_report_project_tool, request)
+
+    async def domain_report_coverage_tool(
+        self,
+        request: DomainReportCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> DomainReportCoverageReport:
+        return await asyncio.to_thread(self.client.domain_report_coverage_tool, request)
 
     async def domain_workflow_catalogue(self) -> dict[str, Any]:
         return await asyncio.to_thread(self.client.domain_workflow_catalogue)

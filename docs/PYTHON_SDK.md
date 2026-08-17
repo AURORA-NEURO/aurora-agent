@@ -26,6 +26,15 @@ The Rust boundary also appends an `artifact_registry` projection to trusted miss
 verified-bundle, and workflow-reconciliation responses. The projection is an audit lookup and may
 report an explicit indexing or checkpoint failure; generic tool results are not auto-registered.
 
+`DomainReportProjectRequest` and `DomainReportCoverageRequest` provide bounded Python models for
+the explicit cross-domain report boundary. `ApiClient.domain_report_project()` and
+`ApiClient.domain_report_coverage()` use the REST routes, while the corresponding `*_tool()`
+methods exercise the same implementation through the REST/MCP dispatcher. `Workspace` and
+`AsyncWorkspace` expose the typed MCP equivalents. Project reports retain the caller payload,
+catalogue membership, claim posture, limitations, and exact artifact digest; coverage reports
+enumerate missing capability groups. These models do not interpret report count or indexing as
+execution, scientific, clinical, provenance, or release readiness.
+
 ## Lifecycle
 
 Both clients enforce the MCP sequence:

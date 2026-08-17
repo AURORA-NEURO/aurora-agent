@@ -1294,6 +1294,10 @@ impl ApiRouter {
                 self.get_evidence_bundle(&request, &request_id)
             }
             ("GET", "/v1/artifacts/cross-store") => self.cross_store_artifact_audit(&request_id),
+            ("GET", "/v1/domain-reports/coverage") => {
+                self.domain_report_coverage(&request, &request_id)
+            }
+            ("POST", "/v1/domain-reports") => self.domain_report_project(&request, &request_id),
             ("GET", "/v1/artifacts") => self.query_artifacts(&request, &request_id),
             ("POST", "/v1/artifacts") => self.register_artifact(&request, &request_id),
             ("GET", "/v1/artifacts/persistence") => self.artifact_persistence_status(),
@@ -3261,6 +3265,8 @@ impl ApiRouter {
                     "operations_gate_reviews": "/v1/operations/gate-reviews",
                     "operations_handoff": "/v1/operations/handoff",
                     "domain_workflows": "/v1/domain-workflows",
+                    "domain_reports": "/v1/domain-reports",
+                    "domain_report_coverage": "/v1/domain-reports/coverage",
                     "domain_workflow_scaffold": "/v1/domain-workflows/scaffold",
                     "domain_workflow_instantiate": "/v1/domain-workflows/instantiate",
                     "domain_workflow_reconcile": "/v1/domain-workflows/reconcile",
@@ -3329,6 +3335,8 @@ impl ApiRouter {
                     "artifact_registry": true,
                     "artifact_registry_lineage": true,
                     "artifact_registry_persistence": self.config.artifact_state_path.is_some(),
+                    "domain_report_projection": true,
+                    "domain_report_coverage": true,
                     "recovery_matrix": true,
                     "operations_snapshot": true,
                     "domain_coverage": true,
@@ -3787,6 +3795,51 @@ impl ApiRouter {
         self.domain_workflow_tool(
             request_id,
             "domain_workflow_reconcile",
+            Value::Object(arguments),
+        )
+    }
+
+    fn domain_report_project(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        self.domain_workflow_tool(
+            request_id,
+            "domain_report_project",
+            Value::Object(arguments),
+        )
+    }
+
+    fn domain_report_coverage(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        let max_groups = match query_usize(&query, "max_groups", 64) {
+            Ok(value) => value,
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let include_report_digests = match query_bool(&query, "include_report_digests", false) {
+            Ok(value) => value,
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let mut arguments = serde_json::Map::new();
+        arguments.insert("operation".into(), json!("coverage"));
+        arguments.insert("max_groups".into(), json!(max_groups));
+        arguments.insert(
+            "include_report_digests".into(),
+            json!(include_report_digests),
+        );
+        if let Some(group_id) = query.get("group_id") {
+            arguments.insert("group_id".into(), json!(group_id));
+        }
+        if let Some(domain) = query.get("domain") {
+            arguments.insert("domain".into(), json!(domain));
+        }
+        self.domain_workflow_tool(
+            request_id,
+            "domain_report_project",
             Value::Object(arguments),
         )
     }
@@ -7008,6 +7061,8 @@ impl ApiRouter {
                     "/v1/artifacts/persistence/flush": { "post": { "responses": { "200": { "description": "force a bounded artifact registry checkpoint" }, "409": { "description": "persistence is disabled" } } } },
                     "/v1/tools": { "get": { "responses": { "200": { "description": "MCP tool catalog" } } } },
                     "/v1/tools/{name}": { "post": { "parameters": [{ "name": "name", "in": "path", "required": true }], "responses": { "200": { "description": "tool result" } } } },
+                    "/v1/domain-reports": { "post": { "responses": { "200": { "description": "bounded domain-report projection" } } } },
+                    "/v1/domain-reports/coverage": { "get": { "responses": { "200": { "description": "domain-report coverage diagnostic" } } } },
                     "/v1/missions/preflight": { "post": { "responses": { "200": { "description": "authoritative no-dispatch mission plan" } } } },
                     "/v1/missions": { "get": { "responses": { "200": { "description": "bounded mission inventory" } } }, "post": { "responses": { "202": { "description": "accepted asynchronous mission" } } } },
                     "/v1/missions/persistence": { "get": { "responses": { "200": { "description": "restart-aware mission snapshot status" } } } },
@@ -11141,6 +11196,67 @@ mod tests {
         );
         assert_eq!(cross_store["findings"], json!([]));
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn domain_report_routes_project_validate_index_and_cover_catalogue() {
+        let artifact_path = test_state_path("domain-report-routes");
+        let config = ApiConfig {
+            artifact_state_path: Some(artifact_path.clone()),
+            ..ApiConfig::default()
+        };
+        let router = ApiRouter::new(std::env::current_dir().unwrap(), config.clone()).unwrap();
+        let projected = router.handle(request(
+            "POST",
+            "/v1/domain-reports",
+            json!({
+                "group_id": "biological_domains",
+                "domains": ["modalities"],
+                "subject_id": "api-domain-report",
+                "source_tool": "modality_catalog",
+                "report": {"observations": ["caller supplied"]},
+                "claim_posture": {"status": "review_required", "does_not_claim": ["truth"]}
+            }),
+        ));
+        assert_eq!(projected.status, 200);
+        let projected: Value = serde_json::from_slice(&projected.body).unwrap();
+        assert_eq!(projected["workflow"], "domain_report_project");
+        assert_eq!(projected["artifact_registry"]["indexed"], true);
+        let digest = projected["artifact_registry"]["content_digest"].clone();
+        let coverage = router.handle(request(
+            "GET",
+            "/v1/domain-reports/coverage?include_report_digests=true",
+            json!({}),
+        ));
+        assert_eq!(coverage.status, 200);
+        let coverage: Value = serde_json::from_slice(&coverage.body).unwrap();
+        assert_eq!(coverage["workflow"], "domain_report_coverage");
+        assert_eq!(coverage["group_count"], 29);
+        assert_eq!(coverage["reported_group_count"], 1);
+        assert!(coverage["groups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|group| group["id"] == "biological_domains")
+            .unwrap()["report_digests"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item == &digest));
+        let refused = router.handle(request(
+            "POST",
+            "/v1/domain-reports",
+            json!({
+                "group_id": "biological_domains",
+                "domains": ["not_declared"],
+                "subject_id": "api-domain-report-refused",
+                "source_tool": "modality_catalog",
+                "report": {},
+                "claim_posture": {"status": "refused", "does_not_claim": ["truth"]}
+            }),
+        ));
+        assert_eq!(refused.status, 422);
+        let _ = std::fs::remove_file(artifact_path);
     }
 
     #[test]

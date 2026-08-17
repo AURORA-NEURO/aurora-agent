@@ -31,6 +31,8 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `POST /v1/domain-workflows/scaffold` | Select available stage tools, build an execution-disabled workflow, and run bounded preflight |
 | `POST /v1/domain-workflows/instantiate` | Instantiate a group-scoped mission and attach authoritative no-dispatch preflight |
 | `POST /v1/domain-workflows/reconcile` | Reconcile retained mission results or evidence bundles against an instantiated workflow contract |
+| `POST /v1/domain-reports` | Validate and index one explicit report projection for a declared capability group and source tool |
+| `GET /v1/domain-reports/coverage?group_id=&domain=&max_groups=&include_report_digests=` | Count retained structured report projections across the capability catalogue |
 | `POST /v1/domain-workflows/reconciliations` | Verify and idempotently import one reconciliation report into the bounded audit registry |
 | `GET /v1/domain-workflows/reconciliations?mission_id=&workflow_id=&mission_plan_digest=&completion_status=&after=&limit=&include_records=` | Query digest-ordered reconciliation index rows |
 | `GET /v1/domain-workflows/reconciliations/{reconciliation_digest}` | Fetch one digest-verified reconciliation report |
@@ -169,6 +171,17 @@ digests, reports missing source projections, orphaned projections, wrong-kind pr
 generations, and each store's digest-protected checkpoint identity. The three registries are
 sampled independently; `consistent=true` means agreement among those bounded observations, not a
 transaction or proof that an omitted record never existed.
+
+`POST /v1/domain-reports` is the explicit projection boundary for the workspace's 29 capability
+groups. Its body requires `group_id`, one or more catalogue-declared `domains`, `subject_id`, a
+catalogue-declared `source_tool`, an object `report`, and a `claim_posture` with one of
+`observed`, `derived`, `review_required`, `refused`, or `not_applicable` plus a non-empty
+`does_not_claim` list. The report is structurally validated, indexed under its exact JSON digest,
+and returned with the artifact lookup and catalogue digest. It does not execute the source tool.
+`GET /v1/domain-reports/coverage` reports which groups have retained structured projections,
+subject/source/status summaries, missing group ids, and an exact coverage digest. Coverage means
+local indexed projection presence only; it is not execution coverage, scientific validity,
+provenance completeness, reproducibility, release readiness, or external-effect completion.
 An executable mission produced by instantiation is automatically reconciled at the authoritative
 MCP dispatch boundary. The response includes a compact `workflow_reconciliation` object with the
 record digest, completion/evidence/integrity posture, registry import result, and a REST lookup

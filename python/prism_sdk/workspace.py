@@ -23,6 +23,12 @@ from .artifacts import (
     ArtifactRegistrationReport,
     ArtifactRegistrationRequest,
 )
+from .domain_reports import (
+    DomainReportCoverageReport,
+    DomainReportCoverageRequest,
+    DomainReportProjectReport,
+    DomainReportProjectRequest,
+)
 from .biological import AdapterPlanReport, AdapterPlanRequest, adapter_plan_report
 from .bioql import BioQlCompileRequest
 from .client import Client
@@ -1982,6 +1988,40 @@ class Workspace:
         """Register, query, fetch, or traverse bounded cross-domain artifacts through MCP."""
 
         return self.tool("artifact_registry_audit", arguments)
+
+    def domain_report_project(
+        self,
+        request: DomainReportProjectRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainReportProjectRequest)
+            else DomainReportProjectRequest(**dict(request))
+        )
+        return self.tool("domain_report_project", normalized.to_arguments())
+
+    def domain_report_project_report(
+        self,
+        request: DomainReportProjectRequest | Mapping[str, Any],
+    ) -> DomainReportProjectReport:
+        return DomainReportProjectReport.from_wire(self.domain_report_project(request))
+
+    def domain_report_coverage(
+        self,
+        request: DomainReportCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainReportCoverageRequest)
+            else DomainReportCoverageRequest(**dict(request or {}))
+        )
+        return self.tool("domain_report_project", normalized.to_arguments())
+
+    def domain_report_coverage_report(
+        self,
+        request: DomainReportCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> DomainReportCoverageReport:
+        return DomainReportCoverageReport.from_wire(self.domain_report_coverage(request))
 
     def artifact_cross_store_audit(self) -> ArtifactCrossStoreAuditReport:
         """Audit exact identity agreement across the bounded artifact stores."""
@@ -5248,6 +5288,40 @@ class AsyncWorkspace:
         arguments: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         return await self.tool("artifact_registry_audit", arguments)
+
+    async def domain_report_project(
+        self,
+        request: DomainReportProjectRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainReportProjectRequest)
+            else DomainReportProjectRequest(**dict(request))
+        )
+        return await self.tool("domain_report_project", normalized.to_arguments())
+
+    async def domain_report_project_report(
+        self,
+        request: DomainReportProjectRequest | Mapping[str, Any],
+    ) -> DomainReportProjectReport:
+        return DomainReportProjectReport.from_wire(await self.domain_report_project(request))
+
+    async def domain_report_coverage(
+        self,
+        request: DomainReportCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainReportCoverageRequest)
+            else DomainReportCoverageRequest(**dict(request or {}))
+        )
+        return await self.tool("domain_report_project", normalized.to_arguments())
+
+    async def domain_report_coverage_report(
+        self,
+        request: DomainReportCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> DomainReportCoverageReport:
+        return DomainReportCoverageReport.from_wire(await self.domain_report_coverage(request))
 
     async def artifact_cross_store_audit(self) -> ArtifactCrossStoreAuditReport:
         return ArtifactCrossStoreAuditReport.from_wire(

@@ -213,6 +213,7 @@ pub mod claim;
 pub mod classify;
 pub mod cross_domain_audit;
 pub mod delivery_receipt;
+pub mod domain_report;
 pub mod engineering;
 pub mod engineering_plan;
 pub mod error;
@@ -284,6 +285,14 @@ pub use delivery_receipt::{
     build_delivery_receipt, verify_delivery_receipt, DeliveryReceiptAudit, DeliveryReceiptEvidence,
     DeliveryReceiptFinding, DeliveryReceiptRequest, DeliveryReceiptTarget,
     DeliveryReceiptVerification, DeliveryReceiptVerificationRequest, DELIVERY_RECEIPT_SCHEMA,
+};
+pub use domain_report::{
+    project_domain_report, validate_domain_report, DomainReportError,
+    DOMAIN_REPORT_COVERAGE_SCHEMA_VERSION, DOMAIN_REPORT_COVERAGE_WORKFLOW,
+    DOMAIN_REPORT_PROJECT_SCHEMA_VERSION, DOMAIN_REPORT_PROJECT_WORKFLOW,
+    DOMAIN_REPORT_SCHEMA_VERSION, MAX_DOMAIN_REPORT_BYTES, MAX_DOMAIN_REPORT_DOMAINS,
+    MAX_DOMAIN_REPORT_LIMITATIONS, MAX_DOMAIN_REPORT_NON_CLAIMS, MAX_DOMAIN_REPORT_PARENTS,
+    MAX_DOMAIN_REPORT_TEXT_BYTES,
 };
 pub use engineering::{
     AdrSpec, AdrStatus, AdrSupersession, EngineeringAudit, EngineeringCounts, EngineeringError,

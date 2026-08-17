@@ -30,6 +30,10 @@ import type {
   DomainWorkflowReconciliationQueryOptions,
   DomainWorkflowReconciliationQueryResult,
   DomainWorkflowReconciliationGetResult,
+  DomainReportProjectArgs,
+  DomainReportProjectResult,
+  DomainReportCoverageOptions,
+  DomainReportCoverageResult,
   AdapterPlanArgs,
   AdapterPlanResult,
   TabularIngestArgs,
@@ -545,6 +549,59 @@ export class ApiClient {
   ): Promise<DomainWorkflowReconciliationGetResult> {
     const digest = pathSegment(reconciliationDigest, "reconciliation digest");
     return this.request<DomainWorkflowReconciliationGetResult>("GET", `/v1/domain-workflows/reconciliations/${encodeURIComponent(digest)}`, undefined, options);
+  }
+
+  /** Project and index one caller-supplied report after checking catalogue membership. */
+  async domainReportProject(
+    args: DomainReportProjectArgs,
+    options?: ClientRequestOptions,
+  ): Promise<DomainReportProjectResult> {
+    if (!isObject(args)) throw new ArgumentError("domain report arguments must be an object");
+    for (const [name, value] of [["group_id", args.group_id], ["subject_id", args.subject_id], ["source_tool", args.source_tool]] as const) {
+      if (typeof value !== "string" || value.trim().length === 0) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    if (!Array.isArray(args.domains) || args.domains.length < 1 || args.domains.length > 64 || args.domains.some((domain) => typeof domain !== "string" || domain.trim().length === 0)) {
+      throw new ArgumentError("domains must contain 1..=64 non-empty strings");
+    }
+    if (!isObject(args.report) || !isObject(args.claim_posture)) throw new ArgumentError("report and claim_posture must be objects");
+    if (args.claim_posture.status === undefined || !["observed", "derived", "review_required", "refused", "not_applicable"].includes(args.claim_posture.status)) throw new ArgumentError("claim_posture.status is invalid");
+    if (!Array.isArray(args.claim_posture.does_not_claim) || args.claim_posture.does_not_claim.length < 1 || args.claim_posture.does_not_claim.some((item) => typeof item !== "string" || item.trim().length === 0)) throw new ArgumentError("claim_posture.does_not_claim must be non-empty");
+    if (args.parent_digests !== undefined && (!Array.isArray(args.parent_digests) || args.parent_digests.length > 128 || args.parent_digests.some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)))) throw new ArgumentError("parent_digests must contain at most 128 lowercase SHA-256 digests");
+    return this.request<DomainReportProjectResult>("POST", "/v1/domain-reports", args, options);
+  }
+
+  /** Audit retained structured report projections by capability group. */
+  async domainReportCoverage(
+    args: DomainReportCoverageOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<DomainReportCoverageResult> {
+    if (!isObject(args)) throw new ArgumentError("domain report coverage arguments must be an object");
+    for (const [name, value] of [["group_id", args.group_id], ["domain", args.domain]] as const) {
+      if (value !== undefined && (typeof value !== "string" || value.trim().length === 0)) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    const maxGroups = args.max_groups ?? 64;
+    if (!Number.isSafeInteger(maxGroups) || maxGroups < 1 || maxGroups > 128) throw new ArgumentError("max_groups must be 1..=128");
+    if (args.include_report_digests !== undefined && typeof args.include_report_digests !== "boolean") throw new ArgumentError("include_report_digests must be a boolean");
+    const query = new URLSearchParams({ max_groups: String(maxGroups), include_report_digests: String(args.include_report_digests ?? false) });
+    if (args.group_id !== undefined) query.set("group_id", args.group_id);
+    if (args.domain !== undefined) query.set("domain", args.domain);
+    return this.request<DomainReportCoverageResult>("GET", `/v1/domain-reports/coverage?${query.toString()}`, undefined, options);
+  }
+
+  /** Invoke the same domain-report contract through the REST tool dispatcher. */
+  async domainReportProjectTool(
+    args: DomainReportProjectArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainReportProjectResult>> {
+    return this.callTool<DomainReportProjectResult>("domain_report_project", args, options);
+  }
+
+  /** Invoke the coverage diagnostic through the REST tool dispatcher. */
+  async domainReportCoverageTool(
+    args: DomainReportCoverageOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainReportCoverageResult>> {
+    return this.callTool<DomainReportCoverageResult>("domain_report_project", { ...args, operation: "coverage" }, options);
   }
 
   /** Inspect all restart, secret, and external-effect boundaries in one operator matrix. */
