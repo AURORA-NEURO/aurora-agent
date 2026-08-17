@@ -353,8 +353,9 @@ class FakeApiHandler(BaseHTTPRequestHandler):
                     "events": {"ok": True, "enabled": True, "file_present": True, "file_bytes": 128, "schema_version": 5, "state_digest": None, "integrity_verified": None, "max_file_bytes": 64 * 1024 * 1024, "retained_events": 1, "next_event_id": 2, "dropped_events": 0, "subscriptions_durable": True, "webhook_deliveries_durable": True, "delivery_attempts_durable": True, "delivery_receipt_metadata_durable": True, "secrets_persisted": False, "retained_delivery_attempts": 1, "dropped_delivery_attempts": 0, "next_attempt_id": 2, "recovery_policy": "events restore"},
                 },
                 "recovery": {"ok": True, "schema": "bioprism-recovery-matrix/0.1", "scope": "single-process-api-instance", "automatic_resume": False, "automatic_external_delivery": False, "boundaries": [{"id": "webhook_signing_secrets", "configured": True, "checkpoint_present": False, "schema_version": None, "state_digest": None, "restores": [], "does_not_restore": ["all signing secrets"], "operator_action": "rebind"}], "observed": {"subscriptions": 1, "pending_deliveries": 1}, "guarantees": ["boundaries are explicit"], "non_claims": ["secret recovery"], "links": {}},
+                "domain_coverage": {"schema": "bioprism-domain-coverage/0.1", "group_count": 1, "returned_groups": 1, "truncated": False, "max_groups": 64, "groups": [{"id": "operations", "status": "available", "domains": ["operations"], "declared_tool_count": 1, "advertised_tool_count": 1, "missing_tool_count": 0, "missing_tools": [], "fully_advertised": True}], "domain_label_count": 1, "declared_tool_memberships": 1, "unique_declared_tools": 1, "advertised_tool_count": 10, "fully_advertised_group_count": 1, "groups_with_gaps": 0, "declared_tools_not_advertised": [], "omitted_declared_tools_not_advertised": 0, "advertised_tools_without_group": ["echo"], "omitted_advertised_tools_without_group": 0, "guarantees": ["exact"], "non_claims": ["runtime health"]},
                 "consistency": {"read_model": "bounded composition of process-local stores", "cross_store_atomic": False, "event_cursor_authoritative": True, "clock_free": True, "underlying_routes_remain_authoritative": True},
-                "capabilities": {"tool_count": 10, "resource_count": 2, "rest_tools": True, "json_rpc": True, "event_cursor": True, "async_missions": True, "mission_inventory": True, "operations_snapshot": True, "delivery_attempt_provenance": True, "external_delivery_worker": False},
+                "capabilities": {"tool_count": 10, "resource_count": 2, "rest_tools": True, "json_rpc": True, "event_cursor": True, "async_missions": True, "mission_inventory": True, "operations_snapshot": True, "domain_coverage": True, "delivery_attempt_provenance": True, "external_delivery_worker": False},
                 "operator_actions": ["inspect"],
                 "guarantees": ["bounded"],
                 "non_claims": ["external effects"],
@@ -926,6 +927,8 @@ class HttpApiClientTests(unittest.TestCase):
         self.assertEqual(snapshot.mission_summary["status_counts"]["succeeded"], 1)
         self.assertFalse(snapshot.recovery.automatic_external_delivery)
         self.assertFalse(snapshot.consistency["cross_store_atomic"])
+        self.assertEqual(snapshot.domain_coverage.groups[0].id, "operations")
+        self.assertEqual(snapshot.domain_coverage.groups_with_gaps, 0)
         self.assertEqual(client.rebind_subscription("sub", "a-long-secret")["resigned_deliveries"], 1)
         with self.assertRaises(ArgumentError):
             client.event_page(after=True)

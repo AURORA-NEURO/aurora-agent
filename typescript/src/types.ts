@@ -7188,6 +7188,7 @@ export interface OperationsSnapshotCapabilities extends JsonObject {
   async_missions: boolean;
   mission_inventory: boolean;
   operations_snapshot: boolean;
+  domain_coverage: boolean;
   delivery_attempt_provenance: boolean;
   external_delivery_worker: boolean;
 }
@@ -7198,6 +7199,38 @@ export interface OperationsSnapshotConsistency extends JsonObject {
   event_cursor_authoritative: true;
   clock_free: true;
   underlying_routes_remain_authoritative: true;
+}
+
+export interface OperationsDomainGroup extends JsonObject {
+  id: string;
+  status: string;
+  domains: string[];
+  declared_tool_count: number;
+  advertised_tool_count: number;
+  missing_tool_count: number;
+  missing_tools: string[];
+  fully_advertised: boolean;
+}
+
+export interface OperationsDomainCoverage extends JsonObject {
+  schema: "bioprism-domain-coverage/0.1";
+  group_count: number;
+  returned_groups: number;
+  truncated: boolean;
+  max_groups: number;
+  groups: OperationsDomainGroup[];
+  domain_label_count: number;
+  declared_tool_memberships: number;
+  unique_declared_tools: number;
+  advertised_tool_count: number;
+  fully_advertised_group_count: number;
+  groups_with_gaps: number;
+  declared_tools_not_advertised: string[];
+  omitted_declared_tools_not_advertised: number;
+  advertised_tools_without_group: string[];
+  omitted_advertised_tools_without_group: number;
+  guarantees: string[];
+  non_claims: string[];
 }
 
 export interface OperationsSnapshot extends JsonObject {
@@ -7216,6 +7249,7 @@ export interface OperationsSnapshot extends JsonObject {
     events: EventPersistenceStatus;
   };
   recovery: RecoveryMatrix;
+  domain_coverage: OperationsDomainCoverage;
   consistency: OperationsSnapshotConsistency;
   capabilities: OperationsSnapshotCapabilities;
   operator_actions: string[];

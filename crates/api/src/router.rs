@@ -13,7 +13,7 @@ use crate::http::{HttpRequest, HttpResponse};
 use bioprism_mcp::{Request, Response, PROTOCOL_VERSION, SERVER_NAME};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -27,6 +27,8 @@ pub const MAX_MISSION_JOBS: usize = 4096;
 pub const MAX_MISSION_LIST_LIMIT: usize = 256;
 pub const MAX_MISSION_TRACE_EVENTS: usize = 4096;
 pub const MAX_OPERATIONS_SNAPSHOT_LIMIT: usize = 256;
+pub const MAX_OPERATIONS_DOMAIN_GROUPS: usize = 64;
+pub const MAX_OPERATIONS_DOMAIN_TOOLS: usize = 256;
 pub const MISSION_STATE_SCHEMA_VERSION: u64 = 2;
 const LEGACY_MISSION_STATE_SCHEMA_VERSION: u64 = 1;
 pub const MAX_MISSION_STATE_FILE_BYTES: usize = 64 * 1024 * 1024;
@@ -937,6 +939,7 @@ impl ApiRouter {
                     "events": event_persistence
                 },
                 "recovery": recovery,
+                "domain_coverage": operations_domain_coverage(),
                 "consistency": {
                     "read_model": "bounded composition of process-local stores",
                     "cross_store_atomic": false,
@@ -953,6 +956,7 @@ impl ApiRouter {
                     "async_missions": true,
                     "mission_inventory": true,
                     "operations_snapshot": true,
+                    "domain_coverage": true,
                     "delivery_attempt_provenance": true,
                     "external_delivery_worker": false
                 },
@@ -1139,6 +1143,7 @@ impl ApiRouter {
                     "route_review_evidence": true,
                     "recovery_matrix": true,
                     "operations_snapshot": true,
+                    "domain_coverage": true,
                     "max_mission_trace_events": MAX_MISSION_TRACE_EVENTS,
                     "cooperative_mission_cancellation": true,
                     "durable_mission_snapshots": self.config.mission_state_path.is_some(),
@@ -2691,6 +2696,133 @@ fn response_value(response: HttpResponse) -> Value {
     })
 }
 
+fn operations_domain_coverage() -> Value {
+    let advertised_tools = bioprism_mcp::tool_definitions()
+        .into_iter()
+        .filter_map(|tool| tool.get("name").and_then(Value::as_str).map(str::to_owned))
+        .collect::<BTreeSet<_>>();
+    let capability_groups = bioprism_mcp::workspace_capabilities();
+    let groups = capability_groups.as_array().cloned().unwrap_or_default();
+    let mut declared_tools = BTreeSet::new();
+    let mut domain_labels = BTreeSet::new();
+    let mut declared_tool_memberships = 0usize;
+    let mut fully_advertised_group_count = 0usize;
+    let mut groups_with_gaps = 0usize;
+    let mut group_rows = Vec::new();
+
+    for (index, group) in groups.iter().enumerate() {
+        let id = group
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+            .to_string();
+        let status = group
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+            .to_string();
+        let domains = group
+            .get("domains")
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        for domain in &domains {
+            domain_labels.insert(domain.clone());
+        }
+        let tools = group
+            .get("mcp_tools")
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        declared_tool_memberships += tools.len();
+        declared_tools.extend(tools.iter().cloned());
+        let missing_tools = tools
+            .iter()
+            .filter(|tool| !advertised_tools.contains(*tool))
+            .cloned()
+            .collect::<Vec<_>>();
+        let advertised_tool_count = tools.len().saturating_sub(missing_tools.len());
+        if missing_tools.is_empty() {
+            fully_advertised_group_count += 1;
+        } else {
+            groups_with_gaps += 1;
+        }
+        if index < MAX_OPERATIONS_DOMAIN_GROUPS {
+            let fully_advertised = missing_tools.is_empty();
+            group_rows.push(json!({
+                "id": id,
+                "status": status,
+                "domains": domains,
+                "declared_tool_count": tools.len(),
+                "advertised_tool_count": advertised_tool_count,
+                "missing_tool_count": missing_tools.len(),
+                "missing_tools": missing_tools,
+                "fully_advertised": fully_advertised
+            }));
+        }
+    }
+
+    let declared_tools_not_advertised = declared_tools
+        .difference(&advertised_tools)
+        .take(MAX_OPERATIONS_DOMAIN_TOOLS)
+        .cloned()
+        .collect::<Vec<_>>();
+    let advertised_tools_without_group = advertised_tools
+        .difference(&declared_tools)
+        .take(MAX_OPERATIONS_DOMAIN_TOOLS)
+        .cloned()
+        .collect::<Vec<_>>();
+    let omitted_declared_tools_not_advertised = declared_tools
+        .difference(&advertised_tools)
+        .count()
+        .saturating_sub(declared_tools_not_advertised.len());
+    let omitted_advertised_tools_without_group = advertised_tools
+        .difference(&declared_tools)
+        .count()
+        .saturating_sub(advertised_tools_without_group.len());
+
+    json!({
+        "schema": "bioprism-domain-coverage/0.1",
+        "group_count": groups.len(),
+        "returned_groups": group_rows.len(),
+        "truncated": groups.len() > MAX_OPERATIONS_DOMAIN_GROUPS,
+        "max_groups": MAX_OPERATIONS_DOMAIN_GROUPS,
+        "groups": group_rows,
+        "domain_label_count": domain_labels.len(),
+        "declared_tool_memberships": declared_tool_memberships,
+        "unique_declared_tools": declared_tools.len(),
+        "advertised_tool_count": advertised_tools.len(),
+        "fully_advertised_group_count": fully_advertised_group_count,
+        "groups_with_gaps": groups_with_gaps,
+        "declared_tools_not_advertised": declared_tools_not_advertised,
+        "omitted_declared_tools_not_advertised": omitted_declared_tools_not_advertised,
+        "advertised_tools_without_group": advertised_tools_without_group,
+        "omitted_advertised_tools_without_group": omitted_advertised_tools_without_group,
+        "guarantees": [
+            "group rows are derived from the same workspace capability catalogue exposed by MCP",
+            "advertised tool names are compared exactly without inferring semantic support",
+            "omission counts make truncation and catalogue gaps explicit"
+        ],
+        "non_claims": [
+            "domain scientific validity",
+            "runtime execution health for every advertised tool",
+            "performance, calibration, or external-system availability"
+        ]
+    })
+}
+
 fn mission_checkpoint_digest(document: &Value) -> Result<String, String> {
     let bytes = serde_json::to_vec(document)
         .map_err(|error| format!("mission state digest could not be serialized: {error}"))?;
@@ -3573,6 +3705,12 @@ mod tests {
         assert_eq!(snapshot["mission_summary"]["total"], 0);
         assert_eq!(snapshot["persistence"]["events"]["enabled"], false);
         assert_eq!(snapshot["recovery"]["automatic_resume"], false);
+        assert_eq!(
+            snapshot["domain_coverage"]["schema"],
+            "bioprism-domain-coverage/0.1"
+        );
+        assert!(snapshot["domain_coverage"]["group_count"].as_u64().unwrap() > 0);
+        assert_eq!(snapshot["domain_coverage"]["truncated"], false);
         assert_eq!(snapshot["consistency"]["cross_store_atomic"], false);
         assert_eq!(snapshot["consistency"]["clock_free"], true);
         assert_eq!(snapshot["capabilities"]["operations_snapshot"], true);

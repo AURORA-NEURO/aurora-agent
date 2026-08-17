@@ -335,7 +335,10 @@ one operator matrix that keeps mission restoration, event rows, subscription met
 outbox evidence, delivery-attempt provenance, secrets, and external effects separate. The
 `GET /v1/operations/snapshot?after=N&limit=M` route and matching typed SDK helpers compose that
 matrix with one bounded event page, event metrics, mission status counts, persistence digests,
-capability transport flags, and actionable operator follow-ups. It is designed as a dashboard
+capability transport flags, exact domain-group/tool coverage, and actionable operator follow-ups.
+The domain projection compares the authoritative workspace capability groups with the advertised
+tool catalogue, preserving missing names and omission counts without inferring semantic readiness.
+It is designed as a dashboard
 bootstrap and handoff surface: it never returns unbounded mission reports, executes no tools, and
 does not turn local observations into scientific validity, receiver acceptance, or automatic
 recovery claims. The event cursor remains authoritative, so consumers should persist

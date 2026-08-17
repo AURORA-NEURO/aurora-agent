@@ -2405,8 +2405,9 @@ test("client parses cursor SSE and validates webhook mutations", async () => {
           mission_summary: { total: 1, status_counts: { succeeded: 1 }, recovered_after_restart: 0, cancel_requested: 0, registry_capacity: 4096 },
           persistence: { missions: {}, events: {} },
           recovery: {},
+          domain_coverage: { schema: "bioprism-domain-coverage/0.1", group_count: 1, returned_groups: 1, truncated: false, max_groups: 64, groups: [{ id: "operations", status: "available", domains: ["operations"], declared_tool_count: 1, advertised_tool_count: 1, missing_tool_count: 0, missing_tools: [], fully_advertised: true }], domain_label_count: 1, declared_tool_memberships: 1, unique_declared_tools: 1, advertised_tool_count: 10, fully_advertised_group_count: 1, groups_with_gaps: 0, declared_tools_not_advertised: [], omitted_declared_tools_not_advertised: 0, advertised_tools_without_group: ["echo"], omitted_advertised_tools_without_group: 0, guarantees: ["exact"], non_claims: ["runtime health"] },
           consistency: { read_model: "bounded composition of process-local stores", cross_store_atomic: false, event_cursor_authoritative: true, clock_free: true, underlying_routes_remain_authoritative: true },
-          capabilities: { tool_count: 10, resource_count: 2, rest_tools: true, json_rpc: true, event_cursor: true, async_missions: true, mission_inventory: true, operations_snapshot: true, delivery_attempt_provenance: true, external_delivery_worker: false },
+          capabilities: { tool_count: 10, resource_count: 2, rest_tools: true, json_rpc: true, event_cursor: true, async_missions: true, mission_inventory: true, operations_snapshot: true, domain_coverage: true, delivery_attempt_provenance: true, external_delivery_worker: false },
           operator_actions: ["inspect"],
           guarantees: ["bounded"],
           non_claims: ["external effects"],
@@ -2470,6 +2471,7 @@ test("client parses cursor SSE and validates webhook mutations", async () => {
   assert.equal(operations.schema, "bioprism-operations-snapshot/0.1");
   assert.equal(operations.mission_summary.status_counts.succeeded, 1);
   assert.equal(operations.recent_events.events[0].id, 1);
+  assert.equal(operations.domain_coverage.groups[0].id, "operations");
   assert.equal(operations.consistency.cross_store_atomic, false);
   await assert.rejects(client.acknowledge("sub", [0]), ArgumentError);
 });

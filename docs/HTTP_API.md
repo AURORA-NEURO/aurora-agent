@@ -129,6 +129,8 @@ to `256`. Unknown query keys and limits outside that range are refused. The resp
 - nested mission and event persistence status with file size, schema, digest, integrity, and
   durability fields;
 - the complete `/v1/recovery` matrix and a compact capability/transport summary; and
+- `domain_coverage`, an exact bounded comparison of workspace capability groups against advertised
+  MCP tool names, including per-group missing tools, aggregate gaps, and omission counts; and
 - a `consistency` declaration that makes the read model's clock-free, non-atomic cross-store
   composition explicit; and
 - `operator_actions`, `guarantees`, and `non_claims` that keep follow-up work and absent

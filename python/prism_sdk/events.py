@@ -424,6 +424,142 @@ class RecoveryMatrix:
 
 
 MAX_OPERATIONS_SNAPSHOT_LIMIT = 256
+MAX_OPERATIONS_DOMAIN_GROUPS = 64
+MAX_OPERATIONS_DOMAIN_TOOLS = 256
+
+
+@dataclass(frozen=True)
+class OperationsDomainGroup:
+    """One bounded workspace capability group and exact tool-name coverage."""
+
+    raw: dict[str, Any]
+    id: str
+    status: str
+    domains: tuple[str, ...]
+    declared_tool_count: int
+    advertised_tool_count: int
+    missing_tool_count: int
+    missing_tools: tuple[str, ...]
+    fully_advertised: bool
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OperationsDomainGroup":
+        raw = _mapping("operations domain group", value)
+        declared = _non_negative(
+            "operations domain group declared_tool_count", raw.get("declared_tool_count")
+        )
+        advertised = _non_negative(
+            "operations domain group advertised_tool_count", raw.get("advertised_tool_count")
+        )
+        missing = _non_negative(
+            "operations domain group missing_tool_count", raw.get("missing_tool_count")
+        )
+        missing_tools = _texts("operations domain group missing_tools", raw.get("missing_tools"))
+        fully_advertised = raw.get("fully_advertised")
+        if not isinstance(fully_advertised, bool):
+            raise ArgumentError("operations domain group fully_advertised must be a boolean")
+        if advertised + missing != declared or missing != len(missing_tools):
+            raise ArgumentError("operations domain group tool counts must reconcile")
+        if fully_advertised != (missing == 0):
+            raise ArgumentError("operations domain group fully_advertised is inconsistent")
+        return cls(
+            raw=raw,
+            id=_text("operations domain group id", raw.get("id")),
+            status=_text("operations domain group status", raw.get("status")),
+            domains=_texts("operations domain group domains", raw.get("domains")),
+            declared_tool_count=declared,
+            advertised_tool_count=advertised,
+            missing_tool_count=missing,
+            missing_tools=missing_tools,
+            fully_advertised=fully_advertised,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class OperationsDomainCoverage:
+    """Typed aggregate of exact capability-group/tool catalogue coverage."""
+
+    raw: dict[str, Any]
+    schema: str
+    groups: tuple[OperationsDomainGroup, ...]
+    group_count: int
+    returned_groups: int
+    truncated: bool
+    domain_label_count: int
+    declared_tool_memberships: int
+    unique_declared_tools: int
+    advertised_tool_count: int
+    fully_advertised_group_count: int
+    groups_with_gaps: int
+    declared_tools_not_advertised: tuple[str, ...]
+    omitted_declared_tools_not_advertised: int
+    advertised_tools_without_group: tuple[str, ...]
+    omitted_advertised_tools_without_group: int
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OperationsDomainCoverage":
+        raw = _mapping("operations domain coverage", value)
+        if raw.get("schema") != "bioprism-domain-coverage/0.1":
+            raise ArgumentError("operations domain coverage schema is invalid")
+        values = raw.get("groups")
+        if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
+            raise ArgumentError("operations domain coverage groups must be an array")
+        groups = tuple(OperationsDomainGroup.from_wire(item) for item in values)
+
+        def non_negative(name: str) -> int:
+            return _non_negative(f"operations domain coverage {name}", raw.get(name))
+
+        group_count = non_negative("group_count")
+        returned_groups = non_negative("returned_groups")
+        if group_count < returned_groups or returned_groups != len(groups):
+            raise ArgumentError("operations domain coverage group counts must reconcile")
+        if returned_groups > MAX_OPERATIONS_DOMAIN_GROUPS:
+            raise ArgumentError("operations domain coverage returned too many groups")
+        truncated = raw.get("truncated")
+        if not isinstance(truncated, bool) or truncated != (group_count > returned_groups):
+            raise ArgumentError("operations domain coverage truncation is inconsistent")
+        declared_tools_not_advertised = _texts(
+            "operations domain coverage declared_tools_not_advertised",
+            raw.get("declared_tools_not_advertised"),
+        )
+        advertised_tools_without_group = _texts(
+            "operations domain coverage advertised_tools_without_group",
+            raw.get("advertised_tools_without_group"),
+        )
+        omitted_declared = non_negative("omitted_declared_tools_not_advertised")
+        omitted_advertised = non_negative("omitted_advertised_tools_without_group")
+        if len(declared_tools_not_advertised) > MAX_OPERATIONS_DOMAIN_TOOLS:
+            raise ArgumentError("operations domain coverage declared tool projection is too large")
+        if len(advertised_tools_without_group) > MAX_OPERATIONS_DOMAIN_TOOLS:
+            raise ArgumentError("operations domain coverage advertised tool projection is too large")
+        fully_advertised = non_negative("fully_advertised_group_count")
+        groups_with_gaps = non_negative("groups_with_gaps")
+        if fully_advertised + groups_with_gaps != group_count:
+            raise ArgumentError("operations domain coverage group health counts must reconcile")
+        return cls(
+            raw=raw,
+            schema=_text("operations domain coverage schema", raw.get("schema")),
+            groups=groups,
+            group_count=group_count,
+            returned_groups=returned_groups,
+            truncated=truncated,
+            domain_label_count=non_negative("domain_label_count"),
+            declared_tool_memberships=non_negative("declared_tool_memberships"),
+            unique_declared_tools=non_negative("unique_declared_tools"),
+            advertised_tool_count=non_negative("advertised_tool_count"),
+            fully_advertised_group_count=fully_advertised,
+            groups_with_gaps=groups_with_gaps,
+            declared_tools_not_advertised=declared_tools_not_advertised,
+            omitted_declared_tools_not_advertised=omitted_declared,
+            advertised_tools_without_group=advertised_tools_without_group,
+            omitted_advertised_tools_without_group=omitted_advertised,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
 
 
 @dataclass(frozen=True)
@@ -443,6 +579,7 @@ class OperationsSnapshot:
     mission_persistence: MissionPersistenceStatus
     event_persistence: EventPersistenceStatus
     recovery: RecoveryMatrix
+    domain_coverage: OperationsDomainCoverage
     consistency: dict[str, Any]
     capabilities: dict[str, Any]
     operator_actions: tuple[str, ...]
@@ -519,6 +656,7 @@ class OperationsSnapshot:
         mission_persistence = MissionPersistenceStatus.from_wire(persistence.get("missions"))
         event_persistence = EventPersistenceStatus.from_wire(persistence.get("events"))
         recovery = RecoveryMatrix.from_wire(raw.get("recovery"))
+        domain_coverage = OperationsDomainCoverage.from_wire(raw.get("domain_coverage"))
         consistency_raw = _mapping("operations snapshot consistency", raw.get("consistency"))
         consistency = dict(consistency_raw)
         if not isinstance(consistency.get("read_model"), str):
@@ -545,6 +683,7 @@ class OperationsSnapshot:
             "async_missions",
             "mission_inventory",
             "operations_snapshot",
+            "domain_coverage",
             "delivery_attempt_provenance",
             "external_delivery_worker",
         ):
@@ -568,6 +707,7 @@ class OperationsSnapshot:
             mission_persistence=mission_persistence,
             event_persistence=event_persistence,
             recovery=recovery,
+            domain_coverage=domain_coverage,
             consistency=consistency,
             capabilities=capabilities,
             operator_actions=_texts(
@@ -878,8 +1018,12 @@ __all__ = [
     "EventPage",
     "EventPersistenceStatus",
     "RecoveryBoundary",
-    "RecoveryMatrix",
+            "RecoveryMatrix",
+    "OperationsDomainGroup",
+    "OperationsDomainCoverage",
     "MAX_OPERATIONS_SNAPSHOT_LIMIT",
+    "MAX_OPERATIONS_DOMAIN_GROUPS",
+    "MAX_OPERATIONS_DOMAIN_TOOLS",
     "OperationsSnapshot",
     "DeliveryView",
     "DeliveryPage",
