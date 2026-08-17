@@ -25,6 +25,7 @@ from prism_sdk import (
     domain_evidence_provider_external_payload_lineage_audit_report,
     domain_evidence_provider_external_payload_execution_evidence_report,
     domain_evidence_provider_external_payload_evidence_query_report,
+    domain_report_from_external_provider_normalization,
 )
 from prism_sdk.authoring import content_digest
 
@@ -446,6 +447,18 @@ def test_external_normalization_bridges_receipt_materialization_and_provider_lin
     assert report.receipt_digest in evidence.parent_digests
     assert report.materialized_payload_digest in evidence.parent_digests
     assert "2" * 64 in evidence.parent_digests
+    domain_report = domain_report_from_external_provider_normalization(
+        report,
+        "bioprism.python.fhir_manifest",
+        "0.1.0",
+        "external-provider-source-1",
+        parent_digests=("3" * 64,),
+    )
+    arguments = domain_report.to_arguments()
+    assert arguments["source_tool"] == "literature:pubmed:external_payload"
+    assert arguments["report"]["external_payload"] is True
+    assert report.receipt_digest in arguments["report"]["evidence"]["parent_digests"]
+    assert arguments["claim_posture"]["status"] == "observed"
 
 
 def test_external_lineage_audit_is_registry_bound_and_preserves_orchestration_boundaries() -> None:

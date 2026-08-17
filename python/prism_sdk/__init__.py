@@ -191,6 +191,11 @@ from .domain_reports import (
     DomainReportProjectReport,
     DomainReportProjectRequest,
 )
+from .domain_report_bridges import (
+    domain_report_from_adapter_execution,
+    domain_report_from_provider_normalization,
+    domain_report_from_external_provider_normalization,
+)
 from .domain_evidence import (
     DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA,
     DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW,
@@ -2930,6 +2935,9 @@ __all__ = [
     "DomainReportProjectReport",
     "DomainReportCoverageRequest",
     "DomainReportCoverageReport",
+    "domain_report_from_adapter_execution",
+    "domain_report_from_provider_normalization",
+    "domain_report_from_external_provider_normalization",
     "DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA",
     "DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW",
     "DOMAIN_EVIDENCE_LINK_ROLES",

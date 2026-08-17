@@ -170,6 +170,12 @@ while a returned remote refusal remains a retained, typed report rather than a t
 checks. `evaluate_adapter_conformance(...)` reports `verified`, `partial`, `unsupported`, or
 `refused` without promoting structural parsing into clinical, biological, or release readiness;
 its stable report digest can be carried as an explicit evidence parent.
+`domain_report_from_adapter_execution(...)`,
+`domain_report_from_provider_normalization(...)`, and
+`domain_report_from_external_provider_normalization(...)` compose those observations into the
+canonical `DomainReportProjectRequest`. They retain typed evidence, refusal/observed posture,
+caller lineage, and non-claims about execution, authenticity, scientific validity, and readiness;
+external-payload bridges preserve receipt/materialization lineage and never reopen a locator.
 Provider normalization reports now expose a parallel evidence handoff: payload, request, shape,
 row-index, intake, catalogue, and normalization digests become explicit parents/output identity,
 while connector outcome and structural status remain distinct. External receipt-verified

@@ -326,6 +326,11 @@ Provider normalization and receipt-verified external materialization now join th
 caller-owned structural observations: payload/normalization, shape, row-index, intake, catalogue,
 receipt, and materialized-payload digests remain independently visible, and provider/clinical
 authenticity is never inferred from a successful shape audit.
+The same observations can now be projected through typed Python bridges into the canonical
+`DomainReportProjectRequest` for adapter execution, in-line provider normalization, and
+receipt-verified external normalization. Claim posture and non-claims remain adjacent to the
+payload, refused outcomes stay refused, caller parents remain explicit, and external locators are
+never reopened; this is report composition rather than an execution or readiness upgrade.
 Verified optional bindings now execute raw NIfTI headers and H5AD/Zarr metadata when nibabel or
 anndata is installed, while preserving the same bounded auditors and refusing absent dependencies.
 The readers avoid full image-array and matrix-value materialization.
