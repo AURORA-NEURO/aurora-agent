@@ -62,6 +62,11 @@ artifact destinations, and unwitnessable claims. This is still a contract replay
 execute a fuzzer, sandbox, detector, credential revocation, quarantine, notification, incident
 workflow, external checkpoint, or durable audit store, so the remaining `36.07` and `36.19`
 blueprint entries stay in the attention list below.
+The transport now also exposes `domain_decision_readiness_audit`, a catalogue-bound structural
+gate over caller-selected reports. It keeps support/qualification floors, contradiction/refusal
+vetoes, review allowance, linkage, lineage, and every missing requirement explicit across all
+29 groups. Its human-review state is not scientific, clinical, release, execution, or truth
+authority; the remaining external acquisition, UI, process, and authority gaps stay in this list.
 The transport now also exposes `biocapability_evidence_audit`, a strict composition surface for
 the §33 metric, value-of-information, reference-standard, temporal-validity, reproducibility,
 cross-modal, causal, translation, and multi-agent contracts already present in the workspace. It

@@ -121,6 +121,12 @@ always-review-required posture. The `DomainEvidenceHarmonizationResult` keeps tr
 contradiction state typed, including per-report bridge class/mode and lineage counts, without
 converting report presence into scientific, clinical, causal, publication, release, or execution
 validity.
+`domainDecisionReadinessAudit` adds the matching structural policy gate through the generic REST
+tool dispatcher. `DomainDecisionReadinessArgs` and `DomainDecisionReadinessResult` preserve
+required group/domain coverage, support and qualification floors, contradiction/refusal and
+review policy, linkage and lineage blockers, the audit digest, and indexed-artifact identity.
+Its `ready_for_human_review` state is structural only: the SDK does not treat it as scientific,
+clinical, release, execution, or truth authority.
 `domainEvidenceHarmonizationCoverage` and
 `domainEvidenceHarmonizationCoverageTool` query the retained harmonization index with typed subject,
 domain, bridge, traceability, cursor, page-size, and digest-inclusion options. The result separates

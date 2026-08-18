@@ -12,6 +12,9 @@
 //! the digest used by this cross-domain index.
 
 use crate::adapter_execution_evidence::ADAPTER_EXECUTION_EVIDENCE_SCHEMA;
+use crate::domain_decision_readiness::{
+    validate_domain_decision_readiness, DOMAIN_DECISION_READINESS_SCHEMA_VERSION,
+};
 use crate::domain_evidence::{
     validate_domain_evidence_harmonization, DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION,
 };
@@ -71,6 +74,7 @@ const ARTIFACT_KINDS: &[&str] = &[
     "domain_evidence_provider_external_payload_replay",
     "domain_evidence_provider_external_payload_lineage_audit",
     "domain_evidence_provider_external_payload_execution_evidence",
+    "domain_decision_readiness",
     "adapter_execution_evidence",
     "domain_evidence_source_plan",
     "external_reference",
@@ -1055,7 +1059,8 @@ fn artifact_family(kind: &str) -> &'static str {
         kind if kind.starts_with("domain_evidence_provider") => "provider",
         "domain_evidence_source_plan"
         | "domain_evidence_intake"
-        | "domain_evidence_harmonization" => "source_or_harmonization",
+        | "domain_evidence_harmonization"
+        | "domain_decision_readiness" => "source_or_harmonization",
         "domain_report" => "domain_report",
         "mission_evidence_bundle"
         | "workflow_reconciliation"
@@ -1226,6 +1231,24 @@ fn verify_known_artifact(
                     "state": "verified_integrity",
                     "method": "domain_evidence_harmonization",
                     "schema": DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION
+                }),
+            ))
+        }
+        "domain_decision_readiness"
+            if artifact.get("schema").and_then(Value::as_str)
+                == Some(DOMAIN_DECISION_READINESS_SCHEMA_VERSION) =>
+        {
+            validate_domain_decision_readiness(artifact).map_err(|error| {
+                ArtifactRegistryError::InvalidInput(format!(
+                    "domain decision-readiness verification failed: {error}"
+                ))
+            })?;
+            Ok((
+                None,
+                json!({
+                    "state": "verified_integrity",
+                    "method": "domain_decision_readiness",
+                    "schema": DOMAIN_DECISION_READINESS_SCHEMA_VERSION
                 }),
             ))
         }

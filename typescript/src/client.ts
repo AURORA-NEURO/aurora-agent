@@ -50,6 +50,8 @@ import type {
   DomainReportCoverageResult,
   DomainEvidenceHarmonizeArgs,
   DomainEvidenceHarmonizationResult,
+  DomainDecisionReadinessArgs,
+  DomainDecisionReadinessResult,
   DomainEvidenceHarmonizationCoverageOptions,
   DomainEvidenceHarmonizationCoverageResult,
   DomainEvidenceIntakeArgs,
@@ -784,6 +786,36 @@ export class ApiClient {
     options?: ClientRequestOptions,
   ): Promise<RestToolResponse<DomainEvidenceHarmonizationResult>> {
     return this.callTool<DomainEvidenceHarmonizationResult>("domain_evidence_harmonize", args, options);
+  }
+
+  /** Apply an explicit fail-closed structural policy across any selected domain reports. */
+  async domainDecisionReadinessAudit(
+    args: DomainDecisionReadinessArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainDecisionReadinessResult>> {
+    if (!isObject(args)) throw new ArgumentError("domain decision-readiness arguments must be an object");
+    if (typeof args.subject_id !== "string" || args.subject_id.trim().length === 0) throw new ArgumentError("subject_id must be a non-empty string");
+    if (!isObject(args.claim) || typeof args.claim.id !== "string" || args.claim.id.trim().length === 0) throw new ArgumentError("claim.id must be a non-empty string");
+    if (!Array.isArray(args.reports) || args.reports.length < 1 || args.reports.length > 64 || args.reports.some((report) => !isObject(report))) throw new ArgumentError("reports must contain 1..=64 objects");
+    if (!Array.isArray(args.links) || args.links.length < 1 || args.links.length > 256 || args.links.some((link) => !isObject(link))) throw new ArgumentError("links must contain 1..=256 objects");
+    for (const [index, link] of args.links.entries()) {
+      if (!Number.isSafeInteger(link.report_index) || link.report_index < 0 || link.report_index >= args.reports.length) throw new ArgumentError(`links[${index}].report_index is out of range`);
+      if (!(["supports", "qualifies", "contradicts", "context"] as const).includes(link.role)) throw new ArgumentError(`links[${index}].role is invalid`);
+      if (link.note !== undefined && typeof link.note !== "string") throw new ArgumentError(`links[${index}].note must be a string`);
+      if ((link.role === "qualifies" || link.role === "contradicts") && (!link.note || link.note.trim().length === 0)) throw new ArgumentError(`links[${index}].note is required for ${link.role}`);
+      if (link.report_digest !== undefined && !/^[0-9a-f]{64}$/.test(link.report_digest)) throw new ArgumentError(`links[${index}].report_digest must be a lowercase SHA-256 digest`);
+    }
+    if (!isObject(args.policy)) throw new ArgumentError("policy must be an object");
+    for (const [name, value] of [["required_group_ids", args.policy.required_group_ids], ["required_domains", args.policy.required_domains]] as const) {
+      if (value !== undefined && (!Array.isArray(value) || value.length > 64 || value.some((item) => typeof item !== "string" || item.trim().length === 0))) throw new ArgumentError(`${name} must contain at most 64 non-empty strings`);
+    }
+    for (const [name, value, minimum] of [["minimum_supporting_reports", args.policy.minimum_supporting_reports, 1], ["minimum_qualifying_reports", args.policy.minimum_qualifying_reports, 0]] as const) {
+      if (value !== undefined && (!Number.isSafeInteger(value) || value < minimum || value > 64)) throw new ArgumentError(`${name} must be ${minimum}..=64`);
+    }
+    for (const [name, value] of [["require_all_reports_linked", args.policy.require_all_reports_linked], ["reject_contradictions", args.policy.reject_contradictions], ["reject_refused_reports", args.policy.reject_refused_reports], ["allow_review_required", args.policy.allow_review_required], ["require_lineage_parents", args.policy.require_lineage_parents]] as const) {
+      if (value !== undefined && typeof value !== "boolean") throw new ArgumentError(`${name} must be a boolean`);
+    }
+    return this.callTool<DomainDecisionReadinessResult>("domain_decision_readiness_audit", args, options);
   }
 
   /** Query retained harmonization artifacts without returning their full bodies. */

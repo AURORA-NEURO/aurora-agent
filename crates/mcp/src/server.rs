@@ -127,7 +127,7 @@ use bioprism_dataops::{
 };
 use bioprism_devplat::{
     apply_binding, audit_ci_execution_evidence, audit_ci_provider_evidence,
-    audit_domain_evidence_provider_external_payload_execution,
+    audit_domain_decision_readiness, audit_domain_evidence_provider_external_payload_execution,
     audit_domain_evidence_provider_external_payload_lineage, audit_execution_provenance,
     build_dashboard, build_delivery_receipt, build_domain_acquisition_catalogue,
     build_domain_workflow_catalogue, build_domain_workflow_portfolio,
@@ -163,7 +163,8 @@ use bioprism_devplat::{
     WorkbenchReportRegistry, WorkbenchRequest, WorkbenchVerificationRequest,
     WorkflowExecutionEvidenceRegistry, ADAPTER_DOMAIN_REPORT_SCHEMA_VERSION,
     ADAPTER_DOMAIN_REPORT_WORKFLOW, CAPABILITY_SCHEMA_VERSION, DOMAIN_ACQUISITION_SCHEMA_VERSION,
-    DOMAIN_ACQUISITION_WORKFLOW, DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION,
+    DOMAIN_ACQUISITION_WORKFLOW, DOMAIN_DECISION_READINESS_SCHEMA_VERSION,
+    DOMAIN_DECISION_READINESS_WORKFLOW, DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION,
     DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA_VERSION,
     DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION,
     DOMAIN_EVIDENCE_INTAKE_WORKFLOW, DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_SCHEMA,
@@ -1619,6 +1620,7 @@ impl Server {
             "artifact_registry_audit" => self.artifact_registry_audit(&arguments),
             "domain_report_project" => self.domain_report_project(&arguments),
             "domain_evidence_harmonize" => self.domain_evidence_harmonize(&arguments),
+            "domain_decision_readiness_audit" => self.domain_decision_readiness_audit(&arguments),
             "domain_evidence_harmonization_coverage" => {
                 self.domain_evidence_harmonization_coverage(&arguments)
             }
@@ -3927,6 +3929,104 @@ impl Server {
                 "traceability proves any claim or chooses between contradictory reports",
                 "harmonization proves scientific, clinical, regulatory, publication, or release validity",
                 "artifact indexing proves provenance completeness or external effect completion"
+            ]
+        }))
+    }
+
+    /// Apply a caller-owned structural readiness policy to reports from any capability group.
+    ///
+    /// The core audit deliberately knows nothing about the workspace catalogue. The MCP boundary
+    /// adds that binding here, so a report cannot claim membership in a group or domain merely by
+    /// spelling the label. The retained audit is content-addressed separately from this transport
+    /// wrapper and remains a structural handoff, never a scientific or clinical conclusion.
+    fn domain_decision_readiness_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let audit = audit_domain_decision_readiness(arguments)
+            .map_err(|error| format!("domain decision-readiness audit refused: {error}"))?;
+        let catalogue = CapabilityCatalogue::from_value(&workspace_capabilities())
+            .map_err(|error| format!("workspace capability catalogue is invalid: {error}"))?;
+        let reports = audit
+            .pointer("/harmonization/reports")
+            .and_then(Value::as_array)
+            .ok_or("decision-readiness audit omitted harmonization reports")?;
+        let mut artifact_domains = BTreeSet::new();
+        let mut parent_digests = Vec::new();
+        for row in reports {
+            let group_id = row
+                .get("group_id")
+                .and_then(Value::as_str)
+                .ok_or("decision-readiness report omitted group_id")?;
+            let source_tool = row
+                .get("source_tool")
+                .and_then(Value::as_str)
+                .ok_or("decision-readiness report omitted source_tool")?;
+            let group = catalogue
+                .groups()
+                .iter()
+                .find(|group| group.id == group_id)
+                .ok_or_else(|| format!("unknown capability group {group_id:?}"))?;
+            if !group.mcp_tools.iter().any(|tool| tool == source_tool) {
+                return Err(format!(
+                    "source_tool {source_tool:?} is not declared by capability group {group_id:?}"
+                ));
+            }
+            let domains = row
+                .get("domains")
+                .and_then(Value::as_array)
+                .ok_or("decision-readiness report omitted domains")?;
+            for domain in domains.iter().filter_map(Value::as_str) {
+                if !group
+                    .domains
+                    .iter()
+                    .any(|declared| declared.eq_ignore_ascii_case(domain))
+                {
+                    return Err(format!(
+                        "domain label {domain:?} is not declared by capability group {group_id:?}"
+                    ));
+                }
+                artifact_domains.insert(domain.to_string());
+            }
+            if let Some(digest) = row.get("digest").and_then(Value::as_str) {
+                parent_digests.push(digest.to_string());
+            }
+        }
+        let subject_id = audit
+            .get("subject_id")
+            .and_then(Value::as_str)
+            .ok_or("decision-readiness audit omitted subject_id")?;
+        let projection = self.index_artifact_projection(
+            "domain_decision_readiness",
+            subject_id,
+            artifact_domains.into_iter().collect(),
+            parent_digests,
+            audit.clone(),
+        );
+        if projection.get("indexed") != Some(&Value::Bool(true)) {
+            return Err(format!(
+                "domain decision-readiness audit could not be indexed: {}",
+                projection
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown artifact registry error")
+            ));
+        }
+        Ok(json!({
+            "ok": true,
+            "schema": DOMAIN_DECISION_READINESS_SCHEMA_VERSION,
+            "workflow": DOMAIN_DECISION_READINESS_WORKFLOW,
+            "audit": audit,
+            "artifact_registry": projection,
+            "catalogue_digest": catalogue.digest().to_string(),
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "guarantees": [
+                "all report source tools and domain labels were checked against the authoritative 29-group catalogue",
+                "the policy result preserves separate coverage, support, qualification, contradiction, refusal, review, and lineage states",
+                "the retained audit is indexed by exact JSON content digest with source report digests as parents"
+            ],
+            "does_not_claim": [
+                "a ready_for_human_review state proves a scientific, clinical, causal, regulatory, publication, or release conclusion",
+                "catalogue membership proves that a source tool executed or that its response is authentic",
+                "artifact retention proves external provenance, consent, identity, execution, or authority"
             ]
         }))
     }
@@ -34283,6 +34383,7 @@ pub fn workspace_capabilities() -> Value {
         "adapter_execution_evidence_query",
         "domain_evidence_intake",
         "domain_evidence_coverage",
+        "domain_decision_readiness_audit",
     ];
     if let Some(groups) = catalogue.as_array_mut() {
         for group in groups {
@@ -34564,6 +34665,21 @@ pub fn tool_definitions() -> Vec<Value> {
                     "include_report_digests": { "type": "boolean", "description": "Include joined report digests in each summary row; defaults false." }
                 },
                 "required": []
+            }
+        }),
+        json!({
+            "name": "domain_decision_readiness_audit",
+            "description": "Apply an explicit fail-closed structural policy to reports spanning any selected capability domains. It reuses domain evidence harmonization, checks required groups/domains, support and qualification floors, explicit contradictions, refused and review-required reports, report links, and lineage-parent requirements, then returns a digest-bound readiness state. ready_for_human_review means only that the caller's structural policy was satisfied; it never means scientific, clinical, causal, regulatory, publication, release, or execution validity.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "subject_id": { "type": "string", "description": "Exact subject identity shared by every report." },
+                    "claim": { "type": "object", "description": "Opaque caller claim descriptor with a required non-empty id." },
+                    "reports": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "object" }, "description": "Canonical domain_report bodies or domain_report_project response wrappers." },
+                    "links": { "type": "array", "minItems": 1, "maxItems": 256, "items": { "type": "object" }, "description": "Explicit report links with report_index, role, and report_digest; supports, qualifies, contradicts, and context remain distinct." },
+                    "policy": { "type": "object", "description": "Caller-owned gate policy: required_group_ids, required_domains, minimum_supporting_reports (default 1), minimum_qualifying_reports (default 0), require_all_reports_linked (default true), reject_contradictions (default true), reject_refused_reports (default true), allow_review_required (default false), and require_lineage_parents (default false)." }
+                },
+                "required": ["subject_id", "claim", "reports", "links", "policy"]
             }
         }),
         json!({

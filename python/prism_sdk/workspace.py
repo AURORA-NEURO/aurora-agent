@@ -45,6 +45,10 @@ from .domain_evidence import (
     DomainEvidenceHarmonizationReport,
     DomainEvidenceHarmonizeRequest,
 )
+from .domain_decision_readiness import (
+    DomainDecisionReadinessReport,
+    DomainDecisionReadinessRequest,
+)
 from .domain_evidence_intake import (
     DomainEvidenceIntakeCoverageReport,
     DomainEvidenceIntakeCoverageRequest,
@@ -2423,6 +2427,23 @@ class Workspace:
         request: DomainEvidenceHarmonizeRequest | Mapping[str, Any],
     ) -> DomainEvidenceHarmonizationReport:
         return DomainEvidenceHarmonizationReport.from_wire(self.domain_evidence_harmonize(request))
+
+    def domain_decision_readiness_audit(
+        self,
+        request: DomainDecisionReadinessRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainDecisionReadinessRequest)
+            else DomainDecisionReadinessRequest(**dict(request))
+        )
+        return self.tool("domain_decision_readiness_audit", normalized.to_arguments())
+
+    def domain_decision_readiness_audit_report(
+        self,
+        request: DomainDecisionReadinessRequest | Mapping[str, Any],
+    ) -> DomainDecisionReadinessReport:
+        return DomainDecisionReadinessReport.from_wire(self.domain_decision_readiness_audit(request))
 
     def domain_evidence_harmonization_coverage(
         self,
@@ -6538,6 +6559,25 @@ class AsyncWorkspace:
     ) -> DomainEvidenceHarmonizationReport:
         return DomainEvidenceHarmonizationReport.from_wire(
             await self.domain_evidence_harmonize(request)
+        )
+
+    async def domain_decision_readiness_audit(
+        self,
+        request: DomainDecisionReadinessRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainDecisionReadinessRequest)
+            else DomainDecisionReadinessRequest(**dict(request))
+        )
+        return await self.tool("domain_decision_readiness_audit", normalized.to_arguments())
+
+    async def domain_decision_readiness_audit_report(
+        self,
+        request: DomainDecisionReadinessRequest | Mapping[str, Any],
+    ) -> DomainDecisionReadinessReport:
+        return DomainDecisionReadinessReport.from_wire(
+            await self.domain_decision_readiness_audit(request)
         )
 
     async def domain_evidence_harmonization_coverage(

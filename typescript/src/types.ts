@@ -5863,6 +5863,51 @@ export interface DomainEvidenceHarmonizationResult extends JsonObject {
   does_not_claim: string[];
 }
 
+export type DomainDecisionReadinessState =
+  | "ready_for_human_review"
+  | "review_required"
+  | "incomplete"
+  | "blocked";
+
+export interface DomainDecisionReadinessPolicy extends JsonObject {
+  required_group_ids?: string[];
+  required_domains?: string[];
+  minimum_supporting_reports?: number;
+  minimum_qualifying_reports?: number;
+  require_all_reports_linked?: boolean;
+  reject_contradictions?: boolean;
+  reject_refused_reports?: boolean;
+  allow_review_required?: boolean;
+  require_lineage_parents?: boolean;
+}
+
+export interface DomainDecisionReadinessArgs extends JsonObject {
+  subject_id: string;
+  claim: JsonObject;
+  reports: JsonObject[];
+  links: DomainEvidenceLinkArgs[];
+  policy: DomainDecisionReadinessPolicy;
+}
+
+export interface DomainDecisionReadinessResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-decision-readiness/0.1";
+  workflow: "domain_decision_readiness_audit";
+  audit: JsonObject & {
+    decision_state: DomainDecisionReadinessState;
+    policy_satisfied: boolean;
+    counts: JsonObject;
+    blockers: JsonObject[];
+    digest: string;
+  };
+  artifact_registry: JsonObject;
+  catalogue_digest: string;
+  readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
 export interface DomainEvidenceHarmonizationCoverageOptions extends JsonObject {
   subject_id?: string;
   domain?: string;

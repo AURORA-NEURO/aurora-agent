@@ -643,6 +643,14 @@ async Python and TypeScript facades all preserve cursor bounds and the distincti
 missing parent, a retained parent, and a digest that is merely declared. It is a structural
 lineage view only: no digest, parent edge, child edge, or intake outcome becomes execution,
 causal provenance, scientific, clinical, provider, release, or readiness authority.
+`domain_decision_readiness_audit` is the next cross-domain policy gate. It accepts the caller's
+same-subject canonical reports and explicit link roles, then evaluates required groups/domains,
+support and qualification floors, contradiction/refusal policy, review posture, report linkage,
+and optional lineage-parent requirements. Its `blocked`, `incomplete`, `review_required`, and
+`ready_for_human_review` states are structural dispositions, not scientific, clinical, release,
+execution, or truth claims; `readiness_claimed` remains false and execution remains `not_started`.
+The MCP tool is available to every current domain group, and the generic REST dispatcher plus
+sync/async Python and TypeScript clients preserve the same digest-bound audit and indexed artifact.
 carry disclosure ratchets, fail-closed score publication, comparability conditions, and typed
 unranked entries into agent-callable public-hub projections. `release_audit` composes required
 registry, bundle, quality, conformance, research-CI, operations, and pack-health gates while

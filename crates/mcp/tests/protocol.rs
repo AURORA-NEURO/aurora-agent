@@ -326,7 +326,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 232);
+    assert_eq!(tools.len(), 233);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -1239,6 +1239,94 @@ fn domain_evidence_harmonization_refuses_subject_or_catalogue_mismatch() {
         }),
     );
     assert_eq!(invalid_catalogue["__isError"], json!(true));
+}
+
+#[test]
+fn domain_decision_readiness_audit_retains_cross_domain_policy_and_review_state() {
+    let mut server = server();
+    let first = call(
+        &mut server,
+        "domain_report_project",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "readiness-subject",
+            "source_tool": "modality_catalog",
+            "report": {"observations": ["modality contract retained"]},
+            "claim_posture": {
+                "status": "observed",
+                "does_not_claim": ["clinical validity"]
+            }
+        }),
+    );
+    let second = call(
+        &mut server,
+        "domain_report_project",
+        json!({
+            "group_id": "biological_ir_and_query",
+            "domains": ["BioQL syntax"],
+            "subject_id": "readiness-subject",
+            "source_tool": "bioql_compile",
+            "report": {"observations": ["query syntax contract retained"]},
+            "claim_posture": {
+                "status": "review_required",
+                "does_not_claim": ["query execution", "biological truth"]
+            }
+        }),
+    );
+    let arguments = json!({
+        "subject_id": "readiness-subject",
+        "claim": {"id": "claim-readiness-1", "statement": "caller-owned structural claim"},
+        "reports": [first["report"].clone(), second["report"].clone()],
+        "links": [
+            {"report_index": 0, "role": "supports"},
+            {"report_index": 1, "role": "context"}
+        ],
+        "policy": {
+            "required_group_ids": ["biological_domains", "biological_ir_and_query"],
+            "required_domains": ["modalities", "BioQL syntax"],
+            "minimum_supporting_reports": 1,
+            "minimum_qualifying_reports": 0,
+            "allow_review_required": true
+        }
+    });
+
+    let first_audit = call(
+        &mut server,
+        "domain_decision_readiness_audit",
+        arguments.clone(),
+    );
+    assert_eq!(
+        first_audit["workflow"],
+        json!("domain_decision_readiness_audit")
+    );
+    assert_eq!(
+        first_audit["audit"]["decision_state"],
+        json!("review_required")
+    );
+    assert_eq!(first_audit["audit"]["policy_satisfied"], json!(false));
+    assert_eq!(first_audit["readiness_claimed"], json!(false));
+    assert_eq!(first_audit["execution"], json!("not_started"));
+    assert_eq!(first_audit["artifact_registry"]["indexed"], json!(true));
+    assert_eq!(
+        first_audit["artifact_registry"]["verification"]["method"],
+        json!("domain_decision_readiness")
+    );
+    assert_eq!(
+        first_audit["audit"]["counts"]["supporting_reports"],
+        json!(1)
+    );
+    assert_eq!(
+        first_audit["audit"]["counts"]["review_required_reports"],
+        json!(1)
+    );
+
+    let replay = call(&mut server, "domain_decision_readiness_audit", arguments);
+    assert_eq!(
+        replay["artifact_registry"]["content_digest"],
+        first_audit["artifact_registry"]["content_digest"]
+    );
+    assert_eq!(replay["artifact_registry"]["already_present"], json!(true));
 }
 
 #[test]
@@ -8353,12 +8441,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(232));
-    assert_eq!(result["advertised_tool_count"], json!(232));
+    assert_eq!(result["unique_catalog_tools"], json!(233));
+    assert_eq!(result["advertised_tool_count"], json!(233));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(232));
-    assert_eq!(result["schema_quality"]["valid"], json!(232));
+    assert_eq!(result["schema_quality"]["checked"], json!(233));
+    assert_eq!(result["schema_quality"]["valid"], json!(233));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

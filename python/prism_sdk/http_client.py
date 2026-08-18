@@ -60,6 +60,10 @@ from .domain_evidence import (
     DomainEvidenceHarmonizationReport,
     DomainEvidenceHarmonizeRequest,
 )
+from .domain_decision_readiness import (
+    DomainDecisionReadinessReport,
+    DomainDecisionReadinessRequest,
+)
 from .domain_evidence_intake import (
     DomainEvidenceIntakeCoverageReport,
     DomainEvidenceIntakeCoverageRequest,
@@ -1050,6 +1054,21 @@ class ApiClient:
         )
         return DomainEvidenceHarmonizationReport.from_wire(
             self.call_tool("domain_evidence_harmonize", normalized.to_arguments())
+        )
+
+    def domain_decision_readiness_audit(
+        self,
+        request: DomainDecisionReadinessRequest | Mapping[str, Any],
+    ) -> DomainDecisionReadinessReport:
+        """Apply a digest-bound structural readiness policy through the MCP tool route."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainDecisionReadinessRequest)
+            else DomainDecisionReadinessRequest(**dict(request))
+        )
+        return DomainDecisionReadinessReport.from_wire(
+            self.call_tool("domain_decision_readiness_audit", normalized.to_arguments())
         )
 
     def domain_evidence_harmonization_coverage(
@@ -6077,6 +6096,12 @@ class AsyncApiClient:
         request: DomainEvidenceHarmonizeRequest | Mapping[str, Any],
     ) -> DomainEvidenceHarmonizationReport:
         return await asyncio.to_thread(self.client.domain_evidence_harmonize_tool, request)
+
+    async def domain_decision_readiness_audit(
+        self,
+        request: DomainDecisionReadinessRequest | Mapping[str, Any],
+    ) -> DomainDecisionReadinessReport:
+        return await asyncio.to_thread(self.client.domain_decision_readiness_audit, request)
 
     async def domain_evidence_harmonization_coverage(
         self,

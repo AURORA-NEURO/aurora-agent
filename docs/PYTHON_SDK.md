@@ -49,6 +49,13 @@ requires exact same-subject reports and explicit support/qualification/contradic
 roles; the typed result preserves traceability state, contradiction posture, catalogue digest,
 and artifact digest, plus bridge class/mode and lineage coverage from the harmonization payload,
 without treating report presence or a support link as a scientific or release claim.
+`DomainDecisionReadinessRequest` and `DomainDecisionReadinessReport` add a shared structural
+policy gate over those reports. `ApiClient.domain_decision_readiness_audit()` and its async
+counterpart, plus `Workspace.domain_decision_readiness_audit_report()` and the async workspace
+helper, preserve required group/domain coverage, support and qualification floors, explicit
+contradiction/refusal handling, review allowance, linkage, lineage, blockers, audit digest, and
+artifact-registry identity. `ready_for_human_review` means only that the supplied structural
+policy passed; the typed model rejects any response that claims readiness or execution.
 `DomainEvidenceHarmonizationCoverageRequest` and
 `DomainEvidenceHarmonizationCoverageReport` provide the bounded retained read model through
 `ApiClient.domain_evidence_harmonization_coverage()` and its tool counterpart, plus matching

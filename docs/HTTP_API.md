@@ -331,6 +331,14 @@ aggregates matching rows before pagination, while `matching_count`, `returned_co
 `next_after` make truncation explicit. A coverage row is an index observation only: it does not fetch
 or reinterpret the harmonization body, and complete traceability does not establish truth, validity,
 provenance completeness, execution, clinical safety, or release readiness.
+`POST /v1/tools/domain_decision_readiness_audit` applies the same explicit structural policy to a
+caller-selected set of canonical reports. Its policy can require exact groups/domains, minimum
+supporting or qualifying reports, complete links, lineage parents, and fail-closed handling for
+contradictions, refusals, or review-required reports. The response keeps every blocker and emits
+`blocked`, `incomplete`, `review_required`, or `ready_for_human_review`; the last state means only
+that the supplied structure passed the caller's policy. It never claims scientific, clinical,
+causal, release, execution, or truth readiness, and remains `readiness_claimed: false` with
+`execution: "not_started"`.
 `POST /v1/domain-evidence/intake` is the raw-envelope boundary for all 29 capability groups. It
 requires a declared group, source tool, domain label, response JSON, explicit outcome, and claim
 posture; an original request is optional and its absence is distinguished from a supplied JSON

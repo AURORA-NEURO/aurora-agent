@@ -217,6 +217,7 @@ pub mod classify;
 pub mod cross_domain_audit;
 pub mod delivery_receipt;
 pub mod domain_acquisition;
+pub mod domain_decision_readiness;
 pub mod domain_evidence;
 pub mod domain_evidence_intake;
 pub mod domain_evidence_provider;
@@ -333,6 +334,13 @@ pub use domain_acquisition::{
     DomainInterpretationRoute, DomainTransportRoute, DOMAIN_ACQUISITION_SCHEMA_VERSION,
     DOMAIN_ACQUISITION_WORKFLOW, MAX_DOMAIN_ACQUISITION_ADAPTERS, MAX_DOMAIN_ACQUISITION_DOMAINS,
     MAX_DOMAIN_ACQUISITION_GROUPS,
+};
+pub use domain_decision_readiness::{
+    audit_domain_decision_readiness, validate_domain_decision_readiness,
+    DomainDecisionReadinessError, DOMAIN_DECISION_READINESS_SCHEMA_VERSION,
+    DOMAIN_DECISION_READINESS_WORKFLOW, MAX_DOMAIN_DECISION_READINESS_BLOCKERS,
+    MAX_DOMAIN_DECISION_READINESS_BYTES, MAX_DOMAIN_DECISION_READINESS_REPORTS,
+    MAX_DOMAIN_DECISION_READINESS_REQUIREMENTS, MAX_DOMAIN_DECISION_READINESS_TEXT_BYTES,
 };
 pub use domain_evidence::{
     harmonize_domain_evidence, validate_domain_evidence_harmonization, DomainEvidenceError,
