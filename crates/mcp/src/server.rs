@@ -1213,15 +1213,32 @@ impl Server {
         workflow_reconciliation_registry: Arc<Mutex<DomainWorkflowReconciliationRegistry>>,
         artifact_registry: Arc<Mutex<ArtifactRegistry>>,
     ) -> Self {
+        Self::with_registries_and_artifacts_and_workflow_execution_evidence(
+            root,
+            evidence_registry,
+            workflow_reconciliation_registry,
+            Arc::new(Mutex::new(WorkflowExecutionEvidenceRegistry::new())),
+            artifact_registry,
+        )
+    }
+
+    /// Construct a server over every caller-owned registry, including portable workflow
+    /// execution evidence. The API gateway uses this seam so MCP and HTTP requests share both
+    /// the live digest indexes and their restart-aware persistence boundary.
+    pub fn with_registries_and_artifacts_and_workflow_execution_evidence(
+        root: PathBuf,
+        evidence_registry: Arc<Mutex<EvidenceBundleRegistry>>,
+        workflow_reconciliation_registry: Arc<Mutex<DomainWorkflowReconciliationRegistry>>,
+        workflow_execution_evidence_registry: Arc<Mutex<WorkflowExecutionEvidenceRegistry>>,
+        artifact_registry: Arc<Mutex<ArtifactRegistry>>,
+    ) -> Self {
         Server {
             root: std::fs::canonicalize(&root).unwrap_or(root),
             lifecycle: Lifecycle::New,
             mission_trace_observer: None,
             evidence_registry,
             workflow_reconciliation_registry,
-            workflow_execution_evidence_registry: Arc::new(Mutex::new(
-                WorkflowExecutionEvidenceRegistry::new(),
-            )),
+            workflow_execution_evidence_registry,
             artifact_registry,
         }
     }

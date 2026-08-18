@@ -15,7 +15,8 @@ use bioprism_devplat::{
     ArtifactRegistryError, DomainWorkflowReconciliationRegistry, EvidenceBundleError,
     EvidenceBundleRegistry, EvidenceRegistryError, MissionEvaluatorCatalogue,
     MissionEvaluatorReplayCompareRequest, MissionEvaluatorReplayRequest,
-    MAX_ARTIFACT_REGISTRY_BYTES, MAX_EVIDENCE_REGISTRY_BYTES,
+    WorkflowExecutionEvidenceRegistry, MAX_ARTIFACT_REGISTRY_BYTES, MAX_EVIDENCE_REGISTRY_BYTES,
+    MAX_WORKFLOW_EXECUTION_EVIDENCE_BYTES,
 };
 use bioprism_factory::{
     AuthorityMutation, ExecutionOperation, Idempotency as FactoryIdempotency, Job as FactoryJob,
@@ -88,6 +89,8 @@ pub struct ApiConfig {
     pub reconciliation_state_path: Option<PathBuf>,
     /// Optional atomic JSON checkpoint for the bounded cross-domain artifact and lineage index.
     pub artifact_state_path: Option<PathBuf>,
+    /// Optional atomic JSON checkpoint for independently validated workflow execution evidence.
+    pub workflow_execution_evidence_state_path: Option<PathBuf>,
 }
 
 impl Default for ApiConfig {
@@ -105,6 +108,7 @@ impl Default for ApiConfig {
             evidence_state_path: None,
             reconciliation_state_path: None,
             artifact_state_path: None,
+            workflow_execution_evidence_state_path: None,
         }
     }
 }
@@ -180,6 +184,13 @@ impl ApiConfig {
         {
             return Err("artifact_state_path must not be empty".into());
         }
+        if self
+            .workflow_execution_evidence_state_path
+            .as_ref()
+            .is_some_and(|path| path.as_os_str().is_empty())
+        {
+            return Err("workflow_execution_evidence_state_path must not be empty".into());
+        }
         Ok(())
     }
 }
@@ -200,6 +211,8 @@ pub struct ApiRouter {
     reconciliation_persistence: Arc<ReconciliationPersistence>,
     artifact_registry: Arc<Mutex<ArtifactRegistry>>,
     artifact_persistence: Arc<ArtifactPersistence>,
+    workflow_execution_evidence_registry: Arc<Mutex<WorkflowExecutionEvidenceRegistry>>,
+    workflow_execution_evidence_persistence: Arc<WorkflowExecutionEvidencePersistence>,
 }
 
 struct MissionJob {
@@ -241,6 +254,12 @@ struct ReconciliationPersistence {
 struct ArtifactPersistence {
     path: Option<PathBuf>,
     registry: Arc<Mutex<ArtifactRegistry>>,
+    lock: Mutex<()>,
+}
+
+struct WorkflowExecutionEvidencePersistence {
+    path: Option<PathBuf>,
+    registry: Arc<Mutex<WorkflowExecutionEvidenceRegistry>>,
     lock: Mutex<()>,
 }
 
@@ -809,6 +828,78 @@ impl ArtifactPersistence {
     }
 }
 
+impl WorkflowExecutionEvidencePersistence {
+    fn persist(&self) -> Result<usize, String> {
+        if self.path.is_none() {
+            return Ok(0);
+        }
+        let registry = self
+            .registry
+            .lock()
+            .map_err(|_| "workflow execution evidence registry is unavailable".to_string())?;
+        let document = registry.snapshot().map_err(|error| error.to_string())?;
+        self.persist_snapshot(&document)
+    }
+
+    fn persist_snapshot(&self, document: &Value) -> Result<usize, String> {
+        let Some(path) = self.path.as_deref() else {
+            return Ok(0);
+        };
+        let _write_guard = self.lock.lock().map_err(|_| {
+            "workflow execution evidence persistence lock is unavailable".to_string()
+        })?;
+        let bytes = serde_json::to_vec_pretty(document).map_err(|error| {
+            format!("workflow execution evidence state could not be serialized: {error}")
+        })?;
+        if bytes.len() > MAX_WORKFLOW_EXECUTION_EVIDENCE_BYTES {
+            return Err(format!(
+                "workflow execution evidence state snapshot is {} bytes, above the {}-byte bound",
+                bytes.len(),
+                MAX_WORKFLOW_EXECUTION_EVIDENCE_BYTES
+            ));
+        }
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                format!("workflow execution evidence state directory could not be created: {error}")
+            })?;
+        }
+        let filename = path
+            .file_name()
+            .ok_or_else(|| "workflow_execution_evidence_state_path must name a file".to_string())?
+            .to_string_lossy();
+        let temporary = path.with_file_name(format!(
+            ".{filename}.tmp-{}",
+            NEXT_CHECKPOINT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::write(&temporary, &bytes).map_err(|error| {
+            format!(
+                "workflow execution evidence state temporary file could not be written: {error}"
+            )
+        })?;
+        if let Err(first_error) = std::fs::rename(&temporary, path) {
+            #[cfg(windows)]
+            {
+                let _ = std::fs::remove_file(path);
+                std::fs::rename(&temporary, path).map_err(|second_error| {
+                    format!(
+                        "workflow execution evidence state could not replace the previous snapshot ({first_error}; retry: {second_error})"
+                    )
+                })?;
+            }
+            #[cfg(not(windows))]
+            {
+                return Err(format!(
+                    "workflow execution evidence state snapshot could not be installed: {first_error}"
+                ));
+            }
+        }
+        Ok(bytes.len())
+    }
+}
+
 impl MissionPersistence {
     fn persist(&self) -> Result<(), String> {
         let Some(path) = self.path.as_deref() else {
@@ -1074,15 +1165,22 @@ impl ApiRouter {
         let restored_reconciliations =
             load_workflow_reconciliation_registry(config.reconciliation_state_path.as_deref())?;
         let restored_artifacts = load_artifact_registry(config.artifact_state_path.as_deref())?;
+        let restored_workflow_execution_evidence = load_workflow_execution_evidence_registry(
+            config.workflow_execution_evidence_state_path.as_deref(),
+        )?;
         let evidence_registry = Arc::new(Mutex::new(restored_evidence));
         let reconciliation_registry = Arc::new(Mutex::new(restored_reconciliations));
         let artifact_registry = Arc::new(Mutex::new(restored_artifacts));
-        let mut server = bioprism_mcp::Server::with_registries_and_artifacts(
-            root,
-            Arc::clone(&evidence_registry),
-            Arc::clone(&reconciliation_registry),
-            Arc::clone(&artifact_registry),
-        );
+        let workflow_execution_evidence_registry =
+            Arc::new(Mutex::new(restored_workflow_execution_evidence));
+        let mut server =
+            bioprism_mcp::Server::with_registries_and_artifacts_and_workflow_execution_evidence(
+                root,
+                Arc::clone(&evidence_registry),
+                Arc::clone(&reconciliation_registry),
+                Arc::clone(&workflow_execution_evidence_registry),
+                Arc::clone(&artifact_registry),
+            );
         let initialize = Request {
             id: Some(json!(0)),
             method: "initialize".into(),
@@ -1128,6 +1226,12 @@ impl ApiRouter {
             registry: Arc::clone(&artifact_registry),
             lock: Mutex::new(()),
         });
+        let workflow_execution_evidence_persistence =
+            Arc::new(WorkflowExecutionEvidencePersistence {
+                path: config.workflow_execution_evidence_state_path.clone(),
+                registry: Arc::clone(&workflow_execution_evidence_registry),
+                lock: Mutex::new(()),
+            });
         let router = Self {
             server,
             mission_executor,
@@ -1144,6 +1248,8 @@ impl ApiRouter {
             reconciliation_persistence,
             artifact_registry,
             artifact_persistence,
+            workflow_execution_evidence_registry,
+            workflow_execution_evidence_persistence,
         };
         if router.config.mission_state_path.is_some() {
             router.persist_mission_registry()?;
@@ -1173,6 +1279,17 @@ impl ApiRouter {
                 format!("artifact registry state checkpoint failed during startup: {error}")
             })?;
         }
+        if router
+            .config
+            .workflow_execution_evidence_state_path
+            .is_some()
+        {
+            router.persist_workflow_execution_evidence_registry().map_err(|error| {
+                    format!(
+                        "workflow execution evidence state checkpoint failed during startup: {error}"
+                    )
+                })?;
+        }
         Ok(router)
     }
 
@@ -1194,6 +1311,10 @@ impl ApiRouter {
 
     fn persist_artifact_registry(&self) -> Result<usize, String> {
         self.artifact_persistence.persist()
+    }
+
+    fn persist_workflow_execution_evidence_registry(&self) -> Result<usize, String> {
+        self.workflow_execution_evidence_persistence.persist()
     }
 
     pub fn handle(&self, request: HttpRequest) -> HttpResponse {
@@ -3750,6 +3871,7 @@ impl ApiRouter {
             // checkpoint it before returning the transport response when durability is enabled.
             let _ = self.reconciliation_persistence.persist();
             let _ = self.artifact_persistence.persist();
+            let _ = self.workflow_execution_evidence_persistence.persist();
         }
         HttpResponse::json(response_status(&wire), &wire)
     }
@@ -3785,6 +3907,7 @@ impl ApiRouter {
         self.record_tool_event(request_id, tool, &wire);
         let _ = self.reconciliation_persistence.persist();
         let _ = self.artifact_persistence.persist();
+        let _ = self.workflow_execution_evidence_persistence.persist();
         let transport_ok = wire.get("error").is_none();
         HttpResponse::json(
             if transport_ok {
@@ -4378,6 +4501,7 @@ impl ApiRouter {
         self.record_tool_event(request_id, tool, &wire);
         let _ = self.reconciliation_persistence.persist();
         let _ = self.artifact_persistence.persist();
+        let _ = self.workflow_execution_evidence_persistence.persist();
         let is_error = wire
             .pointer("/result/isError")
             .and_then(Value::as_bool)
@@ -4706,6 +4830,8 @@ impl ApiRouter {
         let worker_persistence = Arc::clone(&self.mission_persistence);
         let worker_reconciliation_persistence = Arc::clone(&self.reconciliation_persistence);
         let worker_artifact_persistence = Arc::clone(&self.artifact_persistence);
+        let worker_workflow_execution_evidence_persistence =
+            Arc::clone(&self.workflow_execution_evidence_persistence);
         let worker_queue_persistence = Arc::clone(&self.mission_queue_persistence);
         let worker_id = mission_id.clone();
         let worker_mission_id = mission_id.clone();
@@ -4724,6 +4850,7 @@ impl ApiRouter {
                 // it before publishing the terminal mission state to the in-memory job registry.
                 let _ = worker_reconciliation_persistence.persist();
                 let _ = worker_artifact_persistence.persist();
+                let _ = worker_workflow_execution_evidence_persistence.persist();
                 if let Ok(mut current) = job.state.lock() {
                     match outcome {
                         Ok(result) => {
@@ -5742,18 +5869,57 @@ impl ApiRouter {
                     .map(str::to_string),
             )
         };
+        let (
+            workflow_execution_evidence_digests,
+            workflow_execution_evidence_generation,
+            workflow_execution_evidence_state_digest,
+        ) = {
+            let registry = match self.workflow_execution_evidence_registry.lock() {
+                Ok(registry) => registry,
+                Err(_) => {
+                    return self.error(
+                        500,
+                        "workflow_execution_evidence_registry_unavailable",
+                        "workflow execution evidence registry is unavailable",
+                        request_id,
+                    )
+                }
+            };
+            let snapshot = match registry.snapshot() {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    return self.error(
+                        500,
+                        "cross_domain_audit_unavailable",
+                        &format!("workflow execution evidence registry snapshot failed: {error}"),
+                        request_id,
+                    )
+                }
+            };
+            (
+                registry.digests_for_audit(),
+                registry.generation(),
+                snapshot
+                    .get("state_digest")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            )
+        };
         HttpResponse::json(
             200,
             &build_cross_domain_audit(
                 &artifact_records,
                 &evidence_digests,
                 &reconciliation_digests,
+                &workflow_execution_evidence_digests,
                 artifact_generation,
                 evidence_generation,
                 reconciliation_generation,
+                workflow_execution_evidence_generation,
                 artifact_state_digest,
                 evidence_state_digest,
                 reconciliation_state_digest,
+                workflow_execution_evidence_state_digest,
             ),
         )
     }
@@ -8504,6 +8670,37 @@ fn load_artifact_registry(path: Option<&Path>) -> Result<ArtifactRegistry, Strin
         .map_err(|error| format!("artifact state snapshot is invalid JSON: {error}"))?;
     ArtifactRegistry::from_snapshot(&document)
         .map_err(|error| format!("artifact state snapshot is invalid: {error}"))
+}
+
+fn load_workflow_execution_evidence_registry(
+    path: Option<&Path>,
+) -> Result<WorkflowExecutionEvidenceRegistry, String> {
+    let Some(path) = path else {
+        return Ok(WorkflowExecutionEvidenceRegistry::new());
+    };
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(WorkflowExecutionEvidenceRegistry::new())
+        }
+        Err(error) => {
+            return Err(format!(
+                "workflow execution evidence state snapshot could not be read: {error}"
+            ))
+        }
+    };
+    if bytes.len() > MAX_WORKFLOW_EXECUTION_EVIDENCE_BYTES {
+        return Err(format!(
+            "workflow execution evidence state snapshot is {} bytes, above the {}-byte bound",
+            bytes.len(),
+            MAX_WORKFLOW_EXECUTION_EVIDENCE_BYTES
+        ));
+    }
+    let document: Value = serde_json::from_slice(&bytes).map_err(|error| {
+        format!("workflow execution evidence state snapshot is invalid JSON: {error}")
+    })?;
+    WorkflowExecutionEvidenceRegistry::from_snapshot(&document)
+        .map_err(|error| format!("workflow execution evidence state snapshot is invalid: {error}"))
 }
 
 fn load_mission_jobs(path: Option<&Path>) -> Result<BTreeMap<String, Arc<MissionJob>>, String> {
@@ -11443,8 +11640,105 @@ mod tests {
             cross_store["stores"]["artifact_registry"]["record_count"],
             2
         );
+        assert_eq!(
+            cross_store["stores"]["workflow_execution_evidence_registry"]["record_count"],
+            0
+        );
         assert_eq!(cross_store["findings"], json!([]));
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn workflow_execution_evidence_api_shares_and_restores_registry() {
+        let evidence_path = test_state_path("workflow-execution-evidence-registry");
+        let artifact_path = test_state_path("workflow-execution-evidence-artifacts");
+        let config = ApiConfig {
+            artifact_state_path: Some(artifact_path.clone()),
+            workflow_execution_evidence_state_path: Some(evidence_path.clone()),
+            ..ApiConfig::default()
+        };
+        let router = ApiRouter::new(std::env::current_dir().unwrap(), config.clone()).unwrap();
+        let executed = router.handle(request(
+            "POST",
+            "/v1/tools/interweave_workflow_execute",
+            json!({
+                "workflow": "biomedical_research_data_audit",
+                "problem": {
+                    "actions": ["hold", "release"],
+                    "models": ["safe", "unsafe"],
+                    "loss": [0.0, 2.0, 2.0, 0.0]
+                },
+                "belief": {"mass": [0.6, 0.4]},
+                "acquisitions": [{
+                    "id": "screen",
+                    "cost": 0.01,
+                    "outcomes": [
+                        {"label": "negative", "likelihood": [0.9, 0.2]},
+                        {"label": "positive", "likelihood": [0.1, 0.8]}
+                    ]
+                }],
+                "budget": 0.1,
+                "max_steps": 1,
+                "provider": "mcp-simulated",
+                "capabilities": ["data.read", "analysis.sandbox"],
+                "authorization": {"grant_id": "grant-1", "provider": "mcp-simulated"},
+                "observations": [{"acquisition_id": "screen", "outcome_label": "negative"}],
+                "evidence": {
+                    "subject_id": "api-workflow-evidence-subject",
+                    "domains": ["biomedical_research", "privacy"],
+                    "parent_digests": ["a".repeat(64)]
+                }
+            }),
+        ));
+        assert_eq!(
+            executed.status,
+            200,
+            "{}",
+            String::from_utf8_lossy(&executed.body)
+        );
+        let envelope: Value = serde_json::from_slice(&executed.body).unwrap();
+        let text = envelope["mcp"]["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap();
+        let result: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(
+            result["workflow_execution_evidence"]["ok"], true,
+            "{result}"
+        );
+        let evidence_digest = result["workflow_execution_evidence"]["evidence_digest"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let cross_store = router.handle(request("GET", "/v1/artifacts/cross-store", json!({})));
+        let cross_store: Value = serde_json::from_slice(&cross_store.body).unwrap();
+        assert_eq!(
+            cross_store["stores"]["workflow_execution_evidence_registry"]["record_count"],
+            1
+        );
+        drop(router);
+
+        let restored = ApiRouter::new(std::env::current_dir().unwrap(), config).unwrap();
+        let restored_cross_store =
+            restored.handle(request("GET", "/v1/artifacts/cross-store", json!({})));
+        let restored_cross_store: Value =
+            serde_json::from_slice(&restored_cross_store.body).unwrap();
+        assert_eq!(
+            restored_cross_store["stores"]["workflow_execution_evidence_registry"]["record_count"],
+            1
+        );
+        let fetched = restored.handle(request(
+            "POST",
+            "/v1/tools/interweave_workflow_execution_evidence_get",
+            json!({"evidence_digest": evidence_digest}),
+        ));
+        assert_eq!(fetched.status, 200);
+        let fetched: Value = serde_json::from_slice(&fetched.body).unwrap();
+        assert!(fetched["mcp"]["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("review_required"));
+        let _ = std::fs::remove_file(evidence_path);
+        let _ = std::fs::remove_file(artifact_path);
     }
 
     #[test]
