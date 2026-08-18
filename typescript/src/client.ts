@@ -15,6 +15,8 @@ import type {
   CapabilityDashboardArgs,
   CapabilityDashboardResult,
   CapabilityRouteArgs,
+  CapabilityRoutePlanArgs,
+  CapabilityRoutePlanResult,
   CapabilityRouteReviewArgs,
   CapabilityRouteReviewResult,
   CapabilityRouteResult,
@@ -1950,6 +1952,16 @@ export class ApiClient {
   async capabilityRouteReviewRest(args: CapabilityRouteReviewArgs, options?: ClientRequestOptions): Promise<CapabilityRouteReviewResult> {
     if (!isObject(args)) throw new ArgumentError("capability route review arguments must be an object");
     return this.request<CapabilityRouteReviewResult>("POST", "/v1/capabilities/route/review", args, options);
+  }
+
+  async capabilityRoutePlan(args: CapabilityRoutePlanArgs, options?: ClientRequestOptions): Promise<RestToolResponse<CapabilityRoutePlanResult>> {
+    return this.callTool<CapabilityRoutePlanResult>("capability_route_plan", args, options);
+  }
+
+  /** Compose an explicit route review with authoritative non-executing mission preflight. */
+  async capabilityRoutePlanRest(args: CapabilityRoutePlanArgs, options?: ClientRequestOptions): Promise<CapabilityRoutePlanResult> {
+    if (!isObject(args)) throw new ArgumentError("capability route plan arguments must be an object");
+    return this.request<CapabilityRoutePlanResult>("POST", "/v1/capabilities/route/plan", args, options);
   }
 
   async adapterPlan(args: AdapterPlanArgs, options?: ClientRequestOptions): Promise<RestToolResponse<AdapterPlanResult>> {

@@ -52,6 +52,8 @@ from prism_sdk import (
     MissionEvaluatorSearchReport,
     CapabilityRouteReport,
     CapabilityRouteNeed,
+    CapabilityRoutePlanReport,
+    CapabilityRoutePlanRequest,
     CapabilityRouteRequest,
     CapabilityRouteReviewReport,
     CapabilityRouteReviewRequest,
@@ -102,6 +104,7 @@ from prism_sdk import (
     capability_audit_report,
     capability_discover_report,
     capability_route_report,
+    capability_route_plan_report,
     capability_route_review_report,
     mission_evaluator_discover_report,
     mission_evaluator_replay_report,
@@ -2527,6 +2530,59 @@ class AnalyticsModelTests(unittest.TestCase):
         report = capability_route_review_report(envelope)
         self.assertEqual(report.handoff_status, "mission_preflight_required")
 
+    def test_capability_route_plan_request_and_report_compose_non_executing_preflight(self) -> None:
+        request = CapabilityRoutePlanRequest(
+            "mission-route-plan",
+            route_report_payload(),
+            [{
+                "need_id": "oncology",
+                "tool": "oncology_search",
+                "domain": "oncology",
+                "capability": "evidence",
+                "objective": "review evidence",
+                "arguments": {},
+            }],
+        )
+        arguments = request.to_mcp_arguments()
+        self.assertEqual(arguments["mission_id"], "mission-route-plan")
+        self.assertTrue(arguments["validate_schemas"])
+        payload = {
+            "workflow": "capability_route_plan",
+            "ok": True,
+            "mission_id": "mission-route-plan",
+            "route_id": "r" * 64,
+            "review_id": "v" * 64,
+            "catalog_digest": "c" * 64,
+            "goal": "compose evidence",
+            "plan_status": "ready_for_caller_inspection",
+            "review": route_review_payload(),
+            "mission": {"mission_id": "mission-route-plan", "steps": []},
+            "preflight": {"ok": True, "dispatch": "not_started"},
+            "plan_digest": "a" * 64,
+            "route_review_provenance": {"present": True},
+            "dispatch": "not_started",
+            "execution": "not_started",
+        }
+        report = CapabilityRoutePlanReport.from_wire(payload)
+        self.assertTrue(report.ready_for_inspection)
+        self.assertEqual(report.review.review_id, "v" * 64)
+        self.assertEqual(report.plan_digest, "a" * 64)
+        self.assertEqual(capability_route_plan_report(payload).mission_id, "mission-route-plan")
+        with self.assertRaises(ArgumentError):
+            CapabilityRoutePlanRequest(
+                "mission-route-plan",
+                route_report_payload(),
+                [{
+                    "need_id": "oncology",
+                    "tool": "oncology_search",
+                    "domain": "oncology",
+                    "capability": "evidence",
+                    "objective": "review evidence",
+                    "arguments": {},
+                }],
+                policy={"execute": True},
+            )
+
 
 class AnalyticsWorkspaceTests(unittest.TestCase):
     def test_sync_workspace_sends_typed_analytics_request(self) -> None:
@@ -2887,6 +2943,54 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
             include_tools=False,
         )
 
+    def test_sync_workspace_exposes_capability_route_plan(self) -> None:
+        with Client(command(), timeout=2) as client:
+            result = Workspace(client).capability_route_plan({
+                "mission_id": "route-plan",
+                "route": route_report_payload(),
+                "selections": [{
+                    "need_id": "oncology",
+                    "tool": "oncology_search",
+                    "domain": "oncology",
+                    "capability": "evidence",
+                    "objective": "review evidence",
+                    "arguments": {},
+                }],
+            })
+        self.assertEqual(result["echo"]["mission_id"], "route-plan")
+
+    def test_sync_workspace_typed_capability_route_plan_report_delegates(self) -> None:
+        payload = {
+            "workflow": "capability_route_plan",
+            "ok": True,
+            "mission_id": "route-plan",
+            "route_id": "r" * 64,
+            "review_id": "v" * 64,
+            "catalog_digest": "c" * 64,
+            "goal": "compose evidence",
+            "plan_status": "ready_for_caller_inspection",
+            "review": route_review_payload(),
+            "mission": {"mission_id": "route-plan"},
+            "preflight": {"ok": True},
+            "dispatch": "not_started",
+            "execution": "not_started",
+        }
+        with patch.object(Workspace, "capability_route_plan", return_value=payload) as plan:
+            report = Workspace(None).capability_route_plan_report({
+                "mission_id": "route-plan",
+                "route": route_report_payload(),
+                "selections": [{
+                    "need_id": "oncology",
+                    "tool": "oncology_search",
+                    "domain": "oncology",
+                    "capability": "evidence",
+                    "objective": "review evidence",
+                    "arguments": {},
+                }],
+            })  # type: ignore[arg-type]
+        self.assertTrue(report.ready_for_inspection)
+        plan.assert_called_once()
+
     def test_sync_workspace_exposes_adapter_planning(self) -> None:
         with Client(command(), timeout=2) as client:
             result = Workspace(client).adapter_plan(
@@ -3213,6 +3317,59 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
             max_tools=128,
             include_tools=False,
         )
+
+    async def test_async_workspace_exposes_capability_route_plan(self) -> None:
+        async with AsyncClient(command(), timeout=2) as client:
+            result = await AsyncWorkspace(client).capability_route_plan({
+                "mission_id": "route-plan",
+                "route": route_report_payload(),
+                "selections": [{
+                    "need_id": "oncology",
+                    "tool": "oncology_search",
+                    "domain": "oncology",
+                    "capability": "evidence",
+                    "objective": "review evidence",
+                    "arguments": {},
+                }],
+            })
+        self.assertEqual(result["echo"]["mission_id"], "route-plan")
+
+    async def test_async_workspace_typed_capability_route_plan_report_delegates(self) -> None:
+        payload = {
+            "workflow": "capability_route_plan",
+            "ok": True,
+            "mission_id": "route-plan",
+            "route_id": "r" * 64,
+            "review_id": "v" * 64,
+            "catalog_digest": "c" * 64,
+            "goal": "compose evidence",
+            "plan_status": "ready_for_caller_inspection",
+            "review": route_review_payload(),
+            "mission": {"mission_id": "route-plan"},
+            "preflight": {"ok": True},
+            "dispatch": "not_started",
+            "execution": "not_started",
+        }
+        with patch.object(
+            AsyncWorkspace,
+            "capability_route_plan",
+            new_callable=AsyncMock,
+            return_value=payload,
+        ) as plan:
+            report = await AsyncWorkspace(None).capability_route_plan_report({
+                "mission_id": "route-plan",
+                "route": route_report_payload(),
+                "selections": [{
+                    "need_id": "oncology",
+                    "tool": "oncology_search",
+                    "domain": "oncology",
+                    "capability": "evidence",
+                    "objective": "review evidence",
+                    "arguments": {},
+                }],
+            })  # type: ignore[arg-type]
+        self.assertTrue(report.ready_for_inspection)
+        plan.assert_awaited_once()
 
     async def test_async_workspace_exposes_adapter_planning(self) -> None:
         async with AsyncClient(command(), timeout=2) as client:

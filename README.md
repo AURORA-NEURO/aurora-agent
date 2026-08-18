@@ -270,6 +270,11 @@ projection audits, plus bounded heterogeneous projection batches, while leaving 
 oracle decisions to Rust. `prism_sdk.ApiClient` and
 `AsyncApiClient` also speak the bounded HTTP gateway described in [`docs/HTTP_API.md`](docs/HTTP_API.md).
 
+The Python clients also expose `capability_route_plan`, which composes caller-selected route
+candidates with authoritative mission preflight across MCP and REST. It returns a digest-bound
+mission and `plan_digest` with explicit `dispatch: "not_started"`; route-review and preflight
+blockers remain structured, and no nested domain tool is dispatched.
+
 For every current or future MCP domain, the Python layer also exposes a schema-aware fallback:
 `tool_catalogue()` snapshots the live definitions, `plan_tool()` performs bounded transport-shape
 preflight, and `tool_checked()` executes only after that review. This does not claim domain
@@ -850,6 +855,12 @@ catalogue-bound `route_id`.
 the review identity, and the generated mission draft. Its explicit `carried_forward_not_recomputed`
 posture prevents retained discovery observations from being silently dropped or promoted into
 execution/readiness claims; legacy routes report `present: false`.
+`capability_route_plan` closes the public handoff seam by composing a complete route review with
+the authoritative mission preflight boundary. It accepts only caller-selected candidates and
+explicit arguments, carries optional claim/evaluator/workflow bindings, returns the generated
+mission and `plan_digest`, and fails closed with `dispatch: "not_started"` when route review or
+preflight is blocked. It never dispatches a nested tool or turns routing evidence into
+authorization; callers must inspect the preflight before invoking `agent_mission`.
 The reviewed handoff can now be supplied directly as `route_review` on `agent_mission` or
 `/v1/missions/preflight`. The mission boundary requires the ready review to match the submitted
 goal and exact serialized steps, binds its review/route/catalogue identities into the plan digest,

@@ -1372,6 +1372,9 @@ impl ApiRouter {
             ("POST", "/v1/capabilities/route/review") => {
                 self.capability_route_review(&request, &request_id)
             }
+            ("POST", "/v1/capabilities/route/plan") => {
+                self.capability_route_plan(&request, &request_id)
+            }
             ("GET", "/v1/recovery") => self.recovery_matrix(),
             ("GET", "/v1/operations/snapshot") => self.operations_snapshot(&request, &request_id),
             ("GET", "/v1/operations/domains") => {
@@ -3455,6 +3458,7 @@ impl ApiRouter {
                     "capability_dashboard": "/v1/capabilities/dashboard",
                     "capability_route": "/v1/capabilities/route",
                     "capability_route_review": "/v1/capabilities/route/review",
+                    "capability_route_plan": "/v1/capabilities/route/plan",
                     "recovery": "/v1/recovery",
                     "operations_snapshot": "/v1/operations/snapshot",
                     "operations_domains": "/v1/operations/domains",
@@ -4251,6 +4255,18 @@ impl ApiRouter {
         self.domain_workflow_tool(
             request_id,
             "capability_route_review",
+            Value::Object(arguments),
+        )
+    }
+
+    fn capability_route_plan(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        self.domain_workflow_tool(
+            request_id,
+            "capability_route_plan",
             Value::Object(arguments),
         )
     }
@@ -7496,6 +7512,7 @@ impl ApiRouter {
                     "/v1/capabilities/dashboard": { "get": { "parameters": [{ "name": "group_id", "in": "query" }, { "name": "domain", "in": "query" }, { "name": "status", "in": "query" }, { "name": "max_groups", "in": "query" }, { "name": "include_tools", "in": "query" }, { "name": "include_gaps", "in": "query" }], "responses": { "200": { "description": "bounded digest-bound cross-domain capability dashboard" }, "400": { "description": "dashboard query was invalid" } } } },
                     "/v1/capabilities/route": { "post": { "responses": { "200": { "description": "bounded non-executing cross-domain capability route proposal" }, "400": { "description": "route request JSON was invalid" }, "422": { "description": "route request was refused" } } } },
                     "/v1/capabilities/route/review": { "post": { "responses": { "200": { "description": "bounded non-executing route review and mission handoff" }, "400": { "description": "route review JSON was invalid" }, "422": { "description": "route review was refused" } } } },
+                    "/v1/capabilities/route/plan": { "post": { "responses": { "200": { "description": "bounded route review composed with authoritative non-executing mission preflight" }, "400": { "description": "route plan JSON was invalid" }, "422": { "description": "route plan was refused" } } } },
                     "/v1/recovery": { "get": { "responses": { "200": { "description": "operator-visible restart recovery matrix" } } } },
                     "/v1/operations/snapshot": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "bounded operator control-plane snapshot" } } } },
                     "/v1/operations/domains": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "bounded per-domain observed activity projection" } } } },
@@ -12072,6 +12089,129 @@ mod tests {
             review["mission_draft"]["route_evidence_digest"],
             route["evidence_digest"]
         );
+
+        let planned = router.handle(request(
+            "POST",
+            "/v1/capabilities/route/plan",
+            json!({
+                "mission_id": "route-plan-api-test",
+                "route": route,
+                "selections": [{
+                    "need_id": "audit",
+                    "tool": "capability_audit",
+                    "domain": "developer_platform",
+                    "capability": "capability_audit",
+                    "objective": "audit the capability catalogue",
+                    "arguments": {}
+                }],
+                "validate_schemas": true
+            }),
+        ));
+        assert_eq!(
+            planned.status,
+            200,
+            "{}",
+            String::from_utf8_lossy(&planned.body)
+        );
+        let planned: Value = serde_json::from_slice(&planned.body).unwrap();
+        assert_eq!(planned["workflow"], "capability_route_plan");
+        assert_eq!(planned["plan_status"], "ready_for_caller_inspection");
+        assert_eq!(planned["dispatch"], "not_started");
+        assert_eq!(planned["preflight"]["ok"], true);
+        assert_eq!(planned["preflight"]["dispatch"], "not_started");
+        assert_eq!(planned["mission"]["mission_id"], "route-plan-api-test");
+        assert_eq!(planned["plan_digest"].as_str().unwrap().len(), 64);
+        assert_eq!(
+            planned["mission"]["route_review"]["review_id"],
+            review["review_id"]
+        );
+        assert_eq!(planned["route_id"], review["route_id"]);
+
+        let refused = router.handle(request(
+            "POST",
+            "/v1/capabilities/route/plan",
+            json!({
+                "mission_id": "route-plan-policy-refusal",
+                "route": route,
+                "selections": [{
+                    "need_id": "audit",
+                    "tool": "capability_audit",
+                    "domain": "developer_platform",
+                    "capability": "capability_audit",
+                    "objective": "audit the capability catalogue",
+                    "arguments": {}
+                }],
+                "policy": {"execute": true}
+            }),
+        ));
+        assert_eq!(refused.status, 422);
+    }
+
+    #[test]
+    fn capability_route_plan_returns_a_bounded_outcome_for_every_catalogue_group() {
+        let router =
+            ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
+        let catalogue = bioprism_mcp::workspace_capabilities();
+        let groups = catalogue.as_array().unwrap();
+        assert!(
+            !groups.is_empty(),
+            "the cross-domain catalogue must not be empty"
+        );
+        for group in groups {
+            let group_id = group["id"].as_str().unwrap();
+            let route_response = router.handle(request(
+                "POST",
+                "/v1/capabilities/route",
+                json!({
+                    "goal": format!("prepare a bounded plan for {group_id}"),
+                    "needs": [{"id": group_id, "group_id": group_id, "max_items": 1}],
+                    "max_candidates_per_need": 1,
+                    "max_tools": 1
+                }),
+            ));
+            assert_eq!(route_response.status, 200, "route failed for {group_id}");
+            let route: Value = serde_json::from_slice(&route_response.body).unwrap();
+            let candidates = route["needs"][0]["candidate_tools"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            if candidates.is_empty() {
+                assert_eq!(route["unresolved_needs"][0], group_id);
+                continue;
+            }
+            let tool = candidates[0].as_str().unwrap();
+            let domain = route["needs"][0]["candidate_domains"]
+                .as_array()
+                .and_then(|domains| domains.first())
+                .and_then(Value::as_str)
+                .unwrap_or(group_id);
+            let plan_response = router.handle(request(
+                "POST",
+                "/v1/capabilities/route/plan",
+                json!({
+                    "mission_id": format!("catalogue-plan-{group_id}"),
+                    "route": route,
+                    "selections": [{
+                        "need_id": group_id,
+                        "tool": tool,
+                        "domain": domain,
+                        "capability": group_id,
+                        "objective": format!("inspect {group_id}"),
+                        "arguments": {}
+                    }]
+                }),
+            ));
+            assert_eq!(plan_response.status, 200, "plan failed for {group_id}");
+            let plan: Value = serde_json::from_slice(&plan_response.body).unwrap();
+            assert_eq!(plan["workflow"], "capability_route_plan");
+            assert_eq!(plan["dispatch"], "not_started");
+            assert!(matches!(
+                plan["plan_status"].as_str(),
+                Some("ready_for_caller_inspection")
+                    | Some("blocked_by_mission_preflight")
+                    | Some("blocked_by_route_review")
+            ));
+        }
     }
 
     #[test]

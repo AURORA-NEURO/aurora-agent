@@ -58,6 +58,9 @@ The direct HTTP planning handoff is split into two explicit, non-executing endpo
 - `POST /v1/capabilities/route/review` accepts that returned route plus caller-selected tools and
   returns the raw `capability_route_review` handoff. A ready review still requires mission
   preflight and never dispatches a tool.
+- `POST /v1/capabilities/route/plan` composes that explicit review with authoritative mission
+  preflight. It returns the generated mission, plan digest, schema findings, and a structured
+  blocked outcome when either review boundary fails; `dispatch` remains `not_started`.
 
 Both endpoints record the same tool event and use the same authoritative catalogue as MCP. They
 exist for HTTP clients and automation that should not have to unpack an MCP response envelope.
@@ -66,9 +69,10 @@ exist for HTTP clients and automation that should not have to unpack an MCP resp
 
 - Python: `CapabilityDashboardQueryArgs`, `CapabilityDashboardReport`, and sync/async Workspace
   and HTTP client methods, plus `capability_route_rest(...)` and
-  `capability_route_review_rest(...)` for the raw planning handoff.
+  `capability_route_review_rest(...)` and `capability_route_plan_rest(...)` for the raw planning
+  handoff.
 - TypeScript: `CapabilityDashboardArgs`, `CapabilityDashboardResult`, and
   `ApiClient.capabilityDashboard(...)`, `capabilityRouteRest(...)`, and
-  `capabilityRouteReviewRest(...)`.
+  `capabilityRouteReviewRest(...)`, and `capabilityRoutePlanRest(...)`.
 - MCP: the `capability_dashboard` tool with the
   `bioprism-devplat-capability-dashboard/0.1` audit schema.

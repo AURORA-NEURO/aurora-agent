@@ -129,6 +129,8 @@ from .capability import (
     CapabilityRouteReport,
     CapabilityRouteReviewReport,
     CapabilityRouteReviewRequest,
+    CapabilityRoutePlanReport,
+    CapabilityRoutePlanRequest,
     CapabilityRouteRequest,
     DomainWorkflowCatalogueReport,
     DomainWorkflowInstantiateRequest,
@@ -167,6 +169,7 @@ from .capability import (
     capability_route_report,
     capability_discover_report,
     capability_route_review_report,
+    capability_route_plan_report,
     domain_workflow_catalogue_report,
     domain_workflow_instantiation_report,
     domain_workflow_scaffold_report,
@@ -3292,6 +3295,112 @@ class ApiClient:
                 route,
                 selections,
                 validate_schemas=validate_schemas,
+            )
+        )
+
+    def capability_route_plan(
+        self,
+        mission_id: str,
+        route: Mapping[str, Any],
+        selections: Sequence[Mapping[str, Any]],
+        *,
+        validate_schemas: bool = True,
+        policy: Mapping[str, Any] | None = None,
+        claim_requests: Sequence[Mapping[str, Any]] = (),
+        evaluator_review: Mapping[str, Any] | None = None,
+        workflow_binding: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Compose a reviewed route into a non-executing mission preflight."""
+
+        request = CapabilityRoutePlanRequest(
+            mission_id,
+            route,
+            selections,
+            validate_schemas,
+            policy,
+            claim_requests,
+            evaluator_review,
+            workflow_binding,
+        )
+        return self.call_tool("capability_route_plan", request.to_mcp_arguments())
+
+    def capability_route_plan_report(
+        self,
+        mission_id: str,
+        route: Mapping[str, Any],
+        selections: Sequence[Mapping[str, Any]],
+        *,
+        validate_schemas: bool = True,
+        policy: Mapping[str, Any] | None = None,
+        claim_requests: Sequence[Mapping[str, Any]] = (),
+        evaluator_review: Mapping[str, Any] | None = None,
+        workflow_binding: Mapping[str, Any] | None = None,
+    ) -> CapabilityRoutePlanReport:
+        """Return the typed route-review and mission-preflight composition."""
+
+        return capability_route_plan_report(
+            self.capability_route_plan(
+                mission_id,
+                route,
+                selections,
+                validate_schemas=validate_schemas,
+                policy=policy,
+                claim_requests=claim_requests,
+                evaluator_review=evaluator_review,
+                workflow_binding=workflow_binding,
+            )
+        )
+
+    def capability_route_plan_rest(
+        self,
+        mission_id: str,
+        route: Mapping[str, Any],
+        selections: Sequence[Mapping[str, Any]],
+        *,
+        validate_schemas: bool = True,
+        policy: Mapping[str, Any] | None = None,
+        claim_requests: Sequence[Mapping[str, Any]] = (),
+        evaluator_review: Mapping[str, Any] | None = None,
+        workflow_binding: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Submit the route-to-plan composition through its dedicated REST endpoint."""
+
+        request = CapabilityRoutePlanRequest(
+            mission_id,
+            route,
+            selections,
+            validate_schemas,
+            policy,
+            claim_requests,
+            evaluator_review,
+            workflow_binding,
+        )
+        return self.request("POST", "/v1/capabilities/route/plan", request.to_mcp_arguments())
+
+    def capability_route_plan_rest_report(
+        self,
+        mission_id: str,
+        route: Mapping[str, Any],
+        selections: Sequence[Mapping[str, Any]],
+        *,
+        validate_schemas: bool = True,
+        policy: Mapping[str, Any] | None = None,
+        claim_requests: Sequence[Mapping[str, Any]] = (),
+        evaluator_review: Mapping[str, Any] | None = None,
+        workflow_binding: Mapping[str, Any] | None = None,
+    ) -> CapabilityRoutePlanReport:
+        """Return typed route-plan diagnostics from direct REST."""
+
+        return capability_route_plan_report(
+            self.capability_route_plan_rest(
+                mission_id,
+                route,
+                selections,
+                validate_schemas=validate_schemas,
+                policy=policy,
+                claim_requests=claim_requests,
+                evaluator_review=evaluator_review,
+                workflow_binding=workflow_binding,
             )
         )
 
@@ -7571,6 +7680,112 @@ class AsyncApiClient:
                 route,
                 selections,
                 validate_schemas=validate_schemas,
+            )
+        )
+
+    async def capability_route_plan(
+        self,
+        mission_id: str,
+        route: Mapping[str, Any],
+        selections: Sequence[Mapping[str, Any]],
+        *,
+        validate_schemas: bool = True,
+        policy: Mapping[str, Any] | None = None,
+        claim_requests: Sequence[Mapping[str, Any]] = (),
+        evaluator_review: Mapping[str, Any] | None = None,
+        workflow_binding: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.capability_route_plan`."""
+
+        request = CapabilityRoutePlanRequest(
+            mission_id,
+            route,
+            selections,
+            validate_schemas,
+            policy,
+            claim_requests,
+            evaluator_review,
+            workflow_binding,
+        )
+        return await self.call_tool("capability_route_plan", request.to_mcp_arguments())
+
+    async def capability_route_plan_report(
+        self,
+        mission_id: str,
+        route: Mapping[str, Any],
+        selections: Sequence[Mapping[str, Any]],
+        *,
+        validate_schemas: bool = True,
+        policy: Mapping[str, Any] | None = None,
+        claim_requests: Sequence[Mapping[str, Any]] = (),
+        evaluator_review: Mapping[str, Any] | None = None,
+        workflow_binding: Mapping[str, Any] | None = None,
+    ) -> CapabilityRoutePlanReport:
+        """Return typed async route-plan diagnostics."""
+
+        return capability_route_plan_report(
+            await self.capability_route_plan(
+                mission_id,
+                route,
+                selections,
+                validate_schemas=validate_schemas,
+                policy=policy,
+                claim_requests=claim_requests,
+                evaluator_review=evaluator_review,
+                workflow_binding=workflow_binding,
+            )
+        )
+
+    async def capability_route_plan_rest(
+        self,
+        mission_id: str,
+        route: Mapping[str, Any],
+        selections: Sequence[Mapping[str, Any]],
+        *,
+        validate_schemas: bool = True,
+        policy: Mapping[str, Any] | None = None,
+        claim_requests: Sequence[Mapping[str, Any]] = (),
+        evaluator_review: Mapping[str, Any] | None = None,
+        workflow_binding: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Async direct REST route-to-plan composition."""
+
+        return await asyncio.to_thread(
+            self.client.capability_route_plan_rest,
+            mission_id,
+            route,
+            selections,
+            validate_schemas=validate_schemas,
+            policy=policy,
+            claim_requests=claim_requests,
+            evaluator_review=evaluator_review,
+            workflow_binding=workflow_binding,
+        )
+
+    async def capability_route_plan_rest_report(
+        self,
+        mission_id: str,
+        route: Mapping[str, Any],
+        selections: Sequence[Mapping[str, Any]],
+        *,
+        validate_schemas: bool = True,
+        policy: Mapping[str, Any] | None = None,
+        claim_requests: Sequence[Mapping[str, Any]] = (),
+        evaluator_review: Mapping[str, Any] | None = None,
+        workflow_binding: Mapping[str, Any] | None = None,
+    ) -> CapabilityRoutePlanReport:
+        """Return typed async route-plan diagnostics from direct REST."""
+
+        return capability_route_plan_report(
+            await self.capability_route_plan_rest(
+                mission_id,
+                route,
+                selections,
+                validate_schemas=validate_schemas,
+                policy=policy,
+                claim_requests=claim_requests,
+                evaluator_review=evaluator_review,
+                workflow_binding=workflow_binding,
             )
         )
 

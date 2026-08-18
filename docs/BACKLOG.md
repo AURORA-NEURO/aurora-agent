@@ -341,6 +341,10 @@ still requires mission preflight. Optional authoritative schema validation adds 
 bounded issue paths without granting execution permission or validating domain meaning. The review
 also emits a deterministic content-addressed `review_id`, allowing route handoff evidence to be
 joined across MCP, REST, SDK, event, and webhook records without timestamp coupling.
+`capability_route_plan` now provides the corresponding bounded composition seam across MCP, REST,
+Python, and TypeScript: it reruns the review, builds the exact selected mission, invokes only the
+authoritative non-executing preflight, and returns a plan digest plus structured route/preflight
+blockers. It intentionally leaves dispatch and authorization with the caller.
 The companion `capability_dashboard` provides the missing operator inventory: it binds catalogue
 groups to the authoritative `tools/list` schemas, separates callable/partial/declared-only rows,
 keeps crate, CLI, Python, MCP-membership, and schema-backed counts independent, and reports explicit

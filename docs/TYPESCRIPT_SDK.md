@@ -842,6 +842,13 @@ blocked results preserve structured findings without executing anything. Set `va
 to receive bounded authoritative schema reports for the selected arguments; this remains review
 evidence and does not authorize execution. The typed result also includes a deterministic,
 content-addressed `review_id` for correlating the same handoff across transports and event records.
+`capabilityRoutePlan` composes that explicit review with the authoritative mission preflight in one
+bounded, non-executing handoff. It never selects tools or invents arguments, rejects
+`policy.execute: true`, carries optional claim/evaluator/workflow bindings into the generated
+mission, and returns `plan_digest`, the reviewed mission, preflight diagnostics, and an explicit
+`dispatch: "not_started"` posture. A caller must inspect the result before invoking
+`agentMission`; `blocked_by_route_review` and `blocked_by_mission_preflight` remain structured
+outcomes rather than transport errors.
 Pass the ready result as `routeReview` to `missionFromRoute` to carry it into
 `AgentMissionArgs.route_review`; local preflight and the Rust boundary then reject changed goals,
 steps, findings, or evidence bindings. The returned `route_review_provenance` is compact audit

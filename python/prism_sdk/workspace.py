@@ -128,6 +128,8 @@ from .capability import (
     CapabilityRouteReport,
     CapabilityRouteReviewReport,
     CapabilityRouteReviewRequest,
+    CapabilityRoutePlanReport,
+    CapabilityRoutePlanRequest,
     CapabilityRouteRequest,
     DomainWorkflowCatalogueReport,
     DomainWorkflowInstantiateRequest,
@@ -162,6 +164,7 @@ from .capability import (
     capability_discover_report,
     capability_route_report,
     capability_route_review_report,
+    capability_route_plan_report,
     domain_workflow_catalogue_report,
     domain_workflow_instantiation_report,
     domain_workflow_scaffold_report,
@@ -1981,6 +1984,25 @@ class Workspace:
         return capability_route_review_report(
             self.capability_route_review(route, selections, validate_schemas=validate_schemas)
         )
+
+    def capability_route_plan(
+        self,
+        request: CapabilityRoutePlanRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Compile explicit route selections into a non-executing mission preflight."""
+
+        normalized = (
+            request
+            if isinstance(request, CapabilityRoutePlanRequest)
+            else CapabilityRoutePlanRequest(**dict(request))
+        )
+        return self.tool("capability_route_plan", normalized.to_mcp_arguments())
+
+    def capability_route_plan_report(
+        self,
+        request: CapabilityRoutePlanRequest | Mapping[str, Any],
+    ) -> CapabilityRoutePlanReport:
+        return capability_route_plan_report(self.capability_route_plan(request))
 
     def domain_workflow_catalogue(self) -> dict[str, Any]:
         """Return the complete deterministic workflow-template catalogue."""
@@ -5893,6 +5915,25 @@ class AsyncWorkspace:
         return capability_route_review_report(
             await self.capability_route_review(route, selections, validate_schemas=validate_schemas)
         )
+
+    async def capability_route_plan(
+        self,
+        request: CapabilityRoutePlanRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.capability_route_plan`."""
+
+        normalized = (
+            request
+            if isinstance(request, CapabilityRoutePlanRequest)
+            else CapabilityRoutePlanRequest(**dict(request))
+        )
+        return await self.tool("capability_route_plan", normalized.to_mcp_arguments())
+
+    async def capability_route_plan_report(
+        self,
+        request: CapabilityRoutePlanRequest | Mapping[str, Any],
+    ) -> CapabilityRoutePlanReport:
+        return capability_route_plan_report(await self.capability_route_plan(request))
 
     async def domain_workflow_catalogue(self) -> dict[str, Any]:
         """Async complete deterministic workflow-template catalogue."""

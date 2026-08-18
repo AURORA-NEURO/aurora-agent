@@ -479,6 +479,133 @@ class CapabilityRouteReviewReport:
         return dict(self.raw)
 
 
+@dataclass(frozen=True)
+class CapabilityRoutePlanRequest:
+    """Compose explicit route selections into a non-executing mission preflight."""
+
+    mission_id: str
+    route: Mapping[str, Any]
+    selections: Sequence[Mapping[str, Any]]
+    validate_schemas: bool = True
+    policy: Mapping[str, Any] | None = None
+    claim_requests: Sequence[Mapping[str, Any]] = ()
+    evaluator_review: Mapping[str, Any] | None = None
+    workflow_binding: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        _route_text("route plan mission_id", self.mission_id)
+        route = _route_mapping("route plan route", self.route)
+        if route.get("workflow") != "capability_route":
+            raise ArgumentError("route plan route.workflow must be capability_route")
+        if not isinstance(self.selections, Sequence) or isinstance(self.selections, (str, bytes)):
+            raise ArgumentError("route plan selections must be an array")
+        if not 1 <= len(self.selections) <= 128:
+            raise ArgumentError("route plan selections must contain between 1 and 128 choices")
+        normalized = tuple(_review_selection(value) for value in self.selections)
+        if not isinstance(self.validate_schemas, bool):
+            raise ArgumentError("route plan validate_schemas must be a boolean")
+        if self.policy is not None:
+            policy = _route_mapping("route plan policy", self.policy)
+            if policy.get("execute") is True:
+                raise ArgumentError("route plan policy.execute must be false")
+            object.__setattr__(self, "policy", policy)
+        if not isinstance(self.claim_requests, Sequence) or isinstance(self.claim_requests, (str, bytes)) or len(self.claim_requests) > 64:
+            raise ArgumentError("route plan claim_requests must contain at most 64 objects")
+        claims = tuple(_route_mapping("route plan claim request", value) for value in self.claim_requests)
+        object.__setattr__(self, "route", route)
+        object.__setattr__(self, "selections", normalized)
+        object.__setattr__(self, "claim_requests", claims)
+        if self.evaluator_review is not None:
+            object.__setattr__(self, "evaluator_review", _route_mapping("route plan evaluator_review", self.evaluator_review))
+        if self.workflow_binding is not None:
+            object.__setattr__(self, "workflow_binding", _route_mapping("route plan workflow_binding", self.workflow_binding))
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "mission_id": self.mission_id,
+            "route": dict(self.route),
+            "selections": [dict(value) for value in self.selections],
+            "validate_schemas": self.validate_schemas,
+            "claim_requests": [dict(value) for value in self.claim_requests],
+        }
+        for name in ("policy", "evaluator_review", "workflow_binding"):
+            value = getattr(self, name)
+            if value is not None:
+                result[name] = dict(value)
+        return result
+
+
+@dataclass(frozen=True)
+class CapabilityRoutePlanReport:
+    """Validated route-review plus authoritative mission-preflight projection."""
+
+    raw: dict[str, Any]
+    mission_id: str
+    route_id: str
+    review_id: str
+    catalog_digest: str
+    goal: str
+    plan_status: str
+    review: CapabilityRouteReviewReport
+    mission: dict[str, Any] | None
+    preflight: dict[str, Any] | None
+    plan_digest: str | None
+    route_review_provenance: dict[str, Any] | None
+    dispatch: str
+    execution: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "CapabilityRoutePlanReport":
+        raw = _route_mapping("capability route plan report", value)
+        if raw.get("workflow") != "capability_route_plan":
+            raise ArgumentError("route plan.workflow must be capability_route_plan")
+        review = CapabilityRouteReviewReport.from_wire(_route_mapping("route plan review", raw.get("review")))
+        plan_status = _route_text("route plan status", raw.get("plan_status"))
+        if plan_status not in {"preflight_pending", "blocked_by_route_review", "ready_for_caller_inspection", "blocked_by_mission_preflight"}:
+            raise ArgumentError("unknown route plan status")
+        mission_value = raw.get("mission")
+        mission = None if mission_value is None else _route_mapping("route plan mission", mission_value)
+        preflight_value = raw.get("preflight")
+        preflight = None if preflight_value is None else _route_mapping("route plan preflight", preflight_value)
+        if plan_status in {"ready_for_caller_inspection", "blocked_by_mission_preflight"} and (mission is None or preflight is None):
+            raise ArgumentError("completed route plan status requires mission and preflight projections")
+        mission_id = _route_text("route plan mission_id", raw.get("mission_id"))
+        route_id = _route_text("route plan route_id", raw.get("route_id"))
+        review_id = _route_text("route plan review_id", raw.get("review_id"))
+        catalog_digest = _route_text("route plan catalog_digest", raw.get("catalog_digest"))
+        if route_id != review.route_id or review_id != review.review_id or catalog_digest != review.catalog_digest:
+            raise ArgumentError("route plan identity must match its nested route review")
+        if mission is not None and mission.get("mission_id") != mission_id:
+            raise ArgumentError("route plan mission_id must match the mission projection")
+        plan_digest_raw = raw.get("plan_digest")
+        plan_digest = None if plan_digest_raw is None else _digest("route plan plan digest", plan_digest_raw)
+        provenance_value = raw.get("route_review_provenance")
+        provenance = None if provenance_value is None else _route_mapping("route plan route_review_provenance", provenance_value)
+        return cls(
+            raw=raw,
+            mission_id=mission_id,
+            route_id=route_id,
+            review_id=review_id,
+            catalog_digest=catalog_digest,
+            goal=_route_text("route plan goal", raw.get("goal")),
+            plan_status=plan_status,
+            review=review,
+            mission=mission,
+            preflight=preflight,
+            plan_digest=plan_digest,
+            route_review_provenance=provenance,
+            dispatch=_route_text("route plan dispatch", raw.get("dispatch")),
+            execution=_route_text("route plan execution", raw.get("execution")),
+        )
+
+    @property
+    def ready_for_inspection(self) -> bool:
+        return self.plan_status == "ready_for_caller_inspection"
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
 def _tool_payload(value: Mapping[str, Any], workflow: str) -> dict[str, Any]:
     """Extract a JSON projection from either a decoded MCP payload or an HTTP REST envelope."""
 
@@ -516,6 +643,12 @@ def capability_route_review_report(value: Mapping[str, Any]) -> CapabilityRouteR
     """Parse either a direct review payload or an HTTP tool envelope into diagnostics."""
 
     return CapabilityRouteReviewReport.from_wire(_tool_payload(value, "capability_route_review"))
+
+
+def capability_route_plan_report(value: Mapping[str, Any]) -> CapabilityRoutePlanReport:
+    """Parse a direct route-plan payload or an HTTP tool envelope."""
+
+    return CapabilityRoutePlanReport.from_wire(_tool_payload(value, "capability_route_plan"))
 
 
 @dataclass(frozen=True)
@@ -2612,6 +2745,8 @@ __all__ = [
     "CapabilityRouteReport",
     "CapabilityRouteReviewRequest",
     "CapabilityRouteReviewReport",
+    "CapabilityRoutePlanRequest",
+    "CapabilityRoutePlanReport",
     "MissionEvaluatorQuery",
     "MissionEvaluatorReviewRequest",
     "MissionEvaluatorBindingReport",
@@ -2642,6 +2777,7 @@ __all__ = [
     "domain_workflow_scaffold_report",
     "domain_workflow_reconciliation_report",
     "capability_route_review_report",
+    "capability_route_plan_report",
     "capability_discover_report",
     "capability_audit_report",
     "mission_evaluator_discover_report",

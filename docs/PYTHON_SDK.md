@@ -754,6 +754,14 @@ invent defaults:
   counterparts, use the dedicated raw REST handoff endpoints when an HTTP automation caller does
   not want to unpack an MCP envelope; they return the same raw and typed route contracts and still
   preserve the non-execution boundary.
+- `CapabilityRoutePlanRequest` and `capability_route_plan(...)` compose those explicit selections
+  into one non-executing route-review plus authoritative mission-preflight projection. The request
+  rejects `policy.execute=True`, defaults `validate_schemas=True`, and carries optional claim,
+  evaluator-review, and workflow-binding inputs through the generated mission. Typed
+  `CapabilityRoutePlanReport` preserves the review, mission, preflight, plan digest, plan status,
+  and explicit blocked transport outcomes. `Workspace`, `AsyncWorkspace`, `ApiClient`, and
+  `AsyncApiClient` expose MCP and dedicated REST variants; every result remains
+  `dispatch: "not_started"` and still requires caller inspection before `agent_mission`.
 - `DomainWorkflowInstantiateRequest`, `DomainWorkflowCatalogueReport`, and
   `DomainWorkflowInstantiationReport` expose the complete workflow-template bridge. Sync and async
   `Workspace` methods call the MCP tools; `ApiClient` and `AsyncApiClient` also expose the dedicated

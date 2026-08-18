@@ -241,6 +241,12 @@ paths; a schema-clean result is still shape evidence, not domain validation or a
 Each result carries a deterministic content-addressed `review_id` derived from route provenance,
 caller selections, and validation mode so operators can correlate handoff evidence without relying
 on timestamps or mutable server state.
+`capability_route_plan` composes that reviewed route with authoritative mission preflight for every
+catalogue group. It preserves the selected mission draft, plan digest, schema and preflight
+diagnostics, optional claim/evaluator/workflow bindings, and explicit `dispatch: "not_started"`;
+blocked route review or blocked preflight remains a structured plan status rather than an inferred
+partial mission. The compiler never chooses tools, invents arguments, dispatches nested tools, or
+turns routing evidence into authorization.
 The HTTP event page and bounded SSE snapshot accept the same exact `review_id` filter, and
 `/v1/route-reviews/{review_id}/evidence` provides a typed retained-evidence lookup. Missing
 retained evidence is reported as an empty bounded window, never upgraded into a historical

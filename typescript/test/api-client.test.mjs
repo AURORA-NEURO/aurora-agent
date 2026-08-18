@@ -1165,8 +1165,10 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
       if (path === "/v1/capabilities/dashboard") return jsonResponse({ ok: true, workflow: "capability_dashboard", schema: "bioprism-devplat-capability-dashboard/0.1", capability_dashboard_ready: true, audit: { query: { domain: "verification" }, selected_group_count: 1, groups: [{ id: "testing", readiness: "callable", tools: ["echo"] }] } });
       if (path === "/v1/tools/capability_route") return jsonResponse({ ok: true, tool: "capability_route", request_id: "r8", mcp: { result: { structuredContent: { workflow: "capability_route", execution: "not_started", evidence_digest: "e".repeat(64), evidence_scope: "candidate_capability_groups_current_digest_verified_artifact_and_workflow_reconciliation_registries", evidence: { scope: "candidate_capability_groups_current_digest_verified_artifact_and_workflow_reconciliation_registries", evidence_digest: "e".repeat(64), artifact_registry_generation: 0, artifact_registry_size: 0, workflow_reconciliation_registry_generation: 0, workflow_reconciliation_registry_size: 0, candidate_group_count: 1, groups_with_artifact_evidence: 0, artifact_evidence_records: 0, groups_with_workflow_reconciliation: 0, workflow_reconciliation_records: 0, readiness_claimed: false, execution: "not_started", guarantees: [], limitations: [] }, needs: [{ id: "testing", resolution: "ranked_candidates", candidate_groups: ["testing"], candidate_domains: ["verification"], candidate_tools: ["echo"], candidate_group_evidence: [{ id: "testing", artifact_evidence: { state: "missing" }, workflow_reconciliation_evidence: { state: "missing" } }], search: {} }], route_coverage: { needs_total: 1, needs_resolved: 1, needs_unresolved: 0, candidate_group_count: 1, candidate_groups: ["testing"], candidate_domain_count: 1, candidate_domains: ["verification"], candidate_tool_count: 1, candidate_group_evidence_count: 1, posture: "routing evidence only" } } } } });
       if (path === "/v1/tools/capability_route_review") return jsonResponse({ ok: true, tool: "capability_route_review", request_id: "r9", mcp: { result: { structuredContent: { workflow: "capability_route_review", review_id: "v".repeat(64), evidence_digest: "e".repeat(64), evidence_scope: "candidate_capability_groups_current_digest_verified_artifact_and_workflow_reconciliation_registries", evidence_binding: { present: true, evidence_digest: "e".repeat(64), scope: "candidate_capability_groups_current_digest_verified_artifact_and_workflow_reconciliation_registries", posture: "carried_forward_not_recomputed", readiness_claimed: false, execution: "not_started" }, review_status: "ready", handoff_status: "mission_preflight_required", execution: "not_started", findings: [], dependency_waves: [["oncology"]], schema_review: { requested: true, checked: 1, valid: true, fully_checked: true } } } } });
+      if (path === "/v1/tools/capability_route_plan") return jsonResponse({ ok: true, tool: "capability_route_plan", request_id: "r9plan", mcp: { result: { structuredContent: { workflow: "capability_route_plan", ok: true, mission_id: "route-plan", route_id: "r".repeat(64), review_id: "v".repeat(64), catalog_digest: "c".repeat(64), goal: "compose evidence", plan_status: "ready_for_caller_inspection", review: { workflow: "capability_route_review", review_id: "v".repeat(64), route_id: "r".repeat(64), catalog_digest: "c".repeat(64), review_status: "ready", handoff_status: "mission_preflight_required", execution: "not_started", findings: [], dependency_waves: [] }, mission: { mission_id: "route-plan" }, preflight: { ok: true, dispatch: "not_started" }, plan_digest: "a".repeat(64), dispatch: "not_started", execution: "not_started" } } } });
       if (path === "/v1/capabilities/route") return jsonResponse({ workflow: "capability_route", execution: "not_started", route_id: "r".repeat(64), needs: [], unresolved_needs: [], recommended_tools: [], recommended_tool_count: 0, recommended_tool_overflow: 0, route_coverage: { needs_total: 0, needs_resolved: 0, needs_unresolved: 0, candidate_group_count: 0, candidate_groups: [], candidate_domain_count: 0, candidate_domains: [], candidate_tool_count: 0, posture: "routing evidence only" }, schema_attachment: {} });
       if (path === "/v1/capabilities/route/review") return jsonResponse({ workflow: "capability_route_review", review_id: "w".repeat(64), review_status: "ready", handoff_status: "mission_preflight_required", execution: "not_started", findings: [], dependency_waves: [] });
+      if (path === "/v1/capabilities/route/plan") return jsonResponse({ workflow: "capability_route_plan", ok: true, mission_id: "route-plan", route_id: "r".repeat(64), review_id: "v".repeat(64), catalog_digest: "c".repeat(64), goal: "compose evidence", plan_status: "ready_for_caller_inspection", review: { workflow: "capability_route_review", review_id: "v".repeat(64), route_id: "r".repeat(64), catalog_digest: "c".repeat(64), review_status: "ready", handoff_status: "mission_preflight_required", execution: "not_started", findings: [], dependency_waves: [] }, mission: { mission_id: "route-plan" }, preflight: { ok: true, dispatch: "not_started" }, dispatch: "not_started", execution: "not_started" });
       if (path === "/v1/tools/adapter_plan") return jsonResponse({ ok: true, tool: "adapter_plan", request_id: "r10", mcp: { result: { structuredContent: {
         ok: true,
         workflow: "adapter_plan",
@@ -2218,8 +2220,18 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
     selections: [{ need_id: "oncology", tool: "echo", domain: "testing", capability: "verification", objective: "review", arguments: {} }],
     validate_schemas: true,
   });
+  const routePlan = await client.capabilityRoutePlan({
+    mission_id: "route-plan",
+    route: route.mcp.result.structuredContent,
+    selections: [{ need_id: "oncology", tool: "echo", domain: "testing", capability: "verification", objective: "review", arguments: {} }],
+  });
   const routeRest = await client.capabilityRouteRest({ goal: "compose evidence", needs: [{ id: "oncology", query: "oncology" }] });
   const routeReviewRest = await client.capabilityRouteReviewRest({ route: routeRest, selections: [] });
+  const routePlanRest = await client.capabilityRoutePlanRest({
+    mission_id: "route-plan",
+    route: routeRest,
+    selections: [],
+  });
   const adapter = await client.adapterPlan({ source_id: "scan-1", source_kind: "bytes", declared_format: "application/dicom", available_dependencies: ["pydicom"] });
   const tabular = await client.tabularIngest({ source_id: "cohort.csv", profile: { profile_id: "RG-DEMO-001" }, csv: "subject\nS1\n", format: "text/csv", include_facts: true });
   const conformance = await client.conformanceRun({ include_details: false, max_items: 100 });
@@ -2289,10 +2301,15 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(routeReview.mcp.result.structuredContent.evidence_binding.present, true);
   assert.deepEqual(routeReview.mcp.result.structuredContent.dependency_waves, [["oncology"]]);
   assert.equal(routeReview.mcp.result.structuredContent.schema_review.valid, true);
+  assert.equal(routePlan.mcp.result.structuredContent.workflow, "capability_route_plan");
+  assert.equal(routePlan.mcp.result.structuredContent.plan_status, "ready_for_caller_inspection");
+  assert.equal(routePlan.mcp.result.structuredContent.dispatch, "not_started");
   assert.equal(routeRest.workflow, "capability_route");
   assert.equal(routeRest.execution, "not_started");
   assert.equal(routeReviewRest.workflow, "capability_route_review");
   assert.equal(routeReviewRest.review_status, "ready");
+  assert.equal(routePlanRest.workflow, "capability_route_plan");
+  assert.equal(routePlanRest.preflight.ok, true);
   assert.equal(adapter.mcp.result.structuredContent.workflow, "adapter_plan");
   assert.equal(adapter.mcp.result.structuredContent.plan.candidates[0].status, "ready");
   assert.equal(adapter.mcp.result.structuredContent.selected_adapter.id, "bioprism.tabular");

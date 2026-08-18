@@ -5074,6 +5074,37 @@ export interface CapabilityRouteReviewResult extends JsonObject {
   execution: "not_started";
 }
 
+export interface CapabilityRoutePlanArgs extends JsonObject {
+  mission_id: string;
+  route: JsonObject;
+  selections: MissionRouteSelection[];
+  validate_schemas?: boolean;
+  policy?: JsonObject;
+  claim_requests?: JsonValue[];
+  evaluator_review?: JsonObject;
+  workflow_binding?: JsonObject;
+}
+
+export interface CapabilityRoutePlanResult extends JsonObject {
+  ok: boolean;
+  workflow: "capability_route_plan";
+  mission_id: string;
+  route_id: string;
+  review_id: string;
+  catalog_digest: string;
+  goal: string;
+  plan_status: "preflight_pending" | "blocked_by_route_review" | "ready_for_caller_inspection" | "blocked_by_mission_preflight";
+  review: CapabilityRouteReviewResult;
+  mission: JsonObject | null;
+  preflight: JsonObject | null;
+  plan_digest?: string | null;
+  route_review_provenance?: JsonObject | null;
+  dispatch: "not_started";
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface DomainWorkflowInstantiateArgs extends JsonObject {
   workflow_id: string;
   mission_id: string;

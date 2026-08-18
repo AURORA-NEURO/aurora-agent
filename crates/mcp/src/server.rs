@@ -418,7 +418,7 @@ use bioprism_worldfactory::provenance::{
     support as support_world_claim, Claim, Provenance as WorldProvenance,
 };
 use bioprism_worldgen::{generate as generate_world, WorldSpec};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1814,6 +1814,7 @@ impl Server {
             "mission_evidence_bundle_get" => self.mission_evidence_bundle_get(&arguments),
             "capability_route" => self.capability_route(&arguments),
             "capability_route_review" => self.capability_route_review(&arguments),
+            "capability_route_plan" => self.capability_route_plan(&arguments),
             "domain_workflow_catalogue" => self.domain_workflow_catalogue(&arguments),
             "domain_workflow_scaffold" => self.domain_workflow_scaffold(&arguments),
             "domain_workflow_instantiate" => self.domain_workflow_instantiate(&arguments),
@@ -28648,6 +28649,169 @@ impl Server {
         Ok(output)
     }
 
+    /// Compile an explicitly reviewed capability route into a mission preflight handoff.
+    ///
+    /// This is intentionally a composition boundary rather than a second planner: the route
+    /// review remains responsible for candidate membership, dependency structure, and review
+    /// evidence, while `preflight_agent_mission` remains authoritative for the normalized mission
+    /// graph and every selected tool schema. The result is always planned and never dispatches a
+    /// nested tool. Callers still choose every tool, domain label, objective, argument object, and
+    /// dependency; route scores never become an allow-list implicitly.
+    fn capability_route_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode capability route plan input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err(
+                "capability route plan input exceeds the 20000000-byte safety bound".into(),
+            );
+        }
+        let object = arguments
+            .as_object()
+            .ok_or("capability route plan input must be an object")?;
+        let mission_id = object
+            .get("mission_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or("capability route plan requires a non-empty mission_id")?;
+        let route = object
+            .get("route")
+            .and_then(Value::as_object)
+            .ok_or("capability route plan requires a route object")?;
+        if route.get("workflow").and_then(Value::as_str) != Some("capability_route") {
+            return Err("route.workflow must be capability_route".into());
+        }
+        let selections = object
+            .get("selections")
+            .and_then(Value::as_array)
+            .ok_or("capability route plan requires a selections array")?;
+        if selections.is_empty() || selections.len() > 128 {
+            return Err("selections must contain between 1 and 128 choices".into());
+        }
+        let validate_schemas = match object.get("validate_schemas") {
+            None => true,
+            Some(Value::Bool(value)) => *value,
+            Some(_) => return Err("validate_schemas must be a boolean".into()),
+        };
+        if object
+            .get("policy")
+            .and_then(Value::as_object)
+            .and_then(|policy| policy.get("execute"))
+            .and_then(Value::as_bool)
+            == Some(true)
+        {
+            return Err(
+                "capability_route_plan is non-executing; call agent_mission only after inspecting its preflight"
+                    .into(),
+            );
+        }
+        if object.get("policy").is_some_and(|value| !value.is_object()) {
+            return Err("policy must be an object when supplied".into());
+        }
+
+        let review_arguments = json!({
+            "route": route,
+            "selections": selections,
+            "validate_schemas": validate_schemas,
+        });
+        let review = self.capability_route_review(&review_arguments)?;
+        let review_ready = review.get("review_status").and_then(Value::as_str) == Some("ready");
+
+        let mut output = json!({
+            "ok": true,
+            "workflow": "capability_route_plan",
+            "mission_id": mission_id,
+            "route_id": review.get("route_id").cloned().unwrap_or(Value::Null),
+            "review_id": review.get("review_id").cloned().unwrap_or(Value::Null),
+            "catalog_digest": review.get("catalog_digest").cloned().unwrap_or(Value::Null),
+            "goal": review.get("goal").cloned().unwrap_or(Value::Null),
+            "review": review.clone(),
+            "mission": Value::Null,
+            "preflight": Value::Null,
+            "plan_status": if review_ready { "preflight_pending" } else { "blocked_by_route_review" },
+            "dispatch": "not_started",
+            "execution": "not_started",
+            "guarantees": [
+                "route review and authoritative mission preflight are composed without dispatch",
+                "caller-selected tools and arguments remain explicit and candidate-bound",
+                "schema validation is requested by default and remains transport-shape evidence only",
+                "a blocked route review never becomes a partial mission plan",
+            ],
+            "limitations": [
+                "the compiler does not infer missing tools, arguments, dependencies, or domain meaning",
+                "route and preflight digests are provenance and do not authorize execution",
+                "domain semantics, provider availability, and scientific or clinical interpretation remain outside this boundary",
+            ],
+        });
+
+        if !review_ready {
+            return Ok(output);
+        }
+        let mission_draft = review
+            .get("mission_draft")
+            .and_then(Value::as_object)
+            .ok_or("ready route review did not provide a mission_draft")?;
+        let mut mission = Map::new();
+        mission.insert("mission_id".into(), json!(mission_id));
+        mission.insert(
+            "goal".into(),
+            mission_draft.get("goal").cloned().unwrap_or(Value::Null),
+        );
+        mission.insert(
+            "steps".into(),
+            mission_draft
+                .get("steps")
+                .cloned()
+                .unwrap_or_else(|| json!([])),
+        );
+        mission.insert(
+            "policy".into(),
+            object.get("policy").cloned().unwrap_or_else(|| json!({})),
+        );
+        mission.insert("route_review".into(), output["review"].clone());
+        for field in ["claim_requests", "evaluator_review", "workflow_binding"] {
+            if let Some(value) = object.get(field) {
+                mission.insert(field.into(), value.clone());
+            }
+        }
+        let mission = Value::Object(mission);
+        let preflight = match self.preflight_agent_mission(&mission) {
+            Ok(report) => report,
+            Err(error) => json!({
+                "ok": false,
+                "workflow": "agent_mission",
+                "preflight": true,
+                "dispatch": "not_started",
+                "refusal": error,
+                "fail_closed": true,
+                "issues": [error],
+            }),
+        };
+        let preflight_ok = preflight.get("ok").and_then(Value::as_bool) == Some(true);
+        output["mission"] = mission;
+        output["preflight"] = preflight.clone();
+        output["plan_status"] = json!(if preflight_ok {
+            "ready_for_caller_inspection"
+        } else {
+            "blocked_by_mission_preflight"
+        });
+        output["plan_digest"] = preflight
+            .pointer("/plan/digest")
+            .cloned()
+            .unwrap_or(Value::Null);
+        output["route_review_provenance"] = preflight
+            .pointer("/plan/route_review_provenance")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let output_bytes = serde_json::to_vec(&output)
+            .map_err(|error| format!("cannot measure capability route plan result: {error}"))?;
+        if output_bytes.len() > 20_000_000 {
+            return Err(
+                "capability route plan result exceeds the 20000000-byte safety bound".into(),
+            );
+        }
+        Ok(output)
+    }
+
     /// Reconcile a returned mission report with delegated check evidence without executing it.
     fn execution_provenance_audit(&self, arguments: &Value) -> Result<Value, String> {
         let encoded = serde_json::to_vec(arguments)
@@ -32957,7 +33121,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "documentation_and_knowledge",
             "domains": ["repository navigation", "documentation graph", "task routes", "context bundles"],
             "crates": ["bioprism-docgraph", "bioprism-graph", "bioprism-lens"],
-            "mcp_tools": ["workspace_capabilities", "capability_audit", "capability_dashboard", "capability_discover", "capability_route", "capability_route_review", "domain_workflow_catalogue", "domain_workflow_scaffold", "domain_workflow_instantiate", "domain_workflow_reconcile", "domain_workflow_reconciliation_import", "domain_workflow_reconciliation_query", "domain_workflow_reconciliation_get", "repository_catalog", "repository_bundle", "repository_impact", "lens_catalogue", "lens_leakage_check", "projection_bundle"],
+            "mcp_tools": ["workspace_capabilities", "capability_audit", "capability_dashboard", "capability_discover", "capability_route", "capability_route_review", "capability_route_plan", "domain_workflow_catalogue", "domain_workflow_scaffold", "domain_workflow_instantiate", "domain_workflow_reconcile", "domain_workflow_reconciliation_import", "domain_workflow_reconciliation_query", "domain_workflow_reconciliation_get", "repository_catalog", "repository_bundle", "repository_impact", "lens_catalogue", "lens_leakage_check", "projection_bundle"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -36228,6 +36392,24 @@ pub fn tool_definitions() -> Vec<Value> {
                     "validate_schemas": { "type": "boolean", "default": false, "description": "Optionally validate each selected argument object against the authoritative tools/list schema set; this remains review evidence and does not authorize execution." }
                 },
                 "required": ["route", "selections"]
+            }
+        }),
+        json!({
+            "name": "capability_route_plan",
+            "description": "Compile one explicitly reviewed capability_route into a non-executing agent_mission request and authoritative mission preflight. The compiler composes candidate membership, dependency waves, route evidence, and live tools/list schema checks for every workspace capability group. It never chooses tools, invents arguments, grants permission, or dispatches a nested tool; callers must inspect the returned mission and preflight before calling agent_mission.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "mission_id": { "type": "string", "description": "Stable mission identity for the generated plan." },
+                    "route": { "type": "object", "description": "The complete JSON result returned by capability_route." },
+                    "selections": { "type": "array", "minItems": 1, "maxItems": 128, "description": "Explicit caller-selected route candidates; each row must include need_id, tool, domain, capability, objective, and arguments." },
+                    "validate_schemas": { "type": "boolean", "default": true, "description": "Run authoritative tools/list argument checks during route review before mission preflight." },
+                    "policy": { "type": "object", "description": "Optional mission policy for the generated request. execute=true is refused because this tool is always non-executing." },
+                    "claim_requests": { "type": "array", "maxItems": 64, "description": "Optional caller-owned mission claim requests passed through to mission preflight." },
+                    "evaluator_review": { "type": "object", "description": "Optional ready mission_evaluator_review binding passed through to mission preflight." },
+                    "workflow_binding": { "type": "object", "description": "Optional digest-bound domain_workflow_instantiate binding passed through to mission preflight." }
+                },
+                "required": ["mission_id", "route", "selections"]
             }
         }),
         json!({

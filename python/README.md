@@ -66,6 +66,11 @@ runner. `MissionBinding` supports validated field-level dataflow between direct 
 and `CapabilityQuery` routes across the complete domain catalogue with optional tool schemas;
 `capability_audit()` verifies the catalogue against the authoritative MCP schema set, and
 `capability_route()` batches named needs without executing the returned candidates.
+`capability_route_plan()` composes caller-selected candidates into a route review plus authoritative
+mission preflight, returning the generated mission, `plan_digest`, schema diagnostics, and explicit
+`dispatch: "not_started"` status without dispatching any nested tool. Its typed
+`CapabilityRoutePlanRequest` rejects `policy.execute=True`; `CapabilityRoutePlanReport` preserves
+blocked route or preflight outcomes for inspection before `agent_mission`.
 `mission_preflight()` now reviews that graph locally against a live `ToolCatalogue`: it reports
 content digests, deterministic waves, missing/cyclic dependencies, binding targets, execution
 allow-list and side-effect policy findings, and per-step schema warnings before any mission POST.

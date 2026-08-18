@@ -25,6 +25,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `GET /v1/capabilities/dashboard` | Bounded capability inventory with transport gaps plus advisory artifact and workflow-reconciliation evidence posture |
 | `POST /v1/capabilities/route` | Raw non-executing cross-domain route proposal without an MCP response envelope |
 | `POST /v1/capabilities/route/review` | Raw non-executing caller-selection review and mission handoff without an MCP response envelope |
+| `POST /v1/capabilities/route/plan` | Raw non-executing composition of route review and authoritative mission preflight |
 | `GET /v1/recovery` | One operator-visible matrix of restart, secret, outbox, delivery-provenance, and external-effect boundaries |
 | `GET /v1/operations/snapshot?after=N&limit=M` | One bounded operator control-plane snapshot joining event, mission, persistence, recovery, and capability summaries |
 | `GET /v1/operations/domains?after=N&limit=M` | Per-domain catalogue coverage plus exact local tool activity observed in the requested event page |
@@ -535,6 +536,17 @@ and carries its digest and scope into `evidence_binding`, the review identity, a
 route’s retained observation but does not turn it into execution, authorization, readiness, or
 scientific validity. Legacy routes without the optional evidence fields remain reviewable with an
 explicit `present: false` binding.
+
+`POST /v1/capabilities/route/plan` is the bounded composition endpoint for callers that want one
+auditable handoff after making their own candidate choices. It accepts a `mission_id`, the complete
+route, explicit `selections`, and optional mission policy/claim/evaluator/workflow bindings. It
+reruns route review and then invokes the authoritative mission preflight with `execute` forcibly
+false. A successful response contains the reviewed route, the exact generated mission request,
+and its preflight; a transport-unavailable or malformed selected tool is returned as an explicit
+`blocked_by_mission_preflight` projection instead of being mistaken for a dispatch. The endpoint
+always returns `dispatch: "not_started"`, never chooses a candidate, and never executes a domain
+tool. This applies uniformly to every current capability group because it consumes the live
+catalogue rather than a domain-specific allow-list.
 
 `GET /v1/operations/domains` applies the same cursor bounds to a per-domain activity projection.
 Each group retains catalogue counts, missing names, observed event/tool counts, the last observed
