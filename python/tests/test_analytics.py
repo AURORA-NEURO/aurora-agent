@@ -65,6 +65,8 @@ from prism_sdk import (
     DomainWorkflowInstantiationReport,
     DomainWorkflowPortfolioRequest,
     DomainWorkflowPortfolioReport,
+    DomainWorkflowPortfolioVerifyRequest,
+    DomainWorkflowPortfolioVerifyReport,
     DomainWorkflowVerifyRequest,
     DomainWorkflowVerifyReport,
     DomainWorkflowScaffoldRequest,
@@ -1847,6 +1849,39 @@ class AnalyticsModelTests(unittest.TestCase):
         self.assertTrue(portfolio.complete_catalogue is False)
         self.assertTrue(portfolio.preflight_ready)
         self.assertEqual(portfolio.items[0]["status"], "instantiated")
+
+        portfolio_verify_request = DomainWorkflowPortfolioVerifyRequest(
+            portfolio=portfolio.to_dict(),
+            replay_requests=(request.to_arguments(),),
+            policy={"require_replay": True},
+        )
+        self.assertEqual(
+            portfolio_verify_request.to_arguments()["replay_requests"][0]["workflow_id"],
+            "documentation_and_knowledge",
+        )
+        portfolio_verification = DomainWorkflowPortfolioVerifyReport.from_wire({
+            "ok": True,
+            "schema": "bioprism-devplat-domain-workflow-portfolio-verify/0.1",
+            "workflow": "domain_workflow_portfolio_verify",
+            "portfolio_digest": "f" * 64,
+            "observed_portfolio_digest": "f" * 64,
+            "portfolio_digest_matched": True,
+            "portfolio_verify_digest": "a" * 64,
+            "valid": True,
+            "portfolio_ready": True,
+            "verification_status": "verified",
+            "policy": {"allow_partial": False, "require_complete_catalogue": False, "require_replay": True},
+            "coverage": {"complete_catalogue": False, "replay_complete": True},
+            "summary": {"verified_count": 1, "replay_matched_count": 1},
+            "items": [{"status": "verified"}],
+            "mismatches": [],
+            "preflight": {"required": True, "status": "matched", "matched": True},
+            "dispatch": "not_started",
+            "execution": "not_started",
+        })
+        self.assertTrue(portfolio_verification.verified)
+        self.assertTrue(portfolio_verification.portfolio_digest_matched)
+        self.assertEqual(portfolio_verification.items[0]["status"], "verified")
 
         scaffold_request = DomainWorkflowScaffoldRequest(
             "documentation_and_knowledge",

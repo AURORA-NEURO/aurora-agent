@@ -187,6 +187,11 @@ Convenience methods currently cover:
   blocked items retain their own issue witnesses while successful siblings remain inspectable. The
   typed result keeps the portfolio digest and the invariant `dispatch: "not_started"` /
   `execution: "not_started"`;
+- `domainWorkflowPortfolioVerify` / `domainWorkflowPortfolioVerifyQuery`: revalidate a retained
+  portfolio digest and every item, optionally replay an index-aligned request array, and expose
+  per-item mismatch/refusal witnesses plus replay, coverage, and authoritative mission-preflight
+  counts. The typed result preserves `portfolio_verify_digest` and remains
+  `dispatch: "not_started"` / `execution: "not_started"`;
 - `domainWorkflowVerify` / `domainWorkflowVerifyQuery`: retained-instantiation verification that
   checks current catalogue and domain-contract identities, workflow binding, mission identity, and
   authoritative mission preflight. Supplying the original bounded `replay_request` rebuilds the

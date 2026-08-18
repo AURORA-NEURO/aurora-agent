@@ -16,7 +16,7 @@ mod io;
 use args::{Command, CompileOptions, Family, GenerateOptions, Invocation, Parsed, Profile};
 use bioprism_devplat::{
     build_domain_workflow_catalogue, build_domain_workflow_portfolio, instantiate_domain_workflow,
-    reconcile_domain_workflow, scaffold_domain_workflow,
+    reconcile_domain_workflow, scaffold_domain_workflow, verify_domain_workflow_portfolio,
 };
 use bioprism_devplat::{
     verify_mission_evidence_bundle, DomainWorkflowReconciliationRegistry, EvidenceBundleRegistry,
@@ -211,6 +211,21 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
             policy.as_deref(),
             *allow_partial,
             *require_complete_catalogue,
+        ),
+        Command::WorkflowPortfolioVerify {
+            portfolio,
+            replay_requests,
+            policy,
+            allow_partial,
+            require_complete_catalogue,
+            require_replay,
+        } => workflow_portfolio_verify(
+            portfolio,
+            replay_requests.as_deref(),
+            policy.as_deref(),
+            *allow_partial,
+            *require_complete_catalogue,
+            *require_replay,
         ),
         Command::WorkflowReconcile {
             instantiation,
@@ -534,6 +549,258 @@ fn workflow_portfolio(
         report["coverage"]["complete_catalogue"].as_bool().unwrap_or(false),
         report["summary"]["preflight_status"].as_str().unwrap_or("blocked"),
         status,
+        valid,
+    );
+    Ok(Outcome::ok(report, human).failing_if(!valid))
+}
+
+fn workflow_portfolio_verify(
+    portfolio_path: &Path,
+    replay_requests_path: Option<&Path>,
+    policy_path: Option<&Path>,
+    allow_partial: bool,
+    require_complete_catalogue: bool,
+    require_replay: bool,
+) -> CliResult<Outcome> {
+    let raw_portfolio = io::read_json(portfolio_path)?;
+    let mut portfolio =
+        if raw_portfolio.get("portfolio").is_some() && raw_portfolio.get("workflow").is_none() {
+            raw_portfolio
+                .get("portfolio")
+                .cloned()
+                .ok_or_else(|| CliError::invalid("portfolio wrapper omitted portfolio"))?
+        } else {
+            raw_portfolio
+        };
+    if !portfolio.is_object() {
+        return Err(
+            CliError::invalid("--portfolio must contain a portfolio report object")
+                .about(portfolio_path.display().to_string()),
+        );
+    }
+    // REST adds request_id to response envelopes; it is transport metadata rather than part of
+    // the content-addressed portfolio artifact and is safe to remove before digest verification.
+    portfolio
+        .as_object_mut()
+        .expect("portfolio is an object")
+        .remove("request_id");
+    let mut request = json!({"portfolio": portfolio});
+    if let Some(path) = replay_requests_path {
+        let replay_requests = io::read_json(path)?;
+        request["replay_requests"] = if replay_requests.is_array() {
+            replay_requests
+        } else {
+            replay_requests
+                .get("replay_requests")
+                .cloned()
+                .ok_or_else(|| {
+                    CliError::invalid(
+                        "--replay-requests must contain an array or an object with replay_requests",
+                    )
+                    .about(path.display().to_string())
+                })?
+        };
+    }
+    let mut policy = request["portfolio"]
+        .get("policy")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    if let Some(path) = policy_path {
+        policy = io::read_json(path)?;
+    }
+    if !policy.is_object() {
+        return Err(
+            CliError::invalid("--policy must contain a JSON object").about(
+                policy_path
+                    .map(Path::display)
+                    .map(|display| display.to_string())
+                    .unwrap_or_else(|| portfolio_path.display().to_string()),
+            ),
+        );
+    }
+    if allow_partial {
+        policy["allow_partial"] = json!(true);
+    }
+    if require_complete_catalogue {
+        policy["require_complete_catalogue"] = json!(true);
+    }
+    if require_replay {
+        policy["require_replay"] = json!(true);
+    }
+    request["policy"] = policy;
+
+    let mut report = verify_domain_workflow_portfolio(
+        &workspace_capabilities(),
+        &Value::Array(tool_definitions()),
+        &request,
+    )
+    .map_err(|error| {
+        CliError::invalid(error.to_string()).about(portfolio_path.display().to_string())
+    })?;
+    let server = Server::new(
+        std::env::current_dir().map_err(|error| CliError::internal(error.to_string()))?,
+    );
+    let mut preflight_attempted_count = 0usize;
+    let mut preflight_blocked_count = 0usize;
+    if let Some(items) = report.get_mut("items").and_then(Value::as_array_mut) {
+        for item in items.iter_mut() {
+            if !matches!(
+                item.get("status").and_then(Value::as_str),
+                Some("verified") | Some("verified_without_replay")
+            ) {
+                continue;
+            }
+            let mission = item
+                .pointer("/instantiation/mission")
+                .cloned()
+                .ok_or_else(|| CliError::internal("verified portfolio item omitted mission"))?;
+            preflight_attempted_count = preflight_attempted_count.saturating_add(1);
+            let preflight = match server.preflight_agent_mission(&mission) {
+                Ok(value) => value,
+                Err(error) => json!({
+                    "ok": false,
+                    "workflow": "agent_mission",
+                    "preflight": true,
+                    "dispatch": "not_started",
+                    "schema_valid": false,
+                    "error": error,
+                    "fail_closed": true,
+                    "readiness_claimed": false,
+                }),
+            };
+            let preflight_ok = preflight.get("ok") == Some(&Value::Bool(true));
+            let expected_plan_digest = item
+                .pointer("/instantiation/preflight_report/plan/digest")
+                .cloned()
+                .unwrap_or(Value::Null);
+            let observed_plan_digest = preflight
+                .pointer("/plan/digest")
+                .cloned()
+                .unwrap_or(Value::Null);
+            let mut item_mismatches = item
+                .get("mismatches")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let preflight_status = if !preflight_ok {
+                item_mismatches.push(json!({
+                    "code": "mission_preflight_blocked",
+                    "expected": expected_plan_digest,
+                    "observed": observed_plan_digest,
+                }));
+                preflight_blocked_count = preflight_blocked_count.saturating_add(1);
+                item["status"] = json!("blocked_by_mission_preflight");
+                "blocked"
+            } else if expected_plan_digest.is_null() {
+                item_mismatches.push(json!({
+                    "code": "retained_preflight_missing",
+                    "observed": observed_plan_digest,
+                }));
+                preflight_blocked_count = preflight_blocked_count.saturating_add(1);
+                item["status"] = json!("blocked_by_mission_preflight");
+                "retained_projection_missing"
+            } else if expected_plan_digest != observed_plan_digest {
+                item_mismatches.push(json!({
+                    "code": "mission_plan_digest_mismatch",
+                    "expected": expected_plan_digest,
+                    "observed": observed_plan_digest,
+                }));
+                preflight_blocked_count = preflight_blocked_count.saturating_add(1);
+                item["status"] = json!("blocked_by_mission_preflight");
+                "mismatched"
+            } else {
+                "matched"
+            };
+            item["mission_preflight"] = json!({
+                "requested": true,
+                "status": preflight_status,
+                "matched": preflight_status == "matched",
+                "ok": preflight_ok,
+                "expected_plan_digest": expected_plan_digest,
+                "observed_plan_digest": observed_plan_digest,
+                "dispatch": "not_started",
+            });
+            item["verification"]["mission_preflight"] = item["mission_preflight"].clone();
+            item["verification"]["preflight_report"] = preflight.clone();
+            item["instantiation"]["preflight_report"] = preflight;
+            item["mismatches"] = Value::Array(item_mismatches);
+        }
+    }
+    let kernel_valid = report
+        .get("valid")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let valid = kernel_valid && preflight_blocked_count == 0;
+    report["valid"] = json!(valid);
+    report["portfolio_ready"] = json!(valid);
+    let kernel_blocked_count = report
+        .pointer("/summary/blocked_count")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    report["summary"]["blocked_count"] =
+        json!(kernel_blocked_count.saturating_add(preflight_blocked_count));
+    report["summary"]["preflight_attempted_count"] = json!(preflight_attempted_count);
+    report["summary"]["preflight_blocked_count"] = json!(preflight_blocked_count);
+    report["summary"]["preflight_status"] = json!(if preflight_blocked_count > 0 {
+        "blocked"
+    } else if preflight_attempted_count > 0 {
+        "matched"
+    } else {
+        "deferred"
+    });
+    report["preflight"] = json!({
+        "required": true,
+        "status": if preflight_blocked_count > 0 {
+            "blocked"
+        } else if preflight_attempted_count > 0 {
+            "matched"
+        } else {
+            "deferred"
+        },
+        "matched": preflight_blocked_count == 0 && preflight_attempted_count > 0,
+        "attempted_count": preflight_attempted_count,
+        "blocked_count": preflight_blocked_count,
+        "dispatch": "not_started",
+    });
+    let mut mismatches = report
+        .get("mismatches")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if preflight_blocked_count > 0 {
+        mismatches.push(json!({
+            "code": "portfolio_mission_preflight_blocked",
+            "blocked_count": preflight_blocked_count,
+        }));
+    }
+    report["mismatches"] = Value::Array(mismatches);
+    if !valid && preflight_blocked_count > 0 {
+        let allow_partial = report
+            .pointer("/policy/allow_partial")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        report["verification_status"] = json!(if allow_partial {
+            "partial"
+        } else {
+            "blocked_by_mission_preflight"
+        });
+    }
+    report["dispatch"] = json!("not_started");
+    report["execution"] = json!("not_started");
+    if let Some(object) = report.as_object_mut() {
+        object.remove("portfolio_verify_digest");
+    }
+    let digest = bioprism_ids::ContentHash::of_value(&report)
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    report["portfolio_verify_digest"] = json!(digest.to_string());
+    let status = report["verification_status"].as_str().unwrap_or("blocked");
+    let human = format!(
+        "domain workflow portfolio verification\n  items: {}\n  verification status: {}\n  preflight: {}\n  portfolio ready: {}\n  dispatch: not started\n  execution: not started\n\nNext: review mismatches and replay digests, then rerun authoritative verification before any explicit execution path.\n",
+        report["items"].as_array().map(Vec::len).unwrap_or_default(),
+        status,
+        report["summary"]["preflight_status"]
+            .as_str()
+            .unwrap_or("deferred"),
         valid,
     );
     Ok(Outcome::ok(report, human).failing_if(!valid))

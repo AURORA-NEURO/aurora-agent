@@ -574,6 +574,67 @@ fn workflow_portfolio_json_mode_preserves_no_dispatch_posture() {
 }
 
 #[test]
+fn workflow_portfolio_verify_replays_a_retained_report_without_dispatch() {
+    let directory = scratch("workflow-portfolio-verify");
+    let requests = directory.join("requests.json");
+    let portfolio = directory.join("portfolio.json");
+    let replay_requests = directory.join("replay-requests.json");
+    std::fs::write(
+        &requests,
+        r#"{
+          "requests": [{
+            "workflow_id": "documentation_and_knowledge",
+            "mission_id": "cli-portfolio-verify",
+            "goal": "replay the bounded portfolio handoff",
+            "steps": [{"id": "capability", "tool": "workspace_capabilities", "arguments": {}}]
+          }]
+        }"#,
+    )
+    .expect("write portfolio request");
+    let planned = run(&[
+        "--json",
+        "workflow",
+        "portfolio",
+        "--requests",
+        &requests.display().to_string(),
+    ]);
+    assert_eq!(code(&planned), 0, "{}", stdout(&planned));
+    std::fs::write(&portfolio, stdout(&planned)).expect("write retained portfolio");
+    std::fs::write(
+        &replay_requests,
+        r#"[
+          {
+            "workflow_id": "documentation_and_knowledge",
+            "mission_id": "cli-portfolio-verify",
+            "goal": "replay the bounded portfolio handoff",
+            "steps": [{"id": "capability", "tool": "workspace_capabilities", "arguments": {}}]
+          }
+        ]"#,
+    )
+    .expect("write replay requests");
+    let output = run(&[
+        "--json",
+        "workflow",
+        "portfolio-verify",
+        "--portfolio",
+        &portfolio.display().to_string(),
+        "--replay-requests",
+        &replay_requests.display().to_string(),
+        "--require-replay",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stdout(&output));
+    let report: Value = serde_json::from_str(&stdout(&output)).expect("portfolio verify JSON");
+    assert_eq!(report["workflow"], "domain_workflow_portfolio_verify");
+    assert_eq!(report["valid"], true);
+    assert_eq!(report["verification_status"], "verified");
+    assert_eq!(report["summary"]["replay_matched_count"], 1);
+    assert_eq!(report["preflight"]["status"], "matched");
+    assert_eq!(report["items"][0]["status"], "verified");
+    assert_eq!(report["dispatch"], "not_started");
+    assert_eq!(report["execution"], "not_started");
+}
+
+#[test]
 fn the_extended_profile_is_selectable_and_reports_sufficiency() {
     let output = run(&[
         "--json",

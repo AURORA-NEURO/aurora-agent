@@ -107,6 +107,10 @@ COMMANDS
                     [--require-complete-catalogue]
                     Plan multiple explicit group workflows from a JSON array (or an object with
                     `requests`), retaining independent no-dispatch preflight outcomes.
+  workflow portfolio-verify --portfolio <path> [--replay-requests <path>] [--policy <path>]
+                    [--allow-partial] [--require-complete-catalogue] [--require-replay]
+                    Verify a retained portfolio digest, coverage, and per-item replay posture;
+                    authoritative mission preflight remains no-dispatch.
   workflow reconcile --instantiation <path> [--mission <path>] [--evidence-bundle <path>]
                     Reconcile a retained agent_mission report or evidence bundle against the
                     instantiated workflow. Exit 1 when completion evidence is not ready.
@@ -225,6 +229,14 @@ pub enum Command {
         policy: Option<PathBuf>,
         allow_partial: bool,
         require_complete_catalogue: bool,
+    },
+    WorkflowPortfolioVerify {
+        portfolio: PathBuf,
+        replay_requests: Option<PathBuf>,
+        policy: Option<PathBuf>,
+        allow_partial: bool,
+        require_complete_catalogue: bool,
+        require_replay: bool,
     },
     WorkflowReconcile {
         instantiation: PathBuf,
@@ -427,6 +439,14 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
             policy: options.take_optional_path("--policy"),
             allow_partial: options.take_switch("--allow-partial"),
             require_complete_catalogue: options.take_switch("--require-complete-catalogue"),
+        },
+        ("workflow", "portfolio-verify") => Command::WorkflowPortfolioVerify {
+            portfolio: options.take_path("--portfolio")?,
+            replay_requests: options.take_optional_path("--replay-requests"),
+            policy: options.take_optional_path("--policy"),
+            allow_partial: options.take_switch("--allow-partial"),
+            require_complete_catalogue: options.take_switch("--require-complete-catalogue"),
+            require_replay: options.take_switch("--require-replay"),
         },
         ("workflow", "reconcile") => Command::WorkflowReconcile {
             instantiation: options.take_path("--instantiation")?,
@@ -695,6 +715,42 @@ mod tests {
                     policy: Some(PathBuf::from("policy.json")),
                     allow_partial: true,
                     require_complete_catalogue: true,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn workflow_portfolio_verify_parses_replay_and_integrity_controls() {
+        let parsed = parse(
+            [
+                "workflow",
+                "portfolio-verify",
+                "--portfolio",
+                "portfolio-report.json",
+                "--replay-requests",
+                "requests.json",
+                "--policy",
+                "policy.json",
+                "--allow-partial",
+                "--require-complete-catalogue",
+                "--require-replay",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse workflow portfolio verify");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::WorkflowPortfolioVerify {
+                    portfolio: PathBuf::from("portfolio-report.json"),
+                    replay_requests: Some(PathBuf::from("requests.json")),
+                    policy: Some(PathBuf::from("policy.json")),
+                    allow_partial: true,
+                    require_complete_catalogue: true,
+                    require_replay: true,
                 },
             })
         );

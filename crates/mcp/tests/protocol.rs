@@ -323,7 +323,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 224);
+    assert_eq!(tools.len(), 225);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -3295,6 +3295,44 @@ fn domain_workflow_instantiation_is_scoped_and_preflighted_without_dispatch() {
         json!(true)
     );
     assert_eq!(portfolio["dispatch"], json!("not_started"));
+
+    let mut retained_portfolio = portfolio.clone();
+    retained_portfolio
+        .as_object_mut()
+        .unwrap()
+        .remove("__isError");
+    let portfolio_verified = call(
+        &mut server,
+        "domain_workflow_portfolio_verify",
+        json!({
+            "portfolio": retained_portfolio,
+            "replay_requests": [{
+                "workflow_id": "documentation_and_knowledge",
+                "mission_id": "workflow-portfolio-single",
+                "goal": "prepare the repository capability surface",
+                "steps": [{"id": "catalog", "tool": "workspace_capabilities", "arguments": {}}]
+            }],
+            "policy": {"require_replay": true}
+        }),
+    );
+    assert_eq!(
+        portfolio_verified["workflow"],
+        json!("domain_workflow_portfolio_verify")
+    );
+    assert_eq!(portfolio_verified["valid"], json!(true));
+    assert_eq!(portfolio_verified["verification_status"], json!("verified"));
+    assert_eq!(portfolio_verified["summary"]["verified_count"], json!(1));
+    assert_eq!(
+        portfolio_verified["summary"]["replay_matched_count"],
+        json!(1)
+    );
+    assert_eq!(portfolio_verified["items"][0]["status"], json!("verified"));
+    assert_eq!(
+        portfolio_verified["items"][0]["mission_preflight"]["matched"],
+        json!(true)
+    );
+    assert_eq!(portfolio_verified["dispatch"], json!("not_started"));
+    assert_eq!(portfolio_verified["execution"], json!("not_started"));
 
     let shape_only = call(
         &mut server,
@@ -8035,12 +8073,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(224));
-    assert_eq!(result["advertised_tool_count"], json!(224));
+    assert_eq!(result["unique_catalog_tools"], json!(225));
+    assert_eq!(result["advertised_tool_count"], json!(225));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(224));
-    assert_eq!(result["schema_quality"]["valid"], json!(224));
+    assert_eq!(result["schema_quality"]["checked"], json!(225));
+    assert_eq!(result["schema_quality"]["valid"], json!(225));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

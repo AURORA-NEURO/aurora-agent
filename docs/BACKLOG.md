@@ -228,6 +228,11 @@ can be composed with per-item authoritative preflight and retained blocked rows.
 coverage and deliberate partial planning are separate states, so a missing domain-specific argument
 does not disappear behind a portfolio-level pass. This is still a planning/evidence composition
 surface rather than a scheduler or execution authority.
+The same portfolio now has a retained verification/replay continuation: the verifier recomputes the
+portfolio digest, checks coverage, aligns optional original requests by item index, preserves each
+identity/replay/preflight mismatch, and reruns authoritative mission preflight without dispatch.
+This closes the multi-domain plan-to-revalidation seam while leaving semantic sufficiency, external
+provider execution, and durable orchestration explicitly outside the boundary.
 The Python layer now also covers the evaluator/oracle/mutation and environment/pack authoring
 contracts: it builds versioned oracle manifests and judgements, preserves tier demotion and
 admissibility, validates distributions and findings, and exposes the oracle mesh, reference-panel,

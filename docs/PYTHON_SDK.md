@@ -786,6 +786,12 @@ invent defaults:
   result, digest, and refusal diagnostics; `require_complete_catalogue` and `allow_partial` keep
   complete coverage versus deliberate partial planning explicit. A portfolio never dispatches or
   turns `portfolio_ready` into permission, scientific validity, clinical guidance, or release approval.
+- `DomainWorkflowPortfolioVerifyRequest` and `DomainWorkflowPortfolioVerifyReport` revalidate a
+  retained portfolio as one bounded audit artifact. They recompute the portfolio digest, preserve
+  per-item identity/replay/refusal mismatches, accept an index-aligned optional replay array, and
+  expose `require_replay`, coverage, replay counts, and authoritative mission-preflight counts.
+  Sync/async Workspace and HTTP clients expose raw and typed MCP/REST variants; verification always
+  remains `dispatch: "not_started"` / `execution: "not_started"`.
 - `DomainWorkflowVerifyRequest` and `DomainWorkflowVerifyReport` verify a retained instantiation
   against the current catalogue, domain contract, workflow binding, mission identity, and
   authoritative mission preflight. Supplying `replay_request` reconstructs the original bounded

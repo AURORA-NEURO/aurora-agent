@@ -4603,6 +4603,33 @@ test("client exposes scoped domain workflow catalogue and instantiation over RES
     guarantees: [],
     limitations: [],
   };
+  const portfolioVerifyArgs = {
+    portfolio,
+    replay_requests: [args],
+    policy: { require_replay: true },
+  };
+  const portfolioVerified = {
+    ok: true,
+    schema: "bioprism-devplat-domain-workflow-portfolio-verify/0.1",
+    workflow: "domain_workflow_portfolio_verify",
+    portfolio_digest: "f".repeat(64),
+    observed_portfolio_digest: "f".repeat(64),
+    portfolio_digest_matched: true,
+    portfolio_verify_digest: "a".repeat(64),
+    valid: true,
+    portfolio_ready: true,
+    verification_status: "verified",
+    policy: { allow_partial: false, require_complete_catalogue: false, require_replay: true },
+    coverage: { complete_catalogue: false, replay_complete: true },
+    summary: { verified_count: 1, replay_matched_count: 1 },
+    items: [{ status: "verified" }],
+    mismatches: [],
+    preflight: { required: true, status: "matched", matched: true },
+    dispatch: "not_started",
+    execution: "not_started",
+    guarantees: [],
+    limitations: [],
+  };
   const scaffoldArgs = {
     workflow_id: "documentation_and_knowledge",
     mission_id: "ts-scaffold",
@@ -4645,6 +4672,10 @@ test("client exposes scoped domain workflow catalogue and instantiation over RES
         assert.deepEqual(JSON.parse(init.body), portfolioArgs);
         return jsonResponse(portfolio);
       }
+      if (url.pathname === "/v1/domain-workflows/portfolio/verify") {
+        assert.deepEqual(JSON.parse(init.body), portfolioVerifyArgs);
+        return jsonResponse(portfolioVerified);
+      }
       if (url.pathname === "/v1/domain-workflows/verify") {
         assert.deepEqual(JSON.parse(init.body), verifyArgs);
         return jsonResponse(verified);
@@ -4658,6 +4689,7 @@ test("client exposes scoped domain workflow catalogue and instantiation over RES
   assert.equal((await rest.domainWorkflowScaffoldQuery(scaffoldArgs)).readiness_claimed, false);
   assert.equal((await rest.domainWorkflowInstantiateQuery(args)).preflight_report.workflow, "agent_mission");
   assert.equal((await rest.domainWorkflowPortfolioQuery(portfolioArgs)).portfolio_ready, true);
+  assert.equal((await rest.domainWorkflowPortfolioVerifyQuery(portfolioVerifyArgs)).verification_status, "verified");
   assert.equal((await rest.domainWorkflowVerifyQuery(verifyArgs)).verification_status, "verified");
 
   const reconciliationArgs = {
@@ -4712,6 +4744,10 @@ test("client exposes scoped domain workflow catalogue and instantiation over RES
         assert.deepEqual(JSON.parse(init.body), portfolioArgs);
         return jsonResponse({ ok: true, tool: name, mcp: { result: { structuredContent: portfolio } } });
       }
+      if (name === "domain_workflow_portfolio_verify") {
+        assert.deepEqual(JSON.parse(init.body), portfolioVerifyArgs);
+        return jsonResponse({ ok: true, tool: name, mcp: { result: { structuredContent: portfolioVerified } } });
+      }
       if (name === "domain_workflow_verify") {
         assert.deepEqual(JSON.parse(init.body), verifyArgs);
         return jsonResponse({ ok: true, tool: name, mcp: { result: { structuredContent: verified } } });
@@ -4724,6 +4760,7 @@ test("client exposes scoped domain workflow catalogue and instantiation over RES
   assert.equal((await mcp.domainWorkflowScaffold(scaffoldArgs)).mcp.result.structuredContent.readiness_claimed, false);
   assert.equal((await mcp.domainWorkflowInstantiate(args)).mcp.result.structuredContent.execution, "not_started");
   assert.equal((await mcp.domainWorkflowPortfolio(portfolioArgs)).mcp.result.structuredContent.portfolio_status, "ready_for_authoritative_preflight");
+  assert.equal((await mcp.domainWorkflowPortfolioVerify(portfolioVerifyArgs)).mcp.result.structuredContent.verification_status, "verified");
   assert.equal((await mcp.domainWorkflowVerify(verifyArgs)).mcp.result.structuredContent.verification_status, "verified");
   const mcpReconcile = new ApiClient({
     baseUrl: "http://127.0.0.1:18788",

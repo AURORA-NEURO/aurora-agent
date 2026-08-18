@@ -139,12 +139,13 @@ use bioprism_devplat::{
     run_workbench, scaffold_domain_workflow, standard_walkthroughs,
     validate_workflow_execution_evidence, verify_delivery_receipt,
     verify_domain_evidence_provider_external_payload_replay,
-    verify_domain_evidence_provider_replay, verify_mission_evidence_bundle,
-    AdapterExecutionEvidenceQueryRequest, AdapterExecutionEvidenceRequest, ArtifactRegistry,
-    CapabilityCatalogue, CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest,
-    CiExecutionEvidenceRequest, CiProviderEvidenceRequest, CiProviderNormalizationRequest,
-    DeliveryReceiptRequest, DeliveryReceiptVerificationRequest, DevPlatReport,
-    DomainAcquisitionQuery, DomainEvidenceProviderExternalPayloadEvidenceQueryRequest,
+    verify_domain_evidence_provider_replay, verify_domain_workflow_portfolio,
+    verify_mission_evidence_bundle, AdapterExecutionEvidenceQueryRequest,
+    AdapterExecutionEvidenceRequest, ArtifactRegistry, CapabilityCatalogue,
+    CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest, CiExecutionEvidenceRequest,
+    CiProviderEvidenceRequest, CiProviderNormalizationRequest, DeliveryReceiptRequest,
+    DeliveryReceiptVerificationRequest, DevPlatReport, DomainAcquisitionQuery,
+    DomainEvidenceProviderExternalPayloadEvidenceQueryRequest,
     DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest,
     DomainEvidenceProviderExternalPayloadLineageAuditRequest,
     DomainEvidenceProviderExternalPayloadNormalizationRequest,
@@ -1820,6 +1821,7 @@ impl Server {
             "domain_workflow_scaffold" => self.domain_workflow_scaffold(&arguments),
             "domain_workflow_instantiate" => self.domain_workflow_instantiate(&arguments),
             "domain_workflow_portfolio" => self.domain_workflow_portfolio(&arguments),
+            "domain_workflow_portfolio_verify" => self.domain_workflow_portfolio_verify(&arguments),
             "domain_workflow_verify" => self.domain_workflow_verify(&arguments),
             "domain_workflow_reconcile" => self.domain_workflow_reconcile(&arguments),
             "domain_workflow_reconciliation_import" => {
@@ -26904,6 +26906,199 @@ impl Server {
         Ok(output)
     }
 
+    /// Verify a retained multi-domain portfolio, replay aligned requests when supplied, and
+    /// preflight every structurally successful item against the authoritative live tool schemas.
+    /// This is an audit projection only: no selected tool is dispatched, retried, resumed, or
+    /// promoted to execution readiness.
+    fn domain_workflow_portfolio_verify(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments).map_err(|error| {
+            format!("cannot encode domain workflow portfolio verification input: {error}")
+        })?;
+        if encoded.len() > bioprism_devplat::MAX_DOMAIN_WORKFLOW_BYTES {
+            return Err(format!(
+                "domain workflow portfolio verification input exceeds the {}-byte safety bound",
+                bioprism_devplat::MAX_DOMAIN_WORKFLOW_BYTES
+            ));
+        }
+        let mut output = verify_domain_workflow_portfolio(
+            &workspace_capabilities(),
+            &Value::Array(tool_definitions()),
+            arguments,
+        )
+        .map_err(|error| format!("domain workflow portfolio verification refused: {error}"))?;
+        let mut preflight_attempted_count = 0usize;
+        let mut preflight_blocked_count = 0usize;
+        if let Some(items) = output.get_mut("items").and_then(Value::as_array_mut) {
+            for item in items.iter_mut() {
+                let structurally_verified = matches!(
+                    item.get("status").and_then(Value::as_str),
+                    Some("verified") | Some("verified_without_replay")
+                );
+                if !structurally_verified {
+                    continue;
+                }
+                let mission = item
+                    .pointer("/instantiation/mission")
+                    .cloned()
+                    .ok_or_else(|| {
+                        "portfolio verification item omitted verified mission".to_string()
+                    })?;
+                preflight_attempted_count = preflight_attempted_count.saturating_add(1);
+                let preflight = match self.preflight_agent_mission(&mission) {
+                    Ok(value) => value,
+                    Err(error) => json!({
+                        "ok": false,
+                        "workflow": "agent_mission",
+                        "preflight": true,
+                        "dispatch": "not_started",
+                        "schema_valid": false,
+                        "error": error,
+                        "fail_closed": true,
+                        "readiness_claimed": false
+                    }),
+                };
+                let preflight_ok = preflight.get("ok") == Some(&Value::Bool(true));
+                let expected_plan_digest = item
+                    .pointer("/instantiation/preflight_report/plan/digest")
+                    .cloned()
+                    .unwrap_or(Value::Null);
+                let observed_plan_digest = preflight
+                    .pointer("/plan/digest")
+                    .cloned()
+                    .unwrap_or(Value::Null);
+                let mut item_mismatches = item
+                    .get("mismatches")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
+                let preflight_status = if !preflight_ok {
+                    item_mismatches.push(json!({
+                        "code": "mission_preflight_blocked",
+                        "expected": expected_plan_digest,
+                        "observed": observed_plan_digest,
+                        "message": "authoritative mission schema preflight blocked this portfolio verification item"
+                    }));
+                    preflight_blocked_count = preflight_blocked_count.saturating_add(1);
+                    item["status"] = json!("blocked_by_mission_preflight");
+                    "blocked"
+                } else if expected_plan_digest.is_null() {
+                    item_mismatches.push(json!({
+                        "code": "retained_preflight_missing",
+                        "message": "the retained instantiation has no authoritative preflight plan digest",
+                        "observed": observed_plan_digest
+                    }));
+                    preflight_blocked_count = preflight_blocked_count.saturating_add(1);
+                    item["status"] = json!("blocked_by_mission_preflight");
+                    "retained_projection_missing"
+                } else if expected_plan_digest != observed_plan_digest {
+                    item_mismatches.push(json!({
+                        "code": "mission_plan_digest_mismatch",
+                        "expected": expected_plan_digest,
+                        "observed": observed_plan_digest
+                    }));
+                    preflight_blocked_count = preflight_blocked_count.saturating_add(1);
+                    item["status"] = json!("blocked_by_mission_preflight");
+                    "mismatched"
+                } else {
+                    "matched"
+                };
+                item["mission_preflight"] = json!({
+                    "requested": true,
+                    "status": preflight_status,
+                    "matched": preflight_status == "matched",
+                    "ok": preflight_ok,
+                    "expected_plan_digest": expected_plan_digest,
+                    "observed_plan_digest": observed_plan_digest,
+                    "dispatch": "not_started"
+                });
+                item["verification"]["mission_preflight"] = item["mission_preflight"].clone();
+                item["verification"]["preflight_report"] = preflight.clone();
+                item["instantiation"]["preflight_report"] = preflight;
+                item["mismatches"] = Value::Array(item_mismatches);
+            }
+        }
+        let kernel_valid = output
+            .get("valid")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let valid = kernel_valid && preflight_blocked_count == 0;
+        output["valid"] = json!(valid);
+        output["portfolio_ready"] = json!(valid);
+        let kernel_blocked_count = output
+            .pointer("/summary/blocked_count")
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as usize;
+        output["summary"]["blocked_count"] =
+            json!(kernel_blocked_count.saturating_add(preflight_blocked_count));
+        output["summary"]["preflight_attempted_count"] = json!(preflight_attempted_count);
+        output["summary"]["preflight_blocked_count"] = json!(preflight_blocked_count);
+        output["summary"]["preflight_status"] = json!(if preflight_blocked_count > 0 {
+            "blocked"
+        } else if preflight_attempted_count > 0 {
+            "matched"
+        } else {
+            "deferred"
+        });
+        output["preflight"] = json!({
+            "required": true,
+            "status": if preflight_blocked_count > 0 {
+                "blocked"
+            } else if preflight_attempted_count > 0 {
+                "matched"
+            } else {
+                "deferred"
+            },
+            "matched": preflight_blocked_count == 0 && preflight_attempted_count > 0,
+            "attempted_count": preflight_attempted_count,
+            "blocked_count": preflight_blocked_count,
+            "dispatch": "not_started"
+        });
+        let mut mismatches = output
+            .get("mismatches")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        if preflight_blocked_count > 0 {
+            mismatches.push(json!({
+                "code": "portfolio_mission_preflight_blocked",
+                "blocked_count": preflight_blocked_count
+            }));
+        }
+        output["mismatches"] = Value::Array(mismatches);
+        let status = if valid {
+            output
+                .get("verification_status")
+                .cloned()
+                .unwrap_or_else(|| json!("verified"))
+        } else if preflight_blocked_count > 0 {
+            json!(if output
+                .pointer("/policy/allow_partial")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                "partial"
+            } else {
+                "blocked_by_mission_preflight"
+            })
+        } else {
+            output
+                .get("verification_status")
+                .cloned()
+                .unwrap_or_else(|| json!("mismatch"))
+        };
+        output["verification_status"] = status;
+        output["dispatch"] = json!("not_started");
+        output["execution"] = json!("not_started");
+        if let Some(object) = output.as_object_mut() {
+            object.remove("portfolio_verify_digest");
+        }
+        let digest = bioprism_ids::ContentHash::of_value(&output).map_err(|error| {
+            format!("cannot digest domain workflow portfolio verification: {error}")
+        })?;
+        output["portfolio_verify_digest"] = json!(digest.to_string());
+        Ok(output)
+    }
+
     /// Verify a retained domain workflow against the live catalogue and authoritative mission
     /// preflight without dispatching any selected tool.
     fn domain_workflow_verify(&self, arguments: &Value) -> Result<Value, String> {
@@ -33616,7 +33811,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "documentation_and_knowledge",
             "domains": ["repository navigation", "documentation graph", "task routes", "context bundles"],
             "crates": ["bioprism-docgraph", "bioprism-graph", "bioprism-lens"],
-            "mcp_tools": ["workspace_capabilities", "capability_audit", "capability_dashboard", "capability_discover", "capability_route", "capability_route_review", "capability_route_plan", "capability_route_plan_verify", "domain_workflow_catalogue", "domain_workflow_scaffold", "domain_workflow_instantiate", "domain_workflow_portfolio", "domain_workflow_verify", "domain_workflow_reconcile", "domain_workflow_reconciliation_import", "domain_workflow_reconciliation_query", "domain_workflow_reconciliation_get", "repository_catalog", "repository_bundle", "repository_impact", "lens_catalogue", "lens_leakage_check", "projection_bundle"],
+            "mcp_tools": ["workspace_capabilities", "capability_audit", "capability_dashboard", "capability_discover", "capability_route", "capability_route_review", "capability_route_plan", "capability_route_plan_verify", "domain_workflow_catalogue", "domain_workflow_scaffold", "domain_workflow_instantiate", "domain_workflow_portfolio", "domain_workflow_portfolio_verify", "domain_workflow_verify", "domain_workflow_reconcile", "domain_workflow_reconciliation_import", "domain_workflow_reconciliation_query", "domain_workflow_reconciliation_get", "repository_catalog", "repository_bundle", "repository_impact", "lens_catalogue", "lens_leakage_check", "projection_bundle"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -36846,6 +37041,28 @@ pub fn tool_definitions() -> Vec<Value> {
                     }
                 },
                 "required": ["requests"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "domain_workflow_portfolio_verify",
+            "description": "Verify a retained domain_workflow_portfolio artifact as one bounded audit object. Recomputes the retained portfolio digest, checks coverage and aligned replay request digests, verifies every item independently, and adds authoritative no-dispatch mission preflight to structurally successful items. Blocked and mismatched items remain visible; this never dispatches, retries, resumes, grants readiness, or establishes semantic, scientific, clinical, provider, or release validity.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "portfolio": { "type": "object", "description": "Complete retained result returned by domain_workflow_portfolio, including portfolio_digest, coverage, and items." },
+                    "replay_requests": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": ["object", "null"] }, "description": "Optional array aligned by item index with the original instantiate requests; null skips replay for that item." },
+                    "policy": {
+                        "type": "object",
+                        "properties": {
+                            "allow_partial": { "type": "boolean", "description": "Retain blocked verification items as partial instead of reporting the portfolio as blocked." },
+                            "require_complete_catalogue": { "type": "boolean", "description": "Require the retained portfolio coverage to include every live capability-group workflow." },
+                            "require_replay": { "type": "boolean", "description": "Require an aligned replay request and matching replay for every portfolio item." }
+                        },
+                        "additionalProperties": false
+                    }
+                },
+                "required": ["portfolio"],
                 "additionalProperties": false
             }
         }),

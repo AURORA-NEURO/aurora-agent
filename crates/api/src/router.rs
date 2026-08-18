@@ -1416,6 +1416,9 @@ impl ApiRouter {
             ("POST", "/v1/domain-workflows/portfolio") => {
                 self.domain_workflow_portfolio(&request, &request_id)
             }
+            ("POST", "/v1/domain-workflows/portfolio/verify") => {
+                self.domain_workflow_portfolio_verify(&request, &request_id)
+            }
             ("POST", "/v1/domain-workflows/verify") => {
                 self.domain_workflow_verify(&request, &request_id)
             }
@@ -3487,6 +3490,7 @@ impl ApiRouter {
                     "domain_workflow_scaffold": "/v1/domain-workflows/scaffold",
                     "domain_workflow_instantiate": "/v1/domain-workflows/instantiate",
                     "domain_workflow_portfolio": "/v1/domain-workflows/portfolio",
+                    "domain_workflow_portfolio_verify": "/v1/domain-workflows/portfolio/verify",
                     "domain_workflow_verify": "/v1/domain-workflows/verify",
                     "domain_workflow_reconcile": "/v1/domain-workflows/reconcile",
                     "domain_workflow_reconciliations": "/v1/domain-workflows/reconciliations",
@@ -3578,6 +3582,7 @@ impl ApiRouter {
                     "domain_workflow_scaffold": true,
                     "domain_workflow_instantiate": true,
                     "domain_workflow_portfolio": true,
+                    "domain_workflow_portfolio_verify": true,
                     "domain_workflow_verify": true,
                     "domain_workflow_reconcile": true,
                     "domain_workflow_reconciliation_registry": true,
@@ -4017,6 +4022,30 @@ impl ApiRouter {
         self.domain_workflow_tool(
             request_id,
             "domain_workflow_portfolio",
+            Value::Object(arguments),
+        )
+    }
+
+    fn domain_workflow_portfolio_verify(
+        &self,
+        request: &HttpRequest,
+        request_id: &str,
+    ) -> HttpResponse {
+        let mut arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        // REST adds request_id to every response envelope. It is transport metadata, not part of
+        // the retained content-addressed portfolio, so accept a directly round-tripped report.
+        if let Some(portfolio) = arguments
+            .get_mut("portfolio")
+            .and_then(Value::as_object_mut)
+        {
+            portfolio.remove("request_id");
+        }
+        self.domain_workflow_tool(
+            request_id,
+            "domain_workflow_portfolio_verify",
             Value::Object(arguments),
         )
     }
@@ -7581,6 +7610,7 @@ impl ApiRouter {
                     "/v1/domain-workflows/scaffold": { "post": { "responses": { "200": { "description": "deterministic execution-disabled workflow scaffold with authoritative preflight" }, "422": { "description": "workflow selection or scaffold request was refused" } } } },
                     "/v1/domain-workflows/instantiate": { "post": { "responses": { "200": { "description": "group-scoped, authoritative-preflighted, no-dispatch workflow mission" }, "422": { "description": "workflow selection or mission preflight was refused" } } } },
                     "/v1/domain-workflows/portfolio": { "post": { "responses": { "200": { "description": "bounded multi-domain workflow portfolio with per-item authoritative no-dispatch preflight" }, "400": { "description": "workflow portfolio JSON was invalid" }, "422": { "description": "workflow portfolio was refused" } } } },
+                    "/v1/domain-workflows/portfolio/verify": { "post": { "responses": { "200": { "description": "retained multi-domain workflow portfolio digest, replay, coverage, and authoritative mission-preflight verification" }, "400": { "description": "workflow portfolio verification JSON was invalid" }, "422": { "description": "workflow portfolio verification was refused" } } } },
                     "/v1/domain-workflows/verify": { "post": { "responses": { "200": { "description": "retained domain-workflow replay and authoritative mission-preflight verification" }, "400": { "description": "workflow verification JSON was invalid" }, "422": { "description": "workflow verification was refused" } } } },
                     "/v1/domain-workflows/reconcile": { "post": { "responses": { "200": { "description": "digest-bound workflow execution and evidence reconciliation" }, "422": { "description": "workflow evidence source or contract was refused" } } } },
                     "/v1/domain-workflows/reconciliations": { "get": { "parameters": [{ "name": "mission_id", "in": "query" }, { "name": "workflow_id", "in": "query" }, { "name": "mission_plan_digest", "in": "query" }, { "name": "completion_status", "in": "query" }, { "name": "after", "in": "query" }, { "name": "limit", "in": "query" }, { "name": "include_records", "in": "query" }], "responses": { "200": { "description": "bounded deterministic workflow reconciliation registry index" } } }, "post": { "responses": { "201": { "description": "digest-valid workflow reconciliation imported" }, "200": { "description": "idempotent re-import" }, "422": { "description": "reconciliation record failed digest validation" } } } },
@@ -12732,6 +12762,33 @@ mod tests {
         assert_eq!(portfolio["items"][0]["status"], "instantiated");
         assert_eq!(portfolio["items"][0]["mission_preflight"]["matched"], true);
         assert_eq!(portfolio["dispatch"], "not_started");
+
+        let portfolio_verified = router.handle(request(
+            "POST",
+            "/v1/domain-workflows/portfolio/verify",
+            json!({
+                "portfolio": portfolio.clone(),
+                "replay_requests": [{
+                    "workflow_id": "documentation_and_knowledge",
+                    "mission_id": "api-portfolio-1",
+                    "goal": "discover repository capabilities",
+                    "steps": [{"id": "catalog", "tool": "workspace_capabilities", "arguments": {}}],
+                    "policy": {"execute": true}
+                }],
+                "policy": {"require_replay": true}
+            }),
+        ));
+        assert_eq!(portfolio_verified.status, 200);
+        let portfolio_verified: Value = serde_json::from_slice(&portfolio_verified.body).unwrap();
+        assert_eq!(
+            portfolio_verified["workflow"],
+            "domain_workflow_portfolio_verify"
+        );
+        assert_eq!(portfolio_verified["valid"], true);
+        assert_eq!(portfolio_verified["verification_status"], "verified");
+        assert_eq!(portfolio_verified["summary"]["replay_matched_count"], 1);
+        assert_eq!(portfolio_verified["items"][0]["status"], "verified");
+        assert_eq!(portfolio_verified["dispatch"], "not_started");
 
         let verified = router.handle(request(
             "POST",

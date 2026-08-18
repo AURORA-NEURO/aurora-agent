@@ -916,6 +916,13 @@ and `--require-complete-catalogue` make the two most important scope decisions v
 automation. A blocked portfolio returns its full per-item diagnostics in `--json` mode and uses
 the assertion-failed verdict when it is not ready, while preserving `dispatch` and `execution` as
 `not_started`.
+`domain_workflow_portfolio_verify` is the retained multi-domain audit continuation: it recomputes
+the portfolio digest and coverage, verifies every retained item independently, optionally replays
+an index-aligned array of original requests, and retains digest, identity, replay, and mission
+preflight mismatches per item. The CLI exposes this as `workflow portfolio-verify --portfolio
+<path> [--replay-requests <path>] [--require-replay]`; REST, MCP, Python, and TypeScript expose
+the same bounded contract. Verification remains review evidence only: it never dispatches,
+retries, resumes, grants readiness, or establishes domain validity.
 `domain_workflow_verify` is the retained-handoff gate before re-review: it validates the current
 catalogue and contract identities, checks the workflow binding and mission projection, reruns
 authoritative mission preflight, and optionally replays the original bounded instantiation request.

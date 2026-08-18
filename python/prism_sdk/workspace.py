@@ -138,6 +138,8 @@ from .capability import (
     DomainWorkflowInstantiationReport,
     DomainWorkflowPortfolioRequest,
     DomainWorkflowPortfolioReport,
+    DomainWorkflowPortfolioVerifyRequest,
+    DomainWorkflowPortfolioVerifyReport,
     DomainWorkflowVerifyRequest,
     DomainWorkflowVerifyReport,
     DomainWorkflowScaffoldRequest,
@@ -175,6 +177,7 @@ from .capability import (
     domain_workflow_catalogue_report,
     domain_workflow_instantiation_report,
     domain_workflow_portfolio_report,
+    domain_workflow_portfolio_verify_report,
     domain_workflow_verify_report,
     domain_workflow_scaffold_report,
     domain_workflow_reconciliation_report,
@@ -2092,6 +2095,25 @@ class Workspace:
         request: DomainWorkflowPortfolioRequest | Mapping[str, Any],
     ) -> DomainWorkflowPortfolioReport:
         return domain_workflow_portfolio_report(self.domain_workflow_portfolio(request))
+
+    def domain_workflow_portfolio_verify(
+        self,
+        request: DomainWorkflowPortfolioVerifyRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Verify a retained multi-domain portfolio with optional aligned replay."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowPortfolioVerifyRequest)
+            else DomainWorkflowPortfolioVerifyRequest(**dict(request))
+        )
+        return self.tool("domain_workflow_portfolio_verify", normalized.to_arguments())
+
+    def domain_workflow_portfolio_verify_report(
+        self,
+        request: DomainWorkflowPortfolioVerifyRequest | Mapping[str, Any],
+    ) -> DomainWorkflowPortfolioVerifyReport:
+        return domain_workflow_portfolio_verify_report(self.domain_workflow_portfolio_verify(request))
 
     def domain_workflow_verify(
         self,
@@ -6080,6 +6102,25 @@ class AsyncWorkspace:
         request: DomainWorkflowPortfolioRequest | Mapping[str, Any],
     ) -> DomainWorkflowPortfolioReport:
         return domain_workflow_portfolio_report(await self.domain_workflow_portfolio(request))
+
+    async def domain_workflow_portfolio_verify(
+        self,
+        request: DomainWorkflowPortfolioVerifyRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowPortfolioVerifyRequest)
+            else DomainWorkflowPortfolioVerifyRequest(**dict(request))
+        )
+        return await self.tool("domain_workflow_portfolio_verify", normalized.to_arguments())
+
+    async def domain_workflow_portfolio_verify_report(
+        self,
+        request: DomainWorkflowPortfolioVerifyRequest | Mapping[str, Any],
+    ) -> DomainWorkflowPortfolioVerifyReport:
+        return domain_workflow_portfolio_verify_report(
+            await self.domain_workflow_portfolio_verify(request)
+        )
 
     async def domain_workflow_verify(
         self,

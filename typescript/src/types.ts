@@ -5156,6 +5156,12 @@ export interface DomainWorkflowPortfolioArgs extends JsonObject {
   policy?: JsonObject;
 }
 
+export interface DomainWorkflowPortfolioVerifyArgs extends JsonObject {
+  portfolio: JsonObject;
+  replay_requests?: Array<DomainWorkflowInstantiateArgs | null>;
+  policy?: JsonObject;
+}
+
 export interface DomainWorkflowScaffoldArgs extends JsonObject {
   workflow_id: string;
   mission_id: string;
@@ -5301,6 +5307,29 @@ export interface DomainWorkflowPortfolioResult extends JsonObject {
   coverage: JsonObject;
   summary: JsonObject;
   items: JsonObject[];
+  preflight: JsonObject;
+  dispatch: "not_started";
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface DomainWorkflowPortfolioVerifyResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "domain_workflow_portfolio_verify";
+  portfolio_digest: string;
+  observed_portfolio_digest: string;
+  portfolio_digest_matched: boolean;
+  portfolio_verify_digest: string;
+  valid: boolean;
+  portfolio_ready: boolean;
+  verification_status: "verified" | "verified_without_replay" | "partial" | "blocked" | "blocked_by_mission_preflight" | "replay_incomplete" | "incomplete_scope" | "mismatch";
+  policy: JsonObject;
+  coverage: JsonObject;
+  summary: JsonObject;
+  items: JsonObject[];
+  mismatches: JsonObject[];
   preflight: JsonObject;
   dispatch: "not_started";
   execution: "not_started";

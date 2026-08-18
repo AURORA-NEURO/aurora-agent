@@ -36,6 +36,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `POST /v1/domain-workflows/scaffold` | Select available stage tools, build an execution-disabled workflow, and run bounded preflight |
 | `POST /v1/domain-workflows/instantiate` | Instantiate a group-scoped mission and attach authoritative no-dispatch preflight |
 | `POST /v1/domain-workflows/portfolio` | Plan multiple explicit capability-group workflows with independent preflight and complete/partial coverage posture |
+| `POST /v1/domain-workflows/portfolio/verify` | Verify a retained portfolio digest, coverage, aligned replay set, and per-item authoritative no-dispatch preflight |
 | `POST /v1/domain-workflows/verify` | Verify a retained instantiation against current catalogue, contract, and mission-preflight state; optionally replay the original request |
 | `POST /v1/domain-workflows/reconcile` | Reconcile retained mission results or evidence bundles against an instantiated workflow contract |
 | `POST /v1/domain-reports` | Validate and index one explicit report projection for a declared capability group and source tool |
@@ -164,6 +165,18 @@ blocked rows a deliberate `partial` portfolio rather than a transport refusal. `
 `portfolio_ready` are false whenever any item is blocked or required coverage is missing. The
 portfolio digest covers the full bounded projection, and both `dispatch` and `execution` remain
 `not_started`; the route never executes, retries, resumes, or grants readiness.
+
+`POST /v1/domain-workflows/portfolio/verify` accepts a retained `domain_workflow_portfolio`
+report, with optional `replay_requests` aligned exactly to `items` and an optional policy containing
+`allow_partial`, `require_complete_catalogue`, and `require_replay`. It recomputes and compares the
+retained `portfolio_digest`, verifies every instantiated row independently, compares aligned replay
+requests to retained `request_digest` values, and retains blocked rows and mismatch witnesses. The
+MCP transport then reruns authoritative mission preflight for every structurally successful item;
+REST response `request_id` metadata is transport-only and can be round-tripped into this route.
+`portfolio_verify_digest`, item statuses, coverage, replay counts, and preflight counts are all
+explicit. The route remains an audit boundary with `dispatch` and `execution` set to
+`not_started`; a valid result is not execution permission or scientific, clinical, provider, or
+release validity.
 
 `POST /v1/domain-workflows/verify` checks a retained `domain_workflow_instantiate` response before
 handoff or re-review. It validates the workflow, catalogue, domain-contract, mission, and binding

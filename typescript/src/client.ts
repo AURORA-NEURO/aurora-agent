@@ -27,6 +27,8 @@ import type {
   DomainWorkflowInstantiateResult,
   DomainWorkflowPortfolioArgs,
   DomainWorkflowPortfolioResult,
+  DomainWorkflowPortfolioVerifyArgs,
+  DomainWorkflowPortfolioVerifyResult,
   DomainWorkflowVerifyArgs,
   DomainWorkflowVerifyResult,
   DomainWorkflowScaffoldArgs,
@@ -602,6 +604,22 @@ export class ApiClient {
     }
     if (args.policy !== undefined && !isObject(args.policy)) throw new ArgumentError("workflow portfolio policy must be an object");
     return this.request<DomainWorkflowPortfolioResult>("POST", "/v1/domain-workflows/portfolio", args, options);
+  }
+
+  /** Verify a retained multi-domain portfolio, including optional aligned replay. */
+  async domainWorkflowPortfolioVerifyQuery(
+    args: DomainWorkflowPortfolioVerifyArgs,
+    options?: ClientRequestOptions,
+  ): Promise<DomainWorkflowPortfolioVerifyResult> {
+    if (!isObject(args) || !isObject(args.portfolio)) throw new ArgumentError("workflow portfolio verification requires a portfolio object");
+    if (args.replay_requests !== undefined && (!Array.isArray(args.replay_requests) || args.replay_requests.length < 1 || args.replay_requests.length > 64 || args.replay_requests.some((request) => request !== null && !isObject(request)))) {
+      throw new ArgumentError("workflow portfolio verification replay_requests must contain 1..=64 objects or nulls");
+    }
+    if (args.policy !== undefined && !isObject(args.policy)) throw new ArgumentError("workflow portfolio verification policy must be an object");
+    const portfolio = { ...args.portfolio };
+    delete portfolio.request_id;
+    delete portfolio.__isError;
+    return this.request<DomainWorkflowPortfolioVerifyResult>("POST", "/v1/domain-workflows/portfolio/verify", { ...args, portfolio }, options);
   }
 
   /** Verify a retained workflow contract and optionally replay its original request. */
@@ -1790,6 +1808,22 @@ export class ApiClient {
     }
     if (args.policy !== undefined && !isObject(args.policy)) throw new ArgumentError("workflow portfolio policy must be an object");
     return this.callTool<DomainWorkflowPortfolioResult>("domain_workflow_portfolio", args, options);
+  }
+
+  /** Verify a retained multi-domain portfolio through the MCP tool boundary. */
+  async domainWorkflowPortfolioVerify(
+    args: DomainWorkflowPortfolioVerifyArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainWorkflowPortfolioVerifyResult>> {
+    if (!isObject(args) || !isObject(args.portfolio)) throw new ArgumentError("workflow portfolio verification requires a portfolio object");
+    if (args.replay_requests !== undefined && (!Array.isArray(args.replay_requests) || args.replay_requests.length < 1 || args.replay_requests.length > 64 || args.replay_requests.some((request) => request !== null && !isObject(request)))) {
+      throw new ArgumentError("workflow portfolio verification replay_requests must contain 1..=64 objects or nulls");
+    }
+    if (args.policy !== undefined && !isObject(args.policy)) throw new ArgumentError("workflow portfolio verification policy must be an object");
+    const portfolio = { ...args.portfolio };
+    delete portfolio.request_id;
+    delete portfolio.__isError;
+    return this.callTool<DomainWorkflowPortfolioVerifyResult>("domain_workflow_portfolio_verify", { ...args, portfolio }, options);
   }
 
   /** Verify a retained workflow contract through the MCP tool boundary. */

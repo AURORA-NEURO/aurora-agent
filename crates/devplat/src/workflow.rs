@@ -28,6 +28,8 @@ pub const DOMAIN_WORKFLOW_VERIFY_SCHEMA_VERSION: &str =
     "bioprism-devplat-domain-workflow-verify/0.1";
 pub const DOMAIN_WORKFLOW_PORTFOLIO_SCHEMA_VERSION: &str =
     "bioprism-devplat-domain-workflow-portfolio/0.1";
+pub const DOMAIN_WORKFLOW_PORTFOLIO_VERIFY_SCHEMA_VERSION: &str =
+    "bioprism-devplat-domain-workflow-portfolio-verify/0.1";
 pub const DOMAIN_WORKFLOW_SCAFFOLD_SCHEMA_VERSION: &str =
     "bioprism-devplat-domain-workflow-scaffold/0.1";
 pub const DOMAIN_WORKFLOW_CONTRACT_SCHEMA_VERSION: &str =
@@ -1537,6 +1539,432 @@ pub fn verify_domain_workflow(
     }))
 }
 
+/// Verify a retained portfolio as one bounded, independently diagnosable artifact.
+///
+/// The portfolio digest protects the retained scope and item ordering, while each item is passed
+/// through [`verify_domain_workflow`] so identity, mission binding, and optional caller replay are
+/// checked independently. A malformed or blocked row is retained in the result rather than
+/// aborting the other rows. This kernel intentionally stops before authoritative MCP preflight:
+/// the transport may add that check, but neither layer dispatches, retries, resumes, or grants
+/// execution readiness.
+pub fn verify_domain_workflow_portfolio(
+    catalogue: &Value,
+    tool_definitions: &Value,
+    request: &Value,
+) -> Result<Value, DomainWorkflowError> {
+    checked_bytes(request)?;
+    let object = request
+        .as_object()
+        .ok_or(DomainWorkflowError::RequestNotObject)?;
+    let portfolio = object
+        .get("portfolio")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            DomainWorkflowError::InvalidRequest(
+                "portfolio verification requires a portfolio object".into(),
+            )
+        })?;
+    if portfolio.get("workflow").and_then(Value::as_str) != Some("domain_workflow_portfolio") {
+        return Err(DomainWorkflowError::InvalidRequest(
+            "portfolio.workflow must be domain_workflow_portfolio".into(),
+        ));
+    }
+    let expected_portfolio_digest = portfolio
+        .get("portfolio_digest")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            DomainWorkflowError::InvalidRequest(
+                "portfolio.portfolio_digest must be a 64-character hexadecimal digest".into(),
+            )
+        })?
+        .to_owned();
+    ContentHash::parse(expected_portfolio_digest.clone()).map_err(|_| {
+        DomainWorkflowError::InvalidRequest(
+            "portfolio.portfolio_digest must be a 64-character hexadecimal digest".into(),
+        )
+    })?;
+    let mut portfolio_without_digest = Value::Object(portfolio.clone());
+    {
+        let portfolio_object = portfolio_without_digest
+            .as_object_mut()
+            .expect("portfolio_without_digest is an object");
+        portfolio_object.remove("portfolio_digest");
+        // REST and JSON-RPC adapters may append envelope metadata after the portfolio digest was
+        // computed. These fields are transport provenance, not retained portfolio content.
+        portfolio_object.remove("request_id");
+        portfolio_object.remove("__isError");
+    }
+    let observed_portfolio_digest = digest(&portfolio_without_digest)?;
+    let portfolio_digest_matched = observed_portfolio_digest == expected_portfolio_digest;
+
+    let items = portfolio
+        .get("items")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            DomainWorkflowError::InvalidRequest("portfolio.items must be an array".into())
+        })?;
+    if items.is_empty() || items.len() > MAX_DOMAIN_WORKFLOW_PORTFOLIO_ITEMS {
+        return Err(DomainWorkflowError::InvalidRequest(format!(
+            "portfolio.items must contain between 1 and {} items",
+            MAX_DOMAIN_WORKFLOW_PORTFOLIO_ITEMS
+        )));
+    }
+    let coverage = portfolio
+        .get("coverage")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            DomainWorkflowError::InvalidRequest("portfolio.coverage must be an object".into())
+        })?;
+    let portfolio_policy = portfolio
+        .get("policy")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let policy = object.get("policy").cloned().unwrap_or(portfolio_policy);
+    let policy = policy
+        .as_object()
+        .ok_or_else(|| DomainWorkflowError::InvalidRequest("policy must be an object".into()))?;
+    let policy_bool = |field: &str| -> Result<bool, DomainWorkflowError> {
+        policy
+            .get(field)
+            .map(|value| {
+                value.as_bool().ok_or_else(|| {
+                    DomainWorkflowError::InvalidRequest(format!("policy.{field} must be a boolean"))
+                })
+            })
+            .transpose()
+            .map(|value| value.unwrap_or(false))
+    };
+    let allow_partial = policy_bool("allow_partial")?;
+    let require_complete_catalogue = policy_bool("require_complete_catalogue")?;
+    let require_replay = policy_bool("require_replay")?;
+
+    let replay_requests = match object.get("replay_requests") {
+        None => None,
+        Some(value) => {
+            let requests = value.as_array().ok_or_else(|| {
+                DomainWorkflowError::InvalidRequest("replay_requests must be an array".into())
+            })?;
+            if requests.len() != items.len() {
+                return Err(DomainWorkflowError::InvalidRequest(format!(
+                    "replay_requests must contain exactly {} items",
+                    items.len()
+                )));
+            }
+            for (index, replay_request) in requests.iter().enumerate() {
+                if !replay_request.is_null() && !replay_request.is_object() {
+                    return Err(DomainWorkflowError::InvalidRequest(format!(
+                        "replay_requests[{index}] must be an object or null"
+                    )));
+                }
+            }
+            Some(requests.clone())
+        }
+    };
+
+    let mut verified_count = 0usize;
+    let mut verified_without_replay_count = 0usize;
+    let mut mismatch_count = 0usize;
+    let mut blocked_count = 0usize;
+    let mut replay_requested_count = 0usize;
+    let mut replay_matched_count = 0usize;
+    let mut output_items = Vec::with_capacity(items.len());
+
+    for (index, item) in items.iter().enumerate() {
+        let item_object = item.as_object();
+        let workflow_id = item_object
+            .and_then(|item| item.get("workflow_id"))
+            .cloned()
+            .unwrap_or(Value::Null);
+        let mission_id = item_object
+            .and_then(|item| item.get("mission_id"))
+            .cloned()
+            .unwrap_or(Value::Null);
+        let request_digest = item_object
+            .and_then(|item| item.get("request_digest"))
+            .cloned()
+            .unwrap_or(Value::Null);
+        let instantiation = item_object.and_then(|item| item.get("instantiation"));
+        let mut mismatches = item_object
+            .and_then(|item| item.get("issues"))
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let verification;
+        let mut replay_requested = false;
+        let mut status = "blocked";
+
+        if let Some(instantiation) = instantiation.filter(|value| value.is_object()) {
+            let replay_request = replay_requests
+                .as_ref()
+                .and_then(|requests| requests.get(index))
+                .filter(|request| !request.is_null());
+            if let Some(replay_request) = replay_request {
+                replay_requested = true;
+                replay_requested_count = replay_requested_count.saturating_add(1);
+                if let Some(expected_digest) = request_digest.as_str() {
+                    let observed_digest = digest(replay_request)?;
+                    if observed_digest != expected_digest {
+                        mismatches.push(json!({
+                            "code": "replay_request_digest_mismatch",
+                            "expected": expected_digest,
+                            "observed": observed_digest,
+                            "message": "aligned replay request does not match the retained portfolio request digest"
+                        }));
+                    }
+                }
+            }
+            let mut verification_request = json!({"instantiation": instantiation});
+            if let Some(replay_request) = replay_request {
+                verification_request["replay_request"] = replay_request.clone();
+            }
+            match verify_domain_workflow(catalogue, tool_definitions, &verification_request) {
+                Ok(report) => {
+                    let replay_matched = report
+                        .pointer("/replay/matched")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    if replay_matched {
+                        replay_matched_count = replay_matched_count.saturating_add(1);
+                    }
+                    mismatches.extend(
+                        report
+                            .get("mismatches")
+                            .and_then(Value::as_array)
+                            .cloned()
+                            .unwrap_or_default(),
+                    );
+                    let observed_workflow_id =
+                        report.get("workflow_id").cloned().unwrap_or(Value::Null);
+                    let observed_mission_id =
+                        report.get("mission_id").cloned().unwrap_or(Value::Null);
+                    if workflow_id != observed_workflow_id {
+                        mismatches.push(json!({
+                            "code": "portfolio_workflow_id_mismatch",
+                            "expected": workflow_id,
+                            "observed": observed_workflow_id
+                        }));
+                    }
+                    if mission_id != observed_mission_id {
+                        mismatches.push(json!({
+                            "code": "portfolio_mission_id_mismatch",
+                            "expected": mission_id,
+                            "observed": observed_mission_id
+                        }));
+                    }
+                    let replay_status = report
+                        .pointer("/replay/status")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned);
+                    verification = report;
+                    if mismatches.is_empty() {
+                        if replay_requested {
+                            if replay_matched {
+                                status = "verified";
+                                verified_count = verified_count.saturating_add(1);
+                            } else {
+                                status = "mismatch";
+                                mismatch_count = mismatch_count.saturating_add(1);
+                            }
+                        } else {
+                            status = "verified_without_replay";
+                            verified_without_replay_count =
+                                verified_without_replay_count.saturating_add(1);
+                        }
+                    } else if replay_requested && replay_status.as_deref() == Some("blocked") {
+                        status = "blocked_by_replay";
+                        blocked_count = blocked_count.saturating_add(1);
+                    } else {
+                        status = "mismatch";
+                        mismatch_count = mismatch_count.saturating_add(1);
+                    }
+                }
+                Err(error) => {
+                    mismatches.push(json!({
+                        "code": "retained_instantiation_blocked",
+                        "message": error.to_string()
+                    }));
+                    verification = json!({
+                        "ok": false,
+                        "workflow": "domain_workflow_verify",
+                        "structural_valid": false,
+                        "replay": {
+                            "requested": replay_requested,
+                            "status": if replay_requested { "blocked" } else { "not_requested" },
+                            "matched": false
+                        },
+                        "mismatches": mismatches.clone(),
+                        "dispatch": "not_started",
+                        "execution": "not_started"
+                    });
+                    status = if replay_requested {
+                        "blocked_by_replay"
+                    } else {
+                        "blocked"
+                    };
+                    blocked_count = blocked_count.saturating_add(1);
+                }
+            }
+        } else {
+            mismatches.push(json!({
+                "code": "portfolio_item_has_no_instantiation",
+                "message": "blocked portfolio rows cannot be structurally verified"
+            }));
+            verification = json!({
+                "ok": false,
+                "workflow": "domain_workflow_verify",
+                "structural_valid": false,
+                "replay": {"requested": false, "status": "not_requested", "matched": false},
+                "mismatches": mismatches.clone(),
+                "dispatch": "not_started",
+                "execution": "not_started"
+            });
+            blocked_count = blocked_count.saturating_add(1);
+        }
+
+        output_items.push(json!({
+            "index": index,
+            "workflow_id": workflow_id,
+            "mission_id": mission_id,
+            "request_digest": request_digest,
+            "status": status,
+            "instantiation": instantiation.cloned().unwrap_or(Value::Null),
+            "verification": verification,
+            "mismatches": mismatches,
+            "mission_preflight": {
+                "status": "deferred",
+                "matched": false,
+                "dispatch": "not_started"
+            }
+        }));
+    }
+
+    let complete_catalogue = coverage
+        .get("complete_catalogue")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let replay_complete = replay_requests.is_some()
+        && replay_requested_count == items.len()
+        && replay_matched_count == items.len();
+    let item_failures = blocked_count.saturating_add(mismatch_count);
+    let valid = portfolio_digest_matched
+        && item_failures == 0
+        && (!require_complete_catalogue || complete_catalogue)
+        && (!require_replay || replay_complete);
+    let verification_status = if valid {
+        if replay_requested_count > 0 {
+            "verified"
+        } else {
+            "verified_without_replay"
+        }
+    } else if !portfolio_digest_matched {
+        "mismatch"
+    } else if require_replay && !replay_complete {
+        "replay_incomplete"
+    } else if require_complete_catalogue && !complete_catalogue {
+        "incomplete_scope"
+    } else if blocked_count > 0 {
+        if allow_partial {
+            "partial"
+        } else {
+            "blocked"
+        }
+    } else {
+        "mismatch"
+    };
+    let mut mismatches = Vec::new();
+    if !portfolio_digest_matched {
+        mismatches.push(json!({
+            "code": "portfolio_digest_mismatch",
+            "expected": expected_portfolio_digest,
+            "observed": observed_portfolio_digest
+        }));
+    }
+    if require_replay && replay_requests.is_none() {
+        mismatches.push(json!({
+            "code": "required_replay_requests_missing",
+            "message": "policy.require_replay requires an aligned replay_requests array"
+        }));
+    } else if require_replay && !replay_complete {
+        mismatches.push(json!({
+            "code": "required_replay_incomplete",
+            "requested_count": replay_requested_count,
+            "matched_count": replay_matched_count,
+            "item_count": items.len()
+        }));
+    }
+    if require_complete_catalogue && !complete_catalogue {
+        mismatches.push(json!({
+            "code": "portfolio_catalogue_incomplete",
+            "message": "policy.require_complete_catalogue requires complete catalogue coverage"
+        }));
+    }
+    if item_failures > 0 {
+        mismatches.push(json!({
+            "code": "portfolio_items_not_verified",
+            "blocked_count": blocked_count,
+            "mismatch_count": mismatch_count
+        }));
+    }
+    let mut output = json!({
+        "ok": true,
+        "schema": DOMAIN_WORKFLOW_PORTFOLIO_VERIFY_SCHEMA_VERSION,
+        "workflow": "domain_workflow_portfolio_verify",
+        "valid": valid,
+        "portfolio_ready": valid,
+        "verification_status": verification_status,
+        "policy": {
+            "allow_partial": allow_partial,
+            "require_complete_catalogue": require_complete_catalogue,
+            "require_replay": require_replay
+        },
+        "portfolio_digest": expected_portfolio_digest,
+        "observed_portfolio_digest": observed_portfolio_digest,
+        "portfolio_digest_matched": portfolio_digest_matched,
+        "coverage": {
+            "catalogue_group_count": coverage.get("catalogue_group_count").cloned().unwrap_or(Value::Null),
+            "requested_item_count": coverage.get("requested_item_count").cloned().unwrap_or(Value::Null),
+            "verified_item_count": items.len().saturating_sub(item_failures),
+            "complete_catalogue": complete_catalogue,
+            "missing_workflow_ids": coverage.get("missing_workflow_ids").cloned().unwrap_or_else(|| json!([])),
+            "extra_workflow_ids": coverage.get("extra_workflow_ids").cloned().unwrap_or_else(|| json!([])),
+            "replay_complete": replay_complete
+        },
+        "summary": {
+            "verified_count": verified_count,
+            "verified_without_replay_count": verified_without_replay_count,
+            "mismatch_count": mismatch_count,
+            "blocked_count": blocked_count,
+            "replay_requested_count": replay_requested_count,
+            "replay_matched_count": replay_matched_count,
+            "preflight_status": "deferred"
+        },
+        "items": output_items,
+        "mismatches": mismatches,
+        "preflight": {
+            "required": true,
+            "status": "deferred",
+            "dispatch": "not_started"
+        },
+        "dispatch": "not_started",
+        "execution": "not_started",
+        "guarantees": [
+            "the retained portfolio digest and item ordering are checked before readiness is reported",
+            "each retained instantiation is verified independently and blocked rows remain visible",
+            "aligned replay requests are content-addressed against retained request digests",
+            "portfolio verification never dispatches, retries, resumes, or grants execution"
+        ],
+        "limitations": [
+            "authoritative MCP mission schema preflight is added by the transport boundary",
+            "without replay_requests, current catalogue membership is not proof that original requests are unchanged",
+            "structural and replay validity do not establish semantic sufficiency, provider availability, authorization, or scientific validity"
+        ]
+    });
+    output["portfolio_verify_digest"] = Value::String(digest(&output)?);
+    checked_bytes(&output)?;
+    Ok(output)
+}
+
 /// Build a deterministic, execution-disabled starting mission for one capability-group workflow.
 ///
 /// The scaffold selects the first available tool from each lexical stage unless the caller gives
@@ -1965,6 +2393,99 @@ mod tests {
             report["items"][1]["issues"][0]["code"],
             "duplicate_workflow_id"
         );
+    }
+
+    #[test]
+    fn portfolio_verification_replays_aligned_requests_without_dispatch() {
+        let (catalogue, tools) = inputs();
+        let requests = json!([
+            {
+                "workflow_id": "genomics_workflows",
+                "mission_id": "verify-genomics",
+                "goal": "compile the genomic query",
+                "steps": [{"id": "compile", "tool": "bioql_compile", "arguments": {}}]
+            },
+            {
+                "workflow_id": "oncology_workflows",
+                "mission_id": "verify-oncology",
+                "goal": "review the oncology boundary",
+                "steps": [{"id": "boundary", "tool": "onco_boundary_check", "arguments": {}}]
+            }
+        ]);
+        let portfolio = build_domain_workflow_portfolio(
+            &catalogue,
+            &tools,
+            &json!({
+                "requests": requests,
+                "policy": {"require_complete_catalogue": true}
+            }),
+        )
+        .unwrap();
+        let report = verify_domain_workflow_portfolio(
+            &catalogue,
+            &tools,
+            &json!({
+                "portfolio": portfolio,
+                "replay_requests": requests,
+                "policy": {"require_replay": true, "require_complete_catalogue": true}
+            }),
+        )
+        .unwrap();
+        assert_eq!(report["valid"], true);
+        assert_eq!(report["verification_status"], "verified");
+        assert_eq!(report["summary"]["verified_count"], 2);
+        assert_eq!(report["summary"]["replay_matched_count"], 2);
+        assert_eq!(report["items"][0]["status"], "verified");
+        assert_eq!(report["dispatch"], "not_started");
+        assert_eq!(report["execution"], "not_started");
+        assert_eq!(
+            report["portfolio_verify_digest"].as_str().unwrap().len(),
+            64
+        );
+    }
+
+    #[test]
+    fn portfolio_verification_retains_digest_and_replay_mismatches() {
+        let (catalogue, tools) = inputs();
+        let request = json!({
+            "workflow_id": "oncology_workflows",
+            "mission_id": "verify-tampered",
+            "goal": "review the oncology boundary",
+            "steps": [{"id": "boundary", "tool": "onco_boundary_check", "arguments": {}}]
+        });
+        let portfolio = build_domain_workflow_portfolio(
+            &catalogue,
+            &tools,
+            &json!({"requests": [request], "policy": {}}),
+        )
+        .unwrap();
+        let mut tampered = portfolio;
+        tampered["items"][0]["instantiation"]["mission"]["goal"] =
+            json!("a retained goal was tampered with");
+        let report = verify_domain_workflow_portfolio(
+            &catalogue,
+            &tools,
+            &json!({
+                "portfolio": tampered,
+                "replay_requests": [{
+                    "workflow_id": "oncology_workflows",
+                    "mission_id": "verify-tampered",
+                    "goal": "a different replay goal",
+                    "steps": [{"id": "boundary", "tool": "onco_boundary_check", "arguments": {}}]
+                }]
+            }),
+        )
+        .unwrap();
+        assert_eq!(report["valid"], false);
+        assert_eq!(report["portfolio_digest_matched"], false);
+        assert_eq!(report["verification_status"], "mismatch");
+        assert_eq!(report["items"][0]["status"], "mismatch");
+        assert!(report["items"][0]["mismatches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["code"] == "replay_request_digest_mismatch"));
+        assert_eq!(report["dispatch"], "not_started");
     }
 
     #[test]

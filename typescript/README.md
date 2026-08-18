@@ -39,6 +39,7 @@ if (result.mcp.result?.isError) {
   `capabilityDiscover`, `capabilityAudit`, `capabilityRoute`, `adapterPlan`,
   `capabilityRoutePlan`, `capabilityRoutePlanVerify`, and `capabilityRoutePlanVerifyRest`,
   `domainWorkflowPortfolio` and `domainWorkflowPortfolioQuery`,
+  `domainWorkflowPortfolioVerify` and `domainWorkflowPortfolioVerifyQuery`,
   `domainWorkflowVerify` and `domainWorkflowVerifyQuery`,
   `runtimeExecutionSimulate`, `packCatalogue`, `packHealthAssess`, `securityRedteamSimulate`, and
   `worldGenerate`, `factoryLifecycleSimulate`, `storageLifecycleSimulate`, and
