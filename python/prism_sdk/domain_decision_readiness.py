@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
-from .artifacts import _digest, _mapping, _text
+from .artifacts import _count, _digest, _mapping, _text
 from .capability import _tool_payload
 from .errors import ArgumentError
 
@@ -24,6 +24,7 @@ DOMAIN_DECISION_READINESS_STATES = (
 )
 MAX_DOMAIN_DECISION_READINESS_REPORTS = 64
 MAX_DOMAIN_DECISION_READINESS_REQUIREMENTS = 64
+DOMAIN_DECISION_READINESS_QUERY_SCHEMA = "bioprism-devplat-artifact-domain-decision-readiness-query/0.1"
 
 
 def _bounded_texts(name: str, value: Any, maximum: int = MAX_DOMAIN_DECISION_READINESS_REQUIREMENTS) -> tuple[str, ...]:
@@ -165,6 +166,91 @@ def domain_decision_readiness_report(value: Mapping[str, Any]) -> DomainDecision
     return DomainDecisionReadinessReport.from_wire(value)
 
 
+@dataclass(frozen=True)
+class DomainDecisionReadinessQueryRequest:
+    """Bounded lookup over retained structural readiness audits."""
+
+    subject_id: str | None = None
+    decision_state: str | None = None
+    policy_satisfied: bool | None = None
+    after: str | None = None
+    max_items: int = 100
+    include_audits: bool = False
+
+    def __post_init__(self) -> None:
+        for name, value in (("subject_id", self.subject_id), ("decision_state", self.decision_state), ("after", self.after)):
+            if value is not None:
+                _text(f"readiness query {name}", value)
+        if self.decision_state is not None and self.decision_state not in DOMAIN_DECISION_READINESS_STATES:
+            raise ArgumentError("readiness query decision_state is invalid")
+        if self.policy_satisfied is not None and not isinstance(self.policy_satisfied, bool):
+            raise ArgumentError("readiness query policy_satisfied must be a boolean")
+        if isinstance(self.max_items, bool) or not isinstance(self.max_items, int) or not 1 <= self.max_items <= 256:
+            raise ArgumentError("readiness query max_items must be between 1 and 256")
+        if not isinstance(self.include_audits, bool):
+            raise ArgumentError("readiness query include_audits must be a boolean")
+
+    def to_arguments(self) -> dict[str, Any]:
+        result: dict[str, Any] = {"max_items": self.max_items, "include_audits": self.include_audits}
+        for name in ("subject_id", "decision_state", "after"):
+            value = getattr(self, name)
+            if value is not None:
+                result[name] = value
+        if self.policy_satisfied is not None:
+            result["policy_satisfied"] = self.policy_satisfied
+        return result
+
+    def to_query_params(self) -> dict[str, str]:
+        params = {
+            "limit": str(self.max_items),
+            "include_audits": str(self.include_audits).lower(),
+        }
+        for name in ("subject_id", "decision_state", "after"):
+            value = getattr(self, name)
+            if value is not None:
+                params[name] = value
+        if self.policy_satisfied is not None:
+            params["policy_satisfied"] = str(self.policy_satisfied).lower()
+        return params
+
+
+@dataclass(frozen=True)
+class DomainDecisionReadinessQueryReport:
+    """Digest-ordered retained readiness rows; absence is not a negative scientific result."""
+
+    raw: dict[str, Any]
+    rows: tuple[Mapping[str, Any], ...]
+    next_after: str | None
+    has_more: bool
+    registry_generation: int
+    registry_size: int
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainDecisionReadinessQueryReport":
+        raw = dict(value)
+        if raw.get("workflow") != "artifact_registry_domain_decision_readiness_query":
+            raise ArgumentError("readiness query workflow is invalid")
+        rows = raw.get("rows", [])
+        if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
+            raise ArgumentError("readiness query rows must be an array")
+        next_after = raw.get("next_after")
+        if next_after is not None:
+            _digest("readiness query next cursor", next_after)
+        if not isinstance(raw.get("has_more"), bool):
+            raise ArgumentError("readiness query has_more must be a boolean")
+        return cls(
+            raw=raw,
+            rows=tuple(_mapping("readiness query row", row) for row in rows),
+            next_after=next_after,
+            has_more=raw["has_more"],
+            registry_generation=_count("readiness query generation", raw.get("registry_generation")),
+            registry_size=_count("readiness query size", raw.get("registry_size")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
 __all__ = [
     "DOMAIN_DECISION_READINESS_SCHEMA",
     "DOMAIN_DECISION_READINESS_WORKFLOW",
@@ -173,5 +259,8 @@ __all__ = [
     "MAX_DOMAIN_DECISION_READINESS_REQUIREMENTS",
     "DomainDecisionReadinessRequest",
     "DomainDecisionReadinessReport",
+    "DOMAIN_DECISION_READINESS_QUERY_SCHEMA",
+    "DomainDecisionReadinessQueryRequest",
+    "DomainDecisionReadinessQueryReport",
     "domain_decision_readiness_report",
 ]

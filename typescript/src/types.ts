@@ -5369,12 +5369,14 @@ export interface DomainWorkflowVerifyArgs extends JsonObject {
 export interface DomainWorkflowPortfolioArgs extends JsonObject {
   requests: DomainWorkflowInstantiateArgs[];
   policy?: JsonObject;
+  readiness_audit?: JsonObject;
 }
 
 export interface DomainWorkflowPortfolioVerifyArgs extends JsonObject {
   portfolio: JsonObject;
   replay_requests?: Array<DomainWorkflowInstantiateArgs | null>;
   policy?: JsonObject;
+  readiness_audit?: JsonObject;
 }
 
 export interface DomainWorkflowScaffoldArgs extends JsonObject {
@@ -5389,6 +5391,8 @@ export interface DomainWorkflowReconcileArgs extends JsonObject {
   instantiation: JsonObject;
   mission_report?: JsonObject;
   evidence_bundle?: JsonObject;
+  policy?: JsonObject;
+  readiness_audit?: JsonObject;
 }
 
 export interface DomainWorkflowToolContract extends JsonObject {
@@ -5517,8 +5521,9 @@ export interface DomainWorkflowPortfolioResult extends JsonObject {
   portfolio_digest: string;
   valid: boolean;
   portfolio_ready: boolean;
-  portfolio_status: "ready_for_authoritative_preflight" | "partial" | "blocked" | "incomplete_scope";
+  portfolio_status: "ready_for_authoritative_preflight" | "partial" | "blocked" | "blocked_by_decision_readiness" | "incomplete_scope";
   policy: JsonObject;
+  decision_readiness: JsonObject;
   coverage: JsonObject;
   summary: JsonObject;
   items: JsonObject[];
@@ -5539,8 +5544,9 @@ export interface DomainWorkflowPortfolioVerifyResult extends JsonObject {
   portfolio_verify_digest: string;
   valid: boolean;
   portfolio_ready: boolean;
-  verification_status: "verified" | "verified_without_replay" | "partial" | "blocked" | "blocked_by_mission_preflight" | "replay_incomplete" | "incomplete_scope" | "mismatch";
+  verification_status: "verified" | "verified_without_replay" | "partial" | "blocked" | "blocked_by_mission_preflight" | "blocked_by_decision_readiness" | "replay_incomplete" | "incomplete_scope" | "mismatch";
   policy: JsonObject;
+  decision_readiness: JsonObject;
   coverage: JsonObject;
   summary: JsonObject;
   items: JsonObject[];
@@ -5594,6 +5600,8 @@ export interface DomainWorkflowReconcileResult extends JsonObject {
   evidence: JsonObject;
   completion: JsonObject;
   integrity: JsonObject;
+  decision_readiness: JsonObject;
+  decision_review_gate_satisfied: boolean;
   execution: "not_started";
   guarantees: string[];
   limitations: string[];
@@ -5626,6 +5634,8 @@ export interface DomainWorkflowReconciliationQueryOptions extends JsonObject {
   workflow_id?: string;
   mission_plan_digest?: string;
   completion_status?: string;
+  decision_readiness_state?: DomainDecisionReadinessState;
+  decision_readiness_gate_satisfied?: boolean;
   after?: string;
   max_items?: number;
   include_records?: boolean;
@@ -5903,6 +5913,30 @@ export interface DomainDecisionReadinessResult extends JsonObject {
   artifact_registry: JsonObject;
   catalogue_digest: string;
   readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export interface DomainDecisionReadinessQueryOptions extends JsonObject {
+  subject_id?: string;
+  decision_state?: DomainDecisionReadinessState;
+  policy_satisfied?: boolean;
+  after?: string;
+  max_items?: number;
+  include_audits?: boolean;
+}
+
+export interface DomainDecisionReadinessQueryResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-artifact-domain-decision-readiness-query/0.1";
+  workflow: "artifact_registry_domain_decision_readiness_query";
+  filters: DomainDecisionReadinessQueryOptions;
+  registry_generation: number;
+  registry_size: number;
+  rows: JsonObject[];
+  next_after: string | null;
+  has_more: boolean;
   execution: "not_started";
   guarantees: string[];
   does_not_claim: string[];
@@ -9846,6 +9880,7 @@ export type ArtifactKind =
   | "domain_evidence_harmonization"
   | "domain_evidence_intake"
   | "domain_evidence_source_plan"
+  | "domain_decision_readiness"
   | "adapter_execution_evidence"
   | "external_reference";
 

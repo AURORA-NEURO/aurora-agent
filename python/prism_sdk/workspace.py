@@ -48,6 +48,8 @@ from .domain_evidence import (
 from .domain_decision_readiness import (
     DomainDecisionReadinessReport,
     DomainDecisionReadinessRequest,
+    DomainDecisionReadinessQueryReport,
+    DomainDecisionReadinessQueryRequest,
 )
 from .domain_evidence_intake import (
     DomainEvidenceIntakeCoverageReport,
@@ -2444,6 +2446,23 @@ class Workspace:
         request: DomainDecisionReadinessRequest | Mapping[str, Any],
     ) -> DomainDecisionReadinessReport:
         return DomainDecisionReadinessReport.from_wire(self.domain_decision_readiness_audit(request))
+
+    def domain_decision_readiness_query(
+        self,
+        request: DomainDecisionReadinessQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainDecisionReadinessQueryRequest)
+            else DomainDecisionReadinessQueryRequest(**dict(request or {}))
+        )
+        return self.tool("domain_decision_readiness_query", normalized.to_arguments())
+
+    def domain_decision_readiness_query_report(
+        self,
+        request: DomainDecisionReadinessQueryRequest | Mapping[str, Any] | None = None,
+    ) -> DomainDecisionReadinessQueryReport:
+        return DomainDecisionReadinessQueryReport.from_wire(self.domain_decision_readiness_query(request))
 
     def domain_evidence_harmonization_coverage(
         self,
@@ -6578,6 +6597,25 @@ class AsyncWorkspace:
     ) -> DomainDecisionReadinessReport:
         return DomainDecisionReadinessReport.from_wire(
             await self.domain_decision_readiness_audit(request)
+        )
+
+    async def domain_decision_readiness_query(
+        self,
+        request: DomainDecisionReadinessQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainDecisionReadinessQueryRequest)
+            else DomainDecisionReadinessQueryRequest(**dict(request or {}))
+        )
+        return await self.tool("domain_decision_readiness_query", normalized.to_arguments())
+
+    async def domain_decision_readiness_query_report(
+        self,
+        request: DomainDecisionReadinessQueryRequest | Mapping[str, Any] | None = None,
+    ) -> DomainDecisionReadinessQueryReport:
+        return DomainDecisionReadinessQueryReport.from_wire(
+            await self.domain_decision_readiness_query(request)
         )
 
     async def domain_evidence_harmonization_coverage(

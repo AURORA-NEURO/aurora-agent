@@ -56,6 +56,12 @@ helper, preserve required group/domain coverage, support and qualification floor
 contradiction/refusal handling, review allowance, linkage, lineage, blockers, audit digest, and
 artifact-registry identity. `ready_for_human_review` means only that the supplied structural
 policy passed; the typed model rejects any response that claims readiness or execution.
+`DomainDecisionReadinessQueryRequest` / `DomainDecisionReadinessQueryReport` add exact
+subject/state/policy filters, cursor pagination, and opt-in audit bodies through
+`ApiClient.domain_decision_readiness_query()` and `domain_decision_readiness_query_tool()`, with
+matching `Workspace` and `AsyncWorkspace` helpers. Portfolio and reconciliation request models
+accept `readiness_audit` plus `policy.require_readiness`; their typed reports keep that gate
+separate from completion evidence.
 `DomainEvidenceHarmonizationCoverageRequest` and
 `DomainEvidenceHarmonizationCoverageReport` provide the bounded retained read model through
 `ApiClient.domain_evidence_harmonization_coverage()` and its tool counterpart, plus matching

@@ -18,6 +18,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 use crate::mission::MissionRequest;
+use crate::summarize_domain_decision_readiness;
 
 pub const DOMAIN_WORKFLOW_SCHEMA_VERSION: &str = "bioprism-devplat-domain-workflow/0.1";
 pub const DOMAIN_WORKFLOW_CATALOGUE_SCHEMA_VERSION: &str =
@@ -39,6 +40,42 @@ pub const MAX_DOMAIN_WORKFLOW_TOOLS: usize = 256;
 pub const MAX_DOMAIN_WORKFLOW_STEPS: usize = 128;
 pub const MAX_DOMAIN_WORKFLOW_BYTES: usize = 20_000_000;
 pub const MAX_DOMAIN_WORKFLOW_PORTFOLIO_ITEMS: usize = 64;
+
+fn readiness_projection(
+    object: &Map<String, Value>,
+    policy: &Map<String, Value>,
+) -> Result<Value, DomainWorkflowError> {
+    let required = policy
+        .get("require_readiness")
+        .map(|value| {
+            value.as_bool().ok_or_else(|| {
+                DomainWorkflowError::InvalidRequest(
+                    "policy.require_readiness must be a boolean".into(),
+                )
+            })
+        })
+        .transpose()?
+        .unwrap_or(false);
+    match object.get("readiness_audit") {
+        Some(audit) => summarize_domain_decision_readiness(audit, required).map_err(|error| {
+            DomainWorkflowError::InvalidRequest(format!(
+                "readiness_audit is not a valid domain decision-readiness audit: {error}"
+            ))
+        }),
+        None => Ok(json!({
+            "required": required,
+            "provided": false,
+            "subject_id": Value::Null,
+            "audit_digest": Value::Null,
+            "decision_state": Value::Null,
+            "policy_satisfied": false,
+            "gate_satisfied": !required,
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "reason": "readiness_audit_not_supplied"
+        })),
+    }
+}
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum DomainWorkflowError {
@@ -1148,6 +1185,11 @@ pub fn build_domain_workflow_portfolio(
         .get("require_complete_catalogue")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    let decision_readiness = readiness_projection(object, policy)?;
+    let decision_readiness_gate_satisfied = decision_readiness
+        .get("gate_satisfied")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
 
     let catalogue_report = build_domain_workflow_catalogue(catalogue, tool_definitions)?;
     let catalogue_workflows = catalogue_report
@@ -1258,13 +1300,17 @@ pub fn build_domain_workflow_portfolio(
         .cloned()
         .collect::<Vec<_>>();
     let complete_catalogue = missing_workflow_ids.is_empty() && extra_workflow_ids.is_empty();
-    let valid = blocked_count == 0 && (!require_complete_catalogue || complete_catalogue);
+    let valid = blocked_count == 0
+        && (!require_complete_catalogue || complete_catalogue)
+        && decision_readiness_gate_satisfied;
     let portfolio_status = if blocked_count > 0 {
         if allow_partial {
             "partial"
         } else {
             "blocked"
         }
+    } else if !decision_readiness_gate_satisfied {
+        "blocked_by_decision_readiness"
     } else if require_complete_catalogue && !complete_catalogue {
         "incomplete_scope"
     } else {
@@ -1279,8 +1325,10 @@ pub fn build_domain_workflow_portfolio(
         "portfolio_status": portfolio_status,
         "policy": {
             "allow_partial": allow_partial,
-            "require_complete_catalogue": require_complete_catalogue
+            "require_complete_catalogue": require_complete_catalogue,
+            "require_readiness": decision_readiness["required"]
         },
+        "decision_readiness": decision_readiness,
         "coverage": {
             "catalogue_group_count": catalogue_ids.len(),
             "requested_item_count": requests.len(),
@@ -1307,12 +1355,14 @@ pub fn build_domain_workflow_portfolio(
             "each requested workflow is scoped and instantiated independently",
             "blocked domain requests remain visible with structured issue codes",
             "complete-catalogue coverage is explicit rather than inferred from a partial portfolio",
+            "decision-readiness is an optional explicit gate and remains separate from mission preflight and execution",
             "portfolio planning never dispatches, retries, resumes, or grants readiness"
         ],
         "limitations": [
             "authoritative mission schema preflight is added by the transport boundary",
             "partial portfolios are not complete coverage and require caller review",
-            "workflow plans do not establish semantic sufficiency, provider availability, authorization, or domain validity"
+            "workflow plans do not establish semantic sufficiency, provider availability, authorization, or domain validity",
+            "a decision-readiness audit is a structural policy result and does not establish scientific, clinical, operational, regulatory, release, or execution validity"
         ]
     });
     let portfolio_digest = digest(&output)?;
@@ -1638,6 +1688,41 @@ pub fn verify_domain_workflow_portfolio(
     let allow_partial = policy_bool("allow_partial")?;
     let require_complete_catalogue = policy_bool("require_complete_catalogue")?;
     let require_replay = policy_bool("require_replay")?;
+    let require_readiness = policy_bool("require_readiness")?;
+    let retained_readiness = portfolio
+        .get("decision_readiness")
+        .cloned()
+        .unwrap_or_else(|| {
+            json!({
+                "required": false,
+                "provided": false,
+                "subject_id": Value::Null,
+                "audit_digest": Value::Null,
+                "decision_state": Value::Null,
+                "policy_satisfied": false,
+                "gate_satisfied": true,
+                "readiness_claimed": false,
+                "execution": "not_started",
+                "reason": "legacy_portfolio_without_readiness_binding"
+            })
+        });
+    let retained_readiness_gate_satisfied = retained_readiness
+        .get("gate_satisfied")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let readiness_binding_mismatch = if let Some(audit) = object.get("readiness_audit") {
+        let expected =
+            summarize_domain_decision_readiness(audit, require_readiness).map_err(|error| {
+                DomainWorkflowError::InvalidRequest(format!(
+                    "readiness_audit is not a valid domain decision-readiness audit: {error}"
+                ))
+            })?;
+        expected.get("audit_digest") != retained_readiness.get("audit_digest")
+            || expected.get("decision_state") != retained_readiness.get("decision_state")
+            || expected.get("policy_satisfied") != retained_readiness.get("policy_satisfied")
+    } else {
+        false
+    };
 
     let replay_requests = match object.get("replay_requests") {
         None => None,
@@ -1850,7 +1935,9 @@ pub fn verify_domain_workflow_portfolio(
     let valid = portfolio_digest_matched
         && item_failures == 0
         && (!require_complete_catalogue || complete_catalogue)
-        && (!require_replay || replay_complete);
+        && (!require_replay || replay_complete)
+        && (!require_readiness || retained_readiness_gate_satisfied)
+        && !readiness_binding_mismatch;
     let verification_status = if valid {
         if replay_requested_count > 0 {
             "verified"
@@ -1863,6 +1950,10 @@ pub fn verify_domain_workflow_portfolio(
         "replay_incomplete"
     } else if require_complete_catalogue && !complete_catalogue {
         "incomplete_scope"
+    } else if require_readiness
+        && (!retained_readiness_gate_satisfied || readiness_binding_mismatch)
+    {
+        "blocked_by_decision_readiness"
     } else if blocked_count > 0 {
         if allow_partial {
             "partial"
@@ -1906,6 +1997,18 @@ pub fn verify_domain_workflow_portfolio(
             "mismatch_count": mismatch_count
         }));
     }
+    if require_readiness && !retained_readiness_gate_satisfied {
+        mismatches.push(json!({
+            "code": "decision_readiness_gate_not_satisfied",
+            "message": "policy.require_readiness requires a ready_for_human_review audit bound to the retained portfolio"
+        }));
+    }
+    if readiness_binding_mismatch {
+        mismatches.push(json!({
+            "code": "decision_readiness_binding_mismatch",
+            "message": "supplied readiness_audit does not match the retained portfolio readiness projection"
+        }));
+    }
     let mut output = json!({
         "ok": true,
         "schema": DOMAIN_WORKFLOW_PORTFOLIO_VERIFY_SCHEMA_VERSION,
@@ -1916,8 +2019,10 @@ pub fn verify_domain_workflow_portfolio(
         "policy": {
             "allow_partial": allow_partial,
             "require_complete_catalogue": require_complete_catalogue,
-            "require_replay": require_replay
+            "require_replay": require_replay,
+            "require_readiness": require_readiness
         },
+        "decision_readiness": retained_readiness,
         "portfolio_digest": expected_portfolio_digest,
         "observed_portfolio_digest": observed_portfolio_digest,
         "portfolio_digest_matched": portfolio_digest_matched,
@@ -2393,6 +2498,30 @@ mod tests {
             report["items"][1]["issues"][0]["code"],
             "duplicate_workflow_id"
         );
+    }
+
+    #[test]
+    fn portfolio_require_readiness_fails_closed_without_an_attached_audit() {
+        let (catalogue, tools) = inputs();
+        let report = build_domain_workflow_portfolio(
+            &catalogue,
+            &tools,
+            &json!({
+                "requests": [{
+                    "workflow_id": "oncology_workflows",
+                    "mission_id": "portfolio-readiness-gate",
+                    "goal": "review the oncology boundary",
+                    "steps": [{"id": "boundary", "tool": "onco_boundary_check", "arguments": {}}]
+                }],
+                "policy": {"require_readiness": true}
+            }),
+        )
+        .unwrap();
+        assert_eq!(report["valid"], false);
+        assert_eq!(report["portfolio_status"], "blocked_by_decision_readiness");
+        assert_eq!(report["decision_readiness"]["provided"], false);
+        assert_eq!(report["decision_readiness"]["gate_satisfied"], false);
+        assert_eq!(report["decision_readiness"]["readiness_claimed"], false);
     }
 
     #[test]

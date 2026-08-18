@@ -10,6 +10,9 @@ from prism_sdk import (
     ArgumentError,
     DomainDecisionReadinessReport,
     DomainDecisionReadinessRequest,
+    DomainDecisionReadinessQueryReport,
+    DomainDecisionReadinessQueryRequest,
+    DomainWorkflowReconciliationQueryRequest,
     Workspace,
 )
 
@@ -49,6 +52,21 @@ def request() -> DomainDecisionReadinessRequest:
     )
 
 
+def readiness_query_payload() -> dict:
+    return {
+        "ok": True,
+        "schema": "bioprism-devplat-artifact-domain-decision-readiness-query/0.1",
+        "workflow": "artifact_registry_domain_decision_readiness_query",
+        "filters": {"subject_id": "subject-python", "decision_state": "ready_for_human_review"},
+        "registry_generation": 2,
+        "registry_size": 1,
+        "rows": [{"content_digest": "c" * 64, "audit_digest": "b" * 64, "decision_state": "ready_for_human_review", "policy_satisfied": True}],
+        "next_after": None,
+        "has_more": False,
+        "execution": "not_started",
+    }
+
+
 class DomainDecisionReadinessTests(unittest.TestCase):
     def test_request_and_report_preserve_structural_state_without_readiness_claim(self) -> None:
         normalized = request()
@@ -86,6 +104,37 @@ class DomainDecisionReadinessTests(unittest.TestCase):
                 AsyncApiClient(ApiClient("http://127.0.0.1:8787")).domain_decision_readiness_audit(request())
             )
         self.assertTrue(async_report.is_ready_for_human_review)
+
+    def test_retained_query_preserves_exact_filters_and_cursor_posture(self) -> None:
+        query = DomainDecisionReadinessQueryRequest(
+            subject_id="subject-python",
+            decision_state="ready_for_human_review",
+            policy_satisfied=True,
+            max_items=10,
+            include_audits=True,
+        )
+        self.assertEqual(query.to_query_params()["policy_satisfied"], "true")
+        report = DomainDecisionReadinessQueryReport.from_wire(readiness_query_payload())
+        self.assertEqual(report.rows[0]["audit_digest"], "b" * 64)
+        with patch.object(ApiClient, "request", return_value=readiness_query_payload()) as request_mock:
+            queried = ApiClient("http://127.0.0.1:8787").domain_decision_readiness_query(query)
+        self.assertEqual(queried.rows[0]["decision_state"], "ready_for_human_review")
+        self.assertIn("/v1/domain-decision-readiness?", request_mock.call_args.args[1])
+
+    def test_reconciliation_query_carries_readiness_filters_to_mcp_and_rest(self) -> None:
+        normalized = DomainWorkflowReconciliationQueryRequest(
+            decision_readiness_state="ready_for_human_review",
+            decision_readiness_gate_satisfied=True,
+        )
+        self.assertEqual(
+            normalized.to_arguments()["decision_readiness_state"],
+            "ready_for_human_review",
+        )
+        self.assertTrue(normalized.to_arguments()["decision_readiness_gate_satisfied"])
+        self.assertEqual(
+            normalized.to_query_params()["decision_readiness_gate_satisfied"],
+            "true",
+        )
 
 
 if __name__ == "__main__":

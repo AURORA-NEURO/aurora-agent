@@ -51,6 +51,8 @@ pub const ARTIFACT_REGISTRY_DOMAIN_EVIDENCE_POSTURE_SCHEMA_VERSION: &str =
     "bioprism-devplat-artifact-domain-evidence-posture/0.1";
 pub const ARTIFACT_REGISTRY_DOMAIN_EVIDENCE_LINEAGE_SCHEMA_VERSION: &str =
     "bioprism-devplat-artifact-domain-evidence-lineage/0.1";
+pub const ARTIFACT_REGISTRY_DOMAIN_DECISION_READINESS_QUERY_SCHEMA_VERSION: &str =
+    "bioprism-devplat-artifact-domain-decision-readiness-query/0.1";
 pub const MAX_ARTIFACT_REGISTRY_RECORDS: usize = 512;
 pub const MAX_ARTIFACT_REGISTRY_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_ARTIFACT_REGISTRY_QUERY_ITEMS: usize = 256;
@@ -676,6 +678,122 @@ impl ArtifactRegistry {
             "does_not_claim": [
                 "absence from this bounded registry means an artifact never existed",
                 "a valid integrity check establishes domain truth"
+            ]
+        }))
+    }
+
+    /// Query retained structural decision-readiness audits without returning report packets by
+    /// default. This is intentionally narrower than a generic artifact query: callers can find
+    /// a posture by its explicit state or policy result while the exact audit remains available
+    /// through its content digest. Registry presence, policy satisfaction, and a ready-for-human-
+    /// review state never become domain truth or execution authorization.
+    pub fn domain_decision_readiness_query(
+        &self,
+        subject_id: Option<&str>,
+        decision_state: Option<&str>,
+        policy_satisfied: Option<bool>,
+        after: Option<&str>,
+        max_items: usize,
+        include_audits: bool,
+    ) -> Result<Value, ArtifactRegistryError> {
+        if !(1..=MAX_ARTIFACT_REGISTRY_QUERY_ITEMS).contains(&max_items) {
+            return Err(ArtifactRegistryError::InvalidInput(format!(
+                "max_items must be between 1 and {MAX_ARTIFACT_REGISTRY_QUERY_ITEMS}"
+            )));
+        }
+        if let Some(state) = decision_state {
+            if !matches!(
+                state,
+                "ready_for_human_review" | "review_required" | "incomplete" | "blocked"
+            ) {
+                return Err(ArtifactRegistryError::InvalidInput(
+                    "decision_state must be ready_for_human_review, review_required, incomplete, or blocked"
+                        .into(),
+                ));
+            }
+        }
+        let mut rows = Vec::new();
+        let mut has_more = false;
+        for (digest, record) in self
+            .records
+            .iter()
+            .filter(|(digest, _)| after.is_none_or(|cursor| digest.as_str() > cursor))
+        {
+            if record.kind != "domain_decision_readiness"
+                || subject_id.is_some_and(|value| value != record.subject_id)
+                || decision_state.is_some_and(|value| {
+                    record
+                        .artifact
+                        .get("decision_state")
+                        .and_then(Value::as_str)
+                        != Some(value)
+                })
+                || policy_satisfied.is_some_and(|value| {
+                    record
+                        .artifact
+                        .get("policy_satisfied")
+                        .and_then(Value::as_bool)
+                        != Some(value)
+                })
+            {
+                continue;
+            }
+            if rows.len() >= max_items {
+                has_more = true;
+                break;
+            }
+            let mut row = json!({
+                "content_digest": digest,
+                "audit_digest": record.artifact.get("digest"),
+                "subject_id": record.subject_id,
+                "domains": record.domains,
+                "decision_state": record.artifact.get("decision_state"),
+                "policy_satisfied": record.artifact.get("policy_satisfied"),
+                "report_count": record.artifact.get("report_count"),
+                "counts": record.artifact.get("counts"),
+                "parent_digests": record.parent_digests,
+                "verification": record.verification,
+            });
+            if include_audits {
+                row["audit"] = record.artifact.clone();
+            }
+            rows.push(row);
+        }
+        let next_after = if has_more {
+            rows.last()
+                .and_then(|row| row.get("content_digest"))
+                .cloned()
+                .unwrap_or(Value::Null)
+        } else {
+            Value::Null
+        };
+        Ok(json!({
+            "ok": true,
+            "schema": ARTIFACT_REGISTRY_DOMAIN_DECISION_READINESS_QUERY_SCHEMA_VERSION,
+            "workflow": "artifact_registry_domain_decision_readiness_query",
+            "filters": {
+                "subject_id": subject_id,
+                "decision_state": decision_state,
+                "policy_satisfied": policy_satisfied,
+                "after": after,
+                "max_items": max_items,
+                "include_audits": include_audits
+            },
+            "registry_generation": self.generation,
+            "registry_size": self.records.len(),
+            "rows": rows,
+            "next_after": next_after,
+            "has_more": has_more,
+            "execution": "not_started",
+            "guarantees": [
+                "only exact digest-verified domain_decision_readiness artifacts are returned",
+                "rows are ordered by retained artifact content digest",
+                "full audit bodies are opt-in and can be fetched again by content_digest"
+            ],
+            "does_not_claim": [
+                "a ready_for_human_review state proves a scientific, clinical, causal, regulatory, publication, release, or execution conclusion",
+                "absence from this bounded registry proves that a readiness audit never existed",
+                "artifact retention proves external provenance, identity, consent, or authority"
             ]
         }))
     }
@@ -1719,6 +1837,93 @@ mod tests {
             .unwrap();
         assert_eq!(query["rows"].as_array().unwrap().len(), 1);
         assert_eq!(query["rows"][0]["domains"], json!(["genomics", "oncology"]));
+    }
+
+    #[test]
+    fn readiness_query_filters_verified_audits_and_keeps_bodies_opt_in() {
+        let report = |group_id: &str, domain: &str, status: &str| {
+            json!({
+                "schema": "bioprism-devplat-domain-report/0.1",
+                "workflow": "domain_report_project",
+                "group_id": group_id,
+                "domains": [domain],
+                "subject_id": "subject-readiness-query",
+                "source_tool": "modality_catalog",
+                "report": {"observation": status},
+                "claim_posture": {"status": status, "does_not_claim": ["truth"]},
+                "parent_digests": ["a".repeat(64)],
+                "readiness_claimed": false,
+                "execution": "not_started",
+                "guarantees": ["caller supplied"],
+                "does_not_claim": ["scientific validity"]
+            })
+        };
+        let first = report("biological_domains", "modalities", "observed");
+        let second = report("biological_ir_and_query", "BioQL syntax", "derived");
+        let first_digest = ContentHash::of_value(&first).unwrap().to_string();
+        let second_digest = ContentHash::of_value(&second).unwrap().to_string();
+        let audit = crate::audit_domain_decision_readiness(&json!({
+            "subject_id": "subject-readiness-query",
+            "claim": {"id": "claim-readiness-query", "statement": "opaque"},
+            "reports": [first, second],
+            "links": [
+                {"report_index": 0, "report_digest": first_digest, "role": "supports"},
+                {"report_index": 1, "report_digest": second_digest, "role": "qualifies", "note": "scope qualifier"}
+            ],
+            "policy": {
+                "required_group_ids": ["biological_domains", "biological_ir_and_query"],
+                "required_domains": ["modalities", "BioQL syntax"],
+                "minimum_supporting_reports": 1,
+                "minimum_qualifying_reports": 1,
+                "require_lineage_parents": true
+            }
+        }))
+        .unwrap();
+        assert_eq!(audit["decision_state"], "ready_for_human_review");
+        let audit_digest = audit["digest"].clone();
+        let mut registry = ArtifactRegistry::new();
+        let registration = registry
+            .register(&json!({
+                "kind": "domain_decision_readiness",
+                "subject_id": "subject-readiness-query",
+                "domains": ["modalities", "BioQL syntax"],
+                "parent_digests": [first_digest, second_digest],
+                "artifact": audit
+            }))
+            .unwrap();
+
+        let summary = registry
+            .domain_decision_readiness_query(
+                Some("subject-readiness-query"),
+                Some("ready_for_human_review"),
+                Some(true),
+                None,
+                1,
+                false,
+            )
+            .unwrap();
+        assert_eq!(summary["rows"].as_array().unwrap().len(), 1);
+        assert!(summary["rows"][0].get("audit").is_none());
+        assert_eq!(
+            summary["rows"][0]["content_digest"],
+            registration["content_digest"]
+        );
+
+        let detailed = registry
+            .domain_decision_readiness_query(
+                Some("subject-readiness-query"),
+                Some("ready_for_human_review"),
+                Some(true),
+                None,
+                1,
+                true,
+            )
+            .unwrap();
+        assert_eq!(detailed["rows"][0]["audit"]["digest"], audit_digest);
+        assert!(matches!(
+            registry.domain_decision_readiness_query(None, Some("unknown"), None, None, 1, false),
+            Err(ArtifactRegistryError::InvalidInput(_))
+        ));
     }
 
     #[test]

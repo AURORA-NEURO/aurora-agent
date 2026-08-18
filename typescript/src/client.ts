@@ -52,6 +52,8 @@ import type {
   DomainEvidenceHarmonizationResult,
   DomainDecisionReadinessArgs,
   DomainDecisionReadinessResult,
+  DomainDecisionReadinessQueryOptions,
+  DomainDecisionReadinessQueryResult,
   DomainEvidenceHarmonizationCoverageOptions,
   DomainEvidenceHarmonizationCoverageResult,
   DomainEvidenceIntakeArgs,
@@ -679,16 +681,18 @@ export class ApiClient {
     options?: ClientRequestOptions,
   ): Promise<DomainWorkflowReconciliationQueryResult> {
     if (!isObject(args)) throw new ArgumentError("workflow reconciliation query arguments must be a JSON object");
-    for (const [name, value] of [["mission_id", args.mission_id], ["workflow_id", args.workflow_id], ["mission_plan_digest", args.mission_plan_digest], ["completion_status", args.completion_status], ["after", args.after]] as const) {
+    for (const [name, value] of [["mission_id", args.mission_id], ["workflow_id", args.workflow_id], ["mission_plan_digest", args.mission_plan_digest], ["completion_status", args.completion_status], ["decision_readiness_state", args.decision_readiness_state], ["after", args.after]] as const) {
       if (value !== undefined && typeof value !== "string") throw new ArgumentError(`${name} must be a string`);
     }
+    if (args.decision_readiness_gate_satisfied !== undefined && typeof args.decision_readiness_gate_satisfied !== "boolean") throw new ArgumentError("decision_readiness_gate_satisfied must be a boolean");
     if (args.include_records !== undefined && typeof args.include_records !== "boolean") throw new ArgumentError("include_records must be a boolean");
     const maxItems = args.max_items ?? 100;
     if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 256) throw new ArgumentError("max_items must be 1..=256");
     const query = new URLSearchParams({ limit: String(maxItems), include_records: String(args.include_records ?? false) });
-    for (const [name, value] of [["mission_id", args.mission_id], ["workflow_id", args.workflow_id], ["mission_plan_digest", args.mission_plan_digest], ["completion_status", args.completion_status], ["after", args.after]] as const) {
+    for (const [name, value] of [["mission_id", args.mission_id], ["workflow_id", args.workflow_id], ["mission_plan_digest", args.mission_plan_digest], ["completion_status", args.completion_status], ["decision_readiness_state", args.decision_readiness_state], ["after", args.after]] as const) {
       if (value !== undefined) query.set(name, value);
     }
+    if (args.decision_readiness_gate_satisfied !== undefined) query.set("decision_readiness_gate_satisfied", String(args.decision_readiness_gate_satisfied));
     return this.request<DomainWorkflowReconciliationQueryResult>("GET", `/v1/domain-workflows/reconciliations?${query.toString()}`, undefined, options);
   }
 
@@ -816,6 +820,45 @@ export class ApiClient {
       if (value !== undefined && typeof value !== "boolean") throw new ArgumentError(`${name} must be a boolean`);
     }
     return this.callTool<DomainDecisionReadinessResult>("domain_decision_readiness_audit", args, options);
+  }
+
+  /** Query retained decision-readiness audits through the dedicated cursor-based REST route. */
+  async domainDecisionReadinessQuery(
+    args: DomainDecisionReadinessQueryOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<DomainDecisionReadinessQueryResult> {
+    if (!isObject(args)) throw new ArgumentError("domain decision-readiness query arguments must be an object");
+    for (const [name, value] of [["subject_id", args.subject_id], ["decision_state", args.decision_state], ["after", args.after]] as const) {
+      if (value !== undefined && (typeof value !== "string" || value.trim().length === 0)) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    if (args.decision_state !== undefined && !["ready_for_human_review", "review_required", "incomplete", "blocked"].includes(args.decision_state)) throw new ArgumentError("decision_state is invalid");
+    if (args.policy_satisfied !== undefined && typeof args.policy_satisfied !== "boolean") throw new ArgumentError("policy_satisfied must be a boolean");
+    if (args.include_audits !== undefined && typeof args.include_audits !== "boolean") throw new ArgumentError("include_audits must be a boolean");
+    const maxItems = args.max_items ?? 100;
+    if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 256) throw new ArgumentError("max_items must be 1..=256");
+    const query = new URLSearchParams({ limit: String(maxItems), include_audits: String(args.include_audits ?? false) });
+    for (const [name, value] of [["subject_id", args.subject_id], ["decision_state", args.decision_state], ["after", args.after]] as const) {
+      if (value !== undefined) query.set(name, value);
+    }
+    if (args.policy_satisfied !== undefined) query.set("policy_satisfied", String(args.policy_satisfied));
+    return this.request<DomainDecisionReadinessQueryResult>("GET", `/v1/domain-decision-readiness?${query.toString()}`, undefined, options);
+  }
+
+  /** Query retained decision-readiness audits through the MCP tool dispatcher. */
+  async domainDecisionReadinessQueryTool(
+    args: DomainDecisionReadinessQueryOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainDecisionReadinessQueryResult>> {
+    if (!isObject(args)) throw new ArgumentError("domain decision-readiness query arguments must be an object");
+    for (const [name, value] of [["subject_id", args.subject_id], ["decision_state", args.decision_state], ["after", args.after]] as const) {
+      if (value !== undefined && (typeof value !== "string" || value.trim().length === 0)) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    if (args.decision_state !== undefined && !["ready_for_human_review", "review_required", "incomplete", "blocked"].includes(args.decision_state)) throw new ArgumentError("decision_state is invalid");
+    if (args.policy_satisfied !== undefined && typeof args.policy_satisfied !== "boolean") throw new ArgumentError("policy_satisfied must be a boolean");
+    if (args.include_audits !== undefined && typeof args.include_audits !== "boolean") throw new ArgumentError("include_audits must be a boolean");
+    const maxItems = args.max_items ?? 100;
+    if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 256) throw new ArgumentError("max_items must be 1..=256");
+    return this.callTool<DomainDecisionReadinessQueryResult>("domain_decision_readiness_query", args, options);
   }
 
   /** Query retained harmonization artifacts without returning their full bodies. */

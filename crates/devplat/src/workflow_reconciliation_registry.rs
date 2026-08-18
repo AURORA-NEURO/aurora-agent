@@ -291,6 +291,8 @@ impl DomainWorkflowReconciliationRegistry {
         workflow_id: Option<&str>,
         mission_plan_digest: Option<&str>,
         completion_status: Option<&str>,
+        decision_readiness_state: Option<&str>,
+        decision_readiness_gate_satisfied: Option<bool>,
         after: Option<&str>,
         max_items: usize,
         include_records: bool,
@@ -319,6 +321,16 @@ impl DomainWorkflowReconciliationRegistry {
                     index.get("mission_plan_digest").and_then(Value::as_str) == Some(value)
                 }) && completion_status.is_none_or(|value| {
                     index.get("completion_status").and_then(Value::as_str) == Some(value)
+                }) && decision_readiness_state.is_none_or(|value| {
+                    index
+                        .get("decision_readiness_state")
+                        .and_then(Value::as_str)
+                        == Some(value)
+                }) && decision_readiness_gate_satisfied.is_none_or(|value| {
+                    index
+                        .get("decision_readiness_gate_satisfied")
+                        .and_then(Value::as_bool)
+                        == Some(value)
                 });
             if !matches {
                 continue;
@@ -350,6 +362,8 @@ impl DomainWorkflowReconciliationRegistry {
                 "workflow_id": workflow_id,
                 "mission_plan_digest": mission_plan_digest,
                 "completion_status": completion_status,
+                "decision_readiness_state": decision_readiness_state,
+                "decision_readiness_gate_satisfied": decision_readiness_gate_satisfied,
                 "after": after,
                 "max_items": max_items,
                 "include_records": include_records
@@ -642,6 +656,10 @@ fn index_row(
         "review_required": record.pointer("/completion/review_required").cloned().unwrap_or(Value::Null),
         "integrity_valid": record.pointer("/integrity/valid").cloned().unwrap_or(Value::Null),
         "evidence_valid": record.pointer("/evidence/evidence_valid").cloned().unwrap_or(Value::Null),
+        "decision_readiness_state": record.pointer("/decision_readiness/decision_state").cloned().unwrap_or(Value::Null),
+        "decision_readiness_policy_satisfied": record.pointer("/decision_readiness/policy_satisfied").cloned().unwrap_or(Value::Null),
+        "decision_readiness_gate_satisfied": record.get("decision_review_gate_satisfied").cloned().unwrap_or(Value::Null),
+        "decision_readiness_audit_digest": record.pointer("/decision_readiness/audit_digest").cloned().unwrap_or(Value::Null),
         "finding_count": record.pointer("/integrity/finding_count").cloned().unwrap_or(Value::Null),
         "execution": object.get("execution").cloned().unwrap_or(Value::Null)
     }))
@@ -687,6 +705,8 @@ mod tests {
                 Some("oncology"),
                 None,
                 Some("complete"),
+                None,
+                None,
                 None,
                 10,
                 false,
@@ -739,13 +759,13 @@ mod tests {
             .import(&record("mission-two", "oncology", "failed"))
             .unwrap();
         let all = registry
-            .query(None, None, None, None, None, 1, false)
+            .query(None, None, None, None, None, None, None, 1, false)
             .unwrap();
         assert_eq!(all["rows"].as_array().unwrap().len(), 1);
         assert_eq!(all["has_more"], true);
         let cursor = all["next_after"].as_str().unwrap();
         let next = registry
-            .query(None, None, None, None, Some(cursor), 10, false)
+            .query(None, None, None, None, None, None, Some(cursor), 10, false)
             .unwrap();
         assert_eq!(next["rows"].as_array().unwrap().len(), 1);
         assert_eq!(next["has_more"], false);

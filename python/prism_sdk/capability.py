@@ -843,6 +843,7 @@ class DomainWorkflowPortfolioRequest:
 
     requests: Sequence[Mapping[str, Any]]
     policy: Mapping[str, Any] | None = None
+    readiness_audit: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.requests, Sequence) or isinstance(self.requests, (str, bytes)) or not 1 <= len(self.requests) <= 64:
@@ -865,7 +866,7 @@ class DomainWorkflowPortfolioRequest:
         object.__setattr__(self, "requests", tuple(normalized))
         if self.policy is not None:
             policy = _route_mapping("workflow portfolio policy", self.policy)
-            for name in ("allow_partial", "require_complete_catalogue"):
+            for name in ("allow_partial", "require_complete_catalogue", "require_readiness"):
                 if name in policy and not isinstance(policy[name], bool):
                     raise ArgumentError(f"workflow portfolio policy {name} must be boolean")
             object.__setattr__(self, "policy", policy)
@@ -874,6 +875,8 @@ class DomainWorkflowPortfolioRequest:
         result: dict[str, Any] = {"requests": [dict(request) for request in self.requests]}
         if self.policy is not None:
             result["policy"] = dict(self.policy)
+        if self.readiness_audit is not None:
+            result["readiness_audit"] = dict(_route_mapping("workflow portfolio readiness_audit", self.readiness_audit))
         return result
 
 
@@ -913,6 +916,7 @@ class DomainWorkflowPortfolioVerifyRequest:
     portfolio: Mapping[str, Any]
     replay_requests: Sequence[Mapping[str, Any] | None] | None = None
     policy: Mapping[str, Any] | None = None
+    readiness_audit: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         portfolio = dict(_route_mapping("workflow portfolio verification portfolio", self.portfolio))
@@ -940,7 +944,7 @@ class DomainWorkflowPortfolioVerifyRequest:
         object.__setattr__(self, "portfolio", portfolio)
         if self.policy is not None:
             policy = _route_mapping("workflow portfolio verification policy", self.policy)
-            for name in ("allow_partial", "require_complete_catalogue", "require_replay"):
+            for name in ("allow_partial", "require_complete_catalogue", "require_replay", "require_readiness"):
                 if name in policy and not isinstance(policy[name], bool):
                     raise ArgumentError(f"workflow portfolio verification policy {name} must be boolean")
             object.__setattr__(self, "policy", policy)
@@ -953,6 +957,8 @@ class DomainWorkflowPortfolioVerifyRequest:
             ]
         if self.policy is not None:
             result["policy"] = dict(self.policy)
+        if self.readiness_audit is not None:
+            result["readiness_audit"] = dict(_route_mapping("workflow portfolio verification readiness_audit", self.readiness_audit))
         return result
 
 
@@ -995,6 +1001,8 @@ class DomainWorkflowReconcileRequest:
     instantiation: Mapping[str, Any]
     mission_report: Mapping[str, Any] | None = None
     evidence_bundle: Mapping[str, Any] | None = None
+    policy: Mapping[str, Any] | None = None
+    readiness_audit: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         _route_mapping("workflow instantiation", self.instantiation)
@@ -1004,6 +1012,13 @@ class DomainWorkflowReconcileRequest:
             _route_mapping("workflow mission_report", self.mission_report)
         if self.evidence_bundle is not None:
             _route_mapping("workflow evidence_bundle", self.evidence_bundle)
+        if self.policy is not None:
+            policy = _route_mapping("workflow reconciliation policy", self.policy)
+            if "require_readiness" in policy and not isinstance(policy["require_readiness"], bool):
+                raise ArgumentError("workflow reconciliation policy require_readiness must be boolean")
+            object.__setattr__(self, "policy", policy)
+        if self.readiness_audit is not None:
+            object.__setattr__(self, "readiness_audit", _route_mapping("workflow reconciliation readiness_audit", self.readiness_audit))
 
     def to_arguments(self) -> dict[str, Any]:
         result: dict[str, Any] = {"instantiation": dict(self.instantiation)}
@@ -1011,6 +1026,10 @@ class DomainWorkflowReconcileRequest:
             result["mission_report"] = dict(self.mission_report)
         if self.evidence_bundle is not None:
             result["evidence_bundle"] = dict(self.evidence_bundle)
+        if self.policy is not None:
+            result["policy"] = dict(self.policy)
+        if self.readiness_audit is not None:
+            result["readiness_audit"] = dict(self.readiness_audit)
         return result
 
 
@@ -1118,6 +1137,7 @@ class DomainWorkflowPortfolioReport:
     portfolio_ready: bool
     portfolio_status: str
     policy: Mapping[str, Any]
+    decision_readiness: Mapping[str, Any]
     coverage: Mapping[str, Any]
     summary: Mapping[str, Any]
     items: tuple[Mapping[str, Any], ...]
@@ -1133,7 +1153,7 @@ class DomainWorkflowPortfolioReport:
         if not isinstance(valid, bool) or not isinstance(portfolio_ready, bool):
             raise ArgumentError("workflow portfolio validity fields must be booleans")
         status = _route_text("workflow portfolio status", raw.get("portfolio_status"))
-        if status not in {"ready_for_authoritative_preflight", "partial", "blocked", "incomplete_scope"}:
+        if status not in {"ready_for_authoritative_preflight", "partial", "blocked", "blocked_by_decision_readiness", "incomplete_scope"}:
             raise ArgumentError("unknown workflow portfolio status")
         items = raw.get("items", [])
         if not isinstance(items, Sequence) or isinstance(items, (str, bytes)):
@@ -1145,6 +1165,7 @@ class DomainWorkflowPortfolioReport:
             portfolio_ready=portfolio_ready,
             portfolio_status=status,
             policy=_route_mapping("workflow portfolio policy", raw.get("policy", {})),
+            decision_readiness=_route_mapping("workflow portfolio decision readiness", raw.get("decision_readiness", {})),
             coverage=_route_mapping("workflow portfolio coverage", raw.get("coverage", {})),
             summary=_route_mapping("workflow portfolio summary", raw.get("summary", {})),
             items=tuple(_route_mapping("workflow portfolio item", item) for item in items),
@@ -1178,6 +1199,7 @@ class DomainWorkflowPortfolioVerifyReport:
     portfolio_ready: bool
     verification_status: str
     policy: Mapping[str, Any]
+    decision_readiness: Mapping[str, Any]
     coverage: Mapping[str, Any]
     summary: Mapping[str, Any]
     items: tuple[Mapping[str, Any], ...]
@@ -1203,6 +1225,7 @@ class DomainWorkflowPortfolioVerifyReport:
             "blocked_by_mission_preflight",
             "replay_incomplete",
             "incomplete_scope",
+            "blocked_by_decision_readiness",
             "mismatch",
         }:
             raise ArgumentError("unknown workflow portfolio verification status")
@@ -1227,6 +1250,7 @@ class DomainWorkflowPortfolioVerifyReport:
             portfolio_ready=portfolio_ready,
             verification_status=status,
             policy=_route_mapping("workflow portfolio verification policy", raw.get("policy", {})),
+            decision_readiness=_route_mapping("workflow portfolio verification decision readiness", raw.get("decision_readiness", {})),
             coverage=_route_mapping("workflow portfolio verification coverage", raw.get("coverage", {})),
             summary=_route_mapping("workflow portfolio verification summary", raw.get("summary", {})),
             items=tuple(_route_mapping("workflow portfolio verification item", item) for item in items),
@@ -1407,6 +1431,7 @@ class DomainWorkflowReconciliationReport:
     evidence: Mapping[str, Any]
     completion: Mapping[str, Any]
     integrity: Mapping[str, Any]
+    decision_readiness: Mapping[str, Any]
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "DomainWorkflowReconciliationReport":
@@ -1424,6 +1449,7 @@ class DomainWorkflowReconciliationReport:
             evidence=_route_mapping("workflow reconciliation evidence", raw.get("evidence", {})),
             completion=_route_mapping("workflow reconciliation completion", raw.get("completion", {})),
             integrity=_route_mapping("workflow reconciliation integrity", raw.get("integrity", {})),
+            decision_readiness=_route_mapping("workflow reconciliation decision readiness", raw.get("decision_readiness", {})),
         )
 
     @property
@@ -1433,6 +1459,10 @@ class DomainWorkflowReconciliationReport:
     @property
     def completion_status(self) -> str:
         return _route_text("workflow reconciliation completion status", self.completion.get("status"))
+
+    @property
+    def decision_review_gate_satisfied(self) -> bool:
+        return self.raw.get("decision_review_gate_satisfied") is True
 
     @property
     def artifact_registry(self) -> Mapping[str, Any]:
@@ -1477,6 +1507,8 @@ class DomainWorkflowReconciliationQueryRequest:
     workflow_id: str | None = None
     mission_plan_digest: str | None = None
     completion_status: str | None = None
+    decision_readiness_state: str | None = None
+    decision_readiness_gate_satisfied: bool | None = None
     after: str | None = None
     max_items: int = 100
     include_records: bool = False
@@ -1487,12 +1519,17 @@ class DomainWorkflowReconciliationQueryRequest:
             ("workflow_id", self.workflow_id),
             ("mission_plan_digest", self.mission_plan_digest),
             ("completion_status", self.completion_status),
+            ("decision_readiness_state", self.decision_readiness_state),
             ("after", self.after),
         ):
             if value is not None:
                 _route_text(f"workflow reconciliation query {name}", value)
         if isinstance(self.max_items, bool) or not isinstance(self.max_items, int) or not 1 <= self.max_items <= 256:
             raise ArgumentError("workflow reconciliation query max_items must be between 1 and 256")
+        if self.decision_readiness_state is not None and self.decision_readiness_state not in {"ready_for_human_review", "review_required", "incomplete", "blocked"}:
+            raise ArgumentError("workflow reconciliation query decision_readiness_state is invalid")
+        if self.decision_readiness_gate_satisfied is not None and not isinstance(self.decision_readiness_gate_satisfied, bool):
+            raise ArgumentError("workflow reconciliation query decision_readiness_gate_satisfied must be boolean")
         if not isinstance(self.include_records, bool):
             raise ArgumentError("workflow reconciliation query include_records must be a boolean")
 
@@ -1506,10 +1543,13 @@ class DomainWorkflowReconciliationQueryRequest:
             ("workflow_id", self.workflow_id),
             ("mission_plan_digest", self.mission_plan_digest),
             ("completion_status", self.completion_status),
+            ("decision_readiness_state", self.decision_readiness_state),
             ("after", self.after),
         ):
             if value is not None:
                 params[name] = value
+        if self.decision_readiness_gate_satisfied is not None:
+            params["decision_readiness_gate_satisfied"] = "true" if self.decision_readiness_gate_satisfied else "false"
         return params
 
     def to_arguments(self) -> dict[str, Any]:
@@ -1522,10 +1562,13 @@ class DomainWorkflowReconciliationQueryRequest:
             ("workflow_id", self.workflow_id),
             ("mission_plan_digest", self.mission_plan_digest),
             ("completion_status", self.completion_status),
+            ("decision_readiness_state", self.decision_readiness_state),
             ("after", self.after),
         ):
             if value is not None:
                 arguments[name] = value
+        if self.decision_readiness_gate_satisfied is not None:
+            arguments["decision_readiness_gate_satisfied"] = self.decision_readiness_gate_satisfied
         return arguments
 
 

@@ -1621,6 +1621,7 @@ impl Server {
             "domain_report_project" => self.domain_report_project(&arguments),
             "domain_evidence_harmonize" => self.domain_evidence_harmonize(&arguments),
             "domain_decision_readiness_audit" => self.domain_decision_readiness_audit(&arguments),
+            "domain_decision_readiness_query" => self.domain_decision_readiness_query(&arguments),
             "domain_evidence_harmonization_coverage" => {
                 self.domain_evidence_harmonization_coverage(&arguments)
             }
@@ -4029,6 +4030,61 @@ impl Server {
                 "artifact retention proves external provenance, consent, identity, execution, or authority"
             ]
         }))
+    }
+
+    /// Query exact retained decision-readiness audits by structural state or policy result.
+    ///
+    /// This intentionally uses the same artifact registry that receives an audit at creation
+    /// time. Querying never reruns harmonization, reinterprets a claim, or upgrades a retained
+    /// `ready_for_human_review` state into scientific, clinical, release, or execution authority.
+    fn domain_decision_readiness_query(&self, arguments: &Value) -> Result<Value, String> {
+        let optional_string = |name: &str| -> Result<Option<&str>, String> {
+            arguments
+                .get(name)
+                .map(|value| {
+                    value
+                        .as_str()
+                        .filter(|value| !value.trim().is_empty())
+                        .ok_or_else(|| format!("{name} must be a non-empty string"))
+                })
+                .transpose()
+        };
+        let subject_id = optional_string("subject_id")?;
+        let decision_state = optional_string("decision_state")?;
+        let after = optional_string("after")?;
+        let policy_satisfied = arguments
+            .get("policy_satisfied")
+            .map(|value| value.as_bool().ok_or("policy_satisfied must be a boolean"))
+            .transpose()?;
+        let max_items = arguments
+            .get("max_items")
+            .map(|value| {
+                value
+                    .as_u64()
+                    .ok_or_else(|| "max_items must be an integer".to_string())
+                    .and_then(|number| {
+                        usize::try_from(number).map_err(|_| "max_items is too large".to_string())
+                    })
+            })
+            .transpose()?
+            .unwrap_or(100);
+        let include_audits = arguments
+            .get("include_audits")
+            .map(|value| value.as_bool().ok_or("include_audits must be a boolean"))
+            .transpose()?
+            .unwrap_or(false);
+        self.artifact_registry
+            .lock()
+            .map_err(|_| "artifact registry lock is poisoned".to_string())?
+            .domain_decision_readiness_query(
+                subject_id,
+                decision_state,
+                policy_satisfied,
+                after,
+                max_items,
+                include_audits,
+            )
+            .map_err(|error| format!("domain decision-readiness query refused: {error}"))
     }
 
     /// Query retained harmonization artifacts as a cross-domain observability surface.
@@ -27562,6 +27618,7 @@ impl Server {
         let workflow_id = optional_string("workflow_id")?;
         let mission_plan_digest = optional_string("mission_plan_digest")?;
         let completion_status = optional_string("completion_status")?;
+        let decision_readiness_state = optional_string("decision_readiness_state")?;
         let after = optional_string("after")?;
         let max_items = arguments
             .get("max_items")
@@ -27588,6 +27645,14 @@ impl Server {
             .map(|value| value.as_bool().ok_or("include_records must be a boolean"))
             .transpose()?
             .unwrap_or(false);
+        let decision_readiness_gate_satisfied = arguments
+            .get("decision_readiness_gate_satisfied")
+            .map(|value| {
+                value
+                    .as_bool()
+                    .ok_or("decision_readiness_gate_satisfied must be a boolean")
+            })
+            .transpose()?;
         self.workflow_reconciliation_registry
             .lock()
             .map_err(|_| "workflow reconciliation registry lock is poisoned".to_string())?
@@ -27596,6 +27661,8 @@ impl Server {
                 workflow_id,
                 mission_plan_digest,
                 completion_status,
+                decision_readiness_state,
+                decision_readiness_gate_satisfied,
                 after,
                 max_items,
                 include_records,
@@ -34384,6 +34451,7 @@ pub fn workspace_capabilities() -> Value {
         "domain_evidence_intake",
         "domain_evidence_coverage",
         "domain_decision_readiness_audit",
+        "domain_decision_readiness_query",
     ];
     if let Some(groups) = catalogue.as_array_mut() {
         for group in groups {
@@ -34680,6 +34748,22 @@ pub fn tool_definitions() -> Vec<Value> {
                     "policy": { "type": "object", "description": "Caller-owned gate policy: required_group_ids, required_domains, minimum_supporting_reports (default 1), minimum_qualifying_reports (default 0), require_all_reports_linked (default true), reject_contradictions (default true), reject_refused_reports (default true), allow_review_required (default false), and require_lineage_parents (default false)." }
                 },
                 "required": ["subject_id", "claim", "reports", "links", "policy"]
+            }
+        }),
+        json!({
+            "name": "domain_decision_readiness_query",
+            "description": "Query the bounded artifact registry for retained domain decision-readiness audits by exact subject, structural decision state, or policy result. Results are digest-ordered and full audit bodies are opt-in. Querying never reruns harmonization, interprets a claim, or treats ready_for_human_review as scientific, clinical, release, or execution authority.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "subject_id": { "type": "string", "description": "Optional exact subject filter." },
+                    "decision_state": { "type": "string", "enum": ["ready_for_human_review", "review_required", "incomplete", "blocked"], "description": "Optional structural state filter." },
+                    "policy_satisfied": { "type": "boolean", "description": "Optional exact policy-satisfied filter." },
+                    "after": { "type": "string", "description": "Exclusive content-digest cursor." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 256, "description": "Bounded row count; defaults to 100." },
+                    "include_audits": { "type": "boolean", "description": "Include full retained audit bodies; defaults false." }
+                },
+                "required": []
             }
         }),
         json!({
@@ -37567,13 +37651,15 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "domain_workflow_reconcile",
-            "description": "Reconcile a retained agent_mission report or verified mission evidence bundle against an instantiated domain workflow. Checks workflow and mission-plan digests, planned step/tool identity, result counters, trace lifecycle, raw-output retention, refusals, blocks, cancellations, and summary-only omissions, then returns structural completion readiness. This never retries or dispatches a tool and never turns completion evidence into a scientific, clinical, operational, regulatory, or release claim.",
+            "description": "Reconcile a retained agent_mission report or verified mission evidence bundle against an instantiated domain workflow. Checks workflow and mission-plan digests, planned step/tool identity, result counters, trace lifecycle, raw-output retention, refusals, blocks, cancellations, and summary-only omissions, then returns structural completion and optional decision-readiness posture. This never retries or dispatches a tool and never turns completion evidence or readiness posture into a scientific, clinical, operational, regulatory, or release claim.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "instantiation": { "type": "object", "description": "The complete accepted result returned by domain_workflow_instantiate." },
                     "mission_report": { "type": "object", "description": "The exact agent_mission report, when retained. Provide this or evidence_bundle." },
-                    "evidence_bundle": { "type": "object", "description": "A verified mission_evidence_bundle_export, including result when full retention is available. Provide this or mission_report." }
+                    "evidence_bundle": { "type": "object", "description": "A verified mission_evidence_bundle_export, including result when full retention is available. Provide this or mission_report." },
+                    "policy": { "type": "object", "properties": { "require_readiness": { "type": "boolean", "description": "Require the supplied readiness_audit to be ready_for_human_review; completion evidence remains a separate field." } } },
+                    "readiness_audit": { "type": "object", "description": "Optional validated domain_decision_readiness_audit to retain beside completion evidence." }
                 },
                 "required": ["instantiation"]
             }
@@ -37592,7 +37678,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "domain_workflow_portfolio",
-            "description": "Plan a bounded portfolio of explicit domain_workflow_instantiate requests across capability groups. Each item is scoped independently, receives authoritative no-dispatch mission preflight, and retains structured blocked outcomes. Complete-catalogue coverage is optional but explicit; the portfolio never dispatches, retries, resumes, grants readiness, or establishes semantic, scientific, clinical, provider, or release validity.",
+            "description": "Plan a bounded portfolio of explicit domain_workflow_instantiate requests across capability groups. Each item is scoped independently, receives authoritative no-dispatch mission preflight, and retains structured blocked outcomes. Complete-catalogue coverage and an explicit decision-readiness gate are optional but explicit; the portfolio never dispatches, retries, resumes, grants readiness, or establishes semantic, scientific, clinical, provider, or release validity.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -37601,10 +37687,12 @@ pub fn tool_definitions() -> Vec<Value> {
                         "type": "object",
                         "properties": {
                             "allow_partial": { "type": "boolean", "description": "Retain blocked items as a partial portfolio instead of presenting the portfolio as blocked." },
-                            "require_complete_catalogue": { "type": "boolean", "description": "Require one successful request for every live capability-group workflow." }
+                            "require_complete_catalogue": { "type": "boolean", "description": "Require one successful request for every live capability-group workflow." },
+                            "require_readiness": { "type": "boolean", "description": "Require readiness_audit to satisfy its structural policy and be ready_for_human_review." }
                         },
                         "additionalProperties": false
-                    }
+                    },
+                    "readiness_audit": { "type": "object", "description": "Optional validated domain_decision_readiness_audit bound to the portfolio digest and retained separately from preflight." }
                 },
                 "required": ["requests"],
                 "additionalProperties": false
@@ -37623,10 +37711,12 @@ pub fn tool_definitions() -> Vec<Value> {
                         "properties": {
                             "allow_partial": { "type": "boolean", "description": "Retain blocked verification items as partial instead of reporting the portfolio as blocked." },
                             "require_complete_catalogue": { "type": "boolean", "description": "Require the retained portfolio coverage to include every live capability-group workflow." },
-                            "require_replay": { "type": "boolean", "description": "Require an aligned replay request and matching replay for every portfolio item." }
+                            "require_replay": { "type": "boolean", "description": "Require an aligned replay request and matching replay for every portfolio item." },
+                            "require_readiness": { "type": "boolean", "description": "Require the retained portfolio readiness projection to satisfy its structural policy." }
                         },
                         "additionalProperties": false
-                    }
+                    },
+                    "readiness_audit": { "type": "object", "description": "Optional readiness audit to compare against the retained portfolio readiness projection." }
                 },
                 "required": ["portfolio"],
                 "additionalProperties": false
@@ -37645,7 +37735,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "domain_workflow_reconciliation_query",
-            "description": "Query bounded digest-ordered domain workflow reconciliation records by mission, workflow, plan digest, or completion status. This is an audit index query and never re-executes or re-evaluates a mission.",
+            "description": "Query bounded digest-ordered domain workflow reconciliation records by mission, workflow, plan digest, completion status, or retained decision-readiness posture. This is an audit index query and never re-executes or re-evaluates a mission.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -37653,6 +37743,8 @@ pub fn tool_definitions() -> Vec<Value> {
                     "workflow_id": { "type": "string" },
                     "mission_plan_digest": { "type": "string" },
                     "completion_status": { "type": "string", "enum": ["complete", "partial", "failed", "complete_with_output_omissions", "unverified"] },
+                    "decision_readiness_state": { "type": "string", "enum": ["ready_for_human_review", "review_required", "incomplete", "blocked"] },
+                    "decision_readiness_gate_satisfied": { "type": "boolean" },
                     "after": { "type": "string", "description": "Exclusive reconciliation digest cursor." },
                     "max_items": { "type": "integer", "minimum": 1, "maximum": 256, "default": 100 },
                     "include_records": { "type": "boolean", "default": false }

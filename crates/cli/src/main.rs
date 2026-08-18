@@ -15,10 +15,10 @@ mod io;
 
 use args::{Command, CompileOptions, Family, GenerateOptions, Invocation, Parsed, Profile};
 use bioprism_devplat::{
-    build_domain_workflow_catalogue, build_domain_workflow_portfolio, instantiate_domain_workflow,
-    reconcile_domain_workflow, scaffold_domain_workflow, verify_domain_workflow_portfolio,
-    verify_workbench, ArtifactRegistry, CiProviderEvidenceRegistry, WorkbenchReportRegistry,
-    WorkbenchVerificationRequest,
+    audit_domain_decision_readiness, build_domain_workflow_catalogue,
+    build_domain_workflow_portfolio, instantiate_domain_workflow, reconcile_domain_workflow,
+    scaffold_domain_workflow, verify_domain_workflow_portfolio, verify_workbench, ArtifactRegistry,
+    CiProviderEvidenceRegistry, WorkbenchReportRegistry, WorkbenchVerificationRequest,
 };
 use bioprism_devplat::{
     verify_mission_evidence_bundle, DomainWorkflowReconciliationRegistry, EvidenceBundleRegistry,
@@ -205,6 +205,24 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
             *limit,
             *include_children,
         ),
+        Command::ReadinessAudit { request } => readiness_audit(request),
+        Command::ReadinessQuery {
+            store,
+            subject_id,
+            decision_state,
+            policy_satisfied,
+            after,
+            limit,
+            include_audits,
+        } => readiness_query(
+            store,
+            subject_id.as_deref(),
+            decision_state.as_deref(),
+            *policy_satisfied,
+            after.as_deref(),
+            *limit,
+            *include_audits,
+        ),
         Command::WorkflowCatalogue => workflow_catalogue(),
         Command::WorkflowScaffold {
             workflow,
@@ -237,28 +255,36 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
         Command::WorkflowPortfolio {
             requests,
             policy,
+            readiness_audit,
             allow_partial,
             require_complete_catalogue,
+            require_readiness,
         } => workflow_portfolio(
             requests,
             policy.as_deref(),
+            readiness_audit.as_deref(),
             *allow_partial,
             *require_complete_catalogue,
+            *require_readiness,
         ),
         Command::WorkflowPortfolioVerify {
             portfolio,
             replay_requests,
             policy,
+            readiness_audit,
             allow_partial,
             require_complete_catalogue,
             require_replay,
+            require_readiness,
         } => workflow_portfolio_verify(
             portfolio,
             replay_requests.as_deref(),
             policy.as_deref(),
+            readiness_audit.as_deref(),
             *allow_partial,
             *require_complete_catalogue,
             *require_replay,
+            *require_readiness,
         ),
         Command::WorkbenchVerify {
             session,
@@ -331,10 +357,16 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
             instantiation,
             mission,
             evidence_bundle,
+            policy,
+            readiness_audit,
+            require_readiness,
         } => workflow_reconcile(
             instantiation,
             mission.as_deref(),
             evidence_bundle.as_deref(),
+            policy.as_deref(),
+            readiness_audit.as_deref(),
+            *require_readiness,
         ),
         Command::WorkflowReconciliationImport {
             record,
@@ -347,6 +379,8 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
             workflow_id,
             mission_plan_digest,
             completion_status,
+            decision_readiness_state,
+            decision_readiness_gate_satisfied,
             after,
             limit,
             include_records,
@@ -356,6 +390,8 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
             workflow_id.as_deref(),
             mission_plan_digest.as_deref(),
             completion_status.as_deref(),
+            decision_readiness_state.as_deref(),
+            *decision_readiness_gate_satisfied,
             after.as_deref(),
             *limit,
             *include_records,
@@ -542,6 +578,69 @@ fn load_artifact_registry(store_path: &Path) -> CliResult<ArtifactRegistry> {
     ArtifactRegistry::from_snapshot(&snapshot).map_err(|error| {
         CliError::invalid(error.to_string()).about(store_path.display().to_string())
     })
+}
+
+fn readiness_audit(request_path: &Path) -> CliResult<Outcome> {
+    let request = io::read_json(request_path)?;
+    let audit = audit_domain_decision_readiness(&request).map_err(|error| {
+        CliError::invalid(error.to_string()).about(request_path.display().to_string())
+    })?;
+    let policy_satisfied = audit
+        .get("policy_satisfied")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let human = format!(
+        "domain decision-readiness audit\n  subject: {}\n  state: {}\n  policy satisfied: {}\n  audit digest: {}\n  execution: not started\n\nCatalogue binding and artifact retention are transport responsibilities.\n",
+        audit.get("subject_id").and_then(Value::as_str).unwrap_or("unknown"),
+        audit
+            .get("decision_state")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown"),
+        policy_satisfied,
+        audit.get("digest").and_then(Value::as_str).unwrap_or("<missing>"),
+    );
+    Ok(Outcome::ok(audit, human).failing_if(!policy_satisfied))
+}
+
+fn readiness_query(
+    store_path: &Path,
+    subject_id: Option<&str>,
+    decision_state: Option<&str>,
+    policy_satisfied: Option<bool>,
+    after: Option<&str>,
+    limit: usize,
+    include_audits: bool,
+) -> CliResult<Outcome> {
+    let registry = load_artifact_registry(store_path)?;
+    let report = registry
+        .domain_decision_readiness_query(
+            subject_id,
+            decision_state,
+            policy_satisfied,
+            after,
+            limit,
+            include_audits,
+        )
+        .map_err(|error| {
+            CliError::invalid(error.to_string()).about(store_path.display().to_string())
+        })?;
+    let rows = report
+        .get("rows")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    let next_after = report
+        .get("next_after")
+        .and_then(Value::as_str)
+        .unwrap_or("<none>");
+    let human = format!(
+        "domain decision-readiness registry query\n  store: {}\n  rows: {}\n  has more: {}\n  next after: {}\n\nNext: bioprism readiness query --store {} --after <digest>\n",
+        store_path.display(),
+        rows,
+        report.get("has_more").and_then(Value::as_bool).unwrap_or(false),
+        next_after,
+        store_path.display()
+    );
+    Ok(Outcome::ok(report, human))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -879,8 +978,10 @@ fn workflow_instantiate(
 fn workflow_portfolio(
     requests_path: &Path,
     policy_path: Option<&Path>,
+    readiness_audit_path: Option<&Path>,
     allow_partial: bool,
     require_complete_catalogue: bool,
+    require_readiness: bool,
 ) -> CliResult<Outcome> {
     let raw = io::read_json(requests_path)?;
     let mut arguments = if raw.is_array() {
@@ -917,7 +1018,13 @@ fn workflow_portfolio(
     if require_complete_catalogue {
         policy["require_complete_catalogue"] = json!(true);
     }
+    if require_readiness {
+        policy["require_readiness"] = json!(true);
+    }
     arguments["policy"] = policy;
+    if let Some(path) = readiness_audit_path {
+        arguments["readiness_audit"] = io::read_json(path)?;
+    }
 
     let mut report = build_domain_workflow_portfolio(
         &workspace_capabilities(),
@@ -1033,9 +1140,11 @@ fn workflow_portfolio_verify(
     portfolio_path: &Path,
     replay_requests_path: Option<&Path>,
     policy_path: Option<&Path>,
+    readiness_audit_path: Option<&Path>,
     allow_partial: bool,
     require_complete_catalogue: bool,
     require_replay: bool,
+    require_readiness: bool,
 ) -> CliResult<Outcome> {
     let raw_portfolio = io::read_json(portfolio_path)?;
     let mut portfolio =
@@ -1102,7 +1211,13 @@ fn workflow_portfolio_verify(
     if require_replay {
         policy["require_replay"] = json!(true);
     }
+    if require_readiness {
+        policy["require_readiness"] = json!(true);
+    }
     request["policy"] = policy;
+    if let Some(path) = readiness_audit_path {
+        request["readiness_audit"] = io::read_json(path)?;
+    }
 
     let mut report = verify_domain_workflow_portfolio(
         &workspace_capabilities(),
@@ -1285,6 +1400,9 @@ fn workflow_reconcile(
     instantiation_path: &Path,
     mission_path: Option<&Path>,
     evidence_bundle_path: Option<&Path>,
+    policy_path: Option<&Path>,
+    readiness_audit_path: Option<&Path>,
+    require_readiness: bool,
 ) -> CliResult<Outcome> {
     if mission_path.is_none() && evidence_bundle_path.is_none() {
         return Err(CliError::invalid(
@@ -1300,20 +1418,56 @@ fn workflow_reconcile(
     if let Some(path) = evidence_bundle_path {
         request["evidence_bundle"] = io::read_json(path)?;
     }
+    let mut policy = if let Some(path) = policy_path {
+        io::read_json(path)?
+    } else {
+        json!({})
+    };
+    if !policy.is_object() {
+        return Err(
+            CliError::invalid("--policy must contain a JSON object").about(
+                policy_path
+                    .map(Path::display)
+                    .map(|display| display.to_string())
+                    .unwrap_or_else(|| instantiation_path.display().to_string()),
+            ),
+        );
+    }
+    if require_readiness {
+        policy["require_readiness"] = json!(true);
+    }
+    if !policy.as_object().is_some_and(|value| value.is_empty()) {
+        request["policy"] = policy;
+    }
+    if let Some(path) = readiness_audit_path {
+        request["readiness_audit"] = io::read_json(path)?;
+    }
     let report = reconcile_domain_workflow(&request)
         .map_err(|error| CliError::invalid(error.to_string()))?;
     let status = report["completion"]["status"]
         .as_str()
         .unwrap_or("unverified");
     let ready = report["completion"]["ready"].as_bool().unwrap_or(false);
+    let readiness_required = report["decision_readiness"]["required"]
+        .as_bool()
+        .unwrap_or(false);
+    let readiness_gate_satisfied = report["decision_review_gate_satisfied"]
+        .as_bool()
+        .unwrap_or(!readiness_required);
+    let valid = ready && (!readiness_required || readiness_gate_satisfied);
     let human = format!(
-        "domain workflow reconciliation\n  workflow: {}\n  mission: {}\n  completion: {}\n  evidence ready: {}\n  execution: not started\n",
+        "domain workflow reconciliation\n  workflow: {}\n  mission: {}\n  completion: {}\n  evidence ready: {}\n  decision-readiness gate: {}\n  execution: not started\n",
         report["workflow_id"].as_str().unwrap_or("unknown"),
         report["mission_id"].as_str().unwrap_or("unknown"),
         status,
         ready,
+        if readiness_required {
+            if readiness_gate_satisfied { "satisfied" } else { "blocked" }
+        } else {
+            "not required"
+        },
     );
-    Ok(Outcome::ok(report, human).failing_if(!ready))
+    Ok(Outcome::ok(report, human).failing_if(!valid))
 }
 
 fn load_workflow_reconciliation_registry(
@@ -1390,6 +1544,8 @@ fn workflow_reconciliation_query(
     workflow_id: Option<&str>,
     mission_plan_digest: Option<&str>,
     completion_status: Option<&str>,
+    decision_readiness_state: Option<&str>,
+    decision_readiness_gate_satisfied: Option<bool>,
     after: Option<&str>,
     limit: usize,
     include_records: bool,
@@ -1401,6 +1557,8 @@ fn workflow_reconciliation_query(
             workflow_id,
             mission_plan_digest,
             completion_status,
+            decision_readiness_state,
+            decision_readiness_gate_satisfied,
             after,
             limit,
             include_records,

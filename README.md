@@ -651,6 +651,12 @@ and optional lineage-parent requirements. Its `blocked`, `incomplete`, `review_r
 execution, or truth claims; `readiness_claimed` remains false and execution remains `not_started`.
 The MCP tool is available to every current domain group, and the generic REST dispatcher plus
 sync/async Python and TypeScript clients preserve the same digest-bound audit and indexed artifact.
+`domain_decision_readiness_query` and `GET /v1/domain-decision-readiness` provide a bounded,
+digest-ordered retained read model with exact subject/state/policy filters, cursor pagination, and
+opt-in audit bodies; `readiness query` exposes the same query against a local artifact checkpoint.
+Workflow portfolios and reconciliations can carry a validated `readiness_audit` summary and opt
+into `policy.require_readiness`. That gate remains separate from mission preflight and completion:
+it records structural decision posture, never execution authorization or domain truth.
 carry disclosure ratchets, fail-closed score publication, comparability conditions, and typed
 unranked entries into agent-callable public-hub projections. `release_audit` composes required
 registry, bundle, quality, conformance, research-CI, operations, and pack-health gates while

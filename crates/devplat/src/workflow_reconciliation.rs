@@ -17,6 +17,7 @@ use crate::mission::{
     plan_mission, validate_route_review_provenance, MissionReport, MissionRequest, MissionStepPlan,
     MissionStepResult,
 };
+use crate::summarize_domain_decision_readiness;
 
 pub const DOMAIN_WORKFLOW_RECONCILE_SCHEMA_VERSION: &str =
     "bioprism-devplat-domain-workflow-reconcile/0.1";
@@ -612,6 +613,42 @@ pub fn reconcile_domain_workflow(request: &Value) -> Result<Value, DomainWorkflo
     let object = request
         .as_object()
         .ok_or(DomainWorkflowReconcileError::RequestNotObject)?;
+    let policy = object.get("policy").cloned().unwrap_or_else(|| json!({}));
+    let policy = policy.as_object().ok_or_else(|| {
+        DomainWorkflowReconcileError::InvalidRequest("policy must be an object".into())
+    })?;
+    let require_readiness = policy
+        .get("require_readiness")
+        .map(|value| {
+            value.as_bool().ok_or_else(|| {
+                DomainWorkflowReconcileError::InvalidRequest(
+                    "policy.require_readiness must be a boolean".into(),
+                )
+            })
+        })
+        .transpose()?
+        .unwrap_or(false);
+    let decision_readiness = match object.get("readiness_audit") {
+        Some(audit) => {
+            summarize_domain_decision_readiness(audit, require_readiness).map_err(|error| {
+                DomainWorkflowReconcileError::InvalidRequest(format!(
+                    "readiness_audit is not a valid domain decision-readiness audit: {error}"
+                ))
+            })?
+        }
+        None => json!({
+            "required": require_readiness,
+            "provided": false,
+            "subject_id": Value::Null,
+            "audit_digest": Value::Null,
+            "decision_state": Value::Null,
+            "policy_satisfied": false,
+            "gate_satisfied": !require_readiness,
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "reason": "readiness_audit_not_supplied"
+        }),
+    };
     let instantiation = object.get("instantiation").ok_or_else(|| {
         DomainWorkflowReconcileError::InvalidRequest("instantiation is required".into())
     })?;
@@ -837,6 +874,11 @@ pub fn reconcile_domain_workflow(request: &Value) -> Result<Value, DomainWorkflo
         "mission_plan_digest": expected_plan.digest,
         "route_review_provenance": expected_plan.route_review_provenance.clone().unwrap_or(Value::Null),
         "route_review_integrity": evidence_summary["route_review"].clone(),
+        "decision_readiness": decision_readiness.clone(),
+        "decision_review_gate_satisfied": decision_readiness
+            .get("gate_satisfied")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         "source": source,
         "retention": bundle_retention,
         "bundle_verification": bundle_verification,
@@ -865,12 +907,14 @@ pub fn reconcile_domain_workflow(request: &Value) -> Result<Value, DomainWorkflo
             "every planned step remains visible as retained, omitted, refused, blocked, cancelled, or missing",
             "raw result retention is distinguished from successful status",
             "summary-only bundles never become completion evidence",
+            "decision-readiness posture is retained separately from completion evidence and is never inferred from mission success",
             "reconciliation never dispatches, retries, or mutates mission state",
         ],
         "limitations": [
             "completion is a structural evidence posture, not scientific, clinical, causal, operational, regulatory, or release truth",
             "a retained raw tool envelope does not prove the domain semantics of its payload",
             "external signatures, provider identity, and durable storage authority remain separate obligations",
+            "a decision-readiness gate is a caller-owned structural policy handoff and does not authorize execution or establish domain truth",
         ],
         "links": {
             "workflow_catalogue": "/v1/domain-workflows",

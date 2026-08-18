@@ -493,6 +493,39 @@ pub fn validate_domain_decision_readiness(
     ensure_size(value)
 }
 
+/// Project a validated readiness audit into a small composition-safe gate.
+///
+/// Workflow planning and reconciliation need to carry readiness posture without embedding the
+/// full report packet or silently changing what `completion.ready` means. The projection therefore
+/// retains only the exact audit digest, subject, state, and explicit policy result. A required
+/// gate is satisfied only by `ready_for_human_review`; that state remains a structural handoff and
+/// never becomes a scientific, clinical, operational, regulatory, release, or execution claim.
+pub fn summarize_domain_decision_readiness(
+    value: &Value,
+    required: bool,
+) -> Result<Value, DomainDecisionReadinessError> {
+    validate_domain_decision_readiness(value)?;
+    let decision_state = value
+        .get("decision_state")
+        .and_then(Value::as_str)
+        .ok_or_else(|| DomainDecisionReadinessError::InvalidField("decision_state".into()))?;
+    let policy_satisfied = value
+        .get("policy_satisfied")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| DomainDecisionReadinessError::InvalidField("policy_satisfied".into()))?;
+    Ok(json!({
+        "required": required,
+        "provided": true,
+        "subject_id": value.get("subject_id"),
+        "audit_digest": value.get("digest"),
+        "decision_state": decision_state,
+        "policy_satisfied": policy_satisfied,
+        "gate_satisfied": !required || policy_satisfied,
+        "readiness_claimed": false,
+        "execution": "not_started"
+    }))
+}
+
 fn contribution(row: &Value, roles_by_digest: &BTreeMap<String, BTreeSet<String>>) -> &'static str {
     let digest = row
         .get("digest")
@@ -723,6 +756,10 @@ mod tests {
         assert_eq!(result["decision_state"], "ready_for_human_review");
         assert_eq!(result["policy_satisfied"], true);
         validate_domain_decision_readiness(&result).unwrap();
+        let summary = summarize_domain_decision_readiness(&result, true).unwrap();
+        assert_eq!(summary["decision_state"], "ready_for_human_review");
+        assert_eq!(summary["gate_satisfied"], true);
+        assert_eq!(summary["readiness_claimed"], false);
     }
 
     #[test]

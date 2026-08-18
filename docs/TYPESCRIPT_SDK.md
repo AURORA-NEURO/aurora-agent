@@ -127,6 +127,11 @@ required group/domain coverage, support and qualification floors, contradiction/
 review policy, linkage and lineage blockers, the audit digest, and indexed-artifact identity.
 Its `ready_for_human_review` state is structural only: the SDK does not treat it as scientific,
 clinical, release, execution, or truth authority.
+`domainDecisionReadinessQuery` / `domainDecisionReadinessQueryTool` expose digest-ordered retained
+readiness posture with exact subject/state/policy filters, cursors, and opt-in audit bodies.
+Portfolio and reconciliation arguments accept an explicit `readiness_audit` plus
+`policy.require_readiness`; their typed results keep that gate separate from execution preflight
+and completion evidence.
 `domainEvidenceHarmonizationCoverage` and
 `domainEvidenceHarmonizationCoverageTool` query the retained harmonization index with typed subject,
 domain, bridge, traceability, cursor, page-size, and digest-inclusion options. The result separates
