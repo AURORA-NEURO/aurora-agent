@@ -53,6 +53,10 @@ jobs:
         # pre-existing fan-out exception.
         run: cargo clippy --workspace --all-targets --locked --config net.offline=false -- -D warnings -A clippy::too_many_arguments
       - name: test
+        env:
+          # The expanded cross-domain catalogue makes some JSON-heavy API integration tests
+          # exceed the platform default test-thread stack; keep the test contract unchanged.
+          RUST_MIN_STACK: 8388608
         run: cargo test --workspace --locked --config net.offline=false
 
   parity:
