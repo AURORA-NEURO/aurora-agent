@@ -18,7 +18,12 @@ use thiserror::Error;
 pub const DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION: &str =
     "bioprism-devplat-domain-evidence-harmonization/0.1";
 pub const DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW: &str = "domain_evidence_harmonize";
+pub const DOMAIN_EVIDENCE_HARMONIZATION_COVERAGE_SCHEMA_VERSION: &str =
+    "bioprism-devplat-domain-evidence-harmonization-coverage/0.1";
+pub const DOMAIN_EVIDENCE_HARMONIZATION_COVERAGE_WORKFLOW: &str =
+    "domain_evidence_harmonization_coverage";
 pub const MAX_DOMAIN_EVIDENCE_HARMONIZATION_BYTES: usize = 8 * 1024 * 1024;
+pub const MAX_DOMAIN_EVIDENCE_HARMONIZATION_COVERAGE_ITEMS: usize = 256;
 pub const MAX_DOMAIN_EVIDENCE_REPORTS: usize = 64;
 pub const MAX_DOMAIN_EVIDENCE_LINKS: usize = 256;
 pub const MAX_DOMAIN_EVIDENCE_REQUIREMENTS: usize = 64;

@@ -52,6 +52,8 @@ from .domain_report_bridges import (
     external_provider_domain_report_arguments,
 )
 from .domain_evidence import (
+    DomainEvidenceHarmonizationCoverageReport,
+    DomainEvidenceHarmonizationCoverageRequest,
     DomainEvidenceHarmonizationReport,
     DomainEvidenceHarmonizeRequest,
 )
@@ -957,6 +959,39 @@ class ApiClient:
         )
         return DomainEvidenceHarmonizationReport.from_wire(
             self.call_tool("domain_evidence_harmonize", normalized.to_arguments())
+        )
+
+    def domain_evidence_harmonization_coverage(
+        self,
+        request: DomainEvidenceHarmonizationCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> DomainEvidenceHarmonizationCoverageReport:
+        """Query retained harmonization rows through the cursor-based REST route."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceHarmonizationCoverageRequest)
+            else DomainEvidenceHarmonizationCoverageRequest(**dict(request or {}))
+        )
+        return DomainEvidenceHarmonizationCoverageReport.from_wire(
+            self.request(
+                "GET",
+                f"/v1/domain-evidence/harmonization/coverage?{urlencode(normalized.to_query_params())}",
+            )
+        )
+
+    def domain_evidence_harmonization_coverage_tool(
+        self,
+        request: DomainEvidenceHarmonizationCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> DomainEvidenceHarmonizationCoverageReport:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceHarmonizationCoverageRequest)
+            else DomainEvidenceHarmonizationCoverageRequest(**dict(request or {}))
+        )
+        return DomainEvidenceHarmonizationCoverageReport.from_wire(
+            self.call_tool(
+                "domain_evidence_harmonization_coverage", normalized.to_arguments()
+            )
         )
 
     def domain_evidence_intake(
@@ -5259,6 +5294,20 @@ class AsyncApiClient:
         request: DomainEvidenceHarmonizeRequest | Mapping[str, Any],
     ) -> DomainEvidenceHarmonizationReport:
         return await asyncio.to_thread(self.client.domain_evidence_harmonize_tool, request)
+
+    async def domain_evidence_harmonization_coverage(
+        self,
+        request: DomainEvidenceHarmonizationCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> DomainEvidenceHarmonizationCoverageReport:
+        return await asyncio.to_thread(self.client.domain_evidence_harmonization_coverage, request)
+
+    async def domain_evidence_harmonization_coverage_tool(
+        self,
+        request: DomainEvidenceHarmonizationCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> DomainEvidenceHarmonizationCoverageReport:
+        return await asyncio.to_thread(
+            self.client.domain_evidence_harmonization_coverage_tool, request
+        )
 
     async def domain_evidence_intake(
         self,

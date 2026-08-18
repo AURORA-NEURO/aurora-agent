@@ -15,7 +15,14 @@ from .errors import ArgumentError
 
 DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA = "bioprism-devplat-domain-evidence-harmonization/0.1"
 DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW = "domain_evidence_harmonize"
+DOMAIN_EVIDENCE_HARMONIZATION_COVERAGE_SCHEMA = "bioprism-devplat-domain-evidence-harmonization-coverage/0.1"
+DOMAIN_EVIDENCE_HARMONIZATION_COVERAGE_WORKFLOW = "domain_evidence_harmonization_coverage"
 DOMAIN_EVIDENCE_LINK_ROLES = ("supports", "qualifies", "contradicts", "context")
+DOMAIN_EVIDENCE_HARMONIZATION_TRACEABILITY_STATES = (
+    "complete",
+    "requirements_missing",
+    "links_missing",
+)
 
 
 def _bounded_texts(name: str, value: Any, maximum: int = 64) -> tuple[str, ...]:
@@ -164,3 +171,121 @@ class DomainEvidenceHarmonizationReport:
 
     def to_dict(self) -> dict[str, Any]:
         return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class DomainEvidenceHarmonizationCoverageRequest:
+    """Bounded cursor query over retained harmonization artifacts."""
+
+    subject_id: str | None = None
+    domain: str | None = None
+    report_class: str | None = None
+    bridge_mode: str | None = None
+    traceability_state: str | None = None
+    after: str | None = None
+    max_items: int = 100
+    include_report_digests: bool = False
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("subject_id", self.subject_id),
+            ("domain", self.domain),
+            ("report_class", self.report_class),
+            ("bridge_mode", self.bridge_mode),
+        ):
+            if value is not None:
+                _text(f"domain evidence harmonization coverage {name}", value)
+        if self.traceability_state is not None:
+            state = _text(
+                "domain evidence harmonization coverage traceability_state",
+                self.traceability_state,
+            )
+            if state not in DOMAIN_EVIDENCE_HARMONIZATION_TRACEABILITY_STATES:
+                raise ArgumentError("domain evidence harmonization coverage traceability_state is invalid")
+        if self.after is not None:
+            _digest("domain evidence harmonization coverage after", self.after)
+        if isinstance(self.max_items, bool) or not isinstance(self.max_items, int) or not 1 <= self.max_items <= 256:
+            raise ArgumentError("domain evidence harmonization coverage max_items must be between 1 and 256")
+        if not isinstance(self.include_report_digests, bool):
+            raise ArgumentError("domain evidence harmonization coverage include_report_digests must be a boolean")
+
+    def to_query_params(self) -> dict[str, str]:
+        params: dict[str, str] = {
+            "max_items": str(self.max_items),
+            "include_report_digests": str(self.include_report_digests).lower(),
+        }
+        for name in ("subject_id", "domain", "report_class", "bridge_mode", "traceability_state", "after"):
+            value = getattr(self, name)
+            if value is not None:
+                params[name] = value
+        return params
+
+    def to_arguments(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "max_items": self.max_items,
+            "include_report_digests": self.include_report_digests,
+        }
+        for name in ("subject_id", "domain", "report_class", "bridge_mode", "traceability_state", "after"):
+            value = getattr(self, name)
+            if value is not None:
+                result[name] = value
+        return result
+
+
+@dataclass(frozen=True)
+class DomainEvidenceHarmonizationCoverageReport:
+    """Typed retained coverage rows; summary fields remain forward-compatible mappings."""
+
+    raw: dict[str, Any]
+    matching_count: int
+    returned_count: int
+    has_more: bool
+    next_after: str | None
+    rows: tuple[Mapping[str, Any], ...]
+    summary: Mapping[str, Any]
+    coverage_digest: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainEvidenceHarmonizationCoverageReport":
+        raw = dict(value)
+        if raw.get("workflow") != DOMAIN_EVIDENCE_HARMONIZATION_COVERAGE_WORKFLOW:
+            raise ArgumentError("domain evidence harmonization coverage workflow is invalid")
+        if raw.get("schema") != DOMAIN_EVIDENCE_HARMONIZATION_COVERAGE_SCHEMA:
+            raise ArgumentError("domain evidence harmonization coverage schema is invalid")
+        if raw.get("readiness_claimed") is not False:
+            raise ArgumentError("domain evidence harmonization coverage must not claim readiness")
+        if raw.get("execution") != "not_started":
+            raise ArgumentError("domain evidence harmonization coverage execution must be not_started")
+        matching_count = _coverage_count("matching_count", raw.get("matching_count"))
+        returned_count = _coverage_count("returned_count", raw.get("returned_count"))
+        has_more = raw.get("has_more")
+        if not isinstance(has_more, bool):
+            raise ArgumentError("domain evidence harmonization coverage has_more must be a boolean")
+        next_after = raw.get("next_after")
+        if next_after is not None:
+            next_after = _digest("domain evidence harmonization coverage next_after", next_after)
+        rows = raw.get("rows", [])
+        if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
+            raise ArgumentError("domain evidence harmonization coverage rows must be an array")
+        summary = raw.get("summary", {})
+        if not isinstance(summary, Mapping):
+            raise ArgumentError("domain evidence harmonization coverage summary must be an object")
+        return cls(
+            raw=raw,
+            matching_count=matching_count,
+            returned_count=returned_count,
+            has_more=has_more,
+            next_after=next_after,
+            rows=tuple(_mapping("domain evidence harmonization coverage row", row) for row in rows),
+            summary=summary,
+            coverage_digest=_digest("domain evidence harmonization coverage digest", raw.get("coverage_digest")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+def _coverage_count(name: str, value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ArgumentError(f"domain evidence harmonization coverage {name} must be a non-negative integer")
+    return value

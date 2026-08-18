@@ -346,6 +346,12 @@ classified as ordinary, adapter-execution, inline-provider, external-provider, o
 bridge kind, with mode and lineage-parent count retained. Aggregate bridge-mode counts and linked /
 unlinked lineage totals make composition auditable across the full capability matrix without
 upgrading adapter/provider observations into authenticity, completeness, validity, or readiness.
+The retained `domain_evidence_harmonization_coverage` query now makes those joins operationally
+auditable after creation: it filters and cursor-pages digest-ordered summaries by subject, domain,
+bridge class/mode, or traceability state, reports pre-pagination matching counts, and optionally
+returns report digests for exact follow-up. Its domain and posture summaries aggregate only retained
+rows; it does not fetch artifacts, reconstruct omitted history, or turn `complete` traceability into
+a truth, execution, clinical, provenance, or release claim.
 Verified optional bindings now execute raw NIfTI headers and H5AD/Zarr metadata when nibabel or
 anndata is installed, while preserving the same bounded auditors and refusing absent dependencies.
 The readers avoid full image-array and matrix-value materialization.

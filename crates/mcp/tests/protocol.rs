@@ -1082,6 +1082,42 @@ fn domain_evidence_harmonization_indexes_traceability_idempotently() {
         json!("domain_evidence_harmonization")
     );
 
+    let coverage = call(
+        &mut server,
+        "domain_evidence_harmonization_coverage",
+        json!({
+            "subject_id": "harmonization-subject",
+            "domain": "modalities",
+            "traceability_state": "complete",
+            "include_report_digests": true
+        }),
+    );
+    assert_eq!(
+        coverage["workflow"],
+        json!("domain_evidence_harmonization_coverage")
+    );
+    assert_eq!(coverage["matching_count"], json!(1));
+    assert_eq!(coverage["returned_count"], json!(1));
+    assert_eq!(coverage["rows"][0]["report_count"], json!(2));
+    assert_eq!(coverage["rows"][0]["link_count"], json!(2));
+    assert_eq!(
+        coverage["rows"][0]["report_digests"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        coverage["summary"]["domain_summary"]["modalities"]["report_count"],
+        json!(1)
+    );
+    let invalid_cursor = call(
+        &mut server,
+        "domain_evidence_harmonization_coverage",
+        json!({"after": "not-a-digest"}),
+    );
+    assert_eq!(invalid_cursor["__isError"], json!(true));
+
     let replay = call(&mut server, "domain_evidence_harmonize", arguments);
     assert_eq!(
         harmonized["artifact_registry"]["content_digest"],

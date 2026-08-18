@@ -42,6 +42,14 @@ requires exact same-subject reports and explicit support/qualification/contradic
 roles; the typed result preserves traceability state, contradiction posture, catalogue digest,
 and artifact digest, plus bridge class/mode and lineage coverage from the harmonization payload,
 without treating report presence or a support link as a scientific or release claim.
+`DomainEvidenceHarmonizationCoverageRequest` and
+`DomainEvidenceHarmonizationCoverageReport` provide the bounded retained read model through
+`ApiClient.domain_evidence_harmonization_coverage()` and its tool counterpart, plus matching
+`Workspace` and `AsyncWorkspace` helpers. Filters cover subject, domain, report bridge class/mode,
+traceability state, and an exclusive digest cursor; pages expose compact rows, lineage/posture
+summaries, and optional report digests without loading full harmonization bodies. Counts and
+`next_after` make truncation explicit, and the typed models preserve the non-claiming
+`readiness_claimed: false` / `execution: not_started` contract.
 `DomainEvidenceIntakeRequest` and `DomainEvidenceIntakeReport` add the raw-envelope boundary for
 every declared capability group. `ApiClient.domain_evidence_intake()` and its `*_tool()` variant,
 plus the `Workspace` and `AsyncWorkspace` helpers, retain optional request JSON, required response

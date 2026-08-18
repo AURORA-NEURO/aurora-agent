@@ -34,6 +34,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `POST /v1/domain-reports` | Validate and index one explicit report projection for a declared capability group and source tool |
 | `GET /v1/domain-reports/coverage?group_id=&domain=&report_class=&bridge_mode=&max_groups=&include_report_digests=` | Count retained structured report projections across the capability catalogue |
 | `POST /v1/domain-evidence/harmonize` | Join exact same-subject domain reports into an explicit, digest-addressed traceability artifact |
+| `GET /v1/domain-evidence/harmonization/coverage?subject_id=&domain=&report_class=&bridge_mode=&traceability_state=&after=&max_items=&include_report_digests=` | Query bounded retained harmonization summaries without returning full artifact bodies |
 | `POST /v1/domain-evidence/intake` | Normalize and index one supplied raw request/response envelope from any declared capability-group tool |
 | `POST /v1/domain-evidence/sources` | Build and index a non-fetching, digest-addressed external evidence source plan |
 | `POST /v1/domain-evidence/sources/execute` | Execute a retained source plan through bounded file/plain-HTTP connectors and retain the response intake |
@@ -220,6 +221,13 @@ The returned `harmonization.coverage.bridge_summary` reports per-report bridge c
 and lineage-parent count, plus aggregate class/mode counts and linked/unlinked lineage totals.
 Missing bridge markers remain `ordinary`; this is structural composition telemetry and does not
 infer provider authenticity, adapter correctness, payload availability, or readiness.
+`GET /v1/domain-evidence/harmonization/coverage` is the retained read model for that artifact class.
+It orders compact rows by content digest, supports subject/domain/bridge/traceability filters and an
+exclusive `after` cursor, and optionally includes the exact report-digest list. The top-level summary
+aggregates matching rows before pagination, while `matching_count`, `returned_count`, `has_more`, and
+`next_after` make truncation explicit. A coverage row is an index observation only: it does not fetch
+or reinterpret the harmonization body, and complete traceability does not establish truth, validity,
+provenance completeness, execution, clinical safety, or release readiness.
 `POST /v1/domain-evidence/intake` is the raw-envelope boundary for all 29 capability groups. It
 requires a declared group, source tool, domain label, response JSON, explicit outcome, and claim
 posture; an original request is optional and its absence is distinguished from a supplied JSON

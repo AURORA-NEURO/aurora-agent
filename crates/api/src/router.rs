@@ -1301,6 +1301,9 @@ impl ApiRouter {
             ("POST", "/v1/domain-evidence/harmonize") => {
                 self.domain_evidence_harmonize(&request, &request_id)
             }
+            ("GET", "/v1/domain-evidence/harmonization/coverage") => {
+                self.domain_evidence_harmonization_coverage(&request, &request_id)
+            }
             ("POST", "/v1/domain-evidence/intake") => {
                 self.domain_evidence_intake(&request, &request_id)
             }
@@ -3283,6 +3286,7 @@ impl ApiRouter {
                     "domain_reports": "/v1/domain-reports",
                     "domain_report_coverage": "/v1/domain-reports/coverage",
                     "domain_evidence_harmonize": "/v1/domain-evidence/harmonize",
+                    "domain_evidence_harmonization_coverage": "/v1/domain-evidence/harmonization/coverage",
                     "domain_evidence_intake": "/v1/domain-evidence/intake",
                     "domain_evidence_source_plan": "/v1/domain-evidence/sources",
                     "domain_evidence_source_execute": "/v1/domain-evidence/sources/execute",
@@ -3358,6 +3362,7 @@ impl ApiRouter {
                     "domain_report_projection": true,
                     "domain_report_coverage": true,
                     "domain_evidence_harmonization": true,
+                    "domain_evidence_harmonization_coverage": true,
                     "domain_evidence_intake": true,
                     "domain_evidence_source_plan": true,
                     "domain_evidence_source_execute": true,
@@ -3883,6 +3888,48 @@ impl ApiRouter {
         self.domain_workflow_tool(
             request_id,
             "domain_evidence_harmonize",
+            Value::Object(arguments),
+        )
+    }
+
+    fn domain_evidence_harmonization_coverage(
+        &self,
+        request: &HttpRequest,
+        request_id: &str,
+    ) -> HttpResponse {
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        let max_items = match query_usize(&query, "max_items", 100) {
+            Ok(value) => value,
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let include_report_digests = match query_bool(&query, "include_report_digests", false) {
+            Ok(value) => value,
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let mut arguments = serde_json::Map::new();
+        arguments.insert("max_items".into(), json!(max_items));
+        arguments.insert(
+            "include_report_digests".into(),
+            json!(include_report_digests),
+        );
+        for name in [
+            "subject_id",
+            "domain",
+            "report_class",
+            "bridge_mode",
+            "traceability_state",
+            "after",
+        ] {
+            if let Some(value) = query.get(name) {
+                arguments.insert(name.into(), json!(value));
+            }
+        }
+        self.domain_workflow_tool(
+            request_id,
+            "domain_evidence_harmonization_coverage",
             Value::Object(arguments),
         )
     }
@@ -7179,6 +7226,7 @@ impl ApiRouter {
                     "/v1/domain-reports": { "post": { "responses": { "200": { "description": "bounded domain-report projection" } } } },
                     "/v1/domain-reports/coverage": { "get": { "responses": { "200": { "description": "domain-report coverage diagnostic" } } } },
                     "/v1/domain-evidence/harmonize": { "post": { "responses": { "200": { "description": "digest-addressed domain evidence harmonization" }, "422": { "description": "report identity, catalogue, or traceability input was refused" } } } },
+                    "/v1/domain-evidence/harmonization/coverage": { "get": { "parameters": [{ "name": "subject_id", "in": "query" }, { "name": "domain", "in": "query" }, { "name": "report_class", "in": "query" }, { "name": "bridge_mode", "in": "query" }, { "name": "traceability_state", "in": "query" }, { "name": "after", "in": "query" }, { "name": "max_items", "in": "query" }, { "name": "include_report_digests", "in": "query" }], "responses": { "200": { "description": "bounded retained harmonization coverage" }, "422": { "description": "coverage filter was invalid" } } } },
                     "/v1/domain-evidence/intake": { "post": { "responses": { "200": { "description": "exact-digest raw domain evidence intake" }, "422": { "description": "envelope, outcome, or catalogue input was refused" } } } },
                     "/v1/domain-evidence/sources": { "post": { "responses": { "200": { "description": "digest-addressed, non-fetching external evidence source plan" }, "422": { "description": "source locator, policy, or catalogue input was refused" } } } },
                     "/v1/domain-evidence/sources/execute": { "post": { "responses": { "200": { "description": "bounded source execution with raw-byte and canonical-response digests plus retained intake" }, "422": { "description": "retained plan, connector policy, root confinement, or intake binding was refused" } } } },
@@ -11467,6 +11515,39 @@ mod tests {
         assert_eq!(artifacts.status, 200);
         let artifacts: Value = serde_json::from_slice(&artifacts.body).unwrap();
         assert_eq!(artifacts["rows"].as_array().unwrap().len(), 1);
+
+        let coverage = router.handle(request(
+            "GET",
+            "/v1/domain-evidence/harmonization/coverage?subject_id=api-harmonization-subject&traceability_state=complete&include_report_digests=true",
+            json!({}),
+        ));
+        assert_eq!(
+            coverage.status,
+            200,
+            "{}",
+            String::from_utf8_lossy(&coverage.body)
+        );
+        let coverage: Value = serde_json::from_slice(&coverage.body).unwrap();
+        assert_eq!(
+            coverage["workflow"],
+            "domain_evidence_harmonization_coverage"
+        );
+        assert_eq!(coverage["matching_count"], 1);
+        assert_eq!(
+            coverage["rows"][0]["report_digests"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(coverage["rows"][0]["traceability_state"], "complete");
+
+        let invalid_coverage = router.handle(request(
+            "GET",
+            "/v1/domain-evidence/harmonization/coverage?after=invalid",
+            json!({}),
+        ));
+        assert_eq!(invalid_coverage.status, 422);
 
         let refused = router.handle(request(
             "POST",

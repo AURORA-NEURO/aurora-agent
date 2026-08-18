@@ -114,6 +114,11 @@ always-review-required posture. The `DomainEvidenceHarmonizationResult` keeps tr
 contradiction state typed, including per-report bridge class/mode and lineage counts, without
 converting report presence into scientific, clinical, causal, publication, release, or execution
 validity.
+`domainEvidenceHarmonizationCoverage` and
+`domainEvidenceHarmonizationCoverageTool` query the retained harmonization index with typed subject,
+domain, bridge, traceability, cursor, page-size, and digest-inclusion options. The result separates
+matching rows from the returned page, exposes explicit continuation state and digest-bound summaries,
+and never interprets a retained join as execution, provenance completeness, validity, or readiness.
 `domainEvidenceIntake` and `domainEvidenceIntakeTool` expose the raw-envelope boundary with typed
 group/tool/domain membership, explicit outcome states, optional request JSON, required response
 JSON, separate request/response digests, and indexed artifact posture. Request omission remains

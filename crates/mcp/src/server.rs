@@ -1402,6 +1402,9 @@ impl Server {
             "artifact_registry_audit" => self.artifact_registry_audit(&arguments),
             "domain_report_project" => self.domain_report_project(&arguments),
             "domain_evidence_harmonize" => self.domain_evidence_harmonize(&arguments),
+            "domain_evidence_harmonization_coverage" => {
+                self.domain_evidence_harmonization_coverage(&arguments)
+            }
             "domain_evidence_intake" => self.domain_evidence_intake(&arguments),
             "domain_evidence_coverage" => self.domain_evidence_coverage(&arguments),
             "domain_evidence_source_plan" => self.domain_evidence_source_plan(&arguments),
@@ -3573,6 +3576,317 @@ impl Server {
                 "artifact indexing proves provenance completeness or external effect completion"
             ]
         }))
+    }
+
+    /// Query retained harmonization artifacts as a cross-domain observability surface.
+    ///
+    /// The registry is content-addressed and ordered by digest, so this route exposes bounded
+    /// cursoring without reinterpreting any claim. Rows summarize traceability, bridge classes,
+    /// contradiction posture, and lineage; full harmonization bodies remain available through the
+    /// exact artifact digest when a caller explicitly asks for them.
+    fn domain_evidence_harmonization_coverage(&self, arguments: &Value) -> Result<Value, String> {
+        const MAX_ITEMS: usize = bioprism_devplat::MAX_DOMAIN_EVIDENCE_HARMONIZATION_COVERAGE_ITEMS;
+        let subject_filter = arguments.get("subject_id").and_then(Value::as_str);
+        let domain_filter = arguments.get("domain").and_then(Value::as_str);
+        let report_class_filter = arguments.get("report_class").and_then(Value::as_str);
+        let bridge_mode_filter = arguments.get("bridge_mode").and_then(Value::as_str);
+        let traceability_filter = arguments.get("traceability_state").and_then(Value::as_str);
+        let after = arguments.get("after").and_then(Value::as_str);
+        let max_items = arguments
+            .get("max_items")
+            .map(|value| {
+                value
+                    .as_u64()
+                    .ok_or_else(|| "max_items must be an integer".to_string())
+                    .and_then(|value| {
+                        usize::try_from(value).map_err(|_| "max_items is too large".to_string())
+                    })
+            })
+            .transpose()?
+            .unwrap_or(100);
+        if !(1..=MAX_ITEMS).contains(&max_items) {
+            return Err(format!("max_items must be between 1 and {MAX_ITEMS}"));
+        }
+        let include_report_digests = arguments
+            .get("include_report_digests")
+            .map(|value| {
+                value
+                    .as_bool()
+                    .ok_or_else(|| "include_report_digests must be a boolean".to_string())
+            })
+            .transpose()?
+            .unwrap_or(false);
+        for (name, value) in [
+            ("subject_id", subject_filter),
+            ("domain", domain_filter),
+            ("report_class", report_class_filter),
+            ("bridge_mode", bridge_mode_filter),
+            ("traceability_state", traceability_filter),
+            ("after", after),
+        ] {
+            if value.is_some_and(str::is_empty) {
+                return Err(format!("{name} must be non-empty when supplied"));
+            }
+        }
+        if let Some(after) = after {
+            bioprism_ids::ContentHash::parse(after.to_string())
+                .map_err(|_| "after must be a lowercase SHA-256 content digest".to_string())?;
+        }
+        if let Some(state) = traceability_filter {
+            if !["complete", "requirements_missing", "links_missing"].contains(&state) {
+                return Err(
+                    "traceability_state must be complete, requirements_missing, or links_missing"
+                        .into(),
+                );
+            }
+        }
+        let records = self
+            .artifact_registry
+            .lock()
+            .map_err(|_| "artifact registry lock is poisoned".to_string())?
+            .records_for_audit();
+        let mut all_rows = Vec::new();
+        let mut traceability_counts: BTreeMap<String, usize> = BTreeMap::new();
+        let mut report_class_counts: BTreeMap<String, usize> = BTreeMap::new();
+        let mut bridge_mode_counts: BTreeMap<String, usize> = BTreeMap::new();
+        let mut domain_counts: BTreeMap<String, (usize, usize)> = BTreeMap::new();
+        let mut subject_ids = BTreeSet::new();
+        let mut contradiction_count = 0usize;
+        let mut qualification_count = 0usize;
+        let mut parent_digest_count = 0usize;
+        let mut reports_with_lineage_parents = 0usize;
+        let mut reports_without_lineage_parents = 0usize;
+        for record in records.iter().filter(|record| {
+            record.kind == "domain_evidence_harmonization"
+                && record.artifact.get("schema").and_then(Value::as_str)
+                    == Some(bioprism_devplat::DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION)
+                && after.is_none_or(|cursor| record.content_digest.as_str() > cursor)
+        }) {
+            if subject_filter.is_some_and(|filter| record.subject_id != filter) {
+                continue;
+            }
+            let artifact = &record.artifact;
+            let traceability_state = artifact
+                .pointer("/coverage/traceability_state")
+                .and_then(Value::as_str)
+                .unwrap_or("links_missing");
+            if traceability_filter.is_some_and(|filter| traceability_state != filter) {
+                continue;
+            }
+            let report_rows = artifact
+                .get("reports")
+                .and_then(Value::as_array)
+                .ok_or("retained harmonization omitted reports")?;
+            let matches_domain = domain_filter.is_none_or(|filter| {
+                report_rows.iter().any(|row| {
+                    row.get("domains")
+                        .and_then(Value::as_array)
+                        .is_some_and(|domains| {
+                            domains
+                                .iter()
+                                .filter_map(Value::as_str)
+                                .any(|domain| domain.eq_ignore_ascii_case(filter))
+                        })
+                })
+            });
+            if !matches_domain {
+                continue;
+            }
+            let matches_class = report_class_filter.is_none_or(|filter| {
+                report_rows
+                    .iter()
+                    .any(|row| row.get("report_class").and_then(Value::as_str) == Some(filter))
+            });
+            if !matches_class {
+                continue;
+            }
+            let matches_mode = bridge_mode_filter.is_none_or(|filter| {
+                report_rows
+                    .iter()
+                    .any(|row| row.get("bridge_mode").and_then(Value::as_str) == Some(filter))
+            });
+            if !matches_mode {
+                continue;
+            }
+            let bridge_summary = artifact
+                .pointer("/coverage/bridge_summary")
+                .and_then(Value::as_object);
+            let report_classes = bridge_summary
+                .and_then(|summary| summary.get("report_classes"))
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            let bridge_modes = bridge_summary
+                .and_then(|summary| summary.get("modes"))
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            for (class, count) in report_classes.as_object().into_iter().flatten() {
+                let count = count.as_u64().unwrap_or(0) as usize;
+                *report_class_counts.entry(class.clone()).or_default() += count;
+            }
+            for (mode, count) in bridge_modes.as_object().into_iter().flatten() {
+                let count = count.as_u64().unwrap_or(0) as usize;
+                *bridge_mode_counts.entry(mode.clone()).or_default() += count;
+            }
+            let lineage = bridge_summary
+                .and_then(|summary| summary.get("lineage"))
+                .and_then(Value::as_object);
+            let harmonization_parent_count = record.parent_digests.len();
+            let report_parent_count = lineage
+                .and_then(|lineage| lineage.get("parent_digest_count"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as usize;
+            parent_digest_count += harmonization_parent_count;
+            reports_with_lineage_parents += lineage
+                .and_then(|lineage| lineage.get("reports_with_lineage_parents"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as usize;
+            reports_without_lineage_parents += lineage
+                .and_then(|lineage| lineage.get("reports_without_lineage_parents"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as usize;
+            let posture = artifact.get("posture").and_then(Value::as_object);
+            let has_contradiction = posture
+                .and_then(|posture| posture.get("explicit_contradiction_declared"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let has_qualification = posture
+                .and_then(|posture| posture.get("qualification_declared"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            contradiction_count += usize::from(has_contradiction);
+            qualification_count += usize::from(has_qualification);
+            *traceability_counts
+                .entry(traceability_state.to_string())
+                .or_default() += 1;
+            subject_ids.insert(record.subject_id.clone());
+            let report_digests = report_rows
+                .iter()
+                .filter_map(|row| row.get("digest").and_then(Value::as_str))
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            for report in report_rows {
+                for domain in report
+                    .get("domains")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                {
+                    let summary = domain_counts.entry(domain.to_string()).or_default();
+                    summary.0 += 1;
+                    summary.1 += 1;
+                }
+            }
+            let mut row = json!({
+                "content_digest": record.content_digest,
+                "subject_id": record.subject_id,
+                "domains": record.domains,
+                "claim_id": artifact.pointer("/claim/id"),
+                "report_count": artifact.get("report_count"),
+                "link_count": artifact.pointer("/links").and_then(Value::as_array).map(Vec::len),
+                "traceability_state": traceability_state,
+                "requirements_complete": artifact.pointer("/coverage/requirements_complete"),
+                "all_reports_linked": artifact.pointer("/coverage/all_reports_linked"),
+                "contradiction_declared": has_contradiction,
+                "qualification_declared": has_qualification,
+                "report_classes": report_classes,
+                "bridge_modes": bridge_modes,
+                "lineage": {
+                    "harmonization_parent_count": harmonization_parent_count,
+                    "report_parent_digest_count": report_parent_count,
+                    "reports_with_lineage_parents": lineage
+                        .and_then(|lineage| lineage.get("reports_with_lineage_parents")),
+                    "reports_without_lineage_parents": lineage
+                        .and_then(|lineage| lineage.get("reports_without_lineage_parents"))
+                },
+                "missing_group_ids": artifact.get("missing_group_ids"),
+                "missing_domains": artifact.get("missing_domains")
+            });
+            if include_report_digests {
+                row["report_digests"] = json!(report_digests);
+            }
+            all_rows.push((record.content_digest.clone(), row));
+        }
+        let matching_count = all_rows.len();
+        let has_more = matching_count > max_items;
+        let rows = all_rows
+            .into_iter()
+            .take(max_items)
+            .map(|(_, row)| row)
+            .collect::<Vec<_>>();
+        let next_after = if has_more {
+            rows.last()
+                .and_then(|row| row.get("content_digest"))
+                .cloned()
+                .unwrap_or(Value::Null)
+        } else {
+            Value::Null
+        };
+        let domain_summary = domain_counts
+            .into_iter()
+            .map(|(domain, (harmonization_count, report_count))| {
+                (
+                    domain,
+                    json!({
+                        "harmonization_count": harmonization_count,
+                        "report_count": report_count
+                    }),
+                )
+            })
+            .collect::<serde_json::Map<_, _>>();
+        let mut result = json!({
+            "ok": true,
+            "schema": bioprism_devplat::DOMAIN_EVIDENCE_HARMONIZATION_COVERAGE_SCHEMA_VERSION,
+            "workflow": bioprism_devplat::DOMAIN_EVIDENCE_HARMONIZATION_COVERAGE_WORKFLOW,
+            "filters": {
+                "subject_id": subject_filter,
+                "domain": domain_filter,
+                "report_class": report_class_filter,
+                "bridge_mode": bridge_mode_filter,
+                "traceability_state": traceability_filter,
+                "after": after,
+                "max_items": max_items,
+                "include_report_digests": include_report_digests
+            },
+            "registry_size": records.len(),
+            "matching_count": matching_count,
+            "returned_count": rows.len(),
+            "has_more": has_more,
+            "next_after": next_after,
+            "rows": rows,
+            "summary": {
+                "subject_count": subject_ids.len(),
+                "traceability_states": traceability_counts,
+                "report_classes": report_class_counts,
+                "bridge_modes": bridge_mode_counts,
+                "lineage": {
+                    "harmonization_parent_digest_count": parent_digest_count,
+                    "reports_with_lineage_parents": reports_with_lineage_parents,
+                    "reports_without_lineage_parents": reports_without_lineage_parents
+                },
+                "posture": {
+                    "harmonizations_with_contradictions": contradiction_count,
+                    "harmonizations_with_qualifications": qualification_count
+                },
+                "domain_summary": domain_summary
+            },
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "guarantees": [
+                "rows are bounded, digest-ordered retained harmonization summaries",
+                "filters match explicit subject, domain, bridge, and traceability fields only",
+                "full claim bodies remain behind exact artifact digests and are not interpreted"
+            ],
+            "does_not_claim": [
+                "indexed harmonization means the joined claim is true or scientifically valid",
+                "complete traceability means every domain, source, or provenance obligation is satisfied",
+                "absence from this bounded registry means an harmonization never existed"
+            ]
+        });
+        let coverage_digest = bioprism_ids::ContentHash::of_value(&result)
+            .map_err(|error| format!("harmonization coverage could not be hashed: {error}"))?;
+        result["coverage_digest"] = json!(coverage_digest.to_string());
+        Ok(result)
     }
 
     /// Plan a caller-managed external evidence connector without fetching or executing it.
@@ -30926,7 +31240,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "registry_operations_and_infrastructure",
             "domains": ["registry", "deployment", "storage", "cache", "leases", "observability"],
             "crates": ["bioprism-registry", "bioprism-hubapi", "bioprism-infra", "bioprism-ledger", "bioprism-factory", "bioprism-ops", "bioprism-services"],
-            "mcp_tools": ["registry_gate", "registry_lifecycle_simulate", "cache_invalidation_simulate", "storage_lifecycle_simulate", "release_audit", "operations_catalog", "ops_acceptance", "ops_capacity", "quality_gate_run", "ledger_ingest", "factory_lifecycle_simulate", "factory_authority_verify", "artifact_registry_audit", "domain_report_project", "domain_evidence_harmonize", "domain_evidence_intake", "domain_evidence_coverage", "domain_evidence_source_plan", "domain_evidence_source_execute", "hub_search", "hub_resolve", "hub_lock", "telemetry_project"],
+            "mcp_tools": ["registry_gate", "registry_lifecycle_simulate", "cache_invalidation_simulate", "storage_lifecycle_simulate", "release_audit", "operations_catalog", "ops_acceptance", "ops_capacity", "quality_gate_run", "ledger_ingest", "factory_lifecycle_simulate", "factory_authority_verify", "artifact_registry_audit", "domain_report_project", "domain_evidence_harmonize", "domain_evidence_harmonization_coverage", "domain_evidence_intake", "domain_evidence_coverage", "domain_evidence_source_plan", "domain_evidence_source_execute", "hub_search", "hub_resolve", "hub_lock", "telemetry_project"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -31277,6 +31591,24 @@ pub fn tool_definitions() -> Vec<Value> {
                     "required_domains": { "type": "array", "maxItems": 64, "items": { "type": "string" }, "description": "Optional domain labels that must be represented; missing labels remain explicit." }
                 },
                 "required": ["subject_id", "claim", "reports", "links"]
+            }
+        }),
+        json!({
+            "name": "domain_evidence_harmonization_coverage",
+            "description": "Query retained cross-domain harmonization artifacts by exact subject, domain, bridge class/mode, and traceability state. Results are digest-ordered and bounded, preserving contradiction posture, lineage totals, missing requirements, and domain summaries without interpreting caller claims or treating registry presence as validity.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "subject_id": { "type": "string", "description": "Optional exact subject filter." },
+                    "domain": { "type": "string", "description": "Optional case-insensitive domain filter matched against joined report rows." },
+                    "report_class": { "type": "string", "description": "Optional explicit bridge class filter, such as ordinary, adapter_execution, provider_normalization_inline, or provider_normalization_external_payload." },
+                    "bridge_mode": { "type": "string", "description": "Optional explicit bridge mode filter, such as inline or external_payload." },
+                    "traceability_state": { "type": "string", "enum": ["complete", "requirements_missing", "links_missing"], "description": "Optional traceability-state filter." },
+                    "after": { "type": "string", "description": "Exclusive lowercase SHA-256 content-digest cursor." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 256, "description": "Maximum summary rows; defaults to 100." },
+                    "include_report_digests": { "type": "boolean", "description": "Include joined report digests in each summary row; defaults false." }
+                },
+                "required": []
             }
         }),
         json!({

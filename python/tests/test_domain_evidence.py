@@ -8,6 +8,8 @@ from prism_sdk import (
     ApiClient,
     AsyncApiClient,
     ArgumentError,
+    DomainEvidenceHarmonizationCoverageReport,
+    DomainEvidenceHarmonizationCoverageRequest,
     DomainEvidenceHarmonizationReport,
     DomainEvidenceHarmonizeRequest,
     DomainEvidenceLink,
@@ -67,6 +69,52 @@ def request() -> DomainEvidenceHarmonizeRequest:
     )
 
 
+def coverage_payload() -> dict:
+    return {
+        "ok": True,
+        "schema": "bioprism-devplat-domain-evidence-harmonization-coverage/0.1",
+        "workflow": "domain_evidence_harmonization_coverage",
+        "filters": {
+            "subject_id": "subject-python",
+            "domain": "modalities",
+            "max_items": 7,
+            "include_report_digests": True,
+        },
+        "registry_size": 4,
+        "matching_count": 1,
+        "returned_count": 1,
+        "has_more": False,
+        "next_after": None,
+        "rows": [
+            {
+                "content_digest": "d" * 64,
+                "subject_id": "subject-python",
+                "domains": ["modalities"],
+                "claim_id": "claim-1",
+                "report_count": 1,
+                "link_count": 1,
+                "traceability_state": "complete",
+                "requirements_complete": True,
+                "all_reports_linked": True,
+                "contradiction_declared": False,
+                "qualification_declared": False,
+                "report_classes": {"ordinary": 1},
+                "bridge_modes": {"inline": 1},
+                "lineage": {"harmonization_parent_digest_count": 1},
+                "missing_group_ids": [],
+                "missing_domains": [],
+                "report_digests": ["e" * 64],
+            }
+        ],
+        "summary": {"subject_count": 1, "domain_summary": {"modalities": {"report_count": 1}}},
+        "coverage_digest": "f" * 64,
+        "readiness_claimed": False,
+        "execution": "not_started",
+        "guarantees": [],
+        "does_not_claim": [],
+    }
+
+
 class DomainEvidenceModelTests(unittest.TestCase):
     def test_request_and_response_preserve_explicit_review_posture(self) -> None:
         normalized = request()
@@ -97,6 +145,34 @@ class DomainEvidenceModelTests(unittest.TestCase):
         self.assertEqual(report.harmonization_digest, "b" * 64)
         self.assertEqual(tool.call_args.args[0], "domain_evidence_harmonize")
 
+    def test_retained_coverage_request_report_and_routes(self) -> None:
+        normalized = DomainEvidenceHarmonizationCoverageRequest(
+            subject_id="subject-python",
+            domain="modalities",
+            traceability_state="complete",
+            after="a" * 64,
+            max_items=7,
+            include_report_digests=True,
+        )
+        self.assertEqual(normalized.to_query_params()["include_report_digests"], "true")
+        self.assertEqual(normalized.to_arguments()["max_items"], 7)
+        report = DomainEvidenceHarmonizationCoverageReport.from_wire(coverage_payload())
+        self.assertEqual(report.rows[0]["claim_id"], "claim-1")
+        self.assertEqual(report.coverage_digest, "f" * 64)
+        with self.assertRaises(ArgumentError):
+            DomainEvidenceHarmonizationCoverageRequest(after="bad")
+
+        with patch.object(ApiClient, "request", return_value=coverage_payload()) as rest:
+            result = ApiClient("http://127.0.0.1:8787").domain_evidence_harmonization_coverage(normalized)
+        self.assertEqual(result.matching_count, 1)
+        self.assertIn("traceability_state=complete", rest.call_args.args[1])
+        self.assertIn("max_items=7", rest.call_args.args[1])
+
+        with patch.object(ApiClient, "call_tool", return_value=coverage_payload()) as tool:
+            result = ApiClient("http://127.0.0.1:8787").domain_evidence_harmonization_coverage_tool(normalized)
+        self.assertEqual(result.rows[0]["report_count"], 1)
+        self.assertEqual(tool.call_args.args[0], "domain_evidence_harmonization_coverage")
+
     def test_async_and_workspace_helpers_share_wire_contract(self) -> None:
         with patch.object(ApiClient, "request", return_value=harmonization_payload()):
             report = asyncio.run(
@@ -106,6 +182,9 @@ class DomainEvidenceModelTests(unittest.TestCase):
         with patch.object(Workspace, "tool", return_value=harmonization_payload()):
             report = Workspace(None).domain_evidence_harmonize_report(request())
         self.assertEqual(report.artifact_registry["content_digest"], "c" * 64)
+        with patch.object(Workspace, "tool", return_value=coverage_payload()):
+            report = Workspace(None).domain_evidence_harmonization_coverage_report()
+        self.assertEqual(report.returned_count, 1)
 
 
 if __name__ == "__main__":

@@ -38,6 +38,8 @@ from .domain_report_bridges import (
     external_provider_domain_report_arguments,
 )
 from .domain_evidence import (
+    DomainEvidenceHarmonizationCoverageReport,
+    DomainEvidenceHarmonizationCoverageRequest,
     DomainEvidenceHarmonizationReport,
     DomainEvidenceHarmonizeRequest,
 )
@@ -2166,6 +2168,25 @@ class Workspace:
         request: DomainEvidenceHarmonizeRequest | Mapping[str, Any],
     ) -> DomainEvidenceHarmonizationReport:
         return DomainEvidenceHarmonizationReport.from_wire(self.domain_evidence_harmonize(request))
+
+    def domain_evidence_harmonization_coverage(
+        self,
+        request: DomainEvidenceHarmonizationCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceHarmonizationCoverageRequest)
+            else DomainEvidenceHarmonizationCoverageRequest(**dict(request or {}))
+        )
+        return self.tool("domain_evidence_harmonization_coverage", normalized.to_arguments())
+
+    def domain_evidence_harmonization_coverage_report(
+        self,
+        request: DomainEvidenceHarmonizationCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> DomainEvidenceHarmonizationCoverageReport:
+        return DomainEvidenceHarmonizationCoverageReport.from_wire(
+            self.domain_evidence_harmonization_coverage(request)
+        )
 
     def domain_evidence_intake(
         self,
@@ -5864,6 +5885,25 @@ class AsyncWorkspace:
     ) -> DomainEvidenceHarmonizationReport:
         return DomainEvidenceHarmonizationReport.from_wire(
             await self.domain_evidence_harmonize(request)
+        )
+
+    async def domain_evidence_harmonization_coverage(
+        self,
+        request: DomainEvidenceHarmonizationCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceHarmonizationCoverageRequest)
+            else DomainEvidenceHarmonizationCoverageRequest(**dict(request or {}))
+        )
+        return await self.tool("domain_evidence_harmonization_coverage", normalized.to_arguments())
+
+    async def domain_evidence_harmonization_coverage_report(
+        self,
+        request: DomainEvidenceHarmonizationCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> DomainEvidenceHarmonizationCoverageReport:
+        return DomainEvidenceHarmonizationCoverageReport.from_wire(
+            await self.domain_evidence_harmonization_coverage(request)
         )
 
     async def domain_evidence_intake(

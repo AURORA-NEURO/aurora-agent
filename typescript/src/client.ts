@@ -40,6 +40,8 @@ import type {
   DomainReportCoverageResult,
   DomainEvidenceHarmonizeArgs,
   DomainEvidenceHarmonizationResult,
+  DomainEvidenceHarmonizationCoverageOptions,
+  DomainEvidenceHarmonizationCoverageResult,
   DomainEvidenceIntakeArgs,
   DomainEvidenceIntakeResult,
   DomainEvidenceIntakeCoverageOptions,
@@ -702,6 +704,36 @@ export class ApiClient {
     options?: ClientRequestOptions,
   ): Promise<RestToolResponse<DomainEvidenceHarmonizationResult>> {
     return this.callTool<DomainEvidenceHarmonizationResult>("domain_evidence_harmonize", args, options);
+  }
+
+  /** Query retained harmonization artifacts without returning their full bodies. */
+  async domainEvidenceHarmonizationCoverage(
+    args: DomainEvidenceHarmonizationCoverageOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<DomainEvidenceHarmonizationCoverageResult> {
+    if (!isObject(args)) throw new ArgumentError("domain evidence harmonization coverage arguments must be an object");
+    for (const [name, value] of [["subject_id", args.subject_id], ["domain", args.domain], ["report_class", args.report_class], ["bridge_mode", args.bridge_mode]] as const) {
+      if (value !== undefined && (typeof value !== "string" || value.trim().length === 0)) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    if (args.traceability_state !== undefined && !["complete", "requirements_missing", "links_missing"].includes(args.traceability_state)) throw new ArgumentError("traceability_state is invalid");
+    if (args.after !== undefined && (typeof args.after !== "string" || !/^[0-9a-f]{64}$/.test(args.after))) throw new ArgumentError("after must be a lowercase SHA-256 digest");
+    const maxItems = args.max_items ?? 100;
+    if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 256) throw new ArgumentError("max_items must be 1..=256");
+    if (args.include_report_digests !== undefined && typeof args.include_report_digests !== "boolean") throw new ArgumentError("include_report_digests must be a boolean");
+    const query = new URLSearchParams({ max_items: String(maxItems), include_report_digests: String(args.include_report_digests ?? false) });
+    for (const name of ["subject_id", "domain", "report_class", "bridge_mode", "traceability_state", "after"] as const) {
+      const value = args[name];
+      if (value !== undefined) query.set(name, value);
+    }
+    return this.request<DomainEvidenceHarmonizationCoverageResult>("GET", `/v1/domain-evidence/harmonization/coverage?${query.toString()}`, undefined, options);
+  }
+
+  /** Invoke retained harmonization coverage through the REST tool dispatcher. */
+  async domainEvidenceHarmonizationCoverageTool(
+    args: DomainEvidenceHarmonizationCoverageOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceHarmonizationCoverageResult>> {
+    return this.callTool<DomainEvidenceHarmonizationCoverageResult>("domain_evidence_harmonization_coverage", args, options);
   }
 
   /** Normalize one supplied raw source-tool envelope into an exact-digest intake artifact. */

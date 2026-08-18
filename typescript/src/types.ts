@@ -5056,6 +5056,56 @@ export interface DomainEvidenceHarmonizationResult extends JsonObject {
   does_not_claim: string[];
 }
 
+export interface DomainEvidenceHarmonizationCoverageOptions extends JsonObject {
+  subject_id?: string;
+  domain?: string;
+  report_class?: string;
+  bridge_mode?: string;
+  traceability_state?: "complete" | "requirements_missing" | "links_missing";
+  after?: string;
+  max_items?: number;
+  include_report_digests?: boolean;
+}
+
+export interface DomainEvidenceHarmonizationCoverageRow extends JsonObject {
+  content_digest: string;
+  subject_id: string;
+  domains: string[];
+  claim_id: string | null;
+  report_count: number;
+  link_count: number;
+  traceability_state: "complete" | "requirements_missing" | "links_missing";
+  requirements_complete: boolean | null;
+  all_reports_linked: boolean | null;
+  contradiction_declared: boolean;
+  qualification_declared: boolean;
+  report_classes: Record<string, number>;
+  bridge_modes: Record<string, number>;
+  lineage: JsonObject;
+  missing_group_ids: string[] | null;
+  missing_domains: string[] | null;
+  report_digests?: string[];
+}
+
+export interface DomainEvidenceHarmonizationCoverageResult extends JsonObject {
+  ok: true;
+  schema: "bioprism-devplat-domain-evidence-harmonization-coverage/0.1";
+  workflow: "domain_evidence_harmonization_coverage";
+  filters: DomainEvidenceHarmonizationCoverageOptions;
+  registry_size: number;
+  matching_count: number;
+  returned_count: number;
+  has_more: boolean;
+  next_after: string | null;
+  rows: DomainEvidenceHarmonizationCoverageRow[];
+  summary: JsonObject;
+  coverage_digest: string;
+  readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
 export type DomainEvidenceIntakeOutcome = "observed" | "partial" | "refused" | "error" | "unknown";
 
 export interface DomainEvidenceIntakeArgs extends JsonObject {
