@@ -3862,6 +3862,12 @@ impl ApiRouter {
         if let Some(domain) = query.get("domain") {
             arguments.insert("domain".into(), json!(domain));
         }
+        if let Some(report_class) = query.get("report_class") {
+            arguments.insert("report_class".into(), json!(report_class));
+        }
+        if let Some(bridge_mode) = query.get("bridge_mode") {
+            arguments.insert("bridge_mode".into(), json!(bridge_mode));
+        }
         self.domain_workflow_tool(
             request_id,
             "domain_report_project",
@@ -11358,6 +11364,16 @@ mod tests {
             .unwrap()
             .iter()
             .any(|item| item == &digest));
+        let filtered = router.handle(request(
+            "GET",
+            "/v1/domain-reports/coverage?report_class=ordinary&bridge_mode=inline",
+            json!({}),
+        ));
+        assert_eq!(filtered.status, 200);
+        let filtered: Value = serde_json::from_slice(&filtered.body).unwrap();
+        assert_eq!(filtered["filters"]["report_class"], "ordinary");
+        assert_eq!(filtered["filters"]["bridge_mode"], "inline");
+        assert_eq!(filtered["reported_group_count"], 0);
         let refused = router.handle(request(
             "POST",
             "/v1/domain-reports",

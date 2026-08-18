@@ -10,7 +10,15 @@ const harmonization = {
   readiness_claimed: false,
   execution: "not_started",
   harmonization: {
-    coverage: { traceability_state: "complete", all_reports_linked: true },
+    coverage: {
+      traceability_state: "complete",
+      all_reports_linked: true,
+      bridge_summary: {
+        report_classes: { provider_normalization_external_payload: 1 },
+        modes: { external_payload: 1 },
+        lineage: { parent_digest_count: 2, reports_with_lineage_parents: 1, reports_without_lineage_parents: 0 },
+      },
+    },
     posture: { explicit_contradiction_declared: false },
     harmonization_digest: "b".repeat(64),
   },
@@ -40,6 +48,7 @@ test("domain evidence REST and tool clients preserve traceability posture", asyn
     },
   });
   assert.equal((await client.domainEvidenceHarmonize(args)).harmonization.coverage.traceability_state, "complete");
+  assert.equal((await client.domainEvidenceHarmonize(args)).harmonization.coverage.bridge_summary.modes.external_payload, 1);
   assert.equal((await client.domainEvidenceHarmonizeTool(args)).mcp.result.structuredContent.workflow, "domain_evidence_harmonize");
   assert.equal(seen[0].url.pathname, "/v1/domain-evidence/harmonize");
   await assert.rejects(

@@ -70,12 +70,14 @@ test("domain report REST and tool clients preserve bounded projection semantics"
     claim_posture: { status: "review_required", does_not_claim: ["truth"] },
   };
   assert.equal((await client.domainReportProject(args)).artifact_registry.content_digest, "a".repeat(64));
-  const coverageResult = await client.domainReportCoverage({ include_report_digests: true });
+  const coverageResult = await client.domainReportCoverage({ include_report_digests: true, report_class: "ordinary", bridge_mode: "inline" });
   assert.equal(coverageResult.missing_group_count, 28);
   assert.equal(coverageResult.bridge_summary.report_classes.ordinary, 1);
   assert.equal((await client.domainReportProjectTool(args)).mcp.result.structuredContent.workflow, "domain_report_project");
   assert.equal(seen[0].url.pathname, "/v1/domain-reports");
   assert.equal(seen[1].url.searchParams.get("include_report_digests"), "true");
+  assert.equal(seen[1].url.searchParams.get("report_class"), "ordinary");
+  assert.equal(seen[1].url.searchParams.get("bridge_mode"), "inline");
   await assert.rejects(
     client.domainReportProject({ ...args, claim_posture: { status: "derived", does_not_claim: [] } }),
     ArgumentError,

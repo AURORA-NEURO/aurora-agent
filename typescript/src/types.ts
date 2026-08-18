@@ -4943,6 +4943,8 @@ export interface DomainReportCoverageOptions extends JsonObject {
   operation?: "coverage";
   group_id?: string;
   domain?: string;
+  report_class?: string;
+  bridge_mode?: string;
   max_groups?: number;
   include_report_digests?: boolean;
 }
@@ -5003,11 +5005,49 @@ export interface DomainEvidenceHarmonizeArgs extends JsonObject {
   required_domains?: string[];
 }
 
+export interface DomainEvidenceHarmonizationReportRow extends JsonObject {
+  index: number;
+  digest: string;
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string;
+  claim_status: DomainReportClaimStatus | null;
+  parent_digests: string[];
+  report_class: string;
+  bridge_mode: string | null;
+  lineage_parent_count: number;
+  link_roles: DomainEvidenceLinkRole[];
+  link_count: number;
+}
+
+export interface DomainEvidenceHarmonizationBridgeSummary extends JsonObject {
+  report_classes: Record<string, number>;
+  modes: Record<string, number>;
+  lineage: {
+    parent_digest_count: number;
+    reports_with_lineage_parents: number;
+    reports_without_lineage_parents: number;
+  };
+}
+
+export interface DomainEvidenceHarmonizationCoverage extends JsonObject {
+  all_reports_linked: boolean;
+  requirements_complete: boolean;
+  traceability_state: "complete" | "requirements_missing" | "links_missing";
+  observed_group_count: number;
+  observed_domain_count: number;
+  bridge_summary: DomainEvidenceHarmonizationBridgeSummary;
+}
+
 export interface DomainEvidenceHarmonizationResult extends JsonObject {
   ok: boolean;
   schema: "bioprism-devplat-domain-evidence-harmonization/0.1";
   workflow: "domain_evidence_harmonize";
-  harmonization: JsonObject;
+  harmonization: JsonObject & {
+    reports?: DomainEvidenceHarmonizationReportRow[];
+    coverage?: DomainEvidenceHarmonizationCoverage;
+  };
   artifact_registry: JsonObject;
   catalogue_digest: string;
   readiness_claimed: false;

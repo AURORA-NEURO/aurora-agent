@@ -341,6 +341,11 @@ caller-supplied inline payloads and receipt-verified external materialization. T
 retains shape/index summaries plus payload, intake, normalization, and receipt artifact lineage
 without copying the provider payload a second time; inline and external modes remain distinct and
 external locators remain unopened. Python and TypeScript transport facades cover both operations.
+Cross-domain harmonization now preserves that distinction in its coverage rows: each report is
+classified as ordinary, adapter-execution, inline-provider, external-provider, or another explicit
+bridge kind, with mode and lineage-parent count retained. Aggregate bridge-mode counts and linked /
+unlinked lineage totals make composition auditable across the full capability matrix without
+upgrading adapter/provider observations into authenticity, completeness, validity, or readiness.
 Verified optional bindings now execute raw NIfTI headers and H5AD/Zarr metadata when nibabel or
 anndata is installed, while preserving the same bounded auditors and refusing absent dependencies.
 The readers avoid full image-array and matrix-value materialization.

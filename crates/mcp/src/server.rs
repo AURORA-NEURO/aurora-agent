@@ -415,6 +415,29 @@ pub const CERTIFICATE_SCHEMA_URI: &str = "bioprism://schema/fiber-context-certif
 pub const WORLD_SCHEMA_URI: &str = "bioprism://schema/fiber-world/0.1";
 pub const CAPABILITIES_URI: &str = "bioprism://capabilities/0.1";
 
+fn domain_report_bridge_metadata(value: &Value) -> (String, Option<String>) {
+    let payload = value.get("report").and_then(Value::as_object);
+    let kind = payload
+        .and_then(|payload| payload.get("kind"))
+        .and_then(Value::as_str);
+    let mode = payload
+        .and_then(|payload| payload.get("mode"))
+        .and_then(Value::as_str);
+    let mode = mode.map(str::to_string);
+    let class = match (kind, mode.as_deref()) {
+        (Some("adapter_execution"), _) => "adapter_execution".to_string(),
+        (Some("provider_normalization"), Some("inline")) => {
+            "provider_normalization_inline".to_string()
+        }
+        (Some("provider_normalization"), Some("external_payload")) => {
+            "provider_normalization_external_payload".to_string()
+        }
+        (Some(kind), _) => kind.to_string(),
+        (None, _) => "ordinary".to_string(),
+    };
+    (class, mode)
+}
+
 const QUERY_SCHEMA: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../schemas/fiber-v0.1/query.schema.json"
@@ -3239,6 +3262,8 @@ impl Server {
         const MAX_GROUPS: usize = 128;
         let group_filter = arguments.get("group_id").and_then(Value::as_str);
         let domain_filter = arguments.get("domain").and_then(Value::as_str);
+        let report_class_filter = arguments.get("report_class").and_then(Value::as_str);
+        let bridge_mode_filter = arguments.get("bridge_mode").and_then(Value::as_str);
         let max_groups = arguments
             .get("max_groups")
             .map(|value| {
@@ -3263,8 +3288,14 @@ impl Server {
             })
             .transpose()?
             .unwrap_or(false);
-        if group_filter.is_some_and(str::is_empty) || domain_filter.is_some_and(str::is_empty) {
-            return Err("group_id and domain filters must be non-empty".into());
+        if group_filter.is_some_and(str::is_empty)
+            || domain_filter.is_some_and(str::is_empty)
+            || report_class_filter.is_some_and(str::is_empty)
+            || bridge_mode_filter.is_some_and(str::is_empty)
+        {
+            return Err(
+                "group_id, domain, report_class, and bridge_mode filters must be non-empty".into(),
+            );
         }
         let catalogue = CapabilityCatalogue::from_value(&workspace_capabilities())
             .map_err(|error| format!("workspace capability catalogue is invalid: {error}"))?;
@@ -3303,6 +3334,12 @@ impl Server {
             let Some(group_id) = record.artifact.get("group_id").and_then(Value::as_str) else {
                 continue;
             };
+            let (report_class, bridge_mode) = domain_report_bridge_metadata(&record.artifact);
+            if report_class_filter.is_some_and(|filter| report_class != filter)
+                || bridge_mode_filter.is_some_and(|filter| bridge_mode.as_deref() != Some(filter))
+            {
+                continue;
+            }
             if selected_ids.contains(group_id) {
                 group_reports
                     .entry(group_id.to_string())
@@ -3349,24 +3386,7 @@ impl Server {
                     claim_statuses.insert(status.to_string());
                 }
                 report_digests.insert(record.content_digest.clone());
-                let report_payload = record.artifact.get("report");
-                let report_kind = report_payload
-                    .and_then(|payload| payload.get("kind"))
-                    .and_then(Value::as_str);
-                let report_mode = report_payload
-                    .and_then(|payload| payload.get("mode"))
-                    .and_then(Value::as_str);
-                let report_class = match (report_kind, report_mode) {
-                    (Some("adapter_execution"), _) => "adapter_execution",
-                    (Some("provider_normalization"), Some("inline")) => {
-                        "provider_normalization_inline"
-                    }
-                    (Some("provider_normalization"), Some("external_payload")) => {
-                        "provider_normalization_external_payload"
-                    }
-                    (Some(kind), _) => kind,
-                    (None, _) => "ordinary",
-                };
+                let (report_class, report_mode) = domain_report_bridge_metadata(&record.artifact);
                 *report_classes.entry(report_class.to_string()).or_default() += 1;
                 *report_class_summary
                     .entry(report_class.to_string())
@@ -3441,6 +3461,8 @@ impl Server {
             "filters": {
                 "group_id": group_filter,
                 "domain": domain_filter,
+                "report_class": report_class_filter,
+                "bridge_mode": bridge_mode_filter,
                 "max_groups": max_groups,
                 "include_report_digests": include_report_digests
             },
@@ -31245,6 +31267,8 @@ pub fn tool_definitions() -> Vec<Value> {
                     "group_id": { "type": "string", "description": "For project: exact workspace capability-group id; for coverage: optional exact group filter." },
                     "domains": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" }, "description": "For project: domain labels declared by the selected capability group." },
                     "domain": { "type": "string", "description": "For coverage: optional case-insensitive domain-label filter." },
+                    "report_class": { "type": "string", "description": "For coverage: optional report-class filter such as ordinary, adapter_execution, provider_normalization_inline, or provider_normalization_external_payload." },
+                    "bridge_mode": { "type": "string", "description": "For coverage: optional explicit bridge-mode filter such as inline or external_payload." },
                     "subject_id": { "type": "string", "description": "For project: caller-owned subject, dataset, run, or report identity." },
                     "source_tool": { "type": "string", "description": "For project: callable MCP tool declared under group_id." },
                     "report": { "type": "object", "description": "For project: bounded caller-supplied report payload; it is retained but not executed or scientifically interpreted." },

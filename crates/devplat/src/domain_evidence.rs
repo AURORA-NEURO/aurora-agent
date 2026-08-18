@@ -120,6 +120,11 @@ pub fn harmonize_domain_evidence(request: &Value) -> Result<Value, DomainEvidenc
     let mut qualification_link_count = 0usize;
     let mut contradiction_link_count = 0usize;
     let mut context_link_count = 0usize;
+    let mut report_class_counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut bridge_mode_counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut lineage_parent_digest_count = 0usize;
+    let mut reports_with_lineage_parents = 0usize;
+    let mut reports_without_lineage_parents = 0usize;
     let mut link_rows = Vec::with_capacity(links.len());
     for link in &links {
         match link.role.as_str() {
@@ -145,6 +150,23 @@ pub fn harmonize_domain_evidence(request: &Value) -> Result<Value, DomainEvidenc
                 .as_object()
                 .expect("canonical domain report is an object");
             let roles = linked_roles.get(&index).cloned().unwrap_or_default();
+            let (report_class, bridge_mode) = report_bridge_metadata(object);
+            *report_class_counts
+                .entry(report_class.to_string())
+                .or_default() += 1;
+            if let Some(mode) = bridge_mode.as_ref() {
+                *bridge_mode_counts.entry(mode.to_string()).or_default() += 1;
+            }
+            let parent_digests = object
+                .get("parent_digests")
+                .and_then(Value::as_array)
+                .map_or(0, Vec::len);
+            lineage_parent_digest_count += parent_digests;
+            if parent_digests > 0 {
+                reports_with_lineage_parents += 1;
+            } else {
+                reports_without_lineage_parents += 1;
+            }
             json!({
                 "index": index,
                 "digest": report.digest,
@@ -157,6 +179,9 @@ pub fn harmonize_domain_evidence(request: &Value) -> Result<Value, DomainEvidenc
                     .and_then(Value::as_object)
                     .and_then(|posture| posture.get("status")),
                 "parent_digests": object.get("parent_digests"),
+                "report_class": report_class,
+                "bridge_mode": bridge_mode,
+                "lineage_parent_count": parent_digests,
                 "link_roles": roles,
                 "link_count": linked_roles.get(&index).map_or(0, Vec::len)
             })
@@ -193,13 +218,22 @@ pub fn harmonize_domain_evidence(request: &Value) -> Result<Value, DomainEvidenc
         "required_domains": required_domains,
         "missing_group_ids": missing_group_ids,
         "missing_domains": missing_domains,
-        "coverage": {
-            "all_reports_linked": all_reports_linked,
-            "requirements_complete": requirements_complete,
-            "traceability_state": traceability_state,
-            "observed_group_count": observed_groups.len(),
-            "observed_domain_count": observed_domains.len()
-        },
+            "coverage": {
+                "all_reports_linked": all_reports_linked,
+                "requirements_complete": requirements_complete,
+                "traceability_state": traceability_state,
+                "observed_group_count": observed_groups.len(),
+                "observed_domain_count": observed_domains.len(),
+                "bridge_summary": {
+                    "report_classes": report_class_counts,
+                    "modes": bridge_mode_counts,
+                    "lineage": {
+                        "parent_digest_count": lineage_parent_digest_count,
+                        "reports_with_lineage_parents": reports_with_lineage_parents,
+                        "reports_without_lineage_parents": reports_without_lineage_parents
+                    }
+                }
+            },
         "posture": {
             "support_link_count": support_link_count,
             "qualification_link_count": qualification_link_count,
@@ -232,6 +266,35 @@ pub fn harmonize_domain_evidence(request: &Value) -> Result<Value, DomainEvidenc
     ensure_size(&result)?;
     validate_domain_evidence_harmonization(&result)?;
     Ok(result)
+}
+
+/// Classify only the structural bridge marker carried inside the caller-supplied report body.
+/// Missing markers remain ordinary rather than being guessed from a source tool name. This is
+/// intentionally descriptive: a class or mode is not an authenticity, quality, or readiness
+/// judgment.
+fn report_bridge_metadata(object: &Map<String, Value>) -> (String, Option<String>) {
+    let payload = object.get("report").and_then(Value::as_object);
+    let kind = payload
+        .and_then(|payload| payload.get("kind"))
+        .and_then(Value::as_str);
+    let mode = payload
+        .and_then(|payload| payload.get("mode"))
+        .and_then(Value::as_str);
+    match (kind, mode) {
+        (Some("adapter_execution"), _) => {
+            ("adapter_execution".to_string(), mode.map(str::to_string))
+        }
+        (Some("provider_normalization"), Some("inline")) => (
+            "provider_normalization_inline".to_string(),
+            mode.map(str::to_string),
+        ),
+        (Some("provider_normalization"), Some("external_payload")) => (
+            "provider_normalization_external_payload".to_string(),
+            mode.map(str::to_string),
+        ),
+        (Some(kind), _) => (kind.to_string(), mode.map(str::to_string)),
+        (None, _) => ("ordinary".to_string(), mode.map(str::to_string)),
+    }
 }
 
 /// Validate an already harmonized report before durable artifact indexing or restore.
@@ -269,6 +332,11 @@ pub fn validate_domain_evidence_harmonization(value: &Value) -> Result<(), Domai
     let mut report_digests = Vec::with_capacity(report_rows.len());
     let mut observed_groups = BTreeSet::new();
     let mut observed_domains = BTreeSet::new();
+    let mut report_class_counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut bridge_mode_counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut lineage_parent_digest_count = 0usize;
+    let mut reports_with_lineage_parents = 0usize;
+    let mut reports_without_lineage_parents = 0usize;
     for (index, row) in report_rows.iter().enumerate() {
         let row = row
             .as_object()
@@ -299,6 +367,44 @@ pub fn validate_domain_evidence_harmonization(value: &Value) -> Result<(), Domai
         required_text(row, "source_tool")?;
         for domain in text_array(row, "domains", MAX_DOMAIN_EVIDENCE_REQUIREMENTS)? {
             observed_domains.insert(domain);
+        }
+        let report_class = required_text(row, "report_class")?;
+        *report_class_counts.entry(report_class).or_default() += 1;
+        let bridge_mode = match row.get("bridge_mode") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(value)) if !value.trim().is_empty() => Some(value.clone()),
+            Some(_) => {
+                return Err(DomainEvidenceError::InvalidField(format!(
+                    "reports[{index}].bridge_mode"
+                )))
+            }
+        };
+        if let Some(mode) = bridge_mode {
+            *bridge_mode_counts.entry(mode).or_default() += 1;
+        }
+        let parent_digests = row
+            .get("parent_digests")
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                DomainEvidenceError::InvalidField(format!("reports[{index}].parent_digests"))
+            })?;
+        let parent_count = row
+            .get("lineage_parent_count")
+            .and_then(Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or_else(|| {
+                DomainEvidenceError::InvalidField(format!("reports[{index}].lineage_parent_count"))
+            })?;
+        if parent_count != parent_digests.len() {
+            return Err(DomainEvidenceError::InvalidField(format!(
+                "reports[{index}].lineage_parent_count"
+            )));
+        }
+        lineage_parent_digest_count += parent_count;
+        if parent_count > 0 {
+            reports_with_lineage_parents += 1;
+        } else {
+            reports_without_lineage_parents += 1;
         }
         let _ = text_array(row, "link_roles", MAX_DOMAIN_EVIDENCE_LINKS)?;
     }
@@ -407,6 +513,42 @@ pub fn validate_domain_evidence_harmonization(value: &Value) -> Result<(), Domai
         "links_missing"
     };
     exact_text(coverage, "traceability_state", expected_state)?;
+    let bridge_summary = coverage
+        .get("bridge_summary")
+        .and_then(Value::as_object)
+        .ok_or_else(|| DomainEvidenceError::InvalidField("coverage.bridge_summary".into()))?;
+    let expected_report_classes = json!(report_class_counts);
+    if bridge_summary.get("report_classes") != Some(&expected_report_classes) {
+        return Err(DomainEvidenceError::InvalidField(
+            "coverage.bridge_summary.report_classes".into(),
+        ));
+    }
+    let expected_modes = json!(bridge_mode_counts);
+    if bridge_summary.get("modes") != Some(&expected_modes) {
+        return Err(DomainEvidenceError::InvalidField(
+            "coverage.bridge_summary.modes".into(),
+        ));
+    }
+    let lineage = bridge_summary
+        .get("lineage")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            DomainEvidenceError::InvalidField("coverage.bridge_summary.lineage".into())
+        })?;
+    for (field, expected) in [
+        ("parent_digest_count", lineage_parent_digest_count),
+        ("reports_with_lineage_parents", reports_with_lineage_parents),
+        (
+            "reports_without_lineage_parents",
+            reports_without_lineage_parents,
+        ),
+    ] {
+        if lineage.get(field).and_then(Value::as_u64) != Some(expected as u64) {
+            return Err(DomainEvidenceError::InvalidField(format!(
+                "coverage.bridge_summary.lineage.{field}"
+            )));
+        }
+    }
     let posture = object
         .get("posture")
         .and_then(Value::as_object)
@@ -805,7 +947,55 @@ mod tests {
         assert_eq!(result["posture"]["support_link_count"], 1);
         assert_eq!(result["posture"]["qualification_link_count"], 1);
         assert_eq!(result["reports"][0]["digest"].as_str().unwrap().len(), 64);
+        assert_eq!(result["reports"][0]["report_class"], "ordinary");
+        assert_eq!(result["reports"][0]["lineage_parent_count"], 0);
+        assert_eq!(
+            result["coverage"]["bridge_summary"]["report_classes"]["ordinary"],
+            2
+        );
+        assert_eq!(
+            result["coverage"]["bridge_summary"]["lineage"]["reports_without_lineage_parents"],
+            2
+        );
         assert_eq!(result["readiness_claimed"], false);
+        validate_domain_evidence_harmonization(&result).unwrap();
+    }
+
+    #[test]
+    fn harmonization_classifies_provider_bridges_and_lineage() {
+        let mut bridged = report(
+            "subject-1",
+            "literature_bind_check",
+            "biological_domains",
+            "oncology",
+        );
+        bridged["report"] = json!({
+            "kind": "provider_normalization",
+            "mode": "external_payload",
+            "payload_digest": "a".repeat(64)
+        });
+        bridged["parent_digests"] = json!(["b".repeat(64), "c".repeat(64)]);
+        let result = harmonize_domain_evidence(&json!({
+            "subject_id": "subject-1",
+            "claim": {"id": "claim-bridge"},
+            "reports": [bridged],
+            "links": [{"report_index": 0, "role": "context"}]
+        }))
+        .unwrap();
+        assert_eq!(
+            result["reports"][0]["report_class"],
+            "provider_normalization_external_payload"
+        );
+        assert_eq!(result["reports"][0]["bridge_mode"], "external_payload");
+        assert_eq!(result["reports"][0]["lineage_parent_count"], 2);
+        assert_eq!(
+            result["coverage"]["bridge_summary"]["modes"]["external_payload"],
+            1
+        );
+        assert_eq!(
+            result["coverage"]["bridge_summary"]["lineage"]["parent_digest_count"],
+            2
+        );
         validate_domain_evidence_harmonization(&result).unwrap();
     }
 

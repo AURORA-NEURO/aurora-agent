@@ -32,7 +32,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `POST /v1/domain-workflows/instantiate` | Instantiate a group-scoped mission and attach authoritative no-dispatch preflight |
 | `POST /v1/domain-workflows/reconcile` | Reconcile retained mission results or evidence bundles against an instantiated workflow contract |
 | `POST /v1/domain-reports` | Validate and index one explicit report projection for a declared capability group and source tool |
-| `GET /v1/domain-reports/coverage?group_id=&domain=&max_groups=&include_report_digests=` | Count retained structured report projections across the capability catalogue |
+| `GET /v1/domain-reports/coverage?group_id=&domain=&report_class=&bridge_mode=&max_groups=&include_report_digests=` | Count retained structured report projections across the capability catalogue |
 | `POST /v1/domain-evidence/harmonize` | Join exact same-subject domain reports into an explicit, digest-addressed traceability artifact |
 | `POST /v1/domain-evidence/intake` | Normalize and index one supplied raw request/response envelope from any declared capability-group tool |
 | `POST /v1/domain-evidence/sources` | Build and index a non-fetching, digest-addressed external evidence source plan |
@@ -198,7 +198,10 @@ opening the locator. Both routes return one provider-domain bridge envelope cont
 normalization result and canonical domain report, with compact report evidence rather than a
 second payload copy, explicit artifact parents, and readiness_claimed: false.
 `GET /v1/domain-reports/coverage` reports which groups have retained structured projections,
-subject/source/status summaries, missing group ids, and an exact coverage digest. Coverage means
+subject/source/status summaries, missing group ids, and an exact coverage digest. Optional
+`report_class` and `bridge_mode` filters narrow the retained rows before group/domain coverage is
+computed, allowing adapter/provider composition audits without mixing ordinary projections.
+Coverage means
 local indexed projection presence only; it is not execution coverage, scientific validity,
 provenance completeness, reproducibility, release readiness, or external-effect completion.
 Each coverage group also reports classified projection counts for ordinary, adapter-execution,
@@ -213,6 +216,10 @@ missing required groups/domains and link coverage remain visible in the result. 
 indexes a digest-addressed harmonization artifact with report digests as parents, always keeps
 `readiness_claimed: false`, and does not choose between conflicting reports or claim scientific,
 clinical, causal, provenance, publication, release, or execution validity.
+The returned `harmonization.coverage.bridge_summary` reports per-report bridge class, bridge mode,
+and lineage-parent count, plus aggregate class/mode counts and linked/unlinked lineage totals.
+Missing bridge markers remain `ordinary`; this is structural composition telemetry and does not
+infer provider authenticity, adapter correctness, payload availability, or readiness.
 `POST /v1/domain-evidence/intake` is the raw-envelope boundary for all 29 capability groups. It
 requires a declared group, source tool, domain label, response JSON, explicit outcome, and claim
 posture; an original request is optional and its absence is distinguished from a supplied JSON

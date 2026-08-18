@@ -123,6 +123,7 @@ class DomainEvidenceHarmonizationReport:
     harmonization_digest: str
     traceability_state: str
     contradiction_declared: bool
+    bridge_summary: Mapping[str, Any]
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "DomainEvidenceHarmonizationReport":
@@ -141,6 +142,9 @@ class DomainEvidenceHarmonizationReport:
             raise ArgumentError("domain evidence artifact registry projection is not indexed")
         coverage = _mapping("domain evidence coverage", harmonization.get("coverage"))
         posture = _mapping("domain evidence posture", harmonization.get("posture"))
+        bridge_summary = _mapping(
+            "domain evidence bridge summary", coverage.get("bridge_summary", {})
+        )
         state = _text("domain evidence traceability state", coverage.get("traceability_state"))
         contradiction = posture.get("explicit_contradiction_declared")
         if not isinstance(contradiction, bool):
@@ -155,6 +159,7 @@ class DomainEvidenceHarmonizationReport:
             ),
             traceability_state=state,
             contradiction_declared=contradiction,
+            bridge_summary=bridge_summary,
         )
 
     def to_dict(self) -> dict[str, Any]:

@@ -40,8 +40,8 @@ HTTP clients expose `domain_evidence_harmonize()` and `domain_evidence_harmonize
 `Workspace` and `AsyncWorkspace` expose the MCP helper and typed report projection. The request
 requires exact same-subject reports and explicit support/qualification/contradiction/context
 roles; the typed result preserves traceability state, contradiction posture, catalogue digest,
-and artifact digest without treating report presence or a support link as a scientific or release
-claim.
+and artifact digest, plus bridge class/mode and lineage coverage from the harmonization payload,
+without treating report presence or a support link as a scientific or release claim.
 `DomainEvidenceIntakeRequest` and `DomainEvidenceIntakeReport` add the raw-envelope boundary for
 every declared capability group. `ApiClient.domain_evidence_intake()` and its `*_tool()` variant,
 plus the `Workspace` and `AsyncWorkspace` helpers, retain optional request JSON, required response

@@ -31,7 +31,19 @@ def harmonization_payload() -> dict:
             "report_count": 1,
             "reports": [],
             "links": [],
-            "coverage": {"traceability_state": "complete", "all_reports_linked": True},
+            "coverage": {
+                "traceability_state": "complete",
+                "all_reports_linked": True,
+                "bridge_summary": {
+                    "report_classes": {"provider_normalization_external_payload": 1},
+                    "modes": {"external_payload": 1},
+                    "lineage": {
+                        "parent_digest_count": 2,
+                        "reports_with_lineage_parents": 1,
+                        "reports_without_lineage_parents": 0,
+                    },
+                },
+            },
             "posture": {"explicit_contradiction_declared": False},
             "readiness_claimed": False,
             "execution": "not_started",
@@ -63,6 +75,7 @@ class DomainEvidenceModelTests(unittest.TestCase):
         self.assertEqual(report.traceability_state, "complete")
         self.assertFalse(report.contradiction_declared)
         self.assertEqual(report.harmonization_digest, "b" * 64)
+        self.assertEqual(report.bridge_summary["modes"]["external_payload"], 1)
         with self.assertRaises(ArgumentError):
             DomainEvidenceLink(report_index=0, role="qualifies")
         with self.assertRaises(ArgumentError):

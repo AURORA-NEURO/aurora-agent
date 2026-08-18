@@ -808,6 +808,20 @@ fn domain_report_projection_checks_catalogue_indexes_idempotently_and_reports_co
         coverage["bridge_summary"]["lineage"]["reports_without_lineage_parents"],
         json!(1)
     );
+    let filtered = call(
+        &mut server,
+        "domain_report_project",
+        json!({
+            "operation": "coverage",
+            "group_id": "biological_domains",
+            "report_class": "ordinary",
+            "bridge_mode": "inline"
+        }),
+    );
+    assert_eq!(filtered["filters"]["report_class"], json!("ordinary"));
+    assert_eq!(filtered["filters"]["bridge_mode"], json!("inline"));
+    assert_eq!(filtered["reported_group_count"], json!(0));
+    assert_eq!(filtered["missing_group_count"], json!(1));
     assert_eq!(coverage["coverage_digest"].as_str().unwrap().len(), 64);
 }
 

@@ -643,7 +643,7 @@ export class ApiClient {
     options?: ClientRequestOptions,
   ): Promise<DomainReportCoverageResult> {
     if (!isObject(args)) throw new ArgumentError("domain report coverage arguments must be an object");
-    for (const [name, value] of [["group_id", args.group_id], ["domain", args.domain]] as const) {
+    for (const [name, value] of [["group_id", args.group_id], ["domain", args.domain], ["report_class", args.report_class], ["bridge_mode", args.bridge_mode]] as const) {
       if (value !== undefined && (typeof value !== "string" || value.trim().length === 0)) throw new ArgumentError(`${name} must be a non-empty string`);
     }
     const maxGroups = args.max_groups ?? 64;
@@ -652,6 +652,8 @@ export class ApiClient {
     const query = new URLSearchParams({ max_groups: String(maxGroups), include_report_digests: String(args.include_report_digests ?? false) });
     if (args.group_id !== undefined) query.set("group_id", args.group_id);
     if (args.domain !== undefined) query.set("domain", args.domain);
+    if (args.report_class !== undefined) query.set("report_class", args.report_class);
+    if (args.bridge_mode !== undefined) query.set("bridge_mode", args.bridge_mode);
     return this.request<DomainReportCoverageResult>("GET", `/v1/domain-reports/coverage?${query.toString()}`, undefined, options);
   }
 

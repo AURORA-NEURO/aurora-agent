@@ -85,6 +85,12 @@ class DomainReportModelTests(unittest.TestCase):
         self.assertFalse(coverage.complete)
         self.assertEqual(coverage.missing_group_count, 28)
         self.assertEqual(coverage.bridge_summary["report_classes"]["ordinary"], 1)
+        request = DomainReportCoverageRequest(
+            report_class="provider_normalization_external_payload",
+            bridge_mode="external_payload",
+        )
+        self.assertEqual(request.to_query_params()["report_class"], "provider_normalization_external_payload")
+        self.assertEqual(request.to_arguments()["bridge_mode"], "external_payload")
         with self.assertRaises(ArgumentError):
             DomainReportProjectRequest(
                 group_id="biological_domains",
@@ -107,9 +113,18 @@ class DomainReportModelTests(unittest.TestCase):
         with patch.object(ApiClient, "request", side_effect=[project_payload(), coverage_payload()]) as rest:
             client = ApiClient("http://127.0.0.1:8787")
             self.assertEqual(client.domain_report_project(request).content_digest, "a" * 64)
-            self.assertEqual(client.domain_report_coverage(DomainReportCoverageRequest()).group_count, 29)
+            self.assertEqual(
+                client.domain_report_coverage(
+                    DomainReportCoverageRequest(
+                        report_class="ordinary", bridge_mode="inline"
+                    )
+                ).group_count,
+                29,
+            )
         self.assertEqual(rest.call_args_list[0].args[:2], ("POST", "/v1/domain-reports"))
         self.assertIn("/v1/domain-reports/coverage?", rest.call_args_list[1].args[1])
+        self.assertIn("report_class=ordinary", rest.call_args_list[1].args[1])
+        self.assertIn("bridge_mode=inline", rest.call_args_list[1].args[1])
 
         with patch.object(ApiClient, "call_tool", return_value=project_payload()) as tool:
             self.assertEqual(ApiClient("http://127.0.0.1:8787").domain_report_project_tool(request).content_digest, "a" * 64)

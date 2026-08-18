@@ -128,6 +128,8 @@ class DomainReportProjectReport:
 class DomainReportCoverageRequest:
     group_id: str | None = None
     domain: str | None = None
+    report_class: str | None = None
+    bridge_mode: str | None = None
     max_groups: int = 64
     include_report_digests: bool = False
 
@@ -136,6 +138,10 @@ class DomainReportCoverageRequest:
             _text("domain report coverage group_id", self.group_id)
         if self.domain is not None:
             _text("domain report coverage domain", self.domain)
+        if self.report_class is not None:
+            _text("domain report coverage report_class", self.report_class)
+        if self.bridge_mode is not None:
+            _text("domain report coverage bridge_mode", self.bridge_mode)
         if isinstance(self.max_groups, bool) or not isinstance(self.max_groups, int) or not 1 <= self.max_groups <= 128:
             raise ArgumentError("domain report coverage max_groups must be between 1 and 128")
         if not isinstance(self.include_report_digests, bool):
@@ -150,6 +156,10 @@ class DomainReportCoverageRequest:
             params["group_id"] = self.group_id
         if self.domain is not None:
             params["domain"] = self.domain
+        if self.report_class is not None:
+            params["report_class"] = self.report_class
+        if self.bridge_mode is not None:
+            params["bridge_mode"] = self.bridge_mode
         return params
 
     def to_arguments(self) -> dict[str, Any]:
