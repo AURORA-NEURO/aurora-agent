@@ -322,6 +322,8 @@ import type {
   WeaveLangCompileArgs,
   WeaveLangCompileResult,
   DeveloperWorkbenchArgs,
+  DeveloperWorkbenchVerificationArgs,
+  DeveloperWorkbenchVerificationResult,
   CiProviderNormalizationArgs,
   CiProviderNormalizationResult,
   CiProviderEvidenceArgs,
@@ -1747,6 +1749,30 @@ export class ApiClient {
 
   async developerWorkbench(args: DeveloperWorkbenchArgs, options?: ClientRequestOptions) {
     return this.callTool("developer_workbench", args, options);
+  }
+
+  /** Verify a retained authoring/notebook report, with optional deterministic CI-plan replay. */
+  async developerWorkbenchVerifyQuery(
+    args: DeveloperWorkbenchVerificationArgs,
+    options?: ClientRequestOptions,
+  ): Promise<DeveloperWorkbenchVerificationResult> {
+    if (!isObject(args) || !isObject(args.session) || !Object.keys(args.session).length || !isObject(args.report) || !Object.keys(args.report).length) {
+      throw new ArgumentError("developer workbench verification requires session and report objects");
+    }
+    if (args.expected_report_digest !== undefined && (typeof args.expected_report_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.expected_report_digest))) {
+      throw new ArgumentError("expected_report_digest must be a lowercase SHA-256 digest");
+    }
+    if (args.ci_replay !== undefined && !isObject(args.ci_replay)) throw new ArgumentError("ci_replay must be an object");
+    if (args.policy !== undefined && !isObject(args.policy)) throw new ArgumentError("workbench verification policy must be an object");
+    return this.request<DeveloperWorkbenchVerificationResult>("POST", "/v1/developer-workbench/verify", args, options);
+  }
+
+  /** MCP envelope form of developerWorkbenchVerifyQuery. */
+  async developerWorkbenchVerify(
+    args: DeveloperWorkbenchVerificationArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DeveloperWorkbenchVerificationResult>> {
+    return this.callTool<DeveloperWorkbenchVerificationResult>("developer_workbench_verify", args, options);
   }
 
   async ciExecutionEvidenceAudit(args: CiExecutionEvidenceArgs, options?: ClientRequestOptions): Promise<RestToolResponse<CiExecutionEvidenceResult>> {

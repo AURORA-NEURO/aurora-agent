@@ -275,6 +275,11 @@ ordering, logical change history, stale-digest findings, evidence-aware dashboar
 review-only CI workflow plan. Python and TypeScript expose the same composition surface. This does
 not close the external authoring UI, consumer-repository action, hosted GitHub runner, or full
 Python distribution backlog, so those gaps remain explicit rather than being relabelled complete.
+The retained-workbench continuation is now implemented as `developer_workbench_verify`: a caller can
+store the complete report, later re-audit the current session, replay its dashboard and optional CI
+request, and receive content-digest/mismatch witnesses through REST, MCP, CLI, Python, and TypeScript.
+This closes the local authoring handoff audit seam while leaving the external UI, package publishing,
+GitHub authentication, hosted runner, and provider-observed execution evidence intentionally open.
 The `ci_execution_evidence_audit` route adds the next safe boundary without claiming the external
 runner: it regenerates the canonical plan, requires a matching plan digest and per-check result
 digests, reconciles exact check names and requiredness, and keeps caller/provider provenance,

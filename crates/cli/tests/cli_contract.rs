@@ -4,6 +4,7 @@
 //! `--json` is parseable with nothing else on stdout, `--dry-run` has no effects, exit codes
 //! follow the published matrix, and artifacts are byte-identical to the reference runtime.
 
+use bioprism_devplat::{run_workbench, StudioSession, WorkbenchRequest};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -632,6 +633,53 @@ fn workflow_portfolio_verify_replays_a_retained_report_without_dispatch() {
     assert_eq!(report["items"][0]["status"], "verified");
     assert_eq!(report["dispatch"], "not_started");
     assert_eq!(report["execution"], "not_started");
+}
+
+#[test]
+fn workbench_verify_replays_a_retained_report_without_execution() {
+    let directory = scratch("workbench-verify");
+    let session_path = directory.join("session.json");
+    let report_path = directory.join("report.json");
+    let session = StudioSession {
+        session_id: "cli-workbench".into(),
+        owner: "cli-test".into(),
+        goal: "verify retained authoring evidence".into(),
+        environment_digest: None,
+        artifacts: Vec::new(),
+        cells: Vec::new(),
+        changes: Vec::new(),
+        policy: Default::default(),
+    };
+    let retained = run_workbench(&WorkbenchRequest {
+        session: session.clone(),
+        dashboard: None,
+        ci: None,
+    })
+    .expect("build retained workbench report");
+    std::fs::write(&session_path, serde_json::to_vec_pretty(&session).unwrap()).unwrap();
+    std::fs::write(&report_path, serde_json::to_vec_pretty(&retained).unwrap()).unwrap();
+    let output = run(&[
+        "--json",
+        "workbench",
+        "verify",
+        "--session",
+        &session_path.display().to_string(),
+        "--report",
+        &report_path.display().to_string(),
+    ]);
+    assert_eq!(
+        code(&output),
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value =
+        serde_json::from_str(&stdout(&output)).expect("workbench verification JSON");
+    assert_eq!(report["workflow"], "developer_workbench_verify");
+    assert_eq!(report["valid"], true);
+    assert_eq!(report["status"], "verified");
+    assert_eq!(report["execution"], "not_started");
+    assert_eq!(report["network_access"], "not_started");
 }
 
 #[test]

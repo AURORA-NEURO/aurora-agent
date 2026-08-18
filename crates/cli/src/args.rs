@@ -111,6 +111,10 @@ COMMANDS
                     [--allow-partial] [--require-complete-catalogue] [--require-replay]
                     Verify a retained portfolio digest, coverage, and per-item replay posture;
                     authoritative mission preflight remains no-dispatch.
+  workbench verify  --session <path> --report <path> [--ci-replay <path>] [--policy <path>]
+                    [--expected-report-digest <digest>]
+                    Verify a retained authoring/notebook report and optional CI projection;
+                    no notebook cells, YAML, GitHub, or CI run is executed.
   workflow reconcile --instantiation <path> [--mission <path>] [--evidence-bundle <path>]
                     Reconcile a retained agent_mission report or evidence bundle against the
                     instantiated workflow. Exit 1 when completion evidence is not ready.
@@ -237,6 +241,13 @@ pub enum Command {
         allow_partial: bool,
         require_complete_catalogue: bool,
         require_replay: bool,
+    },
+    WorkbenchVerify {
+        session: PathBuf,
+        report: PathBuf,
+        ci_replay: Option<PathBuf>,
+        policy: Option<PathBuf>,
+        expected_report_digest: Option<String>,
     },
     WorkflowReconcile {
         instantiation: PathBuf,
@@ -447,6 +458,13 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
             allow_partial: options.take_switch("--allow-partial"),
             require_complete_catalogue: options.take_switch("--require-complete-catalogue"),
             require_replay: options.take_switch("--require-replay"),
+        },
+        ("workbench", "verify") => Command::WorkbenchVerify {
+            session: options.take_path("--session")?,
+            report: options.take_path("--report")?,
+            ci_replay: options.take_optional_path("--ci-replay"),
+            policy: options.take_optional_path("--policy"),
+            expected_report_digest: options.take_optional("--expected-report-digest"),
         },
         ("workflow", "reconcile") => Command::WorkflowReconcile {
             instantiation: options.take_path("--instantiation")?,
@@ -751,6 +769,42 @@ mod tests {
                     allow_partial: true,
                     require_complete_catalogue: true,
                     require_replay: true,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn workbench_verify_parses_retained_report_and_replay_controls() {
+        let parsed = parse(
+            [
+                "workbench",
+                "verify",
+                "--session",
+                "session.json",
+                "--report",
+                "report.json",
+                "--ci-replay",
+                "ci.json",
+                "--policy",
+                "policy.json",
+                "--expected-report-digest",
+                "a".repeat(64).as_str(),
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse workbench verify");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::WorkbenchVerify {
+                    session: PathBuf::from("session.json"),
+                    report: PathBuf::from("report.json"),
+                    ci_replay: Some(PathBuf::from("ci.json")),
+                    policy: Some(PathBuf::from("policy.json")),
+                    expected_report_digest: Some("a".repeat(64)),
                 },
             })
         );

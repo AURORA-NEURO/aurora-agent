@@ -178,6 +178,14 @@ explicit. The route remains an audit boundary with `dispatch` and `execution` se
 `not_started`; a valid result is not execution permission or scientific, clinical, provider, or
 release validity.
 
+`POST /v1/developer-workbench/verify` verifies a retained `developer_workbench` report against the
+current `StudioSession`. It recomputes the session audit, deterministically replays the retained
+dashboard query, and optionally replays the original `CiRequest`; `require_dashboard`, `require_ci`,
+and `require_ci_replay` make omitted projections explicit policy failures. The result preserves
+retained/observed digests, mismatch codes and JSON paths, replay booleans, and a verification digest.
+Both `execution` and `network_access` are always `not_started`; the route does not run notebook cells,
+write generated YAML, contact GitHub, execute CI, or grant release or domain authority.
+
 `POST /v1/domain-workflows/verify` checks a retained `domain_workflow_instantiate` response before
 handoff or re-review. It validates the workflow, catalogue, domain-contract, mission, and binding
 identities; reruns authoritative mission preflight; and, when `replay_request` is supplied, rebuilds

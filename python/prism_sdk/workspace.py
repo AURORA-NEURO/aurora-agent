@@ -548,7 +548,12 @@ from .hub_card import HubCardRenderArgs, HubCardRenderReport, hub_card_render
 from .hub_publication import BioAtlasPublicationAuditArgs, BioAtlasPublicationAuditReport, HubLeaderboardRenderArgs, HubLeaderboardRenderReport, bioatlas_publication_audit, hub_leaderboard_render
 from .hub_submission import HubSubmissionReviewArgs, HubSubmissionReviewReport, hub_submission_review
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
-from .workbench import WorkbenchRequest
+from .workbench import (
+    WorkbenchRequest,
+    WorkbenchVerificationReport,
+    WorkbenchVerificationRequest,
+    workbench_verification_report,
+)
 from .world import (
     ObservedWorldDeclareArgs,
     ObservedWorldDeclareReport,
@@ -1597,6 +1602,23 @@ class Workspace:
 
         request = WorkbenchRequest(session, dashboard, ci)
         return self.tool("developer_workbench", request.to_mcp_arguments())
+
+    def developer_workbench_verify(
+        self,
+        request: WorkbenchVerificationRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Verify a retained authoring/notebook report through the MCP workbench boundary."""
+
+        normalized = request if isinstance(request, WorkbenchVerificationRequest) else WorkbenchVerificationRequest(**dict(request))
+        return self.tool("developer_workbench_verify", normalized.to_mcp_arguments())
+
+    def developer_workbench_verify_report(
+        self,
+        request: WorkbenchVerificationRequest | Mapping[str, Any],
+    ) -> WorkbenchVerificationReport:
+        """Return typed workbench digest, dashboard, CI replay, and mismatch evidence."""
+
+        return workbench_verification_report(self.developer_workbench_verify(request))
 
     def agent_mission(
         self,
@@ -5602,6 +5624,23 @@ class AsyncWorkspace:
 
         request = WorkbenchRequest(session, dashboard, ci)
         return await self.tool("developer_workbench", request.to_mcp_arguments())
+
+    async def developer_workbench_verify(
+        self,
+        request: WorkbenchVerificationRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.developer_workbench_verify`."""
+
+        normalized = request if isinstance(request, WorkbenchVerificationRequest) else WorkbenchVerificationRequest(**dict(request))
+        return await self.tool("developer_workbench_verify", normalized.to_mcp_arguments())
+
+    async def developer_workbench_verify_report(
+        self,
+        request: WorkbenchVerificationRequest | Mapping[str, Any],
+    ) -> WorkbenchVerificationReport:
+        """Return typed async workbench verification evidence."""
+
+        return workbench_verification_report(await self.developer_workbench_verify(request))
 
     async def agent_mission(
         self,

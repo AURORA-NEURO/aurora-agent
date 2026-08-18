@@ -28,5 +28,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
+bioprism-devplat = { workspace = true }
 bioprism-ids = { workspace = true }
 serde_json = { workspace = true }

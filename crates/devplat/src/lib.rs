@@ -553,11 +553,12 @@ pub use walkthrough::{
     WalkthroughId,
 };
 pub use workbench::{
-    audit_session, plan_ci, query_dashboard, run_workbench, ArtifactCard, ArtifactState, CellInput,
-    CellKind, ChangeKind, CiCheck, CiPlan, CiRequest, DashboardQuery, DashboardReport,
-    DashboardRow, EvidencePosture, NotebookPolicy, SessionAudit, StudioCell, StudioChange,
-    StudioSession, WorkbenchError, WorkbenchFinding, WorkbenchReport, WorkbenchRequest,
-    WORKBENCH_SCHEMA_VERSION,
+    audit_session, plan_ci, query_dashboard, run_workbench, verify_workbench, ArtifactCard,
+    ArtifactState, CellInput, CellKind, ChangeKind, CiCheck, CiPlan, CiRequest, DashboardQuery,
+    DashboardReport, DashboardRow, EvidencePosture, NotebookPolicy, SessionAudit, StudioCell,
+    StudioChange, StudioSession, WorkbenchError, WorkbenchFinding, WorkbenchMismatch,
+    WorkbenchReport, WorkbenchRequest, WorkbenchVerificationPolicy, WorkbenchVerificationReport,
+    WorkbenchVerificationRequest, WORKBENCH_SCHEMA_VERSION, WORKBENCH_VERIFY_SCHEMA_VERSION,
 };
 pub use workflow::{
     build_domain_workflow_catalogue, build_domain_workflow_portfolio, instantiate_domain_workflow,

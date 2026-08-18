@@ -4339,6 +4339,37 @@ export interface DeveloperWorkbenchArgs extends JsonObject {
   ci?: JsonObject;
 }
 
+export interface DeveloperWorkbenchVerificationArgs extends JsonObject {
+  session: JsonObject;
+  report: JsonObject;
+  expected_report_digest?: string;
+  ci_replay?: JsonObject;
+  policy?: JsonObject;
+}
+
+export interface DeveloperWorkbenchVerificationResult extends JsonObject {
+  ok: boolean;
+  workflow: "developer_workbench_verify";
+  valid: boolean;
+  status: "verified" | "verified_without_replay" | "mismatch";
+  retained_report_digest: string;
+  expected_report_digest?: string | null;
+  report_digest_matched?: boolean | null;
+  retained_audit_digest: string;
+  observed_audit_digest: string;
+  dashboard_present: boolean;
+  dashboard_verified: boolean;
+  ci_present: boolean;
+  ci_replay_supplied: boolean;
+  ci_verified: boolean;
+  mismatches: Array<JsonObject>;
+  execution: "not_started";
+  network_access: "not_started";
+  verification_digest: string;
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface CiExecutionEvidenceArgs extends JsonObject {
   ci: JsonObject;
   evidence: JsonObject;

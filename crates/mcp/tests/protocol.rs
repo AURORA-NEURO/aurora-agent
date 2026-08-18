@@ -323,7 +323,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 225);
+    assert_eq!(tools.len(), 226);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -6786,6 +6786,75 @@ fn developer_workbench_refuses_notebook_cycles_and_unsafe_ci() {
 }
 
 #[test]
+fn developer_workbench_verify_replays_retained_projection_without_execution() {
+    let mut server = server();
+    let digest = "a".repeat(64);
+    let output_digest = "b".repeat(64);
+    let session = json!({
+        "session_id": "verify-studio",
+        "owner": "agent-a",
+        "goal": "verify an oncology authoring handoff",
+        "artifacts": [{
+            "id": "artifact-1", "title": "card", "path": "card.json", "domain": "oncology",
+            "capability": "verification", "state": "validated", "evidence": "reproduced",
+            "digest": digest, "score": 0.9
+        }],
+        "cells": [{
+            "id": "cell-1", "kind": "query", "source": "metrics", "inputs": [{"artifact_id": "artifact-1", "digest": digest}],
+            "depends_on": [], "executed": true, "output_digest": output_digest
+        }],
+        "changes": [{
+            "id": "change-1", "artifact_id": "artifact-1", "kind": "create", "actor": "agent-a",
+            "logical_time": 1, "output_digest": digest, "reason": "initial card"
+        }]
+    });
+    let ci = json!({
+        "workflow": "consumer contracts", "triggers": ["pull_request"], "rust_toolchain": "stable",
+        "offline": true, "checks": [{"name": "unit", "run": "cargo test -p bioprism-devplat", "required": true}]
+    });
+    let retained = call(
+        &mut server,
+        "developer_workbench",
+        json!({"session": session.clone(), "dashboard": {"domains": ["oncology"], "limit": 4}, "ci": ci.clone()}),
+    );
+    assert_eq!(retained["ok"], json!(true));
+    let verified = call(
+        &mut server,
+        "developer_workbench_verify",
+        json!({
+            "session": session.clone(),
+            "report": retained.clone(),
+            "ci_replay": ci.clone(),
+            "policy": {"require_dashboard": true, "require_ci": true, "require_ci_replay": true}
+        }),
+    );
+    assert_eq!(verified["ok"], json!(true));
+    assert_eq!(verified["workflow"], json!("developer_workbench_verify"));
+    assert_eq!(verified["valid"], json!(true));
+    assert_eq!(verified["status"], json!("verified"));
+    assert_eq!(verified["dashboard_verified"], json!(true));
+    assert_eq!(verified["ci_verified"], json!(true));
+    assert_eq!(verified["execution"], json!("not_started"));
+    assert_eq!(verified["network_access"], json!("not_started"));
+
+    let mut tampered = retained;
+    tampered["audit"]["ordered_cells"] = json!([]);
+    let mismatch = call(
+        &mut server,
+        "developer_workbench_verify",
+        json!({"session": session, "report": tampered, "ci_replay": ci}),
+    );
+    assert_eq!(mismatch["ok"], json!(true));
+    assert_eq!(mismatch["valid"], json!(false));
+    assert_eq!(mismatch["status"], json!("mismatch"));
+    assert!(mismatch["mismatches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["code"] == "audit_mismatch"));
+}
+
+#[test]
 fn ci_execution_evidence_audit_reconciles_plan_and_run_without_execution() {
     let mut server = server();
     let ci = json!({
@@ -8073,12 +8142,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(225));
-    assert_eq!(result["advertised_tool_count"], json!(225));
+    assert_eq!(result["unique_catalog_tools"], json!(226));
+    assert_eq!(result["advertised_tool_count"], json!(226));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(225));
-    assert_eq!(result["schema_quality"]["valid"], json!(225));
+    assert_eq!(result["schema_quality"]["checked"], json!(226));
+    assert_eq!(result["schema_quality"]["valid"], json!(226));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

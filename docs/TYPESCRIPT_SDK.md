@@ -242,6 +242,9 @@ unindexed unless explicitly registered.
   `ci_execution_evidence`, `ci_provider_evidence`, and `execution_provenance` targets;
 - `developerWorkbench`: digest-bound authoring/notebook audit, capability dashboard query, and
   review-only CI workflow planning;
+- `developerWorkbenchVerify` and `developerWorkbenchVerifyQuery`: retained-report verification
+  through MCP and the dedicated REST route, with replay policy, digest witnesses, mismatch paths,
+  and explicit `not_started` execution/network posture;
 - `ciExecutionEvidenceAudit`: digest-bound reconciliation of a supplied CI run against a freshly
   generated workbench plan, with per-check result digests, complete/missing/non-passing findings,
   provider provenance, and structural-only verification. Its ready flag is a handoff signal, not

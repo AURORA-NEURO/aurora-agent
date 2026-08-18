@@ -1419,6 +1419,9 @@ impl ApiRouter {
             ("POST", "/v1/domain-workflows/portfolio/verify") => {
                 self.domain_workflow_portfolio_verify(&request, &request_id)
             }
+            ("POST", "/v1/developer-workbench/verify") => {
+                self.developer_workbench_verify(&request, &request_id)
+            }
             ("POST", "/v1/domain-workflows/verify") => {
                 self.domain_workflow_verify(&request, &request_id)
             }
@@ -3491,6 +3494,7 @@ impl ApiRouter {
                     "domain_workflow_instantiate": "/v1/domain-workflows/instantiate",
                     "domain_workflow_portfolio": "/v1/domain-workflows/portfolio",
                     "domain_workflow_portfolio_verify": "/v1/domain-workflows/portfolio/verify",
+                    "developer_workbench_verify": "/v1/developer-workbench/verify",
                     "domain_workflow_verify": "/v1/domain-workflows/verify",
                     "domain_workflow_reconcile": "/v1/domain-workflows/reconcile",
                     "domain_workflow_reconciliations": "/v1/domain-workflows/reconciliations",
@@ -3583,6 +3587,7 @@ impl ApiRouter {
                     "domain_workflow_instantiate": true,
                     "domain_workflow_portfolio": true,
                     "domain_workflow_portfolio_verify": true,
+                    "developer_workbench_verify": true,
                     "domain_workflow_verify": true,
                     "domain_workflow_reconcile": true,
                     "domain_workflow_reconciliation_registry": true,
@@ -4046,6 +4051,18 @@ impl ApiRouter {
         self.domain_workflow_tool(
             request_id,
             "domain_workflow_portfolio_verify",
+            Value::Object(arguments),
+        )
+    }
+
+    fn developer_workbench_verify(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        self.domain_workflow_tool(
+            request_id,
+            "developer_workbench_verify",
             Value::Object(arguments),
         )
     }
@@ -7611,6 +7628,7 @@ impl ApiRouter {
                     "/v1/domain-workflows/instantiate": { "post": { "responses": { "200": { "description": "group-scoped, authoritative-preflighted, no-dispatch workflow mission" }, "422": { "description": "workflow selection or mission preflight was refused" } } } },
                     "/v1/domain-workflows/portfolio": { "post": { "responses": { "200": { "description": "bounded multi-domain workflow portfolio with per-item authoritative no-dispatch preflight" }, "400": { "description": "workflow portfolio JSON was invalid" }, "422": { "description": "workflow portfolio was refused" } } } },
                     "/v1/domain-workflows/portfolio/verify": { "post": { "responses": { "200": { "description": "retained multi-domain workflow portfolio digest, replay, coverage, and authoritative mission-preflight verification" }, "400": { "description": "workflow portfolio verification JSON was invalid" }, "422": { "description": "workflow portfolio verification was refused" } } } },
+                    "/v1/developer-workbench/verify": { "post": { "responses": { "200": { "description": "retained authoring/notebook workbench digest, dashboard, and optional CI-plan replay verification" }, "400": { "description": "developer workbench verification JSON was invalid" }, "422": { "description": "developer workbench verification was refused" } } } },
                     "/v1/domain-workflows/verify": { "post": { "responses": { "200": { "description": "retained domain-workflow replay and authoritative mission-preflight verification" }, "400": { "description": "workflow verification JSON was invalid" }, "422": { "description": "workflow verification was refused" } } } },
                     "/v1/domain-workflows/reconcile": { "post": { "responses": { "200": { "description": "digest-bound workflow execution and evidence reconciliation" }, "422": { "description": "workflow evidence source or contract was refused" } } } },
                     "/v1/domain-workflows/reconciliations": { "get": { "parameters": [{ "name": "mission_id", "in": "query" }, { "name": "workflow_id", "in": "query" }, { "name": "mission_plan_digest", "in": "query" }, { "name": "completion_status", "in": "query" }, { "name": "after", "in": "query" }, { "name": "limit", "in": "query" }, { "name": "include_records", "in": "query" }], "responses": { "200": { "description": "bounded deterministic workflow reconciliation registry index" } } }, "post": { "responses": { "201": { "description": "digest-valid workflow reconciliation imported" }, "200": { "description": "idempotent re-import" }, "422": { "description": "reconciliation record failed digest validation" } } } },
@@ -12066,6 +12084,58 @@ mod tests {
         ));
         assert_eq!(refused.status, 422);
         let _ = std::fs::remove_file(artifact_path);
+    }
+
+    #[test]
+    fn developer_workbench_verification_route_replays_retained_report() {
+        let router =
+            ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
+        let digest = "a".repeat(64);
+        let session = json!({
+            "session_id": "api-workbench-verify",
+            "owner": "agent-a",
+            "goal": "verify a retained authoring handoff",
+            "artifacts": [{
+                "id": "artifact-1", "title": "card", "path": "card.json", "domain": "oncology",
+                "capability": "verification", "state": "validated", "evidence": "reproduced", "digest": digest
+            }],
+            "cells": [],
+            "changes": []
+        });
+        let ci = json!({
+            "workflow": "consumer contracts", "triggers": ["pull_request"], "rust_toolchain": "stable",
+            "offline": true, "checks": [{"name": "unit", "run": "cargo test -p bioprism-devplat", "required": true}]
+        });
+        let planned = router.handle(request(
+            "POST",
+            "/v1/tools/developer_workbench",
+            json!({"session": session.clone(), "ci": ci.clone()}),
+        ));
+        assert_eq!(planned.status, 200);
+        let planned: Value = serde_json::from_slice(&planned.body).unwrap();
+        let retained: Value = serde_json::from_str(
+            planned["mcp"]["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+        let verified = router.handle(request(
+            "POST",
+            "/v1/developer-workbench/verify",
+            json!({
+                "session": session,
+                "report": retained,
+                "ci_replay": ci,
+                "policy": {"require_ci": true, "require_ci_replay": true}
+            }),
+        ));
+        assert_eq!(verified.status, 200);
+        let verified: Value = serde_json::from_slice(&verified.body).unwrap();
+        assert_eq!(verified["workflow"], "developer_workbench_verify");
+        assert_eq!(verified["valid"], true);
+        assert_eq!(verified["status"], "verified");
+        assert_eq!(verified["ci_verified"], true);
+        assert_eq!(verified["execution"], "not_started");
     }
 
     #[test]

@@ -2185,7 +2185,12 @@ from .standards import (
     MeasurementVerdictReport,
     measurement_compare_report,
 )
-from .workbench import WorkbenchRequest
+from .workbench import (
+    WorkbenchRequest,
+    WorkbenchVerificationReport,
+    WorkbenchVerificationRequest,
+    workbench_verification_report,
+)
 from .world import (
     WORLD_CLAIM_KINDS,
     WORLD_RUNGS,
@@ -3729,6 +3734,9 @@ __all__ = [
     "ValidationReport",
     "Workspace",
     "WorkbenchRequest",
+    "WorkbenchVerificationRequest",
+    "WorkbenchVerificationReport",
+    "workbench_verification_report",
     "WORLD_CLAIM_KINDS",
     "WORLD_RUNGS",
     "WORLD_SELECTION_KINDS",

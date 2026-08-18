@@ -256,6 +256,11 @@ from .developer_platform import (
     DeveloperPlatformStatusReport,
     developer_platform_status_report,
 )
+from .workbench import (
+    WorkbenchVerificationReport,
+    WorkbenchVerificationRequest,
+    workbench_verification_report,
+)
 from .errors import ApiError, ArgumentError, MissionWaitTimeout, TransportError
 from .events import (
     MAX_EVENT_PAGE,
@@ -2313,6 +2318,40 @@ class ApiClient:
         return developer_platform_status_report(
             self.developer_platform_status(include_details=include_details, max_items=max_items)
         )
+
+    def developer_workbench_verify(
+        self,
+        request: WorkbenchVerificationRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Verify a retained workbench report through the MCP-compatible HTTP bridge."""
+
+        normalized = request if isinstance(request, WorkbenchVerificationRequest) else WorkbenchVerificationRequest(**dict(request))
+        return self.call_tool("developer_workbench_verify", normalized.to_mcp_arguments())
+
+    def developer_workbench_verify_report(
+        self,
+        request: WorkbenchVerificationRequest | Mapping[str, Any],
+    ) -> WorkbenchVerificationReport:
+        """Return typed workbench verification evidence from the MCP-compatible bridge."""
+
+        return workbench_verification_report(self.developer_workbench_verify(request))
+
+    def developer_workbench_verify_rest(
+        self,
+        request: WorkbenchVerificationRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Verify a retained workbench report through the dedicated REST route."""
+
+        normalized = request if isinstance(request, WorkbenchVerificationRequest) else WorkbenchVerificationRequest(**dict(request))
+        return self.request("POST", "/v1/developer-workbench/verify", normalized.to_mcp_arguments())
+
+    def developer_workbench_verify_rest_report(
+        self,
+        request: WorkbenchVerificationRequest | Mapping[str, Any],
+    ) -> WorkbenchVerificationReport:
+        """Return typed workbench verification evidence from the dedicated REST route."""
+
+        return workbench_verification_report(self.developer_workbench_verify_rest(request))
 
     def token_context_plan(
         self,
@@ -6822,6 +6861,38 @@ class AsyncApiClient:
         return developer_platform_status_report(
             await self.developer_platform_status(include_details=include_details, max_items=max_items)
         )
+
+    async def developer_workbench_verify(
+        self,
+        request: WorkbenchVerificationRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async workbench verification through the MCP-compatible HTTP bridge."""
+
+        return await asyncio.to_thread(self.client.developer_workbench_verify, request)
+
+    async def developer_workbench_verify_report(
+        self,
+        request: WorkbenchVerificationRequest | Mapping[str, Any],
+    ) -> WorkbenchVerificationReport:
+        """Return typed async workbench verification evidence from the MCP bridge."""
+
+        return workbench_verification_report(await self.developer_workbench_verify(request))
+
+    async def developer_workbench_verify_rest(
+        self,
+        request: WorkbenchVerificationRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async workbench verification through the dedicated REST route."""
+
+        return await asyncio.to_thread(self.client.developer_workbench_verify_rest, request)
+
+    async def developer_workbench_verify_rest_report(
+        self,
+        request: WorkbenchVerificationRequest | Mapping[str, Any],
+    ) -> WorkbenchVerificationReport:
+        """Return typed async workbench verification evidence from the REST route."""
+
+        return workbench_verification_report(await self.developer_workbench_verify_rest(request))
 
     async def token_context_plan(
         self,

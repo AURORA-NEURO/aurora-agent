@@ -100,6 +100,7 @@ from prism_sdk import (
     developer_delivery_receipt_report,
     developer_delivery_receipt_verification_report,
     developer_platform_status_report,
+    workbench_verification_report,
     ci_provider_normalization_report,
     BioCapabilityEvidenceAuditReport,
     BioCapabilityEvidenceAuditRequest,
@@ -130,6 +131,8 @@ from prism_sdk import (
     MissionStep,
     PairedObservation,
     WorkbenchRequest,
+    WorkbenchVerificationReport,
+    WorkbenchVerificationRequest,
     Workspace,
     PlanStatus,
     SourceKind,
@@ -1010,6 +1013,32 @@ def developer_platform_status_payload(*, include_details: bool = False) -> dict:
     return payload
 
 
+def workbench_verification_payload(*, valid: bool = True) -> dict:
+    return {
+        "ok": True,
+        "workflow": "developer_workbench_verify",
+        "schema_version": "bioprism-devplat-workbench-verify/0.1",
+        "valid": valid,
+        "status": "verified" if valid else "mismatch",
+        "retained_report_digest": "a" * 64,
+        "expected_report_digest": None,
+        "report_digest_matched": None,
+        "retained_audit_digest": "b" * 64,
+        "observed_audit_digest": "b" * 64,
+        "dashboard_present": True,
+        "dashboard_verified": True,
+        "ci_present": True,
+        "ci_replay_supplied": True,
+        "ci_verified": True,
+        "mismatches": [] if valid else [{"code": "audit_mismatch", "path": "/audit"}],
+        "execution": "not_started",
+        "network_access": "not_started",
+        "verification_digest": "c" * 64,
+        "guarantees": ["retained report was replayed"],
+        "limitations": ["CI was not executed"],
+    }
+
+
 def token_context_plan_payload(*, include_comparison: bool = True) -> dict:
     def plan(
         request_digest: str,
@@ -1687,6 +1716,24 @@ class AnalyticsModelTests(unittest.TestCase):
         with self.assertRaises(ArgumentError):
             WorkbenchRequest({})
 
+    def test_workbench_verification_request_and_report_preserve_replay_boundaries(self) -> None:
+        request = WorkbenchVerificationRequest(
+            {"session_id": "studio-1"},
+            {"workflow": "developer_workbench"},
+            expected_report_digest="a" * 64,
+            ci_replay={"workflow": "ci", "checks": []},
+            policy={"require_ci_replay": True},
+        )
+        arguments = request.to_mcp_arguments()
+        self.assertEqual(arguments["expected_report_digest"], "a" * 64)
+        self.assertTrue(arguments["policy"]["require_ci_replay"])
+        report = WorkbenchVerificationReport.from_wire(workbench_verification_payload())
+        self.assertTrue(report.verified)
+        self.assertEqual(report.execution, "not_started")
+        self.assertEqual(workbench_verification_report(workbench_verification_payload()).verification_digest, "c" * 64)
+        with self.assertRaises(ArgumentError):
+            WorkbenchVerificationRequest({"session_id": "studio-1"}, {"workflow": "x"}, expected_report_digest="A" * 64)
+
     def test_mission_request_builds_dependency_bound_wire_contract(self) -> None:
         request = MissionRequest(
             "mission-1",
@@ -2131,6 +2178,32 @@ class AnalyticsModelTests(unittest.TestCase):
         self.assertEqual(request.call_args_list[0].args[0:2], ("POST", "/v1/evidence-bundles"))
         self.assertEqual(request.call_args_list[1].args[0:2], ("GET", "/v1/evidence-bundles?max_items=100&include_bundles=false&domain=oncology"))
         self.assertEqual(request.call_args_list[2].args[0:2], ("GET", f"/v1/evidence-bundles/{'b' * 64}"))
+
+    def test_sync_http_workbench_verification_exposes_rest_and_mcp_routes(self) -> None:
+        request_body = WorkbenchVerificationRequest({"session_id": "studio-1"}, {"workflow": "developer_workbench"})
+        with patch.object(ApiClient, "request", return_value=workbench_verification_payload()) as request:
+            report = ApiClient("http://127.0.0.1:8787").developer_workbench_verify_rest_report(request_body)
+        self.assertTrue(report.verified)
+        request.assert_called_once_with("POST", "/v1/developer-workbench/verify", request_body.to_mcp_arguments())
+        with patch.object(ApiClient, "call_tool", return_value=workbench_verification_payload()) as tool:
+            report = ApiClient("http://127.0.0.1:8787").developer_workbench_verify_report(request_body)
+        self.assertTrue(report.valid)
+        tool.assert_called_once_with("developer_workbench_verify", request_body.to_mcp_arguments())
+
+    def test_async_http_workbench_verification_delegates_to_both_routes(self) -> None:
+        async def exercise() -> tuple[WorkbenchVerificationReport, WorkbenchVerificationReport]:
+            request_body = WorkbenchVerificationRequest({"session_id": "studio-1"}, {"workflow": "developer_workbench"})
+            with patch.object(ApiClient, "request", return_value=workbench_verification_payload()) as request:
+                rest = await AsyncApiClient(ApiClient("http://127.0.0.1:8787")).developer_workbench_verify_rest_report(request_body)
+                request.assert_called_once_with("POST", "/v1/developer-workbench/verify", request_body.to_mcp_arguments())
+            with patch.object(ApiClient, "call_tool", return_value=workbench_verification_payload()) as tool:
+                mcp = await AsyncApiClient(ApiClient("http://127.0.0.1:8787")).developer_workbench_verify_report(request_body)
+                tool.assert_called_once_with("developer_workbench_verify", request_body.to_mcp_arguments())
+            return rest, mcp
+
+        rest, mcp = asyncio.run(exercise())
+        self.assertTrue(rest.valid)
+        self.assertTrue(mcp.verified)
 
     def test_sync_http_mission_evidence_registry_uses_mcp_bridge(self) -> None:
         bundle = MissionEvidenceBundleImportRequest({"bundle_digest": "b" * 64})
@@ -2760,6 +2833,13 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
         self.assertEqual(result["echo"]["session"]["session_id"], "studio-1")
         self.assertEqual(result["echo"]["ci"]["offline"], True)
 
+    def test_sync_workspace_exposes_typed_workbench_verification(self) -> None:
+        request = WorkbenchVerificationRequest({"session_id": "studio-1"}, {"workflow": "developer_workbench"})
+        with patch.object(Workspace, "developer_workbench_verify", return_value=workbench_verification_payload()) as verify:
+            report = Workspace(None).developer_workbench_verify_report(request)  # type: ignore[arg-type]
+        self.assertTrue(report.verified)
+        verify.assert_called_once_with(request)
+
     def test_sync_workspace_typed_biocapability_evidence_report(self) -> None:
         request = biocapability_request()
         with patch.object(
@@ -3207,6 +3287,18 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
                 {"session_id": "studio-async", "artifacts": [], "cells": [], "changes": []}
             )
         self.assertEqual(result["echo"]["session"]["session_id"], "studio-async")
+
+    async def test_async_workspace_exposes_typed_workbench_verification(self) -> None:
+        request = WorkbenchVerificationRequest({"session_id": "studio-async"}, {"workflow": "developer_workbench"})
+        with patch.object(
+            AsyncWorkspace,
+            "developer_workbench_verify",
+            new_callable=AsyncMock,
+            return_value=workbench_verification_payload(),
+        ) as verify:
+            report = await AsyncWorkspace(None).developer_workbench_verify_report(request)  # type: ignore[arg-type]
+        self.assertTrue(report.verified)
+        verify.assert_awaited_once_with(request)
 
     async def test_async_workspace_typed_biocapability_evidence_report(self) -> None:
         request = biocapability_request()

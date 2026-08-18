@@ -17,6 +17,7 @@ use args::{Command, CompileOptions, Family, GenerateOptions, Invocation, Parsed,
 use bioprism_devplat::{
     build_domain_workflow_catalogue, build_domain_workflow_portfolio, instantiate_domain_workflow,
     reconcile_domain_workflow, scaffold_domain_workflow, verify_domain_workflow_portfolio,
+    verify_workbench, WorkbenchVerificationRequest,
 };
 use bioprism_devplat::{
     verify_mission_evidence_bundle, DomainWorkflowReconciliationRegistry, EvidenceBundleRegistry,
@@ -227,6 +228,19 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
             *require_complete_catalogue,
             *require_replay,
         ),
+        Command::WorkbenchVerify {
+            session,
+            report,
+            ci_replay,
+            policy,
+            expected_report_digest,
+        } => workbench_verify(
+            session,
+            report,
+            ci_replay.as_deref(),
+            policy.as_deref(),
+            expected_report_digest.as_deref(),
+        ),
         Command::WorkflowReconcile {
             instantiation,
             mission,
@@ -261,6 +275,46 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
             *include_records,
         ),
     }
+}
+
+fn workbench_verify(
+    session_path: &Path,
+    report_path: &Path,
+    ci_replay_path: Option<&Path>,
+    policy_path: Option<&Path>,
+    expected_report_digest: Option<&str>,
+) -> CliResult<Outcome> {
+    let mut request = serde_json::json!({
+        "session": io::read_json(session_path)?,
+        "report": io::read_json(report_path)?,
+    });
+    if let Some(path) = ci_replay_path {
+        request["ci_replay"] = io::read_json(path)?;
+    }
+    if let Some(path) = policy_path {
+        request["policy"] = io::read_json(path)?;
+    }
+    if let Some(digest) = expected_report_digest {
+        request["expected_report_digest"] = serde_json::json!(digest);
+    }
+    let typed: WorkbenchVerificationRequest = serde_json::from_value(request).map_err(|error| {
+        CliError::invalid(format!("invalid workbench verification request: {error}"))
+            .about(report_path.display().to_string())
+    })?;
+    let report = verify_workbench(&typed).map_err(|error| {
+        CliError::invalid(error.to_string()).about(report_path.display().to_string())
+    })?;
+    let valid = report.valid;
+    let status = report.status.clone();
+    let mismatches = report.mismatches.len();
+    let document =
+        serde_json::to_value(report).map_err(|error| CliError::internal(error.to_string()))?;
+    let human = format!(
+        "developer workbench verification\n  status: {status}\n  valid: {valid}\n  mismatches: {mismatches}\n  dashboard replay: {}\n  CI replay: {}\n  execution: not started\n  network access: not started\n\nNext: inspect the verification digest and mismatch witnesses before any separate execution or CI handoff.\n",
+        document["dashboard_verified"].as_bool().unwrap_or(false),
+        document["ci_verified"].as_bool().unwrap_or(false),
+    );
+    Ok(Outcome::ok(document, human).failing_if(!valid))
 }
 
 fn workflow_catalogue() -> CliResult<Outcome> {

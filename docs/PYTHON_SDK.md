@@ -557,6 +557,11 @@ invent defaults:
   notebook audit with optional hole-preserving capability queries and review-only GitHub Actions
   planning. The facade validates only the outer mappings; Rust validates digests, dependencies,
   evidence posture, release readiness, safe paths, and deterministic YAML.
+- `WorkbenchVerificationRequest` and `WorkbenchVerificationReport` expose the retained-report
+  continuation. `Workspace`/`AsyncWorkspace` and `ApiClient`/`AsyncApiClient` provide typed MCP
+  bridge helpers; the HTTP clients also expose `developer_workbench_verify_rest_report(...)` for
+  the dedicated REST route. The report retains replay status, digest witnesses, mismatch mappings,
+  and the `not_started` execution/network boundary.
 - `ci_execution_evidence_audit(...)` regenerates that canonical CI plan and reconciles a run report
   against its digest and exact checks. `CiExecutionEvidenceReport` preserves per-check result
   digests, missing/unknown/duplicate/non-passing findings, provider provenance, structural-only

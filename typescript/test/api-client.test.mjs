@@ -87,6 +87,48 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         limitations: ["no network publisher"],
       } } } });
       if (path === "/v1/tools/developer_workbench") return jsonResponse({ ok: true, tool: "developer_workbench", request_id: "r4", mcp: { result: { structuredContent: { workflow: "developer_workbench", audit: { valid: true } } } } });
+      if (path === "/v1/tools/developer_workbench_verify") return jsonResponse({ ok: true, tool: "developer_workbench_verify", request_id: "r4v", mcp: { result: { structuredContent: {
+        ok: true,
+        workflow: "developer_workbench_verify",
+        valid: true,
+        status: "verified",
+        retained_report_digest: "r".repeat(64),
+        expected_report_digest: null,
+        report_digest_matched: null,
+        retained_audit_digest: "a".repeat(64),
+        observed_audit_digest: "a".repeat(64),
+        dashboard_present: true,
+        dashboard_verified: true,
+        ci_present: true,
+        ci_replay_supplied: true,
+        ci_verified: true,
+        mismatches: [],
+        execution: "not_started",
+        network_access: "not_started",
+        verification_digest: "v".repeat(64),
+        guarantees: [],
+        limitations: [],
+      } } } });
+      if (path === "/v1/developer-workbench/verify") return jsonResponse({
+        ok: true,
+        workflow: "developer_workbench_verify",
+        valid: true,
+        status: "verified",
+        retained_report_digest: "r".repeat(64),
+        retained_audit_digest: "a".repeat(64),
+        observed_audit_digest: "a".repeat(64),
+        dashboard_present: true,
+        dashboard_verified: true,
+        ci_present: true,
+        ci_replay_supplied: true,
+        ci_verified: true,
+        mismatches: [],
+        execution: "not_started",
+        network_access: "not_started",
+        verification_digest: "v".repeat(64),
+        guarantees: [],
+        limitations: [],
+      });
       if (path === "/v1/tools/ci_execution_evidence_audit") return jsonResponse({ ok: true, tool: "ci_execution_evidence_audit", request_id: "r27", mcp: { result: { structuredContent: {
         ok: true,
         workflow: "ci_execution_evidence_audit",
@@ -1823,6 +1865,12 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(otel.mcp.result.structuredContent.events[0].kind, "goal");
   const workbench = await client.developerWorkbench({ session: { session_id: "studio-1" }, dashboard: { include_holes: true } });
   assert.equal(workbench.mcp.result.structuredContent.workflow, "developer_workbench");
+  const workbenchVerify = await client.developerWorkbenchVerify({ session: { session_id: "studio-1" }, report: { workflow: "developer_workbench" }, ci_replay: { workflow: "contracts" }, policy: { require_ci_replay: true } });
+  assert.equal(workbenchVerify.mcp.result.structuredContent.workflow, "developer_workbench_verify");
+  assert.equal(workbenchVerify.mcp.result.structuredContent.status, "verified");
+  const workbenchVerifyQuery = await client.developerWorkbenchVerifyQuery({ session: { session_id: "studio-1" }, report: { workflow: "developer_workbench" } });
+  assert.equal(workbenchVerifyQuery.workflow, "developer_workbench_verify");
+  await assert.rejects(client.developerWorkbenchVerifyQuery({ session: {}, report: {} }), ArgumentError);
   const ciEvidence = await client.ciExecutionEvidenceAudit({ ci: { workflow: "contracts" }, evidence: { run_id: "run-42" } });
   assert.equal(ciEvidence.mcp.result.structuredContent.workflow, "ci_execution_evidence_audit");
   assert.equal(ciEvidence.mcp.result.structuredContent.ci_evidence_ready, true);

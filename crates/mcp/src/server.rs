@@ -140,7 +140,7 @@ use bioprism_devplat::{
     validate_workflow_execution_evidence, verify_delivery_receipt,
     verify_domain_evidence_provider_external_payload_replay,
     verify_domain_evidence_provider_replay, verify_domain_workflow_portfolio,
-    verify_mission_evidence_bundle, AdapterExecutionEvidenceQueryRequest,
+    verify_mission_evidence_bundle, verify_workbench, AdapterExecutionEvidenceQueryRequest,
     AdapterExecutionEvidenceRequest, ArtifactRegistry, CapabilityCatalogue,
     CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest, CiExecutionEvidenceRequest,
     CiProviderEvidenceRequest, CiProviderNormalizationRequest, DeliveryReceiptRequest,
@@ -158,12 +158,13 @@ use bioprism_devplat::{
     MissionEvaluatorReviewRequest, MissionReport, MissionRequest, MissionStep, MissionStepResult,
     MissionTraceEvent, MissionTraceObserver, OperationalReadinessManifest, ReleasePipelineManifest,
     SandboxManifest, SandboxRuntimeManifest, SecurityPrivacyManifest, SecurityProgramManifest,
-    WorkbenchRequest, WorkflowExecutionEvidenceRegistry, ADAPTER_DOMAIN_REPORT_SCHEMA_VERSION,
-    ADAPTER_DOMAIN_REPORT_WORKFLOW, CAPABILITY_SCHEMA_VERSION, DOMAIN_ACQUISITION_SCHEMA_VERSION,
-    DOMAIN_ACQUISITION_WORKFLOW, DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION,
-    DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA_VERSION,
-    DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION,
-    DOMAIN_EVIDENCE_INTAKE_WORKFLOW, DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_SCHEMA,
+    WorkbenchRequest, WorkbenchVerificationRequest, WorkflowExecutionEvidenceRegistry,
+    ADAPTER_DOMAIN_REPORT_SCHEMA_VERSION, ADAPTER_DOMAIN_REPORT_WORKFLOW,
+    CAPABILITY_SCHEMA_VERSION, DOMAIN_ACQUISITION_SCHEMA_VERSION, DOMAIN_ACQUISITION_WORKFLOW,
+    DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION, DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW,
+    DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA_VERSION, DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW,
+    DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION, DOMAIN_EVIDENCE_INTAKE_WORKFLOW,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_SCHEMA,
     DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_WORKFLOW,
     DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LINEAGE_SCHEMA,
     DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LINEAGE_WORKFLOW,
@@ -1797,6 +1798,7 @@ impl Server {
             "sandbox_runtime_simulate" => self.sandbox_runtime_simulate(&arguments),
             "security_program_audit" => self.security_program_audit(&arguments),
             "developer_workbench" => self.developer_workbench(&arguments),
+            "developer_workbench_verify" => self.developer_workbench_verify(&arguments),
             "ci_provider_normalize" => self.ci_provider_normalize(&arguments),
             "ci_provider_evidence_audit" => self.ci_provider_evidence_audit(&arguments),
             "ci_execution_evidence_audit" => self.ci_execution_evidence_audit(&arguments),
@@ -30609,6 +30611,31 @@ impl Server {
         Ok(output)
     }
 
+    /// Verify a retained authoring/notebook report without executing cells or contacting CI.
+    fn developer_workbench_verify(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments).map_err(|error| {
+            format!("cannot encode developer workbench verification input: {error}")
+        })?;
+        if encoded.len() > 20_000_000 {
+            return Err(
+                "developer workbench verification input exceeds the 20000000-byte safety bound"
+                    .into(),
+            );
+        }
+        let request: WorkbenchVerificationRequest = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid developer workbench verification input: {error}"))?;
+        let report = verify_workbench(&request)
+            .map_err(|error| format!("developer workbench verification refused: {error}"))?;
+        let mut output = serde_json::to_value(report).map_err(|error| {
+            format!("cannot encode developer workbench verification report: {error}")
+        })?;
+        output["ok"] = json!(true);
+        output["workflow"] = json!("developer_workbench_verify");
+        output["workbench_verify_schema_version"] =
+            json!(bioprism_devplat::WORKBENCH_VERIFY_SCHEMA_VERSION);
+        Ok(output)
+    }
+
     /// Reconcile caller-supplied CI evidence against a freshly generated workbench plan.
     ///
     /// This is deliberately a structural audit: it never contacts a provider or executes the
@@ -33820,7 +33847,7 @@ pub fn workspace_capabilities() -> Value {
             "domains": ["diagnostics", "conformance", "cookbook", "SDK contracts", "signed bundles"],
             "crates": ["bioprism-devx", "bioprism-devplat", "bioprism-conformance", "bioprism-cookbook", "bioprism-sdk", "bioprism-bundle", "bioprism-scale", "bioprism-stewardship"],
             "python_artifacts": ["python/prism_sdk"],
-            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "engineering_execution_plan", "release_pipeline_audit", "operational_readiness_audit", "security_privacy_audit", "sandbox_admission_audit", "sandbox_runtime_simulate", "security_program_audit", "agent_mission", "developer_workbench", "ci_provider_normalize", "ci_provider_evidence_audit", "ci_execution_evidence_audit", "execution_provenance_audit", "developer_delivery_audit", "developer_delivery_receipt", "developer_delivery_receipt_verify", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
+            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "engineering_execution_plan", "release_pipeline_audit", "operational_readiness_audit", "security_privacy_audit", "sandbox_admission_audit", "sandbox_runtime_simulate", "security_program_audit", "agent_mission", "developer_workbench", "developer_workbench_verify", "ci_provider_normalize", "ci_provider_evidence_audit", "ci_execution_evidence_audit", "execution_provenance_audit", "developer_delivery_audit", "developer_delivery_receipt", "developer_delivery_receipt_verify", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
             "cli_entrypoints": ["--help", "--json"],
             "status": "available"
         }
@@ -37298,6 +37325,28 @@ pub fn tool_definitions() -> Vec<Value> {
                     "ci": { "type": "object", "description": "Optional CiRequest with workflow, triggers, rust_toolchain, checks, and offline. Generated YAML is returned but never executed or written." }
                 },
                 "required": ["session"]
+            }
+        }),
+        json!({
+            "name": "developer_workbench_verify",
+            "description": "Verify a retained developer_workbench authoring/notebook report against the current session, deterministically replay its dashboard projection, and optionally replay the original CiRequest. Digest and structural mismatches remain visible; this tool never runs notebook cells, writes YAML, contacts GitHub, executes CI, or grants release, scientific, clinical, safety, or production authority.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "session": { "type": "object", "description": "Current serialized bioprism-devplat StudioSession." },
+                    "report": { "type": "object", "description": "Complete retained developer_workbench report to verify." },
+                    "expected_report_digest": { "type": "string", "minLength": 64, "maxLength": 64, "description": "Optional lowercase SHA-256 digest of the canonical retained report." },
+                    "ci_replay": { "type": "object", "description": "Optional original CiRequest. Supplying it re-generates and compares the retained CI plan without executing it." },
+                    "policy": {
+                        "type": "object",
+                        "properties": {
+                            "require_dashboard": { "type": "boolean", "default": false },
+                            "require_ci": { "type": "boolean", "default": false },
+                            "require_ci_replay": { "type": "boolean", "default": false }
+                        }
+                    }
+                },
+                "required": ["session", "report"]
             }
         }),
         json!({
