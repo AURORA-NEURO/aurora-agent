@@ -13223,6 +13223,16 @@ mod tests {
 
     #[test]
     fn capability_route_rest_endpoints_return_raw_planning_reports() {
+        std::thread::Builder::new()
+            .name("capability-route-rest-endpoints".to_string())
+            .stack_size(8 * 1024 * 1024)
+            .spawn(capability_route_rest_endpoints_return_raw_planning_reports_inner)
+            .expect("large-stack capability route test thread must start")
+            .join()
+            .expect("large-stack capability route test thread must complete");
+    }
+
+    fn capability_route_rest_endpoints_return_raw_planning_reports_inner() {
         let router =
             ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
         let route = router.handle(request(
