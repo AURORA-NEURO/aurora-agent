@@ -1,9 +1,10 @@
 """Typed projections for the executable FIBER decision contract.
 
-`fiber-query/0.3` adds a decision-relative quotient summary to ``fiber_compile``. This module
-validates that summary without pretending the progressive-disclosure response contains the full
-certificate or the full model classes. The Rust compiler remains authoritative; Python only makes
-the published MCP projection safe and convenient to consume.
+`fiber-query/0.3` adds a decision-relative quotient summary and `fiber-query/0.4` adds a full
+bounded rate-distortion summary to ``fiber_compile``. This module validates those projections
+without pretending the progressive-disclosure response contains the full certificate. The Rust
+compiler remains authoritative; Python only makes the published MCP projections safe and
+convenient to consume.
 """
 
 from __future__ import annotations
@@ -21,6 +22,8 @@ from .errors import ArgumentError
 FIBER_DECISION_QUOTIENT_SCHEMA = "bioprism-mcp/epistemic-decision-quotient/0.1"
 FIBER_DECISION_QUOTIENT_BASIS = "permitted_loss_difference_profile"
 FIBER_DECISION_MAX_ACTIONS = 1_000
+FIBER_RATE_DISTORTION_SCHEMA = "bioprism-mcp/epistemic-context-audit/0.2"
+FIBER_RATE_DISTORTION_MAX_EVIDENCE = 16
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -150,9 +153,101 @@ def fiber_decision_quotient_summary(value: Mapping[str, Any]) -> FiberDecisionQu
     return FiberDecisionQuotientSummary.from_wire(value)
 
 
+@dataclass(frozen=True)
+class FiberRateDistortionSummary:
+    """Validated L0 observed-context rate-distortion summary from ``fiber_compile``."""
+
+    raw: dict[str, Any]
+    schema: str
+    criterion: str
+    tolerance: float
+    compatibility_floor: float
+    evidence_count: int
+    full_rate: float
+    identification: dict[str, Any]
+    sufficiency: dict[str, Any]
+    frontier: dict[str, Any]
+    query_sha256: str
+    certificate_sha256: str
+    guarantees: tuple[str, ...]
+    limitations: tuple[str, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "FiberRateDistortionSummary":
+        summary: Mapping[str, Any] | None = None
+        for candidate in _candidate_payloads(value):
+            possible = candidate.get("rate_distortion")
+            if isinstance(possible, Mapping):
+                summary = possible
+                break
+        if summary is None:
+            raise ArgumentError("response does not contain a fiber rate-distortion summary")
+
+        schema = _route_text("fiber rate-distortion schema", summary.get("schema"))
+        if schema != FIBER_RATE_DISTORTION_SCHEMA:
+            raise ArgumentError("fiber rate-distortion summary has an invalid schema")
+        criterion = _route_text("fiber rate-distortion criterion", summary.get("criterion"))
+        if criterion not in {"bayes_regret", "minimax_regret"}:
+            raise ArgumentError("fiber rate-distortion criterion is invalid")
+        tolerance = _finite("fiber rate-distortion tolerance", summary.get("tolerance"))
+        if tolerance < 0.0:
+            raise ArgumentError("fiber rate-distortion tolerance must be non-negative")
+        floor = _finite("fiber rate-distortion compatibility floor", summary.get("compatibility_floor"))
+        if not 0.0 <= floor <= 1.0:
+            raise ArgumentError("fiber rate-distortion compatibility floor must be between 0 and 1")
+        evidence_count = _count("fiber rate-distortion evidence count", summary.get("evidence_count"))
+        if evidence_count > FIBER_RATE_DISTORTION_MAX_EVIDENCE:
+            raise ArgumentError("fiber rate-distortion evidence count exceeds the exhaustive bound")
+        full_rate = _finite("fiber rate-distortion full rate", summary.get("full_rate"))
+        if full_rate < 0.0:
+            raise ArgumentError("fiber rate-distortion full rate must be non-negative")
+        identification = dict(_route_mapping("fiber rate-distortion identification", summary.get("identification")))
+        sufficiency = dict(_route_mapping("fiber rate-distortion sufficiency", summary.get("sufficiency")))
+        frontier = dict(_route_mapping("fiber rate-distortion frontier", summary.get("frontier")))
+        evaluated = _count("fiber rate-distortion evaluated contexts", frontier.get("evaluated"))
+        if evaluated == 0 or evaluated > (1 << FIBER_RATE_DISTORTION_MAX_EVIDENCE):
+            raise ArgumentError("fiber rate-distortion frontier evaluated count is outside the exhaustive bound")
+        binding = _route_mapping("fiber rate-distortion certificate binding", summary.get("certificate_binding"))
+        guarantees = _route_strings("fiber rate-distortion guarantees", summary.get("guarantees", []))
+        limitations = _route_strings("fiber rate-distortion limitations", summary.get("limitations", []))
+        return cls(
+            dict(summary),
+            schema,
+            criterion,
+            tolerance,
+            floor,
+            evidence_count,
+            full_rate,
+            identification,
+            sufficiency,
+            frontier,
+            _digest("fiber rate-distortion query_sha256", binding.get("query_sha256")),
+            _digest("fiber rate-distortion certificate_sha256", binding.get("certificate_sha256")),
+            tuple(guarantees),
+            tuple(limitations),
+        )
+
+    @property
+    def refused(self) -> bool:
+        return False
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+def fiber_rate_distortion_summary(value: Mapping[str, Any]) -> FiberRateDistortionSummary:
+    """Parse direct MCP output or an HTTP REST tool envelope from ``fiber_compile``."""
+
+    return FiberRateDistortionSummary.from_wire(value)
+
+
 __all__ = [
     "FIBER_DECISION_QUOTIENT_SCHEMA",
     "FIBER_DECISION_QUOTIENT_BASIS",
+    "FIBER_RATE_DISTORTION_SCHEMA",
+    "FIBER_RATE_DISTORTION_MAX_EVIDENCE",
     "FiberDecisionQuotientSummary",
+    "FiberRateDistortionSummary",
     "fiber_decision_quotient_summary",
+    "fiber_rate_distortion_summary",
 ]

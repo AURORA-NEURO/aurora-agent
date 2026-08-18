@@ -2510,9 +2510,29 @@ export interface FiberDecisionQuotientSummary extends JsonObject {
   limitations: string[];
 }
 
+export interface FiberRateDistortionSummary extends JsonObject {
+  schema: "bioprism-mcp/epistemic-context-audit/0.2";
+  criterion: "bayes_regret" | "minimax_regret";
+  tolerance: number;
+  compatibility_floor: number;
+  evidence_count: number;
+  full_rate: number;
+  identification: JsonObject;
+  sufficiency: JsonObject;
+  frontier: JsonObject;
+  certificate_binding: {
+    query_sha256: string;
+    certificate_sha256: string;
+    [key: string]: JsonValue;
+  };
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface FiberCompileResult extends JsonObject {
   layer?: "l0" | "l1" | "l2" | "l3" | "l4";
   decision_quotient?: FiberDecisionQuotientSummary;
+  rate_distortion?: FiberRateDistortionSummary;
   certificate_sha256?: string;
 }
 

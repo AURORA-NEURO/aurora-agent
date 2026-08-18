@@ -1809,6 +1809,37 @@ impl Server {
                 );
             }
 
+            if let Some(rate_distortion) = &out.trace.rate_distortion {
+                map.insert(
+                    "rate_distortion".into(),
+                    json!({
+                        "schema": "bioprism-mcp/epistemic-context-audit/0.2",
+                        "criterion": rate_distortion.criterion,
+                        "tolerance": rate_distortion.tolerance,
+                        "compatibility_floor": rate_distortion.compatibility_floor,
+                        "evidence_count": rate_distortion.evidence_count,
+                        "full_rate": rate_distortion.full_rate,
+                        "identification": rate_distortion.identification,
+                        "sufficiency": rate_distortion.sufficiency,
+                        "frontier": rate_distortion.frontier,
+                        "certificate_binding": {
+                            "query_sha256": out.certificate.source_hashes.query_sha256,
+                            "certificate_sha256": context.certificate_sha256,
+                        },
+                        "guarantees": [
+                            "frontier is exhaustive over the bounded observed evidence pool",
+                            "rate is summed evidence cost and distortion is decision regret",
+                            "identification, sufficiency and frontier remain separate evidence layers",
+                        ],
+                        "limitations": [
+                            "evidence is caller-declared and already observed; this is not acquisition value",
+                            "decision identification is not causal, biological, clinical or predictive identification",
+                            "the compiler does not claim contexts beyond the 16-item exhaustive boundary",
+                        ],
+                    }),
+                );
+            }
+
             let world = arguments
                 .get("world")
                 .and_then(Value::as_str)
@@ -1858,6 +1889,7 @@ impl Server {
                 "name": name, "reason": reason
             })).collect::<Vec<_>>(),
             "decision_quotient": out.trace.decision_quotient,
+            "rate_distortion": out.trace.rate_distortion,
             "selection": {
                 "facts": out.certificate.plan.compiled_fact_count,
                 "of_total": out.certificate.plan.total_fact_count,
@@ -31518,7 +31550,7 @@ pub fn tool_definitions() -> Vec<Value> {
         "type": "object",
         "properties": {
             "world": { "type": "string", "description": "Path to a fiber-world/0.1 document or an indexed store directory, relative to the server root." },
-            "query": { "type": "string", "description": "Path to a fiber-query/0.1, fiber-query/0.2, or fiber-query/0.3 document, relative to the server root. The 0.3 form carries a required explicit decision-loss matrix and permitted-action boundary." }
+            "query": { "type": "string", "description": "Path to a fiber-query/0.1, fiber-query/0.2, fiber-query/0.3, or fiber-query/0.4 document, relative to the server root. The 0.3 form carries the explicit decision-loss matrix and permitted-action boundary; 0.4 additionally carries bounded observed evidence for executable rate-distortion." }
         },
         "required": ["world", "query"]
     });
@@ -31529,7 +31561,8 @@ pub fn tool_definitions() -> Vec<Value> {
             "description": "Compile a typed decision query into the smallest decision-sufficient \
                 context. Returns the L0 decision contract — goal, verdict, what was omitted, and \
                 whether the sufficiency claim holds — plus a content-addressed handle for descending \
-                to evidence. It \
+                to evidence. A fiber-query/0.4 input also returns the exhaustive decision-relative \
+                rate-distortion identification, frontier and minimal-context result. It \
                 deliberately does not return the evidence: call fiber_refine when the contract is \
                 not enough to act on.",
             "inputSchema": {

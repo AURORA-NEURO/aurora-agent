@@ -26,7 +26,14 @@ use crate::policy::{self, PolicyEnvelope, PolicyOutcome, PolicyScreen, POLICY_RE
 use crate::qir::Query;
 use crate::slice::{backward_slice, max_selected_arity};
 use crate::temporal::{temporal_cut, TemporalCut};
-use bioprism_epistemic::{decision_equivalence_quotient, DecisionEquivalenceQuotient};
+use bioprism_epistemic::{
+    decision_equivalence_quotient,
+    ratedistortion::{
+        frontier as epistemic_frontier, identification as epistemic_identification,
+        AbstentionReason, DistortionCriterion, Frontier, Identification, Sufficiency,
+    },
+    DecisionEquivalenceQuotient,
+};
 use bioprism_ids::ContentHash;
 use bioprism_influence::summarise;
 use bioprism_section::{
@@ -34,6 +41,7 @@ use bioprism_section::{
     OmissionManifest, ReferenceOmissions, RefinementOption, SourceHashes, UnresolvedObligation,
 };
 use bioprism_world::{Fact, WorldSource};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -76,6 +84,27 @@ pub struct CompileTrace {
     /// The exact 43.10 quotient when the query supplied a `fiber-query/0.3` decision contract.
     /// `None` is meaningful: older wire versions remain executable but cannot claim this pass.
     pub decision_quotient: Option<DecisionEquivalenceQuotient>,
+    /// The exhaustive rate-distortion audit when a `fiber-query/0.4` observed-evidence contract
+    /// was supplied. `None` is meaningful: older queries cannot make a context-minimality claim.
+    pub rate_distortion: Option<RateDistortionTrace>,
+}
+
+/// The full bounded rate-distortion result projected into a compile trace.
+///
+/// The frontier is retained alongside identification and sufficiency because they answer
+/// different questions: model disagreement, whether any context meets tolerance, and the
+/// cheapest such context. A compact summary may omit points at the transport boundary, but the
+/// compiler keeps the exact kernel result available to explain/replay callers.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RateDistortionTrace {
+    pub criterion: DistortionCriterion,
+    pub tolerance: f64,
+    pub compatibility_floor: f64,
+    pub evidence_count: usize,
+    pub full_rate: f64,
+    pub identification: Identification,
+    pub sufficiency: Sufficiency,
+    pub frontier: Frontier,
 }
 
 #[derive(Debug, Clone)]
@@ -95,6 +124,82 @@ impl CompileOutput {
     pub fn policy_released_everything(&self) -> bool {
         self.trace.policy.released_everything_requested()
     }
+}
+
+fn execute_rate_distortion(
+    contract: &crate::qir::RateDistortionContract,
+    problem: &bioprism_epistemic::DecisionProblem,
+    tolerance: f64,
+) -> Result<RateDistortionTrace, FiberError> {
+    if !tolerance.is_finite() || tolerance < 0.0 {
+        return Err(FiberError::InvalidRateDistortionContract(
+            "distortion_tolerance must be finite and non-negative".into(),
+        ));
+    }
+    let identification = epistemic_identification(
+        problem,
+        &contract.prior,
+        &contract.evidence_pool,
+        tolerance,
+        contract.compatibility_floor,
+    )
+    .map_err(|error| FiberError::InvalidRateDistortionContract(error.to_string()))?;
+    let frontier = epistemic_frontier(
+        problem,
+        &contract.prior,
+        &contract.evidence_pool,
+        contract.criterion,
+        contract.compatibility_floor,
+    )
+    .map_err(|error| FiberError::InvalidRateDistortionContract(error.to_string()))?;
+    let full_rate = contract
+        .evidence_pool
+        .rate(&contract.evidence_pool.everything())
+        .map_err(|error| FiberError::InvalidRateDistortionContract(error.to_string()))?;
+
+    let sufficiency = if contract.criterion == DistortionCriterion::MinimaxRegret
+        && matches!(&identification, Identification::NonIdentified { .. })
+    {
+        let best_distortion = frontier
+            .points
+            .iter()
+            .map(|point| point.distortion)
+            .fold(f64::INFINITY, f64::min);
+        Sufficiency::Abstain {
+            reason: AbstentionReason::NonIdentifiedUnderAllEvidence,
+            best_distortion,
+            tolerance,
+        }
+    } else if let Some(point) = frontier.cheapest_within(tolerance) {
+        Sufficiency::Sufficient {
+            retained: point.retained.clone(),
+            rate: point.rate,
+            distortion: point.distortion,
+            full_rate,
+        }
+    } else {
+        let best_distortion = frontier
+            .points
+            .iter()
+            .map(|point| point.distortion)
+            .fold(f64::INFINITY, f64::min);
+        Sufficiency::Abstain {
+            reason: AbstentionReason::ToleranceUnattainable,
+            best_distortion,
+            tolerance,
+        }
+    };
+
+    Ok(RateDistortionTrace {
+        criterion: contract.criterion,
+        tolerance,
+        compatibility_floor: contract.compatibility_floor,
+        evidence_count: contract.evidence_pool.len(),
+        full_rate,
+        identification,
+        sufficiency,
+        frontier,
+    })
 }
 
 pub fn compile<S: WorldSource + ?Sized>(
@@ -120,6 +225,46 @@ pub fn compile<S: WorldSource + ?Sized>(
                 quotient.original_model_count,
                 quotient.quotient_model_count,
                 quotient.merged_model_count
+            ),
+        });
+    }
+
+    let rate_distortion = query
+        .rate_distortion
+        .as_ref()
+        .map(|contract| {
+            let problem = &query
+                .decision_contract
+                .as_ref()
+                .ok_or(FiberError::InvalidRateDistortionContract(
+                    "rate-distortion requires the decision contract".into(),
+                ))?
+                .problem;
+            let tolerance =
+                query
+                    .distortion_tolerance
+                    .ok_or(FiberError::InvalidRateDistortionContract(
+                        "rate-distortion requires distortion_tolerance".into(),
+                    ))?;
+            execute_rate_distortion(contract, problem, tolerance)
+        })
+        .transpose()?;
+    if let Some(report) = &rate_distortion {
+        let retained = match &report.sufficiency {
+            Sufficiency::Sufficient { retained, .. } => retained.len(),
+            Sufficiency::Abstain { .. } => 0,
+        };
+        passes.push(PassReceipt {
+            name: "rate_distortion",
+            retained,
+            note: format!(
+                "{} observed evidence item(s), {} exhaustive contexts evaluated under {}",
+                report.evidence_count,
+                report.frontier.evaluated,
+                match report.criterion {
+                    DistortionCriterion::BayesRegret => "Bayes regret",
+                    DistortionCriterion::MinimaxRegret => "minimax regret",
+                }
             ),
         });
     }
@@ -372,6 +517,7 @@ pub fn compile<S: WorldSource + ?Sized>(
             plan: evaluation,
             withheld_influence,
             decision_quotient,
+            rate_distortion,
         },
     })
 }
@@ -475,9 +621,11 @@ fn deferred_passes(query: &Query) -> Vec<(&'static str, &'static str)> {
             "43.10 is defined relative to permitted actions and decision loss; fiber-query/0.1 and fiber-query/0.2 do not carry the executable contract",
         ));
     }
-    deferred.push((
-        "rate_distortion",
-        "43.12 additionally requires compatible-model posteriors and observed evidence-pool likelihoods; fiber-query/0.3 carries neither binding, so the quotient does not get mislabelled as context optimisation",
-    ));
+    if !query.has_rate_distortion_contract() {
+        deferred.push((
+            "rate_distortion",
+            "43.12 requires a normalized model prior, an ordered observed evidence-pool likelihood binding, a compatible-model floor and a distortion tolerance; fiber-query/0.1 through fiber-query/0.3 carry no complete binding",
+        ));
+    }
     deferred
 }

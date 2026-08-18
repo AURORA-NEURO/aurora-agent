@@ -42,3 +42,40 @@ test("fiberCompile exposes the versioned decision quotient projection with certi
   assert.equal(projection.certificate_binding.query_sha256.length, 64);
   assert.equal(projection.quotient_model_count, 2);
 });
+
+test("fiberCompileRateDistortion exposes the exhaustive observed-context projection", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/fiber_compile");
+      return new Response(JSON.stringify({
+        ok: true,
+        tool: "fiber_compile",
+        request_id: "fiber-2",
+        mcp: { result: { structuredContent: {
+          layer: "l0",
+          rate_distortion: {
+            schema: "bioprism-mcp/epistemic-context-audit/0.2",
+            criterion: "bayes_regret",
+            tolerance: 0.25,
+            compatibility_floor: 0.05,
+            evidence_count: 2,
+            full_rate: 3,
+            identification: { status: "point_identified" },
+            sufficiency: { outcome: "sufficient" },
+            frontier: { evaluated: 4, points: [] },
+            certificate_binding: { query_sha256: "a".repeat(64), certificate_sha256: "b".repeat(64) },
+            guarantees: ["exhaustive"],
+            limitations: ["caller-declared"],
+          },
+        } } },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+
+  const response = await client.fiberCompileRateDistortion({ world: "fixtures/world.json", query: "fixtures/query-v04.json" });
+  const projection = response.mcp.result.structuredContent.rate_distortion;
+  assert.equal(projection.schema, "bioprism-mcp/epistemic-context-audit/0.2");
+  assert.equal(projection.frontier.evaluated, 4);
+  assert.equal(projection.certificate_binding.query_sha256.length, 64);
+});

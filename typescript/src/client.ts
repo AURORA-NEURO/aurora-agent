@@ -1498,8 +1498,13 @@ export class ApiClient {
     return this.callTool<EpistemicDecisionQuotientResult>("epistemic_decision_quotient", args, options);
   }
 
-  /** Compile a FIBER query; 0.3 responses carry a typed decision-quotient summary at L0. */
+  /** Compile a FIBER query; 0.3/0.4 responses carry typed decision projections at L0. */
   async fiberCompile(args: FiberCompileArgs, options?: ClientRequestOptions): Promise<RestToolResponse<FiberCompileResult>> {
+    return this.callTool<FiberCompileResult>("fiber_compile", args, options);
+  }
+
+  /** Compile a FIBER query whose 0.4 contract carries observed rate-distortion inputs. */
+  async fiberCompileRateDistortion(args: FiberCompileArgs, options?: ClientRequestOptions): Promise<RestToolResponse<FiberCompileResult>> {
     return this.callTool<FiberCompileResult>("fiber_compile", args, options);
   }
 

@@ -1,4 +1,5 @@
-//! Executable `fiber-query/0.3` coverage for blueprint 43.02 and the 43.10 quotient boundary.
+//! Executable `fiber-query/0.3` and `fiber-query/0.4` coverage for the decision and context
+//! boundaries in blueprint 43.02, 43.10 and 43.12.
 //!
 //! These tests intentionally exercise the published fixture rather than constructing a private
 //! Rust-only query. A wire contract is real only when its JSON, parser, compiler trace, certificate
@@ -23,6 +24,10 @@ fn fixture(relative: &str) -> Value {
 
 fn decision_query() -> Value {
     fixture("fixtures/fiber-v0.3/decision_contract_query.json")
+}
+
+fn rate_distortion_query() -> Value {
+    fixture("fixtures/fiber-v0.4/rate_distortion_query.json")
 }
 
 fn reference_world() -> World {
@@ -95,6 +100,56 @@ fn utility_sense_is_converted_once_at_the_wire_boundary() {
     assert_eq!(contract.sense.as_str(), "utility");
     assert_eq!(contract.problem.loss(0, 1), -7.0);
     assert_eq!(contract.problem.loss(1, 0), -4.0);
+}
+
+#[test]
+fn version_04_executes_identification_frontier_and_minimal_context() {
+    let query = Query::from_json(rate_distortion_query()).expect("0.4 query parses");
+    let contract = query
+        .rate_distortion
+        .as_ref()
+        .expect("0.4 carries a rate-distortion contract");
+    assert_eq!(contract.evidence_pool.len(), 2);
+    assert_eq!(contract.prior.len(), 3);
+    assert_eq!(contract.compatibility_floor, 0.05);
+
+    let out = compile(&reference_world(), &query).expect("0.4 query compiles");
+    let report = out
+        .trace
+        .rate_distortion
+        .as_ref()
+        .expect("the compiler ran the 43.12 context audit");
+    assert_eq!(report.frontier.evaluated, 4);
+    assert_eq!(report.evidence_count, 2);
+    assert!(report.full_rate > 0.0);
+    assert!(out
+        .trace
+        .passes
+        .iter()
+        .any(|pass| pass.name == "rate_distortion" && pass.retained <= 2));
+    assert!(!out
+        .trace
+        .deferred_passes
+        .iter()
+        .any(|(name, _)| *name == "rate_distortion"));
+}
+
+#[test]
+fn changing_observed_evidence_changes_rate_distortion_identity() {
+    let world = reference_world();
+    let first = Query::from_json(rate_distortion_query()).expect("first query parses");
+    let first_out = compile(&world, &first).expect("first query compiles");
+
+    let mut changed_raw = rate_distortion_query();
+    changed_raw["rate_distortion"]["evidence_pool"]["items"][0]["cost"] = json!(3.0);
+    let changed = Query::from_json(changed_raw).expect("changed query parses");
+    let changed_out = compile(&world, &changed).expect("changed query compiles");
+
+    assert_ne!(
+        first_out.certificate.source_hashes.query_sha256,
+        changed_out.certificate.source_hashes.query_sha256,
+        "observed evidence bindings are certificate inputs"
+    );
 }
 
 #[test]
@@ -174,6 +229,36 @@ fn malformed_contracts_are_refused_before_compilation() {
 }
 
 #[test]
+fn malformed_rate_distortion_bindings_are_refused_before_compilation() {
+    let cases: [(&str, QueryMutation); 5] = [
+        ("wrong prior shape", |raw: &mut Value| {
+            raw["rate_distortion"]["prior"] = json!([1.0]);
+        }),
+        ("negative compatibility floor", |raw: &mut Value| {
+            raw["rate_distortion"]["compatibility_floor"] = json!(-0.1);
+        }),
+        ("wrong likelihood shape", |raw: &mut Value| {
+            raw["rate_distortion"]["evidence_pool"]["items"][0]["likelihood"] = json!([1.0]);
+        }),
+        ("duplicate evidence id", |raw: &mut Value| {
+            raw["rate_distortion"]["evidence_pool"]["items"][1]["id"] = json!("scanner-review");
+        }),
+        ("unknown rate-distortion field", |raw: &mut Value| {
+            raw["rate_distortion"]["posterior"] = json!([0.5, 0.25, 0.25]);
+        }),
+    ];
+
+    for (label, mutate) in cases {
+        let mut raw = rate_distortion_query();
+        mutate(&mut raw);
+        assert!(
+            Query::from_json(raw).is_err(),
+            "malformed rate-distortion case {label:?} unexpectedly parsed"
+        );
+    }
+}
+
+#[test]
 fn the_published_schema_names_the_same_required_contract_boundary() {
     let schema: Value = serde_json::from_str(
         &std::fs::read_to_string(
@@ -201,4 +286,35 @@ fn the_published_schema_names_the_same_required_contract_boundary() {
     let required = schema["required"].as_array().expect("required is an array");
     assert!(required.iter().any(|item| item == "decision_loss"));
     assert!(required.iter().any(|item| item == "permitted_actions"));
+}
+
+#[test]
+fn the_published_v04_schema_names_the_rate_distortion_boundary() {
+    let schema: Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("..")
+                .join("..")
+                .join("schemas/fiber-v0.4/query.schema.json"),
+        )
+        .expect("0.4 schema is readable"),
+    )
+    .expect("0.4 schema is valid JSON");
+
+    assert_eq!(
+        schema["properties"]["schema_version"]["const"],
+        json!("fiber-query/0.4")
+    );
+    assert_eq!(
+        schema["properties"]["rate_distortion"]["properties"]["evidence_pool"]["properties"]
+            ["items"]["maxItems"],
+        json!(16)
+    );
+    let required = schema["required"].as_array().expect("required is an array");
+    for field in ["distortion_tolerance", "rate_distortion"] {
+        assert!(
+            required.iter().any(|item| item == field),
+            "{field} required"
+        );
+    }
 }

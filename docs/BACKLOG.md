@@ -116,8 +116,12 @@ benchmark execution, pack generation, SDKs, external APIs, or a public evaluatio
 The quotient additionally preserves model identity, permitted-action boundaries, exact loss-difference
 profiles, tie sets, and deterministic compression across Rust, MCP, Python, and TypeScript. The
 versioned `fiber-query/0.3` boundary now carries and executes that explicit contract inside FIBER;
-legacy 0.1/0.2 queries still defer the pass. Rate-distortion remains open at the wire boundary
-because compatible-model posteriors and evidence-pool likelihood bindings are not yet declared.
+legacy 0.1/0.2 queries still defer the pass. The versioned `fiber-query/0.4` boundary now also
+binds a normalized compatible-model prior, a bounded observed evidence pool, a compatibility
+floor, and a distortion tolerance, so FIBER can execute identification, exhaustive frontier
+enumeration, and minimal-sufficient-context classification. This remains a bounded observed
+context compiler: it does not perform adaptive acquisition, causal identification, or claim that
+an evidence item was actually acquired.
 The foundation contract surface is callable too: it keeps admissibility, refinement, applicability,
 counterfactual world strength, reveal policy, and plane consistency independent, without creating
 clinical authority, causal identification, or runtime world validation.

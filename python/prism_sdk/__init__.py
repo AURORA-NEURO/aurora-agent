@@ -452,8 +452,12 @@ from .context_requests import (
 from .fiber_contract import (
     FIBER_DECISION_QUOTIENT_BASIS,
     FIBER_DECISION_QUOTIENT_SCHEMA,
+    FIBER_RATE_DISTORTION_MAX_EVIDENCE,
+    FIBER_RATE_DISTORTION_SCHEMA,
     FiberDecisionQuotientSummary,
+    FiberRateDistortionSummary,
     fiber_decision_quotient_summary,
+    fiber_rate_distortion_summary,
 )
 from .dicom import DicomAdapter, DicomAuditResult, DicomFinding, audit_dicom
 from .domain_requests import (
@@ -3196,8 +3200,12 @@ __all__ = [
     "FiberVerifyRequest",
     "FIBER_DECISION_QUOTIENT_BASIS",
     "FIBER_DECISION_QUOTIENT_SCHEMA",
+    "FIBER_RATE_DISTORTION_MAX_EVIDENCE",
+    "FIBER_RATE_DISTORTION_SCHEMA",
     "FiberDecisionQuotientSummary",
+    "FiberRateDistortionSummary",
     "fiber_decision_quotient_summary",
+    "fiber_rate_distortion_summary",
     "LifecycleError",
     "InputRef",
     "MutationPlan",

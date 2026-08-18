@@ -64,11 +64,13 @@ The quotient does not claim:
 
 `fiber-query/0.1` and `fiber-query/0.2` carry neither `permitted_actions` nor `decision_loss`, so
 those queries continue to report the decision quotient as deferred. `fiber-query/0.3` is the
-versioned executable boundary: it makes both fields mandatory, bounds and validates the matrix,
-converts utility to loss once, and invokes the same kernel from `bioprism-fiber`. The complete raw
-query is already included in `source_hashes.query_sha256`, so changing the decision contract
-changes certificate identity. Rate-distortion remains deferred because 0.3 does not bind
-compatible-model posteriors or observed evidence-pool likelihoods.
+versioned executable decision boundary: it makes both fields mandatory, bounds and validates the
+matrix, converts utility to loss once, and invokes the same kernel from `bioprism-fiber`.
+`fiber-query/0.4` extends that boundary with the observed prior/evidence inputs and executes the
+rate-distortion audit described in
+[`FIBER_RATE_DISTORTION.md`](FIBER_RATE_DISTORTION.md). The complete raw query is already
+included in `source_hashes.query_sha256`, so changing any decision or evidence binding changes
+certificate identity.
 
 Python exposes `EpistemicDecisionQuotientArgs` and
 `epistemic_decision_quotient_report` over local MCP, sync HTTP, and async HTTP. TypeScript exposes

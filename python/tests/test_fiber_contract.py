@@ -7,8 +7,10 @@ import unittest
 from prism_sdk import (
     AsyncWorkspace,
     FiberDecisionQuotientSummary,
+    FiberRateDistortionSummary,
     Workspace,
     fiber_decision_quotient_summary,
+    fiber_rate_distortion_summary,
 )
 from prism_sdk.errors import ArgumentError
 from prism_sdk.models import ToolResult
@@ -33,7 +35,27 @@ def summary() -> dict:
 
 
 def compile_payload() -> dict:
-    return {"layer": "l0", "decision_quotient": summary()}
+    return {"layer": "l0", "decision_quotient": summary(), "rate_distortion": rate_summary()}
+
+
+def rate_summary() -> dict:
+    return {
+        "schema": "bioprism-mcp/epistemic-context-audit/0.2",
+        "criterion": "bayes_regret",
+        "tolerance": 0.25,
+        "compatibility_floor": 0.05,
+        "evidence_count": 2,
+        "full_rate": 3.0,
+        "identification": {"status": "point_identified", "action": 0},
+        "sufficiency": {"outcome": "sufficient", "retained": [0], "rate": 2.0},
+        "frontier": {"criterion": "bayes_regret", "evaluated": 4, "points": []},
+        "certificate_binding": {
+            "query_sha256": "a" * 64,
+            "certificate_sha256": "b" * 64,
+        },
+        "guarantees": ["exhaustive frontier"],
+        "limitations": ["caller-declared evidence"],
+    }
 
 
 class _SyncTool:
@@ -70,6 +92,26 @@ class FiberContractTests(unittest.TestCase):
             2 / 3,
         )
 
+    def test_rate_distortion_projection_validates_frontier_and_binding(self) -> None:
+        report = fiber_rate_distortion_summary(compile_payload())
+        self.assertIsInstance(report, FiberRateDistortionSummary)
+        self.assertEqual(report.criterion, "bayes_regret")
+        self.assertEqual(report.evidence_count, 2)
+        self.assertEqual(report.frontier["evaluated"], 4)
+        self.assertEqual(report.certificate_sha256, "b" * 64)
+
+    def test_rate_distortion_workspace_facades_preserve_the_same_projection(self) -> None:
+        self.assertEqual(
+            Workspace(_SyncTool()).fiber_compile_rate_distortion("world.json", "query.json").full_rate,
+            3.0,
+        )
+        self.assertEqual(
+            asyncio.run(
+                AsyncWorkspace(_AsyncTool()).fiber_compile_rate_distortion("world.json", "query.json")
+            ).tolerance,
+            0.25,
+        )
+
     def test_legacy_or_malformed_projection_fails_closed(self) -> None:
         with self.assertRaises(ArgumentError):
             fiber_decision_quotient_summary({"layer": "l0"})
@@ -77,3 +119,7 @@ class FiberContractTests(unittest.TestCase):
         broken["decision_quotient"]["merged_model_count"] = 0
         with self.assertRaises(ArgumentError):
             fiber_decision_quotient_summary(broken)
+        broken_rate = compile_payload()
+        broken_rate["rate_distortion"]["frontier"]["evaluated"] = 0
+        with self.assertRaises(ArgumentError):
+            fiber_rate_distortion_summary(broken_rate)

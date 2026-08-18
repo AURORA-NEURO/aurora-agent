@@ -214,7 +214,12 @@ from .context_requests import (
     FiberVerifyRequest,
     ProjectionBundleRequest,
 )
-from .fiber_contract import FiberDecisionQuotientSummary, fiber_decision_quotient_summary
+from .fiber_contract import (
+    FiberDecisionQuotientSummary,
+    FiberRateDistortionSummary,
+    fiber_decision_quotient_summary,
+    fiber_rate_distortion_summary,
+)
 from .delivery import DeveloperDeliveryAuditReport, developer_delivery_audit_report
 from .developer_platform import (
     DeveloperPlatformStatusArgs,
@@ -4024,6 +4029,17 @@ class Workspace:
 
         return fiber_decision_quotient_summary(self.fiber_compile(world, query, layer=layer))
 
+    def fiber_compile_rate_distortion(
+        self,
+        world: str | FiberCompileRequest,
+        query: str | None = None,
+        *,
+        layer: ContextLayer | str = ContextLayer.L0,
+    ) -> FiberRateDistortionSummary:
+        """Compile and validate the executable 0.4 rate-distortion projection."""
+
+        return fiber_rate_distortion_summary(self.fiber_compile(world, query, layer=layer))
+
     def fiber_refine(
         self,
         layer: ContextLayer | str | FiberRefineRequest,
@@ -7822,6 +7838,17 @@ class AsyncWorkspace:
         """Async counterpart to :meth:`Workspace.fiber_compile_decision_quotient`."""
 
         return fiber_decision_quotient_summary(await self.fiber_compile(world, query, layer=layer))
+
+    async def fiber_compile_rate_distortion(
+        self,
+        world: str | FiberCompileRequest,
+        query: str | None = None,
+        *,
+        layer: ContextLayer | str = ContextLayer.L0,
+    ) -> FiberRateDistortionSummary:
+        """Async counterpart to :meth:`Workspace.fiber_compile_rate_distortion`."""
+
+        return fiber_rate_distortion_summary(await self.fiber_compile(world, query, layer=layer))
 
     async def trace_otel_ingest(
         self,

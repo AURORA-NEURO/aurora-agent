@@ -8528,6 +8528,59 @@ fn compile_projects_the_wire_decision_quotient_without_claiming_rate_distortion(
         .any(|pass| pass["name"] == "decision_quotient"));
 }
 
+/// The 0.4 observed-evidence contract crosses MCP as a full, certificate-bound context audit.
+#[test]
+fn compile_projects_the_wire_rate_distortion_audit() {
+    let mut server = server();
+    let payload = call(
+        &mut server,
+        "fiber_compile",
+        json!({
+            "world": WORLD,
+            "query": "fixtures/fiber-v0.4/rate_distortion_query.json"
+        }),
+    );
+
+    let report = &payload["rate_distortion"];
+    assert_eq!(
+        report["schema"],
+        json!("bioprism-mcp/epistemic-context-audit/0.2")
+    );
+    assert_eq!(report["criterion"], json!("bayes_regret"));
+    assert_eq!(report["evidence_count"], json!(2));
+    assert_eq!(report["frontier"]["evaluated"], json!(4));
+    assert!(report["identification"].is_object());
+    assert!(report["sufficiency"].is_object());
+    assert_eq!(
+        report["certificate_binding"]["query_sha256"]
+            .as_str()
+            .map(str::len),
+        Some(64)
+    );
+    assert_eq!(
+        report["certificate_binding"]["certificate_sha256"],
+        payload["certificate_sha256"]
+    );
+
+    let explained = call(
+        &mut server,
+        "fiber_explain",
+        json!({
+            "world": WORLD,
+            "query": "fixtures/fiber-v0.4/rate_distortion_query.json"
+        }),
+    );
+    assert_eq!(
+        explained["rate_distortion"]["frontier"]["evaluated"],
+        json!(4)
+    );
+    assert!(explained["passes_not_run"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|pass| pass["name"] != "rate_distortion"));
+}
+
 #[test]
 fn a_refinement_handle_is_verified_and_stale_handles_are_refused() {
     let mut server = server();

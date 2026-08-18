@@ -18,9 +18,11 @@
 //! ```
 //!
 //! What this engine does *not* do is as important as what it does. It performs no gluing or
-//! obstruction analysis, no abstract interpretation and no rate-distortion optimisation. The
-//! versioned `fiber-query/0.3` boundary now carries the explicit permitted actions and decision
-//! loss needed by the 43.10 quotient, while older queries continue to report that pass deferred.
+//! obstruction analysis or abstract interpretation. The versioned `fiber-query/0.3` boundary
+//! carries the explicit permitted actions and decision loss needed by the 43.10 quotient, and
+//! `fiber-query/0.4` additionally executes the bounded observed-context rate-distortion audit.
+//! Older queries continue to report whichever decision-relative pass their wire form cannot state
+//! as deferred.
 //! Every compile reports the remaining gaps in [`CompileTrace::deferred_passes`] and on the
 //! certificate's `limitations`.
 //!
@@ -49,14 +51,15 @@ pub mod qir;
 pub mod slice;
 pub mod temporal;
 
-pub use compile::{compile, CompileOutput, CompileTrace, PassReceipt};
+pub use compile::{compile, CompileOutput, CompileTrace, PassReceipt, RateDistortionTrace};
 pub use error::FiberError;
 pub use influence::{CorrespondenceCheck, NotPosable, WithheldSplit, WithholdingAnalysis};
 pub use plan::{PlanEvaluation, PortfolioOutcome, RegionStatistics, DELIVERING_BACKEND};
 pub use policy::{PolicyEnvelope, PolicyOutcome, PolicyScreen, PolicyViolation};
 pub use qir::{
-    Budgets, DecisionContract, DecisionSense, Query, ACCEPTED_QUERY_SCHEMA_VERSIONS,
-    QUERY_DECISION_FIELD_PATHS, QUERY_DECISION_SCHEMA_VERSION, QUERY_FIELD_PATHS,
+    Budgets, DecisionContract, DecisionSense, Query, RateDistortionContract,
+    ACCEPTED_QUERY_SCHEMA_VERSIONS, QUERY_DECISION_FIELD_PATHS, QUERY_DECISION_SCHEMA_VERSION,
+    QUERY_FIELD_PATHS, QUERY_RATE_DISTORTION_FIELD_PATHS, QUERY_RATE_DISTORTION_SCHEMA_VERSION,
     QUERY_SCHEMA_VERSION, REFERENCE_GOAL,
 };
 pub use slice::{backward_slice, Slice};

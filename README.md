@@ -1057,7 +1057,7 @@ prints them:
 | Gluing and obstruction tests (43.06) | Requires a declared cover; `fiber-world/0.1` carries none |
 | Abstract interpretation (43.11) | Requires an abstract-domain registry absent from the wire schema |
 | FIBER wire integration of decision-equivalence quotient (43.10) | `fiber-query/0.3` now carries a bounded explicit loss/utility matrix and permitted-action boundary, and FIBER executes the exact quotient; 0.1/0.2 remain deferred |
-| FIBER wire integration of rate-distortion optimisation (43.12) | 0.3 supplies the loss table but not compatible-model posteriors or evidence-pool likelihood bindings, so the compiler keeps this pass deferred |
+| FIBER wire integration of rate-distortion optimisation (43.12) | `fiber-query/0.4` now binds a normalized prior, ordered observed evidence pool, compatibility floor and tolerance; FIBER executes identification, exhaustive frontier and minimal sufficiency. The 16-item bound and caller-declared model inputs remain explicit |
 
 The backend portfolio of 43.19–43.24 (FAQ/InsideOut, worst-case-optimal joins, tensor networks,
 decision diagrams, incremental view maintenance) is **not built**. `Backend` enumerates them so

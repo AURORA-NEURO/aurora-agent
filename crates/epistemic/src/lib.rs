@@ -178,9 +178,11 @@ pub use voi::{complementarity, joint_value, value_of_information, ValueOfInforma
 /// close one. A missing capability that is stated is a limitation; one that is implied to exist is
 /// a lie.
 pub const NOT_IMPLEMENTED: &[&str] = &[
-    "43.10: fiber-query/0.3 now carries the explicit permitted actions and decision-loss matrix \
-     and FIBER executes the exact decision-equivalence quotient; legacy 0.1/0.2 queries still \
-     defer the pass, and rate-distortion needs additional posterior/evidence bindings.",
+    "43.10/43.12: fiber-query/0.3 carries the explicit permitted actions and decision-loss matrix \
+     and fiber-query/0.4 adds normalized priors, bounded observed evidence likelihoods, a \
+     compatibility floor, and tolerance; FIBER executes the exact decision quotient plus the \
+     bounded identification/frontier/minimal-sufficiency audit. Legacy 0.1/0.2 queries still \
+     defer these passes, and the kernel remains non-adaptive and non-causal.",
     "43.50: causal identification in the do-calculus sense. There is no graph, no back-door or \
      front-door criterion, and no instrument. Identification here is decision-relative — whether \
      the surviving models disagree about what to do — and the type is named to force the \
