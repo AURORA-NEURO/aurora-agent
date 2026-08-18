@@ -2597,6 +2597,45 @@ export interface AdaptiveCostedResult extends JsonObject {
   limitations?: string[];
 }
 
+export type InterweaveWorkflowId =
+  | "reliable_software_repair"
+  | "scientific_claim_reproduction"
+  | "biomedical_research_data_audit"
+  | "incident_response"
+  | "evidence_grounded_policy_comparison"
+  | "dataset_transformation_molecule";
+
+export interface WorkflowExecutionArgs extends JsonObject {
+  workflow: InterweaveWorkflowId;
+  problem: EpistemicDecisionProblemArgs;
+  belief: EpistemicBeliefArgs;
+  acquisitions: EpistemicAcquisitionArgs[];
+  budget: number;
+  max_steps: number;
+  mode?: "simulate" | "replay";
+  provider?: string;
+  capabilities?: string[];
+  authorization?: { grant_id: string; provider: string; [key: string]: JsonValue };
+  observations?: Array<{ acquisition_id: string; outcome_label: string; [key: string]: JsonValue }>;
+  receipt?: JsonObject;
+}
+
+export interface WorkflowExecutionResult extends JsonObject {
+  ok: true;
+  schema: "bioprism-interweave/workflow-execution/0.1";
+  mode: "simulate" | "replay";
+  workflow: InterweaveWorkflowId;
+  plan_digest: string;
+  binding_digest: string;
+  binding: JsonObject;
+  completed: boolean;
+  release_posture: string;
+  receipt: JsonObject;
+  provenance_counts: { observed: number; simulated: number; replayed: number; [key: string]: JsonValue };
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface EpistemicDecisionQuotientArgs extends JsonObject {
   problem: EpistemicDecisionProblemArgs;
   permitted_actions: string[];

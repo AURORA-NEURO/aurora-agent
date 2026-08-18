@@ -200,6 +200,11 @@ from .adaptive_execution import (
     adaptive_costed_report,
     adaptive_execution_report,
 )
+from .workflow_execution import (
+    WorkflowExecutionReport,
+    WorkflowExecutionRequest,
+    workflow_execution_report,
+)
 from .delivery_receipt import (
     DeveloperDeliveryReceiptReport,
     DeveloperDeliveryReceiptRequest,
@@ -2283,6 +2288,23 @@ class ApiClient:
         """Return typed HTTP vector-cost planning evidence."""
 
         return adaptive_costed_report(self.epistemic_adaptive_costed(request))
+
+    def interweave_workflow_execute(
+        self,
+        request: WorkflowExecutionRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Simulate or replay a workflow-bound adaptive execution through HTTP."""
+
+        normalized = request if isinstance(request, WorkflowExecutionRequest) else WorkflowExecutionRequest.from_wire(request)
+        return self.call_tool("interweave_workflow_execute", normalized.to_mcp_arguments())
+
+    def interweave_workflow_execute_report(
+        self,
+        request: WorkflowExecutionRequest | Mapping[str, Any],
+    ) -> WorkflowExecutionReport:
+        """Return typed HTTP workflow execution and provenance evidence."""
+
+        return workflow_execution_report(self.interweave_workflow_execute(request))
 
     def epistemic_decision_quotient(
         self,
@@ -6505,6 +6527,23 @@ class AsyncApiClient:
         """Return typed async HTTP vector-cost planning evidence."""
 
         return adaptive_costed_report(await self.epistemic_adaptive_costed(request))
+
+    async def interweave_workflow_execute(
+        self,
+        request: WorkflowExecutionRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Simulate or replay a workflow-bound adaptive execution through async HTTP."""
+
+        normalized = request if isinstance(request, WorkflowExecutionRequest) else WorkflowExecutionRequest.from_wire(request)
+        return await self.call_tool("interweave_workflow_execute", normalized.to_mcp_arguments())
+
+    async def interweave_workflow_execute_report(
+        self,
+        request: WorkflowExecutionRequest | Mapping[str, Any],
+    ) -> WorkflowExecutionReport:
+        """Return typed async HTTP workflow execution and provenance evidence."""
+
+        return workflow_execution_report(await self.interweave_workflow_execute(request))
 
     async def epistemic_decision_quotient(
         self,

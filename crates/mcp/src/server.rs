@@ -243,7 +243,14 @@ use bioprism_infra::{
     KeySchema, Purpose, ReferenceSets, ResourceId, ReuseRule, StorageClass, StorageQuota, Tier,
     TieringPolicy,
 };
-use bioprism_interweave::workflow::{catalogue as interweave_catalogue, outstanding_deliverables};
+use bioprism_interweave::workflow::{
+    catalogue as interweave_catalogue, outstanding_deliverables, WorkflowId as InterweaveWorkflowId,
+};
+use bioprism_interweave::workflow_execution::{
+    WorkflowExecutionBinding as InterweaveWorkflowExecutionBinding,
+    WorkflowExecutionReceipt as InterweaveWorkflowExecutionReceipt,
+    WORKFLOW_EXECUTION_SCHEMA as INTERWEAVE_WORKFLOW_EXECUTION_SCHEMA,
+};
 use bioprism_lab::{
     evolution::{ChangeProposal, ContaminationRecord, EvolutionCard},
     expand as expand_acquisitions,
@@ -1656,6 +1663,7 @@ impl Server {
                     ],
                 }))
             }
+            "interweave_workflow_execute" => self.interweave_workflow_execute(&arguments),
             "atlas_report" => self.atlas_report(&arguments),
             "atlas_surface_audit" => self.atlas_surface_audit(&arguments),
             "adaptive_panel" => self.adaptive_panel(&arguments),
@@ -14303,6 +14311,184 @@ impl Server {
                 "the MCP surface provides a simulated adapter for local contract testing; external providers must implement the Rust acquisition seam",
                 "an observed provenance label is a provider declaration, not authentication, consent, chain of custody, or clinical/release authority",
                 "the decision policy remains conditional-independence, model-relative planning rather than causal or predictive truth",
+            ],
+        }))
+    }
+
+    fn interweave_workflow_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let mode = arguments
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("simulate");
+        if mode != "simulate" && mode != "replay" {
+            return Err("mode must be \"simulate\" or \"replay\"".into());
+        }
+        let workflow: InterweaveWorkflowId = serde_json::from_value(
+            arguments
+                .get("workflow")
+                .cloned()
+                .ok_or("workflow is required and must be one of the six reference workflow ids")?,
+        )
+        .map_err(|error| format!("invalid workflow: {error}"))?;
+        let problem: EpistemicDecisionProblem = serde_json::from_value(
+            arguments
+                .get("problem")
+                .cloned()
+                .ok_or("problem is required")?,
+        )
+        .map_err(|error| format!("invalid decision problem: {error}"))?;
+        let belief: EpistemicBelief = serde_json::from_value(
+            arguments
+                .get("belief")
+                .cloned()
+                .ok_or("belief is required")?,
+        )
+        .map_err(|error| format!("invalid belief: {error}"))?;
+        let acquisitions: Vec<EpistemicAcquisition> = serde_json::from_value(
+            arguments
+                .get("acquisitions")
+                .cloned()
+                .ok_or("acquisitions is required")?,
+        )
+        .map_err(|error| format!("invalid acquisitions: {error}"))?;
+        let budget = arguments
+            .get("budget")
+            .and_then(Value::as_f64)
+            .ok_or("budget is required and must be a finite non-negative number")?;
+        let max_steps = arguments
+            .get("max_steps")
+            .and_then(Value::as_u64)
+            .ok_or("max_steps is required and must be an integer")?
+            as usize;
+        let plan = EpistemicAdaptivePlan::new(problem, belief, acquisitions, budget, max_steps)
+            .map_err(|error| format!("adaptive plan refused: {error}"))?;
+        let plan_digest = plan
+            .digest()
+            .map_err(|error| format!("cannot digest adaptive plan: {error}"))?;
+        let provider = arguments
+            .get("provider")
+            .and_then(Value::as_str)
+            .unwrap_or("mcp-simulated")
+            .to_string();
+        let capabilities = arguments
+            .get("capabilities")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .enumerate()
+            .map(|(index, value)| {
+                value
+                    .as_str()
+                    .filter(|text| !text.trim().is_empty())
+                    .map(str::to_string)
+                    .ok_or_else(|| format!("capabilities[{index}] must be a non-empty string"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let binding = InterweaveWorkflowExecutionBinding::bind(
+            workflow,
+            &plan,
+            provider.clone(),
+            capabilities,
+        )
+        .map_err(|error| format!("workflow binding refused: {error}"))?;
+
+        let receipt = if mode == "replay" {
+            let prior: InterweaveWorkflowExecutionReceipt = serde_json::from_value(
+                arguments
+                    .get("receipt")
+                    .cloned()
+                    .ok_or("receipt is required in replay mode")?,
+            )
+            .map_err(|error| format!("invalid workflow execution receipt: {error}"))?;
+            binding
+                .replay(&plan, &prior)
+                .map_err(|error| format!("workflow replay refused: {error}"))?
+        } else {
+            let grant = match arguments.get("authorization") {
+                None => None,
+                Some(raw) => {
+                    let object = raw.as_object().ok_or("authorization must be an object")?;
+                    let grant_id = object
+                        .get("grant_id")
+                        .and_then(Value::as_str)
+                        .ok_or("authorization.grant_id is required")?;
+                    let authorized_provider = object
+                        .get("provider")
+                        .and_then(Value::as_str)
+                        .ok_or("authorization.provider is required")?;
+                    Some(
+                        EpistemicExecutionGrant::issue(
+                            grant_id,
+                            plan_digest.clone(),
+                            authorized_provider,
+                        )
+                        .map_err(|error| format!("authorization refused: {error}"))?,
+                    )
+                }
+            };
+            let raw_observations = arguments
+                .get("observations")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            if raw_observations.len() > 16 {
+                return Err("observations cannot exceed the exact 16-step bound".into());
+            }
+            let script = raw_observations
+                .iter()
+                .enumerate()
+                .map(|(index, raw)| {
+                    let object = raw
+                        .as_object()
+                        .ok_or_else(|| format!("observations[{index}] must be an object"))?;
+                    let acquisition_id = object
+                        .get("acquisition_id")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| {
+                            format!("observations[{index}].acquisition_id is required")
+                        })?;
+                    let outcome_label = object
+                        .get("outcome_label")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| {
+                            format!("observations[{index}].outcome_label is required")
+                        })?;
+                    Ok((acquisition_id.to_string(), outcome_label.to_string()))
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            let mut executor = EpistemicScriptedExecutor::simulated(provider, script);
+            binding
+                .execute(&plan, grant.as_ref(), &mut executor)
+                .map_err(|error| format!("workflow execution refused: {error}"))?
+        };
+        let (observed, simulated, replayed) = receipt.provenance_counts();
+        Ok(json!({
+            "ok": true,
+            "schema": INTERWEAVE_WORKFLOW_EXECUTION_SCHEMA,
+            "mode": mode,
+            "workflow": workflow,
+            "plan_digest": plan_digest,
+            "binding_digest": binding.digest(),
+            "binding": binding,
+            "completed": receipt.is_completed(),
+            "release_posture": receipt.release_posture(),
+            "receipt": receipt,
+            "provenance_counts": {
+                "observed": observed,
+                "simulated": simulated,
+                "replayed": replayed,
+            },
+            "guarantees": [
+                "workflow identity, workflow specification, adaptive plan, provider, and capability declarations are digest-bound",
+                "no provider call occurs without an explicit plan-scoped authorization grant",
+                "simulation rows remain simulated and replay rows remain replayed",
+                "workflow effect prohibitions are returned as metadata and are not silently treated as release authority",
+            ],
+            "limitations": [
+                "the built-in MCP adapter is a deterministic simulator; real providers remain external Rust acquisition executors",
+                "capability labels and provider provenance are declarations until a domain authority verifies them",
+                "this route produces a receipt and never schedules participants, publishes results, or authorizes an external effect",
             ],
         }))
     }
@@ -32006,7 +32192,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "agent_orchestration",
             "domains": ["typed acts", "session types", "budgets", "sagas", "quorum"],
             "crates": ["bioprism-weave", "bioprism-weavelang", "bioprism-choreography", "bioprism-fabric", "bioprism-interweave"],
-            "mcp_tools": ["weave_protocol_catalog", "weavelang_compile", "choreography_check", "fabric_synthesize", "interweave_workflow_catalogue", "mission_evaluator_discover", "mission_evaluator_review", "mission_evaluator_replay", "mission_evaluator_replay_compare", "mission_evidence_bundle_verify", "mission_evidence_bundle_import", "mission_evidence_bundle_query", "mission_evidence_bundle_get"],
+            "mcp_tools": ["weave_protocol_catalog", "weavelang_compile", "choreography_check", "fabric_synthesize", "interweave_workflow_catalogue", "interweave_workflow_execute", "mission_evaluator_discover", "mission_evaluator_review", "mission_evaluator_replay", "mission_evaluator_replay_compare", "mission_evidence_bundle_verify", "mission_evidence_bundle_import", "mission_evidence_bundle_query", "mission_evidence_bundle_get"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -33661,6 +33847,28 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {},
                 "required": []
+            }
+        }),
+        json!({
+            "name": "interweave_workflow_execute",
+            "description": "Bind one of the six typed Agent Interweave workflows to a validated epistemic adaptive plan and return a deterministic simulated or receipt-only replay result. Authorization, provenance, workflow identity, effect prohibitions, and release limitations remain explicit; this tool never performs an external workflow effect.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "workflow": { "type": "string", "enum": ["reliable_software_repair", "scientific_claim_reproduction", "biomedical_research_data_audit", "incident_response", "evidence_grounded_policy_comparison", "dataset_transformation_molecule"], "description": "One of the six closed reference workflow identities." },
+                    "problem": { "type": "object", "description": "Serialized epistemic DecisionProblem defining actions, outcomes, and utilities." },
+                    "belief": { "type": "object", "description": "Serialized epistemic Belief over the declared outcome space." },
+                    "acquisitions": { "type": "array", "minItems": 1, "maxItems": 16, "description": "Serialized bounded information acquisitions available to the adaptive plan." },
+                    "budget": { "type": "number", "minimum": 0, "description": "Finite non-negative scalar path budget for the adaptive plan." },
+                    "max_steps": { "type": "integer", "minimum": 0, "maximum": 16, "description": "Maximum number of adaptive acquisition steps." },
+                    "mode": { "type": "string", "enum": ["simulate", "replay"], "default": "simulate", "description": "Simulate through the deterministic local adapter or replay a supplied receipt." },
+                    "provider": { "type": "string", "description": "Provider identity bound into the workflow execution digest; defaults to mcp-simulated." },
+                    "capabilities": { "type": "array", "maxItems": 32, "items": { "type": "string" }, "description": "Optional non-empty capability labels bound into the workflow execution digest." },
+                    "authorization": { "type": "object", "description": "Optional {grant_id, provider} plan-scoped authorization. Omission returns a structured no-grant refusal." },
+                    "observations": { "type": "array", "maxItems": 16, "description": "Optional deterministic simulated rows of {acquisition_id, outcome_label}; omitted rows are not fabricated." },
+                    "receipt": { "type": "object", "description": "Required in replay mode: a prior workflow execution receipt from this same binding and plan." }
+                },
+                "required": ["workflow", "problem", "belief", "acquisitions", "budget", "max_steps"]
             }
         }),
         json!({

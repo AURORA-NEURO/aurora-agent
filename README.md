@@ -572,7 +572,9 @@ the FIBER compiler and returns a certificate-bound named policy tree with `execu
 typed replay-safe projection of that boundary.
 The interweave catalogue now has a typed workflow execution binding that carries workflow identity,
 capabilities, effect prohibitions, plan digests, explicit grants, and receipt-only replay across
-all six reference workflow identities without claiming generic release authority. See
+all six reference workflow identities without claiming generic release authority. The
+`interweave_workflow_execute` MCP route and the Python/TypeScript facades expose deterministic
+simulation, structured no-grant refusal, and same-binding receipt replay. See
 [`docs/WORKFLOW_EXECUTION_BINDING.md`](docs/WORKFLOW_EXECUTION_BINDING.md).
 `benchmark_trace_analyze` adds the deeper benchmark compiler's causal, episode, boundary, and
 repetition analysis; the Python and TypeScript SDKs expose typed trace events, causal score

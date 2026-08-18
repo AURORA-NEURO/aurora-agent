@@ -205,6 +205,11 @@ from .adaptive_execution import (
     adaptive_costed_report,
     adaptive_execution_report,
 )
+from .workflow_execution import (
+    WorkflowExecutionReport,
+    WorkflowExecutionRequest,
+    workflow_execution_report,
+)
 from .delivery_receipt import (
     DeveloperDeliveryReceiptReport,
     DeveloperDeliveryReceiptRequest,
@@ -3641,6 +3646,26 @@ class Workspace:
         """Return typed vector dimensions, policy, or fail-closed cost refusal."""
 
         return adaptive_costed_report(self.epistemic_adaptive_costed(request))
+
+    def interweave_workflow_execute(
+        self,
+        request: WorkflowExecutionRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Simulate or replay a workflow-bound adaptive execution through workspace MCP."""
+
+        normalized = request if isinstance(request, WorkflowExecutionRequest) else WorkflowExecutionRequest.from_wire(request)
+        result = self.client.call_tool("interweave_workflow_execute", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def interweave_workflow_execute_report(
+        self,
+        request: WorkflowExecutionRequest | Mapping[str, Any],
+    ) -> WorkflowExecutionReport:
+        """Return typed workflow identity, receipt, provenance, and release-posture evidence."""
+
+        return workflow_execution_report(self.interweave_workflow_execute(request))
 
     def epistemic_decision_quotient(
         self,
@@ -7453,6 +7478,26 @@ class AsyncWorkspace:
         """Return async typed vector-cost planning evidence."""
 
         return adaptive_costed_report(await self.epistemic_adaptive_costed(request))
+
+    async def interweave_workflow_execute(
+        self,
+        request: WorkflowExecutionRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Simulate or replay a workflow-bound adaptive execution through async workspace MCP."""
+
+        normalized = request if isinstance(request, WorkflowExecutionRequest) else WorkflowExecutionRequest.from_wire(request)
+        result = await self.client.call_tool("interweave_workflow_execute", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def interweave_workflow_execute_report(
+        self,
+        request: WorkflowExecutionRequest | Mapping[str, Any],
+    ) -> WorkflowExecutionReport:
+        """Return typed async workspace workflow execution evidence."""
+
+        return workflow_execution_report(await self.interweave_workflow_execute(request))
 
     async def epistemic_decision_quotient(
         self,

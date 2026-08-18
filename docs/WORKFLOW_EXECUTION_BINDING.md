@@ -22,9 +22,10 @@ effect posture changes the binding digest even if the epistemic plan stays uncha
 
 ## Execution and replay
 
-`WorkflowExecutionBinding::execute` accepts an explicit `ExecutionGrant` and a mutable
+`WorkflowExecutionBinding::execute` accepts an optional explicit `ExecutionGrant` and a mutable
 `AcquisitionExecutor`, then returns a `WorkflowExecutionReceipt` containing the lower-level
-adaptive receipt. It does not infer capabilities from a provider, authorize a human, schedule a
+adaptive receipt. Omitting the grant is a valid, structured refusal path and does not call the
+executor. It does not infer capabilities from a provider, authorize a human, schedule a
 participant, publish a result, or perform an effect. A completed adaptive receipt is therefore not
 a release decision.
 
@@ -37,3 +38,30 @@ This makes the same seam usable for software repair, claim reproduction, researc
 incident response, policy comparison, and dataset transformation while preserving domain-specific
 authority outside the generic kernel. Each domain still needs its own consent, privacy, safety,
 rollback, publication, or human-approval gate before any effectful release.
+
+## MCP and SDK contract
+
+The `interweave_workflow_execute` MCP tool exposes this binding end to end for deterministic local
+contract testing. Its required inputs are a closed workflow id, serialized decision problem and
+belief, one to sixteen acquisitions, a finite scalar budget, and a zero-to-sixteen step bound.
+Optional capabilities are digest-bound metadata. `mode: "simulate"` uses the built-in scripted
+adapter and preserves `simulated` provenance; `mode: "replay"` requires a receipt from the exact
+same workflow, plan, provider, capability set, and binding digest. `authorization` is optional so
+the no-grant refusal can be inspected without any provider call.
+
+The six accepted identities are:
+
+- `reliable_software_repair`
+- `scientific_claim_reproduction`
+- `biomedical_research_data_audit`
+- `incident_response`
+- `evidence_grounded_policy_comparison`
+- `dataset_transformation_molecule`
+
+The route returns the workflow and plan/binding digests, binding metadata, completed/refused
+status, provenance counts, the nested receipt, and the explicit posture
+`workflow_receipt_only_external_release_not_authorized`. The Python SDK provides
+`WorkflowExecutionRequest` and `WorkflowExecutionReport` through synchronous/asynchronous
+Workspace and HTTP clients. The TypeScript SDK provides `WorkflowExecutionArgs`,
+`WorkflowExecutionResult`, and `client.interweaveWorkflowExecute`. These facades validate the
+closed workflow set, bounds, mode, capabilities, and replay receipt before transport.

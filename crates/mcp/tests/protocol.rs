@@ -323,7 +323,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 215);
+    assert_eq!(tools.len(), 216);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -7868,12 +7868,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(215));
-    assert_eq!(result["advertised_tool_count"], json!(215));
+    assert_eq!(result["unique_catalog_tools"], json!(216));
+    assert_eq!(result["advertised_tool_count"], json!(216));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(215));
-    assert_eq!(result["schema_quality"]["valid"], json!(215));
+    assert_eq!(result["schema_quality"]["checked"], json!(216));
+    assert_eq!(result["schema_quality"]["valid"], json!(216));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -13563,6 +13563,87 @@ fn epistemic_adaptive_execute_requires_authorization_and_replays_simulated_prefi
     assert_eq!(replay["receipt"]["status"], json!("completed"));
     assert_eq!(replay["provenance_counts"]["replayed"], json!(2));
     assert_eq!(replay["provenance_counts"]["simulated"], json!(0));
+}
+
+#[test]
+fn interweave_workflow_execute_binds_all_reference_workflows_and_replays_receipts() {
+    let workflows = [
+        "reliable_software_repair",
+        "scientific_claim_reproduction",
+        "biomedical_research_data_audit",
+        "incident_response",
+        "evidence_grounded_policy_comparison",
+        "dataset_transformation_molecule",
+    ];
+    let base = json!({
+        "problem": {
+            "actions": ["choose-m0", "choose-m1"],
+            "models": ["m0", "m1"],
+            "loss": [0.0, 1.0, 1.0, 0.0]
+        },
+        "belief": { "mass": [0.5, 0.5] },
+        "acquisitions": [{
+            "id": "screen",
+            "cost": 0.01,
+            "outcomes": [
+                { "label": "positive", "likelihood": [0.9, 0.2] },
+                { "label": "negative", "likelihood": [0.1, 0.8] }
+            ]
+        }],
+        "budget": 0.1,
+        "max_steps": 1,
+        "provider": "mcp-simulated",
+        "capabilities": ["receipt-only"],
+        "observations": [{ "acquisition_id": "screen", "outcome_label": "negative" }]
+    });
+    for workflow in workflows {
+        let mut denied = base.clone();
+        denied["workflow"] = json!(workflow);
+        let refused = call(&mut server(), "interweave_workflow_execute", denied.clone());
+        assert_eq!(refused["ok"], json!(true));
+        assert_eq!(refused["workflow"], json!(workflow));
+        assert_eq!(refused["receipt"]["adaptive"]["status"], json!("refused"));
+        assert_eq!(
+            refused["receipt"]["adaptive"]["refusal"],
+            json!("authorization_required")
+        );
+
+        denied["authorization"] = json!({
+            "grant_id": "workflow-grant",
+            "provider": "mcp-simulated"
+        });
+        let simulated = call(&mut server(), "interweave_workflow_execute", denied.clone());
+        assert_eq!(simulated["completed"], json!(true));
+        assert_eq!(
+            simulated["receipt"]["adaptive"]["status"],
+            json!("completed")
+        );
+        assert_eq!(simulated["provenance_counts"]["simulated"], json!(1));
+        assert_eq!(
+            simulated["release_posture"],
+            json!("workflow_receipt_only_external_release_not_authorized")
+        );
+
+        let replay = call(
+            &mut server(),
+            "interweave_workflow_execute",
+            json!({
+                "mode": "replay",
+                "workflow": workflow,
+                "problem": denied["problem"].clone(),
+                "belief": denied["belief"].clone(),
+                "acquisitions": denied["acquisitions"].clone(),
+                "budget": 0.1,
+                "max_steps": 1,
+                "provider": "mcp-simulated",
+                "capabilities": ["receipt-only"],
+                "receipt": simulated["receipt"].clone()
+            }),
+        );
+        assert_eq!(replay["completed"], json!(true));
+        assert_eq!(replay["provenance_counts"]["replayed"], json!(1));
+        assert_eq!(replay["provenance_counts"]["simulated"], json!(0));
+    }
 }
 
 #[test]

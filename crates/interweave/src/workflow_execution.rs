@@ -117,14 +117,14 @@ impl WorkflowExecutionBinding {
     pub fn execute<E: AcquisitionExecutor>(
         &self,
         plan: &AdaptivePlan,
-        grant: &ExecutionGrant,
+        grant: Option<&ExecutionGrant>,
         executor: &mut E,
     ) -> Result<WorkflowExecutionReceipt, WorkflowExecutionError> {
         self.validate_against(plan)?;
         if executor.provider_id() != self.provider_id {
             return Err(WorkflowExecutionError::BindingMismatch);
         }
-        let adaptive = plan.execute(Some(grant), executor)?;
+        let adaptive = plan.execute(grant, executor)?;
         let receipt = WorkflowExecutionReceipt {
             schema: WORKFLOW_EXECUTION_SCHEMA.into(),
             workflow: self.workflow,
@@ -308,7 +308,7 @@ mod tests {
             vec![("screen".into(), "negative".into())],
         );
         let receipt = binding
-            .execute(&plan, &grant, &mut executor)
+            .execute(&plan, Some(&grant), &mut executor)
             .expect("execution");
         assert!(receipt.is_completed());
         assert_eq!(receipt.provenance_counts(), (0, 1, 0));
@@ -344,7 +344,7 @@ mod tests {
             vec![("screen".into(), "negative".into())],
         );
         let receipt = other
-            .execute(&plan, &grant, &mut executor)
+            .execute(&plan, Some(&grant), &mut executor)
             .expect("execution");
         assert!(matches!(
             binding.replay(&plan, &receipt),

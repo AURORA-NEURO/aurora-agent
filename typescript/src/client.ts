@@ -249,6 +249,8 @@ import type {
   AdaptiveExecutionResult,
   AdaptiveCostedArgs,
   AdaptiveCostedResult,
+  WorkflowExecutionArgs,
+  WorkflowExecutionResult,
   EpistemicDecisionQuotientArgs,
   EpistemicDecisionQuotientResult,
   FiberCompileArgs,
@@ -1524,6 +1526,23 @@ export class ApiClient {
     }
     if ([args.weights.tokens, args.weights.compute_ms, args.weights.latency_ms, args.weights.money_usd, args.weights.privacy_loss, args.weights.specimen_units, args.weights.expert_minutes].every((value) => value === 0)) throw new ArgumentError("weights must contain at least one positive dimension");
     return this.callTool<AdaptiveCostedResult>("epistemic_adaptive_costed", args, options);
+  }
+
+  async interweaveWorkflowExecute(args: WorkflowExecutionArgs, options?: ClientRequestOptions): Promise<RestToolResponse<WorkflowExecutionResult>> {
+    if (!isObject(args)) throw new ArgumentError("workflow execution arguments must be an object");
+    const workflows = ["reliable_software_repair", "scientific_claim_reproduction", "biomedical_research_data_audit", "incident_response", "evidence_grounded_policy_comparison", "dataset_transformation_molecule"];
+    if (!workflows.includes(args.workflow)) throw new ArgumentError("workflow must be one of the six reference workflow ids");
+    if (!isObject(args.problem) || !isObject(args.belief)) throw new ArgumentError("problem and belief must be objects");
+    if (!Number.isFinite(args.budget) || args.budget < 0) throw new ArgumentError("budget must be a finite non-negative number");
+    if (!Number.isSafeInteger(args.max_steps) || args.max_steps < 0 || args.max_steps > 16) throw new ArgumentError("max_steps must be 0..=16");
+    if (!Array.isArray(args.acquisitions) || args.acquisitions.length < 1 || args.acquisitions.length > 16) throw new ArgumentError("acquisitions must contain 1..=16 items");
+    if (args.mode !== undefined && args.mode !== "simulate" && args.mode !== "replay") throw new ArgumentError("mode must be simulate or replay");
+    if (args.provider !== undefined && (typeof args.provider !== "string" || args.provider.trim().length === 0)) throw new ArgumentError("provider must be a non-empty string");
+    if (args.capabilities !== undefined && (!Array.isArray(args.capabilities) || args.capabilities.length > 32 || args.capabilities.some((item) => typeof item !== "string" || item.trim().length === 0))) throw new ArgumentError("capabilities must contain at most 32 non-empty strings");
+    if (args.observations !== undefined && (!Array.isArray(args.observations) || args.observations.length > 16 || args.observations.some((item) => !isObject(item) || typeof item.acquisition_id !== "string" || typeof item.outcome_label !== "string"))) throw new ArgumentError("observations must contain at most 16 typed rows");
+    if (args.authorization !== undefined && (!isObject(args.authorization) || typeof args.authorization.grant_id !== "string" || typeof args.authorization.provider !== "string")) throw new ArgumentError("authorization must contain grant_id and provider");
+    if (args.mode === "replay" && !isObject(args.receipt)) throw new ArgumentError("receipt is required in replay mode");
+    return this.callTool<WorkflowExecutionResult>("interweave_workflow_execute", args, options);
   }
 
   async epistemicDecisionQuotient(args: EpistemicDecisionQuotientArgs, options?: ClientRequestOptions): Promise<RestToolResponse<EpistemicDecisionQuotientResult>> {

@@ -423,6 +423,13 @@ from .adaptive_execution import (
     adaptive_costed_report,
     adaptive_execution_report,
 )
+from .workflow_execution import (
+    INTERWEAVE_WORKFLOW_IDS,
+    WORKFLOW_EXECUTION_SCHEMA,
+    WorkflowExecutionReport,
+    WorkflowExecutionRequest,
+    workflow_execution_report,
+)
 from .delivery_receipt import (
     DELIVERY_RECEIPT_SCHEMA,
     DeliveryReceiptEvidenceReport,
@@ -2769,6 +2776,11 @@ __all__ = [
     "AdaptiveObservationReport",
     "AdaptiveExecutionReport",
     "adaptive_execution_report",
+    "INTERWEAVE_WORKFLOW_IDS",
+    "WORKFLOW_EXECUTION_SCHEMA",
+    "WorkflowExecutionRequest",
+    "WorkflowExecutionReport",
+    "workflow_execution_report",
     "DELIVERY_RECEIPT_SCHEMA",
     "DeliveryReceiptEvidenceReport",
     "DeliveryReceiptFindingReport",

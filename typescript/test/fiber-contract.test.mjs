@@ -200,3 +200,45 @@ test("epistemicAdaptiveCosted sends canonical vector dimensions", async () => {
   });
   assert.equal(response.mcp.result.structuredContent.schema, "bioprism-mcp/epistemic-adaptive-costed/0.1");
 });
+
+test("interweaveWorkflowExecute preserves workflow identity and receipt-only posture", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/interweave_workflow_execute");
+      const body = JSON.parse(String(init?.body));
+      assert.equal(body.workflow, "incident_response");
+      assert.equal(body.capabilities[0], "receipt-only");
+      return new Response(JSON.stringify({
+        ok: true,
+        tool: "interweave_workflow_execute",
+        mcp: { result: { structuredContent: {
+          ok: true,
+          schema: "bioprism-interweave/workflow-execution/0.1",
+          mode: "simulate",
+          workflow: "incident_response",
+          plan_digest: "a".repeat(64),
+          binding_digest: "b".repeat(64),
+          binding: { workflow: "incident_response", binding_digest: "b".repeat(64) },
+          completed: false,
+          release_posture: "workflow_receipt_only_external_release_not_authorized",
+          receipt: { schema: "bioprism-interweave/workflow-execution/0.1" },
+          provenance_counts: { observed: 0, simulated: 0, replayed: 0 },
+          guarantees: ["receipt"],
+          limitations: ["simulator"],
+        } } },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+  const response = await client.interweaveWorkflowExecute({
+    workflow: "incident_response",
+    problem: { actions: ["m0"], models: ["m0"], loss: [0] },
+    belief: { mass: [1] },
+    acquisitions: [{ id: "screen", cost: 0.1, outcomes: [{ label: "negative", likelihood: [1] }] }],
+    budget: 0.1,
+    max_steps: 1,
+    capabilities: ["receipt-only"],
+  });
+  assert.equal(response.mcp.result.structuredContent.workflow, "incident_response");
+  assert.equal(response.mcp.result.structuredContent.release_posture, "workflow_receipt_only_external_release_not_authorized");
+});
