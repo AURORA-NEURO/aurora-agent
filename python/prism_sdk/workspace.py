@@ -210,6 +210,11 @@ from .workflow_execution import (
     WorkflowExecutionRequest,
     workflow_execution_report,
 )
+from .workflow_execution_evidence import (
+    WorkflowExecutionEvidenceReport,
+    WorkflowExecutionEvidenceRequest,
+    workflow_execution_evidence_report,
+)
 from .delivery_receipt import (
     DeveloperDeliveryReceiptReport,
     DeveloperDeliveryReceiptRequest,
@@ -3666,6 +3671,64 @@ class Workspace:
         """Return typed workflow identity, receipt, provenance, and release-posture evidence."""
 
         return workflow_execution_report(self.interweave_workflow_execute(request))
+
+    def interweave_workflow_execution_evidence(
+        self,
+        request: WorkflowExecutionEvidenceRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Index a validated workflow receipt as portable, provenance-preserving evidence."""
+
+        normalized = request if isinstance(request, WorkflowExecutionEvidenceRequest) else WorkflowExecutionEvidenceRequest.from_wire(request)
+        result = self.client.call_tool(
+            "interweave_workflow_execution_evidence", normalized.to_mcp_arguments()
+        )
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def interweave_workflow_execution_evidence_report(
+        self,
+        request: WorkflowExecutionEvidenceRequest | Mapping[str, Any],
+    ) -> WorkflowExecutionEvidenceReport:
+        """Return typed digest, receipt, provenance, and non-readiness evidence."""
+
+        return workflow_execution_evidence_report(self.interweave_workflow_execution_evidence(request))
+
+    def interweave_workflow_execution_evidence_import(
+        self,
+        evidence: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Import a previously exported workflow execution evidence record."""
+
+        result = self.client.call_tool(
+            "interweave_workflow_execution_evidence_import", {"evidence": dict(evidence)}
+        )
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def interweave_workflow_execution_evidence_query(
+        self,
+        filters: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Query digest-ordered workflow execution evidence rows without executing workflows."""
+
+        result = self.client.call_tool(
+            "interweave_workflow_execution_evidence_query", dict(filters or {})
+        )
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def interweave_workflow_execution_evidence_get(self, evidence_digest: str) -> dict[str, Any]:
+        """Fetch one retained workflow execution evidence record by digest."""
+
+        result = self.client.call_tool(
+            "interweave_workflow_execution_evidence_get", {"evidence_digest": evidence_digest}
+        )
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
 
     def epistemic_decision_quotient(
         self,
@@ -7498,6 +7561,68 @@ class AsyncWorkspace:
         """Return typed async workspace workflow execution evidence."""
 
         return workflow_execution_report(await self.interweave_workflow_execute(request))
+
+    async def interweave_workflow_execution_evidence(
+        self,
+        request: WorkflowExecutionEvidenceRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async receipt-to-evidence conversion through workspace MCP."""
+
+        normalized = request if isinstance(request, WorkflowExecutionEvidenceRequest) else WorkflowExecutionEvidenceRequest.from_wire(request)
+        result = await self.client.call_tool(
+            "interweave_workflow_execution_evidence", normalized.to_mcp_arguments()
+        )
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def interweave_workflow_execution_evidence_report(
+        self,
+        request: WorkflowExecutionEvidenceRequest | Mapping[str, Any],
+    ) -> WorkflowExecutionEvidenceReport:
+        """Return typed async workflow execution evidence."""
+
+        return workflow_execution_evidence_report(
+            await self.interweave_workflow_execution_evidence(request)
+        )
+
+    async def interweave_workflow_execution_evidence_import(
+        self,
+        evidence: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async import of a portable workflow execution evidence record."""
+
+        result = await self.client.call_tool(
+            "interweave_workflow_execution_evidence_import", {"evidence": dict(evidence)}
+        )
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def interweave_workflow_execution_evidence_query(
+        self,
+        filters: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Async bounded query over workflow execution evidence."""
+
+        result = await self.client.call_tool(
+            "interweave_workflow_execution_evidence_query", dict(filters or {})
+        )
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def interweave_workflow_execution_evidence_get(
+        self, evidence_digest: str
+    ) -> dict[str, Any]:
+        """Async fetch of one retained workflow execution evidence record."""
+
+        result = await self.client.call_tool(
+            "interweave_workflow_execution_evidence_get", {"evidence_digest": evidence_digest}
+        )
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
 
     async def epistemic_decision_quotient(
         self,

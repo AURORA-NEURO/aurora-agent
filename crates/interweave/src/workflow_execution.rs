@@ -112,6 +112,47 @@ impl WorkflowExecutionBinding {
         &self.binding_digest
     }
 
+    /// Validate the binding's self-contained identity without requiring the original adaptive
+    /// plan.  This is the import boundary for portable receipt evidence: the plan itself may be
+    /// retained elsewhere, but workflow specification, provider identity, capabilities, effect
+    /// prohibitions, and the binding digest must still reconcile before a caller indexes a copy.
+    pub fn validate_identity(&self) -> Result<(), WorkflowExecutionError> {
+        if self.schema != WORKFLOW_EXECUTION_SCHEMA {
+            return Err(WorkflowExecutionError::InvalidReceipt(
+                "binding schema is not the workflow execution schema".into(),
+            ));
+        }
+        if self.provider_id.trim().is_empty()
+            || self
+                .required_capabilities
+                .iter()
+                .any(|value| value.trim().is_empty())
+        {
+            return Err(WorkflowExecutionError::BindingMismatch);
+        }
+        ContentHash::parse(self.adaptive_plan_digest.clone())
+            .map_err(|_| WorkflowExecutionError::BindingMismatch)?;
+        if self.binding_digest
+            != binding_identity_digest(
+                self.workflow,
+                &self.workflow_spec_digest,
+                &self.adaptive_plan_digest,
+                &self.provider_id,
+                &self.required_capabilities,
+                &self.forbidden_effects,
+            )?
+        {
+            return Err(WorkflowExecutionError::BindingMismatch);
+        }
+        if self.workflow_spec_digest != workflow_spec_digest(self.workflow)? {
+            return Err(WorkflowExecutionError::BindingMismatch);
+        }
+        if self.forbidden_effects != self.workflow.forbidden_effects().to_vec() {
+            return Err(WorkflowExecutionError::BindingMismatch);
+        }
+        Ok(())
+    }
+
     /// Executes only through the lower-level grant/provider seam. No workflow effect is inferred
     /// or performed by this wrapper.
     pub fn execute<E: AcquisitionExecutor>(
@@ -156,39 +197,9 @@ impl WorkflowExecutionBinding {
     }
 
     fn validate_against(&self, plan: &AdaptivePlan) -> Result<(), WorkflowExecutionError> {
-        if self.schema != WORKFLOW_EXECUTION_SCHEMA {
-            return Err(WorkflowExecutionError::InvalidReceipt(
-                "binding schema is not the workflow execution schema".into(),
-            ));
-        }
-        if self.provider_id.trim().is_empty()
-            || self
-                .required_capabilities
-                .iter()
-                .any(|value| value.trim().is_empty())
-        {
-            return Err(WorkflowExecutionError::BindingMismatch);
-        }
-        if self.binding_digest
-            != binding_identity_digest(
-                self.workflow,
-                &self.workflow_spec_digest,
-                &self.adaptive_plan_digest,
-                &self.provider_id,
-                &self.required_capabilities,
-                &self.forbidden_effects,
-            )?
-        {
-            return Err(WorkflowExecutionError::BindingMismatch);
-        }
+        self.validate_identity()?;
         let plan_digest = plan.digest()?;
         if self.adaptive_plan_digest != plan_digest {
-            return Err(WorkflowExecutionError::BindingMismatch);
-        }
-        if self.workflow_spec_digest != workflow_spec_digest(self.workflow)? {
-            return Err(WorkflowExecutionError::BindingMismatch);
-        }
-        if self.forbidden_effects != self.workflow.forbidden_effects().to_vec() {
             return Err(WorkflowExecutionError::BindingMismatch);
         }
         Ok(())
@@ -207,7 +218,9 @@ impl WorkflowExecutionReceipt {
             return Err(WorkflowExecutionError::BindingMismatch);
         }
         self.adaptive.validate_shape()?;
-        if self.adaptive.plan_digest != binding.adaptive_plan_digest {
+        if self.adaptive.plan_digest != binding.adaptive_plan_digest
+            || self.adaptive.provider != binding.provider_id
+        {
             return Err(WorkflowExecutionError::BindingMismatch);
         }
         Ok(())

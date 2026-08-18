@@ -242,3 +242,35 @@ test("interweaveWorkflowExecute preserves workflow identity and receipt-only pos
   assert.equal(response.mcp.result.structuredContent.workflow, "incident_response");
   assert.equal(response.mcp.result.structuredContent.release_posture, "workflow_receipt_only_external_release_not_authorized");
 });
+
+test("interweaveWorkflowExecutionEvidence validates bounded labels and exposes digest records", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/interweave_workflow_execution_evidence");
+      const body = JSON.parse(String(init?.body));
+      assert.equal(body.subject_id, "case-1");
+      assert.deepEqual(body.domains, ["incident_response"]);
+      return new Response(JSON.stringify({
+        ok: true,
+        tool: "interweave_workflow_execution_evidence",
+        mcp: { result: { structuredContent: {
+          ok: true,
+          schema: "bioprism-devplat-workflow-execution-evidence/0.1",
+          workflow: "interweave_workflow_execution_evidence",
+          evidence_digest: "c".repeat(64),
+          evidence: { evidence_digest: "c".repeat(64), readiness_claimed: false, execution: "not_started" },
+          registry: { created: true },
+        } } },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+  const response = await client.interweaveWorkflowExecutionEvidence({
+    binding: { binding_digest: "b".repeat(64) },
+    receipt: { schema: "bioprism-interweave/workflow-execution/0.1" },
+    subject_id: "case-1",
+    domains: ["incident_response"],
+    parent_digests: ["a".repeat(64)],
+  });
+  assert.equal(response.mcp.result.structuredContent.evidence_digest, "c".repeat(64));
+});

@@ -323,7 +323,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 216);
+    assert_eq!(tools.len(), 220);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -7868,12 +7868,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(216));
-    assert_eq!(result["advertised_tool_count"], json!(216));
+    assert_eq!(result["unique_catalog_tools"], json!(220));
+    assert_eq!(result["advertised_tool_count"], json!(220));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(216));
-    assert_eq!(result["schema_quality"]["valid"], json!(216));
+    assert_eq!(result["schema_quality"]["checked"], json!(220));
+    assert_eq!(result["schema_quality"]["valid"], json!(220));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -13644,6 +13644,94 @@ fn interweave_workflow_execute_binds_all_reference_workflows_and_replays_receipt
         assert_eq!(replay["provenance_counts"]["replayed"], json!(1));
         assert_eq!(replay["provenance_counts"]["simulated"], json!(0));
     }
+}
+
+#[test]
+fn interweave_workflow_execution_evidence_is_digest_bound_queryable_and_non_promoting() {
+    let request = json!({
+        "workflow": "biomedical_research_data_audit",
+        "problem": {
+            "actions": ["hold", "release"],
+            "models": ["safe", "unsafe"],
+            "loss": [0.0, 2.0, 2.0, 0.0]
+        },
+        "belief": { "mass": [0.6, 0.4] },
+        "acquisitions": [{
+            "id": "screen",
+            "cost": 0.01,
+            "outcomes": [
+                { "label": "negative", "likelihood": [0.9, 0.2] },
+                { "label": "positive", "likelihood": [0.1, 0.8] }
+            ]
+        }],
+        "budget": 0.1,
+        "max_steps": 1,
+        "provider": "mcp-simulated",
+        "capabilities": ["data.read", "analysis.sandbox"],
+        "authorization": { "grant_id": "grant-1", "provider": "mcp-simulated" },
+        "observations": [{ "acquisition_id": "screen", "outcome_label": "negative" }],
+        "evidence": {
+            "subject_id": "bioaudit-subject-1",
+            "domains": ["biomedical_research", "privacy"],
+            "parent_digests": ["a".repeat(64)]
+        }
+    });
+    let first = call(
+        &mut server(),
+        "interweave_workflow_execute",
+        request.clone(),
+    );
+    assert_eq!(first["workflow_execution_evidence"]["ok"], json!(true));
+    assert_eq!(
+        first["workflow_execution_evidence"]["evidence"]["provenance"]["mode"],
+        json!("simulated")
+    );
+    assert_eq!(
+        first["workflow_execution_evidence"]["evidence"]["readiness_claimed"],
+        json!(false)
+    );
+    let digest = first["workflow_execution_evidence"]["evidence_digest"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let query = call(
+        &mut server(),
+        "interweave_workflow_execution_evidence_query",
+        json!({ "subject_id": "bioaudit-subject-1", "include_records": false }),
+    );
+    assert_eq!(query["rows"].as_array().unwrap().len(), 0);
+
+    let mut shared = server();
+    let imported = call(
+        &mut shared,
+        "interweave_workflow_execution_evidence_import",
+        json!({ "evidence": first["workflow_execution_evidence"]["evidence"].clone() }),
+    );
+    assert_eq!(imported["registry"]["created"], json!(true));
+    let queried = call(
+        &mut shared,
+        "interweave_workflow_execution_evidence_query",
+        json!({ "subject_id": "bioaudit-subject-1", "include_records": false }),
+    );
+    assert_eq!(queried["rows"].as_array().unwrap().len(), 1);
+    let fetched = call(
+        &mut shared,
+        "interweave_workflow_execution_evidence_get",
+        json!({ "evidence_digest": digest }),
+    );
+    assert_eq!(
+        fetched["record"]["claim_posture"]["status"],
+        json!("review_required")
+    );
+
+    let mut tampered = first["workflow_execution_evidence"]["evidence"].clone();
+    tampered["subject_id"] = json!("tampered");
+    let refused = call(
+        &mut shared,
+        "interweave_workflow_execution_evidence_import",
+        json!({ "evidence": tampered }),
+    );
+    assert_eq!(refused["__isError"], json!(true));
 }
 
 #[test]

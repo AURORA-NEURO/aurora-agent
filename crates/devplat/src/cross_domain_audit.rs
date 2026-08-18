@@ -20,7 +20,7 @@ pub const CROSS_DOMAIN_AUDIT_SCHEMA_VERSION: &str =
 pub const CROSS_DOMAIN_AUDIT_WORKFLOW: &str = "artifact_registry_cross_store_audit";
 pub const MAX_CROSS_DOMAIN_AUDIT_FINDINGS: usize = 1_024;
 
-/// Build a bounded digest-only audit over the three local registry projections.
+/// Build a bounded digest-only audit over the four local registry projections.
 ///
 /// The input slices are expected to come from the registries' bounded in-memory indexes. The
 /// function still defensively caps every returned set so a future caller cannot accidentally
@@ -30,12 +30,15 @@ pub fn build_cross_domain_audit(
     artifact_records: &[ArtifactRecord],
     evidence_digests: &[String],
     reconciliation_digests: &[String],
+    workflow_execution_evidence_digests: &[String],
     artifact_generation: u64,
     evidence_generation: u64,
     reconciliation_generation: u64,
+    workflow_execution_evidence_generation: u64,
     artifact_state_digest: Option<String>,
     evidence_state_digest: Option<String>,
     reconciliation_state_digest: Option<String>,
+    workflow_execution_evidence_state_digest: Option<String>,
 ) -> Value {
     let mut artifact_by_kind: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for record in artifact_records {
@@ -62,15 +65,28 @@ pub fn build_cross_domain_audit(
             .flatten(),
         &artifact_by_kind,
     );
+    let workflow_execution_evidence = compare_source(
+        "workflow_execution_evidence",
+        workflow_execution_evidence_digests,
+        artifact_by_kind
+            .get("workflow_execution_evidence")
+            .into_iter()
+            .flatten(),
+        &artifact_by_kind,
+    );
 
     let findings = evidence
         .findings
         .iter()
         .chain(reconciliation.findings.iter())
+        .chain(workflow_execution_evidence.findings.iter())
         .take(MAX_CROSS_DOMAIN_AUDIT_FINDINGS)
         .cloned()
         .collect::<Vec<_>>();
-    let truncated = evidence.findings.len() + reconciliation.findings.len() > findings.len();
+    let finding_count = evidence.findings.len()
+        + reconciliation.findings.len()
+        + workflow_execution_evidence.findings.len();
+    let truncated = finding_count > findings.len();
     let consistent = findings.is_empty() && !truncated;
 
     json!({
@@ -95,11 +111,17 @@ pub fn build_cross_domain_audit(
                 "generation": reconciliation_generation,
                 "record_count": reconciliation_digests.len(),
                 "state_digest": reconciliation_state_digest
+            },
+            "workflow_execution_evidence_registry": {
+                "generation": workflow_execution_evidence_generation,
+                "record_count": workflow_execution_evidence_digests.len(),
+                "state_digest": workflow_execution_evidence_state_digest
             }
         },
         "coverage": {
             "mission_evidence_bundle": evidence.report,
-            "workflow_reconciliation": reconciliation.report
+            "workflow_reconciliation": reconciliation.report,
+            "workflow_execution_evidence": workflow_execution_evidence.report
         },
         "artifact_kind_counts": artifact_by_kind
             .iter()
@@ -114,7 +136,7 @@ pub fn build_cross_domain_audit(
             "each store exposes its own generation and digest-protected checkpoint identity"
         ],
         "does_not_claim": [
-            "the three stores were read in one atomic transaction",
+            "the four stores were read in one atomic transaction",
             "absence from a bounded local store means a record never existed",
             "a matching digest proves causal provenance, scientific validity, clinical meaning, publication approval, or external-effect completion"
         ]
@@ -224,12 +246,15 @@ mod tests {
             ],
             &["a".into(), "b".into()],
             &["d".into()],
+            &["e".into()],
             3,
             4,
             5,
+            6,
             Some("artifact-state".into()),
             None,
             Some("reconciliation-state".into()),
+            Some("workflow-evidence-state".into()),
         );
         assert_eq!(result["consistent"], json!(false));
         assert_eq!(
@@ -253,7 +278,8 @@ mod tests {
 
     #[test]
     fn empty_stores_are_consistent() {
-        let result = build_cross_domain_audit(&[], &[], &[], 0, 0, 0, None, None, None);
+        let result =
+            build_cross_domain_audit(&[], &[], &[], &[], 0, 0, 0, 0, None, None, None, None);
         assert_eq!(result["consistent"], json!(true));
         assert_eq!(result["findings"], json!([]));
     }

@@ -128,14 +128,16 @@ use bioprism_devplat::{
     audit_domain_evidence_provider_external_payload_execution,
     audit_domain_evidence_provider_external_payload_lineage, audit_execution_provenance,
     build_dashboard, build_delivery_receipt, build_domain_acquisition_catalogue,
-    build_domain_workflow_catalogue, classify_domain_report_bridge, execute_domain_evidence_source,
+    build_domain_workflow_catalogue, build_workflow_execution_evidence,
+    classify_domain_report_bridge, execute_domain_evidence_source,
     handoff_domain_evidence_provider, instantiate_domain_workflow,
     mission_claim_lineage_with_review, normalize_ci_provider_payload,
     normalize_domain_evidence_provider, normalize_domain_evidence_provider_external_payload,
     plan_domain_evidence_source, plan_mission, query_adapter_execution_evidence,
     query_domain_evidence_provider_external_payload_evidence, reconcile_domain_workflow,
     record_adapter_execution_evidence, record_domain_evidence_provider_external_payload,
-    run_workbench, scaffold_domain_workflow, standard_walkthroughs, verify_delivery_receipt,
+    run_workbench, scaffold_domain_workflow, standard_walkthroughs,
+    validate_workflow_execution_evidence, verify_delivery_receipt,
     verify_domain_evidence_provider_external_payload_replay,
     verify_domain_evidence_provider_replay, verify_mission_evidence_bundle,
     AdapterExecutionEvidenceQueryRequest, AdapterExecutionEvidenceRequest, ArtifactRegistry,
@@ -155,12 +157,12 @@ use bioprism_devplat::{
     MissionEvaluatorReviewRequest, MissionReport, MissionRequest, MissionStep, MissionStepResult,
     MissionTraceEvent, MissionTraceObserver, OperationalReadinessManifest, ReleasePipelineManifest,
     SandboxManifest, SandboxRuntimeManifest, SecurityPrivacyManifest, SecurityProgramManifest,
-    WorkbenchRequest, ADAPTER_DOMAIN_REPORT_SCHEMA_VERSION, ADAPTER_DOMAIN_REPORT_WORKFLOW,
-    CAPABILITY_SCHEMA_VERSION, DOMAIN_ACQUISITION_SCHEMA_VERSION, DOMAIN_ACQUISITION_WORKFLOW,
-    DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION, DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW,
-    DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA_VERSION, DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW,
-    DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION, DOMAIN_EVIDENCE_INTAKE_WORKFLOW,
-    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_SCHEMA,
+    WorkbenchRequest, WorkflowExecutionEvidenceRegistry, ADAPTER_DOMAIN_REPORT_SCHEMA_VERSION,
+    ADAPTER_DOMAIN_REPORT_WORKFLOW, CAPABILITY_SCHEMA_VERSION, DOMAIN_ACQUISITION_SCHEMA_VERSION,
+    DOMAIN_ACQUISITION_WORKFLOW, DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_INTAKE_WORKFLOW, DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_SCHEMA,
     DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_WORKFLOW,
     DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LINEAGE_SCHEMA,
     DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LINEAGE_WORKFLOW,
@@ -182,6 +184,8 @@ use bioprism_devplat::{
     PROVIDER_DOMAIN_REPORT_SCHEMA_VERSION, PROVIDER_DOMAIN_REPORT_WORKFLOW,
     RELEASE_PIPELINE_AUDIT_SCHEMA, SANDBOX_AUDIT_SCHEMA, SANDBOX_RUNTIME_AUDIT_SCHEMA,
     SECURITY_PRIVACY_AUDIT_SCHEMA, SECURITY_PROGRAM_AUDIT_SCHEMA, WORKBENCH_SCHEMA_VERSION,
+    WORKFLOW_EXECUTION_EVIDENCE_IMPORT_SCHEMA_VERSION, WORKFLOW_EXECUTION_EVIDENCE_SCHEMA_VERSION,
+    WORKFLOW_EXECUTION_EVIDENCE_WORKFLOW,
 };
 use bioprism_devx::{audit as devx_audit, lint_catalogue, workspace_contract};
 use bioprism_docgraph::{
@@ -558,6 +562,7 @@ pub struct Server {
     mission_trace_observer: Option<MissionTraceObserver>,
     evidence_registry: Arc<Mutex<EvidenceBundleRegistry>>,
     workflow_reconciliation_registry: Arc<Mutex<DomainWorkflowReconciliationRegistry>>,
+    workflow_execution_evidence_registry: Arc<Mutex<WorkflowExecutionEvidenceRegistry>>,
     artifact_registry: Arc<Mutex<ArtifactRegistry>>,
 }
 
@@ -1214,6 +1219,9 @@ impl Server {
             mission_trace_observer: None,
             evidence_registry,
             workflow_reconciliation_registry,
+            workflow_execution_evidence_registry: Arc::new(Mutex::new(
+                WorkflowExecutionEvidenceRegistry::new(),
+            )),
             artifact_registry,
         }
     }
@@ -1664,6 +1672,18 @@ impl Server {
                 }))
             }
             "interweave_workflow_execute" => self.interweave_workflow_execute(&arguments),
+            "interweave_workflow_execution_evidence" => {
+                self.interweave_workflow_execution_evidence(&arguments)
+            }
+            "interweave_workflow_execution_evidence_import" => {
+                self.interweave_workflow_execution_evidence_import(&arguments)
+            }
+            "interweave_workflow_execution_evidence_query" => {
+                self.interweave_workflow_execution_evidence_query(&arguments)
+            }
+            "interweave_workflow_execution_evidence_get" => {
+                self.interweave_workflow_execution_evidence_get(&arguments)
+            }
             "atlas_report" => self.atlas_report(&arguments),
             "atlas_surface_audit" => self.atlas_surface_audit(&arguments),
             "adaptive_panel" => self.adaptive_panel(&arguments),
@@ -2797,7 +2817,7 @@ impl Server {
         }
     }
 
-    /// Compare the three bounded local registries by exact digest identity.
+    /// Compare the four bounded local registries by exact digest identity.
     ///
     /// Each mutex is observed independently so a slow or poisoned source store cannot hold the
     /// other stores hostage. The returned generations and checkpoint digests make that
@@ -2854,16 +2874,40 @@ impl Server {
                     .map(str::to_string),
             )
         };
+        let (
+            workflow_execution_evidence_digests,
+            workflow_execution_evidence_generation,
+            workflow_execution_evidence_state_digest,
+        ) = {
+            let registry = self
+                .workflow_execution_evidence_registry
+                .lock()
+                .map_err(|_| "workflow execution evidence registry lock is poisoned".to_string())?;
+            let snapshot = registry.snapshot().map_err(|error| {
+                format!("workflow execution evidence registry snapshot failed: {error}")
+            })?;
+            (
+                registry.digests_for_audit(),
+                registry.generation(),
+                snapshot
+                    .get("state_digest")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            )
+        };
         Ok(bioprism_devplat::build_cross_domain_audit(
             &artifact_records,
             &evidence_digests,
             &reconciliation_digests,
+            &workflow_execution_evidence_digests,
             artifact_generation,
             evidence_generation,
             reconciliation_generation,
+            workflow_execution_evidence_generation,
             artifact_state_digest,
             evidence_state_digest,
             reconciliation_state_digest,
+            workflow_execution_evidence_state_digest,
         ))
     }
 
@@ -14463,7 +14507,7 @@ impl Server {
                 .map_err(|error| format!("workflow execution refused: {error}"))?
         };
         let (observed, simulated, replayed) = receipt.provenance_counts();
-        Ok(json!({
+        let mut output = json!({
             "ok": true,
             "schema": INTERWEAVE_WORKFLOW_EXECUTION_SCHEMA,
             "mode": mode,
@@ -14490,7 +14534,226 @@ impl Server {
                 "capability labels and provider provenance are declarations until a domain authority verifies them",
                 "this route produces a receipt and never schedules participants, publishes results, or authorizes an external effect",
             ],
+        });
+        if let Some(config) = arguments.get("evidence") {
+            let config_object = config
+                .as_object()
+                .ok_or("evidence must be an object when supplied")?;
+            let mut evidence_arguments = Value::Object(config_object.clone());
+            evidence_arguments["binding"] = output["binding"].clone();
+            evidence_arguments["receipt"] = output["receipt"].clone();
+            output["workflow_execution_evidence"] =
+                self.interweave_workflow_execution_evidence(&evidence_arguments)?;
+        }
+        Ok(output)
+    }
+
+    /// Convert an already-produced workflow receipt into portable evidence and index it. This
+    /// route is intentionally receipt-only: it never replays, executes, dereferences a provider,
+    /// or upgrades a simulated/replayed provenance label.
+    fn interweave_workflow_execution_evidence(&self, arguments: &Value) -> Result<Value, String> {
+        let binding = arguments.get("binding").ok_or("binding is required")?;
+        let receipt = arguments.get("receipt").ok_or("receipt is required")?;
+        let subject_id = arguments
+            .get("subject_id")
+            .and_then(Value::as_str)
+            .ok_or("subject_id is required and must be a non-empty string")?;
+        let domains = arguments
+            .get("domains")
+            .and_then(Value::as_array)
+            .ok_or("domains is required and must be an array")?
+            .iter()
+            .enumerate()
+            .map(|(index, value)| {
+                value
+                    .as_str()
+                    .filter(|text| !text.trim().is_empty())
+                    .map(str::to_string)
+                    .ok_or_else(|| format!("domains[{index}] must be a non-empty string"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let parent_digests = arguments
+            .get("parent_digests")
+            .and_then(Value::as_array)
+            .unwrap_or(&Vec::new())
+            .iter()
+            .enumerate()
+            .map(|(index, value)| {
+                value
+                    .as_str()
+                    .filter(|text| !text.trim().is_empty())
+                    .map(str::to_string)
+                    .ok_or_else(|| format!("parent_digests[{index}] must be a non-empty digest"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let evidence = build_workflow_execution_evidence(
+            binding,
+            receipt,
+            subject_id,
+            &domains,
+            &parent_digests,
+        )
+        .map_err(|error| format!("workflow execution evidence refused: {error}"))?;
+        let import = self
+            .workflow_execution_evidence_registry
+            .lock()
+            .map_err(|_| "workflow execution evidence registry lock is poisoned".to_string())?
+            .import(&evidence)
+            .map_err(|error| format!("workflow execution evidence import refused: {error}"))?;
+        let artifact_registry = self.index_artifact_projection(
+            "workflow_execution_evidence",
+            subject_id,
+            domains,
+            parent_digests,
+            evidence.clone(),
+        );
+        Ok(json!({
+            "ok": true,
+            "schema": WORKFLOW_EXECUTION_EVIDENCE_SCHEMA_VERSION,
+            "workflow": WORKFLOW_EXECUTION_EVIDENCE_WORKFLOW,
+            "evidence_digest": evidence["evidence_digest"],
+            "evidence": evidence,
+            "registry": import,
+            "artifact_registry": artifact_registry,
+            "execution": "not_started",
+            "guarantees": [
+                "the binding and receipt were independently validated before evidence indexing",
+                "the exact receipt digest and provenance counts remain recoverable",
+                "artifact and evidence registry projections are content-addressed and idempotent"
+            ],
+            "does_not_claim": [
+                "indexing proves provider authentication, consent, scientific truth, or release readiness",
+                "a simulated or replayed receipt is an observed-world result",
+                "this operation executes or authorizes any workflow effect"
+            ]
         }))
+    }
+
+    fn interweave_workflow_execution_evidence_import(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let evidence = arguments.get("evidence").ok_or("evidence is required")?;
+        validate_workflow_execution_evidence(evidence)
+            .map_err(|error| format!("workflow execution evidence refused: {error}"))?;
+        let subject_id = evidence
+            .get("subject_id")
+            .and_then(Value::as_str)
+            .ok_or("validated evidence omitted subject_id")?;
+        let domains = evidence
+            .get("domains")
+            .and_then(Value::as_array)
+            .ok_or("validated evidence omitted domains")?
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let parent_digests = evidence
+            .get("parent_digests")
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let import = self
+            .workflow_execution_evidence_registry
+            .lock()
+            .map_err(|_| "workflow execution evidence registry lock is poisoned".to_string())?
+            .import(evidence)
+            .map_err(|error| format!("workflow execution evidence import refused: {error}"))?;
+        let artifact_registry = self.index_artifact_projection(
+            "workflow_execution_evidence",
+            subject_id,
+            domains,
+            parent_digests,
+            evidence.clone(),
+        );
+        Ok(json!({
+            "ok": true,
+            "schema": WORKFLOW_EXECUTION_EVIDENCE_IMPORT_SCHEMA_VERSION,
+            "workflow": "interweave_workflow_execution_evidence_import",
+            "evidence_digest": evidence["evidence_digest"],
+            "registry": import,
+            "artifact_registry": artifact_registry,
+            "execution": "not_started",
+            "guarantees": [
+                "the portable record was revalidated before import",
+                "identical evidence imports are idempotent",
+                "import does not execute or replay a workflow"
+            ],
+            "does_not_claim": [
+                "registry presence establishes external provenance or domain validity"
+            ]
+        }))
+    }
+
+    fn interweave_workflow_execution_evidence_query(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let optional_text = |field: &str| -> Result<Option<&str>, String> {
+            arguments
+                .get(field)
+                .map(|value| {
+                    value
+                        .as_str()
+                        .filter(|text| !text.trim().is_empty())
+                        .ok_or_else(|| format!("{field} must be a non-empty string"))
+                })
+                .transpose()
+        };
+        let max_items = arguments
+            .get("max_items")
+            .map(|value| {
+                value
+                    .as_u64()
+                    .ok_or_else(|| "max_items must be an integer".to_string())
+                    .and_then(|value| {
+                        usize::try_from(value).map_err(|_| "max_items is too large".to_string())
+                    })
+            })
+            .transpose()?
+            .unwrap_or(100);
+        let include_records = arguments
+            .get("include_records")
+            .map(|value| value.as_bool().ok_or("include_records must be a boolean"))
+            .transpose()?
+            .unwrap_or(false);
+        self.workflow_execution_evidence_registry
+            .lock()
+            .map_err(|_| "workflow execution evidence registry lock is poisoned".to_string())?
+            .query(
+                optional_text("workflow_id")?,
+                optional_text("subject_id")?,
+                optional_text("domain")?,
+                optional_text("plan_digest")?,
+                optional_text("binding_digest")?,
+                optional_text("receipt_status")?,
+                optional_text("provenance_mode")?,
+                optional_text("after")?,
+                max_items,
+                include_records,
+            )
+            .map_err(|error| format!("workflow execution evidence query refused: {error}"))
+    }
+
+    fn interweave_workflow_execution_evidence_get(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let digest = arguments
+            .get("evidence_digest")
+            .and_then(Value::as_str)
+            .ok_or("evidence_digest is required")?;
+        self.workflow_execution_evidence_registry
+            .lock()
+            .map_err(|_| "workflow execution evidence registry lock is poisoned".to_string())?
+            .get(digest)
+            .map_err(|error| format!("workflow execution evidence get refused: {error}"))
     }
 
     fn benchmark_trace_analyze(&self, arguments: &Value) -> Result<Value, String> {
@@ -32192,7 +32455,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "agent_orchestration",
             "domains": ["typed acts", "session types", "budgets", "sagas", "quorum"],
             "crates": ["bioprism-weave", "bioprism-weavelang", "bioprism-choreography", "bioprism-fabric", "bioprism-interweave"],
-            "mcp_tools": ["weave_protocol_catalog", "weavelang_compile", "choreography_check", "fabric_synthesize", "interweave_workflow_catalogue", "interweave_workflow_execute", "mission_evaluator_discover", "mission_evaluator_review", "mission_evaluator_replay", "mission_evaluator_replay_compare", "mission_evidence_bundle_verify", "mission_evidence_bundle_import", "mission_evidence_bundle_query", "mission_evidence_bundle_get"],
+            "mcp_tools": ["weave_protocol_catalog", "weavelang_compile", "choreography_check", "fabric_synthesize", "interweave_workflow_catalogue", "interweave_workflow_execute", "interweave_workflow_execution_evidence", "interweave_workflow_execution_evidence_import", "interweave_workflow_execution_evidence_query", "interweave_workflow_execution_evidence_get", "mission_evaluator_discover", "mission_evaluator_review", "mission_evaluator_replay", "mission_evaluator_replay_compare", "mission_evidence_bundle_verify", "mission_evidence_bundle_import", "mission_evidence_bundle_query", "mission_evidence_bundle_get"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -32487,7 +32750,7 @@ pub fn tool_definitions() -> Vec<Value> {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "operation": { "type": "string", "enum": ["register", "query", "get", "lineage", "cross_store", "verify_snapshot"], "description": "Operation to perform; defaults to query. cross_store compares exact identities across the artifact, evidence, and reconciliation registries." },
+                    "operation": { "type": "string", "enum": ["register", "query", "get", "lineage", "cross_store", "verify_snapshot"], "description": "Operation to perform; defaults to query. cross_store compares exact identities across the artifact, mission evidence, workflow reconciliation, and workflow execution evidence registries." },
                     "registration": { "type": "object", "description": "For register: {kind, subject_id, domains, parent_digests, declared_digest?, artifact}." },
                     "kind": { "type": "string", "description": "For query: artifact kind such as mission_evidence_bundle, workflow_reconciliation, evaluator_replay, domain_report, or domain_evidence_harmonization." },
                     "domain": { "type": "string", "description": "For query: one explicit domain label." },
@@ -33866,9 +34129,67 @@ pub fn tool_definitions() -> Vec<Value> {
                     "capabilities": { "type": "array", "maxItems": 32, "items": { "type": "string" }, "description": "Optional non-empty capability labels bound into the workflow execution digest." },
                     "authorization": { "type": "object", "description": "Optional {grant_id, provider} plan-scoped authorization. Omission returns a structured no-grant refusal." },
                     "observations": { "type": "array", "maxItems": 16, "description": "Optional deterministic simulated rows of {acquisition_id, outcome_label}; omitted rows are not fabricated." },
-                    "receipt": { "type": "object", "description": "Required in replay mode: a prior workflow execution receipt from this same binding and plan." }
+                    "receipt": { "type": "object", "description": "Required in replay mode: a prior workflow execution receipt from this same binding and plan." },
+                    "evidence": { "type": "object", "description": "Optional {subject_id, domains, parent_digests} configuration. When supplied, the produced binding and receipt are converted into indexed workflow execution evidence without another execution." }
                 },
                 "required": ["workflow", "problem", "belief", "acquisitions", "budget", "max_steps"]
+            }
+        }),
+        json!({
+            "name": "interweave_workflow_execution_evidence",
+            "description": "Convert an already-produced interweave workflow binding and receipt into a portable, digest-addressed evidence record and index it in the bounded local registries. The route validates workflow identity, provider, plan digest, receipt shape, provenance counts, subject, domains, and parent digests; it never executes, replays, dereferences a provider, or authorizes an external effect.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "binding": { "type": "object", "description": "The binding returned by interweave_workflow_execute." },
+                    "receipt": { "type": "object", "description": "The receipt returned by interweave_workflow_execute." },
+                    "subject_id": { "type": "string", "description": "Caller-owned subject or case identity for later query." },
+                    "domains": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" }, "description": "Caller-owned domain labels; labels are indexed, not semantically inferred." },
+                    "parent_digests": { "type": "array", "maxItems": 128, "items": { "type": "string" }, "description": "Optional content-hash parents from source plans, reports, or external handoffs." }
+                },
+                "required": ["binding", "receipt", "subject_id", "domains"]
+            }
+        }),
+        json!({
+            "name": "interweave_workflow_execution_evidence_import",
+            "description": "Import a portable workflow execution evidence record after revalidating its binding, receipt, provenance counts, parent digests, and canonical evidence digest. Identical imports are idempotent; import never executes or replays a workflow.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "evidence": { "type": "object", "description": "The complete evidence record returned by interweave_workflow_execution_evidence." }
+                },
+                "required": ["evidence"]
+            }
+        }),
+        json!({
+            "name": "interweave_workflow_execution_evidence_query",
+            "description": "Query the bounded workflow execution evidence registry by workflow, subject, domain, plan, binding, receipt status, provenance mode, or digest cursor. Full records are opt-in and the query never executes, retries, or re-evaluates a workflow.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "workflow_id": { "type": "string" },
+                    "subject_id": { "type": "string" },
+                    "domain": { "type": "string" },
+                    "plan_digest": { "type": "string" },
+                    "binding_digest": { "type": "string" },
+                    "receipt_status": { "type": "string", "enum": ["completed", "partial", "refused"] },
+                    "provenance_mode": { "type": "string", "enum": ["none", "observed_declared", "simulated", "replayed", "mixed"] },
+                    "after": { "type": "string", "description": "Exclusive evidence digest cursor." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 256, "default": 100 },
+                    "include_records": { "type": "boolean", "default": false }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "interweave_workflow_execution_evidence_get",
+            "description": "Fetch one previously imported workflow execution evidence record by its SHA-256 evidence digest. Lookup is bounded, non-executing, and does not turn presence into provider or domain authority.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "evidence_digest": { "type": "string", "description": "The evidence digest returned by import or query." }
+                },
+                "required": ["evidence_digest"]
             }
         }),
         json!({

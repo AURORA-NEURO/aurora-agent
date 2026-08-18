@@ -430,6 +430,16 @@ from .workflow_execution import (
     WorkflowExecutionRequest,
     workflow_execution_report,
 )
+from .workflow_execution_evidence import (
+    WORKFLOW_EXECUTION_EVIDENCE_GET_SCHEMA,
+    WORKFLOW_EXECUTION_EVIDENCE_IMPORT_SCHEMA,
+    WORKFLOW_EXECUTION_EVIDENCE_QUERY_SCHEMA,
+    WORKFLOW_EXECUTION_EVIDENCE_SCHEMA,
+    WORKFLOW_EXECUTION_EVIDENCE_WORKFLOW,
+    WorkflowExecutionEvidenceReport,
+    WorkflowExecutionEvidenceRequest,
+    workflow_execution_evidence_report,
+)
 from .delivery_receipt import (
     DELIVERY_RECEIPT_SCHEMA,
     DeliveryReceiptEvidenceReport,
@@ -2781,6 +2791,14 @@ __all__ = [
     "WorkflowExecutionRequest",
     "WorkflowExecutionReport",
     "workflow_execution_report",
+    "WORKFLOW_EXECUTION_EVIDENCE_GET_SCHEMA",
+    "WORKFLOW_EXECUTION_EVIDENCE_IMPORT_SCHEMA",
+    "WORKFLOW_EXECUTION_EVIDENCE_QUERY_SCHEMA",
+    "WORKFLOW_EXECUTION_EVIDENCE_SCHEMA",
+    "WORKFLOW_EXECUTION_EVIDENCE_WORKFLOW",
+    "WorkflowExecutionEvidenceRequest",
+    "WorkflowExecutionEvidenceReport",
+    "workflow_execution_evidence_report",
     "DELIVERY_RECEIPT_SCHEMA",
     "DeliveryReceiptEvidenceReport",
     "DeliveryReceiptFindingReport",

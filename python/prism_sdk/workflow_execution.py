@@ -75,6 +75,7 @@ class WorkflowExecutionRequest:
     authorization: Mapping[str, Any] | None = None
     observations: Sequence[Mapping[str, Any]] = ()
     receipt: Mapping[str, Any] | None = None
+    evidence: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.workflow not in INTERWEAVE_WORKFLOW_IDS:
@@ -108,6 +109,23 @@ class WorkflowExecutionRequest:
             raise ArgumentError("authorization must be an object")
         if self.receipt is not None and not isinstance(self.receipt, Mapping):
             raise ArgumentError("receipt must be an object")
+        if self.evidence is not None:
+            if not isinstance(self.evidence, Mapping):
+                raise ArgumentError("evidence must be an object")
+            subject_id = self.evidence.get("subject_id")
+            domains = self.evidence.get("domains")
+            if not isinstance(subject_id, str) or not subject_id.strip():
+                raise ArgumentError("evidence.subject_id must be a non-empty string")
+            if not isinstance(domains, Sequence) or isinstance(domains, (str, bytes)) or not 1 <= len(domains) <= 64:
+                raise ArgumentError("evidence.domains must contain 1..=64 labels")
+            if any(not isinstance(domain, str) or not domain.strip() for domain in domains):
+                raise ArgumentError("evidence.domains must contain non-empty strings")
+            parents = self.evidence.get("parent_digests", [])
+            if not isinstance(parents, Sequence) or isinstance(parents, (str, bytes)) or len(parents) > 128:
+                raise ArgumentError("evidence.parent_digests must contain at most 128 digests")
+            for digest in parents:
+                if not isinstance(digest, str) or not _DIGEST.fullmatch(digest):
+                    raise ArgumentError("evidence.parent_digests must contain lowercase SHA-256 digests")
         if self.mode == "replay" and self.receipt is None:
             raise ArgumentError("receipt is required in replay mode")
 
@@ -132,6 +150,7 @@ class WorkflowExecutionRequest:
             authorization=dict(raw["authorization"]) if isinstance(raw.get("authorization"), Mapping) else raw.get("authorization"),
             observations=observations,
             receipt=dict(raw["receipt"]) if isinstance(raw.get("receipt"), Mapping) else raw.get("receipt"),
+            evidence=dict(raw["evidence"]) if isinstance(raw.get("evidence"), Mapping) else raw.get("evidence"),
         )
 
     def to_mcp_arguments(self) -> dict[str, Any]:
@@ -151,6 +170,8 @@ class WorkflowExecutionRequest:
             result["authorization"] = dict(self.authorization)
         if self.receipt is not None:
             result["receipt"] = dict(self.receipt)
+        if self.evidence is not None:
+            result["evidence"] = dict(self.evidence)
         return result
 
 

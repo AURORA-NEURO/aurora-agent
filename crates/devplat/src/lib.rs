@@ -249,6 +249,7 @@ pub mod surface;
 pub mod walkthrough;
 pub mod workbench;
 pub mod workflow;
+pub mod workflow_execution_evidence;
 pub mod workflow_reconciliation;
 pub mod workflow_reconciliation_registry;
 
@@ -564,6 +565,18 @@ pub use workflow::{
     DOMAIN_WORKFLOW_SCAFFOLD_SCHEMA_VERSION, DOMAIN_WORKFLOW_SCHEMA_VERSION,
     MAX_DOMAIN_WORKFLOW_BYTES, MAX_DOMAIN_WORKFLOW_GROUPS, MAX_DOMAIN_WORKFLOW_STEPS,
     MAX_DOMAIN_WORKFLOW_TOOLS,
+};
+pub use workflow_execution_evidence::{
+    build_workflow_execution_evidence, validate_workflow_execution_evidence,
+    WorkflowExecutionEvidenceError, WorkflowExecutionEvidenceRegistry,
+    MAX_WORKFLOW_EXECUTION_EVIDENCE_BYTES, MAX_WORKFLOW_EXECUTION_EVIDENCE_CAPABILITIES,
+    MAX_WORKFLOW_EXECUTION_EVIDENCE_DOMAINS, MAX_WORKFLOW_EXECUTION_EVIDENCE_PARENTS,
+    MAX_WORKFLOW_EXECUTION_EVIDENCE_QUERY_ITEMS, MAX_WORKFLOW_EXECUTION_EVIDENCE_RECORDS,
+    WORKFLOW_EXECUTION_EVIDENCE_GET_SCHEMA_VERSION,
+    WORKFLOW_EXECUTION_EVIDENCE_IMPORT_SCHEMA_VERSION,
+    WORKFLOW_EXECUTION_EVIDENCE_QUERY_SCHEMA_VERSION,
+    WORKFLOW_EXECUTION_EVIDENCE_REGISTRY_SCHEMA_VERSION,
+    WORKFLOW_EXECUTION_EVIDENCE_SCHEMA_VERSION, WORKFLOW_EXECUTION_EVIDENCE_WORKFLOW,
 };
 pub use workflow_reconciliation::{
     reconcile_domain_workflow, DomainWorkflowReconcileError,

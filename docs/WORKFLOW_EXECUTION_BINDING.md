@@ -65,3 +65,34 @@ status, provenance counts, the nested receipt, and the explicit posture
 Workspace and HTTP clients. The TypeScript SDK provides `WorkflowExecutionArgs`,
 `WorkflowExecutionResult`, and `client.interweaveWorkflowExecute`. These facades validate the
 closed workflow set, bounds, mode, capabilities, and replay receipt before transport.
+
+## Portable workflow execution evidence
+
+A route response is not a durable audit record. The
+`interweave_workflow_execution_evidence` route converts an existing `binding` and `receipt` into
+`bioprism-devplat-workflow-execution-evidence/0.1` and indexes the result in two bounded,
+content-addressed registries. The record carries a caller-owned `subject_id`, caller-owned domain
+labels, optional content-hash parents, the binding/plan/workflow-spec/provider identities, the
+exact receipt digest, receipt status, completion posture, and separate observed/simulated/replayed
+counts. Its `claim_posture` remains `review_required` and `readiness_claimed` is always `false`.
+
+The evidence builder validates the binding's self-contained identity and the receipt's binding,
+plan, provider, status, observation sequence, and digest shape before indexing. It does not need
+the adaptive plan body, contact a provider, rerun a receipt, or infer that an observed provenance
+label is authenticated. `interweave_workflow_execute` accepts an optional `evidence` object with
+`subject_id`, `domains`, and `parent_digests`; when present, it creates this evidence projection
+from the just-produced receipt without a second execution.
+
+The registry tools are:
+
+- `interweave_workflow_execution_evidence_import` for portable re-import with digest validation
+  and idempotent duplicates;
+- `interweave_workflow_execution_evidence_query` for bounded, cursor-paginated structural rows;
+  and
+- `interweave_workflow_execution_evidence_get` for one exact retained record.
+
+The artifact registry also admits the `workflow_execution_evidence` kind, retaining the internal
+evidence digest as a declared digest while keeping the registry's outer content digest separate.
+Python exposes `WorkflowExecutionEvidenceRequest` and `WorkflowExecutionEvidenceReport` plus
+sync/async Workspace and HTTP methods. TypeScript exposes the corresponding evidence args,
+import/query result types, and `interweaveWorkflowExecutionEvidence*` methods.

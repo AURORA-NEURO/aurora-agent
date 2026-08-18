@@ -2618,6 +2618,13 @@ export interface WorkflowExecutionArgs extends JsonObject {
   authorization?: { grant_id: string; provider: string; [key: string]: JsonValue };
   observations?: Array<{ acquisition_id: string; outcome_label: string; [key: string]: JsonValue }>;
   receipt?: JsonObject;
+  evidence?: WorkflowExecutionEvidenceConfig;
+}
+
+export interface WorkflowExecutionEvidenceConfig extends JsonObject {
+  subject_id: string;
+  domains: string[];
+  parent_digests?: string[];
 }
 
 export interface WorkflowExecutionResult extends JsonObject {
@@ -2634,6 +2641,47 @@ export interface WorkflowExecutionResult extends JsonObject {
   provenance_counts: { observed: number; simulated: number; replayed: number; [key: string]: JsonValue };
   guarantees: string[];
   limitations: string[];
+  workflow_execution_evidence?: WorkflowExecutionEvidenceResult;
+}
+
+export interface WorkflowExecutionEvidenceArgs extends JsonObject {
+  binding: JsonObject;
+  receipt: JsonObject;
+  subject_id: string;
+  domains: string[];
+  parent_digests?: string[];
+}
+
+export interface WorkflowExecutionEvidenceImportArgs extends JsonObject {
+  evidence: JsonObject;
+}
+
+export interface WorkflowExecutionEvidenceQueryOptions extends JsonObject {
+  workflow_id?: InterweaveWorkflowId;
+  subject_id?: string;
+  domain?: string;
+  plan_digest?: string;
+  binding_digest?: string;
+  receipt_status?: "completed" | "partial" | "refused";
+  provenance_mode?: "none" | "observed_declared" | "simulated" | "replayed" | "mixed";
+  after?: string;
+  max_items?: number;
+  include_records?: boolean;
+}
+
+export interface WorkflowExecutionEvidenceResult extends JsonObject {
+  ok: true;
+  schema: string;
+  workflow: string;
+  evidence_digest: string;
+  evidence?: JsonObject;
+  registry?: JsonObject;
+  artifact_registry?: JsonObject;
+  rows?: JsonObject[];
+  next_after?: string | null;
+  has_more?: boolean;
+  guarantees?: string[];
+  does_not_claim?: string[];
 }
 
 export interface EpistemicDecisionQuotientArgs extends JsonObject {

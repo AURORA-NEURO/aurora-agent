@@ -251,6 +251,10 @@ import type {
   AdaptiveCostedResult,
   WorkflowExecutionArgs,
   WorkflowExecutionResult,
+  WorkflowExecutionEvidenceArgs,
+  WorkflowExecutionEvidenceImportArgs,
+  WorkflowExecutionEvidenceQueryOptions,
+  WorkflowExecutionEvidenceResult,
   EpistemicDecisionQuotientArgs,
   EpistemicDecisionQuotientResult,
   FiberCompileArgs,
@@ -1542,7 +1546,36 @@ export class ApiClient {
     if (args.observations !== undefined && (!Array.isArray(args.observations) || args.observations.length > 16 || args.observations.some((item) => !isObject(item) || typeof item.acquisition_id !== "string" || typeof item.outcome_label !== "string"))) throw new ArgumentError("observations must contain at most 16 typed rows");
     if (args.authorization !== undefined && (!isObject(args.authorization) || typeof args.authorization.grant_id !== "string" || typeof args.authorization.provider !== "string")) throw new ArgumentError("authorization must contain grant_id and provider");
     if (args.mode === "replay" && !isObject(args.receipt)) throw new ArgumentError("receipt is required in replay mode");
+    if (args.evidence !== undefined && (!isObject(args.evidence) || typeof args.evidence.subject_id !== "string" || args.evidence.subject_id.trim().length === 0 || !Array.isArray(args.evidence.domains) || args.evidence.domains.length < 1 || args.evidence.domains.length > 64 || args.evidence.domains.some((item) => typeof item !== "string" || item.trim().length === 0))) throw new ArgumentError("evidence must contain subject_id and 1..=64 non-empty domains");
     return this.callTool<WorkflowExecutionResult>("interweave_workflow_execute", args, options);
+  }
+
+  async interweaveWorkflowExecutionEvidence(args: WorkflowExecutionEvidenceArgs, options?: ClientRequestOptions): Promise<RestToolResponse<WorkflowExecutionEvidenceResult>> {
+    if (!isObject(args)) throw new ArgumentError("workflow execution evidence arguments must be an object");
+    if (!isObject(args.binding) || !isObject(args.receipt)) throw new ArgumentError("binding and receipt must be objects");
+    if (typeof args.subject_id !== "string" || args.subject_id.trim().length === 0) throw new ArgumentError("subject_id must be a non-empty string");
+    if (!Array.isArray(args.domains) || args.domains.length < 1 || args.domains.length > 64 || args.domains.some((item) => typeof item !== "string" || item.trim().length === 0)) throw new ArgumentError("domains must contain 1..=64 non-empty strings");
+    if (args.parent_digests !== undefined && (!Array.isArray(args.parent_digests) || args.parent_digests.length > 128 || args.parent_digests.some((item) => typeof item !== "string" || !/^[0-9a-f]{64}$/.test(item)))) throw new ArgumentError("parent_digests must contain at most 128 lowercase SHA-256 digests");
+    return this.callTool<WorkflowExecutionEvidenceResult>("interweave_workflow_execution_evidence", args, options);
+  }
+
+  async interweaveWorkflowExecutionEvidenceImport(args: WorkflowExecutionEvidenceImportArgs, options?: ClientRequestOptions): Promise<RestToolResponse<WorkflowExecutionEvidenceResult>> {
+    if (!isObject(args) || !isObject(args.evidence)) throw new ArgumentError("evidence import arguments must contain an evidence object");
+    return this.callTool<WorkflowExecutionEvidenceResult>("interweave_workflow_execution_evidence_import", args, options);
+  }
+
+  async interweaveWorkflowExecutionEvidenceQuery(args: WorkflowExecutionEvidenceQueryOptions = {}, options?: ClientRequestOptions): Promise<RestToolResponse<WorkflowExecutionEvidenceResult>> {
+    if (!isObject(args)) throw new ArgumentError("workflow execution evidence query arguments must be an object");
+    if (args.max_items !== undefined && (!Number.isSafeInteger(args.max_items) || args.max_items < 1 || args.max_items > 256)) throw new ArgumentError("max_items must be 1..=256");
+    for (const [name, value] of [["plan_digest", args.plan_digest], ["binding_digest", args.binding_digest], ["after", args.after]] as const) {
+      if (value !== undefined && !/^[0-9a-f]{64}$/.test(value)) throw new ArgumentError(`${name} must be a lowercase SHA-256 digest`);
+    }
+    return this.callTool<WorkflowExecutionEvidenceResult>("interweave_workflow_execution_evidence_query", args, options);
+  }
+
+  async interweaveWorkflowExecutionEvidenceGet(evidenceDigest: string, options?: ClientRequestOptions): Promise<RestToolResponse<WorkflowExecutionEvidenceResult>> {
+    if (typeof evidenceDigest !== "string" || !/^[0-9a-f]{64}$/.test(evidenceDigest)) throw new ArgumentError("evidenceDigest must be a lowercase SHA-256 digest");
+    return this.callTool<WorkflowExecutionEvidenceResult>("interweave_workflow_execution_evidence_get", { evidence_digest: evidenceDigest }, options);
   }
 
   async epistemicDecisionQuotient(args: EpistemicDecisionQuotientArgs, options?: ClientRequestOptions): Promise<RestToolResponse<EpistemicDecisionQuotientResult>> {

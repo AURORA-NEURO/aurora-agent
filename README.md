@@ -576,6 +576,11 @@ all six reference workflow identities without claiming generic release authority
 `interweave_workflow_execute` MCP route and the Python/TypeScript facades expose deterministic
 simulation, structured no-grant refusal, and same-binding receipt replay. See
 [`docs/WORKFLOW_EXECUTION_BINDING.md`](docs/WORKFLOW_EXECUTION_BINDING.md).
+Workflow receipts can also be converted into portable, digest-checked evidence with
+`interweave_workflow_execution_evidence`, then imported, queried, and fetched without re-running
+the workflow. Evidence retains caller-owned domain/subject labels and separates observed,
+simulated, and replayed provenance; registry presence remains review evidence rather than release
+authority.
 `benchmark_trace_analyze` adds the deeper benchmark compiler's causal, episode, boundary, and
 repetition analysis; the Python and TypeScript SDKs expose typed trace events, causal score
 components, divergence/verdict variants, boundaries, episodes, repetitions, and fail-closed

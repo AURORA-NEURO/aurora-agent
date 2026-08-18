@@ -29,6 +29,9 @@ use crate::domain_evidence_source::{
 };
 use crate::domain_report::{validate_domain_report, DOMAIN_REPORT_SCHEMA_VERSION};
 use crate::evidence_bundle::verify_mission_evidence_bundle;
+use crate::workflow_execution_evidence::{
+    validate_workflow_execution_evidence, WORKFLOW_EXECUTION_EVIDENCE_SCHEMA_VERSION,
+};
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -52,6 +55,7 @@ pub const MAX_ARTIFACT_REGISTRY_TEXT_BYTES: usize = 512;
 const ARTIFACT_KINDS: &[&str] = &[
     "mission_evidence_bundle",
     "workflow_reconciliation",
+    "workflow_execution_evidence",
     "mission_report",
     "evaluator_replay",
     "domain_report",
@@ -621,6 +625,32 @@ fn verify_known_artifact(
                     "state": "verified_integrity",
                     "method": "workflow_reconciliation_digest",
                     "reconciliation_digest": declared
+                }),
+            ))
+        }
+        "workflow_execution_evidence"
+            if artifact.get("schema").and_then(Value::as_str)
+                == Some(WORKFLOW_EXECUTION_EVIDENCE_SCHEMA_VERSION) =>
+        {
+            validate_workflow_execution_evidence(artifact).map_err(|error| {
+                ArtifactRegistryError::InvalidInput(format!(
+                    "workflow execution evidence verification failed: {error}"
+                ))
+            })?;
+            let declared = required_digest(
+                artifact.as_object().ok_or_else(|| {
+                    ArtifactRegistryError::InvalidInput(
+                        "workflow execution evidence must be an object".into(),
+                    )
+                })?,
+                "evidence_digest",
+            )?;
+            Ok((
+                Some(declared),
+                json!({
+                    "state": "verified_integrity",
+                    "method": "workflow_execution_evidence",
+                    "schema": WORKFLOW_EXECUTION_EVIDENCE_SCHEMA_VERSION
                 }),
             ))
         }
