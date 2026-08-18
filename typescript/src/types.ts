@@ -2444,6 +2444,48 @@ export interface EpistemicVoiResult extends JsonObject {
   guarantees: string[];
 }
 
+export interface EpistemicDecisionQuotientArgs extends JsonObject {
+  problem: EpistemicDecisionProblemArgs;
+  permitted_actions: string[];
+}
+
+export interface EpistemicDecisionQuotientClass extends JsonObject {
+  class_index: number;
+  representative_model: string;
+  members: string[];
+  loss_differences: Record<string, number>;
+  preferred_actions: string[];
+}
+
+export interface EpistemicDecisionQuotientProjection extends JsonObject {
+  schema_version: "bioprism-epistemic-decision-quotient/0.1";
+  basis: "permitted_loss_difference_profile";
+  permitted_actions: string[];
+  original_model_count: number;
+  quotient_model_count: number;
+  merged_model_count: number;
+  model_to_class: Record<string, number>;
+  classes: EpistemicDecisionQuotientClass[];
+}
+
+export interface EpistemicDecisionQuotientResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/epistemic-decision-quotient/0.1";
+  quotient?: EpistemicDecisionQuotientProjection;
+  summary?: {
+    original_model_count: number;
+    quotient_model_count: number;
+    merged_model_count: number;
+    compressed: boolean;
+    compression_fraction: number;
+  };
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees: string[];
+  limitations?: string[];
+}
+
 export interface EpistemicEvidenceItemArgs extends JsonObject {
   id: string;
   cost: number;

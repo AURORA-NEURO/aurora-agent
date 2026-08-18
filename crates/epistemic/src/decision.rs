@@ -107,6 +107,41 @@ impl DecisionProblem {
         &self.models
     }
 
+    /// Re-check invariants after a value arrived through derived serde deserialisation.
+    ///
+    /// The constructor enforces these conditions for ordinary callers, but serde can construct a
+    /// public value without invoking it. Decision-relative analyses call this gate before any
+    /// indexed matrix access so malformed wire data becomes a typed refusal instead of a panic.
+    pub fn validate(&self) -> Result<(), EpistemicError> {
+        if self.actions.is_empty() || self.models.is_empty() {
+            return Err(EpistemicError::EmptyDecisionProblem {
+                actions: self.actions.len(),
+                models: self.models.len(),
+            });
+        }
+        let want = self.actions.len() * self.models.len();
+        if self.loss.len() != want {
+            return Err(EpistemicError::LossMatrixShape {
+                got: self.loss.len(),
+                want,
+                actions: self.actions.len(),
+                models: self.models.len(),
+            });
+        }
+        crate::unique(&self.actions, "actions")?;
+        crate::unique(&self.models, "models")?;
+        for (index, value) in self.loss.iter().enumerate() {
+            if !value.is_finite() {
+                return Err(EpistemicError::NonFiniteLoss {
+                    action: index / self.models.len(),
+                    model: index % self.models.len(),
+                    value: *value,
+                });
+            }
+        }
+        Ok(())
+    }
+
     pub fn action_count(&self) -> usize {
         self.actions.len()
     }

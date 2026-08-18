@@ -53,6 +53,7 @@
 //! | Module | Blueprint | What it is |
 //! |---|---|---|
 //! | [`decision`] [`evidence`] | 43.50, 43.02 | actions, loss, beliefs, observed evidence, evidence actions |
+//! | [`quotient`] | 43.10 | exact decision-equivalence classes under an explicit permitted-action loss profile |
 //! | [`ratedistortion`] | 43.50, 43.12 | decision distortion, the frontier, identification, abstention |
 //! | [`voi`] | 43.50 | value of information, bundles, complementarity |
 //! | [`gap`] | 43.50 | the wire fields `fiber-query/0.1` lacks, and one it silently drops |
@@ -147,6 +148,7 @@ pub mod library;
 pub mod objective;
 pub mod optimal;
 pub mod patterns;
+pub mod quotient;
 pub mod ratedistortion;
 pub mod rng;
 pub mod separator;
@@ -161,6 +163,10 @@ pub use gap::{RequiredField, PROPOSED_SCHEMA_VERSION, REQUIRED_FOR_RATE_DISTORTI
 pub use greedy::{greedy, lazy_greedy, Constraint, Selection};
 pub use objective::{Coverage, HypothesisElimination, RegretReduction, SetFunction, Tabulated};
 pub use optimal::{brute_force_optimum, measure_ratio, RatioMeasurement};
+pub use quotient::{
+    quotient as decision_equivalence_quotient, DecisionEquivalenceClass,
+    DecisionEquivalenceQuotient, EquivalenceBasis, DECISION_QUOTIENT_SCHEMA_VERSION,
+};
 pub use ratedistortion::{
     evaluate_context, frontier, identification, minimal_sufficient_context, DistortionCriterion,
     Frontier, Identification, Sufficiency,
@@ -176,6 +182,9 @@ pub use voi::{complementarity, joint_value, value_of_information, ValueOfInforma
 /// close one. A missing capability that is stated is a limitation; one that is implied to exist is
 /// a lie.
 pub const NOT_IMPLEMENTED: &[&str] = &[
+    "43.10: the FIBER wire compiler integration remains deferred when fiber-query/0.2 lacks \
+     permitted actions and decision loss; the explicit decision-equivalence kernel is available \
+     through bioprism-epistemic and the MCP/SDK surfaces.",
     "43.50: causal identification in the do-calculus sense. There is no graph, no back-door or \
      front-door criterion, and no instrument. Identification here is decision-relative — whether \
      the surviving models disagree about what to do — and the type is named to force the \

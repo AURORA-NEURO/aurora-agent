@@ -105,7 +105,7 @@ carries a typed verdict in [`crates/residue`](crates/residue) explaining why not
 | [`bioprism-devplat`](crates/devplat) | 11,19 | Developer platform contracts: evidence-aware authoring workbench, cross-domain mission DAGs, digest-bound capability discovery, notebook/session audit, capability dashboard queries, CI planning, and reference-example predicates |
 | [`bioprism-devx`](crates/devx) | 11,23,38,39,40,41,43 | Developer platform: machine-actionable diagnostics, compile introspection, the local-loop invalidation contract and the 23.32 debugger surface model |
 | [`bioprism-docgraph`](crates/docgraph) | 39,41,43 | Documentation graph: module registry, edge vocabulary, context cards, task routes, bundle compiler, change impact |
-| [`bioprism-epistemic`](crates/epistemic) | 43 | The remaining FIBER calculus: coverage-aware selection, separator protocol, rate-distortion and value of information |
+| [`bioprism-epistemic`](crates/epistemic) | 43 | The remaining FIBER calculus: decision-equivalence quotient, coverage-aware selection, separator protocol, rate-distortion and value of information |
 | [`bioprism-evalengine`](crates/evalengine) | 06,07,43 | Evaluation engine: the deterministic-first scoring ladder and causal component attribution |
 | [`bioprism-examples`](crates/examples) | 19,38,39,40,43 | Reference BioWorlds and runnable vertical slices |
 | [`bioprism-fabric`](crates/fabric) | 23,43 | Interweave fabric above the microkernel: composition algebra, effect and information flow, contextual reputation, common ground, semantic lifecycle |
@@ -1056,8 +1056,8 @@ prints them:
 |---|---|
 | Gluing and obstruction tests (43.06) | Requires a declared cover; `fiber-world/0.1` carries none |
 | Abstract interpretation (43.11) | Requires an abstract-domain registry absent from the wire schema |
-| Decision-equivalence quotient (43.10) | Defined relative to permitted actions and decision loss, neither of which `fiber-query/0.2` carries |
-| Rate-distortion optimisation (43.12) | Optimises against a decision loss the query does not declare |
+| FIBER wire integration of decision-equivalence quotient (43.10) | The explicit `bioprism-epistemic` kernel and `epistemic_decision_quotient` tool accept the contract; `fiber-query/0.2` still carries neither permitted actions nor decision loss |
+| FIBER wire integration of rate-distortion optimisation (43.12) | The explicit `bioprism-epistemic` calculus accepts a caller-supplied loss; `fiber-query/0.2` still does not declare one |
 
 The backend portfolio of 43.19–43.24 (FAQ/InsideOut, worst-case-optimal joins, tensor networks,
 decision diagrams, incremental view maintenance) is **not built**. `Backend` enumerates them so

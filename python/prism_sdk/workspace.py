@@ -468,6 +468,7 @@ from .token_context import (
 )
 from .weavelang import WeaveLangCompileArgs, WeaveLangCompileReport, weavelang_compile_report
 from .epistemic import EpistemicVoiArgs, EpistemicVoiReport, epistemic_voi_report
+from .epistemic_quotient import EpistemicDecisionQuotientArgs, EpistemicDecisionQuotientReport, epistemic_decision_quotient_report
 from .epistemic_context import EpistemicContextAuditArgs, EpistemicContextAuditReport, epistemic_context_audit_report
 from .epistemic_selection import EpistemicSelectionAuditArgs, EpistemicSelectionAuditReport, epistemic_selection_audit_report
 from .bioeval_acquisition import BioevalAcquisitionAuditArgs, BioevalAcquisitionAuditReport, bioeval_acquisition_audit_report
@@ -3563,6 +3564,26 @@ class Workspace:
         """Return typed gross/cost/net, action-change, bundle, and refusal evidence."""
 
         return epistemic_voi_report(self.epistemic_voi(request))
+
+    def epistemic_decision_quotient(
+        self,
+        request: EpistemicDecisionQuotientArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Compute a decision-relative model quotient through workspace MCP."""
+
+        normalized = request if isinstance(request, EpistemicDecisionQuotientArgs) else EpistemicDecisionQuotientArgs.from_wire(request)
+        result = self.client.call_tool("epistemic_decision_quotient", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def epistemic_decision_quotient_report(
+        self,
+        request: EpistemicDecisionQuotientArgs | Mapping[str, Any],
+    ) -> EpistemicDecisionQuotientReport:
+        """Return typed class membership, compression, and refusal evidence."""
+
+        return epistemic_decision_quotient_report(self.epistemic_decision_quotient(request))
 
     def epistemic_context_audit(
         self,
@@ -7262,6 +7283,26 @@ class AsyncWorkspace:
         """Return async typed value-of-information evidence."""
 
         return epistemic_voi_report(await self.epistemic_voi(request))
+
+    async def epistemic_decision_quotient(
+        self,
+        request: EpistemicDecisionQuotientArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Compute a decision-relative model quotient through async workspace MCP."""
+
+        normalized = request if isinstance(request, EpistemicDecisionQuotientArgs) else EpistemicDecisionQuotientArgs.from_wire(request)
+        result = await self.client.call_tool("epistemic_decision_quotient", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def epistemic_decision_quotient_report(
+        self,
+        request: EpistemicDecisionQuotientArgs | Mapping[str, Any],
+    ) -> EpistemicDecisionQuotientReport:
+        """Return typed class membership, compression, and refusal evidence."""
+
+        return epistemic_decision_quotient_report(await self.epistemic_decision_quotient(request))
 
     async def epistemic_context_audit(
         self,

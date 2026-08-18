@@ -243,6 +243,8 @@ import type {
   DeveloperPlatformStatusResult,
   EpistemicVoiArgs,
   EpistemicVoiResult,
+  EpistemicDecisionQuotientArgs,
+  EpistemicDecisionQuotientResult,
   EpistemicContextAuditArgs,
   EpistemicContextAuditResult,
   EpistemicSelectionAuditArgs,
@@ -1488,6 +1490,10 @@ export class ApiClient {
 
   async epistemicVoi(args: EpistemicVoiArgs, options?: ClientRequestOptions): Promise<RestToolResponse<EpistemicVoiResult>> {
     return this.callTool<EpistemicVoiResult>("epistemic_voi", args, options);
+  }
+
+  async epistemicDecisionQuotient(args: EpistemicDecisionQuotientArgs, options?: ClientRequestOptions): Promise<RestToolResponse<EpistemicDecisionQuotientResult>> {
+    return this.callTool<EpistemicDecisionQuotientResult>("epistemic_decision_quotient", args, options);
   }
 
   async epistemicContextAudit(args: EpistemicContextAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<EpistemicContextAuditResult>> {

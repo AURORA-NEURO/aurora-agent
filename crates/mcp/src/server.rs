@@ -192,6 +192,7 @@ use bioprism_epistemic::submodularity::check_with_tolerance as epistemic_submodu
 use bioprism_epistemic::{
     brute_force_optimum as epistemic_brute_force_optimum,
     complementarity as epistemic_complementarity, evaluate_context as epistemic_evaluate_context,
+    decision_equivalence_quotient as epistemic_decision_equivalence_quotient,
     frontier as epistemic_frontier, greedy as epistemic_greedy,
     identification as epistemic_identification, joint_value as epistemic_joint_value,
     lazy_greedy as epistemic_lazy_greedy,
@@ -1599,6 +1600,7 @@ impl Server {
             "token_context_plan" => self.token_context_plan(&arguments),
             "bioql_compile" => self.bioql_compile(&arguments),
             "epistemic_voi" => self.epistemic_voi(&arguments),
+            "epistemic_decision_quotient" => self.epistemic_decision_quotient(&arguments),
             "epistemic_context_audit" => self.epistemic_context_audit(&arguments),
             "epistemic_selection_audit" => self.epistemic_selection_audit(&arguments),
             "routing_lab_run" => self.routing_lab_run(&arguments),
@@ -13395,6 +13397,107 @@ impl Server {
             return Err("epistemic context result exceeds the 20000000-byte safety bound".into());
         }
         Ok(output)
+    }
+
+    fn epistemic_decision_quotient(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_problem = arguments
+            .get("problem")
+            .cloned()
+            .ok_or("problem is required and must be a serialized epistemic DecisionProblem")?;
+        let raw_actions = arguments
+            .get("permitted_actions")
+            .and_then(Value::as_array)
+            .ok_or("permitted_actions is required and must be an array of action names")?;
+        if raw_actions.is_empty() || raw_actions.len() > 1_000 {
+            return Err("permitted_actions must contain between 1 and 1000 actions".into());
+        }
+        let permitted_actions = raw_actions
+            .iter()
+            .enumerate()
+            .map(|(index, value)| {
+                let action = value
+                    .as_str()
+                    .ok_or_else(|| format!("permitted_actions[{index}] must be a string"))?;
+                if action.trim().is_empty() || action.len() > 256 {
+                    return Err(format!(
+                        "permitted_actions[{index}] must contain between 1 and 256 bytes"
+                    ));
+                }
+                Ok(action.to_string())
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let encoded = serde_json::to_vec(&json!({
+            "problem": raw_problem.clone(),
+            "permitted_actions": permitted_actions.clone(),
+        }))
+        .map_err(|error| format!("cannot measure decision quotient envelope: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("decision quotient input exceeds the 20000000-byte safety bound".into());
+        }
+
+        let parsed_problem: EpistemicDecisionProblem = serde_json::from_value(raw_problem)
+            .map_err(|error| format!("invalid decision problem: {error}"))?;
+        parsed_problem
+            .validate()
+            .map_err(|error| format!("decision problem invariant failed: {error}"))?;
+        if parsed_problem.action_count() > 1_000 || parsed_problem.model_count() > 1_000 {
+            return Err("decision problems are bounded at 1000 actions and 1000 models".into());
+        }
+        let action_count = parsed_problem.action_count();
+        let model_count = parsed_problem.model_count();
+        let problem_ref = &parsed_problem;
+        let loss = (0..action_count)
+            .flat_map(|action| (0..model_count).map(move |model| problem_ref.loss(action, model)))
+            .collect::<Vec<_>>();
+        let problem = EpistemicDecisionProblem::new(
+            parsed_problem.actions().to_vec(),
+            parsed_problem.models().to_vec(),
+            loss,
+        )
+        .map_err(|error| format!("decision problem invariant failed: {error}"))?;
+
+        let quotient = match epistemic_decision_equivalence_quotient(&problem, &permitted_actions) {
+            Ok(quotient) => quotient,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "schema": "bioprism-mcp/epistemic-decision-quotient/0.1",
+                    "stage": "decision_quotient",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "guarantees": [
+                        "an empty, duplicate, or unknown permitted-action set is refused rather than treated as all actions",
+                        "malformed or non-finite decision losses remain refusals",
+                    ],
+                    "limitations": [
+                        "the quotient is decision-relative to the supplied loss table and permitted action names",
+                    ],
+                }))
+            }
+        };
+        Ok(json!({
+            "ok": true,
+            "schema": "bioprism-mcp/epistemic-decision-quotient/0.1",
+            "quotient": quotient,
+            "summary": {
+                "original_model_count": problem.model_count(),
+                "quotient_model_count": quotient.quotient_model_count,
+                "merged_model_count": quotient.merged_model_count,
+                "compressed": quotient.compressed(),
+                "compression_fraction": quotient.compression_fraction(),
+            },
+            "guarantees": [
+                "models merge only when their permitted-action loss-difference profiles are exactly equal",
+                "model identities, class membership, preferred-action ties, and the permitted action boundary remain visible",
+                "the relation is transitive and deterministic under model or action input reordering",
+                "the quotient preserves permitted-action ordering and regret profiles, not absolute loss baselines",
+            ],
+            "limitations": [
+                "this is not causal, biological, clinical, predictive, or likelihood equivalence",
+                "forbidden actions and distinctions outside the supplied loss table are intentionally not preserved",
+                "fiber-query/0.2 still cannot invoke this pass because it carries neither permitted_actions nor decision_loss",
+            ],
+        }))
     }
 
     fn epistemic_voi(&self, arguments: &Value) -> Result<Value, String> {
@@ -31139,7 +31242,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "evaluation_and_baselines",
             "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes", "factorial designs", "component attribution", "interaction coverage", "evaluator independence", "disagreement witnesses", "abstention handling", "nonrenewable resource accounting", "fork feasibility", "failed-action waste", "prospective commitments", "rubric digest integrity", "selective publication", "contextual integrity", "channel exposure", "utility-safety Pareto"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
-            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "bioeval_reveal_audit", "bioeval_boundary_audit", "epistemic_voi", "epistemic_context_audit", "epistemic_selection_audit"],
+            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "bioeval_reveal_audit", "bioeval_boundary_audit", "epistemic_voi", "epistemic_decision_quotient", "epistemic_context_audit", "epistemic_selection_audit"],
             "cli_entrypoints": ["prism fork", "prism minimize", "context compare"],
             "status": "available"
         },
@@ -33726,6 +33829,18 @@ pub fn tool_definitions() -> Vec<Value> {
                     "acquisitions": { "type": "array", "maxItems": 64, "description": "Alternative bounded acquisition bundle; provide this instead of acquisition for joint non-adaptive pricing." }
                 },
                 "required": ["problem", "belief"]
+            }
+        }),
+        json!({
+            "name": "epistemic_decision_quotient",
+            "description": "Compute the deterministic 43.10 decision-equivalence quotient of an explicit loss table under an explicit permitted-action set. Models merge only when their permitted-action loss-difference profiles are exactly equal; model identities, ties, compression, and the refusal boundary remain visible. This is decision-relative, not causal, biological, clinical, or predictive equivalence.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "problem": { "type": "object", "description": "Serialized bioprism-epistemic DecisionProblem with explicit actions, models, and finite row-major loss matrix." },
+                    "permitted_actions": { "type": "array", "minItems": 1, "maxItems": 1000, "items": { "type": "string", "minLength": 1, "maxLength": 256 }, "description": "Action identifiers this query is allowed to distinguish between. The endpoint canonicalises their order." }
+                },
+                "required": ["problem", "permitted_actions"]
             }
         }),
         json!({

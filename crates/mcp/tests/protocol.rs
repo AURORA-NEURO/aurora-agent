@@ -323,7 +323,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 211);
+    assert_eq!(tools.len(), 212);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -7852,12 +7852,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(211));
-    assert_eq!(result["advertised_tool_count"], json!(211));
+    assert_eq!(result["unique_catalog_tools"], json!(212));
+    assert_eq!(result["advertised_tool_count"], json!(212));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(211));
-    assert_eq!(result["schema_quality"]["valid"], json!(211));
+    assert_eq!(result["schema_quality"]["checked"], json!(212));
+    assert_eq!(result["schema_quality"]["valid"], json!(212));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -13204,6 +13204,65 @@ fn epistemic_voi_keeps_gross_cost_net_and_action_change_separate() {
     );
     assert_eq!(invalid["__isError"], json!(true));
     assert!(invalid["error"]
+        .as_str()
+        .unwrap()
+        .contains("invariant failed"));
+}
+
+#[test]
+fn epistemic_decision_quotient_keeps_permitted_boundary_and_merges_only_equivalent_models() {
+    let result = call(
+        &mut server(),
+        "epistemic_decision_quotient",
+        json!({
+            "problem": {
+                "actions": ["accept", "defer", "reject"],
+                "models": ["m-a", "m-b", "m-c"],
+                "loss": [
+                    0.0, 7.0, 0.0,
+                    4.0, 11.0, 5.0,
+                    8.0, 15.0, 8.0
+                ]
+            },
+            "permitted_actions": ["reject", "accept", "defer"]
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/epistemic-decision-quotient/0.1")
+    );
+    assert_eq!(
+        result["quotient"]["permitted_actions"],
+        json!(["accept", "defer", "reject"])
+    );
+    assert_eq!(result["summary"]["original_model_count"], json!(3));
+    assert_eq!(result["summary"]["quotient_model_count"], json!(2));
+    assert_eq!(result["summary"]["merged_model_count"], json!(1));
+    assert_eq!(
+        result["quotient"]["model_to_class"]["m-a"],
+        result["quotient"]["model_to_class"]["m-b"]
+    );
+    assert_ne!(
+        result["quotient"]["model_to_class"]["m-a"],
+        result["quotient"]["model_to_class"]["m-c"]
+    );
+
+    let refused = call(
+        &mut server(),
+        "epistemic_decision_quotient",
+        json!({
+            "problem": {
+                "actions": ["accept"],
+                "models": ["m"],
+                "loss": []
+            },
+            "permitted_actions": ["accept"]
+        }),
+    );
+    assert_eq!(refused["__isError"], json!(true));
+    assert!(refused["error"]
         .as_str()
         .unwrap()
         .contains("invariant failed"));

@@ -3521,6 +3521,41 @@ test("client exposes epistemic context frontier and subset refusal accounting", 
   assert.equal(result.mcp.result.structuredContent.subset_rows_omitted, 1);
 });
 
+test("client exposes decision-equivalence quotient compression and action boundary", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/epistemic_decision_quotient");
+      return jsonResponse({ ok: true, tool: "epistemic_decision_quotient", request_id: "quotient-1", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/epistemic-decision-quotient/0.1",
+        quotient: {
+          schema_version: "bioprism-epistemic-decision-quotient/0.1",
+          basis: "permitted_loss_difference_profile",
+          permitted_actions: ["accept", "defer"],
+          original_model_count: 3,
+          quotient_model_count: 2,
+          merged_model_count: 1,
+          model_to_class: { "m-a": 0, "m-b": 0, "m-c": 1 },
+          classes: [
+            { class_index: 0, representative_model: "m-a", members: ["m-a", "m-b"], loss_differences: { accept: 0, defer: 4 }, preferred_actions: ["accept"] },
+            { class_index: 1, representative_model: "m-c", members: ["m-c"], loss_differences: { accept: 0, defer: 9 }, preferred_actions: ["accept"] },
+          ],
+        },
+        summary: { original_model_count: 3, quotient_model_count: 2, merged_model_count: 1, compressed: true, compression_fraction: 2 / 3 },
+        guarantees: ["exact permitted-action profile"],
+      } } } });
+    },
+  });
+  const result = await client.epistemicDecisionQuotient({
+    problem: { actions: ["accept", "defer"], models: ["m-a", "m-b", "m-c"], loss: [0, 0, 0, 4, 4, 9] },
+    permitted_actions: ["defer", "accept"],
+  });
+  assert.equal(result.mcp.result.structuredContent.schema, "bioprism-mcp/epistemic-decision-quotient/0.1");
+  assert.equal(result.mcp.result.structuredContent.summary.merged_model_count, 1);
+  assert.deepEqual(result.mcp.result.structuredContent.quotient.permitted_actions, ["accept", "defer"]);
+});
+
 test("client exposes epistemic selection guarantee and exactness posture", async () => {
   const client = new ApiClient({
     baseUrl: "http://127.0.0.1:18788",

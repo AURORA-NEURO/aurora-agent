@@ -107,12 +107,16 @@ remain explicit rather than being represented by a completion percentage.
 BioQL compilation is callable too: it type-checks explicit schemas for units, frames, builds, clocks,
 ontology expansion, labels, provenance, and cost bounds, but does not execute queries, load stores,
 infer schemas, convert units, expand ontologies, or enforce permissions.
-The epistemic value-of-information, observed-context compression, and bounded evidence-selection
-contracts are now callable as well, alongside the benchmark trace compiler and pack portfolio
+The epistemic value-of-information, observed-context compression, bounded evidence-selection, and
+explicit-contract decision-equivalence quotient are now callable as well, alongside the benchmark trace compiler and pack portfolio
 contracts. They preserve explicit losses and beliefs, exhaustive rate-distortion/submodularity
 checks, protected closure, exact small-instance comparison, review-gated causal localization, and
 declaration-versus-measurement boundaries; they do not add adaptive acquisition, trajectory replay,
 benchmark execution, pack generation, SDKs, external APIs, or a public evaluation service.
+The quotient additionally preserves model identity, permitted-action boundaries, exact loss-difference
+profiles, tie sets, and deterministic compression across Rust, MCP, Python, and TypeScript. It does
+not close the FIBER wire integration: `fiber-query/0.2` still lacks the permitted-action and loss
+fields needed to invoke the pass from a compiled query.
 The foundation contract surface is callable too: it keeps admissibility, refinement, applicability,
 counterfactual world strength, reveal policy, and plane consistency independent, without creating
 clinical authority, causal identification, or runtime world validation.

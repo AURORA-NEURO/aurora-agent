@@ -85,6 +85,9 @@ pub enum EpistemicError {
     #[error("no member of {collection} is named {id:?}")]
     UnknownIdentifier { collection: String, id: String },
 
+    #[error("the decision quotient needs at least one permitted action; an empty decision boundary would make every model vacuously equivalent")]
+    EmptyPermittedActionSet,
+
     #[error("element {element} is outside a ground set of size {ground}")]
     ElementOutOfRange { element: usize, ground: usize },
 

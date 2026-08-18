@@ -1018,6 +1018,15 @@ from .epistemic_context import (
     EpistemicEvidencePoolArgs,
     epistemic_context_audit_report,
 )
+from .epistemic_quotient import (
+    EPISTEMIC_QUOTIENT_BASIS,
+    EPISTEMIC_QUOTIENT_KERNEL_SCHEMA,
+    EPISTEMIC_QUOTIENT_SCHEMA,
+    EpistemicDecisionQuotientArgs,
+    EpistemicDecisionQuotientClass,
+    EpistemicDecisionQuotientReport,
+    epistemic_decision_quotient_report,
+)
 from .epistemic_selection import (
     EPISTEMIC_SELECTION_SCHEMA,
     MAX_EPISTEMIC_SELECTION_EXHAUSTIVE,
@@ -2793,6 +2802,13 @@ __all__ = [
     "EpistemicContextAuditArgs",
     "EpistemicContextAuditReport",
     "epistemic_context_audit_report",
+    "EPISTEMIC_QUOTIENT_SCHEMA",
+    "EPISTEMIC_QUOTIENT_KERNEL_SCHEMA",
+    "EPISTEMIC_QUOTIENT_BASIS",
+    "EpistemicDecisionQuotientArgs",
+    "EpistemicDecisionQuotientClass",
+    "EpistemicDecisionQuotientReport",
+    "epistemic_decision_quotient_report",
     "EPISTEMIC_SELECTION_SCHEMA",
     "MAX_EPISTEMIC_SELECTION_ITEMS",
     "MAX_EPISTEMIC_SELECTION_PROTECTED",
