@@ -56,6 +56,51 @@ and audit in one explicit delivery call. The result keeps the normalized provide
 the downstream `ci_evidence` audit separately visible; `ci_provider` and canonical `ci_evidence`
 are mutually exclusive inputs.
 
+## Reusable GitHub Actions exporter
+
+The repository also ships a dependency-free composite action at
+`.github/actions/github-actions-evidence`. It packages a caller-selected checks JSON file and the
+current workflow-run metadata into the exact GitHub Actions-shaped payload accepted by
+`ci_provider_normalize`:
+
+```yaml
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Produce bounded check rows
+        run: |
+          mkdir -p .aurora
+          python - <<'PY'
+          import json
+          json.dump({"jobs": [
+              {"name": "unit", "conclusion": "success"},
+              {"name": "lint", "conclusion": "success"},
+          ]}, open(".aurora/checks.json", "w", encoding="utf-8"))
+          PY
+      - id: aurora-evidence
+        uses: AURORA-NEURO/aurora-agent/.github/actions/github-actions-evidence@<reviewed-commit>
+        with:
+          checks: .aurora/checks.json
+          output: .aurora/github-actions-provider-payload.json
+      - name: Retain the handoff
+        uses: actions/upload-artifact@v4
+        with:
+          name: aurora-provider-payload
+          path: .aurora/github-actions-provider-payload.json
+```
+
+The `checks` input may be an array or an object containing `jobs`/`checks`. Each row is limited to
+the normalizer's bounded text and count contract, duplicate names are refused, malformed supplied
+SHA-256 digests are refused, and the output is canonical JSON with a deterministic SHA-256 digest.
+The action exposes `payload-path`, `payload-digest`, `run-id`, and `check-count` outputs for a
+subsequent API/MCP handoff or artifact manifest. It copies only selected run fields and rows; it
+does not copy the event token, fetch jobs or logs, authenticate GitHub, execute a check, verify a
+signature, upload an artifact, or approve a release. Missing per-check digests are intentionally
+left for the Rust normalizer to derive and label. Pin the action to a reviewed commit or release
+tag in consumer repositories rather than floating on `main`.
+
 ## Provider artifacts, logs, and attestations
 
 `ci_provider_evidence_audit` is the deeper conformance handoff for consumers that have more than a

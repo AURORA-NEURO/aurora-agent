@@ -256,6 +256,14 @@ GitHub Actions, GitLab CI, and generic payloads map into canonical `CiRunEvidenc
 derived and labeled, supplied malformed digests are refused, and unknown/non-passing statuses stay
 visible to the downstream audit. It remains caller-supplied structural normalization rather than
 provider contact, signature verification, log retrieval, or external CI execution.
+The repository now also includes a reusable `.github/actions/github-actions-evidence` composite
+action and a deterministic exporter test contract. It packages bounded, caller-selected GitHub
+Actions run/job rows for that normalizer and refuses duplicate, oversized, malformed, or control-
+character-bearing inputs. This materially covers the local consumer-repository handoff for 11.21,
+but it does not complete 11.22: the action does not authenticate GitHub, discover jobs, retrieve
+logs, execute checks, verify attestations, upload artifacts, or provide hosted runner/release
+authority. Consumers must still supply and retain their own provider evidence and pin a reviewed
+action revision.
 `ci_provider_evidence_audit` now adds the next conformance layer for artifact, log, and attestation
 rows: it preserves the supplied records, checks provider/run/check bindings and subject references,
 computes separate deterministic row-family digests, and fails closed on malformed or unbound rows.

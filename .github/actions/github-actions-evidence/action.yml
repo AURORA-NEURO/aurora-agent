@@ -1,0 +1,63 @@
+name: Aurora GitHub Actions evidence
+description: Export bounded GitHub Actions run/job data into Aurora's provider-normalization payload shape
+author: AURORA-NEURO
+inputs:
+  checks:
+    description: JSON file containing an array or object of bounded job/check rows
+    required: true
+  output:
+    description: Path for the deterministic provider payload artifact
+    required: false
+    default: .aurora/github-actions-provider-payload.json
+  event:
+    description: Optional GitHub event JSON path; defaults to GITHUB_EVENT_PATH
+    required: false
+    default: ''
+  run-id:
+    description: Optional run id; defaults to event metadata or GITHUB_RUN_ID
+    required: false
+    default: ''
+  conclusion:
+    description: Optional run conclusion; defaults to event metadata
+    required: false
+    default: ''
+  run-url:
+    description: Optional run URL; defaults to GitHub repository/run environment variables
+    required: false
+    default: ''
+outputs:
+  payload-path:
+    description: Path to the emitted canonical provider payload
+    value: ${{ steps.export.outputs['payload-path'] }}
+  payload-digest:
+    description: SHA-256 digest over the canonical payload bytes
+    value: ${{ steps.export.outputs['payload-digest'] }}
+  run-id:
+    description: Exported provider run id
+    value: ${{ steps.export.outputs['run-id'] }}
+  check-count:
+    description: Number of exported bounded job rows
+    value: ${{ steps.export.outputs['check-count'] }}
+runs:
+  using: composite
+  steps:
+    - id: export
+      name: Export bounded provider payload
+      shell: bash
+      env:
+        INPUT_CHECKS: ${{ inputs.checks }}
+        INPUT_OUTPUT: ${{ inputs.output }}
+        INPUT_EVENT: ${{ inputs.event }}
+        INPUT_RUN_ID: ${{ inputs['run-id'] }}
+        INPUT_CONCLUSION: ${{ inputs.conclusion }}
+        INPUT_RUN_URL: ${{ inputs['run-url'] }}
+      run: |
+        set -euo pipefail
+        python "$GITHUB_ACTION_PATH/../../../tools/github_actions_evidence.py" \
+          --checks "$INPUT_CHECKS" \
+          --event "$INPUT_EVENT" \
+          --run-id "$INPUT_RUN_ID" \
+          --conclusion "$INPUT_CONCLUSION" \
+          --run-url "$INPUT_RUN_URL" \
+          --output "$INPUT_OUTPUT" \
+          --github-output "$GITHUB_OUTPUT"

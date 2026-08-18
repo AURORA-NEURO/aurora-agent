@@ -83,6 +83,8 @@ jobs:
       - name: run stdio client contract tests
         working-directory: python
         run: python -W error::ResourceWarning -m pytest -q
+      - name: test GitHub Actions evidence exporter
+        run: python -m pytest -q tools/test_github_actions_evidence.py
 
   typescript-sdk:
     name: TypeScript SDK

@@ -912,6 +912,12 @@ projects it into the exact `CiRunEvidence` envelope consumed by that audit. Miss
 digests are derived from the supplied check object and labeled, while unknown and non-passing states
 remain visible; normalization never contacts a provider, verifies signatures, fetches logs, or turns
 caller-supplied data into authenticated execution truth.
+For GitHub consumers, the repository also provides the dependency-free composite action
+[`github-actions-evidence`](.github/actions/github-actions-evidence/action.yml), which packages a
+bounded checks file plus current run metadata into that provider shape, emits a canonical payload
+digest, and exposes the artifact path/count as action outputs. It is an ingestion handoff only:
+provider authentication, job/log retrieval, execution, signature verification, artifact upload, and
+release approval remain outside the action; see [`docs/CI_EVIDENCE.md`](docs/CI_EVIDENCE.md).
 `ci_provider_evidence_audit` extends the same handoff with bounded artifact, log, and attestation rows:
 it validates unique ids, content-digest syntax, provider/run/check bindings, and attestation subjects,
 preserves the original rows, and emits separate deterministic record digests. Its `conformance_ready`
