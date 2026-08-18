@@ -128,7 +128,7 @@ use bioprism_devplat::{
     audit_domain_evidence_provider_external_payload_execution,
     audit_domain_evidence_provider_external_payload_lineage, audit_execution_provenance,
     build_dashboard, build_delivery_receipt, build_domain_acquisition_catalogue,
-    build_domain_workflow_catalogue, execute_domain_evidence_source,
+    build_domain_workflow_catalogue, classify_domain_report_bridge, execute_domain_evidence_source,
     handoff_domain_evidence_provider, instantiate_domain_workflow,
     mission_claim_lineage_with_review, normalize_ci_provider_payload,
     normalize_domain_evidence_provider, normalize_domain_evidence_provider_external_payload,
@@ -414,29 +414,6 @@ pub const QUERY_SCHEMA_URI: &str = "bioprism://schema/fiber-query/0.2";
 pub const CERTIFICATE_SCHEMA_URI: &str = "bioprism://schema/fiber-context-certificate/0.1";
 pub const WORLD_SCHEMA_URI: &str = "bioprism://schema/fiber-world/0.1";
 pub const CAPABILITIES_URI: &str = "bioprism://capabilities/0.1";
-
-fn domain_report_bridge_metadata(value: &Value) -> (String, Option<String>) {
-    let payload = value.get("report").and_then(Value::as_object);
-    let kind = payload
-        .and_then(|payload| payload.get("kind"))
-        .and_then(Value::as_str);
-    let mode = payload
-        .and_then(|payload| payload.get("mode"))
-        .and_then(Value::as_str);
-    let mode = mode.map(str::to_string);
-    let class = match (kind, mode.as_deref()) {
-        (Some("adapter_execution"), _) => "adapter_execution".to_string(),
-        (Some("provider_normalization"), Some("inline")) => {
-            "provider_normalization_inline".to_string()
-        }
-        (Some("provider_normalization"), Some("external_payload")) => {
-            "provider_normalization_external_payload".to_string()
-        }
-        (Some(kind), _) => kind.to_string(),
-        (None, _) => "ordinary".to_string(),
-    };
-    (class, mode)
-}
 
 const QUERY_SCHEMA: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -3334,9 +3311,10 @@ impl Server {
             let Some(group_id) = record.artifact.get("group_id").and_then(Value::as_str) else {
                 continue;
             };
-            let (report_class, bridge_mode) = domain_report_bridge_metadata(&record.artifact);
-            if report_class_filter.is_some_and(|filter| report_class != filter)
-                || bridge_mode_filter.is_some_and(|filter| bridge_mode.as_deref() != Some(filter))
+            let bridge_metadata = classify_domain_report_bridge(&record.artifact);
+            if report_class_filter.is_some_and(|filter| bridge_metadata.report_class != filter)
+                || bridge_mode_filter
+                    .is_some_and(|filter| bridge_metadata.mode.as_deref() != Some(filter))
             {
                 continue;
             }
@@ -3386,7 +3364,9 @@ impl Server {
                     claim_statuses.insert(status.to_string());
                 }
                 report_digests.insert(record.content_digest.clone());
-                let (report_class, report_mode) = domain_report_bridge_metadata(&record.artifact);
+                let bridge_metadata = classify_domain_report_bridge(&record.artifact);
+                let report_class = bridge_metadata.report_class;
+                let report_mode = bridge_metadata.mode;
                 *report_classes.entry(report_class.to_string()).or_default() += 1;
                 *report_class_summary
                     .entry(report_class.to_string())

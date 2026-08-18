@@ -7,7 +7,9 @@
 //! a reviewer which report bytes were considered, which capability group/source produced them,
 //! and where the caller declared support, qualification, contradiction, or context.
 
-use crate::domain_report::{validate_domain_report, DOMAIN_REPORT_SCHEMA_VERSION};
+use crate::domain_report::{
+    classify_domain_report_bridge, validate_domain_report, DOMAIN_REPORT_SCHEMA_VERSION,
+};
 use bioprism_ids::ContentHash;
 use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -150,7 +152,9 @@ pub fn harmonize_domain_evidence(request: &Value) -> Result<Value, DomainEvidenc
                 .as_object()
                 .expect("canonical domain report is an object");
             let roles = linked_roles.get(&index).cloned().unwrap_or_default();
-            let (report_class, bridge_mode) = report_bridge_metadata(object);
+            let bridge_metadata = classify_domain_report_bridge(&report.report);
+            let report_class = bridge_metadata.report_class;
+            let bridge_mode = bridge_metadata.mode;
             *report_class_counts
                 .entry(report_class.to_string())
                 .or_default() += 1;
@@ -266,35 +270,6 @@ pub fn harmonize_domain_evidence(request: &Value) -> Result<Value, DomainEvidenc
     ensure_size(&result)?;
     validate_domain_evidence_harmonization(&result)?;
     Ok(result)
-}
-
-/// Classify only the structural bridge marker carried inside the caller-supplied report body.
-/// Missing markers remain ordinary rather than being guessed from a source tool name. This is
-/// intentionally descriptive: a class or mode is not an authenticity, quality, or readiness
-/// judgment.
-fn report_bridge_metadata(object: &Map<String, Value>) -> (String, Option<String>) {
-    let payload = object.get("report").and_then(Value::as_object);
-    let kind = payload
-        .and_then(|payload| payload.get("kind"))
-        .and_then(Value::as_str);
-    let mode = payload
-        .and_then(|payload| payload.get("mode"))
-        .and_then(Value::as_str);
-    match (kind, mode) {
-        (Some("adapter_execution"), _) => {
-            ("adapter_execution".to_string(), mode.map(str::to_string))
-        }
-        (Some("provider_normalization"), Some("inline")) => (
-            "provider_normalization_inline".to_string(),
-            mode.map(str::to_string),
-        ),
-        (Some("provider_normalization"), Some("external_payload")) => (
-            "provider_normalization_external_payload".to_string(),
-            mode.map(str::to_string),
-        ),
-        (Some(kind), _) => (kind.to_string(), mode.map(str::to_string)),
-        (None, _) => ("ordinary".to_string(), mode.map(str::to_string)),
-    }
 }
 
 /// Validate an already harmonized report before durable artifact indexing or restore.

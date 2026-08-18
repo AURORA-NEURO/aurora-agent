@@ -30,6 +30,39 @@ pub const MAX_DOMAIN_REPORT_NON_CLAIMS: usize = 64;
 pub const MAX_DOMAIN_REPORT_LIMITATIONS: usize = 64;
 pub const MAX_DOMAIN_REPORT_TEXT_BYTES: usize = 512;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DomainReportBridgeMetadata {
+    pub report_class: String,
+    pub mode: Option<String>,
+}
+
+/// Classify explicit bridge markers without inferring them from source-tool names.
+///
+/// This shared vocabulary is used by report coverage and evidence harmonization. It is
+/// descriptive telemetry, not an authenticity, quality, provenance, or readiness judgment.
+pub fn classify_domain_report_bridge(value: &Value) -> DomainReportBridgeMetadata {
+    let payload = value.get("report").and_then(Value::as_object);
+    let kind = payload
+        .and_then(|payload| payload.get("kind"))
+        .and_then(Value::as_str);
+    let mode = payload
+        .and_then(|payload| payload.get("mode"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let report_class = match (kind, mode.as_deref()) {
+        (Some("adapter_execution"), _) => "adapter_execution".to_string(),
+        (Some("provider_normalization"), Some("inline")) => {
+            "provider_normalization_inline".to_string()
+        }
+        (Some("provider_normalization"), Some("external_payload")) => {
+            "provider_normalization_external_payload".to_string()
+        }
+        (Some(kind), _) => kind.to_string(),
+        (None, _) => "ordinary".to_string(),
+    };
+    DomainReportBridgeMetadata { report_class, mode }
+}
+
 const CLAIM_STATUSES: &[&str] = &[
     "observed",
     "derived",
@@ -324,5 +357,25 @@ mod tests {
             project_domain_report(&invalid),
             Err(DomainReportError::InvalidClaimStatus(_))
         ));
+    }
+
+    #[test]
+    fn bridge_classification_is_explicit_and_source_tool_independent() {
+        let metadata = classify_domain_report_bridge(&json!({
+            "source_tool": "caller_named_provider",
+            "report": {"kind": "provider_normalization", "mode": "external_payload"}
+        }));
+        assert_eq!(
+            metadata.report_class,
+            "provider_normalization_external_payload"
+        );
+        assert_eq!(metadata.mode.as_deref(), Some("external_payload"));
+
+        let ordinary = classify_domain_report_bridge(&json!({
+            "source_tool": "domain_evidence_provider_normalize",
+            "report": {"observations": ["no marker"]}
+        }));
+        assert_eq!(ordinary.report_class, "ordinary");
+        assert_eq!(ordinary.mode, None);
     }
 }
