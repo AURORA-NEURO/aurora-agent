@@ -1,4 +1,4 @@
-//! BioResult Bundle and Attestation IR — blueprint 25.20.
+//! HMAC-only BioResult Bundle and Attestation IR — blueprint 25.20.
 //!
 //! What a third party needs to reconstruct what was run, scored, claimed and limited: a run
 //! manifest, a decision trace, the evidence, the scores with their intervals, resource use,
@@ -7,19 +7,18 @@
 //! # Where the IR and the implementing crate disagree, and it matters
 //!
 //! 25.20's required field group is called **signatures**, and its invariant is that "attestations
-//! identify signer and evidence scope". `bioprism-bundle` cannot produce a signature. The workspace
-//! builds offline against pinned dependencies whose only cryptographic primitive is `sha2`, from
-//! which HMAC-SHA256 can be built and nothing asymmetric can. That crate says so in its own type
-//! system: `AuthenticationScheme` has one variant, `SymmetricSharedSecret`; `Repudiability` has one
-//! variant, `ForgeableByAnyVerifier`; a verified result deliberately has no accessor for the claimed
-//! producer, because a symmetric tag cannot identify one.
+//! identify signer and evidence scope". `bioprism-bundle` now has an additive Ed25519 path for
+//! public verification, alongside its HMAC compatibility path. This IR intentionally remains the
+//! older HMAC-only shape: its `Attestation` carries a MAC tag and cannot represent a
+//! `PubliclyAttestedBundle` without inventing fields and identity claims the IR does not define.
+//! The projection tests record that boundary as a gap rather than downgrading a public-key
+//! attestation into forgeable HMAC semantics.
 //!
 //! So this IR does not have a `signature` field. It has [`Attestation`], which carries a MAC tag, a
 //! [`Repudiability`] that admits forgeability, and an evidence scope. Naming the field `signature`
-//! would let a downstream reader conclude non-repudiation from an IR that cannot deliver it, and
-//! that conclusion is exactly the harm 25.20's third-party-reconstruction purpose is meant to
-//! prevent. **The blueprint's "signatures" requirement is not satisfiable on this platform, and the
-//! IR says so rather than looking as though it is.**
+//! would let a downstream reader conclude that this IR carries the stronger public-key contract.
+//! The bundle crate's public-key capability is therefore available to consumers of that crate,
+//! while this blueprint projection remains explicit about what it cannot carry.
 //!
 //! # What is deliberately not implemented
 //!
@@ -82,10 +81,11 @@ pub struct RecordedVerdict {
     pub tier: crate::oracle::EvidenceTier,
 }
 
-/// Whether the attestation can be denied by its producer.
+/// Whether the attestation can be denied by its producer in this HMAC-only IR.
 ///
-/// One variant, mirroring `bioprism_bundle::Repudiability`. A second variant would be a lie the
-/// platform cannot back.
+/// This intentionally models only the legacy MAC attestation. The implementation crate also has
+/// an Ed25519 `NotForgeableByVerifier` value, but it cannot be represented by this field shape and
+/// the projection layer reports that as an explicit gap.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Repudiability {
