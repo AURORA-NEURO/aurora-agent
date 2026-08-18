@@ -166,4 +166,20 @@ pub enum EpistemicError {
 
     #[error("distortion tolerance {value} is negative or non-finite")]
     InadmissibleTolerance { value: f64 },
+
+    #[error("adaptive acquisition budget {value} is negative or non-finite")]
+    InadmissibleAdaptiveBudget { value: f64 },
+
+    #[error("adaptive policy requests {steps} steps, above the exact horizon cap of {cap}")]
+    AdaptiveStepLimit { steps: usize, cap: usize },
+
+    #[error(
+        "adaptive policy supplies {acquisitions} acquisitions, above the exact mask cap of {cap}"
+    )]
+    AdaptiveAcquisitionCapExceeded { acquisitions: usize, cap: usize },
+
+    #[error(
+        "adaptive policy evaluates {nodes} state nodes, above the exact enumeration cap of {cap}"
+    )]
+    AdaptivePolicyCapExceeded { nodes: usize, cap: usize },
 }

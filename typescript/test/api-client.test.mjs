@@ -296,7 +296,39 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         value: { gross: 4, cost: 0.1, net: 3.9, outcome_probabilities: [0.5, 0.5], action_without: 0, action_after: [0, 1] },
         actions: { without: "treat", after: ["treat", "abstain"] },
         complementarity: null,
-        guarantees: ["gross risk reduction and declared acquisition cost remain separate"],
+         guarantees: ["gross risk reduction and declared acquisition cost remain separate"],
+       } } } });
+      if (path === "/v1/tools/epistemic_adaptive_acquisition") return jsonResponse({ ok: true, tool: "epistemic_adaptive_acquisition", request_id: "r19a", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/epistemic-adaptive-acquisition/0.1",
+        budget: 0.11,
+        max_steps: 2,
+        problem: { actions: ["choose-m0", "choose-m1"], models: ["m0", "m1"], action_count: 2, model_count: 2 },
+        acquisitions: [
+          { id: "screen", cost: 0.01, outcomes: [{ label: "positive" }, { label: "negative" }] },
+          { id: "confirm", cost: 0.1, outcomes: [{ label: "positive" }, { label: "negative" }] },
+        ],
+        policy: {
+          expected_total: 0.12,
+          expected_terminal_risk: 0.06,
+          expected_acquisition_cost: 0.06,
+          nodes_evaluated: 7,
+          selected_depth: 2,
+          root: {
+            kind: "acquire", acquisition_index: 0, id: "screen", cost: 0.01,
+            expected_total: 0.12, expected_terminal_risk: 0.06, expected_acquisition_cost: 0.06,
+            outcomes: [
+              { label: "positive", probability: 0.5, posterior: [0.8, 0.2], next: {
+                kind: "stop", action_index: 0, action: "choose-m0", risk: 0.06,
+              } },
+              { label: "negative", probability: 0.5, posterior: [0.2, 0.8], next: {
+                kind: "stop", action_index: 1, action: "choose-m1", risk: 0.06,
+              } },
+            ],
+          },
+        },
+        guarantees: ["exact under explicit caps"],
+        limitations: ["conditional independence is assumed"],
       } } } });
       if (path === "/v1/tools/benchmark_trace_analyze") return jsonResponse({ ok: true, tool: "benchmark_trace_analyze", request_id: "r20", mcp: { result: { structuredContent: {
         ok: true,
@@ -1780,6 +1812,16 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(voi.mcp.result.structuredContent.value.gross, 4);
   assert.equal(voi.mcp.result.structuredContent.value.net, 3.9);
   assert.deepEqual(voi.mcp.result.structuredContent.actions.after, ["treat", "abstain"]);
+  const adaptivePolicy = await client.epistemicAdaptiveAcquisition({
+    problem: { actions: ["choose-m0", "choose-m1"], models: ["m0", "m1"], loss: [0, 1, 1, 0] },
+    belief: { mass: [0.9, 0.1] },
+    acquisitions: [{ id: "screen", cost: 0.01, outcomes: [{ label: "positive", likelihood: [0.9, 0.2] }, { label: "negative", likelihood: [0.1, 0.8] }] }],
+    budget: 0.11,
+    max_steps: 2,
+  });
+  assert.equal(adaptivePolicy.mcp.result.structuredContent.schema, "bioprism-mcp/epistemic-adaptive-acquisition/0.1");
+  assert.equal(adaptivePolicy.mcp.result.structuredContent.policy.root.id, "screen");
+  assert.equal(adaptivePolicy.mcp.result.structuredContent.policy.selected_depth, 2);
   const traceAnalysis = await client.benchmarkTraceAnalyze({
     failing: {
       trace_id: "failed-run",

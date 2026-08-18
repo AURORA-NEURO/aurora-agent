@@ -51,6 +51,7 @@
 //!
 //! | Module | Blueprint | What it is |
 //! |---|---|---|
+//! | [`adaptive`] | 43.15 | exact bounded finite-horizon acquisition policies with branch-dependent choices |
 //! | [`decision`] [`evidence`] | 43.50, 43.02 | actions, loss, beliefs, observed evidence, evidence actions |
 //! | [`quotient`] | 43.10 | exact decision-equivalence classes under an explicit permitted-action loss profile |
 //! | [`ratedistortion`] | 43.50, 43.12 | decision distortion, the frontier, identification, abstention |
@@ -131,10 +132,12 @@
 //! ## What is not implemented
 //!
 //! See [`NOT_IMPLEMENTED`]. The headline omissions: no causal identification in the do-calculus
-//! sense, no adaptive or sequential acquisition policy, no lazy-greedy speedup claim beyond
-//! agreement with plain greedy, no matroid or partition constraints, no loopy message damping, and
-//! no second context capsule.
+//! sense, no adaptive acquisition contract in the FIBER wire, no external acquisition execution,
+//! no lazy-greedy speedup claim beyond agreement with plain greedy, no matroid or partition
+//! constraints, no loopy message damping, and no second context capsule. The kernel's bounded
+//! adaptive planner is intentionally not a FIBER wire contract or an execution engine.
 
+pub mod adaptive;
 pub mod continuation;
 pub mod decision;
 pub mod error;
@@ -153,6 +156,7 @@ pub mod submodularity;
 pub mod theorem;
 pub mod voi;
 
+pub use adaptive::{adaptive_policy, AdaptiveNode, AdaptiveOutcome, AdaptivePolicy};
 pub use decision::{Belief, DecisionProblem};
 pub use error::EpistemicError;
 pub use evidence::{Acquisition, EvidenceItem, EvidencePool, Outcome};
@@ -182,15 +186,17 @@ pub const NOT_IMPLEMENTED: &[&str] = &[
      and fiber-query/0.4 adds normalized priors, bounded observed evidence likelihoods, a \
      compatibility floor, and tolerance; FIBER executes the exact decision quotient plus the \
      bounded identification/frontier/minimal-sufficiency audit. Legacy 0.1/0.2 queries still \
-     defer these passes, and the kernel remains non-adaptive and non-causal.",
+     defer these passes, and the FIBER observed-context kernel remains non-adaptive and non-causal.",
     "43.50: causal identification in the do-calculus sense. There is no graph, no back-door or \
      front-door criterion, and no instrument. Identification here is decision-relative — whether \
      the surviving models disagree about what to do — and the type is named to force the \
      distinction.",
     "43.50: sensitivity analysis to hidden confounding. The compatible-model set is supplied by \
      the caller; nothing widens it to account for an unobserved common cause.",
-    "43.15/43.50: adaptive and sequential acquisition. Bundles are priced non-adaptively, which \
-     is a lower bound on what an adaptive planner would achieve.",
+    "43.15/43.50: fiber-query does not yet carry an adaptive acquisition contract, but the kernel \
+     exposes a bounded exact finite-horizon policy planner over caller-supplied acquisitions. \
+     The planner assumes conditional independence, scalarized costs, and no execution or causal \
+     identification; longer horizons and external scheduling remain outside this crate.",
     "43.14: the cost vector. Cost is a scalar here; the token, compute, latency, privacy, \
      specimen and expert-burden components 43.14 specifies are scalarised by the caller before \
      they arrive.",

@@ -323,7 +323,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 212);
+    assert_eq!(tools.len(), 213);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -7852,12 +7852,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(212));
-    assert_eq!(result["advertised_tool_count"], json!(212));
+    assert_eq!(result["unique_catalog_tools"], json!(213));
+    assert_eq!(result["advertised_tool_count"], json!(213));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(212));
-    assert_eq!(result["schema_quality"]["valid"], json!(212));
+    assert_eq!(result["schema_quality"]["checked"], json!(213));
+    assert_eq!(result["schema_quality"]["valid"], json!(213));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -13321,6 +13321,94 @@ fn epistemic_voi_keeps_gross_cost_net_and_action_change_separate() {
         .as_str()
         .unwrap()
         .contains("invariant failed"));
+}
+
+#[test]
+fn epistemic_adaptive_acquisition_projects_branch_dependent_named_policy() {
+    let result = call(
+        &mut server(),
+        "epistemic_adaptive_acquisition",
+        json!({
+            "problem": {
+                "actions": ["choose-m0", "choose-m1"],
+                "models": ["m0", "m1"],
+                "loss": [0.0, 1.0, 1.0, 0.0]
+            },
+            "belief": { "mass": [0.9, 0.1] },
+            "acquisitions": [
+                {
+                    "id": "screen",
+                    "cost": 0.01,
+                    "outcomes": [
+                        { "label": "positive", "likelihood": [0.9, 0.2] },
+                        { "label": "negative", "likelihood": [0.1, 0.8] }
+                    ]
+                },
+                {
+                    "id": "confirm",
+                    "cost": 0.1,
+                    "outcomes": [
+                        { "label": "positive", "likelihood": [0.01, 0.99] },
+                        { "label": "negative", "likelihood": [0.99, 0.01] }
+                    ]
+                }
+            ],
+            "budget": 0.11,
+            "max_steps": 2
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/epistemic-adaptive-acquisition/0.1")
+    );
+    assert_eq!(result["policy"]["root"]["kind"], json!("acquire"));
+    assert_eq!(result["policy"]["root"]["id"], json!("screen"));
+    assert!(result["policy"]["expected_total"].as_f64().unwrap() < 0.1);
+    assert!(result["policy"]["root"]["outcomes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|outcome| outcome["next"]["kind"] == json!("acquire")
+            && outcome["next"]["id"] == json!("confirm")));
+    assert!(result["policy"]["root"]["outcomes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|outcome| outcome["next"]["kind"] == json!("stop")));
+    assert_eq!(
+        result["policy"]["root"]["outcomes"][0]["posterior"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let refused = call(
+        &mut server(),
+        "epistemic_adaptive_acquisition",
+        json!({
+            "problem": {
+                "actions": ["choose-m0", "choose-m1"],
+                "models": ["m0", "m1"],
+                "loss": [0.0, 1.0, 1.0, 0.0]
+            },
+            "belief": { "mass": [0.5, 0.5] },
+            "acquisitions": [{
+                "id": "too-many-steps",
+                "cost": 0.1,
+                "outcomes": [
+                    { "label": "yes", "likelihood": [0.9, 0.1] },
+                    { "label": "no", "likelihood": [0.1, 0.9] }
+                ]
+            }],
+            "budget": 1.0,
+            "max_steps": 17
+        }),
+    );
+    assert_eq!(refused["__isError"], json!(true));
+    assert!(refused["error"].as_str().unwrap().contains("max_steps"));
 }
 
 #[test]

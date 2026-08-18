@@ -272,6 +272,13 @@ invent defaults:
   joint-versus-singleton excess for explicitly non-adaptive bundles. Improper partitions and
   exhaustive-cap failures remain typed fail-closed refusals rather than being rounded into a
   negative result or silently treated as an adaptive policy.
+- `EpistemicAdaptiveArgs` and `epistemic_adaptive_report(...)` expose the exact bounded adaptive
+  policy tree through sync MCP, async MCP, and HTTP. `EpistemicAdaptiveNodeReport` preserves stop
+  and branch-dependent acquisition nodes, while the report parser validates posterior/probability
+  normalization, expected-risk/cost reconciliation, action and acquisition identity, path-level
+  non-repetition, and the 16-step/65,536-state caps. The endpoint plans only; it does not execute
+  an assay or imply causal, clinical, biological, or predictive truth. See
+  [`docs/EPISTEMIC_ADAPTIVE_ACQUISITION.md`](EPISTEMIC_ADAPTIVE_ACQUISITION.md).
 - `EpistemicContextAuditArgs` / `epistemic_context_audit_report(...)` audit observed-evidence
   compression with typed `EpistemicEvidenceItemArgs` and `EpistemicEvidencePoolArgs`. The report
   keeps decision identification, minimal sufficient context, exhaustive rate–distortion frontier,

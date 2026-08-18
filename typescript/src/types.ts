@@ -2444,6 +2444,59 @@ export interface EpistemicVoiResult extends JsonObject {
   guarantees: string[];
 }
 
+export interface EpistemicAdaptiveArgs extends JsonObject {
+  problem: EpistemicDecisionProblemArgs;
+  belief: EpistemicBeliefArgs;
+  acquisitions: EpistemicAcquisitionArgs[];
+  budget: number;
+  max_steps: number;
+}
+
+export interface EpistemicAdaptiveOutcomeResult extends JsonObject {
+  label: string;
+  probability: number;
+  posterior: number[];
+  next: EpistemicAdaptiveNodeResult;
+}
+
+export interface EpistemicAdaptiveNodeResult extends JsonObject {
+  kind: "stop" | "acquire";
+  action_index?: number;
+  action?: string;
+  risk?: number;
+  acquisition_index?: number;
+  id?: string;
+  cost?: number;
+  expected_total?: number;
+  expected_terminal_risk?: number;
+  expected_acquisition_cost?: number;
+  outcomes?: EpistemicAdaptiveOutcomeResult[];
+}
+
+export interface EpistemicAdaptivePolicyResult extends JsonObject {
+  expected_total: number;
+  expected_terminal_risk: number;
+  expected_acquisition_cost: number;
+  nodes_evaluated: number;
+  selected_depth: number;
+  root: EpistemicAdaptiveNodeResult;
+}
+
+export interface EpistemicAdaptiveResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/epistemic-adaptive-acquisition/0.1";
+  budget?: number;
+  max_steps?: number;
+  problem?: { actions: string[]; models: string[]; action_count: number; model_count: number };
+  acquisitions?: Array<{ id: string; cost: number; outcomes: Array<{ label: string }> }>;
+  policy?: EpistemicAdaptivePolicyResult;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees: string[];
+  limitations?: string[];
+}
+
 export interface EpistemicDecisionQuotientArgs extends JsonObject {
   problem: EpistemicDecisionProblemArgs;
   permitted_actions: string[];

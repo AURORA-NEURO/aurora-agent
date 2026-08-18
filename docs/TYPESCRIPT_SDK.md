@@ -386,6 +386,12 @@ action changes, and complementarity for bounded non-adaptive bundles. The reques
 explicit row-major losses and per-model likelihood vectors; the result keeps structured
 fail-closed refusals visible and does not invent an adaptive policy, hidden prior, causal effect,
 or execution step.
+`epistemicAdaptiveAcquisition` returns `EpistemicAdaptiveResult` with a recursive exact policy
+tree. Its outcome branches preserve probabilities and posteriors, and acquire nodes preserve the
+next acquisition, scalarized cost, expected terminal risk, state-node count, and selected depth.
+The request is bounded to 16 acquisitions and 16 steps by the shared contract; the result remains
+a plan rather than an executed assay or a causal, clinical, biological, or predictive claim. See
+[`docs/EPISTEMIC_ADAPTIVE_ACQUISITION.md`](../docs/EPISTEMIC_ADAPTIVE_ACQUISITION.md).
 `epistemicContextAudit` adds the observed-context boundary: explicit evidence pools, decision
 identification, minimal sufficient contexts, exhaustive rate–distortion points, and bounded
 subset evaluations remain distinct. Its minimax non-identification abstention and contradictory

@@ -107,12 +107,14 @@ remain explicit rather than being represented by a completion percentage.
 BioQL compilation is callable too: it type-checks explicit schemas for units, frames, builds, clocks,
 ontology expansion, labels, provenance, and cost bounds, but does not execute queries, load stores,
 infer schemas, convert units, expand ontologies, or enforce permissions.
-The epistemic value-of-information, observed-context compression, bounded evidence-selection, and
-explicit-contract decision-equivalence quotient are now callable as well, alongside the benchmark trace compiler and pack portfolio
-contracts. They preserve explicit losses and beliefs, exhaustive rate-distortion/submodularity
-checks, protected closure, exact small-instance comparison, review-gated causal localization, and
-declaration-versus-measurement boundaries; they do not add adaptive acquisition, trajectory replay,
-benchmark execution, pack generation, SDKs, external APIs, or a public evaluation service.
+The epistemic value-of-information, exact bounded adaptive acquisition, observed-context
+compression, bounded evidence-selection, and explicit-contract decision-equivalence quotient are
+now callable as well, alongside the benchmark trace compiler and pack portfolio contracts. They
+preserve explicit losses and beliefs, exhaustive rate-distortion/submodularity checks, protected
+closure, exact small-instance comparison, branch-dependent policy trees, review-gated causal
+localization, and declaration-versus-measurement boundaries; they do not add acquisition execution,
+trajectory replay, benchmark execution, pack generation, SDKs, external APIs, or a public evaluation
+service.
 The quotient additionally preserves model identity, permitted-action boundaries, exact loss-difference
 profiles, tie sets, and deterministic compression across Rust, MCP, Python, and TypeScript. The
 versioned `fiber-query/0.3` boundary now carries and executes that explicit contract inside FIBER;
@@ -120,8 +122,9 @@ legacy 0.1/0.2 queries still defer the pass. The versioned `fiber-query/0.4` bou
 binds a normalized compatible-model prior, a bounded observed evidence pool, a compatibility
 floor, and a distortion tolerance, so FIBER can execute identification, exhaustive frontier
 enumeration, and minimal-sufficient-context classification. This remains a bounded observed
-context compiler: it does not perform adaptive acquisition, causal identification, or claim that
-an evidence item was actually acquired.
+context compiler: it does not execute an acquisition, perform causal identification, or claim that
+an evidence item was actually acquired. The separate adaptive route plans only under its exact
+16-acquisition, 16-step, and 65,536-state caps; it still does not schedule or execute the plan.
 The foundation contract surface is callable too: it keeps admissibility, refinement, applicability,
 counterfactual world strength, reveal policy, and plane consistency independent, without creating
 clinical authority, causal identification, or runtime world validation.

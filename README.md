@@ -550,6 +550,12 @@ availability.
 reduction, declared cost, net value, action changes, complementarity, and exhaustive limits visible;
 the Python and TypeScript SDKs expose the same boundary with typed problem, belief, acquisition,
 value, bundle, action-identity, and fail-closed refusal projections;
+`epistemic_adaptive_acquisition` extends that boundary with an exact finite-horizon policy tree:
+each outcome can stop or choose a different unused acquisition, while expected terminal risk,
+expected scalarized cost, posterior branches, state caps, conditional-independence assumptions,
+and fail-closed refusals remain visible; it plans only and never executes an acquisition or claims
+causal, clinical, biological, or predictive truth. See
+[`docs/EPISTEMIC_ADAPTIVE_ACQUISITION.md`](docs/EPISTEMIC_ADAPTIVE_ACQUISITION.md);
 `benchmark_trace_analyze` adds the deeper benchmark compiler's causal, episode, boundary, and
 repetition analysis; the Python and TypeScript SDKs expose typed trace events, causal score
 components, divergence/verdict variants, boundaries, episodes, repetitions, and fail-closed

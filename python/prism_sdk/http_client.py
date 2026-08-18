@@ -398,6 +398,7 @@ from .sdk_registry import SdkRegistryCheckArgs, SdkRegistryCheckReport, sdk_regi
 from .token_context import TokenContextPlanArgs, TokenContextPlanningReport, token_context_plan_report
 from .weavelang import WeaveLangCompileArgs, WeaveLangCompileReport, weavelang_compile_report
 from .epistemic import EpistemicVoiArgs, EpistemicVoiReport, epistemic_voi_report
+from .epistemic_adaptive import EpistemicAdaptiveArgs, EpistemicAdaptiveReport, epistemic_adaptive_report
 from .epistemic_quotient import EpistemicDecisionQuotientArgs, EpistemicDecisionQuotientReport, epistemic_decision_quotient_report
 from .epistemic_context import EpistemicContextAuditArgs, EpistemicContextAuditReport, epistemic_context_audit_report
 from .epistemic_selection import EpistemicSelectionAuditArgs, EpistemicSelectionAuditReport, epistemic_selection_audit_report
@@ -2221,6 +2222,23 @@ class ApiClient:
         """Return typed HTTP value-of-information evidence."""
 
         return epistemic_voi_report(self.epistemic_voi(request))
+
+    def epistemic_adaptive_acquisition(
+        self,
+        request: EpistemicAdaptiveArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Plan a bounded exact adaptive acquisition policy without executing it."""
+
+        normalized = request if isinstance(request, EpistemicAdaptiveArgs) else EpistemicAdaptiveArgs.from_wire(request)
+        return self.call_tool("epistemic_adaptive_acquisition", normalized.to_mcp_arguments())
+
+    def epistemic_adaptive_acquisition_report(
+        self,
+        request: EpistemicAdaptiveArgs | Mapping[str, Any],
+    ) -> EpistemicAdaptiveReport:
+        """Return a validated adaptive policy tree or fail-closed refusal."""
+
+        return epistemic_adaptive_report(self.epistemic_adaptive_acquisition(request))
 
     def epistemic_decision_quotient(
         self,
@@ -6381,6 +6399,23 @@ class AsyncApiClient:
         """Return async typed HTTP value-of-information evidence."""
 
         return epistemic_voi_report(await self.epistemic_voi(request))
+
+    async def epistemic_adaptive_acquisition(
+        self,
+        request: EpistemicAdaptiveArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Plan a bounded exact adaptive acquisition policy without executing it."""
+
+        normalized = request if isinstance(request, EpistemicAdaptiveArgs) else EpistemicAdaptiveArgs.from_wire(request)
+        return await self.call_tool("epistemic_adaptive_acquisition", normalized.to_mcp_arguments())
+
+    async def epistemic_adaptive_acquisition_report(
+        self,
+        request: EpistemicAdaptiveArgs | Mapping[str, Any],
+    ) -> EpistemicAdaptiveReport:
+        """Return a validated adaptive policy tree or fail-closed refusal."""
+
+        return epistemic_adaptive_report(await self.epistemic_adaptive_acquisition(request))
 
     async def epistemic_decision_quotient(
         self,

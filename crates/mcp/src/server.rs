@@ -190,6 +190,7 @@ use bioprism_docgraph::{
 };
 use bioprism_epistemic::submodularity::check_with_tolerance as epistemic_submodularity_check;
 use bioprism_epistemic::{
+    adaptive_policy as epistemic_adaptive_policy,
     brute_force_optimum as epistemic_brute_force_optimum,
     complementarity as epistemic_complementarity,
     decision_equivalence_quotient as epistemic_decision_equivalence_quotient,
@@ -198,8 +199,8 @@ use bioprism_epistemic::{
     joint_value as epistemic_joint_value, lazy_greedy as epistemic_lazy_greedy,
     minimal_sufficient_context as epistemic_minimal_sufficient_context,
     value_of_information as epistemic_value_of_information, Acquisition as EpistemicAcquisition,
-    Belief as EpistemicBelief, Constraint as EpistemicConstraint,
-    DecisionProblem as EpistemicDecisionProblem,
+    AdaptiveNode as EpistemicAdaptiveNode, Belief as EpistemicBelief,
+    Constraint as EpistemicConstraint, DecisionProblem as EpistemicDecisionProblem,
     DistortionCriterion as EpistemicDistortionCriterion, EvidencePool as EpistemicEvidencePool,
     Outcome as EpistemicOutcome, RegretReduction as EpistemicRegretReduction,
     SetFunction as EpistemicSetFunction,
@@ -1600,6 +1601,7 @@ impl Server {
             "token_context_plan" => self.token_context_plan(&arguments),
             "bioql_compile" => self.bioql_compile(&arguments),
             "epistemic_voi" => self.epistemic_voi(&arguments),
+            "epistemic_adaptive_acquisition" => self.epistemic_adaptive_acquisition(&arguments),
             "epistemic_decision_quotient" => self.epistemic_decision_quotient(&arguments),
             "epistemic_context_audit" => self.epistemic_context_audit(&arguments),
             "epistemic_selection_audit" => self.epistemic_selection_audit(&arguments),
@@ -13714,6 +13716,229 @@ impl Server {
                 "action changes are reported by action identity rather than rounded numeric value",
                 "joint bundles are explicitly non-adaptive and enumerate bounded outcome products",
                 "no causal identification, adaptive policy, execution, or hidden prior is invented",
+            ],
+        }))
+    }
+
+    fn epistemic_adaptive_acquisition(&self, arguments: &Value) -> Result<Value, String> {
+        const SCHEMA: &str = "bioprism-mcp/epistemic-adaptive-acquisition/0.1";
+        const MAX_ACQUISITIONS: usize = 16;
+        const MAX_STEPS: usize = 16;
+        let raw_problem = arguments
+            .get("problem")
+            .cloned()
+            .ok_or("problem is required and must be a serialized epistemic DecisionProblem")?;
+        let raw_belief = arguments
+            .get("belief")
+            .cloned()
+            .ok_or("belief is required and must be a serialized epistemic Belief")?;
+        let raw_acquisitions = arguments
+            .get("acquisitions")
+            .and_then(Value::as_array)
+            .cloned()
+            .ok_or("acquisitions is required and must be an array")?;
+        if raw_acquisitions.is_empty() || raw_acquisitions.len() > MAX_ACQUISITIONS {
+            return Err(format!(
+                "acquisitions must contain between 1 and {MAX_ACQUISITIONS} actions"
+            ));
+        }
+        let budget = arguments
+            .get("budget")
+            .and_then(Value::as_f64)
+            .ok_or("budget is required and must be a finite non-negative number")?;
+        if !budget.is_finite() || budget < 0.0 {
+            return Err("budget must be finite and non-negative".into());
+        }
+        let max_steps = arguments
+            .get("max_steps")
+            .and_then(Value::as_u64)
+            .ok_or("max_steps is required and must be an integer")?
+            as usize;
+        if max_steps > MAX_STEPS {
+            return Err(format!(
+                "max_steps must not exceed the exact horizon cap of {MAX_STEPS}"
+            ));
+        }
+        let encoded = serde_json::to_vec(&json!({
+            "problem": raw_problem.clone(),
+            "belief": raw_belief.clone(),
+            "acquisitions": raw_acquisitions.clone(),
+            "budget": budget,
+            "max_steps": max_steps,
+        }))
+        .map_err(|error| format!("cannot measure adaptive epistemic envelope: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("adaptive epistemic input exceeds the 20000000-byte safety bound".into());
+        }
+
+        let problem: EpistemicDecisionProblem = serde_json::from_value(raw_problem)
+            .map_err(|error| format!("invalid decision problem: {error}"))?;
+        problem
+            .validate()
+            .map_err(|error| format!("decision problem invariant failed: {error}"))?;
+        if problem.action_count() > 1_000 || problem.model_count() > 1_000 {
+            return Err("decision problems are bounded at 1000 actions and 1000 models".into());
+        }
+        let parsed_belief: EpistemicBelief = serde_json::from_value(raw_belief)
+            .map_err(|error| format!("invalid belief: {error}"))?;
+        if parsed_belief.len() > 1_000 {
+            return Err("belief is bounded at 1000 models".into());
+        }
+        let belief = EpistemicBelief::new(parsed_belief.masses().to_vec())
+            .map_err(|error| format!("belief invariant failed: {error}"))?;
+
+        let parse_acquisition = |raw: &Value| -> Result<EpistemicAcquisition, String> {
+            let id = raw
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or("each acquisition requires an id")?;
+            if id.trim().is_empty() || id.len() > 256 {
+                return Err("acquisition ids must contain between 1 and 256 bytes".into());
+            }
+            let cost = raw
+                .get("cost")
+                .and_then(Value::as_f64)
+                .ok_or_else(|| format!("acquisition {id:?} requires a finite numeric cost"))?;
+            let raw_outcomes = raw
+                .get("outcomes")
+                .and_then(Value::as_array)
+                .ok_or_else(|| format!("acquisition {id:?} requires outcomes"))?;
+            if raw_outcomes.is_empty() || raw_outcomes.len() > 1_000 {
+                return Err(format!(
+                    "acquisition {id:?} must contain 1 to 1000 outcomes"
+                ));
+            }
+            let mut outcomes = Vec::with_capacity(raw_outcomes.len());
+            for raw_outcome in raw_outcomes {
+                let label = raw_outcome
+                    .get("label")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| format!("acquisition {id:?} outcomes require labels"))?;
+                if label.trim().is_empty() || label.len() > 256 {
+                    return Err(format!(
+                        "acquisition {id:?} outcome labels must contain between 1 and 256 bytes"
+                    ));
+                }
+                let likelihood = raw_outcome
+                    .get("likelihood")
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| format!("acquisition {id:?}/{label:?} requires likelihood"))?
+                    .iter()
+                    .map(|value| {
+                        value.as_f64().ok_or_else(|| {
+                            format!("acquisition {id:?}/{label:?} has a non-numeric likelihood")
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                outcomes.push(EpistemicOutcome::new(label, likelihood));
+            }
+            EpistemicAcquisition::new(id, cost, outcomes, problem.model_count())
+                .map_err(|error| format!("acquisition {id:?} invariant failed: {error}"))
+        };
+        let acquisitions = raw_acquisitions
+            .iter()
+            .map(parse_acquisition)
+            .collect::<Result<Vec<_>, _>>()?;
+        let policy = match epistemic_adaptive_policy(
+            &problem,
+            &belief,
+            &acquisitions,
+            budget,
+            max_steps,
+        ) {
+            Ok(policy) => policy,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "schema": SCHEMA,
+                    "stage": "adaptive_policy",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "guarantees": [
+                        "the endpoint never executes an acquisition or claims that an observation was collected",
+                        "budget, horizon, unique-acquisition, likelihood-partition, and exact-state caps are refusal boundaries",
+                        "a refusal is never converted into a sampled or approximate policy",
+                    ],
+                    "limitations": [
+                        "outcomes are conditionally independent given the supplied models",
+                        "declared costs are caller-supplied scalarizations rather than inferred resource vectors",
+                        "the result is decision-relative and is not causal, clinical, biological, or predictive truth",
+                    ],
+                }));
+            }
+        };
+
+        fn project_node(node: &EpistemicAdaptiveNode, problem: &EpistemicDecisionProblem) -> Value {
+            match node {
+                EpistemicAdaptiveNode::Stop { action, risk } => json!({
+                    "kind": "stop",
+                    "action_index": action,
+                    "action": problem.actions().get(*action),
+                    "risk": risk,
+                }),
+                EpistemicAdaptiveNode::Acquire {
+                    acquisition,
+                    id,
+                    cost,
+                    expected_total,
+                    expected_terminal_risk,
+                    expected_acquisition_cost,
+                    outcomes,
+                } => json!({
+                    "kind": "acquire",
+                    "acquisition_index": acquisition,
+                    "id": id,
+                    "cost": cost,
+                    "expected_total": expected_total,
+                    "expected_terminal_risk": expected_terminal_risk,
+                    "expected_acquisition_cost": expected_acquisition_cost,
+                    "outcomes": outcomes.iter().map(|outcome| json!({
+                        "label": outcome.label,
+                        "probability": outcome.probability,
+                        "posterior": outcome.posterior,
+                        "next": project_node(&outcome.next, problem),
+                    })).collect::<Vec<_>>(),
+                }),
+            }
+        }
+
+        Ok(json!({
+            "ok": true,
+            "schema": SCHEMA,
+            "budget": budget,
+            "max_steps": max_steps,
+            "problem": {
+                "actions": problem.actions(),
+                "models": problem.models(),
+                "action_count": problem.action_count(),
+                "model_count": problem.model_count(),
+            },
+            "acquisitions": acquisitions.iter().map(|acquisition| json!({
+                "id": acquisition.id,
+                "cost": acquisition.cost,
+                "outcomes": acquisition.outcomes().iter().map(|outcome| json!({
+                    "label": outcome.label,
+                })).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
+            "policy": {
+                "expected_total": policy.expected_total,
+                "expected_terminal_risk": policy.expected_terminal_risk,
+                "expected_acquisition_cost": policy.expected_acquisition_cost,
+                "nodes_evaluated": policy.nodes_evaluated,
+                "selected_depth": policy.selected_depth,
+                "root": project_node(&policy.root, &problem),
+            },
+            "guarantees": [
+                "the returned policy is exact under the stated 16-acquisition, 16-step, and 65536-state enumeration caps",
+                "each acquisition is used at most once and branch-dependent next choices are explicit",
+                "expected terminal risk and expected declared cost remain separate from their scalarized total",
+                "posterior model masses and outcome probabilities are serialized at every branch",
+            ],
+            "limitations": [
+                "conditional independence given the caller-supplied models is assumed",
+                "the endpoint plans but does not execute, authenticate, schedule, or observe acquisitions",
+                "the decision-relative policy is not causal, clinical, biological, or predictive truth",
+                "costs are a caller-supplied scalarization of burden, latency, privacy, compute, or money",
             ],
         }))
     }
@@ -31299,7 +31524,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "evaluation_and_baselines",
             "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes", "factorial designs", "component attribution", "interaction coverage", "evaluator independence", "disagreement witnesses", "abstention handling", "nonrenewable resource accounting", "fork feasibility", "failed-action waste", "prospective commitments", "rubric digest integrity", "selective publication", "contextual integrity", "channel exposure", "utility-safety Pareto"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
-            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "bioeval_reveal_audit", "bioeval_boundary_audit", "epistemic_voi", "epistemic_decision_quotient", "epistemic_context_audit", "epistemic_selection_audit"],
+            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "bioeval_reveal_audit", "bioeval_boundary_audit", "epistemic_voi", "epistemic_adaptive_acquisition", "epistemic_decision_quotient", "epistemic_context_audit", "epistemic_selection_audit"],
             "cli_entrypoints": ["prism fork", "prism minimize", "context compare"],
             "status": "available"
         },
@@ -33887,6 +34112,21 @@ pub fn tool_definitions() -> Vec<Value> {
                     "acquisitions": { "type": "array", "maxItems": 64, "description": "Alternative bounded acquisition bundle; provide this instead of acquisition for joint non-adaptive pricing." }
                 },
                 "required": ["problem", "belief"]
+            }
+        }),
+        json!({
+            "name": "epistemic_adaptive_acquisition",
+            "description": "Compute an exact bounded finite-horizon adaptive acquisition policy against an explicit decision problem and belief. The next acquisition may depend on each observed outcome; expected terminal risk, declared acquisition cost, posterior branches, state-node caps, and refusal boundaries remain separate. The endpoint plans only and never executes acquisitions or invents causal, clinical, biological, or predictive claims.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "problem": { "type": "object", "description": "Serialized bioprism-epistemic DecisionProblem with explicit actions, models, and row-major loss matrix." },
+                    "belief": { "type": "object", "description": "Serialized normalized bioprism-epistemic Belief over the problem models." },
+                    "acquisitions": { "type": "array", "minItems": 1, "maxItems": 16, "description": "Distinct acquisitions. Each has id, non-negative scalar cost, and a complete outcome likelihood partition." },
+                    "budget": { "type": "number", "minimum": 0, "description": "Maximum scalarized acquisition cost paid along any policy path." },
+                    "max_steps": { "type": "integer", "minimum": 0, "maximum": 16, "description": "Maximum number of distinct acquisitions on any branch." }
+                },
+                "required": ["problem", "belief", "acquisitions", "budget", "max_steps"]
             }
         }),
         json!({

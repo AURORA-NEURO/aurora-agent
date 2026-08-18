@@ -39,8 +39,9 @@
 //! Sequential and adaptive acquisition. A real planner chooses the second assay after seeing the
 //! first result, and its value is an expectation over adaptive policies, not over joint outcomes
 //! of a fixed set. [`joint_value`] prices the *non-adaptive* bundle, which is a lower bound on the
-//! adaptive value. 43.15 (information-directed acquisition) is the module that would own the
-//! adaptive case and this crate does not implement it.
+//! adaptive value under the same caller-declared budget. [`crate::adaptive_policy`] owns the
+//! bounded exact finite-horizon case; external execution, scheduling, and causal identification
+//! remain outside this crate.
 
 use crate::decision::{Belief, DecisionProblem};
 use crate::error::EpistemicError;
@@ -89,6 +90,7 @@ pub fn value_of_information(
     acquisition: &Acquisition,
 ) -> Result<ValueOfInformation, EpistemicError> {
     belief.check_against(problem)?;
+    acquisition.check_against(problem)?;
     let before = problem.bayes_risk(belief);
     let action_without = problem.bayes_action(belief);
 
@@ -150,6 +152,7 @@ pub fn joint_value(
 
     let mut total: u64 = 1;
     for acquisition in acquisitions {
+        acquisition.check_against(problem)?;
         total = total.saturating_mul(acquisition.outcomes().len() as u64);
         if total > MAX_JOINT_OUTCOMES {
             return Err(EpistemicError::ExhaustiveCapExceeded {
