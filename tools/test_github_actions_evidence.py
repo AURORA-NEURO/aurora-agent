@@ -13,7 +13,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from github_actions_evidence import (  # noqa: E402
     ExportError,
+    build_collection_envelope,
     build_payload,
+    build_provider_evidence_request,
     canonical_bytes,
     discover_github_actions_payload,
     payload_digest,
@@ -43,6 +45,8 @@ class GithubActionsEvidenceTests(unittest.TestCase):
         self.assertIn("using: composite", metadata)
         self.assertIn("discover:", metadata)
         self.assertIn("github-token:", metadata)
+        self.assertIn("collect-evidence:", metadata)
+        self.assertIn("evidence-output:", metadata)
         self.assertIn("$GITHUB_ACTION_PATH/../../../tools/github_actions_evidence.py", metadata)
         self.assertIn("value: ${{ steps.export.outputs['payload-digest'] }}", metadata)
         self.assertIn("value: ${{ steps.export.outputs['discovery-mode'] }}", metadata)
@@ -128,6 +132,111 @@ class GithubActionsEvidenceTests(unittest.TestCase):
         self.assertEqual(discovered["jobs"][1]["status"], "queued")
         self.assertNotIn("secret-token", json.dumps(discovered))
 
+    def test_api_collection_binds_artifact_metadata_and_log_locators(self) -> None:
+        responses = [
+            {"id": 42, "conclusion": "success"},
+            {
+                "jobs": [
+                    {
+                        "id": 101,
+                        "name": "unit",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "logs_url": "https://api.github.test/repos/example/repo/actions/jobs/101/logs",
+                    }
+                ]
+            },
+            {
+                "artifacts": [
+                    {
+                        "id": 501,
+                        "name": "junit",
+                        "archive_download_url": "https://api.github.test/repos/example/repo/actions/artifacts/501",
+                        "size_in_bytes": 2048,
+                        "expired": False,
+                    }
+                ]
+            },
+        ]
+        urls: list[str] = []
+
+        def fake_urlopen(request: object, timeout: int) -> _JsonResponse:
+            urls.append(request.full_url)  # type: ignore[attr-defined]
+            return _JsonResponse(responses.pop(0))
+
+        with patch("github_actions_evidence.urlopen", side_effect=fake_urlopen):
+            discovered = discover_github_actions_payload(
+                token="secret-token",
+                api_url="https://api.github.test",
+                repository="example/repo",
+                run_id="42",
+                collect_evidence=True,
+            )
+
+        self.assertEqual(len(responses), 0)
+        self.assertEqual(len(discovered["artifacts"]), 1)
+        self.assertEqual(discovered["artifacts"][0]["kind"], "junit")
+        self.assertEqual(discovered["artifacts"][0]["run_id"], "42")
+        self.assertEqual(discovered["logs"][0]["check"], "unit")
+        self.assertEqual(discovered["logs"][0]["truncated"], False)
+        self.assertIn("/artifacts?per_page=129", urls[-1])
+        self.assertNotIn("secret-token", json.dumps(discovered))
+
+    def test_manual_collection_emits_exact_registry_request_and_explicit_limits(self) -> None:
+        from github_actions_evidence import main
+
+        root = Path(__file__).parent / "fixtures"
+        with tempfile.TemporaryDirectory() as directory:
+            output_root = Path(directory)
+            output = output_root / "payload.json"
+            collection_output = output_root / "collection.json"
+            evidence_output = output_root / "request.json"
+            self.assertEqual(
+                main(
+                    [
+                        "--checks",
+                        str(root / "github-actions-checks.json"),
+                        "--artifacts",
+                        str(root / "github-actions-artifacts.json"),
+                        "--logs",
+                        str(root / "github-actions-logs.json"),
+                        "--attestations",
+                        str(root / "github-actions-attestations.json"),
+                        "--ci",
+                        str(root / "github-actions-ci.json"),
+                        "--run-id",
+                        "ci-fixture-run",
+                        "--conclusion",
+                        "success",
+                        "--output",
+                        str(output),
+                        "--collection-output",
+                        str(collection_output),
+                        "--evidence-output",
+                        str(evidence_output),
+                    ]
+                ),
+                0,
+            )
+            collection = json.loads(collection_output.read_text(encoding="utf-8"))
+            evidence = json.loads(evidence_output.read_text(encoding="utf-8"))
+            self.assertEqual(collection["collection"]["verification"], "metadata_only")
+            self.assertEqual(collection["collection"]["attestations"], "caller_supplied")
+            self.assertEqual(evidence["source"], "caller_attested")
+            self.assertEqual(evidence["ci"]["checks"][0]["name"], "unit")
+            self.assertEqual(evidence["artifacts"][0]["run_id"], "ci-fixture-run")
+            self.assertEqual(evidence["logs"][0]["check"], "unit")
+            self.assertEqual(evidence["attestations"][0]["subject"], "artifact-unit")
+            self.assertNotIn("token", json.dumps(collection).lower())
+
+    def test_evidence_builders_do_not_infer_a_ci_plan(self) -> None:
+        payload = build_payload([{"name": "unit", "conclusion": "success"}], {"run_id": "run-1"})
+        with self.assertRaisesRegex(ExportError, "ci must be an object"):
+            build_provider_evidence_request([], payload, source="provider_observed")
+        envelope = build_collection_envelope(payload, discovery_mode="manual")
+        self.assertEqual(envelope["collection"]["execution"], "not_started")
+        self.assertEqual(envelope["collection"]["verification"], "metadata_only")
+
     def test_api_discovery_refuses_partial_job_lists_and_invalid_endpoints(self) -> None:
         responses = [{"id": "run-1", "conclusion": "success"}, {"jobs": [{"id": i} for i in range(65)]}]
 
@@ -150,6 +259,23 @@ class GithubActionsEvidenceTests(unittest.TestCase):
                 repository="example/repo",
                 run_id="run-1",
             )
+
+    def test_api_discovery_refuses_provider_reported_rows_beyond_first_page(self) -> None:
+        responses = [
+            {"id": "run-1", "conclusion": "success"},
+            {"total_count": 65, "jobs": [{"id": i, "name": f"job-{i}"} for i in range(64)]},
+        ]
+        with patch(
+            "github_actions_evidence.urlopen",
+            side_effect=lambda request, timeout: _JsonResponse(responses.pop(0)),
+        ):
+            with self.assertRaisesRegex(ExportError, "refusing a partial payload"):
+                discover_github_actions_payload(
+                    token="secret-token",
+                    api_url="https://api.github.test",
+                    repository="example/repo",
+                    run_id="run-1",
+                )
 
     def test_discovery_cli_prefers_workflow_run_target_over_downstream_runner_id(self) -> None:
         from github_actions_evidence import main

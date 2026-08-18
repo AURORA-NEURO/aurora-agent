@@ -1,0 +1,9 @@
+[
+  {
+    "id": "log-unit",
+    "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "check": "unit",
+    "uri": "https://example.invalid/logs/log-unit",
+    "truncated": false
+  }
+]

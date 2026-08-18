@@ -1,5 +1,5 @@
 name: Aurora GitHub Actions evidence
-description: Export bounded GitHub Actions run/job data into Aurora's provider-normalization payload shape
+description: Export bounded GitHub Actions run, job, artifact, and evidence handoff data
 author: AURORA-NEURO
 inputs:
   checks:
@@ -7,6 +7,10 @@ inputs:
     required: false
   discover:
     description: Discover the selected GitHub Actions run and jobs through the GitHub API
+    required: false
+    default: 'false'
+  collect-evidence:
+    description: During discovery, collect bounded artifact metadata and job log locators
     required: false
     default: 'false'
   github-token:
@@ -21,10 +25,30 @@ inputs:
     description: owner/name repository to inspect; defaults to the current repository
     required: false
     default: ${{ github.repository }}
+  artifacts:
+    description: Optional JSON artifact metadata/rows file for manual collection
+    required: false
+  logs:
+    description: Optional JSON log rows file for manual collection
+    required: false
+  attestations:
+    description: Optional caller-supplied JSON attestation rows file; never signature-verified here
+    required: false
+  ci:
+    description: Optional CI plan JSON file required when emitting an exact provider-evidence request
+    required: false
   output:
     description: Path for the deterministic provider payload artifact
     required: false
     default: .aurora/github-actions-provider-payload.json
+  collection-output:
+    description: Optional metadata collection envelope output path
+    required: false
+    default: ''
+  evidence-output:
+    description: Optional exact CiProviderEvidenceRequest output path; requires ci
+    required: false
+    default: ''
   event:
     description: Optional GitHub event JSON path; defaults to GITHUB_EVENT_PATH
     required: false
@@ -57,6 +81,27 @@ outputs:
   discovery-mode:
     description: Whether the payload used manual rows or GitHub API discovery
     value: ${{ steps.export.outputs['discovery-mode'] }}
+  collection-path:
+    description: Path to the optional metadata collection envelope
+    value: ${{ steps.export.outputs['collection-path'] }}
+  collection-digest:
+    description: SHA-256 digest over the optional canonical collection envelope
+    value: ${{ steps.export.outputs['collection-digest'] }}
+  evidence-path:
+    description: Path to the optional exact provider-evidence request
+    value: ${{ steps.export.outputs['evidence-path'] }}
+  evidence-digest:
+    description: SHA-256 digest over the optional exact provider-evidence request
+    value: ${{ steps.export.outputs['evidence-digest'] }}
+  artifact-count:
+    description: Number of exported artifact rows
+    value: ${{ steps.export.outputs['artifact-count'] }}
+  log-count:
+    description: Number of exported log rows or locators
+    value: ${{ steps.export.outputs['log-count'] }}
+  attestation-count:
+    description: Number of exported caller-supplied attestation rows
+    value: ${{ steps.export.outputs['attestation-count'] }}
 runs:
   using: composite
   steps:
@@ -66,10 +111,17 @@ runs:
       env:
         INPUT_CHECKS: ${{ inputs.checks }}
         INPUT_DISCOVER: ${{ inputs.discover }}
+        INPUT_COLLECT_EVIDENCE: ${{ inputs['collect-evidence'] }}
         INPUT_API_URL: ${{ inputs['api-url'] }}
         INPUT_REPOSITORY: ${{ inputs.repository }}
+        INPUT_ARTIFACTS: ${{ inputs.artifacts }}
+        INPUT_LOGS: ${{ inputs.logs }}
+        INPUT_ATTESTATIONS: ${{ inputs.attestations }}
+        INPUT_CI: ${{ inputs.ci }}
         GITHUB_TOKEN: ${{ inputs['github-token'] }}
         INPUT_OUTPUT: ${{ inputs.output }}
+        INPUT_COLLECTION_OUTPUT: ${{ inputs['collection-output'] }}
+        INPUT_EVIDENCE_OUTPUT: ${{ inputs['evidence-output'] }}
         INPUT_EVENT: ${{ inputs.event }}
         INPUT_RUN_ID: ${{ inputs['run-id'] }}
         INPUT_CONCLUSION: ${{ inputs.conclusion }}
@@ -91,10 +143,29 @@ runs:
             --api-url "$INPUT_API_URL"
             --repository "$INPUT_REPOSITORY"
           )
+          if [[ "$INPUT_COLLECT_EVIDENCE" == "true" ]]; then
+            exporter+=(--collect-evidence)
+          elif [[ "$INPUT_COLLECT_EVIDENCE" != "false" ]]; then
+            echo "github-actions-evidence: collect-evidence must be true or false" >&2
+            exit 2
+          fi
         elif [[ "$INPUT_DISCOVER" == "false" ]]; then
           exporter+=(--checks "$INPUT_CHECKS")
+          if [[ "$INPUT_COLLECT_EVIDENCE" == "true" ]]; then
+            echo "github-actions-evidence: collect-evidence requires discover=true" >&2
+            exit 2
+          elif [[ "$INPUT_COLLECT_EVIDENCE" != "false" ]]; then
+            echo "github-actions-evidence: collect-evidence must be true or false" >&2
+            exit 2
+          fi
         else
           echo "github-actions-evidence: discover must be true or false" >&2
           exit 2
         fi
+        if [[ -n "$INPUT_ARTIFACTS" ]]; then exporter+=(--artifacts "$INPUT_ARTIFACTS"); fi
+        if [[ -n "$INPUT_LOGS" ]]; then exporter+=(--logs "$INPUT_LOGS"); fi
+        if [[ -n "$INPUT_ATTESTATIONS" ]]; then exporter+=(--attestations "$INPUT_ATTESTATIONS"); fi
+        if [[ -n "$INPUT_CI" ]]; then exporter+=(--ci "$INPUT_CI"); fi
+        if [[ -n "$INPUT_COLLECTION_OUTPUT" ]]; then exporter+=(--collection-output "$INPUT_COLLECTION_OUTPUT"); fi
+        if [[ -n "$INPUT_EVIDENCE_OUTPUT" ]]; then exporter+=(--evidence-output "$INPUT_EVIDENCE_OUTPUT"); fi
         "${exporter[@]}"

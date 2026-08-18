@@ -103,16 +103,32 @@ normalized; malformed timestamps, duplicate names, mismatched run ids, invalid e
 network/API failures remain errors. The token is used only in the request header and is never
 serialized into the payload or action outputs.
 
+Set `collect-evidence: true` with `collection-output` to make the discovery pass retrieve the
+bounded `/artifacts` metadata list (at most 128 rows) and derive one log-locator row per discovered
+job that exposes `logs_url`. The action does not follow either locator. Artifact rows use a digest of
+selected provider metadata unless the caller supplied a digest; log-row digests cover the locator
+metadata, not downloaded log bytes. More than 128 artifacts or locators is refused rather than
+silently truncated. Manual `artifacts`, `logs`, and `attestations` files use the same bounded row
+shapes, while attestations are always caller-supplied declarations.
+
 For a `workflow_run` trigger, discovery prefers the upstream run id in the event over the
 downstream workflow's own `GITHUB_RUN_ID`; callers can still override it explicitly with `run-id`.
 
 Both modes expose `payload-path`, `payload-digest`, `run-id`, `check-count`, and `discovery-mode`
-outputs for a subsequent API/MCP handoff or artifact manifest. Output is canonical JSON with a
-deterministic SHA-256 digest. The action does not download logs or artifacts, execute a check,
-verify a signature or attestation, approve a release, or turn an API response into cryptographic
-provider truth. Missing per-check digests are intentionally left for the Rust normalizer to derive
-and label. Pin the action to a reviewed commit or release tag in consumer repositories rather than
-floating on `main`.
+outputs for a subsequent API/MCP handoff or artifact manifest. Collection mode additionally exposes
+`collection-path`, `collection-digest`, and row counts. Output is canonical JSON with deterministic
+SHA-256 digests. The collection envelope reports `execution: not_started` and
+`verification: metadata_only`; it does not download logs or artifacts, execute a check, verify a
+signature or attestation, approve a release, or turn an API response into cryptographic provider
+truth. Missing per-check digests are intentionally left for the Rust normalizer to derive and label.
+Pin the action to a reviewed commit or release tag in consumer repositories rather than floating on
+`main`.
+
+To emit the exact handoff accepted by `ci_provider_evidence_import`, provide both `ci` (the explicit
+caller-owned `CiRequest`) and `evidence-output`. The action emits `evidence-path` and
+`evidence-digest`, with `source: provider_observed` for discovery and `source: caller_attested` for
+manual rows. It never infers the CI plan from observed jobs. The emitted request can be posted to the
+MCP/REST/SDK registry surfaces, which re-run the canonical Rust audit before retention.
 
 Discovery example:
 
@@ -123,15 +139,18 @@ Discovery example:
     discover: 'true'
     github-token: ${{ github.token }}
     run-id: ${{ github.run_id }}
+    collect-evidence: 'true'
     output: .aurora/github-actions-provider-payload.json
+    collection-output: .aurora/github-actions-provider-evidence-collection.json
 ```
 
 The repository's public Python CI job invokes this local action in both modes. It exercises manual
-mode against `tools/fixtures/github-actions-checks.json`, then uses the runner token to discover
-the current workflow run and jobs. Each emitted file is re-read and checked for canonical fields,
-mode, run identity, non-empty bounded rows, and token absence. This catches broken composite action
-metadata, output-name expressions, runner path handling, API permissions, discovery serialization,
-and manual serialization drift in addition to the unit-level refusal tests.
+mode against repository fixtures, then uses the runner token to discover the current workflow, jobs,
+artifact metadata, and log locators. Each emitted file is re-read and checked for canonical fields,
+mode, run identity, bounded row counts, explicit metadata-only posture, and token absence. This
+catches broken composite action metadata, output-name expressions, runner path handling, API
+permissions, discovery serialization, and manual serialization drift in addition to unit-level
+refusal tests.
 
 ## Provider artifacts, logs, and attestations
 
@@ -141,6 +160,12 @@ run summary. It accepts the same provider payload plus bounded `artifacts`, `log
 normalized provider and run id, and—when present—a check name from the regenerated plan. URI text
 is retained as a locator but is never fetched. Attestation rows must point to the normalized run,
 an artifact, or a log; their issuer, method, and statement digest are retained as declarations.
+
+The reusable action's collection envelope is intentionally one step earlier than this audit. It
+binds GitHub's run id and provider identity to each discovered row, makes locator/metadata digest
+scope visible, and can be converted without format translation when the caller supplies `ci`. The
+Rust audit remains the authority for plan/check reconciliation, row subject binding, and retained
+registry identity; the action does not claim that its metadata collection is an audit result.
 
 The audit returns separate deterministic record digests for each row family, linked-row counts,
 subject counts, canonical nested CI evidence, and sorted findings. Duplicate ids, invalid digest

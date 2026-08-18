@@ -107,7 +107,13 @@ jobs:
         uses: ./.github/actions/github-actions-evidence
         with:
           checks: tools/fixtures/github-actions-checks.json
+          artifacts: tools/fixtures/github-actions-artifacts.json
+          logs: tools/fixtures/github-actions-logs.json
+          attestations: tools/fixtures/github-actions-attestations.json
+          ci: tools/fixtures/github-actions-ci.json
           output: ${{ runner.temp }}/aurora-github-actions-provider-payload.json
+          collection-output: ${{ runner.temp }}/aurora-github-actions-collection.json
+          evidence-output: ${{ runner.temp }}/aurora-github-actions-request.json
           run-id: ci-fixture-run
           conclusion: success
           run-url: https://example.invalid/aurora/ci-fixture-run
@@ -117,6 +123,11 @@ jobs:
           AURORA_PAYLOAD_DIGEST: ${{ steps.github-actions-evidence.outputs['payload-digest'] }}
           AURORA_RUN_ID: ${{ steps.github-actions-evidence.outputs['run-id'] }}
           AURORA_CHECK_COUNT: ${{ steps.github-actions-evidence.outputs['check-count'] }}
+          AURORA_COLLECTION_PATH: ${{ steps.github-actions-evidence.outputs['collection-path'] }}
+          AURORA_EVIDENCE_PATH: ${{ steps.github-actions-evidence.outputs['evidence-path'] }}
+          AURORA_ARTIFACT_COUNT: ${{ steps.github-actions-evidence.outputs['artifact-count'] }}
+          AURORA_LOG_COUNT: ${{ steps.github-actions-evidence.outputs['log-count'] }}
+          AURORA_ATTESTATION_COUNT: ${{ steps.github-actions-evidence.outputs['attestation-count'] }}
         run: |
           python - <<'PY'
           import hashlib
@@ -134,21 +145,40 @@ jobs:
           assert len(payload["jobs"]) == int(os.environ["AURORA_CHECK_COUNT"]) == 2
           assert hashlib.sha256(canonical).hexdigest() == os.environ["AURORA_PAYLOAD_DIGEST"]
           assert payload["jobs"][1]["conclusion"] == "skipped"
-          print(f"verified {payload_path} ({len(payload['jobs'])} jobs)")
+          collection_path = Path(os.environ["AURORA_COLLECTION_PATH"])
+          collection = json.loads(collection_path.read_text(encoding="utf-8"))
+          assert collection["schema"].endswith("evidence-collection/0.1")
+          assert collection["collection"]["verification"] == "metadata_only"
+          assert collection["collection"]["attestations"] == "caller_supplied"
+          assert len(collection["artifacts"]) == int(os.environ["AURORA_ARTIFACT_COUNT"]) == 1
+          assert len(collection["logs"]) == int(os.environ["AURORA_LOG_COUNT"]) == 1
+          assert len(collection["attestations"]) == int(os.environ["AURORA_ATTESTATION_COUNT"]) == 1
+          assert "token" not in json.dumps(collection).lower()
+          evidence_path = Path(os.environ["AURORA_EVIDENCE_PATH"])
+          evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+          assert evidence["source"] == "caller_attested"
+          assert evidence["ci"]["checks"][0]["name"] == "unit"
+          assert evidence["artifacts"][0]["run_id"] == "ci-fixture-run"
+          print(f"verified {payload_path}, {collection_path}, and {evidence_path}")
           PY
       - name: exercise GitHub API evidence discovery
         id: github-actions-evidence-discovery
         uses: ./.github/actions/github-actions-evidence
         with:
           discover: 'true'
+          collect-evidence: 'true'
           github-token: ${{ github.token }}
           run-id: ${{ github.run_id }}
           output: ${{ runner.temp }}/aurora-github-actions-discovered-payload.json
+          collection-output: ${{ runner.temp }}/aurora-github-actions-discovered-collection.json
       - name: verify discovered evidence artifact and outputs
         env:
           AURORA_DISCOVERED_PATH: ${{ steps.github-actions-evidence-discovery.outputs['payload-path'] }}
           AURORA_DISCOVERED_MODE: ${{ steps.github-actions-evidence-discovery.outputs['discovery-mode'] }}
           AURORA_DISCOVERED_COUNT: ${{ steps.github-actions-evidence-discovery.outputs['check-count'] }}
+          AURORA_DISCOVERED_COLLECTION: ${{ steps.github-actions-evidence-discovery.outputs['collection-path'] }}
+          AURORA_DISCOVERED_ARTIFACT_COUNT: ${{ steps.github-actions-evidence-discovery.outputs['artifact-count'] }}
+          AURORA_DISCOVERED_LOG_COUNT: ${{ steps.github-actions-evidence-discovery.outputs['log-count'] }}
         run: |
           python - <<'PY'
           import json
@@ -162,7 +192,16 @@ jobs:
           assert payload["run"]["id"] == "${{ github.run_id }}"
           assert len(payload["jobs"]) == int(os.environ["AURORA_DISCOVERED_COUNT"]) > 0
           assert "token" not in json.dumps(payload).lower()
-          print(f"verified discovered {payload_path} ({len(payload['jobs'])} jobs)")
+          collection_path = Path(os.environ["AURORA_DISCOVERED_COLLECTION"])
+          collection = json.loads(collection_path.read_text(encoding="utf-8"))
+          assert collection["collection"]["run_metadata"] == "github_api"
+          assert collection["collection"]["artifact_metadata"] == "github_api"
+          assert collection["collection"]["log_metadata"] == "job_log_locators"
+          assert collection["collection"]["attestations"] == "not_requested"
+          assert len(collection["artifacts"]) == int(os.environ["AURORA_DISCOVERED_ARTIFACT_COUNT"])
+          assert len(collection["logs"]) == int(os.environ["AURORA_DISCOVERED_LOG_COUNT"])
+          assert "token" not in json.dumps(collection).lower()
+          print(f"verified discovered {payload_path} and {collection_path} ({len(payload['jobs'])} jobs)")
           PY
 
   typescript-sdk:

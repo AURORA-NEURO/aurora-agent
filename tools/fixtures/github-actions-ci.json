@@ -1,0 +1,18 @@
+{
+  "workflow": "github-actions-fixture",
+  "triggers": ["workflow_dispatch"],
+  "rust_toolchain": "stable",
+  "checks": [
+    {
+      "name": "unit",
+      "run": "python -m pytest -q",
+      "required": true
+    },
+    {
+      "name": "lint",
+      "run": "python -m compileall -q tools",
+      "required": false
+    }
+  ],
+  "offline": true
+}

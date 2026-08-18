@@ -1045,11 +1045,16 @@ caller-supplied data into authenticated execution truth.
 For GitHub consumers, the repository also provides the dependency-free composite action
 [`github-actions-evidence`](.github/actions/github-actions-evidence/action.yml). It supports both a
 manual bounded checks file and an authenticated discovery mode that retrieves one run and its jobs
-through the GitHub API. Both produce the same canonical provider payload and digest, expose the
-artifact path/count plus `discovery-mode` as action outputs, and refuse oversized or partial job
-lists. The token is never copied into the payload. This remains an ingestion handoff: the action
-does not download logs or artifacts, execute checks, verify signatures or attestations, or approve
-a release; see [`docs/CI_EVIDENCE.md`](docs/CI_EVIDENCE.md).
+through the GitHub API. With `collect-evidence: true`, discovery also retrieves at most 128 artifact
+metadata rows and derives bounded job-log locators from the job response; neither locator is
+followed. Both produce the same canonical provider payload and digest, while collection mode emits
+a separate metadata envelope/digest and artifact/log/attestation counts. Oversized or partial job,
+artifact, or locator lists are refused, and the token is never copied into any output. When a caller
+also supplies an explicit `ci` plan and `evidence-output`, the action emits the exact
+`CiProviderEvidenceRequest` accepted by the Rust provider-evidence audit/registry. This remains an
+ingestion handoff: metadata digests are not proof of downloaded bytes, attestations are not
+signature-verified, checks are not executed, and no release is approved; see
+[`docs/CI_EVIDENCE.md`](docs/CI_EVIDENCE.md).
 `ci_provider_evidence_audit` extends the same handoff with bounded artifact, log, and attestation rows:
 it validates unique ids, content-digest syntax, provider/run/check bindings, and attestation subjects,
 preserves the original rows, and emits separate deterministic record digests. Its `conformance_ready`

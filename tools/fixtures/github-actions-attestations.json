@@ -1,0 +1,9 @@
+[
+  {
+    "id": "attestation-unit",
+    "subject": "artifact-unit",
+    "issuer": "fixture-caller",
+    "statement_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "method": "declared_fixture_statement"
+  }
+]

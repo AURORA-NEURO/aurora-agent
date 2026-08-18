@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""Export a bounded GitHub Actions run into Aurora's provider-payload shape.
+"""Export bounded GitHub Actions provider and evidence handoff documents.
 
-The exporter has two explicit modes.  Manual mode reads caller-selected rows from a local JSON
-file.  Discovery mode uses a caller-supplied GitHub token to retrieve one run and its bounded job
-list through the GitHub API.  Both modes are ingestion helpers, not evidence verifiers: the output
-contains no token, does not download logs or artifacts, and leaves result-digest derivation and
-release decisions to the Rust ``ci_provider_normalize``/``ci_provider_evidence_audit`` contracts.
+Manual mode reads caller-selected rows from local JSON files. Discovery mode uses a caller-supplied
+GitHub token to retrieve one run, its bounded jobs, and—when requested—bounded artifact metadata.
+Log rows are locator metadata derived from the job response; log bytes and artifact archives are
+never downloaded. Attestations are accepted only through an explicit bounded caller file.
+
+The exporter is an ingestion helper, not an evidence verifier. It emits a provider payload, an
+optional collection envelope, and (when an explicit CI plan is supplied) an exact
+``CiProviderEvidenceRequest`` handoff for the Rust audit/registry. It never authenticates a
+provider, verifies a signature, executes checks, or turns a locator/digest declaration into proof
+of remote bytes.
 """
 
 from __future__ import annotations
@@ -29,8 +34,12 @@ MAX_TEXT_BYTES = 512
 MAX_DURATION_MS = 7 * 24 * 60 * 60 * 1000
 MAX_API_RESPONSE_BYTES = 2 * 1024 * 1024
 MAX_DISCOVERY_PAGE_SIZE = MAX_CHECKS + 1
+MAX_EVIDENCE_ROWS = 128
+MAX_EVIDENCE_PAGE_SIZE = MAX_EVIDENCE_ROWS + 1
 MAX_DISCOVERY_TIMEOUT_SECONDS = 30
 SCHEMA = "bioprism-actions-github-provider-payload/0.1"
+COLLECTION_SCHEMA = "bioprism-actions-github-provider-evidence-collection/0.1"
+PROVIDER = "github_actions"
 
 
 class ExportError(ValueError):
@@ -145,6 +154,20 @@ def _api_json(url: str, token: str, field: str) -> Mapping[str, Any]:
     return _mapping(f"GitHub API {field}", value)
 
 
+def _reported_total_count(document: Mapping[str, Any], field: str, maximum: int) -> None:
+    """Reject a bounded first page when the provider reports more rows behind it."""
+
+    total = document.get("total_count")
+    if total is None:
+        return
+    if isinstance(total, bool) or not isinstance(total, int) or total < 0:
+        raise ExportError(f"GitHub API {field}.total_count must be a non-negative integer")
+    if total > maximum:
+        raise ExportError(
+            f"GitHub API returned more than {maximum} {field}; refusing a partial payload"
+        )
+
+
 def _timestamp(field: str, value: Any) -> datetime:
     text = _text(field, value)
     assert text is not None
@@ -171,18 +194,211 @@ def _job_duration(job: Mapping[str, Any], index: int) -> int | None:
     return duration_ms
 
 
+def _sha256_mapping(value: Mapping[str, Any]) -> str:
+    return hashlib.sha256(canonical_bytes(value)).hexdigest()
+
+
+def _sha256_digest(field: str, value: Any) -> str:
+    digest = _text(field, value)
+    assert digest is not None
+    if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+        raise ExportError(f"{field} must be a lowercase SHA-256 digest")
+    return digest
+
+
+def _rows_array(field: str, value: Any, *, required: bool = False) -> list[Mapping[str, Any]]:
+    if value is None:
+        if required:
+            raise ExportError(f"{field} must be an array")
+        return []
+    if isinstance(value, Mapping):
+        value = value.get(field)
+    if not isinstance(value, list):
+        raise ExportError(f"{field} must be an array or an object containing {field}")
+    if len(value) > MAX_EVIDENCE_ROWS:
+        raise ExportError(f"{field} cannot contain more than {MAX_EVIDENCE_ROWS} rows")
+    return [_mapping(f"{field}[{index}]", row) for index, row in enumerate(value)]
+
+
+def _artifact_rows(value: Any, run_id: Any, *, field: str = "artifacts") -> list[dict[str, Any]]:
+    """Normalize GitHub artifact metadata into the Rust artifact-row shape.
+
+    GitHub's artifact-list response does not provide a cryptographic archive digest. When no
+    caller digest is supplied, the emitted digest is over the selected metadata and is deliberately
+    described as a metadata digest by the collection envelope.
+    """
+
+    resolved_run_id = _run_id(run_id)
+    rows = _rows_array(field, value)
+    normalized: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, raw in enumerate(rows):
+        artifact_id = _text(f"{field}[{index}].id", raw.get("id"))
+        assert artifact_id is not None
+        if artifact_id in seen:
+            raise ExportError(f"duplicate {field} id {artifact_id!r}")
+        seen.add(artifact_id)
+        name = _text(
+            f"{field}[{index}].name",
+            raw.get("name", raw.get("kind", artifact_id)),
+        )
+        assert name is not None
+        uri = _text(
+            f"{field}[{index}].uri",
+            raw.get("uri", raw.get("archive_download_url", raw.get("url"))),
+            required=False,
+        )
+        supplied_digest = raw.get("digest")
+        if supplied_digest is not None:
+            digest = _sha256_digest(f"{field}[{index}].digest", supplied_digest)
+        else:
+            metadata: dict[str, Any] = {"id": artifact_id, "name": name}
+            for key in ("size_in_bytes", "expired", "created_at", "expires_at"):
+                if key in raw:
+                    candidate = raw[key]
+                    if key == "size_in_bytes":
+                        if isinstance(candidate, bool) or not isinstance(candidate, int) or candidate < 0:
+                            raise ExportError(f"{field}[{index}].size_in_bytes must be a non-negative integer")
+                    elif key == "expired" and not isinstance(candidate, bool):
+                        raise ExportError(f"{field}[{index}].expired must be a boolean")
+                    elif key in {"created_at", "expires_at"}:
+                        _timestamp(f"{field}[{index}].{key}", candidate)
+                    metadata[key] = candidate
+            if uri is not None:
+                metadata["uri"] = uri
+            digest = _sha256_mapping(metadata)
+        normalized.append(
+            {
+                "id": artifact_id,
+                "kind": name,
+                "digest": digest,
+                "run_id": resolved_run_id,
+                "provider": PROVIDER,
+                **({"uri": uri} if uri is not None else {}),
+            }
+        )
+    return normalized
+
+
+def _log_rows(value: Any, run_id: Any, *, field: str = "logs") -> list[dict[str, Any]]:
+    """Validate caller-supplied log rows without dereferencing their locators."""
+
+    resolved_run_id = _run_id(run_id)
+    rows = _rows_array(field, value)
+    normalized: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, raw in enumerate(rows):
+        log_id = _text(f"{field}[{index}].id", raw.get("id"))
+        assert log_id is not None
+        if log_id in seen:
+            raise ExportError(f"duplicate {field} id {log_id!r}")
+        seen.add(log_id)
+        digest = _sha256_digest(f"{field}[{index}].digest", raw.get("digest"))
+        check = _text(f"{field}[{index}].check", raw.get("check"), required=False)
+        uri = _text(f"{field}[{index}].uri", raw.get("uri"), required=False)
+        truncated = raw.get("truncated", False)
+        if not isinstance(truncated, bool):
+            raise ExportError(f"{field}[{index}].truncated must be a boolean")
+        normalized.append(
+            {
+                "id": log_id,
+                "digest": digest,
+                "run_id": resolved_run_id,
+                "provider": PROVIDER,
+                "truncated": truncated,
+                **({"check": check} if check is not None else {}),
+                **({"uri": uri} if uri is not None else {}),
+            }
+        )
+    return normalized
+
+
+def _attestation_rows(value: Any, *, field: str = "attestations") -> list[dict[str, str]]:
+    rows = _rows_array(field, value)
+    normalized: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for index, raw in enumerate(rows):
+        attestation_id = _text(f"{field}[{index}].id", raw.get("id"))
+        assert attestation_id is not None
+        if attestation_id in seen:
+            raise ExportError(f"duplicate {field} id {attestation_id!r}")
+        seen.add(attestation_id)
+        normalized.append(
+            {
+                "id": attestation_id,
+                "subject": _text(f"{field}[{index}].subject", raw.get("subject")),
+                "issuer": _text(f"{field}[{index}].issuer", raw.get("issuer")),
+                "statement_digest": _sha256_digest(
+                    f"{field}[{index}].statement_digest", raw.get("statement_digest")
+                ),
+                "method": _text(f"{field}[{index}].method", raw.get("method")),
+            }
+        )
+    return normalized
+
+
+def _job_log_rows(raw_jobs: Sequence[Mapping[str, Any]], run_id: Any) -> tuple[list[dict[str, Any]], int]:
+    """Create bounded log locator rows from the already retrieved job metadata."""
+
+    resolved_run_id = _run_id(run_id)
+    rows: list[dict[str, Any]] = []
+    missing = 0
+    seen: set[str] = set()
+    for index, job in enumerate(raw_jobs):
+        job_id = _text(f"jobs[{index}].id", job.get("id", job.get("name")))
+        assert job_id is not None
+        name = _text(f"jobs[{index}].name", job.get("name", job_id))
+        assert name is not None
+        uri = _text(f"jobs[{index}].logs_url", job.get("logs_url"), required=False)
+        if uri is None:
+            missing += 1
+            continue
+        log_id = _text(f"jobs[{index}].log_id", f"job-{job_id}-logs")
+        assert log_id is not None
+        if log_id in seen:
+            raise ExportError(f"duplicate discovered log id {log_id!r}")
+        seen.add(log_id)
+        metadata = {
+            "check": name,
+            "job_id": job_id,
+            "locator": uri,
+            "scope": "job_log_locator_metadata",
+        }
+        rows.append(
+            {
+                "id": log_id,
+                "digest": _sha256_mapping(metadata),
+                "check": name,
+                "run_id": resolved_run_id,
+                "provider": PROVIDER,
+                "uri": uri,
+                "truncated": False,
+            }
+        )
+    if len(rows) > MAX_EVIDENCE_ROWS:
+        raise ExportError(
+            f"discovered logs contain more than {MAX_EVIDENCE_ROWS} locators; refusing a partial collection"
+        )
+    return rows, missing
+
+
 def discover_github_actions_payload(
     *,
     token: Any,
     api_url: Any,
     repository: Any,
     run_id: Any,
+    collect_evidence: bool = False,
 ) -> dict[str, Any]:
-    """Retrieve one bounded GitHub run and convert its jobs to exporter input rows.
+    """Retrieve one bounded GitHub run and convert it to exporter input rows.
 
     The API response is treated as an observed provider payload, not as a signature or log proof.
     A response larger than the normalizer's check bound is refused instead of truncated, because a
     partial job list could make a required check look absent for the wrong reason.
+
+    When ``collect_evidence`` is true, the collector also retrieves the bounded artifact metadata
+    endpoint and derives log locator rows from the job response. It does not download either kind
+    of remote content.
     """
 
     token_text = _text("github-token", token)
@@ -210,6 +426,7 @@ def discover_github_actions_payload(
     raw_jobs = jobs_document.get("jobs")
     if not isinstance(raw_jobs, list):
         raise ExportError("GitHub API jobs response must contain a jobs array")
+    _reported_total_count(jobs_document, "jobs", MAX_CHECKS)
     if not raw_jobs:
         raise ExportError("GitHub API jobs response contains no jobs")
     if len(raw_jobs) > MAX_CHECKS:
@@ -237,7 +454,25 @@ def discover_github_actions_payload(
         if detail is not None:
             row["detail"] = detail
         rows.append(row)
-    return {"run": dict(run), "jobs": rows}
+    artifact_rows: list[dict[str, Any]] = []
+    log_rows: list[dict[str, Any]] = []
+    missing_log_locator_count = 0
+    if collect_evidence:
+        artifacts_document = _api_json(
+            f"{base}/repos/{encoded_repo}/actions/runs/{encoded_run_id}/artifacts?per_page={MAX_EVIDENCE_PAGE_SIZE}",
+            token_text,
+            "artifacts",
+        )
+        _reported_total_count(artifacts_document, "artifacts", MAX_EVIDENCE_ROWS)
+        artifact_rows = _artifact_rows(artifacts_document, selected_run_id)
+        log_rows, missing_log_locator_count = _job_log_rows(raw_jobs, selected_run_id)
+    return {
+        "run": dict(run),
+        "jobs": rows,
+        "artifacts": artifact_rows,
+        "logs": log_rows,
+        "missing_log_locator_count": missing_log_locator_count,
+    }
 
 
 def _run_from_event(event: Any) -> Mapping[str, Any]:
@@ -346,27 +581,125 @@ def payload_digest(payload: Mapping[str, Any]) -> str:
     return hashlib.sha256(canonical_bytes(payload)).hexdigest()
 
 
+def build_provider_evidence_request(
+    ci: Any,
+    payload: Mapping[str, Any],
+    *,
+    artifacts: Sequence[Mapping[str, Any]] = (),
+    logs: Sequence[Mapping[str, Any]] = (),
+    attestations: Sequence[Mapping[str, Any]] = (),
+    source: str,
+) -> dict[str, Any]:
+    """Build the exact JSON envelope consumed by ``ci_provider_evidence_import``.
+
+    The CI plan is intentionally caller-supplied. The exporter never infers required checks from
+    observed jobs, because doing so would turn provider observations into release intent.
+    """
+
+    ci_mapping = _mapping("ci", ci)
+    if source not in {"provider_observed", "caller_attested"}:
+        raise ExportError("source must be provider_observed or caller_attested")
+    return {
+        "ci": dict(ci_mapping),
+        "provider": PROVIDER,
+        "payload": dict(_mapping("payload", payload)),
+        "source": source,
+        "artifacts": list(artifacts),
+        "logs": list(logs),
+        "attestations": list(attestations),
+    }
+
+
+def build_collection_envelope(
+    payload: Mapping[str, Any],
+    *,
+    artifacts: Sequence[Mapping[str, Any]] = (),
+    logs: Sequence[Mapping[str, Any]] = (),
+    attestations: Sequence[Mapping[str, Any]] = (),
+    discovery_mode: str,
+    missing_log_locator_count: int = 0,
+    attestation_mode: str = "not_requested",
+) -> dict[str, Any]:
+    """Build a transparent metadata collection envelope, not a Rust audit result."""
+
+    if discovery_mode not in {"manual", "github_api"}:
+        raise ExportError("discovery_mode must be manual or github_api")
+    if attestation_mode not in {"not_requested", "caller_supplied"}:
+        raise ExportError("attestation_mode must be not_requested or caller_supplied")
+    if missing_log_locator_count < 0:
+        raise ExportError("missing_log_locator_count cannot be negative")
+    collection: dict[str, Any] = {
+        "run_metadata": discovery_mode,
+        "artifact_metadata": "github_api" if discovery_mode == "github_api" else "caller_supplied",
+        "log_metadata": "job_log_locators" if discovery_mode == "github_api" else "caller_supplied",
+        "attestations": attestation_mode,
+        "execution": "not_started",
+        "verification": "metadata_only",
+        "limitations": [
+            "artifact digests are selected-metadata digests unless a caller supplied a digest",
+            "log rows are locators and their digests cover locator metadata, not downloaded bytes",
+            "attestation rows are declarations and are not signature-verified",
+        ],
+    }
+    if missing_log_locator_count:
+        collection["missing_log_locator_count"] = missing_log_locator_count
+    return {
+        "schema": COLLECTION_SCHEMA,
+        "provider": PROVIDER,
+        "payload": dict(_mapping("payload", payload)),
+        "artifacts": list(artifacts),
+        "logs": list(logs),
+        "attestations": list(attestations),
+        "collection": collection,
+    }
+
+
+def write_document(document: Mapping[str, Any], output: Path, *, field: str = "output") -> str:
+    """Write one deterministic JSON document and return its digest over bytes without the newline."""
+
+    output = _validated_path(field, output)
+    encoded = canonical_bytes(document)
+    try:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(encoded + b"\n")
+    except OSError as error:
+        raise ExportError(f"cannot write {field} {output}: {error}") from error
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def write_payload(
     payload: Mapping[str, Any],
     output: Path,
     *,
     github_output: Path | None = None,
     discovery_mode: str = "manual",
+    collection: Mapping[str, Any] | None = None,
+    collection_output: Path | None = None,
+    evidence: Mapping[str, Any] | None = None,
+    evidence_output: Path | None = None,
 ) -> str:
-    """Write deterministic JSON and optional GitHub Action outputs."""
+    """Write deterministic JSON and optional collection/evidence action outputs."""
 
     output = _validated_path("output path", output)
     if github_output is not None:
         github_output = _validated_path("GITHUB_OUTPUT path", github_output)
     if discovery_mode not in {"manual", "github_api"}:
         raise ExportError("discovery_mode must be manual or github_api")
-    encoded = canonical_bytes(payload)
-    try:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_bytes(encoded + b"\n")
-    except OSError as error:
-        raise ExportError(f"cannot write output {output}: {error}") from error
-    digest = hashlib.sha256(encoded).hexdigest()
+    if collection is not None and collection_output is None:
+        raise ExportError("collection-output is required when a collection is requested")
+    if evidence is not None and evidence_output is None:
+        raise ExportError("evidence-output is required when an evidence request is requested")
+    digest = write_document(payload, output, field="output")
+    collection_digest = (
+        write_document(collection, collection_output, field="collection-output")
+        if collection is not None and collection_output is not None
+        else None
+    )
+    evidence_digest = (
+        write_document(evidence, evidence_output, field="evidence-output")
+        if evidence is not None and evidence_output is not None
+        else None
+    )
     if github_output is not None:
         try:
             with github_output.open("a", encoding="utf-8", newline="\n") as stream:
@@ -375,6 +708,17 @@ def write_payload(
                 stream.write(f"run-id={payload['run']['id']}\n")
                 stream.write(f"check-count={len(payload['jobs'])}\n")
                 stream.write(f"discovery-mode={discovery_mode}\n")
+                if collection is not None and collection_output is not None and collection_digest is not None:
+                    stream.write(f"collection-path={collection_output}\n")
+                    stream.write(f"collection-digest={collection_digest}\n")
+                if evidence is not None and evidence_output is not None and evidence_digest is not None:
+                    stream.write(f"evidence-path={evidence_output}\n")
+                    stream.write(f"evidence-digest={evidence_digest}\n")
+                rows_document = evidence if evidence is not None else collection
+                if rows_document is not None:
+                    stream.write(f"artifact-count={len(rows_document.get('artifacts', []))}\n")
+                    stream.write(f"log-count={len(rows_document.get('logs', []))}\n")
+                    stream.write(f"attestation-count={len(rows_document.get('attestations', []))}\n")
         except OSError as error:
             raise ExportError(f"cannot write GITHUB_OUTPUT {github_output}: {error}") from error
     return digest
@@ -388,9 +732,18 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="retrieve the selected run and jobs through the GitHub API instead of reading --checks",
     )
+    parser.add_argument(
+        "--collect-evidence",
+        action="store_true",
+        help="also collect bounded artifact metadata and job log locators during discovery",
+    )
     parser.add_argument("--github-token", default="", help="token for bounded GitHub API discovery")
     parser.add_argument("--api-url", default="", help="GitHub API base URL for discovery")
     parser.add_argument("--repository", default="", help="owner/name repository for discovery")
+    parser.add_argument("--artifacts", type=Path, help="optional JSON artifact metadata/rows file for manual collection")
+    parser.add_argument("--logs", type=Path, help="optional JSON log rows file for manual collection")
+    parser.add_argument("--attestations", type=Path, help="optional JSON attestation rows file supplied by the caller")
+    parser.add_argument("--ci", type=Path, help="CI plan JSON file required for an exact provider-evidence request")
     parser.add_argument(
         "--event",
         type=_optional_path,
@@ -400,6 +753,16 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--conclusion", default="", help="optional conclusion; defaults to event metadata")
     parser.add_argument("--run-url", default="", help="optional run URL; defaults to event metadata")
     parser.add_argument("--output", required=True, type=Path, help="deterministic provider payload output path")
+    parser.add_argument(
+        "--collection-output",
+        type=Path,
+        help="optional metadata collection envelope output path",
+    )
+    parser.add_argument(
+        "--evidence-output",
+        type=Path,
+        help="optional exact CiProviderEvidenceRequest output path; requires --ci",
+    )
     parser.add_argument("--github-output", type=Path, help="optional GITHUB_OUTPUT file")
     return parser
 
@@ -407,6 +770,20 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
+        if args.collect_evidence and not args.discover:
+            raise ExportError("--collect-evidence requires --discover")
+        if args.evidence_output is not None and args.ci is None:
+            raise ExportError("--evidence-output requires --ci")
+        if args.ci is not None and args.evidence_output is None:
+            raise ExportError("--ci requires --evidence-output")
+        if (
+            (args.artifacts is not None or args.logs is not None or args.attestations is not None)
+            and args.collection_output is None
+            and args.evidence_output is None
+        ):
+            raise ExportError("artifact, log, and attestation inputs require collection-output or evidence-output")
+        if args.discover and (args.artifacts is not None or args.logs is not None):
+            raise ExportError("--artifacts and --logs cannot be combined with --discover")
         event_path = args.event or (
             Path(os.environ["GITHUB_EVENT_PATH"]) if os.environ.get("GITHUB_EVENT_PATH") else None
         )
@@ -436,6 +813,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 api_url=args.api_url or os.environ.get("GITHUB_API_URL"),
                 repository=args.repository or os.environ.get("GITHUB_REPOSITORY"),
                 run_id=resolved_run_id,
+                collect_evidence=args.collect_evidence,
             )
             payload = build_payload(
                 discovered["jobs"],
@@ -445,6 +823,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 run_url=resolved_url,
             )
             discovery_mode = "github_api"
+            artifacts = list(discovered.get("artifacts", [])) if args.collect_evidence else []
+            logs = list(discovered.get("logs", [])) if args.collect_evidence else []
+            missing_log_locator_count = int(discovered.get("missing_log_locator_count", 0))
         else:
             if args.checks is None:
                 raise ExportError("--checks is required unless --discover is used")
@@ -456,11 +837,54 @@ def main(argv: Sequence[str] | None = None) -> int:
                 run_url=resolved_url,
             )
             discovery_mode = "manual"
+            artifacts = (
+                _artifact_rows(_read_json(args.artifacts, "artifacts"), resolved_run_id)
+                if args.artifacts is not None
+                else []
+            )
+            logs = (
+                _log_rows(_read_json(args.logs, "logs"), resolved_run_id)
+                if args.logs is not None
+                else []
+            )
+            missing_log_locator_count = 0
+        attestations = (
+            _attestation_rows(_read_json(args.attestations, "attestations"))
+            if args.attestations is not None
+            else []
+        )
+        collection = None
+        if args.collection_output is not None or args.collect_evidence:
+            if args.collection_output is None:
+                raise ExportError("--collection-output is required when --collect-evidence is used")
+            collection = build_collection_envelope(
+                payload,
+                artifacts=artifacts,
+                logs=logs,
+                attestations=attestations,
+                discovery_mode=discovery_mode,
+                missing_log_locator_count=missing_log_locator_count,
+                attestation_mode="caller_supplied" if args.attestations is not None else "not_requested",
+            )
+        evidence = None
+        if args.evidence_output is not None and args.ci is not None:
+            evidence = build_provider_evidence_request(
+                _read_json(args.ci, "ci"),
+                payload,
+                artifacts=artifacts,
+                logs=logs,
+                attestations=attestations,
+                source="provider_observed" if discovery_mode == "github_api" else "caller_attested",
+            )
         digest = write_payload(
             payload,
             args.output,
             github_output=args.github_output,
             discovery_mode=discovery_mode,
+            collection=collection,
+            collection_output=args.collection_output,
+            evidence=evidence,
+            evidence_output=args.evidence_output,
         )
     except ExportError as error:
         print(f"github-actions-evidence: error: {error}", file=sys.stderr)
@@ -472,6 +896,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "payload_digest": digest,
                 "check_count": len(payload["jobs"]),
                 "discovery_mode": discovery_mode,
+                "artifact_count": len(artifacts),
+                "log_count": len(logs),
+                "attestation_count": len(attestations),
             },
             sort_keys=True,
         )
