@@ -18057,7 +18057,7 @@ impl Server {
             > 1
         {
             return Err(
-                "provide exactly one of bundle or document; publicly_attested_bundle is the signed-bundle alternative".into(),
+                "provide either bundle or document, or publicly_attested_bundle as the signed-bundle alternative".into(),
             );
         }
         if publicly_attested.is_some() != verification_key.is_some() {
