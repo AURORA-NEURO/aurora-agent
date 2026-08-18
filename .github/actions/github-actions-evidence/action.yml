@@ -13,6 +13,10 @@ inputs:
     description: During discovery, collect bounded artifact metadata and job log locators
     required: false
     default: 'false'
+  download-evidence:
+    description: Explicitly download bounded HTTPS artifact/log responses for local SHA-256 hashing; no archive extraction or log execution
+    required: false
+    default: 'false'
   github-token:
     description: Token used only for bounded GitHub API discovery; never copied into the payload
     required: false
@@ -102,6 +106,18 @@ outputs:
   attestation-count:
     description: Number of exported caller-supplied attestation rows
     value: ${{ steps.export.outputs['attestation-count'] }}
+  download-mode:
+    description: Whether remote evidence download was disabled or locally byte-hashed
+    value: ${{ steps.export.outputs['download-mode'] }}
+  downloaded-artifact-count:
+    description: Number of artifact responses downloaded and locally hashed
+    value: ${{ steps.export.outputs['downloaded-artifact-count'] }}
+  downloaded-log-count:
+    description: Number of log responses downloaded and locally hashed
+    value: ${{ steps.export.outputs['downloaded-log-count'] }}
+  downloaded-byte-count:
+    description: Total response bytes downloaded under the collection bounds
+    value: ${{ steps.export.outputs['downloaded-byte-count'] }}
 runs:
   using: composite
   steps:
@@ -112,6 +128,7 @@ runs:
         INPUT_CHECKS: ${{ inputs.checks }}
         INPUT_DISCOVER: ${{ inputs.discover }}
         INPUT_COLLECT_EVIDENCE: ${{ inputs['collect-evidence'] }}
+        INPUT_DOWNLOAD_EVIDENCE: ${{ inputs['download-evidence'] }}
         INPUT_API_URL: ${{ inputs['api-url'] }}
         INPUT_REPOSITORY: ${{ inputs.repository }}
         INPUT_ARTIFACTS: ${{ inputs.artifacts }}
@@ -149,6 +166,12 @@ runs:
             echo "github-actions-evidence: collect-evidence must be true or false" >&2
             exit 2
           fi
+          if [[ "$INPUT_DOWNLOAD_EVIDENCE" == "true" ]]; then
+            exporter+=(--download-evidence)
+          elif [[ "$INPUT_DOWNLOAD_EVIDENCE" != "false" ]]; then
+            echo "github-actions-evidence: download-evidence must be true or false" >&2
+            exit 2
+          fi
         elif [[ "$INPUT_DISCOVER" == "false" ]]; then
           exporter+=(--checks "$INPUT_CHECKS")
           if [[ "$INPUT_COLLECT_EVIDENCE" == "true" ]]; then
@@ -156,6 +179,12 @@ runs:
             exit 2
           elif [[ "$INPUT_COLLECT_EVIDENCE" != "false" ]]; then
             echo "github-actions-evidence: collect-evidence must be true or false" >&2
+            exit 2
+          fi
+          if [[ "$INPUT_DOWNLOAD_EVIDENCE" == "true" ]]; then
+            exporter+=(--download-evidence)
+          elif [[ "$INPUT_DOWNLOAD_EVIDENCE" != "false" ]]; then
+            echo "github-actions-evidence: download-evidence must be true or false" >&2
             exit 2
           fi
         else

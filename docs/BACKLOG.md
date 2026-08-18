@@ -301,10 +301,13 @@ action and a deterministic exporter test contract. It supports both bounded call
 Actions rows and an authenticated, token-free-in-output discovery mode for one run's jobs. The
 optional collection mode adds bounded GitHub artifact metadata and job-log locators, plus a
 caller-supplied attestation file, and can emit the exact provider-evidence request consumed by the
-Rust audit/registry when an explicit CI plan is provided. Both modes refuse duplicate, oversized,
-malformed, or control-character-bearing inputs. This materially covers the local consumer-repository
-handoff for 11.21 and the bounded discovery portion of 11.22, but it does not download remote bytes,
-execute checks, verify attestations, upload artifacts, or provide hosted runner/release authority.
+Rust audit/registry when an explicit CI plan is provided. An explicit byte-collection switch now
+downloads HTTPS artifact/log responses under per-response and total caps and binds local SHA-256
+digests, while keeping archive extraction, log interpretation, signature verification, and release
+authority out of scope. Both modes refuse duplicate, oversized, malformed, or
+control-character-bearing inputs. This materially covers the local consumer-repository handoff for
+11.21 and the bounded discovery/byte-hash portion of 11.22, but it does not execute checks, verify
+attestations, upload artifacts, or provide hosted runner/release authority.
 Consumers must still retain the payload and pin a reviewed action revision.
 `ci_provider_evidence_audit` now adds the next conformance layer for artifact, log, and attestation
 rows: it preserves the supplied records, checks provider/run/check bindings and subject references,

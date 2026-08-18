@@ -3,8 +3,9 @@
 
 Manual mode reads caller-selected rows from local JSON files. Discovery mode uses a caller-supplied
 GitHub token to retrieve one run, its bounded jobs, and—when requested—bounded artifact metadata.
-Log rows are locator metadata derived from the job response; log bytes and artifact archives are
-never downloaded. Attestations are accepted only through an explicit bounded caller file.
+Remote artifact/log bytes are downloaded only when the explicit byte-collection switch is enabled;
+that path is HTTPS-only, size-bounded, and hashes response bytes locally without extracting archives
+or interpreting logs. Attestations are accepted only through an explicit bounded caller file.
 
 The exporter is an ingestion helper, not an evidence verifier. It emits a provider payload, an
 optional collection envelope, and (when an explicit CI plan is supplied) an exact
@@ -25,7 +26,7 @@ import sys
 from typing import Any, Mapping, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 
 MAX_INPUT_BYTES = 2 * 1024 * 1024
@@ -33,6 +34,8 @@ MAX_CHECKS = 64
 MAX_TEXT_BYTES = 512
 MAX_DURATION_MS = 7 * 24 * 60 * 60 * 1000
 MAX_API_RESPONSE_BYTES = 2 * 1024 * 1024
+MAX_REMOTE_BYTES = 16 * 1024 * 1024
+MAX_REMOTE_TOTAL_BYTES = 256 * 1024 * 1024
 MAX_DISCOVERY_PAGE_SIZE = MAX_CHECKS + 1
 MAX_EVIDENCE_ROWS = 128
 MAX_EVIDENCE_PAGE_SIZE = MAX_EVIDENCE_ROWS + 1
@@ -125,12 +128,12 @@ def _api_json(url: str, token: str, field: str) -> Mapping[str, Any]:
         url,
         headers={
             "Accept": "application/vnd.github+json",
-            "Authorization": f"Bearer {token}",
             "X-GitHub-Api-Version": "2022-11-28",
             "User-Agent": "aurora-agent-github-actions-evidence",
         },
         method="GET",
     )
+    request.add_unredirected_header("Authorization", f"Bearer {token}")
     try:
         with urlopen(request, timeout=MAX_DISCOVERY_TIMEOUT_SECONDS) as response:
             content_length = response.headers.get("Content-Length")
@@ -152,6 +155,87 @@ def _api_json(url: str, token: str, field: str) -> Mapping[str, Any]:
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise ExportError(f"GitHub API {field} response is not valid UTF-8 JSON") from error
     return _mapping(f"GitHub API {field}", value)
+
+
+class _HttpsOnlyRedirectHandler(HTTPRedirectHandler):
+    """Reject insecure redirect targets and prevent credentials crossing redirects."""
+
+    def __init__(self, field: str) -> None:
+        super().__init__()
+        self.field = field
+
+    def redirect_request(self, request: Request, *args: Any, **kwargs: Any) -> Request | None:
+        redirected = super().redirect_request(request, *args, **kwargs)
+        if redirected is None:
+            return None
+        parsed = urlparse(redirected.full_url)
+        if parsed.scheme != "https" or not parsed.netloc or parsed.fragment:
+            raise ExportError(f"{self.field} redirect target must be an absolute HTTPS URL without fragment")
+        # Request.add_unredirected_header is intentional on the first request, but be explicit
+        # here as well: a signed artifact URL may redirect to another HTTPS host and must not
+        # receive the caller's GitHub token.
+        redirected.headers.pop("Authorization", None)
+        redirected.unredirected_hdrs.pop("Authorization", None)
+        return redirected
+
+
+def _open_remote(request: Request, field: str) -> Any:
+    opener = build_opener(_HttpsOnlyRedirectHandler(field))
+    return opener.open(request, timeout=MAX_DISCOVERY_TIMEOUT_SECONDS)
+
+
+def _remote_bytes(url: Any, token: Any, field: str, *, limit: int = MAX_REMOTE_BYTES) -> bytes:
+    """Fetch one HTTPS response under hard per-response and credential-forwarding bounds."""
+
+    if limit <= 0 or limit > MAX_REMOTE_BYTES:
+        raise ExportError(f"{field} requested an invalid remote byte limit")
+    locator = _text(field, url)
+    assert locator is not None
+    parsed = urlparse(locator)
+    if (
+        parsed.scheme != "https"
+        or not parsed.netloc
+        or parsed.fragment
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        raise ExportError(f"{field} must be an absolute HTTPS URL without credentials or fragment")
+    token_text = None
+    if token not in (None, ""):
+        token_text = _text("github-token", token)
+        assert token_text is not None
+        if any(ord(character) < 0x20 or ord(character) == 0x7F for character in token_text):
+            raise ExportError("github-token must not contain control characters")
+    request = Request(
+        locator,
+        headers={
+            "Accept": "application/octet-stream",
+            "User-Agent": "aurora-agent-github-actions-evidence",
+        },
+        method="GET",
+    )
+    if token_text is not None:
+        # Unlike a normal header, urllib does not copy this across redirects. The redirect
+        # handler also strips it defensively from any redirected Request object.
+        request.add_unredirected_header("Authorization", f"Bearer {token_text}")
+    try:
+        with _open_remote(request, field) as response:
+            content_length = response.headers.get("Content-Length")
+            if content_length is not None:
+                try:
+                    parsed_length = int(content_length)
+                except (TypeError, ValueError) as error:
+                    raise ExportError(f"{field} response has an invalid Content-Length") from error
+                if parsed_length < 0 or parsed_length > limit:
+                    raise ExportError(f"{field} response exceeds the {limit}-byte bound")
+            raw = response.read(limit + 1)
+    except HTTPError as error:
+        raise ExportError(f"remote {field} request failed with HTTP {error.code}") from error
+    except (URLError, OSError, TimeoutError) as error:
+        raise ExportError(f"remote {field} request failed: {error}") from error
+    if len(raw) > limit:
+        raise ExportError(f"{field} response exceeds the {limit}-byte bound")
+    return raw
 
 
 def _reported_total_count(document: Mapping[str, Any], field: str, maximum: int) -> None:
@@ -382,6 +466,52 @@ def _job_log_rows(raw_jobs: Sequence[Mapping[str, Any]], run_id: Any) -> tuple[l
     return rows, missing
 
 
+def _download_evidence(
+    artifacts: Sequence[Mapping[str, Any]],
+    logs: Sequence[Mapping[str, Any]],
+    token: Any,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+    """Replace locator/metadata digests with SHA-256 digests of bounded response bytes."""
+
+    total_bytes = 0
+    downloaded_artifacts: list[dict[str, Any]] = []
+    downloaded_logs: list[dict[str, Any]] = []
+
+    def download_rows(
+        source_rows: Sequence[Mapping[str, Any]],
+        destination: list[dict[str, Any]],
+        field: str,
+    ) -> None:
+        nonlocal total_bytes
+        for index, row in enumerate(source_rows):
+            uri = row.get("uri")
+            if uri is None:
+                raise ExportError(f"{field}[{index}].uri is required when download-evidence is enabled")
+            remaining = MAX_REMOTE_TOTAL_BYTES - total_bytes
+            if remaining <= 0:
+                raise ExportError(f"remote evidence exceeds the {MAX_REMOTE_TOTAL_BYTES}-byte total bound")
+            raw = _remote_bytes(uri, token, f"{field}[{index}].uri", limit=min(MAX_REMOTE_BYTES, remaining))
+            total_bytes += len(raw)
+            updated = dict(row)
+            updated["digest"] = hashlib.sha256(raw).hexdigest()
+            destination.append(updated)
+
+    download_rows(artifacts, downloaded_artifacts, "artifacts")
+    download_rows(logs, downloaded_logs, "logs")
+    return (
+        downloaded_artifacts,
+        downloaded_logs,
+        {
+            "mode": "downloaded_and_sha256_hashed",
+            "artifact_count": len(downloaded_artifacts),
+            "log_count": len(downloaded_logs),
+            "total_bytes": total_bytes,
+            "max_bytes_per_response": MAX_REMOTE_BYTES,
+            "max_total_bytes": MAX_REMOTE_TOTAL_BYTES,
+        },
+    )
+
+
 def discover_github_actions_payload(
     *,
     token: Any,
@@ -389,6 +519,7 @@ def discover_github_actions_payload(
     repository: Any,
     run_id: Any,
     collect_evidence: bool = False,
+    download_evidence: bool = False,
 ) -> dict[str, Any]:
     """Retrieve one bounded GitHub run and convert it to exporter input rows.
 
@@ -397,8 +528,9 @@ def discover_github_actions_payload(
     partial job list could make a required check look absent for the wrong reason.
 
     When ``collect_evidence`` is true, the collector also retrieves the bounded artifact metadata
-    endpoint and derives log locator rows from the job response. It does not download either kind
-    of remote content.
+    endpoint and derives log locator rows from the job response. When ``download_evidence`` is
+    true, it implies collection and downloads each bounded HTTPS locator to compute a local byte
+    digest. It does not extract archives, interpret logs, or verify signatures.
     """
 
     token_text = _text("github-token", token)
@@ -457,7 +589,8 @@ def discover_github_actions_payload(
     artifact_rows: list[dict[str, Any]] = []
     log_rows: list[dict[str, Any]] = []
     missing_log_locator_count = 0
-    if collect_evidence:
+    download_stats: dict[str, Any] | None = None
+    if collect_evidence or download_evidence:
         artifacts_document = _api_json(
             f"{base}/repos/{encoded_repo}/actions/runs/{encoded_run_id}/artifacts?per_page={MAX_EVIDENCE_PAGE_SIZE}",
             token_text,
@@ -466,12 +599,19 @@ def discover_github_actions_payload(
         _reported_total_count(artifacts_document, "artifacts", MAX_EVIDENCE_ROWS)
         artifact_rows = _artifact_rows(artifacts_document, selected_run_id)
         log_rows, missing_log_locator_count = _job_log_rows(raw_jobs, selected_run_id)
+        if download_evidence:
+            artifact_rows, log_rows, download_stats = _download_evidence(
+                artifact_rows,
+                log_rows,
+                token_text,
+            )
     return {
         "run": dict(run),
         "jobs": rows,
         "artifacts": artifact_rows,
         "logs": log_rows,
         "missing_log_locator_count": missing_log_locator_count,
+        "download_stats": download_stats,
     }
 
 
@@ -619,6 +759,7 @@ def build_collection_envelope(
     discovery_mode: str,
     missing_log_locator_count: int = 0,
     attestation_mode: str = "not_requested",
+    download_stats: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a transparent metadata collection envelope, not a Rust audit result."""
 
@@ -628,19 +769,45 @@ def build_collection_envelope(
         raise ExportError("attestation_mode must be not_requested or caller_supplied")
     if missing_log_locator_count < 0:
         raise ExportError("missing_log_locator_count cannot be negative")
+    if download_stats is not None:
+        stats = _mapping("download_stats", download_stats)
+        for key in ("artifact_count", "log_count", "total_bytes", "max_bytes_per_response", "max_total_bytes"):
+            value = stats.get(key)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ExportError(f"download_stats.{key} must be a non-negative integer")
+        if stats.get("mode") != "downloaded_and_sha256_hashed":
+            raise ExportError("download_stats.mode must be downloaded_and_sha256_hashed")
     collection: dict[str, Any] = {
         "run_metadata": discovery_mode,
         "artifact_metadata": "github_api" if discovery_mode == "github_api" else "caller_supplied",
         "log_metadata": "job_log_locators" if discovery_mode == "github_api" else "caller_supplied",
         "attestations": attestation_mode,
         "execution": "not_started",
-        "verification": "metadata_only",
-        "limitations": [
-            "artifact digests are selected-metadata digests unless a caller supplied a digest",
-            "log rows are locators and their digests cover locator metadata, not downloaded bytes",
-            "attestation rows are declarations and are not signature-verified",
-        ],
+        "verification": "local_byte_hash_only" if download_stats is not None else "metadata_only",
+        "limitations": (
+            [
+                "artifact and log SHA-256 digests cover the bounded response bytes retrieved locally",
+                "artifact archives were not extracted or independently validated",
+                "logs were not interpreted or executed",
+                "attestation rows are declarations and are not signature-verified",
+            ]
+            if download_stats is not None
+            else [
+                "artifact digests are selected-metadata digests unless a caller supplied a digest",
+                "log rows are locators and their digests cover locator metadata, not downloaded bytes",
+                "attestation rows are declarations and are not signature-verified",
+            ]
+        ),
     }
+    if download_stats is not None:
+        collection["byte_collection"] = {
+            "mode": "downloaded_and_sha256_hashed",
+            "artifact_count": download_stats["artifact_count"],
+            "log_count": download_stats["log_count"],
+            "total_bytes": download_stats["total_bytes"],
+            "max_bytes_per_response": download_stats["max_bytes_per_response"],
+            "max_total_bytes": download_stats["max_total_bytes"],
+        }
     if missing_log_locator_count:
         collection["missing_log_locator_count"] = missing_log_locator_count
     return {
@@ -677,6 +844,7 @@ def write_payload(
     collection_output: Path | None = None,
     evidence: Mapping[str, Any] | None = None,
     evidence_output: Path | None = None,
+    download_stats: Mapping[str, Any] | None = None,
 ) -> str:
     """Write deterministic JSON and optional collection/evidence action outputs."""
 
@@ -719,6 +887,16 @@ def write_payload(
                     stream.write(f"artifact-count={len(rows_document.get('artifacts', []))}\n")
                     stream.write(f"log-count={len(rows_document.get('logs', []))}\n")
                     stream.write(f"attestation-count={len(rows_document.get('attestations', []))}\n")
+                if download_stats is None:
+                    stream.write("download-mode=disabled\n")
+                    stream.write("downloaded-artifact-count=0\n")
+                    stream.write("downloaded-log-count=0\n")
+                    stream.write("downloaded-byte-count=0\n")
+                else:
+                    stream.write("download-mode=local_byte_hash_only\n")
+                    stream.write(f"downloaded-artifact-count={download_stats['artifact_count']}\n")
+                    stream.write(f"downloaded-log-count={download_stats['log_count']}\n")
+                    stream.write(f"downloaded-byte-count={download_stats['total_bytes']}\n")
         except OSError as error:
             raise ExportError(f"cannot write GITHUB_OUTPUT {github_output}: {error}") from error
     return digest
@@ -736,6 +914,11 @@ def _parser() -> argparse.ArgumentParser:
         "--collect-evidence",
         action="store_true",
         help="also collect bounded artifact metadata and job log locators during discovery",
+    )
+    parser.add_argument(
+        "--download-evidence",
+        action="store_true",
+        help="explicitly download bounded HTTPS artifact/log responses and hash their bytes locally",
     )
     parser.add_argument("--github-token", default="", help="token for bounded GitHub API discovery")
     parser.add_argument("--api-url", default="", help="GitHub API base URL for discovery")
@@ -813,7 +996,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 api_url=args.api_url or os.environ.get("GITHUB_API_URL"),
                 repository=args.repository or os.environ.get("GITHUB_REPOSITORY"),
                 run_id=resolved_run_id,
-                collect_evidence=args.collect_evidence,
+                collect_evidence=args.collect_evidence or args.download_evidence,
+                download_evidence=args.download_evidence,
             )
             payload = build_payload(
                 discovered["jobs"],
@@ -823,9 +1007,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                 run_url=resolved_url,
             )
             discovery_mode = "github_api"
-            artifacts = list(discovered.get("artifacts", [])) if args.collect_evidence else []
-            logs = list(discovered.get("logs", [])) if args.collect_evidence else []
+            artifacts = (
+                list(discovered.get("artifacts", []))
+                if args.collect_evidence or args.download_evidence
+                else []
+            )
+            logs = (
+                list(discovered.get("logs", []))
+                if args.collect_evidence or args.download_evidence
+                else []
+            )
             missing_log_locator_count = int(discovered.get("missing_log_locator_count", 0))
+            download_stats = discovered.get("download_stats") if args.download_evidence else None
         else:
             if args.checks is None:
                 raise ExportError("--checks is required unless --discover is used")
@@ -848,6 +1041,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 else []
             )
             missing_log_locator_count = 0
+            download_stats = None
+            if args.download_evidence:
+                artifacts, logs, download_stats = _download_evidence(
+                    artifacts,
+                    logs,
+                    args.github_token or os.environ.get("GITHUB_TOKEN"),
+                )
         attestations = (
             _attestation_rows(_read_json(args.attestations, "attestations"))
             if args.attestations is not None
@@ -865,6 +1065,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 discovery_mode=discovery_mode,
                 missing_log_locator_count=missing_log_locator_count,
                 attestation_mode="caller_supplied" if args.attestations is not None else "not_requested",
+                download_stats=download_stats,
             )
         evidence = None
         if args.evidence_output is not None and args.ci is not None:
@@ -885,6 +1086,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             collection_output=args.collection_output,
             evidence=evidence,
             evidence_output=args.evidence_output,
+            download_stats=download_stats,
         )
     except ExportError as error:
         print(f"github-actions-evidence: error: {error}", file=sys.stderr)
@@ -899,6 +1101,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "artifact_count": len(artifacts),
                 "log_count": len(logs),
                 "attestation_count": len(attestations),
+                "download_mode": download_stats["mode"] if download_stats is not None else "disabled",
+                "downloaded_artifact_count": download_stats["artifact_count"] if download_stats is not None else 0,
+                "downloaded_log_count": download_stats["log_count"] if download_stats is not None else 0,
+                "downloaded_byte_count": download_stats["total_bytes"] if download_stats is not None else 0,
             },
             sort_keys=True,
         )

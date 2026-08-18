@@ -105,22 +105,37 @@ serialized into the payload or action outputs.
 
 Set `collect-evidence: true` with `collection-output` to make the discovery pass retrieve the
 bounded `/artifacts` metadata list (at most 128 rows) and derive one log-locator row per discovered
-job that exposes `logs_url`. The action does not follow either locator. Artifact rows use a digest of
-selected provider metadata unless the caller supplied a digest; log-row digests cover the locator
-metadata, not downloaded log bytes. More than 128 artifacts or locators is refused rather than
-silently truncated. Manual `artifacts`, `logs`, and `attestations` files use the same bounded row
-shapes, while attestations are always caller-supplied declarations.
+job that exposes `logs_url`. The action does not follow either locator by default. Artifact rows use
+a digest of selected provider metadata unless the caller supplied a digest; log-row digests cover
+the locator metadata, not downloaded log bytes. More than 128 artifacts or locators is refused
+rather than silently truncated. Manual `artifacts`, `logs`, and `attestations` files use the same
+bounded row shapes, while attestations are always caller-supplied declarations.
+
+`download-evidence: true` is a separate, explicit opt-in for bounded byte collection. It implies
+evidence collection during discovery and follows every artifact/log `uri` in the selected rows;
+manual mode can use the same switch with explicit `uri` fields. Locators must be absolute HTTPS
+URLs without embedded credentials or fragments. A response is capped at 16 MiB and one collection
+at 256 MiB; declared `Content-Length` values and actual reads are both checked. Authorization is
+attached only to the initial request and removed from redirected requests, while insecure redirect
+targets are refused. The resulting row digest is SHA-256 over the response bytes retrieved locally,
+and outputs include the downloaded artifact/log counts and total byte count. Archives are not
+extracted or validated, logs are not interpreted or executed, and attestation statements are not
+signature-verified. This is reported as `verification: local_byte_hash_only`, not provider
+authentication or remote-content proof.
 
 For a `workflow_run` trigger, discovery prefers the upstream run id in the event over the
 downstream workflow's own `GITHUB_RUN_ID`; callers can still override it explicitly with `run-id`.
 
 Both modes expose `payload-path`, `payload-digest`, `run-id`, `check-count`, and `discovery-mode`
 outputs for a subsequent API/MCP handoff or artifact manifest. Collection mode additionally exposes
-`collection-path`, `collection-digest`, and row counts. Output is canonical JSON with deterministic
-SHA-256 digests. The collection envelope reports `execution: not_started` and
-`verification: metadata_only`; it does not download logs or artifacts, execute a check, verify a
-signature or attestation, approve a release, or turn an API response into cryptographic provider
-truth. Missing per-check digests are intentionally left for the Rust normalizer to derive and label.
+`collection-path`, `collection-digest`, and row counts. The action always emits
+`download-mode`, `downloaded-artifact-count`, `downloaded-log-count`, and `downloaded-byte-count`,
+with zero counts when byte collection is disabled. Output is canonical JSON with deterministic
+SHA-256 digests. The default collection envelope reports `execution: not_started` and
+`verification: metadata_only`; an explicitly downloaded envelope reports
+`verification: local_byte_hash_only`. Neither mode executes a check, verifies a signature or
+attestation, approves a release, or turns an API response into authenticated provider truth.
+Missing per-check digests are intentionally left for the Rust normalizer to derive and label.
 Pin the action to a reviewed commit or release tag in consumer repositories rather than floating on
 `main`.
 
@@ -144,6 +159,10 @@ Discovery example:
     collection-output: .aurora/github-actions-provider-evidence-collection.json
 ```
 
+To request local byte hashes as well, add `download-evidence: 'true'`. The request is deliberately
+separate from metadata collection because it can retrieve up to the documented byte bounds and
+may refuse an expired artifact, a missing locator, an oversized response, or a non-HTTPS redirect.
+
 The repository's public Python CI job invokes this local action in both modes. It exercises manual
 mode against repository fixtures, then uses the runner token to discover the current workflow, jobs,
 artifact metadata, and log locators. Each emitted file is re-read and checked for canonical fields,
@@ -158,7 +177,7 @@ refusal tests.
 run summary. It accepts the same provider payload plus bounded `artifacts`, `logs`, and
 `attestations` arrays. Artifact and log rows must carry a unique id, a valid content digest, the
 normalized provider and run id, and—when present—a check name from the regenerated plan. URI text
-is retained as a locator but is never fetched. Attestation rows must point to the normalized run,
+is retained as a locator by the Rust audit but is never fetched there. Attestation rows must point to the normalized run,
 an artifact, or a log; their issuer, method, and statement digest are retained as declarations.
 
 The reusable action's collection envelope is intentionally one step earlier than this audit. It

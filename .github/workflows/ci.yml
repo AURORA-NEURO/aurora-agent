@@ -128,6 +128,10 @@ jobs:
           AURORA_ARTIFACT_COUNT: ${{ steps.github-actions-evidence.outputs['artifact-count'] }}
           AURORA_LOG_COUNT: ${{ steps.github-actions-evidence.outputs['log-count'] }}
           AURORA_ATTESTATION_COUNT: ${{ steps.github-actions-evidence.outputs['attestation-count'] }}
+          AURORA_DOWNLOAD_MODE: ${{ steps.github-actions-evidence.outputs['download-mode'] }}
+          AURORA_DOWNLOADED_ARTIFACT_COUNT: ${{ steps.github-actions-evidence.outputs['downloaded-artifact-count'] }}
+          AURORA_DOWNLOADED_LOG_COUNT: ${{ steps.github-actions-evidence.outputs['downloaded-log-count'] }}
+          AURORA_DOWNLOADED_BYTE_COUNT: ${{ steps.github-actions-evidence.outputs['downloaded-byte-count'] }}
         run: |
           python - <<'PY'
           import hashlib
@@ -153,6 +157,10 @@ jobs:
           assert len(collection["artifacts"]) == int(os.environ["AURORA_ARTIFACT_COUNT"]) == 1
           assert len(collection["logs"]) == int(os.environ["AURORA_LOG_COUNT"]) == 1
           assert len(collection["attestations"]) == int(os.environ["AURORA_ATTESTATION_COUNT"]) == 1
+          assert os.environ["AURORA_DOWNLOAD_MODE"] == "disabled"
+          assert int(os.environ["AURORA_DOWNLOADED_ARTIFACT_COUNT"]) == 0
+          assert int(os.environ["AURORA_DOWNLOADED_LOG_COUNT"]) == 0
+          assert int(os.environ["AURORA_DOWNLOADED_BYTE_COUNT"]) == 0
           assert "token" not in json.dumps(collection).lower()
           evidence_path = Path(os.environ["AURORA_EVIDENCE_PATH"])
           evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
@@ -179,6 +187,8 @@ jobs:
           AURORA_DISCOVERED_COLLECTION: ${{ steps.github-actions-evidence-discovery.outputs['collection-path'] }}
           AURORA_DISCOVERED_ARTIFACT_COUNT: ${{ steps.github-actions-evidence-discovery.outputs['artifact-count'] }}
           AURORA_DISCOVERED_LOG_COUNT: ${{ steps.github-actions-evidence-discovery.outputs['log-count'] }}
+          AURORA_DISCOVERED_DOWNLOAD_MODE: ${{ steps.github-actions-evidence-discovery.outputs['download-mode'] }}
+          AURORA_DISCOVERED_DOWNLOADED_BYTE_COUNT: ${{ steps.github-actions-evidence-discovery.outputs['downloaded-byte-count'] }}
         run: |
           python - <<'PY'
           import json
@@ -200,6 +210,8 @@ jobs:
           assert collection["collection"]["attestations"] == "not_requested"
           assert len(collection["artifacts"]) == int(os.environ["AURORA_DISCOVERED_ARTIFACT_COUNT"])
           assert len(collection["logs"]) == int(os.environ["AURORA_DISCOVERED_LOG_COUNT"])
+          assert os.environ["AURORA_DISCOVERED_DOWNLOAD_MODE"] == "disabled"
+          assert int(os.environ["AURORA_DISCOVERED_DOWNLOADED_BYTE_COUNT"]) == 0
           assert "token" not in json.dumps(collection).lower()
           print(f"verified discovered {payload_path} and {collection_path} ({len(payload['jobs'])} jobs)")
           PY

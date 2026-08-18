@@ -1047,13 +1047,17 @@ For GitHub consumers, the repository also provides the dependency-free composite
 manual bounded checks file and an authenticated discovery mode that retrieves one run and its jobs
 through the GitHub API. With `collect-evidence: true`, discovery also retrieves at most 128 artifact
 metadata rows and derives bounded job-log locators from the job response; neither locator is
-followed. Both produce the same canonical provider payload and digest, while collection mode emits
-a separate metadata envelope/digest and artifact/log/attestation counts. Oversized or partial job,
-artifact, or locator lists are refused, and the token is never copied into any output. When a caller
-also supplies an explicit `ci` plan and `evidence-output`, the action emits the exact
-`CiProviderEvidenceRequest` accepted by the Rust provider-evidence audit/registry. This remains an
-ingestion handoff: metadata digests are not proof of downloaded bytes, attestations are not
-signature-verified, checks are not executed, and no release is approved; see
+followed by default. An explicit `download-evidence: true` switch follows those HTTPS locators (or
+manual artifact/log URIs) under 16 MiB per response and 256 MiB per collection, then replaces the
+row digest with SHA-256 over the locally retrieved response bytes. Redirects remain HTTPS-only and
+never receive the GitHub token. Archives are not extracted, logs are not interpreted, and
+attestations are not signature-verified. Both modes produce the same canonical provider payload and
+digest, while collection mode emits a separate envelope/digest, row counts, and stable download
+mode/count/byte outputs. Oversized or partial job, artifact, or locator lists are refused, and the
+token is never copied into any output. When a caller also supplies an explicit `ci` plan and
+`evidence-output`, the action emits the exact `CiProviderEvidenceRequest` accepted by the Rust
+provider-evidence audit/registry. This remains an ingestion handoff: metadata or local-byte digests
+are not authenticated provider truth, checks are not executed, and no release is approved; see
 [`docs/CI_EVIDENCE.md`](docs/CI_EVIDENCE.md).
 `ci_provider_evidence_audit` extends the same handoff with bounded artifact, log, and attestation rows:
 it validates unique ids, content-digest syntax, provider/run/check bindings, and attestation subjects,
