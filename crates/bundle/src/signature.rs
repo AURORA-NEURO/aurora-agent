@@ -613,6 +613,10 @@ mod tests {
     }
 
     fn attestation() -> PublicKeyAttestation {
+        attestation_at(Some(1_755_552_000))
+    }
+
+    fn attestation_at(signed_at: Option<u64>) -> PublicKeyAttestation {
         PublicKeyAttestation::produce_with(
             AttestationPurpose::PublisherManifest,
             ContentHash::of_bytes(b"manifest"),
@@ -620,7 +624,7 @@ mod tests {
             ClaimedProducer::new("self-reported publisher"),
             Some("nonce-1".into()),
             Some("2026-08-18T20:00:00Z".into()),
-            Some(1_755_552_000),
+            signed_at,
         )
         .expect("attests")
     }
@@ -688,20 +692,17 @@ mod tests {
         let signing = signing_key();
         let public = signing
             .verification_key(KeyValidity::bounded(Some(100), Some(200)).expect("valid window"));
-        let mut missing = attestation();
-        missing.signed_at = None;
+        let missing = attestation_at(None);
         assert!(matches!(
             missing.verify(&public),
             PublicKeyAttestationCheck::KeyNotValidAtSigningTime { .. }
         ));
-        let mut expired = attestation();
-        expired.signed_at = Some(201);
+        let expired = attestation_at(Some(201));
         assert!(matches!(
             expired.verify(&public),
             PublicKeyAttestationCheck::KeyNotValidAtSigningTime { .. }
         ));
-        let mut active = attestation();
-        active.signed_at = Some(150);
+        let active = attestation_at(Some(150));
         assert!(active.verify(&public).is_authenticated());
     }
 
