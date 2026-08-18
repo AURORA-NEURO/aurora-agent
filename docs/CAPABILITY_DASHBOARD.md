@@ -48,14 +48,27 @@ import Python modules, execute a tool, or establish deployment readiness.
 
 The route reads only the in-process catalogue and MCP tool definitions. It does not inspect an
 external environment or infer capabilities from package names. Callers should use
-`capability_discover` for ranked intent matching and `capability_route_review` before constructing
-an executable `agent_mission` allow-list.
+`capability_discover` for ranked intent matching, `capability_route` to batch named cross-domain
+needs, and `capability_route_review` before constructing an executable `agent_mission` allow-list.
+
+The direct HTTP planning handoff is split into two explicit, non-executing endpoints:
+
+- `POST /v1/capabilities/route` accepts the same bounded route request as the MCP tool and returns
+  the raw `capability_route` proposal.
+- `POST /v1/capabilities/route/review` accepts that returned route plus caller-selected tools and
+  returns the raw `capability_route_review` handoff. A ready review still requires mission
+  preflight and never dispatches a tool.
+
+Both endpoints record the same tool event and use the same authoritative catalogue as MCP. They
+exist for HTTP clients and automation that should not have to unpack an MCP response envelope.
 
 ## SDK surfaces
 
 - Python: `CapabilityDashboardQueryArgs`, `CapabilityDashboardReport`, and sync/async Workspace
-  and HTTP client methods.
+  and HTTP client methods, plus `capability_route_rest(...)` and
+  `capability_route_review_rest(...)` for the raw planning handoff.
 - TypeScript: `CapabilityDashboardArgs`, `CapabilityDashboardResult`, and
-  `ApiClient.capabilityDashboard(...)`.
+  `ApiClient.capabilityDashboard(...)`, `capabilityRouteRest(...)`, and
+  `capabilityRouteReviewRest(...)`.
 - MCP: the `capability_dashboard` tool with the
   `bioprism-devplat-capability-dashboard/0.1` audit schema.

@@ -1246,6 +1246,10 @@ impl ApiRouter {
             ("GET", "/v1/capabilities/dashboard") => {
                 self.capability_dashboard(&request, &request_id)
             }
+            ("POST", "/v1/capabilities/route") => self.capability_route(&request, &request_id),
+            ("POST", "/v1/capabilities/route/review") => {
+                self.capability_route_review(&request, &request_id)
+            }
             ("GET", "/v1/recovery") => self.recovery_matrix(),
             ("GET", "/v1/operations/snapshot") => self.operations_snapshot(&request, &request_id),
             ("GET", "/v1/operations/domains") => {
@@ -3280,6 +3284,8 @@ impl ApiRouter {
                     "openapi": "/v1/openapi.json",
                     "capabilities": "/v1/capabilities",
                     "capability_dashboard": "/v1/capabilities/dashboard",
+                    "capability_route": "/v1/capabilities/route",
+                    "capability_route_review": "/v1/capabilities/route/review",
                     "recovery": "/v1/recovery",
                     "operations_snapshot": "/v1/operations/snapshot",
                     "operations_domains": "/v1/operations/domains",
@@ -3372,6 +3378,8 @@ impl ApiRouter {
                     "domain_evidence_source_execute": true,
                     "domain_evidence_coverage": true,
                     "capability_dashboard": true,
+                    "capability_route": true,
+                    "capability_route_review": true,
                     "recovery_matrix": true,
                     "operations_snapshot": true,
                     "domain_coverage": true,
@@ -4054,6 +4062,26 @@ impl ApiRouter {
             }
         }
         self.domain_workflow_tool(request_id, "capability_dashboard", Value::Object(arguments))
+    }
+
+    fn capability_route(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        self.domain_workflow_tool(request_id, "capability_route", Value::Object(arguments))
+    }
+
+    fn capability_route_review(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        self.domain_workflow_tool(
+            request_id,
+            "capability_route_review",
+            Value::Object(arguments),
+        )
     }
 
     fn import_workflow_reconciliation(
@@ -7247,6 +7275,8 @@ impl ApiRouter {
                     "/readyz": { "get": { "responses": { "200": { "description": "readiness" } } } },
                     "/v1/capabilities": { "get": { "responses": { "200": { "description": "capability and limit catalog" } } } },
                     "/v1/capabilities/dashboard": { "get": { "parameters": [{ "name": "group_id", "in": "query" }, { "name": "domain", "in": "query" }, { "name": "status", "in": "query" }, { "name": "max_groups", "in": "query" }, { "name": "include_tools", "in": "query" }, { "name": "include_gaps", "in": "query" }], "responses": { "200": { "description": "bounded digest-bound cross-domain capability dashboard" }, "400": { "description": "dashboard query was invalid" } } } },
+                    "/v1/capabilities/route": { "post": { "responses": { "200": { "description": "bounded non-executing cross-domain capability route proposal" }, "400": { "description": "route request JSON was invalid" }, "422": { "description": "route request was refused" } } } },
+                    "/v1/capabilities/route/review": { "post": { "responses": { "200": { "description": "bounded non-executing route review and mission handoff" }, "400": { "description": "route review JSON was invalid" }, "422": { "description": "route review was refused" } } } },
                     "/v1/recovery": { "get": { "responses": { "200": { "description": "operator-visible restart recovery matrix" } } } },
                     "/v1/operations/snapshot": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "bounded operator control-plane snapshot" } } } },
                     "/v1/operations/domains": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "bounded per-domain observed activity projection" } } } },
@@ -11520,6 +11550,55 @@ mod tests {
         assert_eq!(invalid.status, 400);
         let invalid: Value = serde_json::from_slice(&invalid.body).unwrap();
         assert_eq!(invalid["error"]["code"], "invalid_query");
+    }
+
+    #[test]
+    fn capability_route_rest_endpoints_return_raw_planning_reports() {
+        let router =
+            ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
+        let route = router.handle(request(
+            "POST",
+            "/v1/capabilities/route",
+            json!({
+                "goal": "audit a cross-domain evidence workflow",
+                "needs": [{"id": "audit", "tool": "capability_audit"}],
+                "max_candidates_per_need": 4,
+                "max_tools": 8,
+                "include_tools": true
+            }),
+        ));
+        assert_eq!(route.status, 200);
+        let route: Value = serde_json::from_slice(&route.body).unwrap();
+        assert_eq!(route["workflow"], "capability_route");
+        assert_eq!(route["needs"][0]["resolution"], "explicit");
+        assert_eq!(route["execution"], "not_started");
+        assert!(route["tool_schemas"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|schema| { schema["name"] == "capability_audit" }));
+
+        let review = router.handle(request(
+            "POST",
+            "/v1/capabilities/route/review",
+            json!({
+                "route": route,
+                "selections": [{
+                    "need_id": "audit",
+                    "tool": "capability_audit",
+                    "domain": "developer_platform",
+                    "capability": "capability_audit",
+                    "objective": "audit the capability catalogue",
+                    "arguments": {}
+                }],
+                "validate_schemas": true
+            }),
+        ));
+        assert_eq!(review.status, 200);
+        let review: Value = serde_json::from_slice(&review.body).unwrap();
+        assert_eq!(review["workflow"], "capability_route_review");
+        assert_eq!(review["review_status"], "ready");
+        assert_eq!(review["execution"], "not_started");
     }
 
     #[test]

@@ -321,6 +321,9 @@ transport coverage only and is not permission, execution, scientific, or deploym
 `capabilityDashboardQuery` reaches the dedicated `GET /v1/capabilities/dashboard` route with the
 same bounded filters, so applications can use a direct REST projection without unpacking an MCP
 tool envelope; the returned result shape is identical.
+`capabilityRouteRest` and `capabilityRouteReviewRest` provide the corresponding raw REST planning
+handoff for cross-domain needs and caller-selected tools. A ready review remains
+`mission_preflight_required`; these methods never dispatch the selected tools.
 `domainAcquisitionCatalogue` adds a typed cross-domain route registry. Its digest-bound rows keep
 bounded file/plain-HTTP transport, caller-managed connectors, native adapter matches, and
 Python-delegated adapter matches separate for every selected declared domain, with explicit

@@ -3041,6 +3041,47 @@ class ApiClient:
             )
         )
 
+    def capability_route_rest(
+        self,
+        goal: str,
+        needs: Sequence[CapabilityRouteNeed | Mapping[str, Any]],
+        *,
+        max_candidates_per_need: int = 10,
+        max_tools: int = 128,
+        include_tools: bool = False,
+    ) -> dict[str, Any]:
+        """Submit a non-executing route proposal through the dedicated REST endpoint."""
+
+        request = CapabilityRouteRequest(
+            goal,
+            needs,
+            max_candidates_per_need,
+            max_tools,
+            include_tools,
+        )
+        return self.request("POST", "/v1/capabilities/route", request.to_mcp_arguments())
+
+    def capability_route_rest_report(
+        self,
+        goal: str,
+        needs: Sequence[CapabilityRouteNeed | Mapping[str, Any]],
+        *,
+        max_candidates_per_need: int = 10,
+        max_tools: int = 128,
+        include_tools: bool = False,
+    ) -> CapabilityRouteReport:
+        """Return a typed report from the dedicated route REST endpoint."""
+
+        return capability_route_report(
+            self.capability_route_rest(
+                goal,
+                needs,
+                max_candidates_per_need=max_candidates_per_need,
+                max_tools=max_tools,
+                include_tools=include_tools,
+            )
+        )
+
     def capability_route_review(
         self,
         route: Mapping[str, Any],
@@ -3064,6 +3105,35 @@ class ApiClient:
 
         return capability_route_review_report(
             self.capability_route_review(route, selections, validate_schemas=validate_schemas)
+        )
+
+    def capability_route_review_rest(
+        self,
+        route: Mapping[str, Any],
+        selections: Sequence[Mapping[str, Any]],
+        *,
+        validate_schemas: bool = False,
+    ) -> dict[str, Any]:
+        """Review route selections through the dedicated raw REST endpoint."""
+
+        request = CapabilityRouteReviewRequest(route, selections, validate_schemas)
+        return self.request("POST", "/v1/capabilities/route/review", request.to_mcp_arguments())
+
+    def capability_route_review_rest_report(
+        self,
+        route: Mapping[str, Any],
+        selections: Sequence[Mapping[str, Any]],
+        *,
+        validate_schemas: bool = False,
+    ) -> CapabilityRouteReviewReport:
+        """Return typed route-review diagnostics from the dedicated REST endpoint."""
+
+        return capability_route_review_report(
+            self.capability_route_review_rest(
+                route,
+                selections,
+                validate_schemas=validate_schemas,
+            )
         )
 
     def adapter_plan(
@@ -7080,6 +7150,47 @@ class AsyncApiClient:
             )
         )
 
+    async def capability_route_rest(
+        self,
+        goal: str,
+        needs: Sequence[CapabilityRouteNeed | Mapping[str, Any]],
+        *,
+        max_candidates_per_need: int = 10,
+        max_tools: int = 128,
+        include_tools: bool = False,
+    ) -> dict[str, Any]:
+        """Async direct REST route proposal without an MCP envelope."""
+
+        return await asyncio.to_thread(
+            self.client.capability_route_rest,
+            goal,
+            needs,
+            max_candidates_per_need=max_candidates_per_need,
+            max_tools=max_tools,
+            include_tools=include_tools,
+        )
+
+    async def capability_route_rest_report(
+        self,
+        goal: str,
+        needs: Sequence[CapabilityRouteNeed | Mapping[str, Any]],
+        *,
+        max_candidates_per_need: int = 10,
+        max_tools: int = 128,
+        include_tools: bool = False,
+    ) -> CapabilityRouteReport:
+        """Return typed async diagnostics from the direct route REST endpoint."""
+
+        return capability_route_report(
+            await self.capability_route_rest(
+                goal,
+                needs,
+                max_candidates_per_need=max_candidates_per_need,
+                max_tools=max_tools,
+                include_tools=include_tools,
+            )
+        )
+
     async def capability_route_review(
         self,
         route: Mapping[str, Any],
@@ -7103,6 +7214,39 @@ class AsyncApiClient:
 
         return capability_route_review_report(
             await self.capability_route_review(route, selections, validate_schemas=validate_schemas)
+        )
+
+    async def capability_route_review_rest(
+        self,
+        route: Mapping[str, Any],
+        selections: Sequence[Mapping[str, Any]],
+        *,
+        validate_schemas: bool = False,
+    ) -> dict[str, Any]:
+        """Async route review through the dedicated raw REST endpoint."""
+
+        return await asyncio.to_thread(
+            self.client.capability_route_review_rest,
+            route,
+            selections,
+            validate_schemas=validate_schemas,
+        )
+
+    async def capability_route_review_rest_report(
+        self,
+        route: Mapping[str, Any],
+        selections: Sequence[Mapping[str, Any]],
+        *,
+        validate_schemas: bool = False,
+    ) -> CapabilityRouteReviewReport:
+        """Return typed async route-review diagnostics from direct REST."""
+
+        return capability_route_review_report(
+            await self.capability_route_review_rest(
+                route,
+                selections,
+                validate_schemas=validate_schemas,
+            )
         )
 
     async def adapter_plan(

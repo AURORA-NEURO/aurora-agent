@@ -108,6 +108,28 @@ class CapabilityDashboardTests(unittest.TestCase):
             "GET",
             "/v1/capabilities/dashboard?max_groups=128&include_tools=true&include_gaps=true&domain=oncology",
         )
+        with patch.object(ApiClient, "request", return_value={"workflow": "capability_route"}) as route_request:
+            route = ApiClient("http://127.0.0.1:1").capability_route_rest(
+                "compose evidence",
+                [{"id": "oncology", "query": "oncology"}],
+            )
+        self.assertEqual(route["workflow"], "capability_route")
+        route_request.assert_called_once_with(
+            "POST",
+            "/v1/capabilities/route",
+            {
+                "goal": "compose evidence",
+                "needs": [{
+                    "id": "oncology",
+                    "max_items": 50,
+                    "include_tools": False,
+                    "query": "oncology",
+                }],
+                "max_candidates_per_need": 10,
+                "max_tools": 128,
+                "include_tools": False,
+            },
+        )
 
         async def run() -> None:
             with patch.object(ApiClient, "call_tool", return_value=payload()) as async_call:

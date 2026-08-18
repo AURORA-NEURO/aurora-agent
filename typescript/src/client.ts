@@ -1829,8 +1829,20 @@ export class ApiClient {
     return this.callTool<CapabilityRouteResult>("capability_route", args, options);
   }
 
+  /** Submit a non-executing capability route through the raw REST handoff. */
+  async capabilityRouteRest(args: CapabilityRouteArgs, options?: ClientRequestOptions): Promise<CapabilityRouteResult> {
+    if (!isObject(args)) throw new ArgumentError("capability route arguments must be an object");
+    return this.request<CapabilityRouteResult>("POST", "/v1/capabilities/route", args, options);
+  }
+
   async capabilityRouteReview(args: CapabilityRouteReviewArgs, options?: ClientRequestOptions): Promise<RestToolResponse<CapabilityRouteReviewResult>> {
     return this.callTool<CapabilityRouteReviewResult>("capability_route_review", args, options);
+  }
+
+  /** Review explicit route selections through the raw REST handoff. */
+  async capabilityRouteReviewRest(args: CapabilityRouteReviewArgs, options?: ClientRequestOptions): Promise<CapabilityRouteReviewResult> {
+    if (!isObject(args)) throw new ArgumentError("capability route review arguments must be an object");
+    return this.request<CapabilityRouteReviewResult>("POST", "/v1/capabilities/route/review", args, options);
   }
 
   async adapterPlan(args: AdapterPlanArgs, options?: ClientRequestOptions): Promise<RestToolResponse<AdapterPlanResult>> {

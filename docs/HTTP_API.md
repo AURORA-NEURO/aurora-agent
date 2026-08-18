@@ -22,6 +22,9 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 |---|---|
 | `GET /healthz`, `GET /readyz` | Liveness/readiness and retention metrics |
 | `GET /v1/capabilities` | Tool/resource counts, transport support, limits, and workspace catalogue |
+| `GET /v1/capabilities/dashboard` | Bounded digest-bound callable/partial/declared-only capability inventory with explicit transport gaps |
+| `POST /v1/capabilities/route` | Raw non-executing cross-domain route proposal without an MCP response envelope |
+| `POST /v1/capabilities/route/review` | Raw non-executing caller-selection review and mission handoff without an MCP response envelope |
 | `GET /v1/recovery` | One operator-visible matrix of restart, secret, outbox, delivery-provenance, and external-effect boundaries |
 | `GET /v1/operations/snapshot?after=N&limit=M` | One bounded operator control-plane snapshot joining event, mission, persistence, recovery, and capability summaries |
 | `GET /v1/operations/domains?after=N&limit=M` | Per-domain catalogue coverage plus exact local tool activity observed in the requested event page |
