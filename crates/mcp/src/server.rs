@@ -1201,7 +1201,7 @@ impl Server {
         }
         // Check both separators lexically. On Unix, `..\\outside` would
         // otherwise be treated as a literal filename instead of traversal.
-        for component in relative.split(|character| character == '/' || character == '\\') {
+        for component in relative.split(['/', '\\']) {
             if component == ".." {
                 return Err(format!(
                     "path escapes the server root and is refused: {relative:?}"
