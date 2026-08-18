@@ -330,7 +330,8 @@ fn observe_refusal(error: &FiberError) -> RefusalObservation {
         | FiberError::MissingQueryField(_)
         | FiberError::WrongQueryFieldType { .. }
         | FiberError::InvalidIdentifier(_)
-        | FiberError::InvalidDecisionTime(_) => (RefusalCode::MalformedQuery, None, None),
+        | FiberError::InvalidDecisionTime(_)
+        | FiberError::InvalidDecisionContract(_) => (RefusalCode::MalformedQuery, None, None),
         FiberError::World(_) => (RefusalCode::MalformedWorld, None, None),
         FiberError::Policy(_) => (RefusalCode::PolicyRefused, None, None),
     };
