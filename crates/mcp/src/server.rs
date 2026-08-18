@@ -1186,8 +1186,27 @@ impl Server {
     /// rename can be made race-free by a pure path helper.
     pub fn resolve(&self, relative: &str) -> Result<PathBuf, String> {
         let candidate = Path::new(relative);
-        if candidate.is_absolute() {
+        // `Path` follows the host platform. The MCP boundary is cross-platform,
+        // though, so a Windows drive path must not become an ordinary filename
+        // when the server happens to run on Unix (and vice versa).
+        let bytes = relative.as_bytes();
+        let has_drive_prefix =
+            bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':';
+        if candidate.is_absolute()
+            || relative.starts_with('/')
+            || relative.starts_with('\\')
+            || has_drive_prefix
+        {
             return Err(format!("absolute paths are refused: {relative:?}"));
+        }
+        // Check both separators lexically. On Unix, `..\\outside` would
+        // otherwise be treated as a literal filename instead of traversal.
+        for component in relative.split(|character| character == '/' || character == '\\') {
+            if component == ".." {
+                return Err(format!(
+                    "path escapes the server root and is refused: {relative:?}"
+                ));
+            }
         }
         for component in candidate.components() {
             match component {

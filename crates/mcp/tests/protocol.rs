@@ -323,7 +323,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 210);
+    assert_eq!(tools.len(), 211);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -7852,12 +7852,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(210));
-    assert_eq!(result["advertised_tool_count"], json!(210));
+    assert_eq!(result["unique_catalog_tools"], json!(211));
+    assert_eq!(result["advertised_tool_count"], json!(211));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(210));
-    assert_eq!(result["schema_quality"]["valid"], json!(210));
+    assert_eq!(result["schema_quality"]["checked"], json!(211));
+    assert_eq!(result["schema_quality"]["valid"], json!(211));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -8593,6 +8593,8 @@ fn absolute_paths_and_traversal_are_refused() {
         "fixtures/../../secrets.json",
         "/etc/passwd",
         "C:/Windows/System32/config/SAM",
+        "C:\\Windows\\System32\\config\\SAM",
+        "..\\outside.json",
     ] {
         assert!(
             server.resolve(hostile).is_err(),
