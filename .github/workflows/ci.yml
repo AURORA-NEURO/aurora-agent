@@ -9,6 +9,10 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
 
+permissions:
+  actions: read
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -131,6 +135,34 @@ jobs:
           assert hashlib.sha256(canonical).hexdigest() == os.environ["AURORA_PAYLOAD_DIGEST"]
           assert payload["jobs"][1]["conclusion"] == "skipped"
           print(f"verified {payload_path} ({len(payload['jobs'])} jobs)")
+          PY
+      - name: exercise GitHub API evidence discovery
+        id: github-actions-evidence-discovery
+        uses: ./.github/actions/github-actions-evidence
+        with:
+          discover: 'true'
+          github-token: ${{ github.token }}
+          run-id: ${{ github.run_id }}
+          output: ${{ runner.temp }}/aurora-github-actions-discovered-payload.json
+      - name: verify discovered evidence artifact and outputs
+        env:
+          AURORA_DISCOVERED_PATH: ${{ steps.github-actions-evidence-discovery.outputs['payload-path'] }}
+          AURORA_DISCOVERED_MODE: ${{ steps.github-actions-evidence-discovery.outputs['discovery-mode'] }}
+          AURORA_DISCOVERED_COUNT: ${{ steps.github-actions-evidence-discovery.outputs['check-count'] }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          payload_path = Path(os.environ["AURORA_DISCOVERED_PATH"])
+          payload = json.loads(payload_path.read_text(encoding="utf-8"))
+          assert os.environ["AURORA_DISCOVERED_MODE"] == "github_api"
+          assert payload["provider"] == "github_actions"
+          assert payload["run"]["id"] == "${{ github.run_id }}"
+          assert len(payload["jobs"]) == int(os.environ["AURORA_DISCOVERED_COUNT"]) > 0
+          assert "token" not in json.dumps(payload).lower()
+          print(f"verified discovered {payload_path} ({len(payload['jobs'])} jobs)")
           PY
 
   typescript-sdk:

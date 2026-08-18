@@ -59,9 +59,12 @@ are mutually exclusive inputs.
 ## Reusable GitHub Actions exporter
 
 The repository also ships a dependency-free composite action at
-`.github/actions/github-actions-evidence`. It packages a caller-selected checks JSON file and the
-current workflow-run metadata into the exact GitHub Actions-shaped payload accepted by
-`ci_provider_normalize`:
+`.github/actions/github-actions-evidence`. It has two explicit input modes. Manual mode packages a
+caller-selected checks JSON file and the current workflow-run metadata. Discovery mode uses the
+provided `GITHUB_TOKEN` to retrieve one run and its bounded jobs from the GitHub API, then packages
+the same exact GitHub Actions-shaped payload accepted by `ci_provider_normalize`.
+
+Manual mode remains useful when a consumer already has a reviewed, transformed check set:
 
 ```yaml
 jobs:
@@ -91,21 +94,44 @@ jobs:
           path: .aurora/github-actions-provider-payload.json
 ```
 
-The `checks` input may be an array or an object containing `jobs`/`checks`. Each row is limited to
-the normalizer's bounded text and count contract, duplicate names are refused, malformed supplied
-SHA-256 digests are refused, and the output is canonical JSON with a deterministic SHA-256 digest.
-The action exposes `payload-path`, `payload-digest`, `run-id`, and `check-count` outputs for a
-subsequent API/MCP handoff or artifact manifest. It copies only selected run fields and rows; it
-does not copy the event token, fetch jobs or logs, authenticate GitHub, execute a check, verify a
-signature, upload an artifact, or approve a release. Missing per-check digests are intentionally
-left for the Rust normalizer to derive and label. Pin the action to a reviewed commit or release
-tag in consumer repositories rather than floating on `main`.
+The `checks` input may be an array or an object containing `jobs`/`checks`. Discovery mode is
+selected with `discover: true` and requires `github-token`, `api-url`, `repository`, and a run id
+from the input, event, or runner environment; it refuses a simultaneous `checks` input. The API
+response is bounded to 64 jobs and 2 MiB per response, and a larger job list is refused rather than
+truncated. Job names, statuses, conclusions, optional RFC 3339 durations, and job URLs are
+normalized; malformed timestamps, duplicate names, mismatched run ids, invalid endpoints, and
+network/API failures remain errors. The token is used only in the request header and is never
+serialized into the payload or action outputs.
 
-The repository's public Python CI job invokes this local action against
-`tools/fixtures/github-actions-checks.json`, then re-reads the emitted file and independently
-recomputes its canonical digest and output values. That end-to-end check catches broken composite
-action metadata, output-name expressions, runner path handling, and serialization drift in addition
-to the unit-level refusal tests.
+For a `workflow_run` trigger, discovery prefers the upstream run id in the event over the
+downstream workflow's own `GITHUB_RUN_ID`; callers can still override it explicitly with `run-id`.
+
+Both modes expose `payload-path`, `payload-digest`, `run-id`, `check-count`, and `discovery-mode`
+outputs for a subsequent API/MCP handoff or artifact manifest. Output is canonical JSON with a
+deterministic SHA-256 digest. The action does not download logs or artifacts, execute a check,
+verify a signature or attestation, approve a release, or turn an API response into cryptographic
+provider truth. Missing per-check digests are intentionally left for the Rust normalizer to derive
+and label. Pin the action to a reviewed commit or release tag in consumer repositories rather than
+floating on `main`.
+
+Discovery example:
+
+```yaml
+- id: aurora-evidence
+  uses: AURORA-NEURO/aurora-agent/.github/actions/github-actions-evidence@<reviewed-commit>
+  with:
+    discover: 'true'
+    github-token: ${{ github.token }}
+    run-id: ${{ github.run_id }}
+    output: .aurora/github-actions-provider-payload.json
+```
+
+The repository's public Python CI job invokes this local action in both modes. It exercises manual
+mode against `tools/fixtures/github-actions-checks.json`, then uses the runner token to discover
+the current workflow run and jobs. Each emitted file is re-read and checked for canonical fields,
+mode, run identity, non-empty bounded rows, and token absence. This catches broken composite action
+metadata, output-name expressions, runner path handling, API permissions, discovery serialization,
+and manual serialization drift in addition to the unit-level refusal tests.
 
 ## Provider artifacts, logs, and attestations
 

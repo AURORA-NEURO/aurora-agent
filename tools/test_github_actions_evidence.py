@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -14,9 +15,25 @@ from github_actions_evidence import (  # noqa: E402
     ExportError,
     build_payload,
     canonical_bytes,
+    discover_github_actions_payload,
     payload_digest,
     write_payload,
 )
+
+
+class _JsonResponse:
+    def __init__(self, value: object) -> None:
+        self._body = json.dumps(value).encode("utf-8")
+        self.headers = {"Content-Length": str(len(self._body))}
+
+    def __enter__(self) -> "_JsonResponse":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def read(self, limit: int = -1) -> bytes:
+        return self._body[:limit] if limit >= 0 else self._body
 
 
 class GithubActionsEvidenceTests(unittest.TestCase):
@@ -24,8 +41,11 @@ class GithubActionsEvidenceTests(unittest.TestCase):
         action = Path(__file__).parents[1] / ".github" / "actions" / "github-actions-evidence" / "action.yml"
         metadata = action.read_text(encoding="utf-8")
         self.assertIn("using: composite", metadata)
+        self.assertIn("discover:", metadata)
+        self.assertIn("github-token:", metadata)
         self.assertIn("$GITHUB_ACTION_PATH/../../../tools/github_actions_evidence.py", metadata)
         self.assertIn("value: ${{ steps.export.outputs['payload-digest'] }}", metadata)
+        self.assertIn("value: ${{ steps.export.outputs['discovery-mode'] }}", metadata)
         fixture = Path(__file__).parent / "fixtures" / "github-actions-checks.json"
         fixture_payload = json.loads(fixture.read_text(encoding="utf-8"))
         self.assertEqual([row["name"] for row in fixture_payload["jobs"]], ["unit", "lint"])
@@ -60,8 +80,117 @@ class GithubActionsEvidenceTests(unittest.TestCase):
             self.assertEqual(output.read_bytes(), canonical_bytes(payload) + b"\n")
             self.assertIn(f"payload-digest={digest}", github_output.read_text(encoding="utf-8"))
             self.assertIn("check-count=2", github_output.read_text(encoding="utf-8"))
+            self.assertIn("discovery-mode=manual", github_output.read_text(encoding="utf-8"))
             with self.assertRaisesRegex(ExportError, "output path.*control characters"):
                 write_payload(payload, Path(directory) / "bad\noutput.json")
+
+    def test_api_discovery_is_bounded_event_aware_and_token_free(self) -> None:
+        responses = [
+            {
+                "id": 42,
+                "conclusion": "success",
+                "html_url": "https://github.com/example/repo/actions/runs/42",
+            },
+            {
+                "jobs": [
+                    {
+                        "id": 101,
+                        "name": "unit",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "started_at": "2026-08-18T00:00:00Z",
+                        "completed_at": "2026-08-18T00:00:01.500Z",
+                        "html_url": "https://github.com/example/repo/actions/runs/42/job/101",
+                    },
+                    {"id": 102, "name": "lint", "status": "queued", "conclusion": None},
+                ]
+            },
+        ]
+
+        def fake_urlopen(request: object, timeout: int) -> _JsonResponse:
+            self.assertEqual(timeout, 30)
+            assert hasattr(request, "headers")
+            self.assertEqual(request.headers["Authorization"], "Bearer secret-token")
+            self.assertEqual(request.get_header("X-github-api-version"), "2022-11-28")
+            return _JsonResponse(responses.pop(0))
+
+        with patch("github_actions_evidence.urlopen", side_effect=fake_urlopen):
+            discovered = discover_github_actions_payload(
+                token="secret-token",
+                api_url="https://api.github.test",
+                repository="example/repo",
+                run_id="42",
+            )
+
+        self.assertEqual(len(responses), 0)
+        self.assertEqual(discovered["run"]["id"], 42)
+        self.assertEqual(discovered["jobs"][0]["duration_ms"], 1500)
+        self.assertEqual(discovered["jobs"][1]["status"], "queued")
+        self.assertNotIn("secret-token", json.dumps(discovered))
+
+    def test_api_discovery_refuses_partial_job_lists_and_invalid_endpoints(self) -> None:
+        responses = [{"id": "run-1", "conclusion": "success"}, {"jobs": [{"id": i} for i in range(65)]}]
+
+        with patch(
+            "github_actions_evidence.urlopen",
+            side_effect=lambda request, timeout: _JsonResponse(responses.pop(0)),
+        ):
+            with self.assertRaisesRegex(ExportError, "refusing a partial payload"):
+                discover_github_actions_payload(
+                    token="secret-token",
+                    api_url="https://api.github.test",
+                    repository="example/repo",
+                    run_id="run-1",
+                )
+
+        with self.assertRaisesRegex(ExportError, "absolute HTTPS"):
+            discover_github_actions_payload(
+                token="secret-token",
+                api_url="http://api.github.test",
+                repository="example/repo",
+                run_id="run-1",
+            )
+
+    def test_discovery_cli_prefers_workflow_run_target_over_downstream_runner_id(self) -> None:
+        from github_actions_evidence import main
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            event = root / "event.json"
+            event.write_text(
+                json.dumps({"workflow_run": {"id": "upstream-run", "conclusion": "success"}}),
+                encoding="utf-8",
+            )
+            output = root / "payload.json"
+            with patch.dict(
+                os.environ,
+                {"GITHUB_RUN_ID": "downstream-run", "GITHUB_TOKEN": "secret-token"},
+                clear=False,
+            ), patch(
+                "github_actions_evidence.discover_github_actions_payload",
+                return_value={
+                    "run": {"id": "upstream-run", "conclusion": "success"},
+                    "jobs": [{"name": "unit", "conclusion": "success"}],
+                },
+            ) as discover:
+                self.assertEqual(
+                    main(
+                        [
+                            "--discover",
+                            "--event",
+                            str(event),
+                            "--api-url",
+                            "https://api.github.test",
+                            "--repository",
+                            "example/repo",
+                            "--output",
+                            str(output),
+                        ]
+                    ),
+                    0,
+                )
+            self.assertEqual(discover.call_args.kwargs["run_id"], "upstream-run")
+            self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["run"]["id"], "upstream-run")
 
     def test_missing_run_duplicate_and_oversized_inputs_fail_closed(self) -> None:
         with self.assertRaisesRegex(ExportError, "run.id"):
