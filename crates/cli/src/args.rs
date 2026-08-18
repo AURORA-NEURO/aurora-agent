@@ -167,6 +167,11 @@ Research and developer infrastructure. Not a medical device: it does not diagnos
 treatment, or triage care.
 ";
 
+// The parser intentionally keeps the invocation value owned and pattern-matchable so the
+// command contract remains straightforward. The rich cross-domain lineage command adds enough
+// typed filters to cross Clippy's representation-size heuristic; boxing every parser fixture
+// would obscure that stable contract without changing runtime behavior.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, PartialEq, Eq)]
 pub enum Parsed {
     Help,
