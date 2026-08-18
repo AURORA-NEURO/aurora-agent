@@ -103,6 +103,10 @@ COMMANDS
                     [--policy <path>] [--dry-run]
                     Instantiate a group-scoped mission and attach authoritative no-dispatch
                     preflight. The steps file is a JSON array or an object containing `steps`.
+  workflow portfolio --requests <path> [--policy <path>] [--allow-partial]
+                    [--require-complete-catalogue]
+                    Plan multiple explicit group workflows from a JSON array (or an object with
+                    `requests`), retaining independent no-dispatch preflight outcomes.
   workflow reconcile --instantiation <path> [--mission <path>] [--evidence-bundle <path>]
                     Reconcile a retained agent_mission report or evidence bundle against the
                     instantiated workflow. Exit 1 when completion evidence is not ready.
@@ -146,19 +150,52 @@ pub struct Invocation {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Command {
-    WorldValidate { world: PathBuf },
-    WorldShow { world: PathBuf },
-    ContextExplain { world: PathBuf, query: PathBuf },
+    WorldValidate {
+        world: PathBuf,
+    },
+    WorldShow {
+        world: PathBuf,
+    },
+    ContextExplain {
+        world: PathBuf,
+        query: PathBuf,
+    },
     ContextCompile(CompileOptions),
-    ContextVerify { certificate: PathBuf },
-    ContextCompare { world: PathBuf, query: PathBuf, markdown: bool },
+    ContextVerify {
+        certificate: PathBuf,
+    },
+    ContextCompare {
+        world: PathBuf,
+        query: PathBuf,
+        markdown: bool,
+    },
     WorldGenerate(GenerateOptions),
-    WorldIndex { world: PathBuf, store: PathBuf, dry_run: bool },
-    PrismFork { world: PathBuf, query: PathBuf, bundle_out: Option<PathBuf>, minimize: bool },
-    PrismMinimize { world: PathBuf },
-    MutateFamily { world: PathBuf, out_dir: Option<PathBuf> },
-    EvidenceBundleVerify { bundle: PathBuf },
-    EvidenceBundleImport { bundle: PathBuf, store: PathBuf, dry_run: bool },
+    WorldIndex {
+        world: PathBuf,
+        store: PathBuf,
+        dry_run: bool,
+    },
+    PrismFork {
+        world: PathBuf,
+        query: PathBuf,
+        bundle_out: Option<PathBuf>,
+        minimize: bool,
+    },
+    PrismMinimize {
+        world: PathBuf,
+    },
+    MutateFamily {
+        world: PathBuf,
+        out_dir: Option<PathBuf>,
+    },
+    EvidenceBundleVerify {
+        bundle: PathBuf,
+    },
+    EvidenceBundleImport {
+        bundle: PathBuf,
+        store: PathBuf,
+        dry_run: bool,
+    },
     EvidenceBundleQuery {
         store: PathBuf,
         mission_id: Option<String>,
@@ -182,6 +219,12 @@ pub enum Command {
         steps: PathBuf,
         policy: Option<PathBuf>,
         dry_run: bool,
+    },
+    WorkflowPortfolio {
+        requests: PathBuf,
+        policy: Option<PathBuf>,
+        allow_partial: bool,
+        require_complete_catalogue: bool,
     },
     WorkflowReconcile {
         instantiation: PathBuf,
@@ -280,9 +323,9 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
             },
             distractors: match options.take_optional("--distractors") {
                 None => 750,
-                Some(text) => text.parse().map_err(|_| {
-                    usage(format!("--distractors must be a number, got {text:?}"))
-                })?,
+                Some(text) => text
+                    .parse()
+                    .map_err(|_| usage(format!("--distractors must be a number, got {text:?}")))?,
             },
             world_out: options.take_optional_path("--world-out"),
             query_out: options.take_optional_path("--query-out"),
@@ -378,6 +421,12 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
             steps: options.take_path("--steps")?,
             policy: options.take_optional_path("--policy"),
             dry_run: options.take_switch("--dry-run"),
+        },
+        ("workflow", "portfolio") => Command::WorkflowPortfolio {
+            requests: options.take_path("--requests")?,
+            policy: options.take_optional_path("--policy"),
+            allow_partial: options.take_switch("--allow-partial"),
+            require_complete_catalogue: options.take_switch("--require-complete-catalogue"),
         },
         ("workflow", "reconcile") => Command::WorkflowReconcile {
             instantiation: options.take_path("--instantiation")?,
@@ -615,6 +664,37 @@ mod tests {
                     goal: "discover capabilities".into(),
                     tools: Some(PathBuf::from("tools.json")),
                     arguments: Some(PathBuf::from("arguments.json")),
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn workflow_portfolio_parses_bounded_scope_controls() {
+        let parsed = parse(
+            [
+                "workflow",
+                "portfolio",
+                "--requests",
+                "portfolio.json",
+                "--policy",
+                "policy.json",
+                "--allow-partial",
+                "--require-complete-catalogue",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse workflow portfolio");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::WorkflowPortfolio {
+                    requests: PathBuf::from("portfolio.json"),
+                    policy: Some(PathBuf::from("policy.json")),
+                    allow_partial: true,
+                    require_complete_catalogue: true,
                 },
             })
         );

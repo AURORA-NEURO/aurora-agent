@@ -323,7 +323,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 223);
+    assert_eq!(tools.len(), 224);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -3026,6 +3026,68 @@ fn domain_workflow_bindings_cover_every_available_capability_group() {
 }
 
 #[test]
+fn domain_workflow_portfolio_preflights_every_capability_group_without_dispatch() {
+    let mut server = server();
+    let catalogue = call(&mut server, "domain_workflow_catalogue", json!({}));
+    let requests = catalogue["workflows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|workflow| {
+            let workflow_id = workflow["workflow_id"].as_str().unwrap();
+            let tool = workflow["tools"]["available"]
+                .as_array()
+                .and_then(|tools| tools.first())
+                .and_then(Value::as_str)
+                .unwrap_or_else(|| panic!("workflow {workflow_id} has no available tool"));
+            json!({
+                "workflow_id": workflow_id,
+                "mission_id": format!("portfolio-{workflow_id}"),
+                "goal": format!("prepare a bounded portfolio plan for {workflow_id}"),
+                "steps": [{"id": "portfolio-probe", "tool": tool, "arguments": {}}],
+                "policy": {"execute": true}
+            })
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(requests.len(), 29);
+
+    let portfolio = call(
+        &mut server,
+        "domain_workflow_portfolio",
+        json!({
+            "requests": requests,
+            "policy": {"allow_partial": true, "require_complete_catalogue": true}
+        }),
+    );
+    assert_eq!(portfolio["workflow"], "domain_workflow_portfolio");
+    assert_eq!(portfolio["valid"], false);
+    assert_eq!(portfolio["portfolio_ready"], false);
+    assert_eq!(portfolio["portfolio_status"], "partial");
+    assert_eq!(portfolio["coverage"]["complete_catalogue"], true);
+    assert_eq!(portfolio["summary"]["instantiated_count"], 29);
+    assert_eq!(portfolio["summary"]["blocked_count"], 0);
+    assert!(
+        portfolio["summary"]["preflight_blocked_count"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert_eq!(portfolio["summary"]["preflight_status"], "blocked");
+    assert_eq!(portfolio["items"].as_array().unwrap().len(), 29);
+    for item in portfolio["items"].as_array().unwrap() {
+        assert!(matches!(
+            item["status"].as_str(),
+            Some("instantiated") | Some("blocked_by_mission_preflight")
+        ));
+        assert!(item["mission_preflight"]["matched"].is_boolean());
+        assert_eq!(item["mission_preflight"]["dispatch"], "not_started");
+        assert_eq!(item["instantiation"]["execution"], "not_started");
+    }
+    assert_eq!(portfolio["dispatch"], "not_started");
+    assert_eq!(portfolio["execution"], "not_started");
+}
+
+#[test]
 fn domain_workflow_reconciliation_preserves_outcomes_for_every_capability_group() {
     let capabilities = bioprism_mcp::workspace_capabilities();
     let definitions = Value::Array(tool_definitions());
@@ -3212,6 +3274,27 @@ fn domain_workflow_instantiation_is_scoped_and_preflighted_without_dispatch() {
     assert_eq!(verified["mission_preflight"]["matched"], json!(true));
     assert_eq!(verified["dispatch"], json!("not_started"));
     assert_eq!(verified["execution"], json!("not_started"));
+
+    let portfolio = call(
+        &mut server,
+        "domain_workflow_portfolio",
+        json!({
+            "requests": [{
+                "workflow_id": "documentation_and_knowledge",
+                "mission_id": "workflow-portfolio-single",
+                "goal": "prepare the repository capability surface",
+                "steps": [{"id": "catalog", "tool": "workspace_capabilities", "arguments": {}}]
+            }]
+        }),
+    );
+    assert_eq!(portfolio["workflow"], json!("domain_workflow_portfolio"));
+    assert_eq!(portfolio["valid"], json!(true));
+    assert_eq!(portfolio["summary"]["preflight_status"], json!("matched"));
+    assert_eq!(
+        portfolio["items"][0]["mission_preflight"]["matched"],
+        json!(true)
+    );
+    assert_eq!(portfolio["dispatch"], json!("not_started"));
 
     let shape_only = call(
         &mut server,
@@ -7952,12 +8035,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(223));
-    assert_eq!(result["advertised_tool_count"], json!(223));
+    assert_eq!(result["unique_catalog_tools"], json!(224));
+    assert_eq!(result["advertised_tool_count"], json!(224));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(223));
-    assert_eq!(result["schema_quality"]["valid"], json!(223));
+    assert_eq!(result["schema_quality"]["checked"], json!(224));
+    assert_eq!(result["schema_quality"]["valid"], json!(224));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

@@ -86,10 +86,19 @@ fn help_publishes_a_retry_decision_against_every_failure_code_and_none_against_t
     let table: Vec<&str> = text
         .lines()
         .filter(|line| {
-            line.starts_with("  ") && line.trim_start().chars().next().is_some_and(|c| c.is_ascii_digit())
+            line.starts_with("  ")
+                && line
+                    .trim_start()
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_digit())
         })
         .collect();
-    assert_eq!(table.len(), 10, "the help table lost or gained a row: {table:?}");
+    assert_eq!(
+        table.len(),
+        10,
+        "the help table lost or gained a row: {table:?}"
+    );
 
     for line in &table[..2] {
         for decision in ["terminal", "retryable_after_change", "retryable_as_is"] {
@@ -111,14 +120,28 @@ fn help_publishes_a_retry_decision_against_every_failure_code_and_none_against_t
 
 #[test]
 fn json_mode_emits_exactly_one_document_and_no_progress_noise() {
-    let output = run(&["--json", "context", "explain", "--world", &world(), "--query", &query()]);
+    let output = run(&[
+        "--json",
+        "context",
+        "explain",
+        "--world",
+        &world(),
+        "--query",
+        &query(),
+    ]);
     assert_eq!(code(&output), 0);
     let text = stdout(&output);
     let parsed: Value = serde_json::from_str(&text)
         .unwrap_or_else(|e| panic!("stdout was not a single JSON document: {e}\n{text}"));
     assert_eq!(parsed["ok"], Value::Bool(true));
-    assert_eq!(parsed["backend"], Value::String("backward_factor_slice_reference".into()));
-    assert!(output.stderr.is_empty(), "json mode must not write to stderr on success");
+    assert_eq!(
+        parsed["backend"],
+        Value::String("backward_factor_slice_reference".into())
+    );
+    assert!(
+        output.stderr.is_empty(),
+        "json mode must not write to stderr on success"
+    );
 }
 
 #[test]
@@ -126,10 +149,15 @@ fn dry_run_writes_nothing() {
     let directory = scratch("dry-run");
     let certificate = directory.join("cert.json");
     let output = run(&[
-        "--json", "context", "compile",
-        "--world", &world(),
-        "--query", &query(),
-        "--certificate-out", &certificate.display().to_string(),
+        "--json",
+        "context",
+        "compile",
+        "--world",
+        &world(),
+        "--query",
+        &query(),
+        "--certificate-out",
+        &certificate.display().to_string(),
         "--dry-run",
     ]);
     assert_eq!(code(&output), 0);
@@ -152,13 +180,23 @@ fn compiled_artifacts_are_byte_identical_to_the_reference() {
     let section = directory.join("section.json");
 
     let output = run(&[
-        "context", "compile",
-        "--world", &world(),
-        "--query", &query(),
-        "--certificate-out", &certificate.display().to_string(),
-        "--section-out", &section.display().to_string(),
+        "context",
+        "compile",
+        "--world",
+        &world(),
+        "--query",
+        &query(),
+        "--certificate-out",
+        &certificate.display().to_string(),
+        "--section-out",
+        &section.display().to_string(),
     ]);
-    assert_eq!(code(&output), 0, "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        code(&output),
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     assert_eq!(
         canonical(&certificate),
@@ -177,13 +215,22 @@ fn verify_accepts_a_sound_certificate_and_rejects_a_tampered_one() {
     let directory = scratch("verify");
     let certificate = directory.join("cert.json");
     run(&[
-        "context", "compile",
-        "--world", &world(),
-        "--query", &query(),
-        "--certificate-out", &certificate.display().to_string(),
+        "context",
+        "compile",
+        "--world",
+        &world(),
+        "--query",
+        &query(),
+        "--certificate-out",
+        &certificate.display().to_string(),
     ]);
 
-    let good = run(&["context", "verify", "--certificate", &certificate.display().to_string()]);
+    let good = run(&[
+        "context",
+        "verify",
+        "--certificate",
+        &certificate.display().to_string(),
+    ]);
     assert_eq!(code(&good), 0);
 
     let mut document: Value =
@@ -195,22 +242,49 @@ fn verify_accepts_a_sound_certificate_and_rejects_a_tampered_one() {
     let tampered = directory.join("tampered.json");
     std::fs::write(&tampered, serde_json::to_string_pretty(&document).unwrap()).unwrap();
 
-    let bad = run(&["--json", "context", "verify", "--certificate", &tampered.display().to_string()]);
-    assert_eq!(code(&bad), 1, "a tampered certificate must fail the assertion");
+    let bad = run(&[
+        "--json",
+        "context",
+        "verify",
+        "--certificate",
+        &tampered.display().to_string(),
+    ]);
+    assert_eq!(
+        code(&bad),
+        1,
+        "a tampered certificate must fail the assertion"
+    );
     let parsed: Value = serde_json::from_str(&stdout(&bad)).unwrap();
     assert_eq!(parsed["ok"], Value::Bool(false));
-    assert!(parsed["verification"].as_str().unwrap().contains("digest mismatch"));
+    assert!(parsed["verification"]
+        .as_str()
+        .unwrap()
+        .contains("digest mismatch"));
 }
 
 #[test]
 fn fail_on_invalid_gates_ci_without_changing_the_compile() {
-    let permissive = run(&["context", "compile", "--world", &world(), "--query", &query()]);
-    assert_eq!(code(&permissive), 0, "an invalid split is a finding, not a crash");
+    let permissive = run(&[
+        "context",
+        "compile",
+        "--world",
+        &world(),
+        "--query",
+        &query(),
+    ]);
+    assert_eq!(
+        code(&permissive),
+        0,
+        "an invalid split is a finding, not a crash"
+    );
 
     let gated = run(&[
-        "context", "compile",
-        "--world", &world(),
-        "--query", &query(),
+        "context",
+        "compile",
+        "--world",
+        &world(),
+        "--query",
+        &query(),
         "--fail-on-invalid",
     ]);
     assert_eq!(code(&gated), 1);
@@ -236,7 +310,10 @@ fn world_show_reports_the_distractor_population() {
     let parsed: Value = serde_json::from_str(&stdout(&output)).unwrap();
     assert_eq!(parsed["fact_tags"]["exploratory"], Value::from(750));
     assert_eq!(parsed["fact_tags"]["protected"], Value::from(9));
-    assert_eq!(parsed["factor_kinds"]["exploratory_summary"], Value::from(750));
+    assert_eq!(
+        parsed["factor_kinds"]["exploratory_summary"],
+        Value::from(750)
+    );
 }
 
 #[test]
@@ -245,8 +322,26 @@ fn bad_invocations_exit_two() {
         vec!["context", "compile", "--world", &world()],
         vec!["nonsense", "thing"],
         vec!["world"],
-        vec!["context", "compile", "--world", &world(), "--query", &query(), "--profile", "banana"],
-        vec!["context", "explain", "--world", &world(), "--query", &query(), "--bogus", "x"],
+        vec![
+            "context",
+            "compile",
+            "--world",
+            &world(),
+            "--query",
+            &query(),
+            "--profile",
+            "banana",
+        ],
+        vec![
+            "context",
+            "explain",
+            "--world",
+            &world(),
+            "--query",
+            &query(),
+            "--bogus",
+            "x",
+        ],
     ] {
         let output = run(&arguments);
         assert_eq!(code(&output), 2, "expected usage error for {arguments:?}");
@@ -259,11 +354,22 @@ fn a_malformed_world_exits_three_and_a_missing_file_exits_five() {
 
     let broken = directory.join("broken.json");
     std::fs::write(&broken, r#"{"schema_version":"fiber-world/0.9"}"#).unwrap();
-    let output = run(&["world", "validate", "--world", &broken.display().to_string()]);
+    let output = run(&[
+        "world",
+        "validate",
+        "--world",
+        &broken.display().to_string(),
+    ]);
     assert_eq!(code(&output), 3, "schema rejection is invalid_input");
 
     let missing = directory.join("absent.json");
-    let output = run(&["--json", "world", "validate", "--world", &missing.display().to_string()]);
+    let output = run(&[
+        "--json",
+        "world",
+        "validate",
+        "--world",
+        &missing.display().to_string(),
+    ]);
     assert_eq!(code(&output), 5, "an unreadable file is an io error");
     let parsed: Value = serde_json::from_str(&stdout(&output)).unwrap();
     assert_eq!(parsed["error"]["retryable"], Value::Bool(true));
@@ -274,7 +380,12 @@ fn a_malformed_world_exits_three_and_a_missing_file_exits_five() {
 
     let not_json = directory.join("not.json");
     std::fs::write(&not_json, "this is not json").unwrap();
-    let output = run(&["world", "validate", "--world", &not_json.display().to_string()]);
+    let output = run(&[
+        "world",
+        "validate",
+        "--world",
+        &not_json.display().to_string(),
+    ]);
     assert_eq!(code(&output), 3);
 }
 
@@ -283,10 +394,29 @@ fn indexing_a_second_world_into_an_occupied_store_exits_six_and_says_it_is_termi
     let directory = scratch("store-identity");
     let store = directory.join("index");
 
-    let first = run(&["world", "index", "--world", &world(), "--store", &store.display().to_string()]);
-    assert_eq!(code(&first), 0, "{}", String::from_utf8_lossy(&first.stderr));
+    let first = run(&[
+        "world",
+        "index",
+        "--world",
+        &world(),
+        "--store",
+        &store.display().to_string(),
+    ]);
+    assert_eq!(
+        code(&first),
+        0,
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
 
-    let again = run(&["world", "index", "--world", &world(), "--store", &store.display().to_string()]);
+    let again = run(&[
+        "world",
+        "index",
+        "--world",
+        &world(),
+        "--store",
+        &store.display().to_string(),
+    ]);
     assert_eq!(
         code(&again),
         0,
@@ -300,11 +430,19 @@ fn indexing_a_second_world_into_an_occupied_store_exits_six_and_says_it_is_termi
     )
     .unwrap();
     let rebind = run(&[
-        "--json", "world", "index",
-        "--world", &other.display().to_string(),
-        "--store", &store.display().to_string(),
+        "--json",
+        "world",
+        "index",
+        "--world",
+        &other.display().to_string(),
+        "--store",
+        &store.display().to_string(),
     ]);
-    assert_eq!(code(&rebind), 6, "rebinding a store to a second world is a conflict");
+    assert_eq!(
+        code(&rebind),
+        6,
+        "rebinding a store to a second world is a conflict"
+    );
     let parsed: Value = serde_json::from_str(&stdout(&rebind)).unwrap();
     assert_eq!(parsed["error"]["kind"], Value::String("conflict".into()));
     assert_eq!(parsed["error"]["retryable"], Value::Bool(false));
@@ -318,21 +456,45 @@ fn indexing_a_second_world_into_an_occupied_store_exits_six_and_says_it_is_termi
 fn a_store_written_under_another_schema_exits_nine_and_says_the_identical_command_may_be_resent() {
     let directory = scratch("stale-store");
     let store = directory.join("index");
-    let built = run(&["world", "index", "--world", &world(), "--store", &store.display().to_string()]);
-    assert_eq!(code(&built), 0, "{}", String::from_utf8_lossy(&built.stderr));
+    let built = run(&[
+        "world",
+        "index",
+        "--world",
+        &world(),
+        "--store",
+        &store.display().to_string(),
+    ]);
+    assert_eq!(
+        code(&built),
+        0,
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
 
     let manifest_path = store.join("manifest.json");
     let mut manifest: Value =
         serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
     manifest["schema_version"] = Value::String("bioprism-store/0.0".into());
-    std::fs::write(&manifest_path, serde_json::to_string_pretty(&manifest).unwrap()).unwrap();
+    std::fs::write(
+        &manifest_path,
+        serde_json::to_string_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
 
     let output = run(&[
-        "--json", "context", "explain",
-        "--world", &store.display().to_string(),
-        "--query", &query(),
+        "--json",
+        "context",
+        "explain",
+        "--world",
+        &store.display().to_string(),
+        "--query",
+        &query(),
     ]);
-    assert_eq!(code(&output), 9, "an index built under another schema is stale, not malformed");
+    assert_eq!(
+        code(&output),
+        9,
+        "an index built under another schema is stale, not malformed"
+    );
     let parsed: Value = serde_json::from_str(&stdout(&output)).unwrap();
     assert_eq!(parsed["error"]["kind"], Value::String("stale".into()));
     assert_eq!(
@@ -347,8 +509,22 @@ fn every_human_mode_command_prints_a_reproducible_follow_up() {
     for arguments in [
         vec!["world", "show", "--world", &world()],
         vec!["world", "validate", "--world", &world()],
-        vec!["context", "explain", "--world", &world(), "--query", &query()],
-        vec!["context", "compile", "--world", &world(), "--query", &query()],
+        vec![
+            "context",
+            "explain",
+            "--world",
+            &world(),
+            "--query",
+            &query(),
+        ],
+        vec![
+            "context",
+            "compile",
+            "--world",
+            &world(),
+            "--query",
+            &query(),
+        ],
     ] {
         let output = run(&arguments);
         let text = stdout(&output);
@@ -360,12 +536,55 @@ fn every_human_mode_command_prints_a_reproducible_follow_up() {
 }
 
 #[test]
+fn workflow_portfolio_json_mode_preserves_no_dispatch_posture() {
+    let directory = scratch("workflow-portfolio");
+    let requests = directory.join("requests.json");
+    std::fs::write(
+        &requests,
+        r#"{
+          "requests": [{
+            "workflow_id": "documentation_and_knowledge",
+            "mission_id": "cli-portfolio",
+            "goal": "exercise the bounded portfolio handoff",
+            "steps": [{"id": "capability", "tool": "workspace_capabilities", "arguments": {}}]
+          }]
+        }"#,
+    )
+    .expect("write portfolio request");
+    let output = run(&[
+        "--json",
+        "workflow",
+        "portfolio",
+        "--requests",
+        &requests.display().to_string(),
+    ]);
+    assert_eq!(
+        code(&output),
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_str(&stdout(&output)).expect("portfolio JSON");
+    assert_eq!(report["workflow"], "domain_workflow_portfolio");
+    assert_eq!(report["portfolio_ready"], true);
+    assert_eq!(report["preflight"]["status"], "matched");
+    assert_eq!(report["dispatch"], "not_started");
+    assert_eq!(report["execution"], "not_started");
+    assert_eq!(report["items"].as_array().map(Vec::len), Some(1));
+}
+
+#[test]
 fn the_extended_profile_is_selectable_and_reports_sufficiency() {
     let output = run(&[
-        "--json", "context", "compile",
-        "--world", &world(),
-        "--query", &query(),
-        "--profile", "extended",
+        "--json",
+        "context",
+        "compile",
+        "--world",
+        &world(),
+        "--query",
+        &query(),
+        "--profile",
+        "extended",
     ]);
     assert_eq!(code(&output), 0);
     let parsed: Value = serde_json::from_str(&stdout(&output)).unwrap();

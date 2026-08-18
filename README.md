@@ -905,6 +905,17 @@ The instantiated mission also carries a bounded `workflow_binding` containing th
 catalogue, domain-contract, and evidence-plan digests plus the contract snapshots needed to
 reconstruct that exact scope after dispatch. The binding is validated as structure and provenance;
 it is not an authorization token, readiness claim, or domain conclusion.
+`domain_workflow_portfolio` composes up to 64 explicit workflow instantiations for multi-domain
+planning. It runs each group independently, adds authoritative no-dispatch preflight, retains
+per-item refusal diagnostics, and makes complete-catalogue versus partial scope explicit. A
+portfolio can be inspected as a whole without hiding the domain-specific arguments that still
+need caller completion; `portfolio_ready` never grants execution or domain validity.
+The CLI exposes the same boundary as `bioprism workflow portfolio --requests <path>`, accepting
+either a JSON request array or an object with `requests` and optional `policy`; `--allow-partial`
+and `--require-complete-catalogue` make the two most important scope decisions visible in shell
+automation. A blocked portfolio returns its full per-item diagnostics in `--json` mode and uses
+the assertion-failed verdict when it is not ready, while preserving `dispatch` and `execution` as
+`not_started`.
 `domain_workflow_verify` is the retained-handoff gate before re-review: it validates the current
 catalogue and contract identities, checks the workflow binding and mission projection, reruns
 authoritative mission preflight, and optionally replays the original bounded instantiation request.

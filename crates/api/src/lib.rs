@@ -16,7 +16,7 @@
 //! The implementation addresses the executable portion of the developer-platform REST/event
 //! contract (`11.08` and `11.09`); TypeScript and gRPC clients remain separate artifacts.
 
-#![recursion_limit = "256"]
+#![recursion_limit = "512"]
 
 pub mod events;
 pub mod http;

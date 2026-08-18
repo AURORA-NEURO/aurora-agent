@@ -4562,6 +4562,7 @@ test("client exposes scoped domain workflow catalogue and instantiation over RES
     steps: [{ id: "catalog", tool: "workspace_capabilities", arguments: {} }],
   };
   const verifyArgs = { instantiation: instantiated, replay_request: args };
+  const portfolioArgs = { requests: [args], policy: { require_complete_catalogue: false } };
   const verified = {
     ok: true,
     schema: "bioprism-devplat-domain-workflow-verify/0.1",
@@ -4579,6 +4580,24 @@ test("client exposes scoped domain workflow catalogue and instantiation over RES
     mission_preflight: { requested: true, status: "matched", matched: true, ok: true },
     mismatches: [],
     preflight_report: { workflow: "agent_mission", dispatch: "not_started" },
+    dispatch: "not_started",
+    execution: "not_started",
+    guarantees: [],
+    limitations: [],
+  };
+  const portfolio = {
+    ok: true,
+    schema: "bioprism-devplat-domain-workflow-portfolio/0.1",
+    workflow: "domain_workflow_portfolio",
+    portfolio_digest: "f".repeat(64),
+    valid: true,
+    portfolio_ready: true,
+    portfolio_status: "ready_for_authoritative_preflight",
+    policy: { allow_partial: false, require_complete_catalogue: false },
+    coverage: { catalogue_group_count: 29, requested_item_count: 1, complete_catalogue: false },
+    summary: { instantiated_count: 1, blocked_count: 0, preflight_blocked_count: 0, preflight_status: "matched" },
+    items: [{ workflow_id: "documentation_and_knowledge", status: "instantiated", mission_preflight: { matched: true } }],
+    preflight: { required: true, status: "matched", matched: true },
     dispatch: "not_started",
     execution: "not_started",
     guarantees: [],
@@ -4622,6 +4641,10 @@ test("client exposes scoped domain workflow catalogue and instantiation over RES
         assert.deepEqual(JSON.parse(init.body), scaffoldArgs);
         return jsonResponse(scaffolded);
       }
+      if (url.pathname === "/v1/domain-workflows/portfolio") {
+        assert.deepEqual(JSON.parse(init.body), portfolioArgs);
+        return jsonResponse(portfolio);
+      }
       if (url.pathname === "/v1/domain-workflows/verify") {
         assert.deepEqual(JSON.parse(init.body), verifyArgs);
         return jsonResponse(verified);
@@ -4634,6 +4657,7 @@ test("client exposes scoped domain workflow catalogue and instantiation over RES
   assert.equal((await rest.domainWorkflowCatalogueQuery()).workflow_count, 29);
   assert.equal((await rest.domainWorkflowScaffoldQuery(scaffoldArgs)).readiness_claimed, false);
   assert.equal((await rest.domainWorkflowInstantiateQuery(args)).preflight_report.workflow, "agent_mission");
+  assert.equal((await rest.domainWorkflowPortfolioQuery(portfolioArgs)).portfolio_ready, true);
   assert.equal((await rest.domainWorkflowVerifyQuery(verifyArgs)).verification_status, "verified");
 
   const reconciliationArgs = {
@@ -4684,6 +4708,10 @@ test("client exposes scoped domain workflow catalogue and instantiation over RES
         assert.deepEqual(JSON.parse(init.body), scaffoldArgs);
         return jsonResponse({ ok: true, tool: name, mcp: { result: { structuredContent: scaffolded } } });
       }
+      if (name === "domain_workflow_portfolio") {
+        assert.deepEqual(JSON.parse(init.body), portfolioArgs);
+        return jsonResponse({ ok: true, tool: name, mcp: { result: { structuredContent: portfolio } } });
+      }
       if (name === "domain_workflow_verify") {
         assert.deepEqual(JSON.parse(init.body), verifyArgs);
         return jsonResponse({ ok: true, tool: name, mcp: { result: { structuredContent: verified } } });
@@ -4695,6 +4723,7 @@ test("client exposes scoped domain workflow catalogue and instantiation over RES
   assert.equal((await mcp.domainWorkflowCatalogue()).mcp.result.structuredContent.workflow_count, 29);
   assert.equal((await mcp.domainWorkflowScaffold(scaffoldArgs)).mcp.result.structuredContent.readiness_claimed, false);
   assert.equal((await mcp.domainWorkflowInstantiate(args)).mcp.result.structuredContent.execution, "not_started");
+  assert.equal((await mcp.domainWorkflowPortfolio(portfolioArgs)).mcp.result.structuredContent.portfolio_status, "ready_for_authoritative_preflight");
   assert.equal((await mcp.domainWorkflowVerify(verifyArgs)).mcp.result.structuredContent.verification_status, "verified");
   const mcpReconcile = new ApiClient({
     baseUrl: "http://127.0.0.1:18788",

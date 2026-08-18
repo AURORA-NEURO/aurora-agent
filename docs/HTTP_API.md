@@ -35,6 +35,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `GET /v1/domain-workflows` | Build one deterministic, digest-bound workflow template for every capability group |
 | `POST /v1/domain-workflows/scaffold` | Select available stage tools, build an execution-disabled workflow, and run bounded preflight |
 | `POST /v1/domain-workflows/instantiate` | Instantiate a group-scoped mission and attach authoritative no-dispatch preflight |
+| `POST /v1/domain-workflows/portfolio` | Plan multiple explicit capability-group workflows with independent preflight and complete/partial coverage posture |
 | `POST /v1/domain-workflows/verify` | Verify a retained instantiation against current catalogue, contract, and mission-preflight state; optionally replay the original request |
 | `POST /v1/domain-workflows/reconcile` | Reconcile retained mission results or evidence bundles against an instantiated workflow contract |
 | `POST /v1/domain-reports` | Validate and index one explicit report projection for a declared capability group and source tool |
@@ -152,6 +153,17 @@ The returned `mission.workflow_binding` is a bounded digest-bound handoff contai
 workflow/catalogue/contract identities, the full domain contract, and the exact evidence plan with
 its own digest. It is structural provenance carried into `agent_mission`; it is never a permission
 or readiness credential.
+
+`POST /v1/domain-workflows/portfolio` composes a bounded array of explicit instantiation requests
+for callers preparing several capability groups at once. Each request is scoped and normalized
+independently, then receives authoritative no-dispatch mission preflight. A request that fails
+scope, availability, mission, or schema checks remains in `items` with its own digest and issue
+codes; it cannot erase successful sibling plans. `require_complete_catalogue=true` requires one
+successful structural request for every live workflow group, while `allow_partial=true` makes
+blocked rows a deliberate `partial` portfolio rather than a transport refusal. `valid` and
+`portfolio_ready` are false whenever any item is blocked or required coverage is missing. The
+portfolio digest covers the full bounded projection, and both `dispatch` and `execution` remain
+`not_started`; the route never executes, retries, resumes, or grants readiness.
 
 `POST /v1/domain-workflows/verify` checks a retained `domain_workflow_instantiate` response before
 handoff or re-review. It validates the workflow, catalogue, domain-contract, mission, and binding

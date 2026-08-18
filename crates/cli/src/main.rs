@@ -9,17 +9,17 @@
 //! * every failure maps to a documented exit code (see [`exit::ExitCode`]).
 
 mod args;
-mod explain;
 mod exit;
+mod explain;
 mod io;
 
 use args::{Command, CompileOptions, Family, GenerateOptions, Invocation, Parsed, Profile};
 use bioprism_devplat::{
-    DomainWorkflowReconciliationRegistry, EvidenceBundleRegistry, verify_mission_evidence_bundle,
+    build_domain_workflow_catalogue, build_domain_workflow_portfolio, instantiate_domain_workflow,
+    reconcile_domain_workflow, scaffold_domain_workflow,
 };
 use bioprism_devplat::{
-    build_domain_workflow_catalogue, instantiate_domain_workflow, reconcile_domain_workflow,
-    scaffold_domain_workflow,
+    verify_mission_evidence_bundle, DomainWorkflowReconciliationRegistry, EvidenceBundleRegistry,
 };
 use bioprism_fiber::compile;
 use bioprism_mcp::{tool_definitions, workspace_capabilities, Server};
@@ -87,7 +87,12 @@ fn main_inner() {
             } else {
                 match &error.subject {
                     Some(subject) => {
-                        eprintln!("error [{}]: {}: {}", error.code.slug(), subject, error.message)
+                        eprintln!(
+                            "error [{}]: {}: {}",
+                            error.code.slug(),
+                            subject,
+                            error.message
+                        )
                     }
                     None => eprintln!("error [{}]: {}", error.code.slug(), error.message),
                 }
@@ -125,22 +130,33 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
         Command::WorldValidate { world } => world_validate(world),
         Command::WorldShow { world } => world_show(world),
         Command::WorldGenerate(options) => world_generate(options),
-        Command::WorldIndex { world, store, dry_run } => world_index(world, store, *dry_run),
-        Command::PrismFork { world, query, bundle_out, minimize } => {
-            prism_fork(world, query, bundle_out.as_deref(), *minimize)
-        }
+        Command::WorldIndex {
+            world,
+            store,
+            dry_run,
+        } => world_index(world, store, *dry_run),
+        Command::PrismFork {
+            world,
+            query,
+            bundle_out,
+            minimize,
+        } => prism_fork(world, query, bundle_out.as_deref(), *minimize),
         Command::PrismMinimize { world } => prism_minimize(world),
         Command::MutateFamily { world, out_dir } => mutate_family(world, out_dir.as_deref()),
         Command::ContextExplain { world, query } => context_explain(world, query),
         Command::ContextCompile(options) => context_compile(options),
         Command::ContextVerify { certificate } => context_verify(certificate),
-        Command::ContextCompare { world, query, markdown } => {
-            context_compare(world, query, *markdown)
-        }
+        Command::ContextCompare {
+            world,
+            query,
+            markdown,
+        } => context_compare(world, query, *markdown),
         Command::EvidenceBundleVerify { bundle } => evidence_bundle_verify(bundle),
-        Command::EvidenceBundleImport { bundle, store, dry_run } => {
-            evidence_bundle_import(bundle, store, *dry_run)
-        }
+        Command::EvidenceBundleImport {
+            bundle,
+            store,
+            dry_run,
+        } => evidence_bundle_import(bundle, store, *dry_run),
         Command::EvidenceBundleQuery {
             store,
             mission_id,
@@ -177,12 +193,34 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
             steps,
             policy,
             dry_run,
-        } => workflow_instantiate(workflow, mission_id, goal, steps, policy.as_deref(), *dry_run),
+        } => workflow_instantiate(
+            workflow,
+            mission_id,
+            goal,
+            steps,
+            policy.as_deref(),
+            *dry_run,
+        ),
+        Command::WorkflowPortfolio {
+            requests,
+            policy,
+            allow_partial,
+            require_complete_catalogue,
+        } => workflow_portfolio(
+            requests,
+            policy.as_deref(),
+            *allow_partial,
+            *require_complete_catalogue,
+        ),
         Command::WorkflowReconcile {
             instantiation,
             mission,
             evidence_bundle,
-        } => workflow_reconcile(instantiation, mission.as_deref(), evidence_bundle.as_deref()),
+        } => workflow_reconcile(
+            instantiation,
+            mission.as_deref(),
+            evidence_bundle.as_deref(),
+        ),
         Command::WorkflowReconciliationImport {
             record,
             store,
@@ -307,10 +345,10 @@ fn workflow_instantiate(
         .filter(Value::is_array)
         .unwrap_or(raw_steps);
     if !steps.is_array() {
-        return Err(
-            CliError::invalid("--steps must contain a JSON array or an object with a steps array")
-                .about(steps_path.display().to_string()),
-        );
+        return Err(CliError::invalid(
+            "--steps must contain a JSON array or an object with a steps array",
+        )
+        .about(steps_path.display().to_string()));
     }
     let policy = policy_path.map(io::read_json).transpose()?;
     let mut request = json!({
@@ -346,6 +384,159 @@ fn workflow_instantiate(
         workflow,
     );
     Ok(Outcome::ok(report, human))
+}
+
+fn workflow_portfolio(
+    requests_path: &Path,
+    policy_path: Option<&Path>,
+    allow_partial: bool,
+    require_complete_catalogue: bool,
+) -> CliResult<Outcome> {
+    let raw = io::read_json(requests_path)?;
+    let mut arguments = if raw.is_array() {
+        json!({"requests": raw})
+    } else {
+        raw
+    };
+    if !arguments.is_object() {
+        return Err(CliError::invalid(
+            "--requests must contain a JSON array or an object with a requests array",
+        )
+        .about(requests_path.display().to_string()));
+    }
+    let mut policy = arguments
+        .get("policy")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    if let Some(path) = policy_path {
+        policy = io::read_json(path)?;
+    }
+    if !policy.is_object() {
+        return Err(
+            CliError::invalid("--policy must contain a JSON object").about(
+                policy_path
+                    .map(Path::display)
+                    .map(|display| display.to_string())
+                    .unwrap_or_else(|| requests_path.display().to_string()),
+            ),
+        );
+    }
+    if allow_partial {
+        policy["allow_partial"] = json!(true);
+    }
+    if require_complete_catalogue {
+        policy["require_complete_catalogue"] = json!(true);
+    }
+    arguments["policy"] = policy;
+
+    let mut report = build_domain_workflow_portfolio(
+        &workspace_capabilities(),
+        &Value::Array(tool_definitions()),
+        &arguments,
+    )
+    .map_err(|error| {
+        CliError::invalid(error.to_string()).about(requests_path.display().to_string())
+    })?;
+    let server = Server::new(
+        std::env::current_dir().map_err(|error| CliError::internal(error.to_string()))?,
+    );
+    let mut preflight_blocked_count = 0usize;
+    if let Some(items) = report.get_mut("items").and_then(Value::as_array_mut) {
+        for item in items.iter_mut() {
+            if item.get("status").and_then(Value::as_str) != Some("instantiated") {
+                continue;
+            }
+            let mission = item
+                .pointer("/instantiation/mission")
+                .cloned()
+                .ok_or_else(|| CliError::internal("portfolio item omitted instantiated mission"))?;
+            let preflight = match server.preflight_agent_mission(&mission) {
+                Ok(value) => value,
+                Err(error) => json!({
+                    "ok": false,
+                    "workflow": "agent_mission",
+                    "preflight": true,
+                    "dispatch": "not_started",
+                    "schema_valid": false,
+                    "error": error,
+                    "fail_closed": true,
+                    "readiness_claimed": false,
+                }),
+            };
+            let preflight_ok = preflight.get("ok") == Some(&Value::Bool(true));
+            let observed_plan_digest = preflight
+                .pointer("/plan/digest")
+                .cloned()
+                .unwrap_or(Value::Null);
+            item["mission_preflight"] = json!({
+                "status": if preflight_ok { "matched" } else { "blocked" },
+                "matched": preflight_ok,
+                "ok": preflight_ok,
+                "observed_plan_digest": observed_plan_digest,
+                "dispatch": "not_started",
+            });
+            item["instantiation"]["preflight_report"] = preflight.clone();
+            if !preflight_ok {
+                preflight_blocked_count = preflight_blocked_count.saturating_add(1);
+                item["status"] = json!("blocked_by_mission_preflight");
+                item["issues"] = json!([{
+                    "code": "mission_preflight_blocked",
+                    "message": "authoritative mission schema preflight blocked this portfolio item",
+                    "preflight": preflight,
+                }]);
+            }
+        }
+    }
+    let kernel_valid = report
+        .get("valid")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let policy_allows_partial = report
+        .pointer("/policy/allow_partial")
+        .and_then(Value::as_bool)
+        .unwrap_or(allow_partial);
+    let valid = kernel_valid && preflight_blocked_count == 0;
+    report["valid"] = json!(valid);
+    report["portfolio_ready"] = json!(valid);
+    report["summary"]["preflight_blocked_count"] = json!(preflight_blocked_count);
+    report["summary"]["preflight_status"] = json!(if preflight_blocked_count == 0 {
+        "matched"
+    } else {
+        "blocked"
+    });
+    report["preflight"] = json!({
+        "required": true,
+        "status": if preflight_blocked_count == 0 { "matched" } else { "blocked" },
+        "matched": preflight_blocked_count == 0,
+        "blocked_count": preflight_blocked_count,
+        "dispatch": "not_started",
+    });
+    if preflight_blocked_count > 0 {
+        report["portfolio_status"] = json!(if policy_allows_partial {
+            "partial"
+        } else {
+            "blocked"
+        });
+    }
+    report["dispatch"] = json!("not_started");
+    report["execution"] = json!("not_started");
+    if let Some(object) = report.as_object_mut() {
+        object.remove("portfolio_digest");
+    }
+    let digest = bioprism_ids::ContentHash::of_value(&report)
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    report["portfolio_digest"] = json!(digest.to_string());
+    let item_count = report["items"].as_array().map(Vec::len).unwrap_or_default();
+    let status = report["portfolio_status"].as_str().unwrap_or("blocked");
+    let human = format!(
+        "domain workflow portfolio\n  items: {}\n  catalogue complete: {}\n  preflight: {}\n  portfolio status: {}\n  portfolio ready: {}\n  dispatch: not started\n  execution: not started\n\nNext: complete blocked item arguments, review the portfolio digest, then run authoritative preflight before any explicit execution path.\n",
+        item_count,
+        report["coverage"]["complete_catalogue"].as_bool().unwrap_or(false),
+        report["summary"]["preflight_status"].as_str().unwrap_or("blocked"),
+        status,
+        valid,
+    );
+    Ok(Outcome::ok(report, human).failing_if(!valid))
 }
 
 fn workflow_reconcile(
@@ -390,8 +581,9 @@ fn load_workflow_reconciliation_registry(
         return Ok(DomainWorkflowReconciliationRegistry::new());
     }
     let snapshot = io::read_json(store_path)?;
-    DomainWorkflowReconciliationRegistry::from_snapshot(&snapshot)
-        .map_err(|error| CliError::invalid(error.to_string()).about(store_path.display().to_string()))
+    DomainWorkflowReconciliationRegistry::from_snapshot(&snapshot).map_err(|error| {
+        CliError::invalid(error.to_string()).about(store_path.display().to_string())
+    })
 }
 
 fn workflow_reconciliation_import(
@@ -404,9 +596,9 @@ fn workflow_reconciliation_import(
     let report = registry.import(&record).map_err(|error| {
         CliError::invalid(error.to_string()).about(record_path.display().to_string())
     })?;
-    let snapshot = registry
-        .snapshot()
-        .map_err(|error| CliError::internal(error.to_string()).about(store_path.display().to_string()))?;
+    let snapshot = registry.snapshot().map_err(|error| {
+        CliError::internal(error.to_string()).about(store_path.display().to_string())
+    })?;
     let artifact = if report.get("created").and_then(Value::as_bool) == Some(true) {
         Some(io::write_artifact(store_path, &snapshot, dry_run)?)
     } else {
@@ -471,8 +663,13 @@ fn workflow_reconciliation_query(
             limit,
             include_records,
         )
-        .map_err(|error| CliError::invalid(error.to_string()).about(store_path.display().to_string()))?;
-    let rows = report.get("rows").and_then(Value::as_array).map_or(0, Vec::len);
+        .map_err(|error| {
+            CliError::invalid(error.to_string()).about(store_path.display().to_string())
+        })?;
+    let rows = report
+        .get("rows")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
     let next_after = report
         .get("next_after")
         .and_then(Value::as_str)
@@ -493,7 +690,10 @@ fn evidence_bundle_verify(bundle_path: &Path) -> CliResult<Outcome> {
     let report = verify_mission_evidence_bundle(&bundle).map_err(|error| {
         CliError::invalid(error.to_string()).about(bundle_path.display().to_string())
     })?;
-    let valid = report.get("valid").and_then(Value::as_bool).unwrap_or(false);
+    let valid = report
+        .get("valid")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let digest = report
         .get("bundle_digest")
         .and_then(Value::as_str)
@@ -529,8 +729,9 @@ fn load_evidence_registry(store_path: &Path) -> CliResult<EvidenceBundleRegistry
         return Ok(EvidenceBundleRegistry::new());
     }
     let snapshot = io::read_json(store_path)?;
-    EvidenceBundleRegistry::from_snapshot(&snapshot)
-        .map_err(|error| CliError::invalid(error.to_string()).about(store_path.display().to_string()))
+    EvidenceBundleRegistry::from_snapshot(&snapshot).map_err(|error| {
+        CliError::invalid(error.to_string()).about(store_path.display().to_string())
+    })
 }
 
 fn evidence_bundle_import(
@@ -543,9 +744,9 @@ fn evidence_bundle_import(
     let report = registry.import(&bundle).map_err(|error| {
         CliError::invalid(error.to_string()).about(bundle_path.display().to_string())
     })?;
-    let snapshot = registry
-        .snapshot()
-        .map_err(|error| CliError::internal(error.to_string()).about(store_path.display().to_string()))?;
+    let snapshot = registry.snapshot().map_err(|error| {
+        CliError::internal(error.to_string()).about(store_path.display().to_string())
+    })?;
     let artifact = if report.get("created").and_then(Value::as_bool) == Some(true) {
         Some(io::write_artifact(store_path, &snapshot, dry_run)?)
     } else {
@@ -599,8 +800,13 @@ fn evidence_bundle_query(
     let registry = load_evidence_registry(store_path)?;
     let report = registry
         .query(mission_id, domain, after, limit, include_bundles)
-        .map_err(|error| CliError::invalid(error.to_string()).about(store_path.display().to_string()))?;
-    let rows = report.get("rows").and_then(Value::as_array).map_or(0, Vec::len);
+        .map_err(|error| {
+            CliError::invalid(error.to_string()).about(store_path.display().to_string())
+        })?;
+    let rows = report
+        .get("rows")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
     let next_after = report
         .get("next_after")
         .and_then(Value::as_str)
@@ -737,8 +943,14 @@ fn world_generate(options: &GenerateOptions) -> CliResult<Outcome> {
         written.push(io::write_artifact(path, &generated.query, options.dry_run)?);
     }
 
-    let facts = generated.world["facts"].as_array().map(Vec::len).unwrap_or(0);
-    let factors = generated.world["factors"].as_array().map(Vec::len).unwrap_or(0);
+    let facts = generated.world["facts"]
+        .as_array()
+        .map(Vec::len)
+        .unwrap_or(0);
+    let factors = generated.world["factors"]
+        .as_array()
+        .map(Vec::len)
+        .unwrap_or(0);
 
     let document = json!({
         "ok": true,
@@ -770,14 +982,20 @@ fn world_generate(options: &GenerateOptions) -> CliResult<Outcome> {
         human.push_str(&format!(
             "  {} {} ({} bytes)
 ",
-            if artifact.written { "wrote" } else { "would write" },
+            if artifact.written {
+                "wrote"
+            } else {
+                "would write"
+            },
             artifact.path.display(),
             artifact.bytes
         ));
     }
-    human.push_str("
+    human.push_str(
+        "
 Next: bioprism context compare --world <world.json> --query <query.json>
-");
+",
+    );
 
     Ok(Outcome::ok(document, human))
 }
@@ -789,13 +1007,17 @@ fn world_index(world_path: &Path, store_path: &Path, dry_run: bool) -> CliResult
     if dry_run {
         return Ok(Outcome::ok(
             json!({ "ok": true, "dry_run": true, "store": store_path.display().to_string() }),
-            format!("would index {} into {}
-", world_path.display(), store_path.display()),
+            format!(
+                "would index {} into {}
+",
+                world_path.display(),
+                store_path.display()
+            ),
         ));
     }
 
-    let manifest = bioprism_store::build(&raw, store_path)
-        .map_err(|e| CliError::from_store(store_path, e))?;
+    let manifest =
+        bioprism_store::build(&raw, store_path).map_err(|e| CliError::from_store(store_path, e))?;
 
     let document = json!({
         "ok": true,
@@ -843,10 +1065,18 @@ fn context_compile(options: &CompileOptions) -> CliResult<Outcome> {
 
     let mut written = Vec::new();
     if let Some(path) = &options.certificate_out {
-        written.push(io::write_artifact(path, &certificate_document, options.dry_run)?);
+        written.push(io::write_artifact(
+            path,
+            &certificate_document,
+            options.dry_run,
+        )?);
     }
     if let Some(path) = &options.section_out {
-        written.push(io::write_artifact(path, &section_document, options.dry_run)?);
+        written.push(io::write_artifact(
+            path,
+            &section_document,
+            options.dry_run,
+        )?);
     }
 
     let digest = certificate_document["certificate_sha256"]
@@ -906,7 +1136,11 @@ fn context_compile(options: &CompileOptions) -> CliResult<Outcome> {
     for artifact in &written {
         human.push_str(&format!(
             "  {} {} ({} bytes)\n",
-            if artifact.written { "wrote" } else { "would write" },
+            if artifact.written {
+                "wrote"
+            } else {
+                "would write"
+            },
             artifact.path.display(),
             artifact.bytes
         ));
@@ -1029,8 +1263,9 @@ fn prism_fork(
     if with_minimization {
         // A bundle carrying a minimization the oracle refused would attest a reduction that
         // preserved nothing, so the refusal ends the command rather than riding along in it.
-        let minimization = minimize_world(&world)
-            .map_err(|error| CliError::from_minimize(error).about(world_path.display().to_string()))?;
+        let minimization = minimize_world(&world).map_err(|error| {
+            CliError::from_minimize(error).about(world_path.display().to_string())
+        })?;
         bundle = bundle.with_minimization(minimization);
     }
     let attested = bundle.attest();
@@ -1063,9 +1298,13 @@ fn prism_fork(
 
     let mut human = human;
     for artifact in &artifacts {
-        human.push_str(&format!("
+        human.push_str(&format!(
+            "
 wrote {} ({} bytes)
-", artifact.path.display(), artifact.bytes));
+",
+            artifact.path.display(),
+            artifact.bytes
+        ));
     }
     human.push_str(&format!(
         "
@@ -1089,9 +1328,19 @@ fn mutate_family(world_path: &Path, out_dir: Option<&Path>) -> CliResult<Outcome
         for (id, world) in &family.worlds {
             let safe: String = id
                 .chars()
-                .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '.' { c } else { '_' })
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() || c == '-' || c == '.' {
+                        c
+                    } else {
+                        '_'
+                    }
+                })
                 .collect();
-            written.push(io::write_artifact(&directory.join(format!("{safe}.json")), world, false)?);
+            written.push(io::write_artifact(
+                &directory.join(format!("{safe}.json")),
+                world,
+                false,
+            )?);
         }
     }
 
@@ -1122,9 +1371,11 @@ fn mutate_family(world_path: &Path, out_dir: Option<&Path>) -> CliResult<Outcome
         family.duplicates.len(),
         family.yield_rate() * 100.0
     );
-    human.push_str("| Instance | Family | Verdict | Witnesses |
+    human.push_str(
+        "| Instance | Family | Verdict | Witnesses |
 |---|---|---|---:|
-");
+",
+    );
     for instance in &family.accepted {
         human.push_str(&format!(
             "| {} | {} | {} | {} |
@@ -1136,19 +1387,31 @@ fn mutate_family(world_path: &Path, out_dir: Option<&Path>) -> CliResult<Outcome
         ));
     }
     for rejection in &family.rejected {
-        human.push_str(&format!("
+        human.push_str(&format!(
+            "
 - rejected `{}`: {}
-", rejection.mutation_id, rejection.reason));
+",
+            rejection.mutation_id, rejection.reason
+        ));
     }
-    human.push_str(&format!("
+    human.push_str(&format!(
+        "
 {}
-", diversity.headline()));
-    human.push_str(&format!("publishable as a benchmark family: {}
-", diversity.is_publishable()));
+",
+        diversity.headline()
+    ));
+    human.push_str(&format!(
+        "publishable as a benchmark family: {}
+",
+        diversity.is_publishable()
+    ));
     if !written.is_empty() {
-        human.push_str(&format!("
+        human.push_str(&format!(
+            "
 wrote {} world(s)
-", written.len()));
+",
+            written.len()
+        ));
     }
     human.push_str(&format!(
         "
@@ -1203,8 +1466,10 @@ Next: bioprism prism fork --world {} --query <query.json>
         result.evaluations,
         reverification_line(&preservation),
         result.guarantee,
-        result.minimal.join("
-"),
+        result.minimal.join(
+            "
+"
+        ),
         world_path.display()
     );
 
@@ -1235,7 +1500,10 @@ fn context_verify(path: &Path) -> CliResult<Outcome> {
     use bioprism_section::CertificateVerification::*;
     let (ok, detail) = match &verification {
         Valid => (true, "digest verifies".to_string()),
-        DigestMismatch { claimed, recomputed } => (
+        DigestMismatch {
+            claimed,
+            recomputed,
+        } => (
             false,
             format!("digest mismatch: claims {claimed}, recomputes to {recomputed}"),
         ),

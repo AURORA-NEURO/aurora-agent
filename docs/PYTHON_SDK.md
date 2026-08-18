@@ -780,6 +780,12 @@ invent defaults:
   visible on typed mission status/inventory and queue projections; evaluator replay exposes
   `route_review_status`, and workflow reconciliation reports whether retained provenance still
   matches the instantiation. These are integrity/provenance joins, not execution authorization.
+- `DomainWorkflowPortfolioRequest` and `DomainWorkflowPortfolioReport` compose up to 64 explicit
+  group-scoped workflow requests. Sync/async Workspace and HTTP clients expose MCP, REST, and
+  typed report variants. Each item retains its own instantiation, authoritative mission-preflight
+  result, digest, and refusal diagnostics; `require_complete_catalogue` and `allow_partial` keep
+  complete coverage versus deliberate partial planning explicit. A portfolio never dispatches or
+  turns `portfolio_ready` into permission, scientific validity, clinical guidance, or release approval.
 - `DomainWorkflowVerifyRequest` and `DomainWorkflowVerifyReport` verify a retained instantiation
   against the current catalogue, domain contract, workflow binding, mission identity, and
   authoritative mission preflight. Supplying `replay_request` reconstructs the original bounded

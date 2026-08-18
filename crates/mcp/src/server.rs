@@ -128,9 +128,9 @@ use bioprism_devplat::{
     audit_domain_evidence_provider_external_payload_execution,
     audit_domain_evidence_provider_external_payload_lineage, audit_execution_provenance,
     build_dashboard, build_delivery_receipt, build_domain_acquisition_catalogue,
-    build_domain_workflow_catalogue, build_workflow_execution_evidence,
-    classify_domain_report_bridge, execute_domain_evidence_source,
-    handoff_domain_evidence_provider, instantiate_domain_workflow,
+    build_domain_workflow_catalogue, build_domain_workflow_portfolio,
+    build_workflow_execution_evidence, classify_domain_report_bridge,
+    execute_domain_evidence_source, handoff_domain_evidence_provider, instantiate_domain_workflow,
     mission_claim_lineage_with_review, normalize_ci_provider_payload,
     normalize_domain_evidence_provider, normalize_domain_evidence_provider_external_payload,
     plan_domain_evidence_source, plan_mission, query_adapter_execution_evidence,
@@ -1819,6 +1819,7 @@ impl Server {
             "domain_workflow_catalogue" => self.domain_workflow_catalogue(&arguments),
             "domain_workflow_scaffold" => self.domain_workflow_scaffold(&arguments),
             "domain_workflow_instantiate" => self.domain_workflow_instantiate(&arguments),
+            "domain_workflow_portfolio" => self.domain_workflow_portfolio(&arguments),
             "domain_workflow_verify" => self.domain_workflow_verify(&arguments),
             "domain_workflow_reconcile" => self.domain_workflow_reconcile(&arguments),
             "domain_workflow_reconciliation_import" => {
@@ -26799,6 +26800,110 @@ impl Server {
         Ok(output)
     }
 
+    /// Plan multiple group-scoped workflows while retaining independent authoritative preflight
+    /// outcomes for each item. This is a composition boundary only; it never dispatches a group
+    /// tool or turns a complete portfolio into execution authorization.
+    fn domain_workflow_portfolio(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode domain workflow portfolio input: {error}"))?;
+        if encoded.len() > bioprism_devplat::MAX_DOMAIN_WORKFLOW_BYTES {
+            return Err(format!(
+                "domain workflow portfolio input exceeds the {}-byte safety bound",
+                bioprism_devplat::MAX_DOMAIN_WORKFLOW_BYTES
+            ));
+        }
+        let mut output = build_domain_workflow_portfolio(
+            &workspace_capabilities(),
+            &Value::Array(tool_definitions()),
+            arguments,
+        )
+        .map_err(|error| format!("domain workflow portfolio refused: {error}"))?;
+        let mut preflight_blocked_count = 0usize;
+        if let Some(items) = output.get_mut("items").and_then(Value::as_array_mut) {
+            for item in items.iter_mut() {
+                if item.get("status").and_then(Value::as_str) != Some("instantiated") {
+                    continue;
+                }
+                let mission = item
+                    .pointer("/instantiation/mission")
+                    .cloned()
+                    .ok_or_else(|| "portfolio item omitted instantiated mission".to_string())?;
+                let preflight = match self.preflight_agent_mission(&mission) {
+                    Ok(value) => value,
+                    Err(error) => json!({
+                        "ok": false,
+                        "workflow": "agent_mission",
+                        "preflight": true,
+                        "dispatch": "not_started",
+                        "schema_valid": false,
+                        "error": error,
+                        "fail_closed": true,
+                        "readiness_claimed": false
+                    }),
+                };
+                let preflight_ok = preflight.get("ok") == Some(&Value::Bool(true));
+                let observed_plan_digest = preflight
+                    .pointer("/plan/digest")
+                    .cloned()
+                    .unwrap_or(Value::Null);
+                let preflight_status = if preflight_ok { "matched" } else { "blocked" };
+                item["mission_preflight"] = json!({
+                    "status": preflight_status,
+                    "matched": preflight_ok,
+                    "ok": preflight_ok,
+                    "observed_plan_digest": observed_plan_digest,
+                    "dispatch": "not_started"
+                });
+                item["instantiation"]["preflight_report"] = preflight.clone();
+                if !preflight_ok {
+                    preflight_blocked_count = preflight_blocked_count.saturating_add(1);
+                    item["status"] = json!("blocked_by_mission_preflight");
+                    item["issues"] = json!([{
+                        "code": "mission_preflight_blocked",
+                        "message": "authoritative mission schema preflight blocked this portfolio item",
+                        "preflight": preflight
+                    }]);
+                }
+            }
+        }
+        let kernel_valid = output
+            .get("valid")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let valid = kernel_valid && preflight_blocked_count == 0;
+        output["valid"] = json!(valid);
+        output["portfolio_ready"] = json!(valid);
+        output["summary"]["preflight_blocked_count"] = json!(preflight_blocked_count);
+        output["summary"]["preflight_status"] = json!(if preflight_blocked_count == 0 {
+            "matched"
+        } else {
+            "blocked"
+        });
+        output["preflight"] = json!({
+            "required": true,
+            "status": if preflight_blocked_count == 0 { "matched" } else { "blocked" },
+            "matched": preflight_blocked_count == 0,
+            "blocked_count": preflight_blocked_count,
+            "dispatch": "not_started"
+        });
+        if preflight_blocked_count > 0 {
+            let allow_partial = output
+                .pointer("/policy/allow_partial")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            output["portfolio_status"] = json!(if allow_partial { "partial" } else { "blocked" });
+        }
+        output["dispatch"] = json!("not_started");
+        output["execution"] = json!("not_started");
+        if let Some(object) = output.as_object_mut() {
+            object.remove("portfolio_digest");
+        }
+        let digest = bioprism_ids::ContentHash::of_value(&output)
+            .map_err(|error| format!("cannot digest domain workflow portfolio: {error}"))?;
+        output["portfolio_digest"] = json!(digest.to_string());
+        Ok(output)
+    }
+
     /// Verify a retained domain workflow against the live catalogue and authoritative mission
     /// preflight without dispatching any selected tool.
     fn domain_workflow_verify(&self, arguments: &Value) -> Result<Value, String> {
@@ -33511,7 +33616,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "documentation_and_knowledge",
             "domains": ["repository navigation", "documentation graph", "task routes", "context bundles"],
             "crates": ["bioprism-docgraph", "bioprism-graph", "bioprism-lens"],
-            "mcp_tools": ["workspace_capabilities", "capability_audit", "capability_dashboard", "capability_discover", "capability_route", "capability_route_review", "capability_route_plan", "capability_route_plan_verify", "domain_workflow_catalogue", "domain_workflow_scaffold", "domain_workflow_instantiate", "domain_workflow_verify", "domain_workflow_reconcile", "domain_workflow_reconciliation_import", "domain_workflow_reconciliation_query", "domain_workflow_reconciliation_get", "repository_catalog", "repository_bundle", "repository_impact", "lens_catalogue", "lens_leakage_check", "projection_bundle"],
+            "mcp_tools": ["workspace_capabilities", "capability_audit", "capability_dashboard", "capability_discover", "capability_route", "capability_route_review", "capability_route_plan", "capability_route_plan_verify", "domain_workflow_catalogue", "domain_workflow_scaffold", "domain_workflow_instantiate", "domain_workflow_portfolio", "domain_workflow_verify", "domain_workflow_reconcile", "domain_workflow_reconciliation_import", "domain_workflow_reconciliation_query", "domain_workflow_reconciliation_get", "repository_catalog", "repository_bundle", "repository_impact", "lens_catalogue", "lens_leakage_check", "projection_bundle"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -36722,6 +36827,26 @@ pub fn tool_definitions() -> Vec<Value> {
                     "replay_request": { "type": "object", "description": "Optional original domain_workflow_instantiate request. When supplied, the live catalogue is used to recompute and compare the retained contract." }
                 },
                 "required": ["instantiation"]
+            }
+        }),
+        json!({
+            "name": "domain_workflow_portfolio",
+            "description": "Plan a bounded portfolio of explicit domain_workflow_instantiate requests across capability groups. Each item is scoped independently, receives authoritative no-dispatch mission preflight, and retains structured blocked outcomes. Complete-catalogue coverage is optional but explicit; the portfolio never dispatches, retries, resumes, grants readiness, or establishes semantic, scientific, clinical, provider, or release validity.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "requests": { "type": "array", "minItems": 1, "maxItems": 64, "description": "Explicit domain_workflow_instantiate request objects, at most one per workflow_id and mission_id." },
+                    "policy": {
+                        "type": "object",
+                        "properties": {
+                            "allow_partial": { "type": "boolean", "description": "Retain blocked items as a partial portfolio instead of presenting the portfolio as blocked." },
+                            "require_complete_catalogue": { "type": "boolean", "description": "Require one successful request for every live capability-group workflow." }
+                        },
+                        "additionalProperties": false
+                    }
+                },
+                "required": ["requests"],
+                "additionalProperties": false
             }
         }),
         json!({

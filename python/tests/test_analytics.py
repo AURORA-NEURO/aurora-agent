@@ -63,6 +63,8 @@ from prism_sdk import (
     DomainWorkflowCatalogueReport,
     DomainWorkflowInstantiateRequest,
     DomainWorkflowInstantiationReport,
+    DomainWorkflowPortfolioRequest,
+    DomainWorkflowPortfolioReport,
     DomainWorkflowVerifyRequest,
     DomainWorkflowVerifyReport,
     DomainWorkflowScaffoldRequest,
@@ -1817,6 +1819,34 @@ class AnalyticsModelTests(unittest.TestCase):
         })
         self.assertTrue(verification.verified)
         self.assertEqual(verification.replay["status"], "matched")
+
+        portfolio_request = DomainWorkflowPortfolioRequest(
+            requests=(request.to_arguments(),),
+            policy={"require_complete_catalogue": False},
+        )
+        self.assertEqual(
+            portfolio_request.to_arguments()["requests"][0]["workflow_id"],
+            "documentation_and_knowledge",
+        )
+        portfolio = DomainWorkflowPortfolioReport.from_wire({
+            "ok": True,
+            "schema": "bioprism-devplat-domain-workflow-portfolio/0.1",
+            "workflow": "domain_workflow_portfolio",
+            "portfolio_digest": "f" * 64,
+            "valid": True,
+            "portfolio_ready": True,
+            "portfolio_status": "ready_for_authoritative_preflight",
+            "policy": {"allow_partial": False, "require_complete_catalogue": False},
+            "coverage": {"catalogue_group_count": 29, "requested_item_count": 1, "complete_catalogue": False},
+            "summary": {"instantiated_count": 1, "blocked_count": 0, "preflight_blocked_count": 0},
+            "items": [{"workflow_id": "documentation_and_knowledge", "status": "instantiated"}],
+            "preflight": {"required": True, "status": "matched", "matched": True},
+            "dispatch": "not_started",
+            "execution": "not_started",
+        })
+        self.assertTrue(portfolio.complete_catalogue is False)
+        self.assertTrue(portfolio.preflight_ready)
+        self.assertEqual(portfolio.items[0]["status"], "instantiated")
 
         scaffold_request = DomainWorkflowScaffoldRequest(
             "documentation_and_knowledge",

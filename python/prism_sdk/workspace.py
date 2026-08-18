@@ -136,6 +136,8 @@ from .capability import (
     DomainWorkflowCatalogueReport,
     DomainWorkflowInstantiateRequest,
     DomainWorkflowInstantiationReport,
+    DomainWorkflowPortfolioRequest,
+    DomainWorkflowPortfolioReport,
     DomainWorkflowVerifyRequest,
     DomainWorkflowVerifyReport,
     DomainWorkflowScaffoldRequest,
@@ -172,6 +174,7 @@ from .capability import (
     capability_route_plan_verify_report,
     domain_workflow_catalogue_report,
     domain_workflow_instantiation_report,
+    domain_workflow_portfolio_report,
     domain_workflow_verify_report,
     domain_workflow_scaffold_report,
     domain_workflow_reconciliation_report,
@@ -2070,6 +2073,25 @@ class Workspace:
         request: DomainWorkflowInstantiateRequest | Mapping[str, Any],
     ) -> DomainWorkflowInstantiationReport:
         return domain_workflow_instantiation_report(self.domain_workflow_instantiate(request))
+
+    def domain_workflow_portfolio(
+        self,
+        request: DomainWorkflowPortfolioRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Plan multiple domain workflows with independent no-dispatch preflight."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowPortfolioRequest)
+            else DomainWorkflowPortfolioRequest(**dict(request))
+        )
+        return self.tool("domain_workflow_portfolio", normalized.to_arguments())
+
+    def domain_workflow_portfolio_report(
+        self,
+        request: DomainWorkflowPortfolioRequest | Mapping[str, Any],
+    ) -> DomainWorkflowPortfolioReport:
+        return domain_workflow_portfolio_report(self.domain_workflow_portfolio(request))
 
     def domain_workflow_verify(
         self,
@@ -6041,6 +6063,23 @@ class AsyncWorkspace:
         return domain_workflow_instantiation_report(
             await self.domain_workflow_instantiate(request)
         )
+
+    async def domain_workflow_portfolio(
+        self,
+        request: DomainWorkflowPortfolioRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowPortfolioRequest)
+            else DomainWorkflowPortfolioRequest(**dict(request))
+        )
+        return await self.tool("domain_workflow_portfolio", normalized.to_arguments())
+
+    async def domain_workflow_portfolio_report(
+        self,
+        request: DomainWorkflowPortfolioRequest | Mapping[str, Any],
+    ) -> DomainWorkflowPortfolioReport:
+        return domain_workflow_portfolio_report(await self.domain_workflow_portfolio(request))
 
     async def domain_workflow_verify(
         self,

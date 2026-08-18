@@ -181,6 +181,12 @@ Convenience methods currently cover:
   per-tool argument contracts, and return structured ready/blocked preflight without dispatch.
   `DomainWorkflowScaffoldResult.readiness_claimed` is the literal `false`; the scaffold is never
   permission, evidence, clinical guidance, or a domain conclusion;
+- `domainWorkflowPortfolio` / `domainWorkflowPortfolioQuery`: compose up to 64 explicit workflow
+  requests with per-item no-dispatch mission preflight. `require_complete_catalogue` and
+  `allow_partial` preserve complete, blocked, incomplete-scope, and partial portfolio states;
+  blocked items retain their own issue witnesses while successful siblings remain inspectable. The
+  typed result keeps the portfolio digest and the invariant `dispatch: "not_started"` /
+  `execution: "not_started"`;
 - `domainWorkflowVerify` / `domainWorkflowVerifyQuery`: retained-instantiation verification that
   checks current catalogue and domain-contract identities, workflow binding, mission identity, and
   authoritative mission preflight. Supplying the original bounded `replay_request` rebuilds the

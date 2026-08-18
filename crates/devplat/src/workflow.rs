@@ -26,6 +26,8 @@ pub const DOMAIN_WORKFLOW_INSTANTIATE_SCHEMA_VERSION: &str =
     "bioprism-devplat-domain-workflow-instantiate/0.1";
 pub const DOMAIN_WORKFLOW_VERIFY_SCHEMA_VERSION: &str =
     "bioprism-devplat-domain-workflow-verify/0.1";
+pub const DOMAIN_WORKFLOW_PORTFOLIO_SCHEMA_VERSION: &str =
+    "bioprism-devplat-domain-workflow-portfolio/0.1";
 pub const DOMAIN_WORKFLOW_SCAFFOLD_SCHEMA_VERSION: &str =
     "bioprism-devplat-domain-workflow-scaffold/0.1";
 pub const DOMAIN_WORKFLOW_CONTRACT_SCHEMA_VERSION: &str =
@@ -34,6 +36,7 @@ pub const MAX_DOMAIN_WORKFLOW_GROUPS: usize = 128;
 pub const MAX_DOMAIN_WORKFLOW_TOOLS: usize = 256;
 pub const MAX_DOMAIN_WORKFLOW_STEPS: usize = 128;
 pub const MAX_DOMAIN_WORKFLOW_BYTES: usize = 20_000_000;
+pub const MAX_DOMAIN_WORKFLOW_PORTFOLIO_ITEMS: usize = 64;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum DomainWorkflowError {
@@ -1105,6 +1108,217 @@ pub fn instantiate_domain_workflow(
     Ok(output)
 }
 
+/// Plan a bounded portfolio of explicitly authored domain workflows.
+///
+/// A portfolio is a structural composition boundary for callers that need to prepare more than
+/// one capability group at once. Each request is instantiated independently, so one malformed or
+/// out-of-scope group remains a retained blocked item instead of erasing the other domain plans.
+/// The transport adds authoritative mission preflight to each successful instantiation; this
+/// kernel never dispatches, retries, resumes, or infers a domain goal or tool argument.
+pub fn build_domain_workflow_portfolio(
+    catalogue: &Value,
+    tool_definitions: &Value,
+    request: &Value,
+) -> Result<Value, DomainWorkflowError> {
+    checked_bytes(request)?;
+    let object = request
+        .as_object()
+        .ok_or(DomainWorkflowError::RequestNotObject)?;
+    let requests = object
+        .get("requests")
+        .and_then(Value::as_array)
+        .ok_or_else(|| DomainWorkflowError::InvalidRequest("requests must be an array".into()))?;
+    if requests.is_empty() || requests.len() > MAX_DOMAIN_WORKFLOW_PORTFOLIO_ITEMS {
+        return Err(DomainWorkflowError::InvalidRequest(format!(
+            "requests must contain between 1 and {} items",
+            MAX_DOMAIN_WORKFLOW_PORTFOLIO_ITEMS
+        )));
+    }
+    let policy = object.get("policy").cloned().unwrap_or_else(|| json!({}));
+    let policy = policy
+        .as_object()
+        .ok_or_else(|| DomainWorkflowError::InvalidRequest("policy must be an object".into()))?;
+    let allow_partial = policy
+        .get("allow_partial")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let require_complete_catalogue = policy
+        .get("require_complete_catalogue")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    let catalogue_report = build_domain_workflow_catalogue(catalogue, tool_definitions)?;
+    let catalogue_workflows = catalogue_report
+        .get("workflows")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            DomainWorkflowError::InvalidRequest(
+                "workflow catalogue omitted its workflow rows".into(),
+            )
+        })?;
+    let catalogue_ids = catalogue_workflows
+        .iter()
+        .filter_map(|workflow| workflow.get("workflow_id").and_then(Value::as_str))
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
+
+    let mut seen_workflow_ids = BTreeSet::new();
+    let mut seen_mission_ids = BTreeSet::new();
+    let mut items = Vec::with_capacity(requests.len());
+    let mut blocked_count = 0usize;
+    let mut selected_tool_count = 0usize;
+
+    for (index, raw_request) in requests.iter().enumerate() {
+        let request_digest = digest(raw_request)?;
+        let workflow_id = raw_request.get("workflow_id").and_then(Value::as_str);
+        let mission_id = raw_request.get("mission_id").and_then(Value::as_str);
+        let mut item_issues = Vec::new();
+        if !raw_request.is_object() {
+            item_issues.push(json!({
+                "code": "request_not_object",
+                "message": "portfolio request must be an object"
+            }));
+        }
+        if let Some(workflow_id) = workflow_id {
+            if !seen_workflow_ids.insert(workflow_id.to_owned()) {
+                item_issues.push(json!({
+                    "code": "duplicate_workflow_id",
+                    "workflow_id": workflow_id,
+                    "message": "each workflow_id may occur at most once in a portfolio"
+                }));
+            }
+        }
+        if let Some(mission_id) = mission_id {
+            if !seen_mission_ids.insert(mission_id.to_owned()) {
+                item_issues.push(json!({
+                    "code": "duplicate_mission_id",
+                    "mission_id": mission_id,
+                    "message": "each mission_id may occur at most once in a portfolio"
+                }));
+            }
+        }
+        if item_issues.is_empty() {
+            match instantiate_domain_workflow(catalogue, tool_definitions, raw_request) {
+                Ok(instantiation) => {
+                    selected_tool_count = selected_tool_count.saturating_add(
+                        instantiation
+                            .pointer("/selection/selected_tools")
+                            .and_then(Value::as_array)
+                            .map_or(0, Vec::len),
+                    );
+                    items.push(json!({
+                        "index": index,
+                        "workflow_id": workflow_id,
+                        "mission_id": mission_id,
+                        "request_digest": request_digest,
+                        "status": "instantiated",
+                        "instantiation": instantiation,
+                        "mission_preflight": {
+                            "status": "deferred",
+                            "matched": false,
+                            "dispatch": "not_started"
+                        }
+                    }));
+                    continue;
+                }
+                Err(error) => item_issues.push(json!({
+                    "code": "workflow_instantiation_blocked",
+                    "message": error.to_string()
+                })),
+            }
+        }
+        blocked_count = blocked_count.saturating_add(1);
+        items.push(json!({
+            "index": index,
+            "workflow_id": workflow_id,
+            "mission_id": mission_id,
+            "request_digest": request_digest,
+            "status": "blocked",
+            "issues": item_issues,
+            "mission_preflight": {
+                "status": "not_requested",
+                "matched": false,
+                "dispatch": "not_started"
+            }
+        }));
+    }
+
+    let requested_ids = seen_workflow_ids
+        .intersection(&catalogue_ids)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let missing_workflow_ids = catalogue_ids
+        .difference(&requested_ids)
+        .cloned()
+        .collect::<Vec<_>>();
+    let extra_workflow_ids = seen_workflow_ids
+        .difference(&catalogue_ids)
+        .cloned()
+        .collect::<Vec<_>>();
+    let complete_catalogue = missing_workflow_ids.is_empty() && extra_workflow_ids.is_empty();
+    let valid = blocked_count == 0 && (!require_complete_catalogue || complete_catalogue);
+    let portfolio_status = if blocked_count > 0 {
+        if allow_partial {
+            "partial"
+        } else {
+            "blocked"
+        }
+    } else if require_complete_catalogue && !complete_catalogue {
+        "incomplete_scope"
+    } else {
+        "ready_for_authoritative_preflight"
+    };
+    let mut output = json!({
+        "ok": true,
+        "schema": DOMAIN_WORKFLOW_PORTFOLIO_SCHEMA_VERSION,
+        "workflow": "domain_workflow_portfolio",
+        "valid": valid,
+        "portfolio_ready": valid,
+        "portfolio_status": portfolio_status,
+        "policy": {
+            "allow_partial": allow_partial,
+            "require_complete_catalogue": require_complete_catalogue
+        },
+        "coverage": {
+            "catalogue_group_count": catalogue_ids.len(),
+            "requested_item_count": requests.len(),
+            "unique_workflow_count": seen_workflow_ids.len(),
+            "complete_catalogue": complete_catalogue,
+            "missing_workflow_ids": missing_workflow_ids,
+            "extra_workflow_ids": extra_workflow_ids
+        },
+        "summary": {
+            "instantiated_count": requests.len().saturating_sub(blocked_count),
+            "blocked_count": blocked_count,
+            "selected_tool_count": selected_tool_count,
+            "preflight_status": "deferred"
+        },
+        "items": items,
+        "preflight": {
+            "required": true,
+            "status": "deferred",
+            "dispatch": "not_started"
+        },
+        "dispatch": "not_started",
+        "execution": "not_started",
+        "guarantees": [
+            "each requested workflow is scoped and instantiated independently",
+            "blocked domain requests remain visible with structured issue codes",
+            "complete-catalogue coverage is explicit rather than inferred from a partial portfolio",
+            "portfolio planning never dispatches, retries, resumes, or grants readiness"
+        ],
+        "limitations": [
+            "authoritative mission schema preflight is added by the transport boundary",
+            "partial portfolios are not complete coverage and require caller review",
+            "workflow plans do not establish semantic sufficiency, provider availability, authorization, or domain validity"
+        ]
+    });
+    let portfolio_digest = digest(&output)?;
+    output["portfolio_digest"] = Value::String(portfolio_digest);
+    checked_bytes(&output)?;
+    Ok(output)
+}
+
 /// Verify a retained domain-workflow instantiation against its internal identities and, when
 /// supplied, the original caller request.
 ///
@@ -1669,6 +1883,87 @@ mod tests {
         assert_eq!(
             report["evidence_plan"]["steps"][0]["tool_contract"]["schema_state"],
             "missing"
+        );
+    }
+
+    #[test]
+    fn portfolio_plans_complete_catalogue_with_independent_items() {
+        let (catalogue, tools) = inputs();
+        let report = build_domain_workflow_portfolio(
+            &catalogue,
+            &tools,
+            &json!({
+                "requests": [
+                    {
+                        "workflow_id": "genomics_workflows",
+                        "mission_id": "portfolio-genomics",
+                        "goal": "compile the genomic query",
+                        "steps": [{"id": "compile", "tool": "bioql_compile", "arguments": {}}]
+                    },
+                    {
+                        "workflow_id": "oncology_workflows",
+                        "mission_id": "portfolio-oncology",
+                        "goal": "review the oncology boundary",
+                        "steps": [{"id": "boundary", "tool": "onco_boundary_check", "arguments": {}}]
+                    }
+                ],
+                "policy": {"require_complete_catalogue": true}
+            }),
+        )
+        .unwrap();
+        assert_eq!(report["valid"], true);
+        assert_eq!(report["portfolio_ready"], true);
+        assert_eq!(
+            report["portfolio_status"],
+            "ready_for_authoritative_preflight"
+        );
+        assert_eq!(report["coverage"]["complete_catalogue"], true);
+        assert_eq!(report["summary"]["instantiated_count"], 2);
+        assert_eq!(report["summary"]["blocked_count"], 0);
+        assert_eq!(report["items"][0]["status"], "instantiated");
+        assert_eq!(
+            report["items"][1]["mission_preflight"]["status"],
+            "deferred"
+        );
+        assert_eq!(report["dispatch"], "not_started");
+        assert_eq!(report["execution"], "not_started");
+        assert_eq!(report["portfolio_digest"].as_str().unwrap().len(), 64);
+    }
+
+    #[test]
+    fn portfolio_retains_blocked_rows_and_explicit_partial_scope() {
+        let (catalogue, tools) = inputs();
+        let report = build_domain_workflow_portfolio(
+            &catalogue,
+            &tools,
+            &json!({
+                "requests": [
+                    {
+                        "workflow_id": "oncology_workflows",
+                        "mission_id": "portfolio-duplicate",
+                        "goal": "review",
+                        "steps": [{"id": "boundary", "tool": "onco_boundary_check"}]
+                    },
+                    {
+                        "workflow_id": "oncology_workflows",
+                        "mission_id": "portfolio-duplicate",
+                        "goal": "review again",
+                        "steps": [{"id": "boundary", "tool": "onco_boundary_check"}]
+                    }
+                ],
+                "policy": {"allow_partial": true}
+            }),
+        )
+        .unwrap();
+        assert_eq!(report["valid"], false);
+        assert_eq!(report["portfolio_ready"], false);
+        assert_eq!(report["portfolio_status"], "partial");
+        assert_eq!(report["summary"]["instantiated_count"], 1);
+        assert_eq!(report["summary"]["blocked_count"], 1);
+        assert_eq!(report["items"][1]["status"], "blocked");
+        assert_eq!(
+            report["items"][1]["issues"][0]["code"],
+            "duplicate_workflow_id"
         );
     }
 

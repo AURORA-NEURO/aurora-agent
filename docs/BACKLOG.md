@@ -223,6 +223,11 @@ catalogue/contract/binding identity, rerun mission preflight, and optionally rep
 instantiation request before re-review. The verifier is intentionally structural and non-executing;
 it does not remove the remaining domain adapters, external evidence connectors, or durable execution
 orchestration work below.
+The handoff now also supports a bounded domain-workflow portfolio: up to 64 explicit group plans
+can be composed with per-item authoritative preflight and retained blocked rows. Complete-catalogue
+coverage and deliberate partial planning are separate states, so a missing domain-specific argument
+does not disappear behind a portfolio-level pass. This is still a planning/evidence composition
+surface rather than a scheduler or execution authority.
 The Python layer now also covers the evaluator/oracle/mutation and environment/pack authoring
 contracts: it builds versioned oracle manifests and judgements, preserves tier demotion and
 admissibility, validates distributions and findings, and exposes the oracle mesh, reference-panel,

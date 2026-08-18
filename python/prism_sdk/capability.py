@@ -838,6 +838,46 @@ class DomainWorkflowInstantiateRequest:
 
 
 @dataclass(frozen=True)
+class DomainWorkflowPortfolioRequest:
+    """Bounded set of explicit domain-workflow requests for one non-executing portfolio."""
+
+    requests: Sequence[Mapping[str, Any]]
+    policy: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.requests, Sequence) or isinstance(self.requests, (str, bytes)) or not 1 <= len(self.requests) <= 64:
+            raise ArgumentError("workflow portfolio requests must contain between 1 and 64 objects")
+        workflow_ids: set[str] = set()
+        mission_ids: set[str] = set()
+        normalized: list[dict[str, Any]] = []
+        for index, request in enumerate(self.requests):
+            try:
+                typed = DomainWorkflowInstantiateRequest(**dict(_route_mapping(f"workflow portfolio requests[{index}]", request)))
+            except (TypeError, ValueError) as error:
+                raise ArgumentError(f"invalid workflow portfolio request {index}: {error}") from error
+            if typed.workflow_id in workflow_ids:
+                raise ArgumentError(f"workflow portfolio contains duplicate workflow_id {typed.workflow_id!r}")
+            if typed.mission_id in mission_ids:
+                raise ArgumentError(f"workflow portfolio contains duplicate mission_id {typed.mission_id!r}")
+            workflow_ids.add(typed.workflow_id)
+            mission_ids.add(typed.mission_id)
+            normalized.append(typed.to_arguments())
+        object.__setattr__(self, "requests", tuple(normalized))
+        if self.policy is not None:
+            policy = _route_mapping("workflow portfolio policy", self.policy)
+            for name in ("allow_partial", "require_complete_catalogue"):
+                if name in policy and not isinstance(policy[name], bool):
+                    raise ArgumentError(f"workflow portfolio policy {name} must be boolean")
+            object.__setattr__(self, "policy", policy)
+
+    def to_arguments(self) -> dict[str, Any]:
+        result: dict[str, Any] = {"requests": [dict(request) for request in self.requests]}
+        if self.policy is not None:
+            result["policy"] = dict(self.policy)
+        return result
+
+
+@dataclass(frozen=True)
 class DomainWorkflowVerifyRequest:
     """Verify a retained domain-workflow instantiation without dispatch."""
 
@@ -1019,6 +1059,63 @@ class DomainWorkflowInstantiationReport:
 
 
 @dataclass(frozen=True)
+class DomainWorkflowPortfolioReport:
+    """Typed multi-domain portfolio with per-item preflight and explicit coverage posture."""
+
+    raw: dict[str, Any]
+    portfolio_digest: str
+    valid: bool
+    portfolio_ready: bool
+    portfolio_status: str
+    policy: Mapping[str, Any]
+    coverage: Mapping[str, Any]
+    summary: Mapping[str, Any]
+    items: tuple[Mapping[str, Any], ...]
+    preflight: Mapping[str, Any]
+    dispatch: str
+    execution: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainWorkflowPortfolioReport":
+        raw = _tool_payload(value, "domain_workflow_portfolio")
+        valid = raw.get("valid")
+        portfolio_ready = raw.get("portfolio_ready")
+        if not isinstance(valid, bool) or not isinstance(portfolio_ready, bool):
+            raise ArgumentError("workflow portfolio validity fields must be booleans")
+        status = _route_text("workflow portfolio status", raw.get("portfolio_status"))
+        if status not in {"ready_for_authoritative_preflight", "partial", "blocked", "incomplete_scope"}:
+            raise ArgumentError("unknown workflow portfolio status")
+        items = raw.get("items", [])
+        if not isinstance(items, Sequence) or isinstance(items, (str, bytes)):
+            raise ArgumentError("workflow portfolio items must be an array")
+        return cls(
+            raw=raw,
+            portfolio_digest=_digest("workflow portfolio digest", raw.get("portfolio_digest")),
+            valid=valid,
+            portfolio_ready=portfolio_ready,
+            portfolio_status=status,
+            policy=_route_mapping("workflow portfolio policy", raw.get("policy", {})),
+            coverage=_route_mapping("workflow portfolio coverage", raw.get("coverage", {})),
+            summary=_route_mapping("workflow portfolio summary", raw.get("summary", {})),
+            items=tuple(_route_mapping("workflow portfolio item", item) for item in items),
+            preflight=_route_mapping("workflow portfolio preflight", raw.get("preflight", {})),
+            dispatch=_route_text("workflow portfolio dispatch", raw.get("dispatch")),
+            execution=_route_text("workflow portfolio execution", raw.get("execution")),
+        )
+
+    @property
+    def complete_catalogue(self) -> bool:
+        return self.coverage.get("complete_catalogue") is True
+
+    @property
+    def preflight_ready(self) -> bool:
+        return self.preflight.get("matched") is True and self.summary.get("preflight_blocked_count", 0) == 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
 class DomainWorkflowVerifyReport:
     """Typed structural, replay, and authoritative-preflight verification evidence."""
 
@@ -1091,6 +1188,12 @@ def domain_workflow_instantiation_report(value: Mapping[str, Any]) -> DomainWork
     """Parse a direct REST/MCP workflow instantiation result."""
 
     return DomainWorkflowInstantiationReport.from_wire(value)
+
+
+def domain_workflow_portfolio_report(value: Mapping[str, Any]) -> DomainWorkflowPortfolioReport:
+    """Parse a direct REST/MCP domain-workflow portfolio result."""
+
+    return DomainWorkflowPortfolioReport.from_wire(value)
 
 
 def domain_workflow_verify_report(value: Mapping[str, Any]) -> DomainWorkflowVerifyReport:
@@ -2952,6 +3055,8 @@ def mission_evaluator_discover_report(value: Mapping[str, Any]) -> MissionEvalua
 
 __all__ = [
     "DomainWorkflowInstantiateRequest",
+    "DomainWorkflowPortfolioRequest",
+    "DomainWorkflowPortfolioReport",
     "DomainWorkflowVerifyRequest",
     "DomainWorkflowVerifyReport",
     "DomainWorkflowScaffoldRequest",
@@ -3014,6 +3119,7 @@ __all__ = [
     "capability_route_report",
     "domain_workflow_catalogue_report",
     "domain_workflow_instantiation_report",
+    "domain_workflow_portfolio_report",
     "domain_workflow_verify_report",
     "domain_workflow_scaffold_report",
     "domain_workflow_reconciliation_report",

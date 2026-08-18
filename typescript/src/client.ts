@@ -25,6 +25,8 @@ import type {
   DomainWorkflowCatalogueResult,
   DomainWorkflowInstantiateArgs,
   DomainWorkflowInstantiateResult,
+  DomainWorkflowPortfolioArgs,
+  DomainWorkflowPortfolioResult,
   DomainWorkflowVerifyArgs,
   DomainWorkflowVerifyResult,
   DomainWorkflowScaffoldArgs,
@@ -588,6 +590,18 @@ export class ApiClient {
     if (typeof args.goal !== "string" || args.goal.trim().length === 0) throw new ArgumentError("goal must be a non-empty string");
     if (!Array.isArray(args.steps) || args.steps.length < 1 || args.steps.length > 128) throw new ArgumentError("steps must contain 1..=128 items");
     return this.request<DomainWorkflowInstantiateResult>("POST", "/v1/domain-workflows/instantiate", args, options);
+  }
+
+  /** Plan multiple explicit domain workflows with per-item authoritative no-dispatch preflight. */
+  async domainWorkflowPortfolioQuery(
+    args: DomainWorkflowPortfolioArgs,
+    options?: ClientRequestOptions,
+  ): Promise<DomainWorkflowPortfolioResult> {
+    if (!isObject(args) || !Array.isArray(args.requests) || args.requests.length < 1 || args.requests.length > 64 || args.requests.some((request) => !isObject(request))) {
+      throw new ArgumentError("workflow portfolio requires 1..=64 request objects");
+    }
+    if (args.policy !== undefined && !isObject(args.policy)) throw new ArgumentError("workflow portfolio policy must be an object");
+    return this.request<DomainWorkflowPortfolioResult>("POST", "/v1/domain-workflows/portfolio", args, options);
   }
 
   /** Verify a retained workflow contract and optionally replay its original request. */
@@ -1764,6 +1778,18 @@ export class ApiClient {
       throw new ArgumentError("domain workflow instantiate requires 1..=128 step objects");
     }
     return this.callTool<DomainWorkflowInstantiateResult>("domain_workflow_instantiate", args, options);
+  }
+
+  /** Plan multiple explicit domain workflows through the MCP tool boundary. */
+  async domainWorkflowPortfolio(
+    args: DomainWorkflowPortfolioArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainWorkflowPortfolioResult>> {
+    if (!isObject(args) || !Array.isArray(args.requests) || args.requests.length < 1 || args.requests.length > 64 || args.requests.some((request) => !isObject(request))) {
+      throw new ArgumentError("workflow portfolio requires 1..=64 request objects");
+    }
+    if (args.policy !== undefined && !isObject(args.policy)) throw new ArgumentError("workflow portfolio policy must be an object");
+    return this.callTool<DomainWorkflowPortfolioResult>("domain_workflow_portfolio", args, options);
   }
 
   /** Verify a retained workflow contract through the MCP tool boundary. */
