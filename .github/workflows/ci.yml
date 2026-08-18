@@ -85,6 +85,40 @@ jobs:
         run: python -W error::ResourceWarning -m pytest -q
       - name: test GitHub Actions evidence exporter
         run: python -m pytest -q tools/test_github_actions_evidence.py
+      - name: exercise reusable GitHub Actions evidence action
+        id: github-actions-evidence
+        uses: ./.github/actions/github-actions-evidence
+        with:
+          checks: tools/fixtures/github-actions-checks.json
+          output: ${{ runner.temp }}/aurora-github-actions-provider-payload.json
+          run-id: ci-fixture-run
+          conclusion: success
+          run-url: https://example.invalid/aurora/ci-fixture-run
+      - name: verify reusable action artifact and outputs
+        env:
+          AURORA_PAYLOAD_PATH: ${{ steps.github-actions-evidence.outputs['payload-path'] }}
+          AURORA_PAYLOAD_DIGEST: ${{ steps.github-actions-evidence.outputs['payload-digest'] }}
+          AURORA_RUN_ID: ${{ steps.github-actions-evidence.outputs['run-id'] }}
+          AURORA_CHECK_COUNT: ${{ steps.github-actions-evidence.outputs['check-count'] }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          payload_path = Path(os.environ["AURORA_PAYLOAD_PATH"])
+          payload = json.loads(payload_path.read_text(encoding="utf-8"))
+          canonical = json.dumps(
+              payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+          ).encode("utf-8")
+          assert payload["provider"] == "github_actions"
+          assert payload["run"]["id"] == os.environ["AURORA_RUN_ID"] == "ci-fixture-run"
+          assert len(payload["jobs"]) == int(os.environ["AURORA_CHECK_COUNT"]) == 2
+          assert hashlib.sha256(canonical).hexdigest() == os.environ["AURORA_PAYLOAD_DIGEST"]
+          assert payload["jobs"][1]["conclusion"] == "skipped"
+          print(f"verified {payload_path} ({len(payload['jobs'])} jobs)")
+          PY
 
   typescript-sdk:
     name: TypeScript SDK

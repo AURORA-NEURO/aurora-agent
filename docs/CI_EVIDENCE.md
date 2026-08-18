@@ -101,6 +101,12 @@ signature, upload an artifact, or approve a release. Missing per-check digests a
 left for the Rust normalizer to derive and label. Pin the action to a reviewed commit or release
 tag in consumer repositories rather than floating on `main`.
 
+The repository's public Python CI job invokes this local action against
+`tools/fixtures/github-actions-checks.json`, then re-reads the emitted file and independently
+recomputes its canonical digest and output values. That end-to-end check catches broken composite
+action metadata, output-name expressions, runner path handling, and serialization drift in addition
+to the unit-level refusal tests.
+
 ## Provider artifacts, logs, and attestations
 
 `ci_provider_evidence_audit` is the deeper conformance handoff for consumers that have more than a

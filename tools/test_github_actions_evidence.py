@@ -26,6 +26,9 @@ class GithubActionsEvidenceTests(unittest.TestCase):
         self.assertIn("using: composite", metadata)
         self.assertIn("$GITHUB_ACTION_PATH/../../../tools/github_actions_evidence.py", metadata)
         self.assertIn("value: ${{ steps.export.outputs['payload-digest'] }}", metadata)
+        fixture = Path(__file__).parent / "fixtures" / "github-actions-checks.json"
+        fixture_payload = json.loads(fixture.read_text(encoding="utf-8"))
+        self.assertEqual([row["name"] for row in fixture_payload["jobs"]], ["unit", "lint"])
 
     def test_payload_is_bounded_deterministic_and_event_aware(self) -> None:
         event = {
