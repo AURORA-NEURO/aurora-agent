@@ -75,7 +75,7 @@ test("artifact registry REST and MCP clients preserve lineage uncertainty", asyn
     findings: [],
     execution: "not_started",
     guarantees: [],
-    does_not_claim: ["the three stores were read in one atomic transaction"],
+    does_not_claim: ["the four stores were read in one atomic transaction"],
   };
   const client = new ApiClient({
     baseUrl: "http://127.0.0.1:18788",

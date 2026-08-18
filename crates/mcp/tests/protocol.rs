@@ -751,7 +751,7 @@ fn artifact_registry_audit_joins_cross_domain_records_without_inventing_provenan
         .as_array()
         .unwrap()
         .iter()
-        .any(|item| item == "the three stores were read in one atomic transaction"));
+        .any(|item| item == "the four stores were read in one atomic transaction"));
 }
 
 #[test]
