@@ -1578,6 +1578,65 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.deepEqual(assembly.selected_tools, ["echo"]);
   const assembledPreflight = await client.missionPreflight(assembly.mission, catalogue);
   assert.equal(assembledPreflight.ok, true);
+  const missionRouteReview = {
+    ok: true,
+    workflow: "capability_route_review",
+    review_id: "a".repeat(64),
+    route_id: "b".repeat(64),
+    catalog_digest: "d".repeat(64),
+    goal: "check routed work",
+    findings: [],
+    review_status: "ready",
+    handoff_status: "mission_preflight_required",
+    execution: "not_started",
+    evidence_digest: "e".repeat(64),
+    evidence_scope: "capability_route",
+    evidence_binding: {
+      present: true,
+      evidence_digest: "e".repeat(64),
+      scope: "capability_route",
+      summary: { evidence_digest: "e".repeat(64), scope: "capability_route" },
+      posture: "carried_forward_not_recomputed",
+      readiness_claimed: false,
+      execution: "not_started",
+    },
+    mission_draft: {
+      goal: "check routed work",
+      steps: assembly.mission.steps,
+      dependency_waves: [["echo-need"]],
+      route_evidence_digest: "e".repeat(64),
+      route_evidence_scope: "capability_route",
+    },
+  };
+  const reviewedAssembly = client.missionFromRoute(
+    assembly.mission ? {
+      workflow: "capability_route",
+      route_id: "route-ts",
+      catalog_digest: "d".repeat(64),
+      goal: "check routed work",
+      needs: [{ id: "echo-need", candidate_tools: ["echo"] }],
+      unresolved_needs: [],
+    } : {},
+    "mission-from-reviewed-route",
+    [{
+      need_id: "echo-need",
+      tool: "echo",
+      domain: "workspace",
+      capability: "discovery",
+      objective: "check routed work",
+      arguments: { value: 3 },
+    }],
+    undefined,
+    missionRouteReview,
+  );
+  const reviewedPreflight = await client.missionPreflight(reviewedAssembly.mission, catalogue);
+  assert.equal(reviewedPreflight.ok, true);
+  assert.equal(reviewedPreflight.route_review_provenance.evidence_present, true);
+  const tamperedRouteReview = structuredClone(missionRouteReview);
+  tamperedRouteReview.mission_draft.steps[0].objective = "tampered after review";
+  const tamperedRoutePreflight = await client.missionPreflight({ ...reviewedAssembly.mission, route_review: tamperedRouteReview }, catalogue);
+  assert.equal(tamperedRoutePreflight.ok, false);
+  assert.equal(tamperedRoutePreflight.issues.some((issue) => issue.includes("route_review")), true);
   assert.throws(() => client.missionFromRoute({
     workflow: "capability_route",
     route_id: "route-ts",

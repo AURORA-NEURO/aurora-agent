@@ -8101,8 +8101,8 @@ fn capability_route_review_builds_non_executing_handoff_and_reports_bad_selectio
         json!({
             "goal": "compose a reviewed handoff",
             "needs": [
-                {"id": "oncology", "query": "oncology"},
-                {"id": "release", "tool": "bundle_verify"}
+                {"id": "oncology", "tool": "workspace_capabilities"},
+                {"id": "release", "tool": "weave_protocol_catalog"}
             ],
             "max_candidates_per_need": 2,
             "max_tools": 4
@@ -8128,11 +8128,11 @@ fn capability_route_review_builds_non_executing_handoff_and_reports_bad_selectio
                 },
                 {
                     "need_id": "release",
-                    "tool": "bundle_verify",
+                    "tool": "weave_protocol_catalog",
                     "domain": "release",
                     "capability": "verification",
                     "objective": "verify the release bundle",
-                    "arguments": {},
+                    "arguments": {"context": null},
                     "depends_on": ["oncology"]
                 }
             ]
@@ -8207,6 +8207,49 @@ fn capability_route_review_builds_non_executing_handoff_and_reports_bad_selectio
         review["mission_draft"]["steps"].as_array().unwrap().len(),
         2
     );
+
+    let mission = call(
+        &mut server,
+        "agent_mission",
+        json!({
+            "mission_id": "route-review-mission",
+            "goal": review["goal"].clone(),
+            "steps": review["mission_draft"]["steps"].clone(),
+            "route_review": review.clone()
+        }),
+    );
+    assert_eq!(mission["__isError"], json!(false));
+    assert_eq!(mission["execution"], json!("planned"));
+    assert_eq!(
+        mission["plan"]["route_review_provenance"]["present"],
+        json!(true)
+    );
+    assert_eq!(
+        mission["plan"]["route_review_provenance"]["evidence_present"],
+        json!(true)
+    );
+    assert_eq!(
+        mission["plan"]["route_review_provenance"]["readiness_claimed"],
+        json!(false)
+    );
+
+    let mut tampered_review = review.clone();
+    tampered_review["mission_draft"]["steps"][0]["objective"] = json!("tampered after review");
+    let refused_handoff = call(
+        &mut server,
+        "agent_mission",
+        json!({
+            "mission_id": "route-review-tampered",
+            "goal": review["goal"].clone(),
+            "steps": review["mission_draft"]["steps"].clone(),
+            "route_review": tampered_review
+        }),
+    );
+    assert_eq!(refused_handoff["__isError"], json!(true));
+    assert!(refused_handoff["error"]
+        .as_str()
+        .unwrap()
+        .contains("route_review"));
 
     let blocked = call(
         &mut server,

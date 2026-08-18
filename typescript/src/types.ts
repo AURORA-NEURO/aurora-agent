@@ -9068,6 +9068,8 @@ export interface AgentMissionArgs extends JsonObject {
   evaluator_review?: JsonObject;
   /** Digest-bound domain workflow instantiation contract carried through dispatch. */
   workflow_binding?: DomainWorkflowBinding;
+  /** Ready, non-executing capability route review bound to this mission's exact steps. */
+  route_review?: JsonObject;
 }
 
 export type MissionTraceEventName =
@@ -10082,6 +10084,7 @@ export interface MissionPreflightResult extends JsonObject {
   waves: string[][];
   issues: string[];
   warnings: string[];
+  route_review_provenance?: JsonObject | null;
   steps: MissionStepPreflight[];
   limitations: string[];
 }
@@ -10104,6 +10107,7 @@ export interface MissionAssembly extends JsonObject {
   catalog_digest: string;
   mission: AgentMissionArgs;
   selected_tools: string[];
+  route_review_provenance?: JsonObject | null;
   limitations: string[];
 }
 

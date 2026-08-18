@@ -850,6 +850,12 @@ catalogue-bound `route_id`.
 the review identity, and the generated mission draft. Its explicit `carried_forward_not_recomputed`
 posture prevents retained discovery observations from being silently dropped or promoted into
 execution/readiness claims; legacy routes report `present: false`.
+The reviewed handoff can now be supplied directly as `route_review` on `agent_mission` or
+`/v1/missions/preflight`. The mission boundary requires the ready review to match the submitted
+goal and exact serialized steps, binds its review/route/catalogue identities into the plan digest,
+and retains compact evidence posture without granting permission or readiness. A changed draft,
+stale finding, or tampered evidence binding is refused before dispatch; legacy no-evidence reviews
+remain structurally supported with an explicit absent binding.
 `domain_workflow_catalogue` closes the next gap between discovery and planning: it materializes
 one deterministic, digest-bound workflow template for each of the 29 capability groups, including
 available versus missing tool definitions, per-tool schema/evidence contracts, and advisory lexical

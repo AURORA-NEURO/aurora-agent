@@ -37,6 +37,12 @@ pub const MAX_CLAIM_EVALUATORS: usize = 16;
 /// This is deliberately below the larger workflow/reconciliation envelopes: a mission must be
 /// able to carry its provenance through dispatch without becoming an unbounded transport cache.
 pub const MAX_WORKFLOW_BINDING_BYTES: usize = 2_000_000;
+/// Maximum serialized size of the ready capability-route review carried into mission preflight.
+///
+/// The review is provenance, not an execution cache. Keeping the bound explicit prevents a
+/// caller from smuggling an unbounded route, schema attachment, or evidence envelope through the
+/// mission digest.
+pub const MAX_ROUTE_REVIEW_BYTES: usize = 2_000_000;
 
 fn default_true() -> bool {
     true
@@ -182,6 +188,299 @@ fn validate_workflow_binding(binding: &Value) -> Result<(), MissionError> {
         });
     }
     Ok(())
+}
+
+fn route_review_digest(value: &Value, field: &str) -> Result<String, MissionError> {
+    let digest = value
+        .as_str()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| MissionError::InvalidRouteReview {
+            reason: format!("`{field}` must be a non-empty string"),
+        })?;
+    ContentHash::parse(digest.to_owned()).map_err(|_| MissionError::InvalidRouteReview {
+        reason: format!("`{field}` must be a 64-character hexadecimal digest"),
+    })?;
+    Ok(digest.to_owned())
+}
+
+fn optional_route_review_text(
+    object: &Map<String, Value>,
+    field: &str,
+) -> Result<Option<String>, MissionError> {
+    match object.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => value
+            .as_str()
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_owned)
+            .ok_or_else(|| MissionError::InvalidRouteReview {
+                reason: format!("`{field}` must be a non-empty string when supplied"),
+            })
+            .map(Some),
+    }
+}
+
+/// Validate the exact non-executing handoff emitted by `capability_route_review`.
+///
+/// A route review is intentionally not a permission token. It is a caller-owned checkpoint that
+/// proves which route, selections, dependency waves, and optional route evidence were reviewed.
+/// The mission boundary therefore binds the review to the current goal and serialized steps and
+/// carries only compact provenance into the plan. Any change after review is refused before a
+/// nested tool can be dispatched.
+fn validate_route_review(
+    review: &Value,
+    goal: &str,
+    steps: &[MissionStep],
+) -> Result<(), MissionError> {
+    let encoded = serde_json::to_vec(review).map_err(|error| MissionError::InvalidRouteReview {
+        reason: format!("cannot measure review: {error}"),
+    })?;
+    if encoded.len() > MAX_ROUTE_REVIEW_BYTES {
+        return Err(MissionError::InvalidRouteReview {
+            reason: format!(
+                "serialized review is {} bytes; maximum is {}",
+                encoded.len(),
+                MAX_ROUTE_REVIEW_BYTES
+            ),
+        });
+    }
+    let object = review
+        .as_object()
+        .ok_or_else(|| MissionError::InvalidRouteReview {
+            reason: "route_review must be an object".into(),
+        })?;
+    if object.get("ok").and_then(Value::as_bool) != Some(true)
+        || object.get("workflow").and_then(Value::as_str) != Some("capability_route_review")
+        || object.get("review_status").and_then(Value::as_str) != Some("ready")
+        || object.get("handoff_status").and_then(Value::as_str)
+            != Some("mission_preflight_required")
+        || object.get("execution").and_then(Value::as_str) != Some("not_started")
+    {
+        return Err(MissionError::InvalidRouteReview {
+            reason: "route_review must be an ok, ready, non-executing mission handoff".into(),
+        });
+    }
+    let findings = object
+        .get("findings")
+        .and_then(Value::as_array)
+        .ok_or_else(|| MissionError::InvalidRouteReview {
+            reason: "findings must be an array".into(),
+        })?;
+    if !findings.is_empty() {
+        return Err(MissionError::InvalidRouteReview {
+            reason: "blocked route review findings must be corrected before mission preflight"
+                .into(),
+        });
+    }
+    let review_id = route_review_digest(
+        object
+            .get("review_id")
+            .ok_or_else(|| MissionError::InvalidRouteReview {
+                reason: "missing required field `review_id`".into(),
+            })?,
+        "review_id",
+    )?;
+    let route_id = route_review_digest(
+        object
+            .get("route_id")
+            .ok_or_else(|| MissionError::InvalidRouteReview {
+                reason: "missing required field `route_id`".into(),
+            })?,
+        "route_id",
+    )?;
+    let catalog_digest = route_review_digest(
+        object
+            .get("catalog_digest")
+            .ok_or_else(|| MissionError::InvalidRouteReview {
+                reason: "missing required field `catalog_digest`".into(),
+            })?,
+        "catalog_digest",
+    )?;
+    let review_goal = object
+        .get("goal")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| MissionError::InvalidRouteReview {
+            reason: "route_review.goal must be a non-empty string".into(),
+        })?;
+    if review_goal != goal {
+        return Err(MissionError::InvalidRouteReview {
+            reason: "route_review.goal does not match mission goal".into(),
+        });
+    }
+    let mission_draft = object
+        .get("mission_draft")
+        .and_then(Value::as_object)
+        .ok_or_else(|| MissionError::InvalidRouteReview {
+            reason: "ready route_review must include a mission_draft object".into(),
+        })?;
+    if mission_draft.get("goal").and_then(Value::as_str) != Some(goal) {
+        return Err(MissionError::InvalidRouteReview {
+            reason: "route_review.mission_draft.goal does not match mission goal".into(),
+        });
+    }
+    let reviewed_steps = mission_draft
+        .get("steps")
+        .and_then(Value::as_array)
+        .ok_or_else(|| MissionError::InvalidRouteReview {
+            reason: "route_review.mission_draft.steps must be an array".into(),
+        })?;
+    let expected_steps =
+        serde_json::to_value(steps).map_err(|error| MissionError::InvalidRouteReview {
+            reason: format!("cannot encode mission steps for comparison: {error}"),
+        })?;
+    if !expected_steps
+        .as_array()
+        .is_some_and(|expected| reviewed_steps == expected)
+    {
+        return Err(MissionError::InvalidRouteReview {
+            reason: "route_review.mission_draft.steps do not exactly match mission steps".into(),
+        });
+    }
+    if !mission_draft
+        .get("dependency_waves")
+        .is_some_and(Value::is_array)
+    {
+        return Err(MissionError::InvalidRouteReview {
+            reason: "route_review.mission_draft.dependency_waves must be an array".into(),
+        });
+    }
+
+    let evidence_digest = optional_route_review_text(object, "evidence_digest")?;
+    let evidence_scope = optional_route_review_text(object, "evidence_scope")?;
+    if evidence_digest.is_some() != evidence_scope.is_some() {
+        return Err(MissionError::InvalidRouteReview {
+            reason: "evidence_digest and evidence_scope must be supplied together".into(),
+        });
+    }
+    if let Some(digest) = evidence_digest.as_deref() {
+        ContentHash::parse(digest.to_owned()).map_err(|_| MissionError::InvalidRouteReview {
+            reason: "evidence_digest must be a 64-character hexadecimal digest".into(),
+        })?;
+    }
+    let binding_present = match object.get("evidence_binding") {
+        None => false,
+        Some(binding) => {
+            let binding = binding
+                .as_object()
+                .ok_or_else(|| MissionError::InvalidRouteReview {
+                    reason: "evidence_binding must be an object".into(),
+                })?;
+            binding
+                .get("present")
+                .and_then(Value::as_bool)
+                .ok_or_else(|| MissionError::InvalidRouteReview {
+                    reason: "evidence_binding.present must be a boolean".into(),
+                })?
+        }
+    };
+    if binding_present {
+        let binding = object
+            .get("evidence_binding")
+            .and_then(Value::as_object)
+            .expect("binding_present implies an object");
+        let digest =
+            evidence_digest
+                .as_deref()
+                .ok_or_else(|| MissionError::InvalidRouteReview {
+                    reason: "present evidence_binding requires evidence_digest and evidence_scope"
+                        .into(),
+                })?;
+        let scope = evidence_scope
+            .as_deref()
+            .expect("digest and scope are paired");
+        if binding.get("evidence_digest").and_then(Value::as_str) != Some(digest)
+            || binding.get("scope").and_then(Value::as_str) != Some(scope)
+        {
+            return Err(MissionError::InvalidRouteReview {
+                reason: "evidence_binding digest and scope do not match route_review".into(),
+            });
+        }
+        if binding.get("posture").and_then(Value::as_str) != Some("carried_forward_not_recomputed")
+            || binding.get("readiness_claimed").and_then(Value::as_bool) != Some(false)
+            || binding.get("execution").and_then(Value::as_str) != Some("not_started")
+        {
+            return Err(MissionError::InvalidRouteReview {
+                reason:
+                    "evidence_binding must remain carried-forward, non-ready, and non-executing"
+                        .into(),
+            });
+        }
+        let summary = binding
+            .get("summary")
+            .and_then(Value::as_object)
+            .ok_or_else(|| MissionError::InvalidRouteReview {
+                reason: "present evidence_binding requires a summary object".into(),
+            })?;
+        if summary.get("evidence_digest").and_then(Value::as_str) != Some(digest)
+            || summary.get("scope").and_then(Value::as_str) != Some(scope)
+        {
+            return Err(MissionError::InvalidRouteReview {
+                reason: "evidence_binding.summary does not match route_review evidence".into(),
+            });
+        }
+        if mission_draft
+            .get("route_evidence_digest")
+            .and_then(Value::as_str)
+            != Some(digest)
+            || mission_draft
+                .get("route_evidence_scope")
+                .and_then(Value::as_str)
+                != Some(scope)
+        {
+            return Err(MissionError::InvalidRouteReview {
+                reason: "mission_draft route evidence does not match route_review evidence".into(),
+            });
+        }
+    } else if evidence_digest.is_some()
+        || evidence_scope.is_some()
+        || object
+            .get("evidence_binding")
+            .and_then(Value::as_object)
+            .and_then(|binding| binding.get("posture"))
+            .is_some_and(|posture| posture != "not_supplied")
+    {
+        return Err(MissionError::InvalidRouteReview {
+            reason: "legacy route review cannot claim route evidence without a present binding"
+                .into(),
+        });
+    }
+    let _ = (review_id, route_id, catalog_digest);
+    Ok(())
+}
+
+fn route_review_provenance(review: Option<&Value>) -> Option<Value> {
+    let review = review?.as_object()?;
+    let mut provenance = Map::new();
+    provenance.insert("present".into(), Value::Bool(true));
+    for field in ["review_id", "route_id", "catalog_digest"] {
+        if let Some(value) = review.get(field) {
+            provenance.insert(field.into(), value.clone());
+        }
+    }
+    let binding = review.get("evidence_binding").and_then(Value::as_object);
+    let evidence_present = binding
+        .and_then(|value| value.get("present"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    provenance.insert("evidence_present".into(), Value::Bool(evidence_present));
+    provenance.insert(
+        "posture".into(),
+        binding
+            .and_then(|value| value.get("posture"))
+            .cloned()
+            .unwrap_or_else(|| json!("not_supplied")),
+    );
+    provenance.insert("readiness_claimed".into(), json!(false));
+    provenance.insert("execution".into(), json!("not_started"));
+    if evidence_present {
+        for field in ["evidence_digest", "evidence_scope"] {
+            if let Some(value) = review.get(field) {
+                provenance.insert(field.into(), value.clone());
+            }
+        }
+    }
+    Some(Value::Object(provenance))
 }
 
 fn valid_tool_name(name: &str) -> bool {
@@ -886,6 +1185,10 @@ pub struct MissionRequest {
     /// created from the domain-workflow surface.
     #[serde(default)]
     pub workflow_binding: Option<Value>,
+    /// The ready, non-executing capability route review consumed by this mission, when route
+    /// selections were reviewed before mission preflight.
+    #[serde(default)]
+    pub route_review: Option<Value>,
 }
 
 impl MissionRequest {
@@ -949,6 +1252,9 @@ impl MissionRequest {
         }
         if let Some(binding) = &self.workflow_binding {
             validate_workflow_binding(binding)?;
+        }
+        if let Some(review) = &self.route_review {
+            validate_route_review(review, &self.goal, &self.steps)?;
         }
         for step in &self.steps {
             let mut dependencies = BTreeSet::new();
@@ -1071,6 +1377,8 @@ pub struct MissionPlan {
     pub max_parallelism: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow_binding: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route_review_provenance: Option<Value>,
     pub guarantees: Vec<String>,
     pub limitations: Vec<String>,
 }
@@ -1580,6 +1888,8 @@ pub enum MissionError {
     InvalidEvaluatorReview { reason: String },
     #[error("invalid workflow binding: {reason}")]
     InvalidWorkflowBinding { reason: String },
+    #[error("invalid capability route review: {reason}")]
+    InvalidRouteReview { reason: String },
 }
 
 /// Build a deterministic plan from a mission request.
@@ -1657,14 +1967,17 @@ pub fn plan_mission(request: &MissionRequest) -> Result<MissionPlan, MissionErro
         execution_mode: request.policy.execution_mode.clone(),
         max_parallelism: request.policy.max_parallelism,
         workflow_binding: request.workflow_binding.clone(),
+        route_review_provenance: route_review_provenance(request.route_review.as_ref()),
         guarantees: vec![
             "step dependencies are validated and ordered deterministically".into(),
             "execution requires an explicit tool allow-list and is opt-in".into(),
             "side-effect confirmation and output budgets are policy-controlled".into(),
             "the plan is content-addressed before any tool call".into(),
+            "a supplied ready capability route review is bound to the exact mission goal and steps without implying readiness or execution".into(),
         ],
         limitations: vec![
             "the planner does not infer missing arguments or scientific meaning".into(),
+            "route review provenance is caller-owned structure and does not authorize execution".into(),
             if request.policy.execution_mode == "parallel_waves" {
                 format!(
                     "independent steps in each wave execute in bounded batches of at most {} in the server process",
@@ -1710,6 +2023,7 @@ mod tests {
             claim_requests: Vec::new(),
             evaluator_review: None,
             workflow_binding: None,
+            route_review: None,
         }
     }
 

@@ -2586,8 +2586,9 @@ export class ApiClient {
     missionId: string,
     selections: readonly MissionRouteSelection[],
     policy?: AgentMissionPolicy,
+    routeReview?: JsonObject,
   ): MissionAssembly {
-    return assembleMissionFromRoute(route, missionId, selections, policy);
+    return assembleMissionFromRoute(route, missionId, selections, policy, routeReview);
   }
 
   async runtimeEffectCheck(

@@ -276,6 +276,11 @@ record, while the full digest-bound report remains available through reconciliat
 link is evidence posture only and never an authorization or readiness claim. The report may also
 include an `artifact_registry` link for the exact mission-report bytes and, when available, a
 parent edge to the indexed reconciliation artifact.
+When a mission carries a ready `route_review`, local preflight and the Rust boundary require the
+review to be non-executing, finding-free, goal-matching, and an exact digest-equivalent match for
+the mission-draft steps. `route_review_provenance` preserves review/route/catalog identities and
+the carried evidence posture without turning route evidence into permission or readiness. Reviews
+without modern route evidence remain explicit `evidence_present: false` handoffs.
 `MissionJob` makes queued, running, planned, succeeded, partial, failed, and cancelled states
 explicit; cancellation is a request to stop future dispatch, not a force-kill or rollback claim.
 Its optional `progress: MissionProgress` field provides one bounded shape for queued, live, and
@@ -837,6 +842,10 @@ blocked results preserve structured findings without executing anything. Set `va
 to receive bounded authoritative schema reports for the selected arguments; this remains review
 evidence and does not authorize execution. The typed result also includes a deterministic,
 content-addressed `review_id` for correlating the same handoff across transports and event records.
+Pass the ready result as `routeReview` to `missionFromRoute` to carry it into
+`AgentMissionArgs.route_review`; local preflight and the Rust boundary then reject changed goals,
+steps, findings, or evidence bindings. The returned `route_review_provenance` is compact audit
+structure only and never permission or readiness.
 `routeReviewEvidence(reviewId, after, limit)` retrieves bounded retained event evidence for that
 exact id as `RouteReviewEvidenceResponse`; the result preserves cursor gaps and distinguishes an
 empty retained window from a claim that the review was never produced.

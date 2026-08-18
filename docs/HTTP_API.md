@@ -696,6 +696,13 @@ static tool schemas, then returns the authoritative `agent_mission` plan with
 job, records an execution event, or invokes a nested domain tool. Binding-dependent arguments
 are represented in the plan and are validated again only when an execution request materializes
 them.
+The same document may include a ready `route_review` from `/v1/capabilities/route/review`. The
+gateway fails closed unless its goal and serialized mission-draft steps exactly match the submitted
+mission, its review/route/catalogue digests are valid, and any `evidence_binding` remains
+`carried_forward_not_recomputed`, `readiness_claimed: false`, and `execution: "not_started"`.
+The returned plan exposes compact `route_review_provenance`; this is retained audit structure, not
+an authorization or readiness credential. Legacy reviews without route evidence remain explicit
+absent bindings.
 
 `GET /v1/missions?status=<status>&limit=<n>` lists at most 256 process-local jobs in deterministic
 mission-id order. It returns lifecycle links and bounded summaries (`total_steps`, completed and

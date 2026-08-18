@@ -629,6 +629,11 @@ invent defaults:
   instantiation. The typed `MissionExecutionReport.workflow_reconciliation` property exposes the
   compact automatic reconciliation link after execution; the full digest-bound record remains
   available through the domain-workflow reconciliation helpers.
+- A ready `capability_route_review` can be passed as `MissionRequest.route_review`. The Rust
+  boundary rechecks its ready/non-executing status, goal, exact mission-draft steps, review IDs,
+  and optional carried route evidence before dispatch. `MissionPlan` and `MissionPreflight` retain
+  compact `route_review_provenance`; it is audit structure, never authorization, readiness, or a
+  domain claim. Legacy reviews without route evidence remain explicit `evidence_present: false`.
 - `mission_preflight(request, catalogue=...)` adds a no-side-effect client review before mission
   dispatch. It returns a request digest, live-catalogue digest, deterministic waves, per-step
   schema reports, binding/dependency findings, execution authorization issues, and explicit
@@ -786,11 +791,12 @@ invent defaults:
   `event_stream(...)`, and raw `events(...)` accept `receipt_id=...` as a mutually exclusive
   filter. Large receipt responses retain a bounded projection in the event row; callers must still
   use the receipt verifier for integrity.
-- `mission_from_route(route, mission_id, selections, policy=...)` converts that route into a
+- `mission_from_route(route, mission_id, selections, policy=..., route_review=...)` converts that route into a
   provenance-preserving `MissionAssembly` only after every need has one caller-selected candidate,
   explicit JSON arguments, and domain-labelled mission metadata. It refuses unresolved or
   out-of-candidate tools, performs no transport call, and is intended to feed `mission_preflight()`
-  before `agent_mission()`.
+  before `agent_mission()`. An optional ready review is carried into the request and must match
+  the generated goal and steps exactly.
 - `ApiClient.submit_mission(request)` and `AsyncApiClient.submit_mission(request)` submit the same
   typed `MissionRequest` to the bounded asynchronous HTTP executor. `mission_status(mission_id)`
   returns a typed `MissionJob` with the raw authoritative report when terminal, and

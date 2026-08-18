@@ -1616,10 +1616,13 @@ class Workspace:
         selections: Sequence[MissionRouteSelection | Mapping[str, Any]],
         *,
         policy: MissionPolicy | Mapping[str, Any] | None = None,
+        route_review: Mapping[str, Any] | None = None,
     ) -> MissionAssembly:
         """Assemble an explicit mission from one reviewed capability-route response without transport."""
 
-        return assemble_mission_from_route(route, mission_id, selections, policy=policy)
+        return assemble_mission_from_route(
+            route, mission_id, selections, policy=policy, route_review=route_review
+        )
 
     def capability_discover(
         self,
@@ -5523,10 +5526,13 @@ class AsyncWorkspace:
         selections: Sequence[MissionRouteSelection | Mapping[str, Any]],
         *,
         policy: MissionPolicy | Mapping[str, Any] | None = None,
+        route_review: Mapping[str, Any] | None = None,
     ) -> MissionAssembly:
         """Async facade for route-to-mission assembly; no network call is made."""
 
-        return assemble_mission_from_route(route, mission_id, selections, policy=policy)
+        return assemble_mission_from_route(
+            route, mission_id, selections, policy=policy, route_review=route_review
+        )
 
     async def capability_discover(
         self,

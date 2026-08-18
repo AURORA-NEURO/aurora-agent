@@ -8,6 +8,7 @@ interpretation to the authoritative MCP server.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 from typing import Any, Mapping, Sequence
 
 from .authoring import content_digest
@@ -28,6 +29,7 @@ MAX_MISSION_CLAIM_REQUESTS = 64
 MAX_MISSION_CLAIM_REFERENCES = 32
 MAX_MISSION_CLAIM_EVALUATORS = 16
 MAX_WORKFLOW_BINDING_BYTES = 2_000_000
+MAX_ROUTE_REVIEW_BYTES = 2_000_000
 OPERATIONS_REQUIRED_GATES = (
     "catalogue",
     "observed_activity",
@@ -485,6 +487,130 @@ class OperationsGateAcceptance(OperationsGateReviewRequest):
         return {**super().to_dict(), "review_id": self.review_id}
 
 
+def _route_review_digest(name: str, value: Any) -> str:
+    if not isinstance(value, str) or not value.strip() or len(value) != 64 or any(
+        character not in "0123456789abcdef" for character in value
+    ):
+        raise ArgumentError(f"{name} must be a lowercase 64-character digest")
+    return value
+
+
+def _route_review_provenance(
+    value: Mapping[str, Any],
+    goal: str,
+    normalized_steps: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    review = _mapping("route_review", value)
+    encoded = json.dumps(review, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    if len(encoded) > MAX_ROUTE_REVIEW_BYTES:
+        raise ArgumentError(
+            f"route_review may contain at most {MAX_ROUTE_REVIEW_BYTES} serialized bytes"
+        )
+    if (
+        review.get("ok") is not True
+        or review.get("workflow") != "capability_route_review"
+        or review.get("review_status") != "ready"
+        or review.get("handoff_status") != "mission_preflight_required"
+        or review.get("execution") != "not_started"
+    ):
+        raise ArgumentError("route_review must be an ok, ready, non-executing mission handoff")
+    findings = review.get("findings")
+    if not isinstance(findings, Sequence) or isinstance(findings, (str, bytes)):
+        raise ArgumentError("route_review.findings must be a sequence")
+    if findings:
+        raise ArgumentError("route_review findings must be empty before mission preflight")
+    review_id = _route_review_digest("route_review.review_id", review.get("review_id"))
+    route_id = _route_review_digest("route_review.route_id", review.get("route_id"))
+    catalog_digest = _route_review_digest(
+        "route_review.catalog_digest", review.get("catalog_digest")
+    )
+    _text("route_review.goal", review.get("goal"))
+    if review["goal"] != goal:
+        raise ArgumentError("route_review.goal does not match mission goal")
+    draft = review.get("mission_draft")
+    if not isinstance(draft, Mapping):
+        raise ArgumentError("ready route_review requires a mission_draft mapping")
+    if draft.get("goal") != goal:
+        raise ArgumentError("route_review.mission_draft.goal does not match mission goal")
+    reviewed_steps = draft.get("steps")
+    if not isinstance(reviewed_steps, Sequence) or isinstance(reviewed_steps, (str, bytes)):
+        raise ArgumentError("route_review.mission_draft.steps must be a sequence")
+    if content_digest(list(reviewed_steps)) != content_digest(list(normalized_steps)):
+        raise ArgumentError("route_review.mission_draft.steps do not exactly match mission steps")
+    waves = draft.get("dependency_waves")
+    if not isinstance(waves, Sequence) or isinstance(waves, (str, bytes)):
+        raise ArgumentError("route_review.mission_draft.dependency_waves must be a sequence")
+
+    evidence_digest = review.get("evidence_digest")
+    evidence_scope = review.get("evidence_scope")
+    if evidence_digest is None and evidence_scope is None:
+        normalized_evidence_digest = None
+        normalized_evidence_scope = None
+    elif evidence_digest is None or evidence_scope is None:
+        raise ArgumentError("route_review evidence_digest and evidence_scope must be supplied together")
+    else:
+        normalized_evidence_digest = _route_review_digest(
+            "route_review.evidence_digest", evidence_digest
+        )
+        if not isinstance(evidence_scope, str) or not evidence_scope.strip():
+            raise ArgumentError("route_review.evidence_scope must be a non-empty string")
+        normalized_evidence_scope = evidence_scope
+
+    raw_binding = review.get("evidence_binding", {"present": False})
+    binding = _mapping("route_review.evidence_binding", raw_binding)
+    binding_present = binding.get("present")
+    if not isinstance(binding_present, bool):
+        raise ArgumentError("route_review.evidence_binding.present must be a boolean")
+    if binding_present:
+        if normalized_evidence_digest is None or normalized_evidence_scope is None:
+            raise ArgumentError("present route evidence_binding requires a digest and scope")
+        if (
+            binding.get("evidence_digest") != normalized_evidence_digest
+            or binding.get("scope") != normalized_evidence_scope
+        ):
+            raise ArgumentError("route_review evidence_binding digest and scope do not match")
+        if (
+            binding.get("posture") != "carried_forward_not_recomputed"
+            or binding.get("readiness_claimed") is not False
+            or binding.get("execution") != "not_started"
+        ):
+            raise ArgumentError(
+                "route_review evidence_binding must remain carried-forward, non-ready, and non-executing"
+            )
+        summary = _mapping("route_review.evidence_binding.summary", binding.get("summary"))
+        if (
+            summary.get("evidence_digest") != normalized_evidence_digest
+            or summary.get("scope") != normalized_evidence_scope
+        ):
+            raise ArgumentError("route_review evidence summary does not match its digest and scope")
+        if (
+            draft.get("route_evidence_digest") != normalized_evidence_digest
+            or draft.get("route_evidence_scope") != normalized_evidence_scope
+        ):
+            raise ArgumentError("route_review mission draft evidence does not match its binding")
+    elif (
+        normalized_evidence_digest is not None
+        or normalized_evidence_scope is not None
+        or binding.get("posture") not in (None, "not_supplied")
+    ):
+        raise ArgumentError("legacy route review cannot claim evidence without a present binding")
+
+    provenance: dict[str, Any] = {
+        "present": True,
+        "review_id": review_id,
+        "route_id": route_id,
+        "catalog_digest": catalog_digest,
+        "evidence_present": binding_present,
+        "posture": binding.get("posture", "not_supplied"),
+        "readiness_claimed": False,
+        "execution": "not_started",
+    }
+    if binding_present:
+        provenance["evidence_digest"] = normalized_evidence_digest
+        provenance["evidence_scope"] = normalized_evidence_scope
+    return provenance
+
+
 @dataclass(frozen=True)
 class MissionRequest:
     """Build a previewable or explicitly executable cross-domain mission."""
@@ -497,6 +623,7 @@ class MissionRequest:
     claim_requests: Sequence[MissionClaimRequest | Mapping[str, Any]] = ()
     evaluator_review: Mapping[str, Any] | None = None
     workflow_binding: Mapping[str, Any] | None = None
+    route_review: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         _text("mission_id", self.mission_id)
@@ -577,6 +704,8 @@ class MissionRequest:
                 raise ArgumentError("workflow_binding.evidence_plan.steps must be a sequence")
             if not 0 < len(evidence_plan["steps"]) <= MAX_MISSION_STEPS:
                 raise ArgumentError(f"workflow_binding.evidence_plan.steps must contain 1..{MAX_MISSION_STEPS} entries")
+        if self.route_review is not None:
+            _route_review_provenance(self.route_review, self.goal, normalized_steps)
 
     def to_mcp_arguments(self) -> dict[str, Any]:
         arguments: dict[str, Any] = {
@@ -602,6 +731,8 @@ class MissionRequest:
             arguments["evaluator_review"] = _mapping("evaluator_review", self.evaluator_review)
         if self.workflow_binding is not None:
             arguments["workflow_binding"] = _mapping("workflow_binding", self.workflow_binding)
+        if self.route_review is not None:
+            arguments["route_review"] = _mapping("route_review", self.route_review)
         return arguments
 
 
@@ -700,6 +831,7 @@ def mission_from_route(
     selections: Sequence[MissionRouteSelection | Mapping[str, Any]],
     *,
     policy: MissionPolicy | Mapping[str, Any] | None = None,
+    route_review: Mapping[str, Any] | None = None,
 ) -> MissionAssembly:
     """Build an explicit mission only from tools selected out of one capability-route result.
 
@@ -787,6 +919,7 @@ def mission_from_route(
         goal,
         [selected_by_need[need_id].to_step() for need_id in ordered_need_ids],
         policy,
+        route_review=route_review,
     )
     return MissionAssembly(
         route_id=route_id,
@@ -861,6 +994,7 @@ class MissionPreflight:
     steps: tuple[MissionStepPreflight, ...]
     issues: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
+    route_review_provenance: dict[str, Any] | None = None
 
     @property
     def ok(self) -> bool:
@@ -901,6 +1035,7 @@ class MissionPreflight:
             "waves": [list(wave) for wave in self.waves],
             "issues": list(self.issues),
             "warnings": list(self.warnings),
+            "route_review_provenance": self.route_review_provenance,
             "steps": [step.to_dict() for step in self.steps],
             "limitations": [
                 "preflight checks transport shape and mission graph invariants only",
@@ -2015,6 +2150,14 @@ def preflight_mission(request: MissionRequest, catalogue: ToolCatalogue) -> Miss
         issues.append(f"policy: {error}")
 
     raw_steps = [_step(value) for value in request.steps]
+    route_review_provenance: dict[str, Any] | None = None
+    if request.route_review is not None:
+        try:
+            route_review_provenance = _route_review_provenance(
+                request.route_review, request.goal, raw_steps
+            )
+        except ArgumentError as error:
+            issues.append(f"route_review: {error}")
     if len(raw_steps) > MAX_MISSION_STEPS:
         issues.append(f"mission has {len(raw_steps)} steps; maximum is {MAX_MISSION_STEPS}")
     if len(raw_steps) > policy.max_steps:
@@ -2170,6 +2313,7 @@ def preflight_mission(request: MissionRequest, catalogue: ToolCatalogue) -> Miss
         steps=tuple(step_results),
         issues=tuple(dict.fromkeys(issues)),
         warnings=tuple(dict.fromkeys(warnings)),
+        route_review_provenance=route_review_provenance,
     )
 
 

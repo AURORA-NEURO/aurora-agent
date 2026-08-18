@@ -12519,6 +12519,75 @@ mod tests {
         );
         assert_eq!(body["operations_evidence"]["acceptance_required"], true);
         assert_eq!(body["operations_evidence"]["acceptance_valid"], false);
+        let reviewed = router.handle(request(
+            "POST",
+            "/v1/missions/preflight",
+            json!({
+                "mission_id": "api-route-review-1",
+                "goal": "preview a reviewed route",
+                "steps": [{
+                    "id": "catalog",
+                    "domain": "workspace",
+                    "capability": "discovery",
+                    "objective": "discover routes",
+                    "tool": "workspace_capabilities",
+                    "arguments": {},
+                    "depends_on": [],
+                    "bindings": [],
+                    "required": true
+                }],
+                "route_review": {
+                    "ok": true,
+                    "workflow": "capability_route_review",
+                    "review_id": "a".repeat(64),
+                    "route_id": "b".repeat(64),
+                    "catalog_digest": "c".repeat(64),
+                    "goal": "preview a reviewed route",
+                    "findings": [],
+                    "review_status": "ready",
+                    "handoff_status": "mission_preflight_required",
+                    "execution": "not_started",
+                    "evidence_digest": "e".repeat(64),
+                    "evidence_scope": "capability_route",
+                    "evidence_binding": {
+                        "present": true,
+                        "evidence_digest": "e".repeat(64),
+                        "scope": "capability_route",
+                        "summary": {"evidence_digest": "e".repeat(64), "scope": "capability_route"},
+                        "posture": "carried_forward_not_recomputed",
+                        "readiness_claimed": false,
+                        "execution": "not_started"
+                    },
+                    "mission_draft": {
+                        "goal": "preview a reviewed route",
+                        "steps": [{
+                            "id": "catalog",
+                            "domain": "workspace",
+                            "capability": "discovery",
+                            "objective": "discover routes",
+                            "tool": "workspace_capabilities",
+                            "arguments": {},
+                            "depends_on": [],
+                            "bindings": [],
+                            "required": true
+                        }],
+                        "dependency_waves": [["catalog"]],
+                        "route_evidence_digest": "e".repeat(64),
+                        "route_evidence_scope": "capability_route"
+                    }
+                }
+            }),
+        ));
+        assert_eq!(reviewed.status, 200);
+        let reviewed_body: Value = serde_json::from_slice(&reviewed.body).unwrap();
+        assert_eq!(
+            reviewed_body["plan"]["route_review_provenance"]["present"],
+            true
+        );
+        assert_eq!(
+            reviewed_body["plan"]["route_review_provenance"]["evidence_present"],
+            true
+        );
         let missing = router.handle(request("GET", "/v1/missions/api-preflight-1", json!({})));
         assert_eq!(missing.status, 404);
 
