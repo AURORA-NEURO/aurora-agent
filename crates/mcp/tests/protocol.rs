@@ -323,7 +323,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 226);
+    assert_eq!(tools.len(), 229);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -6855,6 +6855,64 @@ fn developer_workbench_verify_replays_retained_projection_without_execution() {
 }
 
 #[test]
+fn developer_workbench_registry_retains_queries_and_fetches_reports() {
+    let mut server = server();
+    let retained = call(
+        &mut server,
+        "developer_workbench",
+        json!({
+            "session": {
+                "session_id": "registry-protocol",
+                "owner": "agent-a",
+                "goal": "retain a cross-domain report",
+                "artifacts": [{
+                    "id": "artifact-1", "title": "result", "path": "result.json",
+                    "domain": "oncology", "capability": "evidence", "state": "validated",
+                    "evidence": "observed", "digest": "a".repeat(64), "score": 0.8
+                }],
+                "cells": [], "changes": []
+            },
+            "dashboard": {"domains": ["oncology"], "limit": 10}
+        }),
+    );
+    assert_eq!(retained["ok"], json!(true));
+    let imported = call(
+        &mut server,
+        "developer_workbench_import",
+        json!({"report": retained.clone()}),
+    );
+    assert_eq!(imported["ok"], json!(true));
+    assert_eq!(imported["created"], json!(true));
+    let digest = imported["workbench_report_digest"].as_str().unwrap();
+    assert_eq!(digest.len(), 64);
+
+    let repeated = call(
+        &mut server,
+        "developer_workbench_import",
+        json!({"report": retained}),
+    );
+    assert_eq!(repeated["already_present"], json!(true));
+    let queried = call(
+        &mut server,
+        "developer_workbench_query",
+        json!({"domain": "oncology", "capability": "evidence"}),
+    );
+    assert_eq!(queried["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(queried["rows"][0]["workbench_report_digest"], digest);
+    let fetched = call(
+        &mut server,
+        "developer_workbench_get",
+        json!({"workbench_report_digest": digest}),
+    );
+    assert_eq!(fetched["ok"], json!(true));
+    assert_eq!(fetched["workbench_report_digest"], digest);
+    assert_eq!(
+        fetched["report"]["schema_version"],
+        "bioprism-devplat-workbench/0.1"
+    );
+}
+
+#[test]
 fn ci_execution_evidence_audit_reconciles_plan_and_run_without_execution() {
     let mut server = server();
     let ci = json!({
@@ -8142,12 +8200,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(226));
-    assert_eq!(result["advertised_tool_count"], json!(226));
+    assert_eq!(result["unique_catalog_tools"], json!(229));
+    assert_eq!(result["advertised_tool_count"], json!(229));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(226));
-    assert_eq!(result["schema_quality"]["valid"], json!(226));
+    assert_eq!(result["schema_quality"]["checked"], json!(229));
+    assert_eq!(result["schema_quality"]["valid"], json!(229));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

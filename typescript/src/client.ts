@@ -322,6 +322,11 @@ import type {
   WeaveLangCompileArgs,
   WeaveLangCompileResult,
   DeveloperWorkbenchArgs,
+  DeveloperWorkbenchRegistryGetResult,
+  DeveloperWorkbenchRegistryImportArgs,
+  DeveloperWorkbenchRegistryImportResult,
+  DeveloperWorkbenchRegistryQueryArgs,
+  DeveloperWorkbenchRegistryQueryResult,
   DeveloperWorkbenchVerificationArgs,
   DeveloperWorkbenchVerificationResult,
   CiProviderNormalizationArgs,
@@ -1773,6 +1778,60 @@ export class ApiClient {
     options?: ClientRequestOptions,
   ): Promise<RestToolResponse<DeveloperWorkbenchVerificationResult>> {
     return this.callTool<DeveloperWorkbenchVerificationResult>("developer_workbench_verify", args, options);
+  }
+
+  async developerWorkbenchImportRest(
+    args: DeveloperWorkbenchRegistryImportArgs,
+    options?: ClientRequestOptions,
+  ): Promise<DeveloperWorkbenchRegistryImportResult> {
+    if (!isObject(args) || !isObject(args.report) || !Object.keys(args.report).length) {
+      throw new ArgumentError("developer workbench registry import requires a non-empty report object");
+    }
+    return this.request<DeveloperWorkbenchRegistryImportResult>("POST", "/v1/developer-workbench/reports", args, options);
+  }
+
+  async developerWorkbenchImport(
+    args: DeveloperWorkbenchRegistryImportArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DeveloperWorkbenchRegistryImportResult>> {
+    return this.callTool<DeveloperWorkbenchRegistryImportResult>("developer_workbench_import", args, options);
+  }
+
+  async developerWorkbenchQueryRest(
+    args: DeveloperWorkbenchRegistryQueryArgs = {},
+    options?: ClientRequestOptions,
+  ): Promise<DeveloperWorkbenchRegistryQueryResult> {
+    if (!isObject(args)) throw new ArgumentError("developer workbench registry query arguments must be an object");
+    if (args.session_digest !== undefined && (typeof args.session_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.session_digest))) throw new ArgumentError("session_digest must be a lowercase SHA-256 digest");
+    if (args.after !== undefined && (typeof args.after !== "string" || !/^[0-9a-f]{64}$/.test(args.after))) throw new ArgumentError("after must be a lowercase SHA-256 digest");
+    if (args.max_items !== undefined && (!Number.isInteger(args.max_items) || args.max_items < 1 || args.max_items > 256)) throw new ArgumentError("max_items must be between 1 and 256");
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries({ ...args, max_items: args.max_items ?? 100, include_reports: args.include_reports ?? false })) {
+      if (value !== undefined) params.set(key, String(value));
+    }
+    return this.request<DeveloperWorkbenchRegistryQueryResult>("GET", `/v1/developer-workbench/reports?${params.toString()}`, undefined, options);
+  }
+
+  async developerWorkbenchQuery(
+    args: DeveloperWorkbenchRegistryQueryArgs = {},
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DeveloperWorkbenchRegistryQueryResult>> {
+    return this.callTool<DeveloperWorkbenchRegistryQueryResult>("developer_workbench_query", args, options);
+  }
+
+  async developerWorkbenchGetRest(
+    digest: string,
+    options?: ClientRequestOptions,
+  ): Promise<DeveloperWorkbenchRegistryGetResult> {
+    if (!/^[0-9a-f]{64}$/.test(digest)) throw new ArgumentError("workbench_report_digest must be a lowercase SHA-256 digest");
+    return this.request<DeveloperWorkbenchRegistryGetResult>("GET", `/v1/developer-workbench/reports/${encodeURIComponent(digest)}`, undefined, options);
+  }
+
+  async developerWorkbenchGet(
+    digest: string,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DeveloperWorkbenchRegistryGetResult>> {
+    return this.callTool<DeveloperWorkbenchRegistryGetResult>("developer_workbench_get", { workbench_report_digest: digest }, options);
   }
 
   async ciExecutionEvidenceAudit(args: CiExecutionEvidenceArgs, options?: ClientRequestOptions): Promise<RestToolResponse<CiExecutionEvidenceResult>> {

@@ -53,7 +53,7 @@ evidence judgements, reference panels, evidence-conditioned BioCapability audit 
 paired contrasts, and calibration forecasts. They validate local JSON and cross-field invariants,
 then let `Workspace` delegate final decisions and arithmetic to the Rust kernel through
 `pack_health_assess()`, `mutation_family()`, `oracle_combine()`,
-`metrics_analytics_audit()`, `biocapability_evidence_audit()`, `bioql_compile()`, `world_claim_check()`, `lab_plan()`, `routing_decide()`, `fiber_compile()`, `fiber_refine()`, `fiber_explain()`, `fiber_verify()`, `projection_bundle()`, `repository_catalog()`, `repository_bundle()`, `repository_impact()`, `telemetry_project()`, `developer_workbench()`, `developer_workbench_verify()`, `agent_mission()`, `capability_discover()`, and the evaluation helpers.
+`metrics_analytics_audit()`, `biocapability_evidence_audit()`, `bioql_compile()`, `world_claim_check()`, `lab_plan()`, `routing_decide()`, `fiber_compile()`, `fiber_refine()`, `fiber_explain()`, `fiber_verify()`, `projection_bundle()`, `repository_catalog()`, `repository_bundle()`, `repository_impact()`, `telemetry_project()`, `developer_workbench()`, `developer_workbench_verify()`, `developer_workbench_import()`, `developer_workbench_query()`, `developer_workbench_get()`, `agent_mission()`, `capability_discover()`, and the evaluation helpers.
 The repository helpers preserve bounded discovery and route completeness; telemetry requires an
 explicit redaction policy and observed metric inputs. The FIBER helpers preserve the progressive-disclosure lifecycle: compile the minimal contract,
 refine only when necessary, inspect omissions before trust, verify certificates, and opt into full
@@ -62,7 +62,9 @@ The mission layer lets an agent preview or explicitly execute a bounded, allow-l
 the existing domain tools while retaining refusals and blocking dependent work. The workbench
 keeps authoring/notebook sessions, stale digests, capability holes, release posture, and review-only
 CI planning in one evidence-bearing response; it does not pretend to execute a hosted UI or GitHub
-runner. `MissionBinding` supports validated field-level dataflow between direct prerequisite steps,
+runner. The registry helpers retain structurally valid workbench reports behind bounded digest
+queries and restart-safe checkpoints; they never execute or re-evaluate the retained report.
+`MissionBinding` supports validated field-level dataflow between direct prerequisite steps,
 and `CapabilityQuery` routes across the complete domain catalogue with optional tool schemas;
 `capability_audit()` verifies the catalogue against the authoritative MCP schema set, and
 `capability_route()` batches named needs without executing the returned candidates.

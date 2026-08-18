@@ -248,6 +248,7 @@ pub mod security_program;
 pub mod surface;
 pub mod walkthrough;
 pub mod workbench;
+pub mod workbench_registry;
 pub mod workflow;
 pub mod workflow_execution_evidence;
 pub mod workflow_reconciliation;
@@ -559,6 +560,12 @@ pub use workbench::{
     StudioChange, StudioSession, WorkbenchError, WorkbenchFinding, WorkbenchMismatch,
     WorkbenchReport, WorkbenchRequest, WorkbenchVerificationPolicy, WorkbenchVerificationReport,
     WorkbenchVerificationRequest, WORKBENCH_SCHEMA_VERSION, WORKBENCH_VERIFY_SCHEMA_VERSION,
+};
+pub use workbench_registry::{
+    WorkbenchRegistryError, WorkbenchReportRegistry, MAX_WORKBENCH_QUERY_ITEMS,
+    MAX_WORKBENCH_REGISTRY_BYTES, MAX_WORKBENCH_REPORTS, WORKBENCH_REGISTRY_GET_SCHEMA_VERSION,
+    WORKBENCH_REGISTRY_IMPORT_SCHEMA_VERSION, WORKBENCH_REGISTRY_QUERY_SCHEMA_VERSION,
+    WORKBENCH_REGISTRY_SCHEMA_VERSION,
 };
 pub use workflow::{
     build_domain_workflow_catalogue, build_domain_workflow_portfolio, instantiate_domain_workflow,

@@ -115,6 +115,14 @@ COMMANDS
                     [--expected-report-digest <digest>]
                     Verify a retained authoring/notebook report and optional CI projection;
                     no notebook cells, YAML, GitHub, or CI run is executed.
+  workbench import  --report <path> --store <path> [--dry-run]
+                    Retain a structurally valid workbench report in a bounded local checkpoint.
+  workbench query   --store <path> [--session-digest <digest>] [--domain <name>]
+                    [--capability <name>] [--state <state>] [--release-ready]
+                    [--after <digest>] [--limit <n>] [--include-reports]
+                    Query retained report posture without executing or re-evaluating a workbench.
+  workbench get     --store <path> --digest <digest>
+                    Fetch one retained report by canonical content digest.
   workflow reconcile --instantiation <path> [--mission <path>] [--evidence-bundle <path>]
                     Reconcile a retained agent_mission report or evidence bundle against the
                     instantiated workflow. Exit 1 when completion evidence is not ready.
@@ -248,6 +256,26 @@ pub enum Command {
         ci_replay: Option<PathBuf>,
         policy: Option<PathBuf>,
         expected_report_digest: Option<String>,
+    },
+    WorkbenchImport {
+        report: PathBuf,
+        store: PathBuf,
+        dry_run: bool,
+    },
+    WorkbenchQuery {
+        store: PathBuf,
+        session_digest: Option<String>,
+        domain: Option<String>,
+        capability: Option<String>,
+        state: Option<String>,
+        release_ready: bool,
+        after: Option<String>,
+        limit: usize,
+        include_reports: bool,
+    },
+    WorkbenchGet {
+        store: PathBuf,
+        digest: String,
     },
     WorkflowReconcile {
         instantiation: PathBuf,
@@ -466,6 +494,33 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
             policy: options.take_optional_path("--policy"),
             expected_report_digest: options.take_optional("--expected-report-digest"),
         },
+        ("workbench", "import") => Command::WorkbenchImport {
+            report: options.take_path("--report")?,
+            store: options.take_path("--store")?,
+            dry_run: options.take_switch("--dry-run"),
+        },
+        ("workbench", "query") => Command::WorkbenchQuery {
+            store: options.take_path("--store")?,
+            session_digest: options.take_optional("--session-digest"),
+            domain: options.take_optional("--domain"),
+            capability: options.take_optional("--capability"),
+            state: options.take_optional("--state"),
+            release_ready: options.take_switch("--release-ready"),
+            after: options.take_optional("--after"),
+            limit: match options.take_optional("--limit") {
+                None => 100,
+                Some(text) => text
+                    .parse()
+                    .map_err(|_| usage(format!("--limit must be a number, got {text:?}")))?,
+            },
+            include_reports: options.take_switch("--include-reports"),
+        },
+        ("workbench", "get") => Command::WorkbenchGet {
+            store: options.take_path("--store")?,
+            digest: options
+                .take_optional("--digest")
+                .ok_or_else(|| usage("--digest is required"))?,
+        },
         ("workflow", "reconcile") => Command::WorkflowReconcile {
             instantiation: options.take_path("--instantiation")?,
             mission: options.take_optional_path("--mission"),
@@ -513,7 +568,8 @@ struct Options {
 }
 
 impl Options {
-    fn collect<I: Iterator<Item = String>>(mut cursor: I) -> CliResult<Self> {
+    fn collect<I: Iterator<Item = String>>(cursor: I) -> CliResult<Self> {
+        let mut cursor = cursor.peekable();
         let mut values = Vec::new();
         while let Some(token) = cursor.next() {
             if !token.starts_with("--") {
@@ -523,13 +579,12 @@ impl Options {
                 values.push((name.to_string(), Some(inline.to_string())));
                 continue;
             }
-            match cursor.next() {
-                Some(next) if !next.starts_with("--") => values.push((token, Some(next))),
-                Some(next) => {
-                    values.push((token, None));
-                    values.push((next, None));
+            match cursor.peek() {
+                Some(next) if !next.starts_with("--") => {
+                    let next = cursor.next().expect("peeked CLI option value");
+                    values.push((token, Some(next)));
                 }
-                None => values.push((token, None)),
+                _ => values.push((token, None)),
             }
         }
         Ok(Options { values })
@@ -805,6 +860,102 @@ mod tests {
                     ci_replay: Some(PathBuf::from("ci.json")),
                     policy: Some(PathBuf::from("policy.json")),
                     expected_report_digest: Some("a".repeat(64)),
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn workbench_registry_commands_parse_storage_and_query_controls() {
+        let imported = parse(
+            [
+                "workbench",
+                "import",
+                "--report",
+                "report.json",
+                "--store",
+                "state.json",
+                "--dry-run",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse workbench import");
+        assert_eq!(
+            imported,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::WorkbenchImport {
+                    report: PathBuf::from("report.json"),
+                    store: PathBuf::from("state.json"),
+                    dry_run: true,
+                },
+            })
+        );
+
+        let queried = parse(
+            [
+                "workbench",
+                "query",
+                "--store",
+                "state.json",
+                "--session-digest",
+                &"a".repeat(64),
+                "--domain",
+                "oncology",
+                "--capability",
+                "evidence",
+                "--state",
+                "release_ready",
+                "--release-ready",
+                "--after",
+                &"b".repeat(64),
+                "--limit",
+                "17",
+                "--include-reports",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse workbench query");
+        assert_eq!(
+            queried,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::WorkbenchQuery {
+                    store: PathBuf::from("state.json"),
+                    session_digest: Some("a".repeat(64)),
+                    domain: Some("oncology".into()),
+                    capability: Some("evidence".into()),
+                    state: Some("release_ready".into()),
+                    release_ready: true,
+                    after: Some("b".repeat(64)),
+                    limit: 17,
+                    include_reports: true,
+                },
+            })
+        );
+
+        let fetched = parse(
+            [
+                "workbench",
+                "get",
+                "--store",
+                "state.json",
+                "--digest",
+                &"c".repeat(64),
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse workbench get");
+        assert_eq!(
+            fetched,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::WorkbenchGet {
+                    store: PathBuf::from("state.json"),
+                    digest: "c".repeat(64),
                 },
             })
         );

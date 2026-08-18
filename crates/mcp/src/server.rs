@@ -158,13 +158,13 @@ use bioprism_devplat::{
     MissionEvaluatorReviewRequest, MissionReport, MissionRequest, MissionStep, MissionStepResult,
     MissionTraceEvent, MissionTraceObserver, OperationalReadinessManifest, ReleasePipelineManifest,
     SandboxManifest, SandboxRuntimeManifest, SecurityPrivacyManifest, SecurityProgramManifest,
-    WorkbenchRequest, WorkbenchVerificationRequest, WorkflowExecutionEvidenceRegistry,
-    ADAPTER_DOMAIN_REPORT_SCHEMA_VERSION, ADAPTER_DOMAIN_REPORT_WORKFLOW,
-    CAPABILITY_SCHEMA_VERSION, DOMAIN_ACQUISITION_SCHEMA_VERSION, DOMAIN_ACQUISITION_WORKFLOW,
-    DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION, DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW,
-    DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA_VERSION, DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW,
-    DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION, DOMAIN_EVIDENCE_INTAKE_WORKFLOW,
-    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_SCHEMA,
+    WorkbenchReportRegistry, WorkbenchRequest, WorkbenchVerificationRequest,
+    WorkflowExecutionEvidenceRegistry, ADAPTER_DOMAIN_REPORT_SCHEMA_VERSION,
+    ADAPTER_DOMAIN_REPORT_WORKFLOW, CAPABILITY_SCHEMA_VERSION, DOMAIN_ACQUISITION_SCHEMA_VERSION,
+    DOMAIN_ACQUISITION_WORKFLOW, DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_INTAKE_WORKFLOW, DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_SCHEMA,
     DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_WORKFLOW,
     DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LINEAGE_SCHEMA,
     DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LINEAGE_WORKFLOW,
@@ -565,6 +565,7 @@ pub struct Server {
     evidence_registry: Arc<Mutex<EvidenceBundleRegistry>>,
     workflow_reconciliation_registry: Arc<Mutex<DomainWorkflowReconciliationRegistry>>,
     workflow_execution_evidence_registry: Arc<Mutex<WorkflowExecutionEvidenceRegistry>>,
+    workbench_registry: Arc<Mutex<WorkbenchReportRegistry>>,
     artifact_registry: Arc<Mutex<ArtifactRegistry>>,
 }
 
@@ -1234,6 +1235,28 @@ impl Server {
         workflow_execution_evidence_registry: Arc<Mutex<WorkflowExecutionEvidenceRegistry>>,
         artifact_registry: Arc<Mutex<ArtifactRegistry>>,
     ) -> Self {
+        Self::with_all_registries(
+            root,
+            evidence_registry,
+            workflow_reconciliation_registry,
+            workflow_execution_evidence_registry,
+            Arc::new(Mutex::new(WorkbenchReportRegistry::new())),
+            artifact_registry,
+        )
+    }
+
+    /// Construct a server over every caller-owned registry, including retained workbench reports.
+    ///
+    /// The API gateway uses this seam to share its restart-restored workbench index with both
+    /// direct HTTP handlers and the MCP dispatcher in the same process.
+    pub fn with_all_registries(
+        root: PathBuf,
+        evidence_registry: Arc<Mutex<EvidenceBundleRegistry>>,
+        workflow_reconciliation_registry: Arc<Mutex<DomainWorkflowReconciliationRegistry>>,
+        workflow_execution_evidence_registry: Arc<Mutex<WorkflowExecutionEvidenceRegistry>>,
+        workbench_registry: Arc<Mutex<WorkbenchReportRegistry>>,
+        artifact_registry: Arc<Mutex<ArtifactRegistry>>,
+    ) -> Self {
         Server {
             root: std::fs::canonicalize(&root).unwrap_or(root),
             lifecycle: Lifecycle::New,
@@ -1241,6 +1264,7 @@ impl Server {
             evidence_registry,
             workflow_reconciliation_registry,
             workflow_execution_evidence_registry,
+            workbench_registry,
             artifact_registry,
         }
     }
@@ -1799,6 +1823,9 @@ impl Server {
             "security_program_audit" => self.security_program_audit(&arguments),
             "developer_workbench" => self.developer_workbench(&arguments),
             "developer_workbench_verify" => self.developer_workbench_verify(&arguments),
+            "developer_workbench_import" => self.developer_workbench_import(&arguments),
+            "developer_workbench_query" => self.developer_workbench_query(&arguments),
+            "developer_workbench_get" => self.developer_workbench_get(&arguments),
             "ci_provider_normalize" => self.ci_provider_normalize(&arguments),
             "ci_provider_evidence_audit" => self.ci_provider_evidence_audit(&arguments),
             "ci_execution_evidence_audit" => self.ci_execution_evidence_audit(&arguments),
@@ -30636,6 +30663,104 @@ impl Server {
         Ok(output)
     }
 
+    /// Retain a structurally valid developer workbench report in the bounded shared registry.
+    ///
+    /// This is an explicit handoff: generating a report never silently mutates retention state.
+    /// The import kernel strips transport metadata and revalidates the typed report before the
+    /// canonical report digest becomes queryable.
+    fn developer_workbench_import(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode developer workbench import input: {error}"))?;
+        if encoded.len() > bioprism_devplat::MAX_WORKBENCH_REGISTRY_BYTES {
+            return Err(format!(
+                "developer workbench import input exceeds the {}-byte safety bound",
+                bioprism_devplat::MAX_WORKBENCH_REGISTRY_BYTES
+            ));
+        }
+        let report = arguments.get("report").ok_or("report is required")?;
+        self.workbench_registry
+            .lock()
+            .map_err(|_| "workbench registry lock is poisoned".to_string())?
+            .import(report)
+            .map_err(|error| format!("developer workbench import refused: {error}"))
+    }
+
+    /// Query retained workbench reports by session and dashboard posture without executing work.
+    fn developer_workbench_query(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode developer workbench query input: {error}"))?;
+        if encoded.len() > 1_000_000 {
+            return Err(
+                "developer workbench query input exceeds the 1000000-byte safety bound".into(),
+            );
+        }
+        let optional_string = |name: &str| -> Result<Option<&str>, String> {
+            arguments
+                .get(name)
+                .map(|value| {
+                    value
+                        .as_str()
+                        .ok_or_else(|| format!("{name} must be a string"))
+                })
+                .transpose()
+        };
+        let session_digest = optional_string("session_digest")?;
+        let domain = optional_string("domain")?;
+        let capability = optional_string("capability")?;
+        let state = optional_string("state")?;
+        let after = optional_string("after")?;
+        let release_ready = arguments
+            .get("release_ready")
+            .map(|value| value.as_bool().ok_or("release_ready must be a boolean"))
+            .transpose()?;
+        let max_items = arguments
+            .get("max_items")
+            .map(|value| {
+                value
+                    .as_u64()
+                    .ok_or_else(|| "max_items must be an integer".to_string())
+                    .and_then(|number| {
+                        usize::try_from(number).map_err(|_| "max_items is too large".to_string())
+                    })
+            })
+            .transpose()?
+            .unwrap_or(100);
+        let include_reports = arguments
+            .get("include_reports")
+            .map(|value| value.as_bool().ok_or("include_reports must be a boolean"))
+            .transpose()?
+            .unwrap_or(false);
+        self.workbench_registry
+            .lock()
+            .map_err(|_| "workbench registry lock is poisoned".to_string())?
+            .query(
+                session_digest,
+                domain,
+                capability,
+                state,
+                release_ready,
+                after,
+                max_items,
+                include_reports,
+            )
+            .map_err(|error| format!("developer workbench query refused: {error}"))
+    }
+
+    /// Fetch one retained workbench report by its canonical content hash.
+    fn developer_workbench_get(&self, arguments: &Value) -> Result<Value, String> {
+        let digest = arguments
+            .get("workbench_report_digest")
+            .and_then(Value::as_str)
+            .ok_or("workbench_report_digest is required and must be a content hash")?;
+        bioprism_ids::ContentHash::parse(digest.to_string())
+            .map_err(|error| format!("workbench_report_digest is invalid: {error}"))?;
+        self.workbench_registry
+            .lock()
+            .map_err(|_| "workbench registry lock is poisoned".to_string())?
+            .get_response(digest)
+            .map_err(|error| format!("developer workbench get refused: {error}"))
+    }
+
     /// Reconcile caller-supplied CI evidence against a freshly generated workbench plan.
     ///
     /// This is deliberately a structural audit: it never contacts a provider or executes the
@@ -33847,7 +33972,7 @@ pub fn workspace_capabilities() -> Value {
             "domains": ["diagnostics", "conformance", "cookbook", "SDK contracts", "signed bundles"],
             "crates": ["bioprism-devx", "bioprism-devplat", "bioprism-conformance", "bioprism-cookbook", "bioprism-sdk", "bioprism-bundle", "bioprism-scale", "bioprism-stewardship"],
             "python_artifacts": ["python/prism_sdk"],
-            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "engineering_execution_plan", "release_pipeline_audit", "operational_readiness_audit", "security_privacy_audit", "sandbox_admission_audit", "sandbox_runtime_simulate", "security_program_audit", "agent_mission", "developer_workbench", "developer_workbench_verify", "ci_provider_normalize", "ci_provider_evidence_audit", "ci_execution_evidence_audit", "execution_provenance_audit", "developer_delivery_audit", "developer_delivery_receipt", "developer_delivery_receipt_verify", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
+            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "engineering_execution_plan", "release_pipeline_audit", "operational_readiness_audit", "security_privacy_audit", "sandbox_admission_audit", "sandbox_runtime_simulate", "security_program_audit", "agent_mission", "developer_workbench", "developer_workbench_verify", "developer_workbench_import", "developer_workbench_query", "developer_workbench_get", "ci_provider_normalize", "ci_provider_evidence_audit", "ci_execution_evidence_audit", "execution_provenance_audit", "developer_delivery_audit", "developer_delivery_receipt", "developer_delivery_receipt_verify", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
             "cli_entrypoints": ["--help", "--json"],
             "status": "available"
         }
@@ -37347,6 +37472,46 @@ pub fn tool_definitions() -> Vec<Value> {
                     }
                 },
                 "required": ["session", "report"]
+            }
+        }),
+        json!({
+            "name": "developer_workbench_import",
+            "description": "Retain a structurally valid developer_workbench report in the bounded digest-addressed local registry. MCP/REST transport metadata is ignored for canonical identity; import is idempotent and never executes notebook cells, CI, GitHub, or external effects.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "report": { "type": "object", "description": "Complete developer_workbench report, either direct or with the returned transport envelope fields." }
+                },
+                "required": ["report"]
+            }
+        }),
+        json!({
+            "name": "developer_workbench_query",
+            "description": "Query the bounded retained developer-workbench report registry by session digest, dashboard domain/capability/state, release-ready posture, and a digest cursor. Rows are deterministic and report bodies are opt-in; the query never executes or re-evaluates a workbench.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "session_digest": { "type": "string", "minLength": 64, "maxLength": 64 },
+                    "domain": { "type": "string" },
+                    "capability": { "type": "string" },
+                    "state": { "type": "string", "enum": ["draft", "validated", "released", "withdrawn"] },
+                    "release_ready": { "type": "boolean" },
+                    "after": { "type": "string", "minLength": 64, "maxLength": 64 },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 256, "default": 100 },
+                    "include_reports": { "type": "boolean", "default": false }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "developer_workbench_get",
+            "description": "Fetch one retained developer_workbench report by its canonical SHA-256 content digest. The report was structurally validated at import; lookup never executes or re-evaluates it.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "workbench_report_digest": { "type": "string", "minLength": 64, "maxLength": 64 }
+                },
+                "required": ["workbench_report_digest"]
             }
         }),
         json!({

@@ -35,7 +35,8 @@ if (result.mcp.result?.isError) {
 - `callTool(name, arguments)` is the escape hatch for all current and future MCP tools. The typed
   helpers `traceOtelIngest`, `metricsProfileAudit`, `metricsAnalyticsAudit`, `bioCapabilityEvidenceAudit`,
   `bioAtlasPublicationAudit`, `repositoryCatalog`, `repositoryBundle`, `repositoryImpact`,
-  `telemetryProject`, `developerDeliveryAudit`, `developerWorkbench`, `developerWorkbenchVerify`, `agentMission`,
+  `telemetryProject`, `developerDeliveryAudit`, `developerWorkbench`, `developerWorkbenchVerify`,
+  `developerWorkbenchImport`, `developerWorkbenchQuery`, `developerWorkbenchGet`, `agentMission`,
   `capabilityDiscover`, `capabilityAudit`, `capabilityRoute`, `adapterPlan`,
   `capabilityRoutePlan`, `capabilityRoutePlanVerify`, and `capabilityRoutePlanVerifyRest`,
   `domainWorkflowPortfolio` and `domainWorkflowPortfolioQuery`,

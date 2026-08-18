@@ -550,8 +550,16 @@ from .hub_submission import HubSubmissionReviewArgs, HubSubmissionReviewReport, 
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .workbench import (
     WorkbenchRequest,
+    WorkbenchRegistryGetReport,
+    WorkbenchRegistryImportReport,
+    WorkbenchRegistryImportRequest,
+    WorkbenchRegistryQueryReport,
+    WorkbenchRegistryQueryRequest,
     WorkbenchVerificationReport,
     WorkbenchVerificationRequest,
+    workbench_registry_get_report,
+    workbench_registry_import_report,
+    workbench_registry_query_report,
     workbench_verification_report,
 )
 from .world import (
@@ -1619,6 +1627,40 @@ class Workspace:
         """Return typed workbench digest, dashboard, CI replay, and mismatch evidence."""
 
         return workbench_verification_report(self.developer_workbench_verify(request))
+
+    def developer_workbench_import(
+        self,
+        request: WorkbenchRegistryImportRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Retain a structurally valid workbench report in the bounded MCP registry."""
+
+        normalized = request if isinstance(request, WorkbenchRegistryImportRequest) else WorkbenchRegistryImportRequest(**dict(request))
+        return self.tool("developer_workbench_import", normalized.to_mcp_arguments())
+
+    def developer_workbench_import_report(
+        self,
+        request: WorkbenchRegistryImportRequest | Mapping[str, Any],
+    ) -> WorkbenchRegistryImportReport:
+        return workbench_registry_import_report(self.developer_workbench_import(request))
+
+    def developer_workbench_query(
+        self,
+        request: WorkbenchRegistryQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, WorkbenchRegistryQueryRequest) else WorkbenchRegistryQueryRequest(**dict(request or {}))
+        return self.tool("developer_workbench_query", normalized.to_mcp_arguments())
+
+    def developer_workbench_query_report(
+        self,
+        request: WorkbenchRegistryQueryRequest | Mapping[str, Any] | None = None,
+    ) -> WorkbenchRegistryQueryReport:
+        return workbench_registry_query_report(self.developer_workbench_query(request))
+
+    def developer_workbench_get(self, digest: str) -> dict[str, Any]:
+        return self.tool("developer_workbench_get", {"workbench_report_digest": digest})
+
+    def developer_workbench_get_report(self, digest: str) -> WorkbenchRegistryGetReport:
+        return workbench_registry_get_report(self.developer_workbench_get(digest))
 
     def agent_mission(
         self,
@@ -5641,6 +5683,40 @@ class AsyncWorkspace:
         """Return typed async workbench verification evidence."""
 
         return workbench_verification_report(await self.developer_workbench_verify(request))
+
+    async def developer_workbench_import(
+        self,
+        request: WorkbenchRegistryImportRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.developer_workbench_import`."""
+
+        normalized = request if isinstance(request, WorkbenchRegistryImportRequest) else WorkbenchRegistryImportRequest(**dict(request))
+        return await self.tool("developer_workbench_import", normalized.to_mcp_arguments())
+
+    async def developer_workbench_import_report(
+        self,
+        request: WorkbenchRegistryImportRequest | Mapping[str, Any],
+    ) -> WorkbenchRegistryImportReport:
+        return workbench_registry_import_report(await self.developer_workbench_import(request))
+
+    async def developer_workbench_query(
+        self,
+        request: WorkbenchRegistryQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, WorkbenchRegistryQueryRequest) else WorkbenchRegistryQueryRequest(**dict(request or {}))
+        return await self.tool("developer_workbench_query", normalized.to_mcp_arguments())
+
+    async def developer_workbench_query_report(
+        self,
+        request: WorkbenchRegistryQueryRequest | Mapping[str, Any] | None = None,
+    ) -> WorkbenchRegistryQueryReport:
+        return workbench_registry_query_report(await self.developer_workbench_query(request))
+
+    async def developer_workbench_get(self, digest: str) -> dict[str, Any]:
+        return await self.tool("developer_workbench_get", {"workbench_report_digest": digest})
+
+    async def developer_workbench_get_report(self, digest: str) -> WorkbenchRegistryGetReport:
+        return workbench_registry_get_report(await self.developer_workbench_get(digest))
 
     async def agent_mission(
         self,

@@ -87,6 +87,59 @@ class WorkbenchVerificationRequest:
         return arguments
 
 
+@dataclass(frozen=True)
+class WorkbenchRegistryImportRequest:
+    """Import one direct or transport-wrapped workbench report into retention."""
+
+    report: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.report, Mapping) or not self.report:
+            raise ArgumentError("report must be a non-empty mapping")
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        return {"report": dict(self.report)}
+
+
+@dataclass(frozen=True)
+class WorkbenchRegistryQueryRequest:
+    """Bounded report-index query; report bodies are opt-in."""
+
+    session_digest: str | None = None
+    domain: str | None = None
+    capability: str | None = None
+    state: str | None = None
+    release_ready: bool | None = None
+    after: str | None = None
+    max_items: int = 100
+    include_reports: bool = False
+
+    def __post_init__(self) -> None:
+        for name, value in (("session_digest", self.session_digest), ("after", self.after)):
+            if value is not None and (not isinstance(value, str) or not _DIGEST.fullmatch(value)):
+                raise ArgumentError(f"{name} must be a lowercase SHA-256 digest")
+        for name, value in (("domain", self.domain), ("capability", self.capability), ("state", self.state)):
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                raise ArgumentError(f"{name} must be a non-empty string")
+        if not isinstance(self.max_items, int) or isinstance(self.max_items, bool) or not 1 <= self.max_items <= 256:
+            raise ArgumentError("max_items must be between 1 and 256")
+        if self.release_ready is not None and not isinstance(self.release_ready, bool):
+            raise ArgumentError("release_ready must be a boolean")
+        if not isinstance(self.include_reports, bool):
+            raise ArgumentError("include_reports must be a boolean")
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        arguments: dict[str, Any] = {"max_items": self.max_items, "include_reports": self.include_reports}
+        for name in ("session_digest", "domain", "capability", "state", "release_ready", "after"):
+            value = getattr(self, name)
+            if value is not None:
+                arguments[name] = value
+        return arguments
+
+    def to_http_query(self) -> dict[str, str]:
+        return {key: str(value).lower() if isinstance(value, bool) else str(value) for key, value in self.to_mcp_arguments().items()}
+
+
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -160,15 +213,114 @@ class WorkbenchVerificationReport:
         return dict(self.raw)
 
 
+@dataclass(frozen=True)
+class WorkbenchRegistryImportReport:
+    raw: dict[str, Any]
+    workbench_report_digest: str
+    created: bool
+    already_present: bool
+    registry_generation: int
+    registry_size: int
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "WorkbenchRegistryImportReport":
+        raw = _tool_payload(value, "developer_workbench_import")
+        return cls(
+            raw=raw,
+            workbench_report_digest=_route_text("workbench report digest", raw.get("workbench_report_digest")),
+            created=raw.get("created") is True,
+            already_present=raw.get("already_present") is True,
+            registry_generation=int(raw.get("registry_generation", 0)),
+            registry_size=int(raw.get("registry_size", 0)),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class WorkbenchRegistryQueryReport:
+    raw: dict[str, Any]
+    rows: tuple[dict[str, Any], ...]
+    next_after: str | None
+    has_more: bool
+    registry_generation: int
+    registry_size: int
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "WorkbenchRegistryQueryReport":
+        raw = _tool_payload(value, "developer_workbench_query")
+        rows = raw.get("rows", [])
+        if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
+            raise ArgumentError("workbench query rows must be an array")
+        return cls(
+            raw=raw,
+            rows=tuple(_route_mapping("workbench query row", item) for item in rows),
+            next_after=raw.get("next_after") if isinstance(raw.get("next_after"), str) else None,
+            has_more=raw.get("has_more") is True,
+            registry_generation=int(raw.get("registry_generation", 0)),
+            registry_size=int(raw.get("registry_size", 0)),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class WorkbenchRegistryGetReport:
+    raw: dict[str, Any]
+    workbench_report_digest: str
+    report: dict[str, Any]
+    registry_generation: int
+    registry_size: int
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "WorkbenchRegistryGetReport":
+        raw = _tool_payload(value, "developer_workbench_get")
+        report = raw.get("report")
+        if not isinstance(report, Mapping):
+            raise ArgumentError("workbench get report must be a mapping")
+        return cls(
+            raw=raw,
+            workbench_report_digest=_route_text("workbench report digest", raw.get("workbench_report_digest")),
+            report=dict(report),
+            registry_generation=int(raw.get("registry_generation", 0)),
+            registry_size=int(raw.get("registry_size", 0)),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
 def workbench_verification_report(value: Mapping[str, Any]) -> WorkbenchVerificationReport:
     """Parse a direct MCP projection or an HTTP REST tool envelope."""
 
     return WorkbenchVerificationReport.from_wire(value)
 
 
+def workbench_registry_import_report(value: Mapping[str, Any]) -> WorkbenchRegistryImportReport:
+    return WorkbenchRegistryImportReport.from_wire(value)
+
+
+def workbench_registry_query_report(value: Mapping[str, Any]) -> WorkbenchRegistryQueryReport:
+    return WorkbenchRegistryQueryReport.from_wire(value)
+
+
+def workbench_registry_get_report(value: Mapping[str, Any]) -> WorkbenchRegistryGetReport:
+    return WorkbenchRegistryGetReport.from_wire(value)
+
+
 __all__ = [
     "WorkbenchRequest",
     "WorkbenchVerificationRequest",
     "WorkbenchVerificationReport",
+    "WorkbenchRegistryImportRequest",
+    "WorkbenchRegistryQueryRequest",
+    "WorkbenchRegistryImportReport",
+    "WorkbenchRegistryQueryReport",
+    "WorkbenchRegistryGetReport",
     "workbench_verification_report",
+    "workbench_registry_import_report",
+    "workbench_registry_query_report",
+    "workbench_registry_get_report",
 ]

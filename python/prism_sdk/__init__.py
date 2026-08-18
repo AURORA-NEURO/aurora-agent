@@ -2187,8 +2187,16 @@ from .standards import (
 )
 from .workbench import (
     WorkbenchRequest,
+    WorkbenchRegistryGetReport,
+    WorkbenchRegistryImportReport,
+    WorkbenchRegistryImportRequest,
+    WorkbenchRegistryQueryReport,
+    WorkbenchRegistryQueryRequest,
     WorkbenchVerificationReport,
     WorkbenchVerificationRequest,
+    workbench_registry_get_report,
+    workbench_registry_import_report,
+    workbench_registry_query_report,
     workbench_verification_report,
 )
 from .world import (
@@ -3734,8 +3742,16 @@ __all__ = [
     "ValidationReport",
     "Workspace",
     "WorkbenchRequest",
+    "WorkbenchRegistryImportRequest",
+    "WorkbenchRegistryQueryRequest",
     "WorkbenchVerificationRequest",
     "WorkbenchVerificationReport",
+    "WorkbenchRegistryImportReport",
+    "WorkbenchRegistryQueryReport",
+    "WorkbenchRegistryGetReport",
+    "workbench_registry_import_report",
+    "workbench_registry_query_report",
+    "workbench_registry_get_report",
     "workbench_verification_report",
     "WORLD_CLAIM_KINDS",
     "WORLD_RUNGS",

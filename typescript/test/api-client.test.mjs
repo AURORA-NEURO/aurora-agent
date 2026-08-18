@@ -109,6 +109,16 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         guarantees: [],
         limitations: [],
       } } } });
+      if (path === "/v1/tools/developer_workbench_import") return jsonResponse({ ok: true, tool: "developer_workbench_import", request_id: "r4i", mcp: { result: { structuredContent: {
+        ok: true, workflow: "developer_workbench_import", workbench_report_digest: "d".repeat(64), created: true,
+        already_present: false, registry_generation: 1, registry_size: 1, execution: "not_started", guarantees: [], limitations: [],
+      } } } });
+      if (path === "/v1/tools/developer_workbench_query") return jsonResponse({ ok: true, tool: "developer_workbench_query", request_id: "r4q", mcp: { result: { structuredContent: {
+        ok: true, workflow: "developer_workbench_query", rows: [{ workbench_report_digest: "d".repeat(64), schema_version: "bioprism-devplat-workbench/0.1", session_digest: "s".repeat(64), audit_valid: true, release_ready: false, artifact_count: 1, cell_count: 0, change_count: 0, executed_cell_count: 0, dashboard_present: true, dashboard_matched: 1, dashboard_holes: 0, dashboard_stale: 0, ci_present: false, ci_digest: null, domains: ["oncology"], capabilities: ["evidence"], states: ["validated"] }], next_after: null, has_more: false, registry_generation: 1, registry_size: 1, execution: "not_started", guarantees: [], limitations: [],
+      } } } });
+      if (path === "/v1/tools/developer_workbench_get") return jsonResponse({ ok: true, tool: "developer_workbench_get", request_id: "r4g", mcp: { result: { structuredContent: {
+        ok: true, workflow: "developer_workbench_get", workbench_report_digest: "d".repeat(64), report: { schema_version: "bioprism-devplat-workbench/0.1" }, registry_generation: 1, registry_size: 1, execution: "not_started", guarantees: [], limitations: [],
+      } } } });
       if (path === "/v1/developer-workbench/verify") return jsonResponse({
         ok: true,
         workflow: "developer_workbench_verify",
@@ -129,6 +139,11 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         guarantees: [],
         limitations: [],
       });
+      if (path === "/v1/developer-workbench/reports") {
+        if (init?.method === "GET") return jsonResponse({ ok: true, workflow: "developer_workbench_query", rows: [], next_after: null, has_more: false, registry_generation: 1, registry_size: 1, execution: "not_started", guarantees: [], limitations: [] });
+        return jsonResponse({ ok: true, workflow: "developer_workbench_import", workbench_report_digest: "d".repeat(64), created: true, already_present: false, registry_generation: 1, registry_size: 1, execution: "not_started", guarantees: [], limitations: [] });
+      }
+      if (path === "/v1/developer-workbench/reports/" + "d".repeat(64)) return jsonResponse({ ok: true, workflow: "developer_workbench_get", workbench_report_digest: "d".repeat(64), report: { schema_version: "bioprism-devplat-workbench/0.1" }, registry_generation: 1, registry_size: 1, execution: "not_started", guarantees: [], limitations: [] });
       if (path === "/v1/tools/ci_execution_evidence_audit") return jsonResponse({ ok: true, tool: "ci_execution_evidence_audit", request_id: "r27", mcp: { result: { structuredContent: {
         ok: true,
         workflow: "ci_execution_evidence_audit",
@@ -1871,6 +1886,18 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   const workbenchVerifyQuery = await client.developerWorkbenchVerifyQuery({ session: { session_id: "studio-1" }, report: { workflow: "developer_workbench" } });
   assert.equal(workbenchVerifyQuery.workflow, "developer_workbench_verify");
   await assert.rejects(client.developerWorkbenchVerifyQuery({ session: {}, report: {} }), ArgumentError);
+  const workbenchImport = await client.developerWorkbenchImport({ report: { schema_version: "bioprism-devplat-workbench/0.1" } });
+  assert.equal(workbenchImport.mcp.result.structuredContent.created, true);
+  const workbenchImportRest = await client.developerWorkbenchImportRest({ report: { schema_version: "bioprism-devplat-workbench/0.1" } });
+  assert.equal(workbenchImportRest.workbench_report_digest, "d".repeat(64));
+  const workbenchQuery = await client.developerWorkbenchQuery({ domain: "oncology" });
+  assert.equal(workbenchQuery.mcp.result.structuredContent.rows[0].capabilities[0], "evidence");
+  const workbenchQueryRest = await client.developerWorkbenchQueryRest({ domain: "oncology" });
+  assert.deepEqual(workbenchQueryRest.rows, []);
+  const workbenchGet = await client.developerWorkbenchGet("d".repeat(64));
+  assert.equal(workbenchGet.mcp.result.structuredContent.report.schema_version, "bioprism-devplat-workbench/0.1");
+  const workbenchGetRest = await client.developerWorkbenchGetRest("d".repeat(64));
+  assert.equal(workbenchGetRest.workbench_report_digest, "d".repeat(64));
   const ciEvidence = await client.ciExecutionEvidenceAudit({ ci: { workflow: "contracts" }, evidence: { run_id: "run-42" } });
   assert.equal(ciEvidence.mcp.result.structuredContent.workflow, "ci_execution_evidence_audit");
   assert.equal(ciEvidence.mcp.result.structuredContent.ci_evidence_ready, true);

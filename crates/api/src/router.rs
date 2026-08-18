@@ -15,8 +15,8 @@ use bioprism_devplat::{
     ArtifactRegistryError, DomainWorkflowReconciliationRegistry, EvidenceBundleError,
     EvidenceBundleRegistry, EvidenceRegistryError, MissionEvaluatorCatalogue,
     MissionEvaluatorReplayCompareRequest, MissionEvaluatorReplayRequest, MissionRequest,
-    WorkflowExecutionEvidenceRegistry, MAX_ARTIFACT_REGISTRY_BYTES, MAX_EVIDENCE_REGISTRY_BYTES,
-    MAX_WORKFLOW_EXECUTION_EVIDENCE_BYTES,
+    WorkbenchReportRegistry, WorkflowExecutionEvidenceRegistry, MAX_ARTIFACT_REGISTRY_BYTES,
+    MAX_EVIDENCE_REGISTRY_BYTES, MAX_WORKFLOW_EXECUTION_EVIDENCE_BYTES,
 };
 use bioprism_factory::{
     AuthorityMutation, ExecutionOperation, Idempotency as FactoryIdempotency, Job as FactoryJob,
@@ -55,6 +55,8 @@ pub const MAX_PERSISTED_MISSION_PROVENANCE_BYTES: usize = 128 * 1024;
 pub const MAX_MISSION_EVIDENCE_BUNDLE_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_WORKFLOW_RECONCILIATION_STATE_BYTES: usize =
     bioprism_devplat::MAX_DOMAIN_WORKFLOW_RECONCILIATION_BYTES;
+pub const MAX_WORKBENCH_REGISTRY_STATE_BYTES: usize =
+    bioprism_devplat::MAX_WORKBENCH_REGISTRY_BYTES;
 pub const MISSION_QUEUE_LEASE_DURATION_NANOS: i128 = 24 * 60 * 60 * 1_000_000_000;
 const MISSION_QUEUE_WORKER_ID: &str = "bioprism-api-mission-worker";
 static NEXT_CHECKPOINT_TEMP_ID: AtomicU64 = AtomicU64::new(1);
@@ -91,6 +93,8 @@ pub struct ApiConfig {
     pub artifact_state_path: Option<PathBuf>,
     /// Optional atomic JSON checkpoint for independently validated workflow execution evidence.
     pub workflow_execution_evidence_state_path: Option<PathBuf>,
+    /// Optional atomic JSON checkpoint for retained, structurally valid workbench reports.
+    pub workbench_state_path: Option<PathBuf>,
 }
 
 impl Default for ApiConfig {
@@ -109,6 +113,7 @@ impl Default for ApiConfig {
             reconciliation_state_path: None,
             artifact_state_path: None,
             workflow_execution_evidence_state_path: None,
+            workbench_state_path: None,
         }
     }
 }
@@ -191,6 +196,13 @@ impl ApiConfig {
         {
             return Err("workflow_execution_evidence_state_path must not be empty".into());
         }
+        if self
+            .workbench_state_path
+            .as_ref()
+            .is_some_and(|path| path.as_os_str().is_empty())
+        {
+            return Err("workbench_state_path must not be empty".into());
+        }
         Ok(())
     }
 }
@@ -213,6 +225,8 @@ pub struct ApiRouter {
     artifact_persistence: Arc<ArtifactPersistence>,
     workflow_execution_evidence_registry: Arc<Mutex<WorkflowExecutionEvidenceRegistry>>,
     workflow_execution_evidence_persistence: Arc<WorkflowExecutionEvidencePersistence>,
+    workbench_registry: Arc<Mutex<WorkbenchReportRegistry>>,
+    workbench_persistence: Arc<WorkbenchPersistence>,
 }
 
 struct MissionJob {
@@ -260,6 +274,12 @@ struct ArtifactPersistence {
 struct WorkflowExecutionEvidencePersistence {
     path: Option<PathBuf>,
     registry: Arc<Mutex<WorkflowExecutionEvidenceRegistry>>,
+    lock: Mutex<()>,
+}
+
+struct WorkbenchPersistence {
+    path: Option<PathBuf>,
+    registry: Arc<Mutex<WorkbenchReportRegistry>>,
     lock: Mutex<()>,
 }
 
@@ -900,6 +920,76 @@ impl WorkflowExecutionEvidencePersistence {
     }
 }
 
+impl WorkbenchPersistence {
+    fn persist(&self) -> Result<usize, String> {
+        let Some(_) = self.path.as_deref() else {
+            return Ok(0);
+        };
+        let registry = self
+            .registry
+            .lock()
+            .map_err(|_| "workbench registry is unavailable".to_string())?;
+        let document = registry.snapshot().map_err(|error| error.to_string())?;
+        self.persist_snapshot(&document)
+    }
+
+    fn persist_snapshot(&self, document: &Value) -> Result<usize, String> {
+        let Some(path) = self.path.as_deref() else {
+            return Ok(0);
+        };
+        let _write_guard = self
+            .lock
+            .lock()
+            .map_err(|_| "workbench persistence lock is unavailable".to_string())?;
+        let bytes = serde_json::to_vec_pretty(document)
+            .map_err(|error| format!("workbench state could not be serialized: {error}"))?;
+        if bytes.len() > MAX_WORKBENCH_REGISTRY_STATE_BYTES {
+            return Err(format!(
+                "workbench state snapshot is {} bytes, above the {}-byte bound",
+                bytes.len(),
+                MAX_WORKBENCH_REGISTRY_STATE_BYTES
+            ));
+        }
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                format!("workbench state directory could not be created: {error}")
+            })?;
+        }
+        let filename = path
+            .file_name()
+            .ok_or_else(|| "workbench_state_path must name a file".to_string())?
+            .to_string_lossy();
+        let temporary = path.with_file_name(format!(
+            ".{filename}.tmp-{}",
+            NEXT_CHECKPOINT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::write(&temporary, &bytes).map_err(|error| {
+            format!("workbench state temporary file could not be written: {error}")
+        })?;
+        if let Err(first_error) = std::fs::rename(&temporary, path) {
+            #[cfg(windows)]
+            {
+                let _ = std::fs::remove_file(path);
+                std::fs::rename(&temporary, path).map_err(|second_error| {
+                    format!(
+                        "workbench state could not replace the previous snapshot ({first_error}; retry: {second_error})"
+                    )
+                })?;
+            }
+            #[cfg(not(windows))]
+            {
+                return Err(format!(
+                    "workbench state snapshot could not be installed: {first_error}"
+                ));
+            }
+        }
+        Ok(bytes.len())
+    }
+}
+
 impl MissionPersistence {
     fn persist(&self) -> Result<(), String> {
         let Some(path) = self.path.as_deref() else {
@@ -1169,19 +1259,21 @@ impl ApiRouter {
         let restored_workflow_execution_evidence = load_workflow_execution_evidence_registry(
             config.workflow_execution_evidence_state_path.as_deref(),
         )?;
+        let restored_workbench = load_workbench_registry(config.workbench_state_path.as_deref())?;
         let evidence_registry = Arc::new(Mutex::new(restored_evidence));
         let reconciliation_registry = Arc::new(Mutex::new(restored_reconciliations));
         let artifact_registry = Arc::new(Mutex::new(restored_artifacts));
         let workflow_execution_evidence_registry =
             Arc::new(Mutex::new(restored_workflow_execution_evidence));
-        let mut server =
-            bioprism_mcp::Server::with_registries_and_artifacts_and_workflow_execution_evidence(
-                root,
-                Arc::clone(&evidence_registry),
-                Arc::clone(&reconciliation_registry),
-                Arc::clone(&workflow_execution_evidence_registry),
-                Arc::clone(&artifact_registry),
-            );
+        let workbench_registry = Arc::new(Mutex::new(restored_workbench));
+        let mut server = bioprism_mcp::Server::with_all_registries(
+            root,
+            Arc::clone(&evidence_registry),
+            Arc::clone(&reconciliation_registry),
+            Arc::clone(&workflow_execution_evidence_registry),
+            Arc::clone(&workbench_registry),
+            Arc::clone(&artifact_registry),
+        );
         let initialize = Request {
             id: Some(json!(0)),
             method: "initialize".into(),
@@ -1233,6 +1325,11 @@ impl ApiRouter {
                 registry: Arc::clone(&workflow_execution_evidence_registry),
                 lock: Mutex::new(()),
             });
+        let workbench_persistence = Arc::new(WorkbenchPersistence {
+            path: config.workbench_state_path.clone(),
+            registry: Arc::clone(&workbench_registry),
+            lock: Mutex::new(()),
+        });
         let router = Self {
             server,
             mission_executor,
@@ -1251,6 +1348,8 @@ impl ApiRouter {
             artifact_persistence,
             workflow_execution_evidence_registry,
             workflow_execution_evidence_persistence,
+            workbench_registry,
+            workbench_persistence,
         };
         if router.config.mission_state_path.is_some() {
             router.persist_mission_registry()?;
@@ -1289,7 +1388,12 @@ impl ApiRouter {
                     format!(
                         "workflow execution evidence state checkpoint failed during startup: {error}"
                     )
-                })?;
+            })?;
+        }
+        if router.config.workbench_state_path.is_some() {
+            router.workbench_persistence.persist().map_err(|error| {
+                format!("workbench state checkpoint failed during startup: {error}")
+            })?;
         }
         Ok(router)
     }
@@ -1316,6 +1420,10 @@ impl ApiRouter {
 
     fn persist_workflow_execution_evidence_registry(&self) -> Result<usize, String> {
         self.workflow_execution_evidence_persistence.persist()
+    }
+
+    fn persist_workbench_registry(&self) -> Result<usize, String> {
+        self.workbench_persistence.persist()
     }
 
     pub fn handle(&self, request: HttpRequest) -> HttpResponse {
@@ -1421,6 +1529,21 @@ impl ApiRouter {
             }
             ("POST", "/v1/developer-workbench/verify") => {
                 self.developer_workbench_verify(&request, &request_id)
+            }
+            ("POST", "/v1/developer-workbench/reports") => {
+                self.import_workbench_report(&request, &request_id)
+            }
+            ("GET", "/v1/developer-workbench/reports") => {
+                self.query_workbench_reports(&request, &request_id)
+            }
+            ("GET", "/v1/developer-workbench/reports/persistence") => {
+                self.workbench_persistence_status()
+            }
+            ("POST", "/v1/developer-workbench/reports/persistence/flush") => {
+                self.flush_workbench_persistence(&request_id)
+            }
+            ("GET", path) if path.starts_with("/v1/developer-workbench/reports/") => {
+                self.get_workbench_report(&request, &request_id)
             }
             ("POST", "/v1/domain-workflows/verify") => {
                 self.domain_workflow_verify(&request, &request_id)
@@ -3495,6 +3618,9 @@ impl ApiRouter {
                     "domain_workflow_portfolio": "/v1/domain-workflows/portfolio",
                     "domain_workflow_portfolio_verify": "/v1/domain-workflows/portfolio/verify",
                     "developer_workbench_verify": "/v1/developer-workbench/verify",
+                    "developer_workbench_reports": "/v1/developer-workbench/reports",
+                    "developer_workbench_report_persistence": "/v1/developer-workbench/reports/persistence",
+                    "developer_workbench_report_persistence_flush": "/v1/developer-workbench/reports/persistence/flush",
                     "domain_workflow_verify": "/v1/domain-workflows/verify",
                     "domain_workflow_reconcile": "/v1/domain-workflows/reconcile",
                     "domain_workflow_reconciliations": "/v1/domain-workflows/reconciliations",
@@ -3588,6 +3714,8 @@ impl ApiRouter {
                     "domain_workflow_portfolio": true,
                     "domain_workflow_portfolio_verify": true,
                     "developer_workbench_verify": true,
+                    "developer_workbench_report_registry": true,
+                    "developer_workbench_report_persistence": self.config.workbench_state_path.is_some(),
                     "domain_workflow_verify": true,
                     "domain_workflow_reconcile": true,
                     "domain_workflow_reconciliation_registry": true,
@@ -4065,6 +4193,246 @@ impl ApiRouter {
             "developer_workbench_verify",
             Value::Object(arguments),
         )
+    }
+
+    fn import_workbench_report(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        let report = match arguments.get("report") {
+            Some(report) => report,
+            None => return self.error(400, "invalid_json", "report is required", request_id),
+        };
+        let mut registry = match self.workbench_registry.lock() {
+            Ok(registry) => registry,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "workbench_registry_unavailable",
+                    "workbench registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let before = registry.clone();
+        let result = match registry.import(report) {
+            Ok(result) => result,
+            Err(error) => return self.error(422, "invalid_report", &error.to_string(), request_id),
+        };
+        if self.config.workbench_state_path.is_some() && result["created"] == true {
+            let snapshot = match registry.snapshot() {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    *registry = before;
+                    return self.error(
+                        503,
+                        "workbench_persistence_unavailable",
+                        &error.to_string(),
+                        request_id,
+                    );
+                }
+            };
+            if let Err(error) = self.workbench_persistence.persist_snapshot(&snapshot) {
+                *registry = before;
+                return self.error(503, "workbench_persistence_unavailable", &error, request_id);
+            }
+        }
+        HttpResponse::json(
+            if result["created"].as_bool().unwrap_or(false) {
+                201
+            } else {
+                200
+            },
+            &result,
+        )
+    }
+
+    fn query_workbench_reports(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        for key in query.keys() {
+            if !matches!(
+                key.as_str(),
+                "session_digest"
+                    | "domain"
+                    | "capability"
+                    | "state"
+                    | "release_ready"
+                    | "after"
+                    | "limit"
+                    | "include_reports"
+            ) {
+                return self.error(
+                    400,
+                    "invalid_query",
+                    "workbench query accepts only session_digest, domain, capability, state, release_ready, after, limit, and include_reports",
+                    request_id,
+                );
+            }
+        }
+        let session_digest = query.get("session_digest").map(String::as_str);
+        let domain = query.get("domain").map(String::as_str);
+        let capability = query.get("capability").map(String::as_str);
+        let state = query.get("state").map(String::as_str);
+        let after = query.get("after").map(String::as_str);
+        let max_items = match query_usize(&query, "limit", 100) {
+            Ok(value) if (1..=bioprism_devplat::MAX_WORKBENCH_QUERY_ITEMS).contains(&value) => {
+                value
+            }
+            Ok(_) => {
+                return self.error(
+                    422,
+                    "invalid_query",
+                    "limit must be between 1 and 256",
+                    request_id,
+                )
+            }
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let release_ready = match query_bool(&query, "release_ready", false) {
+            Ok(value) if query.contains_key("release_ready") => Some(value),
+            Ok(_) => None,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let include_reports = match query_bool(&query, "include_reports", false) {
+            Ok(value) => value,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let result = match self.workbench_registry.lock() {
+            Ok(registry) => registry.query(
+                session_digest,
+                domain,
+                capability,
+                state,
+                release_ready,
+                after,
+                max_items,
+                include_reports,
+            ),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "workbench_registry_unavailable",
+                    "workbench registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match result {
+            Ok(value) => HttpResponse::json(200, &value),
+            Err(error) => self.error(422, "invalid_query", &error.to_string(), request_id),
+        }
+    }
+
+    fn get_workbench_report(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let segments = match request.path_segments() {
+            Ok(segments) => segments,
+            Err(error) => return self.error(400, "invalid_path", &error.to_string(), request_id),
+        };
+        if segments.len() != 4
+            || segments[0] != "v1"
+            || segments[1] != "developer-workbench"
+            || segments[2] != "reports"
+        {
+            return self.error(
+                404,
+                "not_found",
+                "workbench report route does not exist",
+                request_id,
+            );
+        }
+        let digest = &segments[3];
+        if ContentHash::parse(digest.clone()).is_err() {
+            return self.error(
+                422,
+                "invalid_digest",
+                "workbench_report_digest must be a 64-character SHA-256 digest",
+                request_id,
+            );
+        }
+        let result = match self.workbench_registry.lock() {
+            Ok(registry) => registry.get_response(digest),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "workbench_registry_unavailable",
+                    "workbench registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match result {
+            Ok(value) => HttpResponse::json(200, &value),
+            Err(_) => self.error(
+                404,
+                "not_found",
+                "workbench report does not exist",
+                request_id,
+            ),
+        }
+    }
+
+    fn workbench_persistence_status(&self) -> HttpResponse {
+        let enabled = self.config.workbench_state_path.is_some();
+        let file_bytes = self
+            .config
+            .workbench_state_path
+            .as_deref()
+            .and_then(|path| std::fs::metadata(path).ok())
+            .map(|metadata| metadata.len());
+        let registry = self.workbench_registry.lock();
+        let (registry_size, generation) = registry
+            .as_ref()
+            .map(|registry| (registry.len(), registry.generation()))
+            .unwrap_or((0, 0));
+        let (state_digest, integrity_verified) = self
+            .config
+            .workbench_state_path
+            .as_deref()
+            .and_then(|path| std::fs::read(path).ok())
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+            .map(|document| {
+                let digest = document.get("state_digest").cloned().unwrap_or(Value::Null);
+                let valid = WorkbenchReportRegistry::from_snapshot(&document).is_ok();
+                (digest, Value::Bool(valid))
+            })
+            .unwrap_or((Value::Null, Value::Null));
+        HttpResponse::json(
+            200,
+            &json!({
+                "ok": true,
+                "enabled": enabled,
+                "file_present": file_bytes.is_some(),
+                "file_bytes": file_bytes,
+                "schema": bioprism_devplat::WORKBENCH_REGISTRY_SCHEMA_VERSION,
+                "state_digest": state_digest,
+                "integrity_verified": integrity_verified,
+                "registry_size": registry_size,
+                "registry_generation": generation,
+                "max_reports": bioprism_devplat::MAX_WORKBENCH_REPORTS,
+                "max_file_bytes": MAX_WORKBENCH_REGISTRY_STATE_BYTES,
+                "recovery_policy": "only structurally valid digest-bound reports restore; retained reports never resume execution",
+                "flush": "/v1/developer-workbench/reports/persistence/flush"
+            }),
+        )
+    }
+
+    fn flush_workbench_persistence(&self, request_id: &str) -> HttpResponse {
+        if self.config.workbench_state_path.is_none() {
+            return self.error(
+                409,
+                "workbench_persistence_disabled",
+                "configure workbench_state_path before flushing a workbench report snapshot",
+                request_id,
+            );
+        }
+        match self.persist_workbench_registry() {
+            Ok(_) => self.workbench_persistence_status(),
+            Err(error) => self.error(503, "workbench_persistence_unavailable", &error, request_id),
+        }
     }
 
     fn domain_workflow_verify(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
@@ -8891,6 +9259,34 @@ fn load_workflow_execution_evidence_registry(
         .map_err(|error| format!("workflow execution evidence state snapshot is invalid: {error}"))
 }
 
+fn load_workbench_registry(path: Option<&Path>) -> Result<WorkbenchReportRegistry, String> {
+    let Some(path) = path else {
+        return Ok(WorkbenchReportRegistry::new());
+    };
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(WorkbenchReportRegistry::new())
+        }
+        Err(error) => {
+            return Err(format!(
+                "workbench state snapshot could not be read: {error}"
+            ))
+        }
+    };
+    if bytes.len() > MAX_WORKBENCH_REGISTRY_STATE_BYTES {
+        return Err(format!(
+            "workbench state snapshot is {} bytes, above the {}-byte bound",
+            bytes.len(),
+            MAX_WORKBENCH_REGISTRY_STATE_BYTES
+        ));
+    }
+    let document: Value = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("workbench state snapshot is invalid JSON: {error}"))?;
+    WorkbenchReportRegistry::from_snapshot(&document)
+        .map_err(|error| format!("workbench state snapshot is invalid: {error}"))
+}
+
 fn load_mission_jobs(path: Option<&Path>) -> Result<BTreeMap<String, Arc<MissionJob>>, String> {
     let Some(path) = path else {
         return Ok(BTreeMap::new());
@@ -12136,6 +12532,82 @@ mod tests {
         assert_eq!(verified["status"], "verified");
         assert_eq!(verified["ci_verified"], true);
         assert_eq!(verified["execution"], "not_started");
+    }
+
+    #[test]
+    fn developer_workbench_report_registry_is_queryable_and_restart_safe() {
+        let path = test_state_path("workbench-registry");
+        let config = ApiConfig {
+            workbench_state_path: Some(path.clone()),
+            ..ApiConfig::default()
+        };
+        let router = ApiRouter::new(std::env::current_dir().unwrap(), config.clone()).unwrap();
+        let planned = router.handle(request(
+            "POST",
+            "/v1/tools/developer_workbench",
+            json!({
+                "session": {
+                    "session_id": "api-workbench-registry",
+                    "owner": "agent-a",
+                    "goal": "retain a report",
+                    "artifacts": [{
+                        "id": "artifact-1", "title": "card", "path": "card.json",
+                        "domain": "oncology", "capability": "evidence", "state": "validated",
+                        "evidence": "observed", "digest": "a".repeat(64)
+                    }],
+                    "cells": [], "changes": []
+                },
+                "dashboard": {"domains": ["oncology"], "limit": 10}
+            }),
+        ));
+        let planned: Value = serde_json::from_slice(&planned.body).unwrap();
+        let retained: Value = serde_json::from_str(
+            planned["mcp"]["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+        let imported = router.handle(request(
+            "POST",
+            "/v1/developer-workbench/reports",
+            json!({"report": retained}),
+        ));
+        assert_eq!(imported.status, 201);
+        let imported: Value = serde_json::from_slice(&imported.body).unwrap();
+        let digest = imported["workbench_report_digest"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let queried = router.handle(request(
+            "GET",
+            "/v1/developer-workbench/reports?domain=oncology&capability=evidence&limit=10",
+            json!({}),
+        ));
+        let queried: Value = serde_json::from_slice(&queried.body).unwrap();
+        assert_eq!(queried["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(queried["rows"][0]["workbench_report_digest"], digest);
+        let fetched = router.handle(request(
+            "GET",
+            &format!("/v1/developer-workbench/reports/{digest}"),
+            json!({}),
+        ));
+        assert_eq!(fetched.status, 200);
+        let fetched: Value = serde_json::from_slice(&fetched.body).unwrap();
+        assert_eq!(
+            fetched["report"]["schema_version"],
+            "bioprism-devplat-workbench/0.1"
+        );
+        drop(router);
+        let restored = ApiRouter::new(std::env::current_dir().unwrap(), config).unwrap();
+        let status = restored.handle(request(
+            "GET",
+            "/v1/developer-workbench/reports/persistence",
+            json!({}),
+        ));
+        let status: Value = serde_json::from_slice(&status.body).unwrap();
+        assert_eq!(status["integrity_verified"], true);
+        assert_eq!(status["registry_size"], 1);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

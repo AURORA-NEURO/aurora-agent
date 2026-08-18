@@ -17,7 +17,7 @@ use args::{Command, CompileOptions, Family, GenerateOptions, Invocation, Parsed,
 use bioprism_devplat::{
     build_domain_workflow_catalogue, build_domain_workflow_portfolio, instantiate_domain_workflow,
     reconcile_domain_workflow, scaffold_domain_workflow, verify_domain_workflow_portfolio,
-    verify_workbench, WorkbenchVerificationRequest,
+    verify_workbench, WorkbenchReportRegistry, WorkbenchVerificationRequest,
 };
 use bioprism_devplat::{
     verify_mission_evidence_bundle, DomainWorkflowReconciliationRegistry, EvidenceBundleRegistry,
@@ -241,6 +241,33 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
             policy.as_deref(),
             expected_report_digest.as_deref(),
         ),
+        Command::WorkbenchImport {
+            report,
+            store,
+            dry_run,
+        } => workbench_import(report, store, *dry_run),
+        Command::WorkbenchQuery {
+            store,
+            session_digest,
+            domain,
+            capability,
+            state,
+            release_ready,
+            after,
+            limit,
+            include_reports,
+        } => workbench_query(
+            store,
+            session_digest.as_deref(),
+            domain.as_deref(),
+            capability.as_deref(),
+            state.as_deref(),
+            *release_ready,
+            after.as_deref(),
+            *limit,
+            *include_reports,
+        ),
+        Command::WorkbenchGet { store, digest } => workbench_get(store, digest),
         Command::WorkflowReconcile {
             instantiation,
             mission,
@@ -315,6 +342,127 @@ fn workbench_verify(
         document["ci_verified"].as_bool().unwrap_or(false),
     );
     Ok(Outcome::ok(document, human).failing_if(!valid))
+}
+
+fn load_workbench_registry(store_path: &Path) -> CliResult<WorkbenchReportRegistry> {
+    if !store_path.exists() {
+        return Ok(WorkbenchReportRegistry::new());
+    }
+    let snapshot = io::read_json(store_path)?;
+    WorkbenchReportRegistry::from_snapshot(&snapshot).map_err(|error| {
+        CliError::invalid(error.to_string()).about(store_path.display().to_string())
+    })
+}
+
+fn workbench_import(report_path: &Path, store_path: &Path, dry_run: bool) -> CliResult<Outcome> {
+    let report = io::read_json(report_path)?;
+    let mut registry = load_workbench_registry(store_path)?;
+    let result = registry.import(&report).map_err(|error| {
+        CliError::invalid(error.to_string()).about(report_path.display().to_string())
+    })?;
+    let snapshot = registry.snapshot().map_err(|error| {
+        CliError::internal(error.to_string()).about(store_path.display().to_string())
+    })?;
+    let artifact = if result.get("created").and_then(Value::as_bool) == Some(true) {
+        Some(io::write_artifact(store_path, &snapshot, dry_run)?)
+    } else {
+        None
+    };
+    let mut document = result;
+    document["store"] = json!(store_path.display().to_string());
+    document["report"] = json!(report_path.display().to_string());
+    document["dry_run"] = json!(dry_run);
+    document["state_digest"] = snapshot.get("state_digest").cloned().unwrap_or(Value::Null);
+    document["artifact"] = artifact
+        .as_ref()
+        .map(|value| {
+            json!({
+                "path": value.path.display().to_string(),
+                "bytes": value.bytes,
+                "written": value.written
+            })
+        })
+        .unwrap_or(Value::Null);
+    let digest = document
+        .get("workbench_report_digest")
+        .and_then(Value::as_str)
+        .unwrap_or("<missing>");
+    let human = format!(
+        "developer workbench report {}\n  digest: {}\n  registry: {} (generation {})\n  state: {}\n\nNext: bioprism workbench query --store {}\n",
+        if document.get("created").and_then(Value::as_bool) == Some(true) {
+            if dry_run { "planned for import" } else { "imported" }
+        } else {
+            "already present"
+        },
+        digest,
+        store_path.display(),
+        document
+            .get("registry_generation")
+            .and_then(Value::as_u64)
+            .unwrap_or_default(),
+        if dry_run { "not written (dry run)" } else { "checkpoint updated" },
+        store_path.display()
+    );
+    Ok(Outcome::ok(document, human))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn workbench_query(
+    store_path: &Path,
+    session_digest: Option<&str>,
+    domain: Option<&str>,
+    capability: Option<&str>,
+    state: Option<&str>,
+    release_ready: bool,
+    after: Option<&str>,
+    limit: usize,
+    include_reports: bool,
+) -> CliResult<Outcome> {
+    let registry = load_workbench_registry(store_path)?;
+    let report = registry
+        .query(
+            session_digest,
+            domain,
+            capability,
+            state,
+            release_ready.then_some(true),
+            after,
+            limit,
+            include_reports,
+        )
+        .map_err(|error| {
+            CliError::invalid(error.to_string()).about(store_path.display().to_string())
+        })?;
+    let rows = report
+        .get("rows")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    let next_after = report
+        .get("next_after")
+        .and_then(Value::as_str)
+        .unwrap_or("<none>");
+    let human = format!(
+        "developer workbench registry query\n  store: {}\n  rows: {}\n  has more: {}\n  next after: {}\n\nNext: bioprism workbench query --store {} --after <digest>\n",
+        store_path.display(),
+        rows,
+        report.get("has_more").and_then(Value::as_bool).unwrap_or(false),
+        next_after,
+        store_path.display()
+    );
+    Ok(Outcome::ok(report, human))
+}
+
+fn workbench_get(store_path: &Path, digest: &str) -> CliResult<Outcome> {
+    let registry = load_workbench_registry(store_path)?;
+    let report = registry.get_response(digest).map_err(|error| {
+        CliError::invalid(error.to_string()).about(store_path.display().to_string())
+    })?;
+    let human = format!(
+        "developer workbench report\n  digest: {}\n  store: {}\n  execution: not started\n",
+        digest,
+        store_path.display()
+    );
+    Ok(Outcome::ok(report, human))
 }
 
 fn workflow_catalogue() -> CliResult<Outcome> {

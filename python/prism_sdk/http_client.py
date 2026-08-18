@@ -12,6 +12,7 @@ import asyncio
 import http.client
 import json
 import math
+import re
 import ssl
 import time
 from typing import Any, Mapping, Sequence
@@ -257,8 +258,16 @@ from .developer_platform import (
     developer_platform_status_report,
 )
 from .workbench import (
+    WorkbenchRegistryGetReport,
+    WorkbenchRegistryImportReport,
+    WorkbenchRegistryImportRequest,
+    WorkbenchRegistryQueryReport,
+    WorkbenchRegistryQueryRequest,
     WorkbenchVerificationReport,
     WorkbenchVerificationRequest,
+    workbench_registry_get_report,
+    workbench_registry_import_report,
+    workbench_registry_query_report,
     workbench_verification_report,
 )
 from .errors import ApiError, ArgumentError, MissionWaitTimeout, TransportError
@@ -2352,6 +2361,74 @@ class ApiClient:
         """Return typed workbench verification evidence from the dedicated REST route."""
 
         return workbench_verification_report(self.developer_workbench_verify_rest(request))
+
+    def developer_workbench_import(
+        self,
+        request: WorkbenchRegistryImportRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, WorkbenchRegistryImportRequest) else WorkbenchRegistryImportRequest(**dict(request))
+        return self.call_tool("developer_workbench_import", normalized.to_mcp_arguments())
+
+    def developer_workbench_import_report(
+        self,
+        request: WorkbenchRegistryImportRequest | Mapping[str, Any],
+    ) -> WorkbenchRegistryImportReport:
+        return workbench_registry_import_report(self.developer_workbench_import(request))
+
+    def developer_workbench_import_rest(
+        self,
+        request: WorkbenchRegistryImportRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, WorkbenchRegistryImportRequest) else WorkbenchRegistryImportRequest(**dict(request))
+        return self.request("POST", "/v1/developer-workbench/reports", normalized.to_mcp_arguments())
+
+    def developer_workbench_import_rest_report(
+        self,
+        request: WorkbenchRegistryImportRequest | Mapping[str, Any],
+    ) -> WorkbenchRegistryImportReport:
+        return workbench_registry_import_report(self.developer_workbench_import_rest(request))
+
+    def developer_workbench_query(
+        self,
+        request: WorkbenchRegistryQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, WorkbenchRegistryQueryRequest) else WorkbenchRegistryQueryRequest(**dict(request or {}))
+        return self.call_tool("developer_workbench_query", normalized.to_mcp_arguments())
+
+    def developer_workbench_query_report(
+        self,
+        request: WorkbenchRegistryQueryRequest | Mapping[str, Any] | None = None,
+    ) -> WorkbenchRegistryQueryReport:
+        return workbench_registry_query_report(self.developer_workbench_query(request))
+
+    def developer_workbench_query_rest(
+        self,
+        request: WorkbenchRegistryQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, WorkbenchRegistryQueryRequest) else WorkbenchRegistryQueryRequest(**dict(request or {}))
+        return self.request("GET", f"/v1/developer-workbench/reports?{urlencode(normalized.to_http_query())}")
+
+    def developer_workbench_query_rest_report(
+        self,
+        request: WorkbenchRegistryQueryRequest | Mapping[str, Any] | None = None,
+    ) -> WorkbenchRegistryQueryReport:
+        return workbench_registry_query_report(self.developer_workbench_query_rest(request))
+
+    def developer_workbench_get(self, digest: str) -> dict[str, Any]:
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise ArgumentError("workbench_report_digest must be a lowercase SHA-256 digest")
+        return self.call_tool("developer_workbench_get", {"workbench_report_digest": digest})
+
+    def developer_workbench_get_report(self, digest: str) -> WorkbenchRegistryGetReport:
+        return workbench_registry_get_report(self.developer_workbench_get(digest))
+
+    def developer_workbench_get_rest(self, digest: str) -> dict[str, Any]:
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise ArgumentError("workbench_report_digest must be a lowercase SHA-256 digest")
+        return self.request("GET", f"/v1/developer-workbench/reports/{quote(digest, safe='')}")
+
+    def developer_workbench_get_rest_report(self, digest: str) -> WorkbenchRegistryGetReport:
+        return workbench_registry_get_report(self.developer_workbench_get_rest(digest))
 
     def token_context_plan(
         self,
@@ -6893,6 +6970,66 @@ class AsyncApiClient:
         """Return typed async workbench verification evidence from the REST route."""
 
         return workbench_verification_report(await self.developer_workbench_verify_rest(request))
+
+    async def developer_workbench_import(
+        self,
+        request: WorkbenchRegistryImportRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.developer_workbench_import, request)
+
+    async def developer_workbench_import_report(
+        self,
+        request: WorkbenchRegistryImportRequest | Mapping[str, Any],
+    ) -> WorkbenchRegistryImportReport:
+        return workbench_registry_import_report(await self.developer_workbench_import(request))
+
+    async def developer_workbench_import_rest(
+        self,
+        request: WorkbenchRegistryImportRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.developer_workbench_import_rest, request)
+
+    async def developer_workbench_import_rest_report(
+        self,
+        request: WorkbenchRegistryImportRequest | Mapping[str, Any],
+    ) -> WorkbenchRegistryImportReport:
+        return workbench_registry_import_report(await self.developer_workbench_import_rest(request))
+
+    async def developer_workbench_query(
+        self,
+        request: WorkbenchRegistryQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.developer_workbench_query, request)
+
+    async def developer_workbench_query_report(
+        self,
+        request: WorkbenchRegistryQueryRequest | Mapping[str, Any] | None = None,
+    ) -> WorkbenchRegistryQueryReport:
+        return workbench_registry_query_report(await self.developer_workbench_query(request))
+
+    async def developer_workbench_query_rest(
+        self,
+        request: WorkbenchRegistryQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.developer_workbench_query_rest, request)
+
+    async def developer_workbench_query_rest_report(
+        self,
+        request: WorkbenchRegistryQueryRequest | Mapping[str, Any] | None = None,
+    ) -> WorkbenchRegistryQueryReport:
+        return workbench_registry_query_report(await self.developer_workbench_query_rest(request))
+
+    async def developer_workbench_get(self, digest: str) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.developer_workbench_get, digest)
+
+    async def developer_workbench_get_report(self, digest: str) -> WorkbenchRegistryGetReport:
+        return workbench_registry_get_report(await self.developer_workbench_get(digest))
+
+    async def developer_workbench_get_rest(self, digest: str) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.developer_workbench_get_rest, digest)
+
+    async def developer_workbench_get_rest_report(self, digest: str) -> WorkbenchRegistryGetReport:
+        return workbench_registry_get_report(await self.developer_workbench_get_rest(digest))
 
     async def token_context_plan(
         self,

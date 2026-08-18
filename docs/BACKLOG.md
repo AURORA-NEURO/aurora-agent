@@ -280,6 +280,11 @@ store the complete report, later re-audit the current session, replay its dashbo
 request, and receive content-digest/mismatch witnesses through REST, MCP, CLI, Python, and TypeScript.
 This closes the local authoring handoff audit seam while leaving the external UI, package publishing,
 GitHub authentication, hosted runner, and provider-observed execution evidence intentionally open.
+The next retention seam is also implemented: `developer_workbench_import/query/get` provides a
+bounded, content-addressed registry shared by MCP and REST, with CLI and typed SDK facades plus an
+atomic `--workbench-state` checkpoint. Import, query, restore, and lookup verify report/snapshot
+digests and preserve transport-normalized envelopes; they do not turn local retention into a hosted
+authoring UI, a GitHub-backed repository action, CI execution, or release authority.
 The `ci_execution_evidence_audit` route adds the next safe boundary without claiming the external
 runner: it regenerates the canonical plan, requires a matching plan digest and per-check result
 digests, reconciles exact check names and requiredness, and keeps caller/provider provenance,

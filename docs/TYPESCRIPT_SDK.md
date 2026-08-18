@@ -245,6 +245,10 @@ unindexed unless explicitly registered.
 - `developerWorkbenchVerify` and `developerWorkbenchVerifyQuery`: retained-report verification
   through MCP and the dedicated REST route, with replay policy, digest witnesses, mismatch paths,
   and explicit `not_started` execution/network posture;
+- `developerWorkbenchImport`, `developerWorkbenchQuery`, and `developerWorkbenchGet` expose the
+  MCP registry, while `developerWorkbenchImportRest`, `developerWorkbenchQueryRest`, and
+  `developerWorkbenchGetRest` target the REST registry. Imports are digest-normalized and
+  idempotent; queries use bounded digest cursors and omit full reports unless requested;
 - `ciExecutionEvidenceAudit`: digest-bound reconciliation of a supplied CI run against a freshly
   generated workbench plan, with per-check result digests, complete/missing/non-passing findings,
   provider provenance, and structural-only verification. Its ready flag is a handoff signal, not

@@ -10,7 +10,7 @@ an implementation — so read the numbers as *"someone has read this and taken a
 never as *"this is done"*. The stronger criterion would be a conformance test per module. It does
 not exist and is not being claimed.
 
-The MCP integration layer currently exposes 226 callable tools. That count is intentionally
+The MCP integration layer currently exposes 229 callable tools. That count is intentionally
 separate from this citation denominator: `pack_health_assess`, `sdk_registry_check`, and
 `repository_impact` make existing typed contracts agent-callable, while `world_generate`,
 `hub_submission_review`, and `telemetry_project` add bounded in-tree generation, public-hub
@@ -65,6 +65,14 @@ report/audit/plan digests with explicit mismatch witnesses. It is available thro
 dedicated REST route, the CLI, and typed sync/async Python and TypeScript facades; it never executes
 cells, writes YAML, contacts GitHub, runs CI, or upgrades structural verification into release,
 scientific, clinical, safety, or production authority.
+The workbench registry is the durable continuation of that handoff audit: it imports only
+structurally valid digest-normalized reports, exposes bounded digest-ordered query/get projections,
+normalizes direct, MCP, and REST transport envelopes, and rejects tampered snapshots on restore.
+`developer_workbench_import`, `developer_workbench_query`, and `developer_workbench_get` share one
+registry across MCP and REST; the CLI and typed Python/TypeScript facades expose the same contract.
+`--workbench-state` enables atomic restart-safe persistence, capped at 512 reports and 32 MiB, while
+the registry remains an audit index only and never executes or re-evaluates a notebook, CI plan, or
+release decision.
 The standalone `capability_dashboard` route projects the same catalogue into bounded, digest-bound
 coverage rows: callable, partial, and declared-only readiness are separated; crate, CLI, Python,
 MCP-membership, and authoritative-schema counts remain independent; and missing surfaces are

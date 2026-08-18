@@ -4370,6 +4370,81 @@ export interface DeveloperWorkbenchVerificationResult extends JsonObject {
   limitations: string[];
 }
 
+export interface DeveloperWorkbenchRegistryImportArgs extends JsonObject {
+  report: JsonObject;
+}
+
+export interface DeveloperWorkbenchRegistryQueryArgs extends JsonObject {
+  session_digest?: string;
+  domain?: string;
+  capability?: string;
+  state?: "draft" | "validated" | "released" | "withdrawn";
+  release_ready?: boolean;
+  after?: string;
+  max_items?: number;
+  include_reports?: boolean;
+}
+
+export interface DeveloperWorkbenchRegistryImportResult extends JsonObject {
+  ok: boolean;
+  workflow: "developer_workbench_import";
+  workbench_report_digest: string;
+  created: boolean;
+  already_present: boolean;
+  registry_generation: number;
+  registry_size: number;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface DeveloperWorkbenchRegistryQueryRow extends JsonObject {
+  workbench_report_digest: string;
+  schema_version: string;
+  session_digest: string;
+  audit_valid: boolean;
+  release_ready: boolean;
+  artifact_count: number;
+  cell_count: number;
+  change_count: number;
+  executed_cell_count: number;
+  dashboard_present: boolean;
+  dashboard_matched: number;
+  dashboard_holes: number;
+  dashboard_stale: number;
+  ci_present: boolean;
+  ci_digest?: string | null;
+  domains: string[];
+  capabilities: string[];
+  states: string[];
+  report?: JsonObject;
+}
+
+export interface DeveloperWorkbenchRegistryQueryResult extends JsonObject {
+  ok: boolean;
+  workflow: "developer_workbench_query";
+  rows: DeveloperWorkbenchRegistryQueryRow[];
+  next_after: string | null;
+  has_more: boolean;
+  registry_generation: number;
+  registry_size: number;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface DeveloperWorkbenchRegistryGetResult extends JsonObject {
+  ok: boolean;
+  workflow: "developer_workbench_get";
+  workbench_report_digest: string;
+  report: JsonObject;
+  registry_generation: number;
+  registry_size: number;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface CiExecutionEvidenceArgs extends JsonObject {
   ci: JsonObject;
   evidence: JsonObject;

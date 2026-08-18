@@ -186,6 +186,23 @@ retained/observed digests, mismatch codes and JSON paths, replay booleans, and a
 Both `execution` and `network_access` are always `not_started`; the route does not run notebook cells,
 write generated YAML, contact GitHub, execute CI, or grant release or domain authority.
 
+The retained workbench registry provides a bounded lookup layer for those reports:
+
+- `POST /v1/developer-workbench/reports` imports `{ "report": <developer_workbench> }` after
+  canonical digest and schema validation. Re-importing the same report is idempotent.
+- `GET /v1/developer-workbench/reports` returns digest-ordered compact rows. Optional query
+  parameters are `session_digest`, `domain`, `capability`, `state`, `release_ready`, `after`,
+  `limit` (1–256), and `include_reports` (false by default).
+- `GET /v1/developer-workbench/reports/{workbench_report_digest}` fetches one exact report by its
+  lowercase SHA-256 content digest.
+- `GET /v1/developer-workbench/reports/persistence` reports configured checkpoint state and
+  `POST /v1/developer-workbench/reports/persistence/flush` writes the current snapshot explicitly.
+
+The API shares this registry with MCP, so an import through one transport is immediately queryable
+through the other. `--workbench-state <file>` enables atomic restart-safe persistence; startup
+verifies the snapshot digest and every retained report. The registry is capped at 512 reports and
+32 MiB, and all registry operations remain non-executing audit lookups.
+
 `POST /v1/domain-workflows/verify` checks a retained `domain_workflow_instantiate` response before
 handoff or re-review. It validates the workflow, catalogue, domain-contract, mission, and binding
 identities; reruns authoritative mission preflight; and, when `replay_request` is supplied, rebuilds

@@ -131,6 +131,11 @@ from prism_sdk import (
     MissionStep,
     PairedObservation,
     WorkbenchRequest,
+    WorkbenchRegistryGetReport,
+    WorkbenchRegistryImportReport,
+    WorkbenchRegistryImportRequest,
+    WorkbenchRegistryQueryReport,
+    WorkbenchRegistryQueryRequest,
     WorkbenchVerificationReport,
     WorkbenchVerificationRequest,
     Workspace,
@@ -1036,6 +1041,49 @@ def workbench_verification_payload(*, valid: bool = True) -> dict:
         "verification_digest": "c" * 64,
         "guarantees": ["retained report was replayed"],
         "limitations": ["CI was not executed"],
+    }
+
+
+def workbench_registry_import_payload() -> dict:
+    return {
+        "ok": True,
+        "workflow": "developer_workbench_import",
+        "workbench_report_digest": "d" * 64,
+        "created": True,
+        "already_present": False,
+        "registry_generation": 1,
+        "registry_size": 1,
+        "execution": "not_started",
+        "guarantees": [],
+        "limitations": [],
+    }
+
+
+def workbench_registry_query_payload() -> dict:
+    return {
+        "ok": True,
+        "workflow": "developer_workbench_query",
+        "rows": [{
+            "workbench_report_digest": "d" * 64,
+            "session_digest": "s" * 64,
+            "domains": ["oncology"],
+            "capabilities": ["evidence"],
+        }],
+        "next_after": None,
+        "has_more": False,
+        "registry_generation": 1,
+        "registry_size": 1,
+    }
+
+
+def workbench_registry_get_payload() -> dict:
+    return {
+        "ok": True,
+        "workflow": "developer_workbench_get",
+        "workbench_report_digest": "d" * 64,
+        "report": {"schema_version": "bioprism-devplat-workbench/0.1"},
+        "registry_generation": 1,
+        "registry_size": 1,
     }
 
 
@@ -2189,6 +2237,25 @@ class AnalyticsModelTests(unittest.TestCase):
             report = ApiClient("http://127.0.0.1:8787").developer_workbench_verify_report(request_body)
         self.assertTrue(report.valid)
         tool.assert_called_once_with("developer_workbench_verify", request_body.to_mcp_arguments())
+
+    def test_sync_http_workbench_registry_exposes_rest_and_mcp_routes(self) -> None:
+        import_request = WorkbenchRegistryImportRequest({"schema_version": "bioprism-devplat-workbench/0.1"})
+        query_request = WorkbenchRegistryQueryRequest(domain="oncology")
+        client = ApiClient("http://127.0.0.1:8787")
+        with patch.object(ApiClient, "request", side_effect=[workbench_registry_import_payload(), workbench_registry_query_payload(), workbench_registry_get_payload()]) as request:
+            self.assertTrue(client.developer_workbench_import_rest_report(import_request).created)
+            self.assertEqual(client.developer_workbench_query_rest_report(query_request).rows[0]["domains"], ["oncology"])
+            self.assertEqual(client.developer_workbench_get_rest_report("d" * 64).workbench_report_digest, "d" * 64)
+        self.assertEqual(request.call_args_list[0].args[0:2], ("POST", "/v1/developer-workbench/reports"))
+        self.assertEqual(request.call_args_list[1].args[0:2], ("GET", "/v1/developer-workbench/reports?max_items=100&include_reports=false&domain=oncology"))
+        self.assertEqual(request.call_args_list[2].args[0:2], ("GET", f"/v1/developer-workbench/reports/{'d' * 64}"))
+        with patch.object(ApiClient, "call_tool", side_effect=[workbench_registry_import_payload(), workbench_registry_query_payload(), workbench_registry_get_payload()]) as tool:
+            self.assertTrue(client.developer_workbench_import_report(import_request).created)
+            self.assertFalse(client.developer_workbench_query_report(query_request).has_more)
+            self.assertEqual(client.developer_workbench_get_report("d" * 64).workbench_report_digest, "d" * 64)
+        self.assertEqual(tool.call_args_list[0].args[0], "developer_workbench_import")
+        self.assertEqual(tool.call_args_list[1].args[0], "developer_workbench_query")
+        self.assertEqual(tool.call_args_list[2].args[0], "developer_workbench_get")
 
     def test_async_http_workbench_verification_delegates_to_both_routes(self) -> None:
         async def exercise() -> tuple[WorkbenchVerificationReport, WorkbenchVerificationReport]:

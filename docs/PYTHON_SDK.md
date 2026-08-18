@@ -562,6 +562,11 @@ invent defaults:
   bridge helpers; the HTTP clients also expose `developer_workbench_verify_rest_report(...)` for
   the dedicated REST route. The report retains replay status, digest witnesses, mismatch mappings,
   and the `not_started` execution/network boundary.
+- `WorkbenchRegistryImportRequest`, `WorkbenchRegistryQueryRequest`, and the corresponding typed
+  import/query/get reports expose the bounded retained-report registry. `Workspace` and
+  `AsyncWorkspace` provide MCP helpers; `ApiClient` and `AsyncApiClient` provide both MCP helpers
+  and `developer_workbench_*_rest(...)` methods for the REST routes. Query rows are digest-ordered,
+  cursored, and compact by default; full reports require `include_reports=True`.
 - `ci_execution_evidence_audit(...)` regenerates that canonical CI plan and reconciles a run report
   against its digest and exact checks. `CiExecutionEvidenceReport` preserves per-check result
   digests, missing/unknown/duplicate/non-passing findings, provider provenance, structural-only
