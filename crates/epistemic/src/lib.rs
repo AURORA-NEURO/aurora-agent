@@ -138,7 +138,9 @@
 //! remains a plan and not an execution engine.
 
 pub mod adaptive;
+pub mod adaptive_execution;
 pub mod continuation;
+pub mod cost;
 pub mod decision;
 pub mod error;
 pub mod evidence;
@@ -157,6 +159,17 @@ pub mod theorem;
 pub mod voi;
 
 pub use adaptive::{adaptive_policy, AdaptiveNode, AdaptiveOutcome, AdaptivePolicy};
+pub use adaptive_execution::{
+    AcquisitionExecutor, AcquisitionObservation, AcquisitionRequest, AdaptiveExecutionError,
+    AdaptiveExecutionReceipt, AdaptivePlan, AuthorizationSummary, ExecutionGrant, ExecutionRefusal,
+    ExecutionStatus, ObservationProvenance, ObservationReceipt, ReceiptReplayExecutor,
+    ScriptedExecutor, ADAPTIVE_EXECUTION_SCHEMA,
+};
+pub use cost::{
+    adaptive_policy_with_cost_vectors, scalar_policy_cost_note, CostVector, CostWeights,
+    CostedAcquisition, CostedAdaptiveNode, CostedAdaptiveOutcome, CostedAdaptivePolicy,
+    COST_DIMENSIONS,
+};
 pub use decision::{Belief, DecisionProblem};
 pub use error::EpistemicError;
 pub use evidence::{Acquisition, EvidenceItem, EvidencePool, Outcome};
@@ -194,12 +207,14 @@ pub const NOT_IMPLEMENTED: &[&str] = &[
     "43.50: sensitivity analysis to hidden confounding. The compatible-model set is supplied by \
      the caller; nothing widens it to account for an unobserved common cause.",
     "43.15/43.50: fiber-query/0.5 carries a bounded exact finite-horizon policy contract over \
-     caller-supplied acquisitions, and FIBER executes it under explicit caps. The planner assumes \
-     conditional independence, scalarized costs, and no execution or causal identification; \
-     external scheduling, observation receipts, and longer horizons remain outside this crate.",
-    "43.14: the cost vector. Cost is a scalar here; the token, compute, latency, privacy, \
-     specimen and expert-burden components 43.14 specifies are scalarised by the caller before \
-     they arrive.",
+     caller-supplied acquisitions, and FIBER executes it under explicit caps. The epistemic crate \
+     now adds a typed plan-scoped execution/grant/observation/replay seam, but the planner still \
+     assumes conditional independence and external scheduling, provider authentication, consent, \
+     and domain release authority remain outside this crate.",
+    "43.14: the vector-cost planner is implemented with seven explicit dimensions and component-wise \
+     feasibility, plus an explicit weight vector for scalar objective comparison. The scalar \
+     fiber-query/0.5 wire field remains a compatibility path; vector costs are not yet a versioned \
+     FIBER wire contract.",
     "43.14: matroid and partition constraints, and the partial-enumeration knapsack variant that \
      earns the (1-1/e)/2 factor. Cardinality and a simple cost-benefit knapsack are implemented; \
      the knapsack case reports no guarantee.",

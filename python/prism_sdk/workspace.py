@@ -197,6 +197,14 @@ from .execution_provenance import (
     ExecutionProvenanceRequest,
     execution_provenance_report,
 )
+from .adaptive_execution import (
+    AdaptiveCostedReport,
+    AdaptiveCostedRequest,
+    AdaptiveExecutionReport,
+    AdaptiveExecutionRequest,
+    adaptive_costed_report,
+    adaptive_execution_report,
+)
 from .delivery_receipt import (
     DeveloperDeliveryReceiptReport,
     DeveloperDeliveryReceiptRequest,
@@ -3593,6 +3601,46 @@ class Workspace:
         """Return a validated adaptive policy tree or fail-closed refusal."""
 
         return epistemic_adaptive_report(self.epistemic_adaptive_acquisition(request))
+
+    def epistemic_adaptive_execute(
+        self,
+        request: AdaptiveExecutionRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Execute or replay a bounded adaptive policy through the explicit provider boundary."""
+
+        normalized = request if isinstance(request, AdaptiveExecutionRequest) else AdaptiveExecutionRequest.from_wire(request)
+        result = self.client.call_tool("epistemic_adaptive_execute", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def epistemic_adaptive_execute_report(
+        self,
+        request: AdaptiveExecutionRequest | Mapping[str, Any],
+    ) -> AdaptiveExecutionReport:
+        """Return typed authorization, partial-prefix, terminal, and provenance evidence."""
+
+        return adaptive_execution_report(self.epistemic_adaptive_execute(request))
+
+    def epistemic_adaptive_costed(
+        self,
+        request: AdaptiveCostedRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Plan an adaptive policy with component-wise vector budgets through workspace MCP."""
+
+        normalized = request if isinstance(request, AdaptiveCostedRequest) else AdaptiveCostedRequest.from_wire(request)
+        result = self.client.call_tool("epistemic_adaptive_costed", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def epistemic_adaptive_costed_report(
+        self,
+        request: AdaptiveCostedRequest | Mapping[str, Any],
+    ) -> AdaptiveCostedReport:
+        """Return typed vector dimensions, policy, or fail-closed cost refusal."""
+
+        return adaptive_costed_report(self.epistemic_adaptive_costed(request))
 
     def epistemic_decision_quotient(
         self,
@@ -7365,6 +7413,46 @@ class AsyncWorkspace:
         """Return a validated adaptive policy tree or fail-closed refusal."""
 
         return epistemic_adaptive_report(await self.epistemic_adaptive_acquisition(request))
+
+    async def epistemic_adaptive_execute(
+        self,
+        request: AdaptiveExecutionRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async execution or receipt-only replay through the adaptive provider boundary."""
+
+        normalized = request if isinstance(request, AdaptiveExecutionRequest) else AdaptiveExecutionRequest.from_wire(request)
+        result = await self.client.call_tool("epistemic_adaptive_execute", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def epistemic_adaptive_execute_report(
+        self,
+        request: AdaptiveExecutionRequest | Mapping[str, Any],
+    ) -> AdaptiveExecutionReport:
+        """Return async typed adaptive execution and provenance evidence."""
+
+        return adaptive_execution_report(await self.epistemic_adaptive_execute(request))
+
+    async def epistemic_adaptive_costed(
+        self,
+        request: AdaptiveCostedRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async vector-cost adaptive planning through workspace MCP."""
+
+        normalized = request if isinstance(request, AdaptiveCostedRequest) else AdaptiveCostedRequest.from_wire(request)
+        result = await self.client.call_tool("epistemic_adaptive_costed", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def epistemic_adaptive_costed_report(
+        self,
+        request: AdaptiveCostedRequest | Mapping[str, Any],
+    ) -> AdaptiveCostedReport:
+        """Return async typed vector-cost planning evidence."""
+
+        return adaptive_costed_report(await self.epistemic_adaptive_costed(request))
 
     async def epistemic_decision_quotient(
         self,

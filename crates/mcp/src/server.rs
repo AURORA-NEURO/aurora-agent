@@ -191,6 +191,7 @@ use bioprism_docgraph::{
 use bioprism_epistemic::submodularity::check_with_tolerance as epistemic_submodularity_check;
 use bioprism_epistemic::{
     adaptive_policy as epistemic_adaptive_policy,
+    adaptive_policy_with_cost_vectors as epistemic_vector_adaptive_policy,
     brute_force_optimum as epistemic_brute_force_optimum,
     complementarity as epistemic_complementarity,
     decision_equivalence_quotient as epistemic_decision_equivalence_quotient,
@@ -199,11 +200,15 @@ use bioprism_epistemic::{
     joint_value as epistemic_joint_value, lazy_greedy as epistemic_lazy_greedy,
     minimal_sufficient_context as epistemic_minimal_sufficient_context,
     value_of_information as epistemic_value_of_information, Acquisition as EpistemicAcquisition,
-    AdaptiveNode as EpistemicAdaptiveNode, Belief as EpistemicBelief,
-    Constraint as EpistemicConstraint, DecisionProblem as EpistemicDecisionProblem,
+    AdaptiveExecutionReceipt as EpistemicAdaptiveExecutionReceipt,
+    AdaptiveNode as EpistemicAdaptiveNode, AdaptivePlan as EpistemicAdaptivePlan,
+    Belief as EpistemicBelief, Constraint as EpistemicConstraint,
+    CostVector as EpistemicCostVector, CostWeights as EpistemicCostWeights,
+    CostedAcquisition as EpistemicCostedAcquisition, DecisionProblem as EpistemicDecisionProblem,
     DistortionCriterion as EpistemicDistortionCriterion, EvidencePool as EpistemicEvidencePool,
-    Outcome as EpistemicOutcome, RegretReduction as EpistemicRegretReduction,
-    SetFunction as EpistemicSetFunction,
+    ExecutionGrant as EpistemicExecutionGrant, Outcome as EpistemicOutcome,
+    RegretReduction as EpistemicRegretReduction, ScriptedExecutor as EpistemicScriptedExecutor,
+    SetFunction as EpistemicSetFunction, ADAPTIVE_EXECUTION_SCHEMA,
 };
 use bioprism_evalengine::attribute as bioeval_design_attribute;
 use bioprism_evalengine::{
@@ -1707,6 +1712,8 @@ impl Server {
             "bioql_compile" => self.bioql_compile(&arguments),
             "epistemic_voi" => self.epistemic_voi(&arguments),
             "epistemic_adaptive_acquisition" => self.epistemic_adaptive_acquisition(&arguments),
+            "epistemic_adaptive_costed" => self.epistemic_adaptive_costed(&arguments),
+            "epistemic_adaptive_execute" => self.epistemic_adaptive_execute(&arguments),
             "epistemic_decision_quotient" => self.epistemic_decision_quotient(&arguments),
             "epistemic_context_audit" => self.epistemic_context_audit(&arguments),
             "epistemic_selection_audit" => self.epistemic_selection_audit(&arguments),
@@ -14031,6 +14038,271 @@ impl Server {
                 "the endpoint plans but does not execute, authenticate, schedule, or observe acquisitions",
                 "the decision-relative policy is not causal, clinical, biological, or predictive truth",
                 "costs are a caller-supplied scalarization of burden, latency, privacy, compute, or money",
+            ],
+        }))
+    }
+
+    fn epistemic_adaptive_costed(&self, arguments: &Value) -> Result<Value, String> {
+        const SCHEMA: &str = "bioprism-mcp/epistemic-adaptive-costed/0.1";
+        let raw_problem = arguments
+            .get("problem")
+            .cloned()
+            .ok_or("problem is required")?;
+        let raw_belief = arguments
+            .get("belief")
+            .cloned()
+            .ok_or("belief is required")?;
+        let raw_acquisitions = arguments
+            .get("acquisitions")
+            .and_then(Value::as_array)
+            .cloned()
+            .ok_or("acquisitions is required and must be an array")?;
+        if raw_acquisitions.is_empty() || raw_acquisitions.len() > 16 {
+            return Err("acquisitions must contain between 1 and 16 actions".into());
+        }
+        let raw_budget = arguments
+            .get("budget")
+            .cloned()
+            .ok_or("budget is required and must be a seven-dimensional cost vector")?;
+        let raw_weights = arguments
+            .get("weights")
+            .cloned()
+            .ok_or("weights is required and must be a seven-dimensional cost vector")?;
+        let budget: EpistemicCostVector = serde_json::from_value(raw_budget)
+            .map_err(|error| format!("invalid vector budget: {error}"))?;
+        let weights: EpistemicCostWeights = serde_json::from_value(raw_weights)
+            .map_err(|error| format!("invalid vector weights: {error}"))?;
+        let max_steps = arguments
+            .get("max_steps")
+            .and_then(Value::as_u64)
+            .ok_or("max_steps is required and must be an integer")?
+            as usize;
+        if max_steps > 16 {
+            return Err("max_steps must not exceed the exact horizon cap of 16".into());
+        }
+        let encoded = serde_json::to_vec(&json!({
+            "problem": raw_problem.clone(),
+            "belief": raw_belief.clone(),
+            "acquisitions": raw_acquisitions.clone(),
+            "budget": budget,
+            "weights": weights,
+            "max_steps": max_steps,
+        }))
+        .map_err(|error| format!("cannot measure vector-cost envelope: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("vector-cost adaptive input exceeds the 20000000-byte safety bound".into());
+        }
+        let problem: EpistemicDecisionProblem = serde_json::from_value(raw_problem)
+            .map_err(|error| format!("invalid decision problem: {error}"))?;
+        problem
+            .validate()
+            .map_err(|error| format!("decision problem invariant failed: {error}"))?;
+        if problem.action_count() > 1_000 || problem.model_count() > 1_000 {
+            return Err("decision problems are bounded at 1000 actions and 1000 models".into());
+        }
+        let belief: EpistemicBelief = serde_json::from_value(raw_belief)
+            .map_err(|error| format!("invalid belief: {error}"))?;
+        if belief.len() > 1_000 {
+            return Err("belief is bounded at 1000 models".into());
+        }
+        belief
+            .check_against(&problem)
+            .map_err(|error| format!("belief invariant failed: {error}"))?;
+        let acquisitions: Vec<EpistemicCostedAcquisition> =
+            serde_json::from_value(Value::Array(raw_acquisitions))
+                .map_err(|error| format!("invalid vector-cost acquisitions: {error}"))?;
+        let policy = match epistemic_vector_adaptive_policy(
+            &problem,
+            &belief,
+            &acquisitions,
+            budget,
+            weights,
+            max_steps,
+        ) {
+            Ok(policy) => policy,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "schema": SCHEMA,
+                    "stage": "adaptive_vector_policy",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "cost_dimensions": bioprism_epistemic::COST_DIMENSIONS,
+                    "guarantees": [
+                        "every acquisition path is checked component-wise against the remaining vector budget",
+                        "scalar weights compare only policies that already satisfy every component budget",
+                        "no scalar cost is substituted for an omitted vector dimension",
+                    ],
+                }));
+            }
+        };
+        Ok(json!({
+            "ok": true,
+            "schema": SCHEMA,
+            "cost_dimensions": bioprism_epistemic::COST_DIMENSIONS,
+            "budget": budget,
+            "weights": weights,
+            "max_steps": max_steps,
+            "problem": {
+                "actions": problem.actions(),
+                "models": problem.models(),
+                "action_count": problem.action_count(),
+                "model_count": problem.model_count(),
+            },
+            "acquisitions": acquisitions,
+            "policy": policy,
+            "guarantees": [
+                "the exact finite-horizon policy is feasible in every declared cost dimension",
+                "expected acquisition cost is returned as a vector and as its explicit scalarization",
+                "branch-dependent next acquisitions and posterior masses remain serialized",
+            ],
+            "limitations": [
+                "the planner assumes conditional independence given caller-supplied models",
+                "cost vectors and weights are caller declarations, not provider telemetry",
+                "the result plans but does not execute acquisitions or establish causal, clinical, biological, or predictive truth",
+            ],
+        }))
+    }
+
+    fn epistemic_adaptive_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let mode = arguments
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("simulate");
+        if mode != "simulate" && mode != "replay" {
+            return Err("mode must be \"simulate\" or \"replay\"".into());
+        }
+        let problem: EpistemicDecisionProblem = serde_json::from_value(
+            arguments
+                .get("problem")
+                .cloned()
+                .ok_or("problem is required")?,
+        )
+        .map_err(|error| format!("invalid decision problem: {error}"))?;
+        let belief: EpistemicBelief = serde_json::from_value(
+            arguments
+                .get("belief")
+                .cloned()
+                .ok_or("belief is required")?,
+        )
+        .map_err(|error| format!("invalid belief: {error}"))?;
+        let acquisitions: Vec<EpistemicAcquisition> = serde_json::from_value(
+            arguments
+                .get("acquisitions")
+                .cloned()
+                .ok_or("acquisitions is required")?,
+        )
+        .map_err(|error| format!("invalid acquisitions: {error}"))?;
+        let budget = arguments
+            .get("budget")
+            .and_then(Value::as_f64)
+            .ok_or("budget is required and must be a finite non-negative number")?;
+        let max_steps = arguments
+            .get("max_steps")
+            .and_then(Value::as_u64)
+            .ok_or("max_steps is required and must be an integer")?
+            as usize;
+        let plan = EpistemicAdaptivePlan::new(problem, belief, acquisitions, budget, max_steps)
+            .map_err(|error| format!("adaptive plan refused: {error}"))?;
+        let plan_digest = plan
+            .digest()
+            .map_err(|error| format!("cannot digest adaptive plan: {error}"))?;
+        let provider = arguments
+            .get("provider")
+            .and_then(Value::as_str)
+            .unwrap_or("mcp-simulated")
+            .to_string();
+
+        let receipt = if mode == "replay" {
+            let prior: EpistemicAdaptiveExecutionReceipt = serde_json::from_value(
+                arguments
+                    .get("receipt")
+                    .cloned()
+                    .ok_or("receipt is required in replay mode")?,
+            )
+            .map_err(|error| format!("invalid adaptive execution receipt: {error}"))?;
+            plan.replay(&prior)
+                .map_err(|error| format!("adaptive replay refused: {error}"))?
+        } else {
+            let grant = match arguments.get("authorization") {
+                None => None,
+                Some(raw) => {
+                    let object = raw.as_object().ok_or("authorization must be an object")?;
+                    let grant_id = object
+                        .get("grant_id")
+                        .and_then(Value::as_str)
+                        .ok_or("authorization.grant_id is required")?;
+                    let authorized_provider = object
+                        .get("provider")
+                        .and_then(Value::as_str)
+                        .ok_or("authorization.provider is required")?;
+                    Some(
+                        EpistemicExecutionGrant::issue(
+                            grant_id,
+                            plan_digest.clone(),
+                            authorized_provider,
+                        )
+                        .map_err(|error| format!("authorization refused: {error}"))?,
+                    )
+                }
+            };
+            let raw_observations = arguments
+                .get("observations")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            if raw_observations.len() > 16 {
+                return Err("observations cannot exceed the exact 16-step bound".into());
+            }
+            let script = raw_observations
+                .iter()
+                .enumerate()
+                .map(|(index, raw)| {
+                    let object = raw
+                        .as_object()
+                        .ok_or_else(|| format!("observations[{index}] must be an object"))?;
+                    let acquisition_id = object
+                        .get("acquisition_id")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| {
+                            format!("observations[{index}].acquisition_id is required")
+                        })?;
+                    let outcome_label = object
+                        .get("outcome_label")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| {
+                            format!("observations[{index}].outcome_label is required")
+                        })?;
+                    Ok((acquisition_id.to_string(), outcome_label.to_string()))
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            let mut executor = EpistemicScriptedExecutor::simulated(provider, script);
+            plan.execute(grant.as_ref(), &mut executor)
+                .map_err(|error| format!("adaptive execution refused: {error}"))?
+        };
+        let (observed, simulated, replayed) = receipt.provenance_counts();
+        Ok(json!({
+            "ok": true,
+            "schema": ADAPTIVE_EXECUTION_SCHEMA,
+            "mode": mode,
+            "plan_digest": plan_digest,
+            "completed": receipt.is_completed(),
+            "receipt": receipt,
+            "provenance_counts": {
+                "observed": observed,
+                "simulated": simulated,
+                "replayed": replayed,
+            },
+            "guarantees": [
+                "no provider call occurs without an explicit plan-scoped grant",
+                "provider identity, acquisition identity, declared outcome labels, evidence digests, path budget, and policy order are checked",
+                "partial and refused runs retain their validated prefix rather than being upgraded to completion",
+                "replay uses a receipt-only executor with no live-source fallback",
+            ],
+            "limitations": [
+                "the MCP surface provides a simulated adapter for local contract testing; external providers must implement the Rust acquisition seam",
+                "an observed provenance label is a provider declaration, not authentication, consent, chain of custody, or clinical/release authority",
+                "the decision policy remains conditional-independence, model-relative planning rather than causal or predictive truth",
             ],
         }))
     }
@@ -31622,7 +31894,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "evaluation_and_baselines",
             "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes", "factorial designs", "component attribution", "interaction coverage", "evaluator independence", "disagreement witnesses", "abstention handling", "nonrenewable resource accounting", "fork feasibility", "failed-action waste", "prospective commitments", "rubric digest integrity", "selective publication", "contextual integrity", "channel exposure", "utility-safety Pareto"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
-            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "bioeval_reveal_audit", "bioeval_boundary_audit", "epistemic_voi", "epistemic_adaptive_acquisition", "epistemic_decision_quotient", "epistemic_context_audit", "epistemic_selection_audit"],
+            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "bioeval_reveal_audit", "bioeval_boundary_audit", "epistemic_voi", "epistemic_adaptive_acquisition", "epistemic_adaptive_costed", "epistemic_adaptive_execute", "epistemic_decision_quotient", "epistemic_context_audit", "epistemic_selection_audit"],
             "cli_entrypoints": ["prism fork", "prism minimize", "context compare"],
             "status": "available"
         },
@@ -34224,6 +34496,42 @@ pub fn tool_definitions() -> Vec<Value> {
                     "acquisitions": { "type": "array", "minItems": 1, "maxItems": 16, "description": "Distinct acquisitions. Each has id, non-negative scalar cost, and a complete outcome likelihood partition." },
                     "budget": { "type": "number", "minimum": 0, "description": "Maximum scalarized acquisition cost paid along any policy path." },
                     "max_steps": { "type": "integer", "minimum": 0, "maximum": 16, "description": "Maximum number of distinct acquisitions on any branch." }
+                },
+                "required": ["problem", "belief", "acquisitions", "budget", "max_steps"]
+            }
+        }),
+        json!({
+            "name": "epistemic_adaptive_costed",
+            "description": "Compute an exact finite-horizon adaptive acquisition policy with seven explicit resource dimensions: tokens, compute time, latency, money, privacy loss, specimen units, and expert minutes. Component-wise feasibility is checked before explicit scalar weights compare policies; the endpoint plans only and never executes acquisitions.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "problem": { "type": "object", "description": "Serialized bioprism-epistemic DecisionProblem." },
+                    "belief": { "type": "object", "description": "Serialized normalized bioprism-epistemic Belief." },
+                    "acquisitions": { "type": "array", "minItems": 1, "maxItems": 16, "description": "Items shaped as {acquisition: {id, cost, outcomes}, cost: {tokens, compute_ms, latency_ms, money_usd, privacy_loss, specimen_units, expert_minutes}}." },
+                    "budget": { "type": "object", "description": "Seven-dimensional component budget with the exact cost dimension keys." },
+                    "weights": { "type": "object", "description": "Non-negative comparison weights over the same seven dimensions; at least one must be positive." },
+                    "max_steps": { "type": "integer", "minimum": 0, "maximum": 16, "description": "Maximum number of distinct acquisitions on any branch." }
+                },
+                "required": ["problem", "belief", "acquisitions", "budget", "weights", "max_steps"]
+            }
+        }),
+        json!({
+            "name": "epistemic_adaptive_execute",
+            "description": "Run or replay a previously planned adaptive policy through an explicit provider boundary. Simulation is the only provider built into this MCP surface and is always labelled simulated; external adapters implement the typed Rust acquisition seam. Execution without a plan-scoped authorization returns a refusal without calling the provider. Every accepted branch is checked for plan digest, provider identity, declared outcome labels, evidence digest shape, path budget, and provenance; partial runs never become completed runs.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "mode": { "type": "string", "enum": ["simulate", "replay"], "default": "simulate", "description": "Simulate caller-supplied outcomes or replay a prior receipt without a live source." },
+                    "problem": { "type": "object", "description": "Serialized bioprism-epistemic DecisionProblem used to bind the policy digest." },
+                    "belief": { "type": "object", "description": "Serialized normalized bioprism-epistemic Belief." },
+                    "acquisitions": { "type": "array", "minItems": 1, "maxItems": 16, "description": "The exact acquisition definitions used by the policy." },
+                    "budget": { "type": "number", "minimum": 0, "description": "Maximum scalarized cost on any policy path." },
+                    "max_steps": { "type": "integer", "minimum": 0, "maximum": 16, "description": "Maximum number of acquisitions on any branch." },
+                    "provider": { "type": "string", "maxLength": 256, "default": "mcp-simulated", "description": "Provider identity. The built-in adapter only simulates and cannot claim external observation." },
+                    "authorization": { "type": "object", "description": "Optional explicit {grant_id, provider}; absent authorization is a fail-closed no-call refusal." },
+                    "observations": { "type": "array", "maxItems": 16, "description": "Simulation script rows {acquisition_id, outcome_label}; outcomes are labelled simulated." },
+                    "receipt": { "type": "object", "description": "Prior adaptive execution receipt required in replay mode." }
                 },
                 "required": ["problem", "belief", "acquisitions", "budget", "max_steps"]
             }

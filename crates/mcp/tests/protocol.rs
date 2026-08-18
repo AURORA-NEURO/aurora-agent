@@ -323,7 +323,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 213);
+    assert_eq!(tools.len(), 215);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -7868,12 +7868,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(213));
-    assert_eq!(result["advertised_tool_count"], json!(213));
+    assert_eq!(result["unique_catalog_tools"], json!(215));
+    assert_eq!(result["advertised_tool_count"], json!(215));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(213));
-    assert_eq!(result["schema_quality"]["valid"], json!(213));
+    assert_eq!(result["schema_quality"]["checked"], json!(215));
+    assert_eq!(result["schema_quality"]["valid"], json!(215));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -13487,6 +13487,141 @@ fn epistemic_adaptive_acquisition_projects_branch_dependent_named_policy() {
     );
     assert_eq!(refused["__isError"], json!(true));
     assert!(refused["error"].as_str().unwrap().contains("max_steps"));
+}
+
+#[test]
+fn epistemic_adaptive_execute_requires_authorization_and_replays_simulated_prefixes() {
+    let base = json!({
+        "problem": {
+            "actions": ["choose-m0", "choose-m1"],
+            "models": ["m0", "m1"],
+            "loss": [0.0, 1.0, 1.0, 0.0]
+        },
+        "belief": { "mass": [0.9, 0.1] },
+        "acquisitions": [
+            {
+                "id": "screen",
+                "cost": 0.01,
+                "outcomes": [
+                    { "label": "positive", "likelihood": [0.9, 0.2] },
+                    { "label": "negative", "likelihood": [0.1, 0.8] }
+                ]
+            },
+            {
+                "id": "confirm",
+                "cost": 0.1,
+                "outcomes": [
+                    { "label": "positive", "likelihood": [0.01, 0.99] },
+                    { "label": "negative", "likelihood": [0.99, 0.01] }
+                ]
+            }
+        ],
+        "budget": 0.11,
+        "max_steps": 2
+    });
+
+    let denied = call(&mut server(), "epistemic_adaptive_execute", base.clone());
+    assert_eq!(denied["ok"], json!(true));
+    assert_eq!(denied["completed"], json!(false));
+    assert_eq!(denied["receipt"]["status"], json!("refused"));
+    assert_eq!(denied["receipt"]["observations"], json!([]));
+    assert_eq!(
+        denied["receipt"]["refusal"],
+        json!("authorization_required")
+    );
+
+    let mut authorized = base;
+    authorized["provider"] = json!("mcp-simulated");
+    authorized["authorization"] = json!({ "grant_id": "grant-1", "provider": "mcp-simulated" });
+    authorized["observations"] = json!([
+        { "acquisition_id": "screen", "outcome_label": "negative" },
+        { "acquisition_id": "confirm", "outcome_label": "negative" }
+    ]);
+    let simulated = call(
+        &mut server(),
+        "epistemic_adaptive_execute",
+        authorized.clone(),
+    );
+    assert_eq!(simulated["completed"], json!(true));
+    assert_eq!(simulated["receipt"]["status"], json!("completed"));
+    assert_eq!(simulated["provenance_counts"]["simulated"], json!(2));
+
+    let replay = call(
+        &mut server(),
+        "epistemic_adaptive_execute",
+        json!({
+            "mode": "replay",
+            "problem": authorized["problem"].clone(),
+            "belief": authorized["belief"].clone(),
+            "acquisitions": authorized["acquisitions"].clone(),
+            "budget": 0.11,
+            "max_steps": 2,
+            "receipt": simulated["receipt"].clone()
+        }),
+    );
+    assert_eq!(replay["completed"], json!(true));
+    assert_eq!(replay["receipt"]["status"], json!("completed"));
+    assert_eq!(replay["provenance_counts"]["replayed"], json!(2));
+    assert_eq!(replay["provenance_counts"]["simulated"], json!(0));
+}
+
+#[test]
+fn epistemic_adaptive_costed_keeps_latency_infeasibility_out_of_scalarization() {
+    let result = call(
+        &mut server(),
+        "epistemic_adaptive_costed",
+        json!({
+            "problem": {
+                "actions": ["choose-m0", "choose-m1"],
+                "models": ["m0", "m1"],
+                "loss": [0.0, 1.0, 1.0, 0.0]
+            },
+            "belief": { "mass": [0.5, 0.5] },
+            "acquisitions": [{
+                "acquisition": {
+                    "id": "slow-screen",
+                    "cost": 0.01,
+                    "outcomes": [
+                        { "label": "positive", "likelihood": [0.9, 0.1] },
+                        { "label": "negative", "likelihood": [0.1, 0.9] }
+                    ]
+                },
+                "cost": {
+                    "tokens": 1.0,
+                    "compute_ms": 1.0,
+                    "latency_ms": 100.0,
+                    "money_usd": 0.0,
+                    "privacy_loss": 0.0,
+                    "specimen_units": 0.0,
+                    "expert_minutes": 0.0
+                }
+            }],
+            "budget": {
+                "tokens": 100.0,
+                "compute_ms": 100.0,
+                "latency_ms": 10.0,
+                "money_usd": 1.0,
+                "privacy_loss": 1.0,
+                "specimen_units": 1.0,
+                "expert_minutes": 10.0
+            },
+            "weights": {
+                "tokens": 0.0,
+                "compute_ms": 0.0,
+                "latency_ms": 1.0,
+                "money_usd": 0.0,
+                "privacy_loss": 0.0,
+                "specimen_units": 0.0,
+                "expert_minutes": 0.0
+            },
+            "max_steps": 1
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["cost_dimensions"].as_array().unwrap().len(), 7);
+    assert_eq!(result["policy"]["budget"]["latency_ms"], json!(10.0));
+    assert!(result["policy"]["root"].get("Stop").is_some());
 }
 
 #[test]

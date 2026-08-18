@@ -122,6 +122,30 @@ pub struct AdaptiveAcquisitionTrace {
     pub policy: AdaptivePolicy,
 }
 
+impl AdaptiveAcquisitionTrace {
+    /// Rebinds the compiler's policy projection to the execution-layer contract.
+    ///
+    /// Compilation remains side-effect free: this method only revalidates the exact policy and
+    /// returns a plan that a caller may later execute with an explicit provider grant. Keeping the
+    /// conversion here prevents SDK and MCP callers from reconstructing the prior, acquisitions,
+    /// and policy independently (which would weaken the compiler-to-executor digest boundary).
+    pub fn execution_plan(
+        &self,
+    ) -> Result<bioprism_epistemic::AdaptivePlan, bioprism_epistemic::AdaptiveExecutionError> {
+        let belief = bioprism_epistemic::Belief::new(self.prior.clone()).map_err(|error| {
+            bioprism_epistemic::AdaptiveExecutionError::InvalidPlan(error.to_string())
+        })?;
+        bioprism_epistemic::AdaptivePlan::from_policy(
+            self.problem.clone(),
+            belief,
+            self.acquisitions.clone(),
+            self.budget,
+            self.max_steps,
+            self.policy.clone(),
+        )
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CompileOutput {
     pub section: DecisionSection,

@@ -494,7 +494,9 @@ name = "bioprism-interweave"
 version = "0.1.0"
 dependencies = [
  "bioprism-choreography",
+ "bioprism-epistemic",
  "bioprism-fabric",
+ "bioprism-ids",
  "bioprism-section",
  "bioprism-weave",
  "serde",

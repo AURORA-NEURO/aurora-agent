@@ -556,10 +556,24 @@ expected scalarized cost, posterior branches, state caps, conditional-independen
 and fail-closed refusals remain visible; it plans only and never executes an acquisition or claims
 causal, clinical, biological, or predictive truth. See
 [`docs/EPISTEMIC_ADAPTIVE_ACQUISITION.md`](docs/EPISTEMIC_ADAPTIVE_ACQUISITION.md);
+`epistemic_adaptive_execute` is the explicit next boundary: it requires a plan-scoped provider
+grant, validates one provider outcome against the selected branch at a time, preserves partial and
+refused prefixes, and replays through a receipt-only executor with no live fallback. The built-in
+MCP adapter is simulation-only and labels its rows `simulated`; Python and TypeScript expose typed
+receipt/provenance projections. See
+[`docs/EPISTEMIC_ADAPTIVE_EXECUTION.md`](docs/EPISTEMIC_ADAPTIVE_EXECUTION.md);
+`epistemic_adaptive_costed` exposes the same exact finite-horizon planner with component-wise
+tokens/compute/latency/money/privacy/specimen/expert budgets and explicit scalar weights; Python
+and TypeScript preserve the canonical seven-dimension request/result contract. See
+[`docs/EPISTEMIC_COST_VECTORS.md`](docs/EPISTEMIC_COST_VECTORS.md);
 the versioned `fiber-query/0.5` contract carries the same unperformed-acquisition semantics into
 the FIBER compiler and returns a certificate-bound named policy tree with `execution:
 "not_started"` and `authorization: "not_granted"`; the Python and TypeScript SDKs expose a
 typed replay-safe projection of that boundary.
+The interweave catalogue now has a typed workflow execution binding that carries workflow identity,
+capabilities, effect prohibitions, plan digests, explicit grants, and receipt-only replay across
+all six reference workflow identities without claiming generic release authority. See
+[`docs/WORKFLOW_EXECUTION_BINDING.md`](docs/WORKFLOW_EXECUTION_BINDING.md).
 `benchmark_trace_analyze` adds the deeper benchmark compiler's causal, episode, boundary, and
 repetition analysis; the Python and TypeScript SDKs expose typed trace events, causal score
 components, divergence/verdict variants, boundaries, episodes, repetitions, and fail-closed

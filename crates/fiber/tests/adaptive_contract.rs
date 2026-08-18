@@ -3,7 +3,7 @@
 //! The test uses the published JSON fixture so parser validation, exact kernel planning,
 //! certificate identity, and the explicit no-execution posture all share one artifact.
 
-use bioprism_epistemic::adaptive::AdaptiveNode;
+use bioprism_epistemic::{adaptive::AdaptiveNode, ScriptedExecutor};
 use bioprism_fiber::{compile, FiberError, Query, QUERY_ADAPTIVE_FIELD_PATHS};
 use bioprism_section::CertificateProfile;
 use bioprism_world::World;
@@ -113,4 +113,40 @@ fn adaptive_field_catalogue_is_version_specific() {
     assert!(QUERY_ADAPTIVE_FIELD_PATHS.contains(&"adaptive_acquisition"));
     assert!(QUERY_ADAPTIVE_FIELD_PATHS.contains(&"adaptive_acquisition.acquisitions"));
     assert!(QUERY_ADAPTIVE_FIELD_PATHS.contains(&"adaptive_acquisition.prior"));
+}
+
+#[test]
+fn compiled_policy_rebinds_to_execution_and_replays_without_live_fallback() {
+    let query = Query::from_json(adaptive_query()).expect("0.5 query parses");
+    let out = compile(&reference_world(), &query).expect("0.5 query compiles");
+    let trace = out
+        .trace
+        .adaptive_acquisition
+        .as_ref()
+        .expect("adaptive trace is present");
+    let plan = trace
+        .execution_plan()
+        .expect("trace is a valid execution plan");
+    let digest = plan.digest().expect("plan digest");
+    let grant =
+        bioprism_epistemic::ExecutionGrant::issue("fiber-test-grant", &digest, "fiber-test")
+            .expect("grant scopes to the compiled plan");
+    let mut executor = ScriptedExecutor::simulated(
+        "fiber-test",
+        vec![
+            ("screen".into(), "negative".into()),
+            ("confirm".into(), "negative".into()),
+        ],
+    );
+    let receipt = plan
+        .execute(Some(&grant), &mut executor)
+        .expect("simulated execution succeeds");
+    assert!(receipt.is_completed());
+    // This fixture's exact optimum is an immediate stop, so the valid receipt has no acquisition
+    // rows. The lower-level epistemic tests cover a non-empty simulated branch; this integration
+    // test proves the compiler-produced stop policy still crosses the execution boundary.
+    assert_eq!(receipt.provenance_counts(), (0, 0, 0));
+    let replay = plan.replay(&receipt).expect("receipt-only replay succeeds");
+    assert!(replay.is_completed());
+    assert_eq!(replay.provenance_counts(), (0, 0, 0));
 }

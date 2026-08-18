@@ -192,6 +192,14 @@ from .ci_provider_evidence import (
     ci_provider_evidence_report,
 )
 from .execution_provenance import ExecutionProvenanceReport, ExecutionProvenanceRequest, execution_provenance_report
+from .adaptive_execution import (
+    AdaptiveCostedReport,
+    AdaptiveCostedRequest,
+    AdaptiveExecutionReport,
+    AdaptiveExecutionRequest,
+    adaptive_costed_report,
+    adaptive_execution_report,
+)
 from .delivery_receipt import (
     DeveloperDeliveryReceiptReport,
     DeveloperDeliveryReceiptRequest,
@@ -2241,6 +2249,40 @@ class ApiClient:
         """Return a validated adaptive policy tree or fail-closed refusal."""
 
         return epistemic_adaptive_report(self.epistemic_adaptive_acquisition(request))
+
+    def epistemic_adaptive_execute(
+        self,
+        request: AdaptiveExecutionRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Execute or replay an adaptive policy through the HTTP gateway."""
+
+        normalized = request if isinstance(request, AdaptiveExecutionRequest) else AdaptiveExecutionRequest.from_wire(request)
+        return self.call_tool("epistemic_adaptive_execute", normalized.to_mcp_arguments())
+
+    def epistemic_adaptive_execute_report(
+        self,
+        request: AdaptiveExecutionRequest | Mapping[str, Any],
+    ) -> AdaptiveExecutionReport:
+        """Return typed HTTP adaptive execution and provenance evidence."""
+
+        return adaptive_execution_report(self.epistemic_adaptive_execute(request))
+
+    def epistemic_adaptive_costed(
+        self,
+        request: AdaptiveCostedRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Plan a component-wise feasible adaptive policy through HTTP."""
+
+        normalized = request if isinstance(request, AdaptiveCostedRequest) else AdaptiveCostedRequest.from_wire(request)
+        return self.call_tool("epistemic_adaptive_costed", normalized.to_mcp_arguments())
+
+    def epistemic_adaptive_costed_report(
+        self,
+        request: AdaptiveCostedRequest | Mapping[str, Any],
+    ) -> AdaptiveCostedReport:
+        """Return typed HTTP vector-cost planning evidence."""
+
+        return adaptive_costed_report(self.epistemic_adaptive_costed(request))
 
     def epistemic_decision_quotient(
         self,
@@ -6429,6 +6471,40 @@ class AsyncApiClient:
         """Return a validated adaptive policy tree or fail-closed refusal."""
 
         return epistemic_adaptive_report(await self.epistemic_adaptive_acquisition(request))
+
+    async def epistemic_adaptive_execute(
+        self,
+        request: AdaptiveExecutionRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async HTTP execution or receipt-only replay through the adaptive boundary."""
+
+        normalized = request if isinstance(request, AdaptiveExecutionRequest) else AdaptiveExecutionRequest.from_wire(request)
+        return await self.call_tool("epistemic_adaptive_execute", normalized.to_mcp_arguments())
+
+    async def epistemic_adaptive_execute_report(
+        self,
+        request: AdaptiveExecutionRequest | Mapping[str, Any],
+    ) -> AdaptiveExecutionReport:
+        """Return typed async HTTP adaptive execution and provenance evidence."""
+
+        return adaptive_execution_report(await self.epistemic_adaptive_execute(request))
+
+    async def epistemic_adaptive_costed(
+        self,
+        request: AdaptiveCostedRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async HTTP vector-cost adaptive planning."""
+
+        normalized = request if isinstance(request, AdaptiveCostedRequest) else AdaptiveCostedRequest.from_wire(request)
+        return await self.call_tool("epistemic_adaptive_costed", normalized.to_mcp_arguments())
+
+    async def epistemic_adaptive_costed_report(
+        self,
+        request: AdaptiveCostedRequest | Mapping[str, Any],
+    ) -> AdaptiveCostedReport:
+        """Return typed async HTTP vector-cost planning evidence."""
+
+        return adaptive_costed_report(await self.epistemic_adaptive_costed(request))
 
     async def epistemic_decision_quotient(
         self,

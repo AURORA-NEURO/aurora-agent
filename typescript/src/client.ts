@@ -245,6 +245,10 @@ import type {
   EpistemicVoiResult,
   EpistemicAdaptiveArgs,
   EpistemicAdaptiveResult,
+  AdaptiveExecutionArgs,
+  AdaptiveExecutionResult,
+  AdaptiveCostedArgs,
+  AdaptiveCostedResult,
   EpistemicDecisionQuotientArgs,
   EpistemicDecisionQuotientResult,
   FiberCompileArgs,
@@ -1498,6 +1502,28 @@ export class ApiClient {
 
   async epistemicAdaptiveAcquisition(args: EpistemicAdaptiveArgs, options?: ClientRequestOptions): Promise<RestToolResponse<EpistemicAdaptiveResult>> {
     return this.callTool<EpistemicAdaptiveResult>("epistemic_adaptive_acquisition", args, options);
+  }
+
+  async epistemicAdaptiveExecute(args: AdaptiveExecutionArgs, options?: ClientRequestOptions): Promise<RestToolResponse<AdaptiveExecutionResult>> {
+    if (!isObject(args)) throw new ArgumentError("adaptive execution arguments must be an object");
+    if (!Number.isFinite(args.budget) || args.budget < 0) throw new ArgumentError("budget must be a finite non-negative number");
+    if (!Number.isSafeInteger(args.max_steps) || args.max_steps < 0 || args.max_steps > 16) throw new ArgumentError("max_steps must be 0..=16");
+    if (!Array.isArray(args.acquisitions) || args.acquisitions.length < 1 || args.acquisitions.length > 16) throw new ArgumentError("acquisitions must contain 1..=16 items");
+    if (args.mode !== undefined && args.mode !== "simulate" && args.mode !== "replay") throw new ArgumentError("mode must be simulate or replay");
+    return this.callTool<AdaptiveExecutionResult>("epistemic_adaptive_execute", args, options);
+  }
+
+  async epistemicAdaptiveCosted(args: AdaptiveCostedArgs, options?: ClientRequestOptions): Promise<RestToolResponse<AdaptiveCostedResult>> {
+    if (!isObject(args)) throw new ArgumentError("adaptive costed arguments must be an object");
+    if (!Number.isSafeInteger(args.max_steps) || args.max_steps < 0 || args.max_steps > 16) throw new ArgumentError("max_steps must be 0..=16");
+    if (!Array.isArray(args.acquisitions) || args.acquisitions.length < 1 || args.acquisitions.length > 16) throw new ArgumentError("acquisitions must contain 1..=16 items");
+    for (const [name, vector] of [["budget", args.budget], ["weights", args.weights]] as const) {
+      if (!isObject(vector)) throw new ArgumentError(`${name} must be a seven-dimensional object`);
+      const values = [vector.tokens, vector.compute_ms, vector.latency_ms, vector.money_usd, vector.privacy_loss, vector.specimen_units, vector.expert_minutes];
+      if (values.some((value) => typeof value !== "number" || !Number.isFinite(value) || value < 0)) throw new ArgumentError(`${name} dimensions must be finite and non-negative`);
+    }
+    if ([args.weights.tokens, args.weights.compute_ms, args.weights.latency_ms, args.weights.money_usd, args.weights.privacy_loss, args.weights.specimen_units, args.weights.expert_minutes].every((value) => value === 0)) throw new ArgumentError("weights must contain at least one positive dimension");
+    return this.callTool<AdaptiveCostedResult>("epistemic_adaptive_costed", args, options);
   }
 
   async epistemicDecisionQuotient(args: EpistemicDecisionQuotientArgs, options?: ClientRequestOptions): Promise<RestToolResponse<EpistemicDecisionQuotientResult>> {

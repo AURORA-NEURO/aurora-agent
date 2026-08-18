@@ -2497,6 +2497,106 @@ export interface EpistemicAdaptiveResult extends JsonObject {
   limitations?: string[];
 }
 
+export interface AdaptiveExecutionArgs extends JsonObject {
+  problem: EpistemicDecisionProblemArgs;
+  belief: EpistemicBeliefArgs;
+  acquisitions: EpistemicAcquisitionArgs[];
+  budget: number;
+  max_steps: number;
+  mode?: "simulate" | "replay";
+  provider?: string;
+  authorization?: { grant_id: string; provider: string; [key: string]: JsonValue };
+  observations?: Array<{ acquisition_id: string; outcome_label: string; [key: string]: JsonValue }>;
+  receipt?: JsonObject;
+}
+
+export interface AdaptiveExecutionObservation extends JsonObject {
+  provider: string;
+  acquisition_id: string;
+  outcome_label: string;
+  evidence_digest: string;
+  provenance: "observed" | "simulated" | "replayed";
+}
+
+export interface AdaptiveExecutionObservationReceipt extends JsonObject {
+  sequence: number;
+  request: {
+    plan_digest: string;
+    sequence: number;
+    acquisition_id: string;
+    declared_cost: number;
+    [key: string]: JsonValue;
+  };
+  observation: AdaptiveExecutionObservation;
+}
+
+export interface AdaptiveExecutionReceipt extends JsonObject {
+  schema: "bioprism-epistemic/adaptive-execution/0.1";
+  plan_digest: string;
+  provider: string;
+  status: "completed" | "partial" | "refused";
+  authorization: { granted: boolean; grant_id: string | null; provider: string | null; [key: string]: JsonValue };
+  observations: AdaptiveExecutionObservationReceipt[];
+  actual_acquisition_cost: number;
+  terminal_action: number | null;
+  terminal_risk: number | null;
+  refusal: string | null;
+  refusal_detail: string | null;
+}
+
+export interface AdaptiveExecutionResult extends JsonObject {
+  ok: true;
+  schema: "bioprism-epistemic/adaptive-execution/0.1";
+  mode: "simulate" | "replay";
+  plan_digest: string;
+  completed: boolean;
+  receipt: AdaptiveExecutionReceipt;
+  provenance_counts: { observed: number; simulated: number; replayed: number; [key: string]: JsonValue };
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface AdaptiveCostVector extends JsonObject {
+  tokens: number;
+  compute_ms: number;
+  latency_ms: number;
+  money_usd: number;
+  privacy_loss: number;
+  specimen_units: number;
+  expert_minutes: number;
+}
+
+export interface AdaptiveCostedAcquisitionArgs extends JsonObject {
+  acquisition: EpistemicAcquisitionArgs;
+  cost: AdaptiveCostVector;
+}
+
+export interface AdaptiveCostedArgs extends JsonObject {
+  problem: EpistemicDecisionProblemArgs;
+  belief: EpistemicBeliefArgs;
+  acquisitions: AdaptiveCostedAcquisitionArgs[];
+  budget: AdaptiveCostVector;
+  weights: AdaptiveCostVector;
+  max_steps: number;
+}
+
+export interface AdaptiveCostedResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-mcp/epistemic-adaptive-costed/0.1";
+  cost_dimensions: string[];
+  budget?: AdaptiveCostVector;
+  weights?: AdaptiveCostVector;
+  max_steps?: number;
+  problem?: { actions: string[]; models: string[]; action_count: number; model_count: number };
+  acquisitions?: AdaptiveCostedAcquisitionArgs[];
+  policy?: JsonObject;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees: string[];
+  limitations?: string[];
+}
+
 export interface EpistemicDecisionQuotientArgs extends JsonObject {
   problem: EpistemicDecisionProblemArgs;
   permitted_actions: string[];
