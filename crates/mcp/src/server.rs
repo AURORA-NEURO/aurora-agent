@@ -214,7 +214,7 @@ use bioprism_fabric::synth::{
     Goal as FabricGoal,
 };
 use bioprism_factory::{ExecutionAuthoritySnapshot, Job as FactoryJob, JobStore, WorkerCapability};
-use bioprism_fiber::{compile, Query};
+use bioprism_fiber::{compile, AdaptiveAcquisitionTrace, Query};
 use bioprism_foundation::contract::{ContractDraft, FalsifiableContract};
 use bioprism_foundation::maturity::ApplicabilityEnvelope;
 use bioprism_foundation::worldclass::{BioWorldDeclaration, CounterfactualClaim, Transition};
@@ -413,6 +413,7 @@ pub use bioprism_devplat::MISSION_TRACE_SCHEMA_VERSION;
 pub const PROTOCOL_VERSION: &str = "2025-06-18";
 pub const SERVER_NAME: &str = "bioprism";
 pub const QUERY_SCHEMA_URI: &str = "bioprism://schema/fiber-query/0.2";
+pub const ADAPTIVE_QUERY_SCHEMA_URI: &str = "bioprism://schema/fiber-query/0.5";
 pub const CERTIFICATE_SCHEMA_URI: &str = "bioprism://schema/fiber-context-certificate/0.1";
 pub const WORLD_SCHEMA_URI: &str = "bioprism://schema/fiber-world/0.1";
 pub const CAPABILITIES_URI: &str = "bioprism://capabilities/0.1";
@@ -420,6 +421,10 @@ pub const CAPABILITIES_URI: &str = "bioprism://capabilities/0.1";
 const QUERY_SCHEMA: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../schemas/fiber-v0.1/query.schema.json"
+));
+const ADAPTIVE_QUERY_SCHEMA: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../schemas/fiber-v0.5/query.schema.json"
 ));
 const CERTIFICATE_SCHEMA: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -429,6 +434,103 @@ const WORLD_SCHEMA: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../schemas/fiber-v0.1/world.schema.json"
 ));
+
+/// Convert the epistemic kernel's Rust-tagged policy tree into the stable named projection used
+/// by both the standalone adaptive route and the versioned FIBER compiler contract.
+fn project_adaptive_node(
+    node: &EpistemicAdaptiveNode,
+    problem: &EpistemicDecisionProblem,
+) -> Value {
+    match node {
+        EpistemicAdaptiveNode::Stop { action, risk } => json!({
+            "kind": "stop",
+            "action_index": action,
+            "action": problem.actions().get(*action),
+            "risk": risk,
+        }),
+        EpistemicAdaptiveNode::Acquire {
+            acquisition,
+            id,
+            cost,
+            expected_total,
+            expected_terminal_risk,
+            expected_acquisition_cost,
+            outcomes,
+        } => json!({
+            "kind": "acquire",
+            "acquisition_index": acquisition,
+            "id": id,
+            "cost": cost,
+            "expected_total": expected_total,
+            "expected_terminal_risk": expected_terminal_risk,
+            "expected_acquisition_cost": expected_acquisition_cost,
+            "outcomes": outcomes.iter().map(|outcome| json!({
+                "label": outcome.label,
+                "probability": outcome.probability,
+                "posterior": outcome.posterior,
+                "next": project_adaptive_node(&outcome.next, problem),
+            })).collect::<Vec<_>>(),
+        }),
+    }
+}
+
+fn project_fiber_adaptive_trace(
+    trace: &AdaptiveAcquisitionTrace,
+    query_sha256: &str,
+    certificate_sha256: &str,
+) -> Value {
+    json!({
+        "schema": "bioprism-mcp/fiber-adaptive-acquisition/0.1",
+        "budget": trace.budget,
+        "max_steps": trace.max_steps,
+        "prior": trace.prior,
+        "problem": {
+            "actions": trace.problem.actions(),
+            "models": trace.problem.models(),
+            "action_count": trace.problem.action_count(),
+            "model_count": trace.problem.model_count(),
+        },
+        "acquisitions": trace.acquisitions.iter().map(|acquisition| json!({
+            "id": acquisition.id,
+            "cost": acquisition.cost,
+            "outcomes": acquisition.outcomes().iter().map(|outcome| json!({
+                "label": outcome.label,
+                "likelihood": outcome.likelihoods(),
+            })).collect::<Vec<_>>(),
+        })).collect::<Vec<_>>(),
+        "policy": {
+            "expected_total": trace.policy.expected_total,
+            "expected_terminal_risk": trace.policy.expected_terminal_risk,
+            "expected_acquisition_cost": trace.policy.expected_acquisition_cost,
+            "nodes_evaluated": trace.policy.nodes_evaluated,
+            "selected_depth": trace.policy.selected_depth,
+            "root": project_adaptive_node(&trace.policy.root, &trace.problem),
+        },
+        "certificate_binding": {
+            "query_sha256": query_sha256,
+            "certificate_sha256": certificate_sha256,
+        },
+        "execution": "not_started",
+        "authorization": "not_granted",
+        "provenance": {
+            "planner": "bioprism-epistemic::adaptive_policy",
+            "input_posture": "caller_declared_unperformed_acquisitions",
+            "independence_assumption": "conditionally_independent_given_supplied_models",
+        },
+        "guarantees": [
+            "the selected policy is exact under the 16-acquisition, 16-step, and 65536-state caps",
+            "each acquisition is used at most once and branch-dependent next choices are explicit",
+            "expected terminal risk and expected declared cost remain separate",
+            "certificate binding makes the policy input and result replayable"
+        ],
+        "limitations": [
+            "the planner assumes conditional independence given the caller-supplied models",
+            "the compiler plans but does not schedule, authorize, authenticate, execute, or observe an acquisition",
+            "costs are caller-supplied scalarizations rather than inferred resource vectors",
+            "the decision-relative policy is not causal, clinical, biological, or predictive truth"
+        ]
+    })
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lifecycle {
@@ -1366,6 +1468,9 @@ impl Server {
 
         let (mime_type, text) = match uri {
             QUERY_SCHEMA_URI => ("application/schema+json", QUERY_SCHEMA.to_string()),
+            ADAPTIVE_QUERY_SCHEMA_URI => {
+                ("application/schema+json", ADAPTIVE_QUERY_SCHEMA.to_string())
+            }
             CERTIFICATE_SCHEMA_URI => ("application/schema+json", CERTIFICATE_SCHEMA.to_string()),
             WORLD_SCHEMA_URI => ("application/schema+json", WORLD_SCHEMA.to_string()),
             CAPABILITIES_URI => ("application/json", workspace_capabilities().to_string()),
@@ -1842,6 +1947,20 @@ impl Server {
                 );
             }
 
+            if let Some(adaptive_acquisition) = &out.trace.adaptive_acquisition {
+                map.insert(
+                    "adaptive_acquisition".into(),
+                    project_fiber_adaptive_trace(
+                        adaptive_acquisition,
+                        &out.certificate.source_hashes.query_sha256,
+                        context
+                            .certificate_sha256
+                            .as_deref()
+                            .ok_or("compiled certificate has no reference digest")?,
+                    ),
+                );
+            }
+
             let world = arguments
                 .get("world")
                 .and_then(Value::as_str)
@@ -1880,7 +1999,7 @@ impl Server {
     }
 
     fn fiber_explain(&self, arguments: &Value) -> Result<Value, String> {
-        let (out, _) = self.compiled(arguments)?;
+        let (out, context) = self.compiled(arguments)?;
         Ok(json!({
             "ok": true,
             "backend": out.certificate.plan.backend.as_str(),
@@ -1892,6 +2011,13 @@ impl Server {
             })).collect::<Vec<_>>(),
             "decision_quotient": out.trace.decision_quotient,
             "rate_distortion": out.trace.rate_distortion,
+            "adaptive_acquisition": out.trace.adaptive_acquisition.as_ref().map(|trace| {
+                project_fiber_adaptive_trace(
+                    trace,
+                    &out.certificate.source_hashes.query_sha256,
+                    context.certificate_sha256.as_deref().unwrap_or_default(),
+                )
+            }),
             "selection": {
                 "facts": out.certificate.plan.compiled_fact_count,
                 "of_total": out.certificate.plan.total_fact_count,
@@ -13868,40 +13994,6 @@ impl Server {
             }
         };
 
-        fn project_node(node: &EpistemicAdaptiveNode, problem: &EpistemicDecisionProblem) -> Value {
-            match node {
-                EpistemicAdaptiveNode::Stop { action, risk } => json!({
-                    "kind": "stop",
-                    "action_index": action,
-                    "action": problem.actions().get(*action),
-                    "risk": risk,
-                }),
-                EpistemicAdaptiveNode::Acquire {
-                    acquisition,
-                    id,
-                    cost,
-                    expected_total,
-                    expected_terminal_risk,
-                    expected_acquisition_cost,
-                    outcomes,
-                } => json!({
-                    "kind": "acquire",
-                    "acquisition_index": acquisition,
-                    "id": id,
-                    "cost": cost,
-                    "expected_total": expected_total,
-                    "expected_terminal_risk": expected_terminal_risk,
-                    "expected_acquisition_cost": expected_acquisition_cost,
-                    "outcomes": outcomes.iter().map(|outcome| json!({
-                        "label": outcome.label,
-                        "probability": outcome.probability,
-                        "posterior": outcome.posterior,
-                        "next": project_node(&outcome.next, problem),
-                    })).collect::<Vec<_>>(),
-                }),
-            }
-        }
-
         Ok(json!({
             "ok": true,
             "schema": SCHEMA,
@@ -13926,7 +14018,7 @@ impl Server {
                 "expected_acquisition_cost": policy.expected_acquisition_cost,
                 "nodes_evaluated": policy.nodes_evaluated,
                 "selected_depth": policy.selected_depth,
-                "root": project_node(&policy.root, &problem),
+                "root": project_adaptive_node(&policy.root, &problem),
             },
             "guarantees": [
                 "the returned policy is exact under the stated 16-acquisition, 16-step, and 65536-state enumeration caps",
@@ -31428,6 +31520,12 @@ pub fn resource_definitions() -> Vec<Value> {
             "mimeType": "application/schema+json",
         }),
         json!({
+            "uri": ADAPTIVE_QUERY_SCHEMA_URI,
+            "name": "fiber-query/0.5 schema",
+            "description": "The strict adaptive-acquisition query schema accepted by the FIBER compiler.",
+            "mimeType": "application/schema+json",
+        }),
+        json!({
             "uri": CERTIFICATE_SCHEMA_URI,
             "name": "fiber-context-certificate/0.1 schema",
             "description": "The certificate contract emitted by a FIBER compilation.",
@@ -31775,7 +31873,7 @@ pub fn tool_definitions() -> Vec<Value> {
         "type": "object",
         "properties": {
             "world": { "type": "string", "description": "Path to a fiber-world/0.1 document or an indexed store directory, relative to the server root." },
-            "query": { "type": "string", "description": "Path to a fiber-query/0.1, fiber-query/0.2, fiber-query/0.3, or fiber-query/0.4 document, relative to the server root. The 0.3 form carries the explicit decision-loss matrix and permitted-action boundary; 0.4 additionally carries bounded observed evidence for executable rate-distortion." }
+            "query": { "type": "string", "description": "Path to a fiber-query/0.1 through fiber-query/0.5 document, relative to the server root. The 0.3 form carries the explicit decision-loss matrix and permitted-action boundary; 0.4 additionally carries bounded observed evidence for executable rate-distortion; 0.5 carries an exact finite-horizon adaptive acquisition plan." }
         },
         "required": ["world", "query"]
     });
@@ -31787,14 +31885,15 @@ pub fn tool_definitions() -> Vec<Value> {
                 context. Returns the L0 decision contract — goal, verdict, what was omitted, and \
                 whether the sufficiency claim holds — plus a content-addressed handle for descending \
                 to evidence. A fiber-query/0.4 input also returns the exhaustive decision-relative \
-                rate-distortion identification, frontier and minimal-context result. It \
+                rate-distortion identification, frontier and minimal-context result; a \
+                fiber-query/0.5 input returns a certificate-bound exact adaptive policy tree. It \
                 deliberately does not return the evidence: call fiber_refine when the contract is \
                 not enough to act on.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "world": { "type": "string", "description": "Path to a world document or store directory, relative to the server root." },
-                    "query": { "type": "string", "description": "Path to a query document, relative to the server root." },
+                    "query": { "type": "string", "description": "Path to a fiber-query/0.1 through fiber-query/0.5 document, relative to the server root." },
                     "layer": { "type": "string", "enum": ["l0", "l1", "l2", "l3", "l4"], "description": "Starting layer. Defaults to l0." }
                 },
                 "required": ["world", "query"]

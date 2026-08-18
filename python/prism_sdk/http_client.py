@@ -210,8 +210,10 @@ from .context_requests import (
     ProjectionBundleRequest,
 )
 from .fiber_contract import (
+    FiberAdaptiveAcquisitionSummary,
     FiberDecisionQuotientSummary,
     FiberRateDistortionSummary,
+    fiber_adaptive_acquisition_summary,
     fiber_decision_quotient_summary,
     fiber_rate_distortion_summary,
 )
@@ -4859,6 +4861,17 @@ class ApiClient:
 
         return fiber_rate_distortion_summary(self.fiber_compile(world, query, layer=layer))
 
+    def fiber_compile_adaptive_acquisition(
+        self,
+        world: str | FiberCompileRequest,
+        query: str | None = None,
+        *,
+        layer: ContextLayer | str = ContextLayer.L0,
+    ) -> FiberAdaptiveAcquisitionSummary:
+        """Compile and validate the certificate-bound 0.5 adaptive policy projection."""
+
+        return fiber_adaptive_acquisition_summary(self.fiber_compile(world, query, layer=layer))
+
     def fiber_refine(
         self,
         layer: ContextLayer | str | FiberRefineRequest,
@@ -9019,6 +9032,17 @@ class AsyncApiClient:
         """Async counterpart to :meth:`ApiClient.fiber_compile_rate_distortion`."""
 
         return fiber_rate_distortion_summary(await self.fiber_compile(world, query, layer=layer))
+
+    async def fiber_compile_adaptive_acquisition(
+        self,
+        world: str | FiberCompileRequest,
+        query: str | None = None,
+        *,
+        layer: ContextLayer | str = ContextLayer.L0,
+    ) -> FiberAdaptiveAcquisitionSummary:
+        """Async counterpart to :meth:`ApiClient.fiber_compile_adaptive_acquisition`."""
+
+        return fiber_adaptive_acquisition_summary(await self.fiber_compile(world, query, layer=layer))
 
     async def fiber_refine(
         self,

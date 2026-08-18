@@ -132,10 +132,10 @@
 //! ## What is not implemented
 //!
 //! See [`NOT_IMPLEMENTED`]. The headline omissions: no causal identification in the do-calculus
-//! sense, no adaptive acquisition contract in the FIBER wire, no external acquisition execution,
-//! no lazy-greedy speedup claim beyond agreement with plain greedy, no matroid or partition
-//! constraints, no loopy message damping, and no second context capsule. The kernel's bounded
-//! adaptive planner is intentionally not a FIBER wire contract or an execution engine.
+//! sense, no external acquisition execution, no lazy-greedy speedup claim beyond agreement with
+//! plain greedy, no matroid or partition constraints, no loopy message damping, and no second
+//! context capsule. The bounded adaptive planner now has a versioned FIBER wire boundary, but it
+//! remains a plan and not an execution engine.
 
 pub mod adaptive;
 pub mod continuation;
@@ -193,10 +193,10 @@ pub const NOT_IMPLEMENTED: &[&str] = &[
      distinction.",
     "43.50: sensitivity analysis to hidden confounding. The compatible-model set is supplied by \
      the caller; nothing widens it to account for an unobserved common cause.",
-    "43.15/43.50: fiber-query does not yet carry an adaptive acquisition contract, but the kernel \
-     exposes a bounded exact finite-horizon policy planner over caller-supplied acquisitions. \
-     The planner assumes conditional independence, scalarized costs, and no execution or causal \
-     identification; longer horizons and external scheduling remain outside this crate.",
+    "43.15/43.50: fiber-query/0.5 carries a bounded exact finite-horizon policy contract over \
+     caller-supplied acquisitions, and FIBER executes it under explicit caps. The planner assumes \
+     conditional independence, scalarized costs, and no execution or causal identification; \
+     external scheduling, observation receipts, and longer horizons remain outside this crate.",
     "43.14: the cost vector. Cost is a scalar here; the token, compute, latency, privacy, \
      specimen and expert-burden components 43.14 specifies are scalarised by the caller before \
      they arrive.",

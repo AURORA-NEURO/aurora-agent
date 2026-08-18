@@ -58,8 +58,8 @@ use bioprism_ledger::{
     ValidTime as LedgerValidTime,
 };
 use bioprism_mcp::{
-    serve, tool_definitions, Lifecycle, Request, Server, CAPABILITIES_URI, CERTIFICATE_SCHEMA_URI,
-    PROTOCOL_VERSION,
+    serve, tool_definitions, Lifecycle, Request, Server, ADAPTIVE_QUERY_SCHEMA_URI,
+    CAPABILITIES_URI, CERTIFICATE_SCHEMA_URI, PROTOCOL_VERSION,
 };
 use bioprism_megafactory::{
     AccessTier as PlacementAccessTier, Attestation, Locale, TrustDomain, WorkRequest, WorkerProfile,
@@ -2778,7 +2778,23 @@ fn schemas_are_exposed_as_read_only_resources() {
     let list = Request::parse(r#"{"jsonrpc":"2.0","id":1,"method":"resources/list","params":{}}"#)
         .unwrap();
     let listed = server.handle(&list).unwrap().to_json();
-    assert_eq!(listed["result"]["resources"].as_array().unwrap().len(), 4);
+    assert_eq!(listed["result"]["resources"].as_array().unwrap().len(), 5);
+
+    let adaptive = Request::parse(
+        &json!({
+            "jsonrpc":"2.0", "id":4, "method":"resources/read",
+            "params": { "uri": ADAPTIVE_QUERY_SCHEMA_URI }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let adaptive_document = server.handle(&adaptive).unwrap().to_json();
+    let adaptive_text = adaptive_document["result"]["contents"][0]["text"]
+        .as_str()
+        .unwrap();
+    let adaptive_schema: Value =
+        serde_json::from_str(adaptive_text).expect("adaptive schema is valid JSON");
+    assert_eq!(adaptive_schema["title"], json!("AURORA FIBER Query 0.5"));
 
     let read = Request::parse(
         &json!({
@@ -8579,6 +8595,68 @@ fn compile_projects_the_wire_rate_distortion_audit() {
         .unwrap()
         .iter()
         .all(|pass| pass["name"] != "rate_distortion"));
+}
+
+/// The 0.5 adaptive contract crosses MCP as a certificate-bound plan, never as an execution
+/// receipt or authorization claim.
+#[test]
+fn compile_projects_the_wire_adaptive_policy() {
+    let mut server = server();
+    let payload = call(
+        &mut server,
+        "fiber_compile",
+        json!({
+            "world": WORLD,
+            "query": "fixtures/fiber-v0.5/adaptive_acquisition_query.json"
+        }),
+    );
+
+    let report = &payload["adaptive_acquisition"];
+    assert_eq!(
+        report["schema"],
+        json!("bioprism-mcp/fiber-adaptive-acquisition/0.1")
+    );
+    assert_eq!(report["budget"], json!(1.0));
+    assert_eq!(report["max_steps"], json!(2));
+    assert_eq!(report["prior"], json!([0.5, 0.25, 0.25]));
+    assert_eq!(report["acquisitions"].as_array().unwrap().len(), 2);
+    assert!(report["policy"]["nodes_evaluated"].as_u64().unwrap() > 0);
+    assert!(report["policy"]["root"].is_object());
+    assert_eq!(report["execution"], json!("not_started"));
+    assert_eq!(report["authorization"], json!("not_granted"));
+    assert_eq!(
+        report["certificate_binding"]["query_sha256"]
+            .as_str()
+            .map(str::len),
+        Some(64)
+    );
+    assert_eq!(
+        report["certificate_binding"]["certificate_sha256"],
+        payload["certificate_sha256"]
+    );
+
+    let explained = call(
+        &mut server,
+        "fiber_explain",
+        json!({
+            "world": WORLD,
+            "query": "fixtures/fiber-v0.5/adaptive_acquisition_query.json"
+        }),
+    );
+    assert_eq!(
+        explained["adaptive_acquisition"]["schema"],
+        json!("bioprism-mcp/fiber-adaptive-acquisition/0.1")
+    );
+    assert!(explained["passes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|pass| pass["name"] == "adaptive_acquisition"));
+    assert!(explained["passes_not_run"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|pass| pass["name"] != "adaptive_acquisition"));
 }
 
 #[test]

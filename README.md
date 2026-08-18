@@ -556,6 +556,10 @@ expected scalarized cost, posterior branches, state caps, conditional-independen
 and fail-closed refusals remain visible; it plans only and never executes an acquisition or claims
 causal, clinical, biological, or predictive truth. See
 [`docs/EPISTEMIC_ADAPTIVE_ACQUISITION.md`](docs/EPISTEMIC_ADAPTIVE_ACQUISITION.md);
+the versioned `fiber-query/0.5` contract carries the same unperformed-acquisition semantics into
+the FIBER compiler and returns a certificate-bound named policy tree with `execution:
+"not_started"` and `authorization: "not_granted"`; the Python and TypeScript SDKs expose a
+typed replay-safe projection of that boundary.
 `benchmark_trace_analyze` adds the deeper benchmark compiler's causal, episode, boundary, and
 repetition analysis; the Python and TypeScript SDKs expose typed trace events, causal score
 components, divergence/verdict variants, boundaries, episodes, repetitions, and fail-closed
@@ -1064,6 +1068,7 @@ prints them:
 | Abstract interpretation (43.11) | Requires an abstract-domain registry absent from the wire schema |
 | FIBER wire integration of decision-equivalence quotient (43.10) | `fiber-query/0.3` now carries a bounded explicit loss/utility matrix and permitted-action boundary, and FIBER executes the exact quotient; 0.1/0.2 remain deferred |
 | FIBER wire integration of rate-distortion optimisation (43.12) | `fiber-query/0.4` now binds a normalized prior, ordered observed evidence pool, compatibility floor and tolerance; FIBER executes identification, exhaustive frontier and minimal sufficiency. The 16-item bound and caller-declared model inputs remain explicit |
+| FIBER wire integration of adaptive acquisition (43.15) | `fiber-query/0.5` now binds a normalized prior, complete outcome likelihood partitions, scalarized path budget, and finite horizon; FIBER executes the exact policy under 16/16/65,536 caps and returns certificate-bound planning provenance. It does not schedule, authorize, execute, or receipt an acquisition |
 
 The backend portfolio of 43.19–43.24 (FAQ/InsideOut, worst-case-optimal joins, tensor networks,
 decision diagrams, incremental view maintenance) is **not built**. `Backend` enumerates them so

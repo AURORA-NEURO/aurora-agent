@@ -48,6 +48,9 @@ pub enum FiberError {
     #[error("invalid rate-distortion contract: {0}")]
     InvalidRateDistortionContract(String),
 
+    #[error("invalid adaptive-acquisition contract: {0}")]
+    InvalidAdaptiveAcquisitionContract(String),
+
     #[error("missing required query field {0:?}")]
     MissingQueryField(&'static str),
 

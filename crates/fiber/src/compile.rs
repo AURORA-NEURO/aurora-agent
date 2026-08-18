@@ -27,7 +27,8 @@ use crate::qir::Query;
 use crate::slice::{backward_slice, max_selected_arity};
 use crate::temporal::{temporal_cut, TemporalCut};
 use bioprism_epistemic::{
-    decision_equivalence_quotient,
+    adaptive::AdaptivePolicy,
+    adaptive_policy as epistemic_adaptive_policy, decision_equivalence_quotient,
     ratedistortion::{
         frontier as epistemic_frontier, identification as epistemic_identification,
         AbstentionReason, DistortionCriterion, Frontier, Identification, Sufficiency,
@@ -87,6 +88,9 @@ pub struct CompileTrace {
     /// The exhaustive rate-distortion audit when a `fiber-query/0.4` observed-evidence contract
     /// was supplied. `None` is meaningful: older queries cannot make a context-minimality claim.
     pub rate_distortion: Option<RateDistortionTrace>,
+    /// The exact finite-horizon adaptive acquisition policy when a `fiber-query/0.5` contract was
+    /// supplied. This is a plan projection only; it carries no execution receipt or authority.
+    pub adaptive_acquisition: Option<AdaptiveAcquisitionTrace>,
 }
 
 /// The full bounded rate-distortion result projected into a compile trace.
@@ -105,6 +109,17 @@ pub struct RateDistortionTrace {
     pub identification: Identification,
     pub sufficiency: Sufficiency,
     pub frontier: Frontier,
+}
+
+/// The bounded adaptive policy plus the exact caller inputs needed to replay its objective.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AdaptiveAcquisitionTrace {
+    pub budget: f64,
+    pub max_steps: usize,
+    pub prior: Vec<f64>,
+    pub problem: bioprism_epistemic::DecisionProblem,
+    pub acquisitions: Vec<bioprism_epistemic::Acquisition>,
+    pub policy: AdaptivePolicy,
 }
 
 #[derive(Debug, Clone)]
@@ -202,6 +217,28 @@ fn execute_rate_distortion(
     })
 }
 
+fn execute_adaptive_acquisition(
+    contract: &crate::qir::AdaptiveAcquisitionContract,
+    problem: &bioprism_epistemic::DecisionProblem,
+) -> Result<AdaptiveAcquisitionTrace, FiberError> {
+    let policy = epistemic_adaptive_policy(
+        problem,
+        &contract.prior,
+        &contract.acquisitions,
+        contract.budget,
+        contract.max_steps,
+    )
+    .map_err(|error| FiberError::InvalidAdaptiveAcquisitionContract(error.to_string()))?;
+    Ok(AdaptiveAcquisitionTrace {
+        budget: contract.budget,
+        max_steps: contract.max_steps,
+        prior: contract.prior.masses().to_vec(),
+        problem: problem.clone(),
+        acquisitions: contract.acquisitions.clone(),
+        policy,
+    })
+}
+
 pub fn compile<S: WorldSource + ?Sized>(
     source: &S,
     query: &Query,
@@ -265,6 +302,31 @@ pub fn compile<S: WorldSource + ?Sized>(
                     DistortionCriterion::BayesRegret => "Bayes regret",
                     DistortionCriterion::MinimaxRegret => "minimax regret",
                 }
+            ),
+        });
+    }
+
+    let adaptive_acquisition = query
+        .adaptive_acquisition
+        .as_ref()
+        .map(|contract| {
+            let problem = &query
+                .decision_contract
+                .as_ref()
+                .ok_or(FiberError::InvalidAdaptiveAcquisitionContract(
+                    "adaptive acquisition requires the decision contract".into(),
+                ))?
+                .problem;
+            execute_adaptive_acquisition(contract, problem)
+        })
+        .transpose()?;
+    if let Some(report) = &adaptive_acquisition {
+        passes.push(PassReceipt {
+            name: "adaptive_acquisition",
+            retained: report.policy.selected_depth,
+            note: format!(
+                "exact policy under budget {} and {}-step horizon; {} state node(s) evaluated",
+                report.budget, report.max_steps, report.policy.nodes_evaluated
             ),
         });
     }
@@ -518,6 +580,7 @@ pub fn compile<S: WorldSource + ?Sized>(
             withheld_influence,
             decision_quotient,
             rate_distortion,
+            adaptive_acquisition,
         },
     })
 }
@@ -625,6 +688,12 @@ fn deferred_passes(query: &Query) -> Vec<(&'static str, &'static str)> {
         deferred.push((
             "rate_distortion",
             "43.12 requires a normalized model prior, an ordered observed evidence-pool likelihood binding, a compatible-model floor and a distortion tolerance; fiber-query/0.1 through fiber-query/0.3 carry no complete binding",
+        ));
+    }
+    if !query.has_adaptive_acquisition_contract() {
+        deferred.push((
+            "adaptive_acquisition",
+            "43.15 requires an explicit model prior, outcome likelihood partitions, scalarized budget and finite horizon; fiber-query/0.1 through fiber-query/0.4 carry no complete binding",
         ));
     }
     deferred

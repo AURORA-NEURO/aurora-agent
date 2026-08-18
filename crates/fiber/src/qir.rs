@@ -21,7 +21,9 @@
 //! against 0.2 without extending the schema. [`Query::missing_contract_fields`] reports the gap
 //! rather than letting a later pass quietly substitute a default. 0.3 closes only the 43.10
 //! input gap; compatible-model posteriors and evidence-pool likelihood bindings for 43.12 are
-//! supplied only by 0.4 and remain reported as deferred for older forms.
+//! supplied only by 0.4 and remain reported as deferred for older forms. `fiber-query/0.5`
+//! adds a separate unperformed-acquisition contract: a normalized prior, complete per-model
+//! outcome partitions, a scalarized path budget and a finite horizon.
 //!
 //! Of the role/policy pair `ω`, only [`Query::policy`] is read — by [`crate::policy`], as the set
 //! of obligations the caller accepts. [`Query::role`] is still parsed and discarded: 43.33 binds
@@ -46,7 +48,7 @@
 //!
 //! # Why a 0.1 label is still read
 //!
-//! [`ACCEPTED_QUERY_SCHEMA_VERSIONS`] holds four entries, which looks like a loophole and is the
+//! [`ACCEPTED_QUERY_SCHEMA_VERSIONS`] holds five entries, which looks like a loophole and is the
 //! opposite. The published `schemas/fiber-v0.1/query.schema.json` has declared
 //! `additionalProperties: false` since 0.1: a document carrying an undeclared key was *never* a
 //! valid 0.1 query, the parser simply was not enforcing the schema it published. So no document
@@ -74,8 +76,10 @@
 //! and this is the first.
 
 use crate::error::FiberError;
+use bioprism_epistemic::adaptive::{MAX_ADAPTIVE_ACQUISITIONS, MAX_ADAPTIVE_STEPS};
 use bioprism_epistemic::{
-    Belief, DecisionProblem, DistortionCriterion, EpistemicError, EvidenceItem, EvidencePool,
+    Acquisition, Belief, DecisionProblem, DistortionCriterion, EpistemicError, EvidenceItem,
+    EvidencePool, Outcome,
 };
 use bioprism_ids::{QueryId, VariableName};
 use bioprism_scope::Timestamp;
@@ -95,12 +99,16 @@ pub const QUERY_DECISION_SCHEMA_VERSION: &str = "fiber-query/0.3";
 /// The first wire version whose decision contract also binds observed evidence for 43.12.
 pub const QUERY_RATE_DISTORTION_SCHEMA_VERSION: &str = "fiber-query/0.4";
 
+/// The first wire version whose decision contract also binds an exact adaptive acquisition plan.
+pub const QUERY_ADAPTIVE_SCHEMA_VERSION: &str = "fiber-query/0.5";
+
 /// Every version label this parser reads, newest last. See the module docs for why 0.1 is here.
 pub const ACCEPTED_QUERY_SCHEMA_VERSIONS: &[&str] = &[
     "fiber-query/0.1",
     QUERY_SCHEMA_VERSION,
     QUERY_DECISION_SCHEMA_VERSION,
     QUERY_RATE_DISTORTION_SCHEMA_VERSION,
+    QUERY_ADAPTIVE_SCHEMA_VERSION,
 ];
 
 /// Every key `fiber-query/0.2` declares, as dotted paths, sorted.
@@ -184,6 +192,34 @@ pub const QUERY_RATE_DISTORTION_FIELD_PATHS: &[&str] = &[
     "targets",
 ];
 
+/// Every key `fiber-query/0.5` declares. The nested acquisition and outcome member shapes are
+/// checked by [`parse_adaptive_acquisition_contract`] so array-item errors remain contextual.
+pub const QUERY_ADAPTIVE_FIELD_PATHS: &[&str] = &[
+    "adaptive_acquisition",
+    "adaptive_acquisition.acquisitions",
+    "adaptive_acquisition.budget",
+    "adaptive_acquisition.max_steps",
+    "adaptive_acquisition.prior",
+    "budgets",
+    "budgets.max_facts",
+    "budgets.max_tokens",
+    "decision_loss",
+    "decision_loss.actions",
+    "decision_loss.loss",
+    "decision_loss.models",
+    "decision_loss.sense",
+    "decision_time",
+    "distortion_tolerance",
+    "goal",
+    "permitted_actions",
+    "policy",
+    "protected_tags",
+    "query_id",
+    "role",
+    "schema_version",
+    "targets",
+];
+
 /// The goal string the CPython reference hard-codes into every Decision Section.
 ///
 /// Hard-coding a radiogenomic goal inside a general compiler is a defect in the reference. A
@@ -239,6 +275,19 @@ pub struct RateDistortionContract {
     pub compatibility_floor: f64,
 }
 
+/// The caller-declared inputs to an exact finite-horizon adaptive acquisition policy.
+///
+/// Unlike the observed `RateDistortionContract`, these outcomes describe tests that have not
+/// been performed. The compiler may plan against them, but the resulting trace never asserts an
+/// observation receipt, provider execution, authorization, or causal identification.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AdaptiveAcquisitionContract {
+    pub prior: Belief,
+    pub acquisitions: Vec<Acquisition>,
+    pub budget: f64,
+    pub max_steps: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Budgets {
     pub max_facts: usize,
@@ -260,6 +309,7 @@ pub struct Query {
     pub goal: Option<String>,
     pub decision_contract: Option<DecisionContract>,
     pub rate_distortion: Option<RateDistortionContract>,
+    pub adaptive_acquisition: Option<AdaptiveAcquisitionContract>,
     raw: Value,
 }
 
@@ -278,7 +328,9 @@ impl Query {
             });
         }
 
-        let accepted_fields = if schema_version == QUERY_RATE_DISTORTION_SCHEMA_VERSION {
+        let accepted_fields = if schema_version == QUERY_ADAPTIVE_SCHEMA_VERSION {
+            QUERY_ADAPTIVE_FIELD_PATHS
+        } else if schema_version == QUERY_RATE_DISTORTION_SCHEMA_VERSION {
             QUERY_RATE_DISTORTION_FIELD_PATHS
         } else if schema_version == QUERY_DECISION_SCHEMA_VERSION {
             QUERY_DECISION_FIELD_PATHS
@@ -333,6 +385,7 @@ impl Query {
 
         let decision_contract = if schema_version == QUERY_DECISION_SCHEMA_VERSION
             || schema_version == QUERY_RATE_DISTORTION_SCHEMA_VERSION
+            || schema_version == QUERY_ADAPTIVE_SCHEMA_VERSION
         {
             Some(parse_decision_contract(map)?)
         } else {
@@ -348,6 +401,15 @@ impl Query {
                 return Err(FiberError::MissingQueryField("distortion_tolerance"));
             }
             Some(parse_rate_distortion_contract(map, &contract.problem)?)
+        } else {
+            None
+        };
+
+        let adaptive_acquisition = if schema_version == QUERY_ADAPTIVE_SCHEMA_VERSION {
+            let contract = decision_contract
+                .as_ref()
+                .ok_or(FiberError::MissingQueryField("decision_loss"))?;
+            Some(parse_adaptive_acquisition_contract(map, &contract.problem)?)
         } else {
             None
         };
@@ -371,6 +433,7 @@ impl Query {
             goal: map.get("goal").and_then(Value::as_str).map(str::to_string),
             decision_contract,
             rate_distortion,
+            adaptive_acquisition,
             raw,
         })
     }
@@ -391,11 +454,16 @@ impl Query {
         self.rate_distortion.is_some()
     }
 
+    pub fn has_adaptive_acquisition_contract(&self) -> bool {
+        self.adaptive_acquisition.is_some()
+    }
+
     /// Components of the formal decision contract that this query cannot express.
     ///
     /// Any pass that needs one of these must refuse to run rather than assume a default. Legacy
-    /// 0.1/0.2 queries return the two decision fields; 0.3 returns neither because its explicit
-    /// contract is present. Distortion tolerance is independent and remains optional.
+    /// Legacy 0.1/0.2 queries return the two decision fields; 0.3, 0.4 and 0.5 carry an explicit
+    /// decision contract. Distortion tolerance is independent and remains optional except for
+    /// the observed rate-distortion contract.
     pub fn missing_contract_fields(&self) -> Vec<&'static str> {
         let mut missing = Vec::new();
         if self.decision_contract.is_none() {
@@ -720,6 +788,228 @@ fn parse_rate_distortion_contract(
     })
 }
 
+fn parse_adaptive_acquisition_contract(
+    map: &Map<String, Value>,
+    problem: &DecisionProblem,
+) -> Result<AdaptiveAcquisitionContract, FiberError> {
+    let object = map
+        .get("adaptive_acquisition")
+        .and_then(Value::as_object)
+        .ok_or(FiberError::MissingQueryField("adaptive_acquisition"))?;
+    let allowed = ["acquisitions", "budget", "max_steps", "prior"];
+    let unknown: Vec<&str> = object
+        .keys()
+        .map(String::as_str)
+        .filter(|key| !allowed.contains(key))
+        .collect();
+    if !unknown.is_empty() {
+        return Err(FiberError::InvalidAdaptiveAcquisitionContract(format!(
+            "adaptive_acquisition carries undeclared field(s) {unknown:?}"
+        )));
+    }
+
+    let budget = object
+        .get("budget")
+        .and_then(Value::as_f64)
+        .ok_or(FiberError::MissingQueryField("adaptive_acquisition.budget"))?;
+    if !budget.is_finite() || budget < 0.0 {
+        return Err(FiberError::InvalidAdaptiveAcquisitionContract(
+            "budget must be finite and non-negative".into(),
+        ));
+    }
+
+    let max_steps =
+        object
+            .get("max_steps")
+            .and_then(Value::as_u64)
+            .ok_or(FiberError::MissingQueryField(
+                "adaptive_acquisition.max_steps",
+            ))? as usize;
+    if max_steps > MAX_ADAPTIVE_STEPS {
+        return Err(FiberError::InvalidAdaptiveAcquisitionContract(format!(
+            "max_steps is {max_steps}; exact adaptive planning is capped at {MAX_ADAPTIVE_STEPS}"
+        )));
+    }
+
+    let prior_values = object
+        .get("prior")
+        .and_then(Value::as_array)
+        .ok_or(FiberError::MissingQueryField("adaptive_acquisition.prior"))?;
+    if prior_values.len() != problem.model_count() {
+        return Err(FiberError::InvalidAdaptiveAcquisitionContract(format!(
+            "prior has {} entries but decision_loss declares {} models",
+            prior_values.len(),
+            problem.model_count()
+        )));
+    }
+    let prior = prior_values
+        .iter()
+        .enumerate()
+        .map(|(model, value)| {
+            value.as_f64().ok_or_else(|| {
+                FiberError::InvalidAdaptiveAcquisitionContract(format!(
+                    "prior[{model}] must be a finite non-negative number"
+                ))
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let prior = Belief::new(prior).map_err(adaptive_acquisition_error)?;
+    prior
+        .check_against(problem)
+        .map_err(adaptive_acquisition_error)?;
+
+    let raw_acquisitions = object.get("acquisitions").and_then(Value::as_array).ok_or(
+        FiberError::MissingQueryField("adaptive_acquisition.acquisitions"),
+    )?;
+    if raw_acquisitions.is_empty() || raw_acquisitions.len() > MAX_ADAPTIVE_ACQUISITIONS {
+        return Err(FiberError::InvalidAdaptiveAcquisitionContract(format!(
+            "acquisitions must contain between 1 and {MAX_ADAPTIVE_ACQUISITIONS} items"
+        )));
+    }
+
+    let mut acquisitions = Vec::with_capacity(raw_acquisitions.len());
+    for (index, raw_acquisition) in raw_acquisitions.iter().enumerate() {
+        let acquisition = raw_acquisition.as_object().ok_or_else(|| {
+            FiberError::InvalidAdaptiveAcquisitionContract(format!(
+                "acquisitions[{index}] must be an object"
+            ))
+        })?;
+        let allowed = ["cost", "id", "outcomes"];
+        let unknown: Vec<&str> = acquisition
+            .keys()
+            .map(String::as_str)
+            .filter(|key| !allowed.contains(key))
+            .collect();
+        if !unknown.is_empty() {
+            return Err(FiberError::InvalidAdaptiveAcquisitionContract(format!(
+                "acquisitions[{index}] carries undeclared field(s) {unknown:?}"
+            )));
+        }
+        let id = acquisition
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                FiberError::InvalidAdaptiveAcquisitionContract(format!(
+                    "acquisitions[{index}].id must be a non-empty string"
+                ))
+            })?;
+        if id.trim().is_empty() || id.len() > MAX_DECISION_IDENTIFIER_BYTES {
+            return Err(FiberError::InvalidAdaptiveAcquisitionContract(format!(
+                "acquisitions[{index}].id must be non-empty and at most {MAX_DECISION_IDENTIFIER_BYTES} bytes"
+            )));
+        }
+        let cost = acquisition
+            .get("cost")
+            .and_then(Value::as_f64)
+            .ok_or_else(|| {
+                FiberError::InvalidAdaptiveAcquisitionContract(format!(
+                    "acquisitions[{index}].cost must be a finite non-negative number"
+                ))
+            })?;
+        let raw_outcomes = acquisition
+            .get("outcomes")
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                FiberError::InvalidAdaptiveAcquisitionContract(format!(
+                    "acquisitions[{index}].outcomes must be an array"
+                ))
+            })?;
+        if raw_outcomes.is_empty() || raw_outcomes.len() > MAX_DECISION_CONTRACT_ITEMS {
+            return Err(FiberError::InvalidAdaptiveAcquisitionContract(format!(
+                "acquisitions[{index}].outcomes must contain between 1 and {MAX_DECISION_CONTRACT_ITEMS} items"
+            )));
+        }
+        let mut outcomes = Vec::with_capacity(raw_outcomes.len());
+        let mut labels = BTreeSet::new();
+        for (outcome_index, raw_outcome) in raw_outcomes.iter().enumerate() {
+            let outcome = raw_outcome.as_object().ok_or_else(|| {
+                FiberError::InvalidAdaptiveAcquisitionContract(format!(
+                    "acquisitions[{index}].outcomes[{outcome_index}] must be an object"
+                ))
+            })?;
+            let allowed = ["label", "likelihood"];
+            let unknown: Vec<&str> = outcome
+                .keys()
+                .map(String::as_str)
+                .filter(|key| !allowed.contains(key))
+                .collect();
+            if !unknown.is_empty() {
+                return Err(FiberError::InvalidAdaptiveAcquisitionContract(format!(
+                    "acquisitions[{index}].outcomes[{outcome_index}] carries undeclared field(s) {unknown:?}"
+                )));
+            }
+            let label = outcome
+                .get("label")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    FiberError::InvalidAdaptiveAcquisitionContract(format!(
+                        "acquisitions[{index}].outcomes[{outcome_index}].label must be a string"
+                    ))
+                })?;
+            if label.trim().is_empty() || label.len() > MAX_DECISION_IDENTIFIER_BYTES {
+                return Err(FiberError::InvalidAdaptiveAcquisitionContract(format!(
+                    "acquisitions[{index}].outcomes[{outcome_index}].label must be non-empty and at most {MAX_DECISION_IDENTIFIER_BYTES} bytes"
+                )));
+            }
+            if !labels.insert(label.to_string()) {
+                return Err(FiberError::InvalidAdaptiveAcquisitionContract(format!(
+                    "acquisitions[{index}] repeats outcome label {label:?}"
+                )));
+            }
+            let raw_likelihood = outcome
+                .get("likelihood")
+                .and_then(Value::as_array)
+                .ok_or_else(|| {
+                    FiberError::InvalidAdaptiveAcquisitionContract(format!(
+                        "acquisitions[{index}].outcomes[{outcome_index}].likelihood must be an array"
+                    ))
+                })?;
+            if raw_likelihood.len() != problem.model_count() {
+                return Err(FiberError::InvalidAdaptiveAcquisitionContract(format!(
+                    "acquisitions[{index}].outcomes[{outcome_index}].likelihood has {} entries but decision_loss declares {} models",
+                    raw_likelihood.len(),
+                    problem.model_count()
+                )));
+            }
+            let likelihood = raw_likelihood
+                .iter()
+                .enumerate()
+                .map(|(model, value)| {
+                    value.as_f64().ok_or_else(|| {
+                        FiberError::InvalidAdaptiveAcquisitionContract(format!(
+                            "acquisitions[{index}].outcomes[{outcome_index}].likelihood[{model}] must be a finite non-negative number"
+                        ))
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            outcomes.push(Outcome::new(label, likelihood));
+        }
+        acquisitions.push(
+            Acquisition::new(id, cost, outcomes, problem.model_count())
+                .map_err(adaptive_acquisition_error)?,
+        );
+    }
+    let ids = acquisitions
+        .iter()
+        .map(|acquisition| acquisition.id.clone())
+        .collect::<Vec<_>>();
+    let mut seen = BTreeSet::new();
+    for id in ids {
+        if !seen.insert(id.clone()) {
+            return Err(FiberError::InvalidAdaptiveAcquisitionContract(format!(
+                "acquisitions repeats id {id:?}"
+            )));
+        }
+    }
+
+    Ok(AdaptiveAcquisitionContract {
+        prior,
+        acquisitions,
+        budget,
+        max_steps,
+    })
+}
+
 fn parse_contract_strings(
     object: &Map<String, Value>,
     key: &'static str,
@@ -782,6 +1072,10 @@ fn decision_contract_error(error: EpistemicError) -> FiberError {
 
 fn rate_distortion_error(error: EpistemicError) -> FiberError {
     FiberError::InvalidRateDistortionContract(error.to_string())
+}
+
+fn adaptive_acquisition_error(error: EpistemicError) -> FiberError {
+    FiberError::InvalidAdaptiveAcquisitionContract(error.to_string())
 }
 
 fn string_set(value: Option<&Value>) -> BTreeSet<String> {

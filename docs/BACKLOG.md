@@ -123,8 +123,11 @@ binds a normalized compatible-model prior, a bounded observed evidence pool, a c
 floor, and a distortion tolerance, so FIBER can execute identification, exhaustive frontier
 enumeration, and minimal-sufficient-context classification. This remains a bounded observed
 context compiler: it does not execute an acquisition, perform causal identification, or claim that
-an evidence item was actually acquired. The separate adaptive route plans only under its exact
-16-acquisition, 16-step, and 65,536-state caps; it still does not schedule or execute the plan.
+an evidence item was actually acquired. The versioned `fiber-query/0.5` boundary now carries the
+same adaptive contract into FIBER: normalized prior, complete outcome partitions, scalarized
+path budget, finite horizon, and a certificate-bound named policy tree. It plans only under its
+exact 16-acquisition, 16-step, and 65,536-state caps; it still does not schedule, authorize,
+execute, or receipt the plan.
 The foundation contract surface is callable too: it keeps admissibility, refinement, applicability,
 counterfactual world strength, reveal policy, and plane consistency independent, without creating
 clinical authority, causal identification, or runtime world validation.

@@ -6,9 +6,11 @@ import unittest
 
 from prism_sdk import (
     AsyncWorkspace,
+    FiberAdaptiveAcquisitionSummary,
     FiberDecisionQuotientSummary,
     FiberRateDistortionSummary,
     Workspace,
+    fiber_adaptive_acquisition_summary,
     fiber_decision_quotient_summary,
     fiber_rate_distortion_summary,
 )
@@ -35,7 +37,81 @@ def summary() -> dict:
 
 
 def compile_payload() -> dict:
-    return {"layer": "l0", "decision_quotient": summary(), "rate_distortion": rate_summary()}
+    return {
+        "layer": "l0",
+        "decision_quotient": summary(),
+        "rate_distortion": rate_summary(),
+        "adaptive_acquisition": adaptive_summary(),
+    }
+
+
+def adaptive_summary() -> dict:
+    return {
+        "schema": "bioprism-mcp/fiber-adaptive-acquisition/0.1",
+        "budget": 1.0,
+        "max_steps": 2,
+        "prior": [0.5, 0.25, 0.25],
+        "problem": {
+            "actions": ["accept", "defer", "reject"],
+            "models": ["m-a", "m-b", "m-c"],
+            "action_count": 3,
+            "model_count": 3,
+        },
+        "acquisitions": [
+            {
+                "id": "rapid-screen",
+                "cost": 0.1,
+                "outcomes": [
+                    {"label": "positive", "likelihood": [0.9, 0.2, 0.8]},
+                    {"label": "negative", "likelihood": [0.1, 0.8, 0.2]},
+                ],
+            },
+            {
+                "id": "confirmatory-panel",
+                "cost": 0.5,
+                "outcomes": [
+                    {"label": "positive", "likelihood": [0.2, 0.8, 0.3]},
+                    {"label": "negative", "likelihood": [0.8, 0.2, 0.7]},
+                ],
+            },
+        ],
+        "policy": {
+            "expected_total": 0.9,
+            "expected_terminal_risk": 0.8,
+            "expected_acquisition_cost": 0.1,
+            "nodes_evaluated": 7,
+            "selected_depth": 1,
+            "root": {
+                "kind": "acquire",
+                "acquisition_index": 0,
+                "id": "rapid-screen",
+                "cost": 0.1,
+                "expected_total": 0.9,
+                "expected_terminal_risk": 0.8,
+                "expected_acquisition_cost": 0.1,
+                "outcomes": [
+                    {
+                        "label": "positive",
+                        "probability": 0.7,
+                        "posterior": [0.6, 0.2, 0.2],
+                        "next": {"kind": "stop", "action_index": 0, "action": "accept", "risk": 0.5},
+                    },
+                    {
+                        "label": "negative",
+                        "probability": 0.3,
+                        "posterior": [0.2, 0.6, 0.2],
+                        "next": {"kind": "stop", "action_index": 1, "action": "defer", "risk": 1.5},
+                    },
+                ],
+            },
+        },
+        "certificate_binding": {"query_sha256": "a" * 64, "certificate_sha256": "b" * 64},
+        "execution": "not_started",
+        "authorization": "not_granted",
+        "provenance": {"planner": "bioprism-epistemic::adaptive_policy"},
+        "guarantees": ["exact under caps"],
+        "limitations": ["caller-declared"],
+    }
 
 
 def rate_summary() -> dict:
@@ -111,6 +187,37 @@ class FiberContractTests(unittest.TestCase):
             ).tolerance,
             0.25,
         )
+
+    def test_adaptive_projection_validates_recursive_policy_and_execution_boundary(self) -> None:
+        report = fiber_adaptive_acquisition_summary(compile_payload())
+        self.assertIsInstance(report, FiberAdaptiveAcquisitionSummary)
+        self.assertEqual(report.root.kind, "acquire")
+        self.assertEqual(report.root.outcomes[1].next.action, "defer")
+        self.assertEqual(report.selected_depth, 1)
+        self.assertEqual(report.execution, "not_started")
+        self.assertEqual(report.authorization, "not_granted")
+
+    def test_adaptive_workspace_facades_preserve_the_same_projection(self) -> None:
+        self.assertEqual(
+            Workspace(_SyncTool()).fiber_compile_adaptive_acquisition("world.json", "query.json").certificate_sha256,
+            "b" * 64,
+        )
+        self.assertEqual(
+            asyncio.run(
+                AsyncWorkspace(_AsyncTool()).fiber_compile_adaptive_acquisition("world.json", "query.json")
+            ).expected_acquisition_cost,
+            0.1,
+        )
+
+    def test_adaptive_projection_refuses_execution_claims_and_budget_overruns(self) -> None:
+        broken = compile_payload()
+        broken["adaptive_acquisition"]["execution"] = "completed"
+        with self.assertRaises(ArgumentError):
+            fiber_adaptive_acquisition_summary(broken)
+        broken = compile_payload()
+        broken["adaptive_acquisition"]["policy"]["root"]["cost"] = 2.0
+        with self.assertRaises(ArgumentError):
+            fiber_adaptive_acquisition_summary(broken)
 
     def test_legacy_or_malformed_projection_fails_closed(self) -> None:
         with self.assertRaises(ArgumentError):

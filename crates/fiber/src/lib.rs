@@ -3,7 +3,8 @@
 //! Implements blueprint 43.13 (protected closure), 43.17 (dependency slicing and obligation
 //! closure), 43.09 (temporal accessibility), 43.16 (the compiler pipeline), the fragment of 43.33
 //! (policy fibers) the v0.1 wire formats can state, the portfolio consultation of 43.36 and 43.37,
-//! the influence bounds of 43.28, and the deterministic oracle of 43.41, emitting the Decision
+//! the influence bounds of 43.28, the deterministic oracle of 43.41, and the bounded adaptive
+//! acquisition planner of 43.15, emitting the Decision
 //! Section and Context Certificate defined in `bioprism-section`.
 //!
 //! ```no_run
@@ -19,8 +20,9 @@
 //!
 //! What this engine does *not* do is as important as what it does. It performs no gluing or
 //! obstruction analysis or abstract interpretation. The versioned `fiber-query/0.3` boundary
-//! carries the explicit permitted actions and decision loss needed by the 43.10 quotient, and
-//! `fiber-query/0.4` additionally executes the bounded observed-context rate-distortion audit.
+//! carries the explicit permitted actions and decision loss needed by the 43.10 quotient,
+//! `fiber-query/0.4` additionally executes the bounded observed-context rate-distortion audit,
+//! and `fiber-query/0.5` executes the exact adaptive acquisition policy contract.
 //! Older queries continue to report whichever decision-relative pass their wire form cannot state
 //! as deferred.
 //! Every compile reports the remaining gaps in [`CompileTrace::deferred_passes`] and on the
@@ -51,14 +53,18 @@ pub mod qir;
 pub mod slice;
 pub mod temporal;
 
-pub use compile::{compile, CompileOutput, CompileTrace, PassReceipt, RateDistortionTrace};
+pub use compile::{
+    compile, AdaptiveAcquisitionTrace, CompileOutput, CompileTrace, PassReceipt,
+    RateDistortionTrace,
+};
 pub use error::FiberError;
 pub use influence::{CorrespondenceCheck, NotPosable, WithheldSplit, WithholdingAnalysis};
 pub use plan::{PlanEvaluation, PortfolioOutcome, RegionStatistics, DELIVERING_BACKEND};
 pub use policy::{PolicyEnvelope, PolicyOutcome, PolicyScreen, PolicyViolation};
 pub use qir::{
-    Budgets, DecisionContract, DecisionSense, Query, RateDistortionContract,
-    ACCEPTED_QUERY_SCHEMA_VERSIONS, QUERY_DECISION_FIELD_PATHS, QUERY_DECISION_SCHEMA_VERSION,
+    AdaptiveAcquisitionContract, Budgets, DecisionContract, DecisionSense, Query,
+    RateDistortionContract, ACCEPTED_QUERY_SCHEMA_VERSIONS, QUERY_ADAPTIVE_FIELD_PATHS,
+    QUERY_ADAPTIVE_SCHEMA_VERSION, QUERY_DECISION_FIELD_PATHS, QUERY_DECISION_SCHEMA_VERSION,
     QUERY_FIELD_PATHS, QUERY_RATE_DISTORTION_FIELD_PATHS, QUERY_RATE_DISTORTION_SCHEMA_VERSION,
     QUERY_SCHEMA_VERSION, REFERENCE_GOAL,
 };

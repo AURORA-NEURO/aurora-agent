@@ -1514,6 +1514,11 @@ export class ApiClient {
     return this.callTool<FiberCompileResult>("fiber_compile", args, options);
   }
 
+  /** Compile a FIBER 0.5 query and expose its certificate-bound adaptive policy projection. */
+  async fiberCompileAdaptiveAcquisition(args: FiberCompileArgs, options?: ClientRequestOptions): Promise<RestToolResponse<FiberCompileResult>> {
+    return this.callTool<FiberCompileResult>("fiber_compile", args, options);
+  }
+
   async epistemicContextAudit(args: EpistemicContextAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<EpistemicContextAuditResult>> {
     return this.callTool<EpistemicContextAuditResult>("epistemic_context_audit", args, options);
   }

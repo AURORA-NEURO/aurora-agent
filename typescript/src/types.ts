@@ -2582,10 +2582,71 @@ export interface FiberRateDistortionSummary extends JsonObject {
   limitations: string[];
 }
 
+export interface FiberAdaptiveAcquisitionOutcome extends JsonObject {
+  label: string;
+  probability: number;
+  posterior: number[];
+  next: FiberAdaptiveAcquisitionNode;
+}
+
+export interface FiberAdaptiveAcquisitionNode extends JsonObject {
+  kind: "stop" | "acquire";
+  action_index?: number;
+  action?: string;
+  risk?: number;
+  acquisition_index?: number;
+  id?: string;
+  cost?: number;
+  expected_total?: number;
+  expected_terminal_risk?: number;
+  expected_acquisition_cost?: number;
+  outcomes?: FiberAdaptiveAcquisitionOutcome[];
+}
+
+export interface FiberAdaptiveAcquisitionSummary extends JsonObject {
+  schema: "bioprism-mcp/fiber-adaptive-acquisition/0.1";
+  budget: number;
+  max_steps: number;
+  prior: number[];
+  problem: {
+    actions: string[];
+    models: string[];
+    action_count: number;
+    model_count: number;
+    [key: string]: JsonValue;
+  };
+  acquisitions: Array<{
+    id: string;
+    cost: number;
+    outcomes: Array<{ label: string; likelihood: number[]; [key: string]: JsonValue }>;
+    [key: string]: JsonValue;
+  }>;
+  policy: {
+    expected_total: number;
+    expected_terminal_risk: number;
+    expected_acquisition_cost: number;
+    nodes_evaluated: number;
+    selected_depth: number;
+    root: FiberAdaptiveAcquisitionNode;
+    [key: string]: JsonValue;
+  };
+  certificate_binding: {
+    query_sha256: string;
+    certificate_sha256: string;
+    [key: string]: JsonValue;
+  };
+  execution: "not_started";
+  authorization: "not_granted";
+  provenance: JsonObject;
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface FiberCompileResult extends JsonObject {
   layer?: "l0" | "l1" | "l2" | "l3" | "l4";
   decision_quotient?: FiberDecisionQuotientSummary;
   rate_distortion?: FiberRateDistortionSummary;
+  adaptive_acquisition?: FiberAdaptiveAcquisitionSummary;
   certificate_sha256?: string;
 }
 
