@@ -1742,8 +1742,10 @@ class AnalyticsModelTests(unittest.TestCase):
             "discover the repository capabilities",
             [{"id": "catalog", "tool": "workspace_capabilities", "arguments": {}}],
             policy={"execute": False},
+            route_review={"workflow": "capability_route_review", "review_id": "a" * 64},
         )
         self.assertEqual(request.to_arguments()["steps"][0]["tool"], "workspace_capabilities")
+        self.assertEqual(request.to_arguments()["route_review"]["review_id"], "a" * 64)
         catalogue = DomainWorkflowCatalogueReport.from_wire({
             "ok": True,
             "workflow": "domain_workflow_catalogue",

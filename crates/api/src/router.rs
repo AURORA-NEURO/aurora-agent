@@ -11,10 +11,10 @@ use crate::events::{
 };
 use crate::http::{HttpRequest, HttpResponse};
 use bioprism_devplat::{
-    build_cross_domain_audit, verify_mission_evidence_bundle, ArtifactRegistry,
+    build_cross_domain_audit, plan_mission, verify_mission_evidence_bundle, ArtifactRegistry,
     ArtifactRegistryError, DomainWorkflowReconciliationRegistry, EvidenceBundleError,
     EvidenceBundleRegistry, EvidenceRegistryError, MissionEvaluatorCatalogue,
-    MissionEvaluatorReplayCompareRequest, MissionEvaluatorReplayRequest,
+    MissionEvaluatorReplayCompareRequest, MissionEvaluatorReplayRequest, MissionRequest,
     WorkflowExecutionEvidenceRegistry, MAX_ARTIFACT_REGISTRY_BYTES, MAX_EVIDENCE_REGISTRY_BYTES,
     MAX_WORKFLOW_EXECUTION_EVIDENCE_BYTES,
 };
@@ -999,6 +999,7 @@ struct MissionJobState {
     result: Option<Value>,
     result_omitted: Option<Value>,
     evaluator_replay_summary: Option<Value>,
+    route_review_provenance: Option<Value>,
     error: Option<String>,
     recovered_after_restart: bool,
     execution_provenance: Option<Value>,
@@ -4712,6 +4713,7 @@ impl ApiRouter {
         };
 
         let queue_attempt = queue_lease.attempt;
+        let route_review_provenance = mission_route_review_provenance(&arguments);
         let cancellation = Arc::new(AtomicBool::new(false));
         let state = Arc::new(Mutex::new(MissionJobState {
             total_steps,
@@ -4723,6 +4725,7 @@ impl ApiRouter {
             result: None,
             result_omitted: None,
             evaluator_replay_summary: None,
+            route_review_provenance: route_review_provenance.clone(),
             error: None,
             recovered_after_restart: false,
             execution_provenance: execution_provenance.clone(),
@@ -4986,6 +4989,7 @@ impl ApiRouter {
                 },
                 "cancel_requested": false,
                 "progress": mission_progress_json(&MissionProgressState::new(total_steps)),
+                "route_review_provenance": route_review_provenance,
                 "execution_provenance": execution_provenance,
                 "poll": format!("/v1/missions/{mission_id}"),
                 "cancel": format!("/v1/missions/{mission_id}/cancel"),
@@ -5084,6 +5088,7 @@ impl ApiRouter {
                 "cancel_requested": state.cancel_requested,
                 "cancel_reason": state.cancel_reason,
                 "recovered_after_restart": state.recovered_after_restart,
+                "route_review_provenance": state.route_review_provenance,
                 "execution_provenance": state.execution_provenance,
                 "queue": queue,
                 "progress": mission_progress_json(&state.progress),
@@ -5159,6 +5164,7 @@ impl ApiRouter {
                 "execution_provenance": current.execution_provenance,
                 "queue": queue,
                 "progress": mission_progress_json(&current.progress),
+                "route_review_provenance": current.route_review_provenance,
                 "result": current.result,
                 "result_omitted": current.result_omitted,
                 "error": current.error,
@@ -7580,6 +7586,15 @@ fn current_timestamp() -> Result<Timestamp, String> {
     Ok(Timestamp::from_nanos_utc(nanos))
 }
 
+/// Recover only the bounded route-review identity from a validated mission specification. The
+/// queue checkpoint keeps the complete spec private; this projection lets operators verify that
+/// a reviewed route stayed attached to the queued work without exposing domain arguments.
+fn mission_route_review_provenance(arguments: &Value) -> Option<Value> {
+    let request: MissionRequest = serde_json::from_value(arguments.clone()).ok()?;
+    let plan = plan_mission(&request).ok()?;
+    plan.route_review_provenance
+}
+
 fn mission_queue_job_json(job: &FactoryJob) -> Value {
     json!({
         "mission_id": job.id,
@@ -7592,6 +7607,8 @@ fn mission_queue_job_json(job: &FactoryJob) -> Value {
         "attempts": job.attempts,
         "attempts_remaining": job.attempts_remaining(),
         "reason": job.reason,
+        "spec_digest": job.idempotency_key().to_string(),
+        "route_review_provenance": mission_route_review_provenance(&job.spec),
         "spec_returned": false
     })
 }
@@ -8850,6 +8867,10 @@ fn load_mission_jobs(path: Option<&Path>) -> Result<BTreeMap<String, Arc<Mission
                 .get("evaluator_replay_summary")
                 .filter(|value| value.is_object())
                 .cloned(),
+            route_review_provenance: object
+                .get("route_review_provenance")
+                .filter(|value| value.is_object())
+                .cloned(),
             error: object
                 .get("error")
                 .and_then(Value::as_str)
@@ -8922,6 +8943,7 @@ fn durable_mission_state_json(mission_id: &str, state: &MissionJobState) -> Valu
         "result": result,
         "result_omitted": state.result_omitted.clone().or(generated_omission),
         "evaluator_replay_summary": state.evaluator_replay_summary.clone(),
+        "route_review_provenance": state.route_review_provenance.clone(),
         "execution_provenance": execution_provenance,
         "execution_provenance_omitted": generated_provenance_omission,
         "error": state.error,
@@ -9002,6 +9024,8 @@ fn evaluator_replay_summary(report: &Value, mission_id: &str) -> Option<Value> {
         "historical_review_id": review_provenance.get("review_id").cloned().unwrap_or(Value::Null),
         "historical_discovery_digest": review_provenance.get("discovery_digest").cloned().unwrap_or(Value::Null),
         "historical_catalogue_snapshot": review_provenance.get("catalogue_snapshot").cloned().unwrap_or(Value::Null),
+        "route_review_provenance": replay.get("route_review_provenance").cloned().unwrap_or(Value::Null),
+        "route_review_status": replay.get("route_review_status").cloned().unwrap_or(json!("absent")),
         "referenced_adapter_ids": referenced_adapter_ids,
         "binding_count": replay.get("binding_count")?,
         "omitted_bindings": replay.get("omitted_bindings")?,
@@ -9664,6 +9688,7 @@ mod tests {
                     result: None,
                     result_omitted: Some(json!({"bytes": 300_000, "sha256": "a".repeat(64)})),
                     evaluator_replay_summary: Some(summary),
+                    route_review_provenance: None,
                     error: None,
                     recovered_after_restart: false,
                     execution_provenance: None,
@@ -9734,6 +9759,7 @@ mod tests {
             )),
             result_omitted: None,
             evaluator_replay_summary: None,
+            route_review_provenance: None,
             error: None,
             recovered_after_restart: false,
             execution_provenance: None,
@@ -11085,7 +11111,24 @@ mod tests {
             json!({
                 "mission_id": "durable-queue-1",
                 "goal": "exercise the durable mission queue",
-                "steps": [{"id": "catalog", "domain": "workspace", "capability": "discovery", "objective": "discover routes", "tool": "workspace_capabilities"}]
+                "steps": [{"id": "catalog", "domain": "workspace", "capability": "discovery", "objective": "discover routes", "tool": "workspace_capabilities", "arguments": {}, "depends_on": [], "bindings": [], "required": true}],
+                "route_review": {
+                    "ok": true,
+                    "workflow": "capability_route_review",
+                    "review_id": "a".repeat(64),
+                    "route_id": "b".repeat(64),
+                    "catalog_digest": "c".repeat(64),
+                    "goal": "exercise the durable mission queue",
+                    "findings": [],
+                    "review_status": "ready",
+                    "handoff_status": "mission_preflight_required",
+                    "mission_draft": {
+                        "goal": "exercise the durable mission queue",
+                        "steps": [{"id": "catalog", "domain": "workspace", "capability": "discovery", "objective": "discover routes", "tool": "workspace_capabilities", "arguments": {}, "depends_on": [], "bindings": [], "required": true}],
+                        "dependency_waves": [["catalog"]]
+                    },
+                    "execution": "not_started"
+                }
             }),
         ));
         assert_eq!(submitted.status, 202);
@@ -11101,6 +11144,10 @@ mod tests {
         assert_eq!(mission["status"], "planned");
         assert_eq!(mission["queue"]["state"], "succeeded");
         assert_eq!(mission["queue"]["attempts"], 1);
+        assert_eq!(
+            mission["route_review_provenance"]["route_id"],
+            "b".repeat(64)
+        );
 
         let queue = router.handle(request("GET", "/v1/missions/queue", json!({})));
         assert_eq!(queue.status, 200);
@@ -11110,6 +11157,10 @@ mod tests {
         assert_eq!(queue["queue"]["integrity_verified"], true);
         assert_eq!(queue["queue"]["jobs"][0]["spec_returned"], false);
         assert_eq!(queue["queue"]["jobs"][0]["state"], "succeeded");
+        assert_eq!(
+            queue["queue"]["jobs"][0]["route_review_provenance"]["review_id"],
+            "a".repeat(64)
+        );
         assert_eq!(queue["queue"]["state_digest"].as_str().unwrap().len(), 64);
         assert_eq!(queue["queue"]["authority"]["configured"], true);
         assert_eq!(queue["queue"]["authority"]["integrity_verified"], true);
@@ -11134,6 +11185,10 @@ mod tests {
         let restored_queue: Value = serde_json::from_slice(&restored_queue.body).unwrap();
         assert_eq!(restored_queue["integrity_verified"], true);
         assert_eq!(restored_queue["jobs"][0]["state"], "succeeded");
+        assert_eq!(
+            restored_queue["jobs"][0]["route_review_provenance"]["catalog_digest"],
+            "c".repeat(64)
+        );
         assert_eq!(
             restored_queue["authority"]["queue_state_digest"],
             restored_queue["state_digest"]

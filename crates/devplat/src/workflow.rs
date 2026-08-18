@@ -1006,6 +1006,7 @@ pub fn instantiate_domain_workflow(
         "policy": policy,
         "claim_requests": object.get("claim_requests").cloned().unwrap_or_else(|| json!([])),
         "evaluator_review": object.get("evaluator_review").cloned().unwrap_or(Value::Null),
+        "route_review": object.get("route_review").cloned().unwrap_or(Value::Null),
     });
     let selected_tools = selected_tools.into_iter().collect::<Vec<_>>();
     let evidence_plan = steps
@@ -1448,6 +1449,67 @@ mod tests {
         assert_eq!(
             report["evidence_plan"]["steps"][0]["tool_contract"]["schema_state"],
             "missing"
+        );
+    }
+
+    #[test]
+    fn instantiation_carries_a_reviewed_route_into_the_mission_contract() {
+        let (catalogue, tools) = inputs();
+        let steps = json!([{
+            "id": "boundary",
+            "domain": "oncology",
+            "capability": "oncology_workflows",
+            "objective": "review the oncology boundary",
+            "tool": "onco_boundary_check",
+            "arguments": {},
+            "depends_on": [],
+            "bindings": [],
+            "required": true
+        }]);
+        let route_review = json!({
+            "ok": true,
+            "workflow": "capability_route_review",
+            "review_id": "a".repeat(64),
+            "route_id": "b".repeat(64),
+            "catalog_digest": "c".repeat(64),
+            "goal": "review the oncology boundary",
+            "findings": [],
+            "review_status": "ready",
+            "handoff_status": "mission_preflight_required",
+            "mission_draft": {
+                "goal": "review the oncology boundary",
+                "steps": steps.clone(),
+                "dependency_waves": [["boundary"]]
+            },
+            "execution": "not_started"
+        });
+        let report = instantiate_domain_workflow(
+            &catalogue,
+            &tools,
+            &json!({
+                "workflow_id": "oncology_workflows",
+                "mission_id": "reviewed-workflow",
+                "goal": "review the oncology boundary",
+                "steps": steps,
+                "route_review": route_review
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            report["mission"]["route_review"]["route_id"],
+            "b".repeat(64)
+        );
+        assert_eq!(
+            report["mission"]["route_review"]["execution"],
+            "not_started"
+        );
+        let plan = crate::mission::plan_mission(
+            &serde_json::from_value(report["mission"].clone()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            plan.route_review_provenance.as_ref().unwrap()["review_id"],
+            "a".repeat(64)
         );
     }
 

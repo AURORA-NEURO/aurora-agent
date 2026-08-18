@@ -4806,6 +4806,8 @@ export interface MissionEvaluatorReplayResult extends JsonObject {
   mission_digest: string;
   mission_status: JsonValue;
   review_provenance: JsonValue;
+  route_review_provenance?: JsonObject | null;
+  route_review_status?: "absent" | "valid" | "invalid" | string;
   catalog_digest: string;
   binding_count: number;
   omitted_bindings: number;
@@ -5080,6 +5082,7 @@ export interface DomainWorkflowInstantiateArgs extends JsonObject {
   policy?: JsonObject;
   claim_requests?: JsonValue[];
   evaluator_review?: JsonObject;
+  route_review?: JsonObject;
 }
 
 export interface DomainWorkflowScaffoldArgs extends JsonObject {
@@ -9503,6 +9506,7 @@ export interface MissionJob extends JsonObject {
   result_omitted?: MissionResultOmission | null;
   error?: string | null;
   progress?: MissionProgress;
+  route_review_provenance?: JsonObject | null;
   poll?: string;
   cancel?: string;
   trace?: string;
@@ -9550,6 +9554,7 @@ export interface MissionInventoryItem extends JsonObject {
   poll: string;
   cancel: string;
   trace: string;
+  route_review_provenance?: JsonObject | null;
   execution_provenance?: JsonObject | null;
 }
 
@@ -9606,6 +9611,8 @@ export interface MissionQueueJob extends JsonObject {
   attempts: number;
   attempts_remaining: number;
   reason?: string | null;
+  spec_digest: string;
+  route_review_provenance?: JsonObject | null;
   spec_returned: false;
 }
 

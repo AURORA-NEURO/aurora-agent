@@ -36139,7 +36139,8 @@ pub fn tool_definitions() -> Vec<Value> {
                     "steps": { "type": "array", "minItems": 1, "maxItems": 128, "items": { "type": "object" }, "description": "Explicit steps; each tool must belong to the selected workflow and arguments remain domain-specific JSON objects." },
                     "policy": { "type": "object", "description": "Optional mission execution and resource policy; execution still remains outside this kernel." },
                     "claim_requests": { "type": "array", "maxItems": 64, "items": { "type": "object" } },
-                    "evaluator_review": { "type": "object" }
+                    "evaluator_review": { "type": "object" },
+                    "route_review": { "type": "object", "description": "Optional ready, non-executing capability_route_review handoff. It must match the exact normalized steps and is retained as provenance only." }
                 },
                 "required": ["workflow_id", "mission_id", "goal", "steps"]
             }

@@ -704,6 +704,15 @@ The returned plan exposes compact `route_review_provenance`; this is retained au
 an authorization or readiness credential. Legacy reviews without route evidence remain explicit
 absent bindings.
 
+The same `route_review` may be supplied to `domain_workflow_instantiate`; the workflow kernel
+copies it into the generated mission only after the normalized steps are known, so a reviewed
+route cannot silently drift while crossing from cross-domain planning into a workflow template.
+When that mission is submitted, the queue checkpoint exposes only a `spec_digest` and compact
+`route_review_provenance` (never the original job specification). Mission status and inventory
+persist the same bounded projection. Terminal evaluator replay reports `route_review_status` as
+`absent`, `valid`, or `invalid`, and `domain_workflow_reconcile` compares retained provenance with
+the workflow instantiation, producing an explicit integrity finding on mismatch.
+
 `GET /v1/missions?status=<status>&limit=<n>` lists at most 256 process-local jobs in deterministic
 mission-id order. It returns lifecycle links and bounded summaries (`total_steps`, completed and
 refused counts, cancellation counts, required failures, and returned bytes), never the full raw

@@ -529,6 +529,7 @@ class DomainWorkflowInstantiateRequest:
     policy: Mapping[str, Any] | None = None
     claim_requests: Sequence[Mapping[str, Any]] = ()
     evaluator_review: Mapping[str, Any] | None = None
+    route_review: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         for name, value in (("workflow_id", self.workflow_id), ("mission_id", self.mission_id), ("goal", self.goal)):
@@ -545,6 +546,8 @@ class DomainWorkflowInstantiateRequest:
             _route_mapping(f"workflow claim_requests[{index}]", claim)
         if self.evaluator_review is not None:
             _route_mapping("workflow evaluator_review", self.evaluator_review)
+        if self.route_review is not None:
+            _route_mapping("workflow route_review", self.route_review)
 
     def to_arguments(self) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -558,6 +561,8 @@ class DomainWorkflowInstantiateRequest:
             result["policy"] = dict(self.policy)
         if self.evaluator_review is not None:
             result["evaluator_review"] = dict(self.evaluator_review)
+        if self.route_review is not None:
+            result["route_review"] = dict(self.route_review)
         return result
 
 
@@ -1857,6 +1862,8 @@ class MissionEvaluatorReplayReport:
     execution: str
     fixtures: tuple[dict[str, Any], ...]
     omitted_fixtures: int
+    route_review_provenance: Mapping[str, Any] | None
+    route_review_status: str
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "MissionEvaluatorReplayReport":
@@ -1877,6 +1884,12 @@ class MissionEvaluatorReplayReport:
         coverage = raw.get("coverage", {})
         if not isinstance(state_counts, Mapping) or not isinstance(coverage, Mapping):
             raise ArgumentError("mission evaluator replay state_counts and coverage must be objects")
+        route_review_status = _route_text(
+            "mission evaluator replay route_review_status",
+            raw.get("route_review_status", "absent"),
+        )
+        if route_review_status not in {"absent", "valid", "invalid"}:
+            raise ArgumentError(f"unknown mission evaluator replay route_review_status: {route_review_status}")
         return cls(
             raw=raw,
             mission_id=_route_text("mission evaluator replay mission id", raw.get("mission_id")),
@@ -1893,6 +1906,15 @@ class MissionEvaluatorReplayReport:
             execution=_route_text("mission evaluator replay execution", raw.get("execution")),
             fixtures=tuple(_route_mapping("mission evaluator replay fixture", item) for item in fixtures),
             omitted_fixtures=_route_count("mission evaluator replay omitted fixtures", raw.get("omitted_fixtures", 0)),
+            route_review_provenance=(
+                None
+                if raw.get("route_review_provenance") is None
+                else _route_mapping(
+                    "mission evaluator replay route_review_provenance",
+                    raw.get("route_review_provenance"),
+                )
+            ),
+            route_review_status=route_review_status,
         )
 
     @property

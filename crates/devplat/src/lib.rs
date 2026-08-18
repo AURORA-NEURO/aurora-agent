@@ -477,8 +477,9 @@ pub use exploit::{
 };
 pub use mission::{
     apply_binding, mission_claim_lineage, mission_claim_lineage_with_review, plan_mission,
-    MissionBinding, MissionClaimEvaluatorBinding, MissionClaimRequest, MissionError, MissionPlan,
-    MissionPolicy, MissionReport, MissionRequest, MissionStep, MissionStepPlan, MissionStepResult,
+    route_review_provenance, validate_route_review_provenance, MissionBinding,
+    MissionClaimEvaluatorBinding, MissionClaimRequest, MissionError, MissionPlan, MissionPolicy,
+    MissionReport, MissionRequest, MissionStep, MissionStepPlan, MissionStepResult,
     MissionTraceEvent, MissionTraceObserver, MAX_CLAIM_EVALUATORS, MAX_CLAIM_REFERENCES,
     MAX_CLAIM_REQUESTS, MAX_WORKFLOW_BINDING_BYTES, MISSION_SCHEMA_VERSION,
     MISSION_TRACE_SCHEMA_VERSION,

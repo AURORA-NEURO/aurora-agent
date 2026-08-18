@@ -1473,6 +1473,7 @@ class MissionJob:
     result_omitted: MissionResultOmission | None
     error: str | None
     progress: MissionProgress | None
+    route_review_provenance: Mapping[str, Any] | None
     execution_provenance: Mapping[str, Any] | None
 
     @classmethod
@@ -1505,10 +1506,13 @@ class MissionJob:
             _text("mission job error", error)
         progress_value = raw.get("progress")
         progress = None if progress_value is None else MissionProgress.from_wire(progress_value)
+        route_review_provenance = raw.get("route_review_provenance")
+        if route_review_provenance is not None and not isinstance(route_review_provenance, Mapping):
+            raise ArgumentError("mission job route_review_provenance must be an object or null")
         execution_provenance = raw.get("execution_provenance")
         if execution_provenance is not None and not isinstance(execution_provenance, Mapping):
             raise ArgumentError("mission job execution_provenance must be an object or null")
-        return cls(raw, mission_id, status, cancel_requested, cancel_reason, recovered_after_restart, result, result_omitted, error, progress, execution_provenance)
+        return cls(raw, mission_id, status, cancel_requested, cancel_reason, recovered_after_restart, result, result_omitted, error, progress, route_review_provenance, execution_provenance)
 
     @property
     def terminal(self) -> bool:
@@ -1589,6 +1593,7 @@ class MissionInventoryItem:
     poll: str
     cancel: str
     trace: str
+    route_review_provenance: Mapping[str, Any] | None
     execution_provenance: Mapping[str, Any] | None
 
     @classmethod
@@ -1620,6 +1625,9 @@ class MissionInventoryItem:
             candidate = raw.get(name)
             _text(f"mission inventory {name}", candidate)
             links[name] = candidate
+        route_review_provenance = raw.get("route_review_provenance")
+        if route_review_provenance is not None and not isinstance(route_review_provenance, Mapping):
+            raise ArgumentError("mission inventory route_review_provenance must be an object or null")
         execution_provenance = raw.get("execution_provenance")
         if execution_provenance is not None and not isinstance(execution_provenance, Mapping):
             raise ArgumentError("mission inventory execution_provenance must be an object or null")
@@ -1635,6 +1643,7 @@ class MissionInventoryItem:
             links["poll"],
             links["cancel"],
             links["trace"],
+            route_review_provenance,
             execution_provenance,
         )
 
@@ -1786,6 +1795,8 @@ class MissionQueueJob:
     attempts: int
     attempts_remaining: int
     reason: str | None
+    spec_digest: str
+    route_review_provenance: Mapping[str, Any] | None
     spec_returned: bool
 
     @classmethod
@@ -1835,6 +1846,17 @@ class MissionQueueJob:
         reason = raw.get("reason")
         if reason is not None:
             _text("mission queue job reason", reason)
+        supplied_spec_digest = raw.get("spec_digest")
+        spec_digest = idempotency_key if supplied_spec_digest is None else supplied_spec_digest
+        _text("mission queue job spec_digest", spec_digest)
+        if supplied_spec_digest is not None and (
+            len(spec_digest) != 64
+            or any(character not in "0123456789abcdef" for character in spec_digest)
+        ):
+            raise ArgumentError("mission queue job spec_digest must be 64 lowercase hexadecimal characters")
+        route_review_provenance = raw.get("route_review_provenance")
+        if route_review_provenance is not None and not isinstance(route_review_provenance, Mapping):
+            raise ArgumentError("mission queue job route_review_provenance must be an object or null")
         spec_returned = raw.get("spec_returned")
         if not isinstance(spec_returned, bool):
             raise ArgumentError("mission queue job spec_returned must be a boolean")
@@ -1852,6 +1874,8 @@ class MissionQueueJob:
             attempts,
             attempts_remaining,
             reason,
+            spec_digest,
+            route_review_provenance,
             spec_returned,
         )
 

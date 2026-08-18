@@ -856,6 +856,13 @@ goal and exact serialized steps, binds its review/route/catalogue identities int
 and retains compact evidence posture without granting permission or readiness. A changed draft,
 stale finding, or tampered evidence binding is refused before dispatch; legacy no-evidence reviews
 remain structurally supported with an explicit absent binding.
+The same reviewed handoff may cross the workflow-template boundary through
+`domain_workflow_instantiate`. After normalized steps are constructed, the generated mission
+retains the exact route review; the durable queue exposes only its `spec_digest` and compact
+provenance, mission checkpoints preserve that projection across restart, evaluator replay marks it
+`absent`, `valid`, or `invalid`, and workflow reconciliation compares it against the instantiated
+workflow. These joins add integrity evidence without turning route review into authorization,
+execution, or a domain conclusion.
 `domain_workflow_catalogue` closes the next gap between discovery and planning: it materializes
 one deterministic, digest-bound workflow template for each of the 29 capability groups, including
 available versus missing tool definitions, per-tool schema/evidence contracts, and advisory lexical

@@ -761,6 +761,11 @@ invent defaults:
   reports preserve catalogue/workflow digests, missing-tool coverage, selected-tool scope,
   the selected domain contract, a step-level evidence plan, authoritative `preflight_report`, and
   `execution: "not_started"`. No client method dispatches a domain tool through this workflow layer.
+  `DomainWorkflowInstantiateRequest.route_review` carries a ready capability-route handoff into
+  the generated mission after exact step normalization. The same compact route provenance is
+  visible on typed mission status/inventory and queue projections; evaluator replay exposes
+  `route_review_status`, and workflow reconciliation reports whether retained provenance still
+  matches the instantiation. These are integrity/provenance joins, not execution authorization.
 - `DomainWorkflowScaffoldRequest` and `DomainWorkflowScaffoldReport` provide the deterministic
   planning shortcut for all capability groups. `ApiClient`/`AsyncApiClient` expose REST and
   `*_tool` variants, while `Workspace`/`AsyncWorkspace` expose the MCP bridge. The typed request

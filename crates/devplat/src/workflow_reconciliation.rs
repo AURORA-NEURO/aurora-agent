@@ -14,7 +14,8 @@ use thiserror::Error;
 
 use crate::evidence_bundle::verify_mission_evidence_bundle;
 use crate::mission::{
-    plan_mission, MissionReport, MissionRequest, MissionStepPlan, MissionStepResult,
+    plan_mission, validate_route_review_provenance, MissionReport, MissionRequest, MissionStepPlan,
+    MissionStepResult,
 };
 
 pub const DOMAIN_WORKFLOW_RECONCILE_SCHEMA_VERSION: &str =
@@ -280,6 +281,104 @@ fn result_row(
     }))
 }
 
+fn route_review_audit(
+    expected: Option<&Value>,
+    observed: Option<&Value>,
+    findings: &mut Vec<Value>,
+) -> Value {
+    match (expected, observed) {
+        (None, None) => json!({
+            "present": false,
+            "status": "absent",
+            "matched": true,
+            "expected": Value::Null,
+            "observed": Value::Null,
+        }),
+        (Some(expected), None) => {
+            append_finding(
+                findings,
+                finding(
+                    "route_review_provenance_missing",
+                    "error",
+                    "the retained mission plan dropped route-review provenance carried by the instantiated workflow",
+                    None,
+                ),
+            );
+            json!({
+                "present": true,
+                "status": "missing",
+                "matched": false,
+                "expected": expected,
+                "observed": Value::Null,
+            })
+        }
+        (None, Some(observed)) => {
+            append_finding(
+                findings,
+                finding(
+                    "route_review_provenance_unexpected",
+                    "error",
+                    "the retained mission plan introduced route-review provenance that was not present at workflow instantiation",
+                    None,
+                ),
+            );
+            json!({
+                "present": true,
+                "status": "unexpected",
+                "matched": false,
+                "expected": Value::Null,
+                "observed": observed,
+            })
+        }
+        (Some(expected), Some(observed)) => {
+            let expected_error = validate_route_review_provenance(expected).err();
+            let observed_error = validate_route_review_provenance(observed).err();
+            if let Some(reason) = expected_error.as_deref() {
+                append_finding(
+                    findings,
+                    finding(
+                        "route_review_provenance_expected_invalid",
+                        "error",
+                        format!("instantiated route-review provenance is invalid: {reason}"),
+                        None,
+                    ),
+                );
+            }
+            if let Some(reason) = observed_error.as_deref() {
+                append_finding(
+                    findings,
+                    finding(
+                        "route_review_provenance_invalid",
+                        "error",
+                        format!("retained route-review provenance is invalid: {reason}"),
+                        None,
+                    ),
+                );
+            }
+            let matched =
+                expected_error.is_none() && observed_error.is_none() && expected == observed;
+            if !matched && expected_error.is_none() && observed_error.is_none() {
+                append_finding(
+                    findings,
+                    finding(
+                        "route_review_provenance_mismatch",
+                        "error",
+                        "retained route-review identity or evidence posture does not match the instantiated workflow",
+                        None,
+                    ),
+                );
+            }
+            json!({
+                "present": true,
+                "status": if matched { "matched" } else { "mismatch" },
+                "matched": matched,
+                "expected": expected,
+                "observed": observed,
+            })
+        }
+    }
+}
+
 fn reconcile_report(
     report_value: &Value,
     expected_request: &MissionRequest,
@@ -346,6 +445,11 @@ fn reconcile_report(
             ),
         );
     }
+    let route_review = route_review_audit(
+        expected_plan.route_review_provenance.as_ref(),
+        report.plan.route_review_provenance.as_ref(),
+        findings,
+    );
 
     let expected_by_id = expected_plan
         .steps
@@ -495,6 +599,7 @@ fn reconcile_report(
             "required_outputs_retained": required_retained,
             "optional_unresolved": optional_unresolved,
             "trace": trace,
+            "route_review": route_review,
         }),
     ))
 }
@@ -623,13 +728,21 @@ pub fn reconcile_domain_workflow(request: &Value) -> Result<Value, DomainWorkflo
         "mission_status": Value::Null,
         "execution": Value::Null,
         "result_count": 0,
-        "returned_bytes": 0,
+            "returned_bytes": 0,
+        "route_review_provenance": expected_plan.route_review_provenance.clone().unwrap_or(Value::Null),
     });
     let mut evidence_summary = json!({
         "required_success": false,
         "required_outputs_retained": false,
         "optional_unresolved": false,
         "trace": Value::Null,
+        "route_review": {
+            "present": expected_plan.route_review_provenance.is_some(),
+            "status": if expected_plan.route_review_provenance.is_some() { "not_observable" } else { "absent" },
+            "matched": Value::Null,
+            "expected": expected_plan.route_review_provenance.clone().unwrap_or(Value::Null),
+            "observed": Value::Null,
+        },
     });
     if let Some(report_value) = report_value {
         let (report, rows, summary) = reconcile_report(
@@ -651,6 +764,7 @@ pub fn reconcile_domain_workflow(request: &Value) -> Result<Value, DomainWorkflo
             "cancelled": report.cancelled,
             "required_failures": report.required_failures,
             "returned_bytes": report.returned_bytes,
+            "route_review_provenance": report.plan.route_review_provenance,
         });
     } else {
         for expected in &expected_plan.steps {
@@ -721,6 +835,8 @@ pub fn reconcile_domain_workflow(request: &Value) -> Result<Value, DomainWorkflo
         "domain_contract_digest": domain_contract_digest,
         "mission_id": expected_request.mission_id,
         "mission_plan_digest": expected_plan.digest,
+        "route_review_provenance": expected_plan.route_review_provenance.clone().unwrap_or(Value::Null),
+        "route_review_integrity": evidence_summary["route_review"].clone(),
         "source": source,
         "retention": bundle_retention,
         "bundle_verification": bundle_verification,
@@ -799,6 +915,41 @@ mod tests {
                 "goal":"review the oncology boundary",
                 "steps":[{"id":"boundary","tool":"onco_boundary_check","arguments":{}}],
                 "policy":{"execute":true}
+            }),
+        )
+        .unwrap()
+    }
+
+    fn reviewed_instantiation() -> Value {
+        let (catalogue, tools) = inputs();
+        let base = instantiation();
+        let steps = base["mission"]["steps"].clone();
+        instantiate_domain_workflow(
+            &catalogue,
+            &tools,
+            &json!({
+                "workflow_id":"oncology_workflows",
+                "mission_id":"reconcile-reviewed-1",
+                "goal":"review the oncology boundary",
+                "steps":steps.clone(),
+                "policy":{"execute":true},
+                "route_review": {
+                    "ok": true,
+                    "workflow": "capability_route_review",
+                    "review_id": "a".repeat(64),
+                    "route_id": "b".repeat(64),
+                    "catalog_digest": "c".repeat(64),
+                    "goal": "review the oncology boundary",
+                    "findings": [],
+                    "review_status": "ready",
+                    "handoff_status": "mission_preflight_required",
+                    "mission_draft": {
+                        "goal":"review the oncology boundary",
+                        "steps":steps,
+                        "dependency_waves":[["boundary"]]
+                    },
+                    "execution":"not_started"
+                }
             }),
         )
         .unwrap()
@@ -901,6 +1052,25 @@ mod tests {
             .unwrap()
             .iter()
             .any(|row| row["code"] == "mission_plan_digest_mismatch"));
+    }
+
+    #[test]
+    fn route_review_provenance_must_match_the_instantiated_workflow() {
+        let instantiation = reviewed_instantiation();
+        let mut tampered = report(&instantiation, "succeeded", Some(json!({"ok": true})));
+        tampered["plan"]["route_review_provenance"]["route_id"] = json!("d".repeat(64));
+        let reconciled = reconcile_domain_workflow(&json!({
+            "instantiation": instantiation,
+            "mission_report": tampered
+        }))
+        .unwrap();
+        assert_eq!(reconciled["route_review_integrity"]["matched"], false);
+        assert_eq!(reconciled["integrity"]["valid"], false);
+        assert!(reconciled["integrity"]["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["code"] == "route_review_provenance_mismatch"));
     }
 
     #[test]

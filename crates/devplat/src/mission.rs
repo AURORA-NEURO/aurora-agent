@@ -449,7 +449,10 @@ fn validate_route_review(
     Ok(())
 }
 
-fn route_review_provenance(review: Option<&Value>) -> Option<Value> {
+/// Project a validated capability-route review into the small identity/provenance record that
+/// may safely travel through queues, reports, replay summaries, and reconciliation indexes. The
+/// complete review remains caller-owned and is intentionally not copied into every projection.
+pub fn route_review_provenance(review: Option<&Value>) -> Option<Value> {
     let review = review?.as_object()?;
     let mut provenance = Map::new();
     provenance.insert("present".into(), Value::Bool(true));
@@ -481,6 +484,92 @@ fn route_review_provenance(review: Option<&Value>) -> Option<Value> {
         }
     }
     Some(Value::Object(provenance))
+}
+
+/// Validate the compact route-review projection independently of the original review document.
+///
+/// This is used at boundaries that receive a retained mission report or checkpoint rather than
+/// the original route review. It prevents a caller from changing a review identity, adding a
+/// fabricated evidence binding, or upgrading a non-executing review into readiness after the
+/// full review has left the boundary.
+pub fn validate_route_review_provenance(provenance: &Value) -> Result<(), String> {
+    let encoded = serde_json::to_vec(provenance)
+        .map_err(|error| format!("route-review provenance cannot be encoded: {error}"))?;
+    if encoded.len() > 16 * 1024 {
+        return Err("route-review provenance exceeds the 16384-byte safety bound".into());
+    }
+    let object = provenance
+        .as_object()
+        .ok_or_else(|| "route-review provenance must be an object".to_string())?;
+    if object.get("present").and_then(Value::as_bool) != Some(true) {
+        return Err("route-review provenance.present must be true".into());
+    }
+    for field in ["review_id", "route_id", "catalog_digest"] {
+        let value = object
+            .get(field)
+            .and_then(Value::as_str)
+            .ok_or_else(|| format!("route-review provenance.{field} must be a digest"))?;
+        if value.len() != 64
+            || !value.bytes().all(|byte| byte.is_ascii_hexdigit())
+            || value.bytes().any(|byte| byte.is_ascii_uppercase())
+            || ContentHash::parse(value.to_string()).is_err()
+        {
+            return Err(format!(
+                "route-review provenance.{field} must be a lowercase 64-character SHA-256 digest"
+            ));
+        }
+    }
+    if object.get("readiness_claimed").and_then(Value::as_bool) != Some(false) {
+        return Err("route-review provenance.readiness_claimed must be false".into());
+    }
+    if object.get("execution").and_then(Value::as_str) != Some("not_started") {
+        return Err("route-review provenance.execution must be not_started".into());
+    }
+    let evidence_present = object
+        .get("evidence_present")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| "route-review provenance.evidence_present must be a boolean".to_string())?;
+    let posture = object
+        .get("posture")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "route-review provenance.posture must be a string".to_string())?;
+    if evidence_present {
+        if posture != "carried_forward_not_recomputed" {
+            return Err(
+                "route-review provenance with evidence must remain carried_forward_not_recomputed"
+                    .into(),
+            );
+        }
+        for field in ["evidence_digest", "evidence_scope"] {
+            let value = object
+                .get(field)
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("route-review provenance.{field} is required"))?;
+            if field == "evidence_digest"
+                && (value.len() != 64
+                    || !value.bytes().all(|byte| byte.is_ascii_hexdigit())
+                    || value.bytes().any(|byte| byte.is_ascii_uppercase())
+                    || ContentHash::parse(value.to_string()).is_err())
+            {
+                return Err(
+                    "route-review provenance.evidence_digest must be a lowercase 64-character SHA-256 digest"
+                        .into(),
+                );
+            }
+            if field == "evidence_scope" && value.trim().is_empty() {
+                return Err("route-review provenance.evidence_scope must be non-empty".into());
+            }
+        }
+    } else if posture != "not_supplied"
+        || object.get("evidence_digest").is_some()
+        || object.get("evidence_scope").is_some()
+    {
+        return Err(
+            "route-review provenance without evidence must use not_supplied and omit evidence identity"
+                .into(),
+        );
+    }
+    Ok(())
 }
 
 fn valid_tool_name(name: &str) -> bool {

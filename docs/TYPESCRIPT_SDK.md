@@ -846,6 +846,10 @@ Pass the ready result as `routeReview` to `missionFromRoute` to carry it into
 `AgentMissionArgs.route_review`; local preflight and the Rust boundary then reject changed goals,
 steps, findings, or evidence bindings. The returned `route_review_provenance` is compact audit
 structure only and never permission or readiness.
+`DomainWorkflowInstantiateArgs.route_review` carries the same reviewed handoff through a
+capability-group workflow template. The generated mission, queue projection, mission checkpoint,
+evaluator replay, and workflow reconciliation preserve and compare this bounded identity without
+exposing the queued specification or converting provenance into authorization.
 `routeReviewEvidence(reviewId, after, limit)` retrieves bounded retained event evidence for that
 exact id as `RouteReviewEvidenceResponse`; the result preserves cursor gaps and distinguishes an
 empty retained window from a claim that the review was never produced.

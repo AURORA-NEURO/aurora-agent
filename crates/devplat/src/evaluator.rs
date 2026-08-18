@@ -7,6 +7,7 @@
 //! which mission level it fits, and which existing MCP tools are plausible evidence producers;
 //! none of those labels authorizes execution or establishes that a claim is true.
 
+use crate::mission::validate_route_review_provenance;
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, to_value, Value};
@@ -756,6 +757,25 @@ impl MissionEvaluatorCatalogue {
                 reason: "mission.claim_lineage.claims must be an array".into(),
             })?;
         let mut findings = Vec::new();
+        let route_review_provenance = mission
+            .get("plan")
+            .and_then(Value::as_object)
+            .and_then(|plan| plan.get("route_review_provenance"))
+            .cloned();
+        let route_review_status = match route_review_provenance.as_ref() {
+            None => "absent",
+            Some(provenance) => match validate_route_review_provenance(provenance) {
+                Ok(()) => "valid",
+                Err(reason) => {
+                    findings.push(json!({
+                        "severity": "error",
+                        "code": "route_review_provenance_invalid",
+                        "message": reason,
+                    }));
+                    "invalid"
+                }
+            },
+        };
         let mut binding_rows = Vec::new();
         let mut claim_rows = Vec::new();
         let mut state_counts = BTreeMap::<String, usize>::new();
@@ -1024,6 +1044,8 @@ impl MissionEvaluatorCatalogue {
             "mission_digest": mission_digest,
             "mission_status": mission.get("mission_status").cloned().unwrap_or(Value::Null),
             "review_provenance": lineage.get("evaluator_review").cloned().unwrap_or(json!({"present": false})),
+            "route_review_provenance": route_review_provenance,
+            "route_review_status": route_review_status,
             "catalog_digest": self.digest.to_string(),
             "binding_count": returned_bindings,
             "omitted_bindings": omitted_bindings,
@@ -1863,4 +1885,51 @@ mod tests {
             Err(EvaluatorError::InvalidReplayLimit { value: 0 })
         ));
     }
+}
+
+#[test]
+fn replay_validates_retained_route_review_provenance_without_execution() {
+    let provenance = json!({
+        "present": true,
+        "review_id": "a".repeat(64),
+        "route_id": "b".repeat(64),
+        "catalog_digest": "c".repeat(64),
+        "evidence_present": false,
+        "posture": "not_supplied",
+        "readiness_claimed": false,
+        "execution": "not_started"
+    });
+    let catalogue = MissionEvaluatorCatalogue::standard();
+    let request = MissionEvaluatorReplayRequest {
+        mission: json!({
+            "workflow": "agent_mission",
+            "plan": {
+                "mission_id": "mission-route-replay",
+                "route_review_provenance": provenance
+            },
+            "claim_lineage": {"claims": []}
+        }),
+        include_fixtures: false,
+        max_items: DEFAULT_REPLAY_ITEMS,
+    };
+    let replay = catalogue.replay(&request).unwrap();
+    assert_eq!(replay["route_review_status"], "valid");
+    assert_eq!(replay["replay_status"], "ready");
+
+    let mut tampered = request.mission.clone();
+    tampered["plan"]["route_review_provenance"]["readiness_claimed"] = json!(true);
+    let blocked = catalogue
+        .replay(&MissionEvaluatorReplayRequest {
+            mission: tampered,
+            include_fixtures: false,
+            max_items: DEFAULT_REPLAY_ITEMS,
+        })
+        .unwrap();
+    assert_eq!(blocked["route_review_status"], "invalid");
+    assert_eq!(blocked["replay_status"], "blocked");
+    assert!(blocked["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|finding| finding["code"] == "route_review_provenance_invalid"));
 }
