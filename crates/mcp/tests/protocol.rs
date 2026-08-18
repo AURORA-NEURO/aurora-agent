@@ -323,7 +323,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 222);
+    assert_eq!(tools.len(), 223);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -3000,6 +3000,28 @@ fn domain_workflow_bindings_cover_every_available_capability_group() {
                 .unwrap()
                 .to_string()
         );
+        let verification = bioprism_devplat::verify_domain_workflow(
+            &capabilities,
+            &definitions,
+            &json!({
+                "instantiation": report,
+                "replay_request": {
+                    "workflow_id": workflow_id,
+                    "mission_id": mission_id,
+                    "goal": format!("exercise the {workflow_id} contract"),
+                    "steps": [{
+                        "id": "contract-probe",
+                        "tool": tool,
+                        "arguments": {}
+                    }],
+                    "policy": {"execute": false}
+                }
+            }),
+        )
+        .unwrap_or_else(|error| panic!("workflow {workflow_id} failed verification: {error}"));
+        assert_eq!(verification["structural_valid"], true);
+        assert_eq!(verification["replay"]["status"], "matched");
+        assert_eq!(verification["mismatches"], json!([]));
     }
 }
 
@@ -3169,6 +3191,53 @@ fn domain_workflow_instantiation_is_scoped_and_preflighted_without_dispatch() {
         report["preflight_report"]["workflow"],
         json!("agent_mission")
     );
+
+    let verified = call(
+        &mut server,
+        "domain_workflow_verify",
+        json!({
+            "instantiation": report.clone(),
+            "replay_request": {
+                "workflow_id": "documentation_and_knowledge",
+                "mission_id": "workflow-test",
+                "goal": "discover the repository capability surface",
+                "steps": [{"id": "catalog", "tool": "workspace_capabilities", "arguments": {}}]
+            }
+        }),
+    );
+    assert_eq!(verified["workflow"], json!("domain_workflow_verify"));
+    assert_eq!(verified["valid"], json!(true));
+    assert_eq!(verified["verification_status"], json!("verified"));
+    assert_eq!(verified["replay"]["matched"], json!(true));
+    assert_eq!(verified["mission_preflight"]["matched"], json!(true));
+    assert_eq!(verified["dispatch"], json!("not_started"));
+    assert_eq!(verified["execution"], json!("not_started"));
+
+    let shape_only = call(
+        &mut server,
+        "domain_workflow_verify",
+        json!({"instantiation": report.clone()}),
+    );
+    assert_eq!(shape_only["valid"], json!(true));
+    assert_eq!(
+        shape_only["verification_status"],
+        json!("verified_without_replay")
+    );
+
+    let mut tampered = report.clone();
+    tampered["mission"]["goal"] = json!("tampered workflow goal");
+    let refused_tamper = call(
+        &mut server,
+        "domain_workflow_verify",
+        json!({"instantiation": tampered}),
+    );
+    assert_eq!(refused_tamper["valid"], json!(false));
+    assert_eq!(refused_tamper["verification_status"], json!("mismatch"));
+    assert!(refused_tamper["mismatches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["code"] == "mission_plan_digest_mismatch"));
 
     let refused = call(
         &mut server,
@@ -7883,12 +7952,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(222));
-    assert_eq!(result["advertised_tool_count"], json!(222));
+    assert_eq!(result["unique_catalog_tools"], json!(223));
+    assert_eq!(result["advertised_tool_count"], json!(223));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(222));
-    assert_eq!(result["schema_quality"]["valid"], json!(222));
+    assert_eq!(result["schema_quality"]["checked"], json!(223));
+    assert_eq!(result["schema_quality"]["valid"], json!(223));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

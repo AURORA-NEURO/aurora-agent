@@ -25,6 +25,8 @@ import type {
   DomainWorkflowCatalogueResult,
   DomainWorkflowInstantiateArgs,
   DomainWorkflowInstantiateResult,
+  DomainWorkflowVerifyArgs,
+  DomainWorkflowVerifyResult,
   DomainWorkflowScaffoldArgs,
   DomainWorkflowScaffoldResult,
   DomainWorkflowReconcileArgs,
@@ -586,6 +588,16 @@ export class ApiClient {
     if (typeof args.goal !== "string" || args.goal.trim().length === 0) throw new ArgumentError("goal must be a non-empty string");
     if (!Array.isArray(args.steps) || args.steps.length < 1 || args.steps.length > 128) throw new ArgumentError("steps must contain 1..=128 items");
     return this.request<DomainWorkflowInstantiateResult>("POST", "/v1/domain-workflows/instantiate", args, options);
+  }
+
+  /** Verify a retained workflow contract and optionally replay its original request. */
+  async domainWorkflowVerifyQuery(
+    args: DomainWorkflowVerifyArgs,
+    options?: ClientRequestOptions,
+  ): Promise<DomainWorkflowVerifyResult> {
+    if (!isObject(args) || !isObject(args.instantiation)) throw new ArgumentError("workflow verification requires an instantiation object");
+    if (args.replay_request !== undefined && !isObject(args.replay_request)) throw new ArgumentError("workflow verification replay_request must be an object");
+    return this.request<DomainWorkflowVerifyResult>("POST", "/v1/domain-workflows/verify", args, options);
   }
 
   /** Reconcile retained mission evidence against an instantiated workflow without dispatch. */
@@ -1752,6 +1764,16 @@ export class ApiClient {
       throw new ArgumentError("domain workflow instantiate requires 1..=128 step objects");
     }
     return this.callTool<DomainWorkflowInstantiateResult>("domain_workflow_instantiate", args, options);
+  }
+
+  /** Verify a retained workflow contract through the MCP tool boundary. */
+  async domainWorkflowVerify(
+    args: DomainWorkflowVerifyArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainWorkflowVerifyResult>> {
+    if (!isObject(args) || !isObject(args.instantiation)) throw new ArgumentError("workflow verification requires an instantiation object");
+    if (args.replay_request !== undefined && !isObject(args.replay_request)) throw new ArgumentError("workflow verification replay_request must be an object");
+    return this.callTool<DomainWorkflowVerifyResult>("domain_workflow_verify", args, options);
   }
 
   async domainWorkflowReconcile(

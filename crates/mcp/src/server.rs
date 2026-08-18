@@ -1819,6 +1819,7 @@ impl Server {
             "domain_workflow_catalogue" => self.domain_workflow_catalogue(&arguments),
             "domain_workflow_scaffold" => self.domain_workflow_scaffold(&arguments),
             "domain_workflow_instantiate" => self.domain_workflow_instantiate(&arguments),
+            "domain_workflow_verify" => self.domain_workflow_verify(&arguments),
             "domain_workflow_reconcile" => self.domain_workflow_reconcile(&arguments),
             "domain_workflow_reconciliation_import" => {
                 self.domain_workflow_reconciliation_import(&arguments)
@@ -26798,6 +26799,121 @@ impl Server {
         Ok(output)
     }
 
+    /// Verify a retained domain workflow against the live catalogue and authoritative mission
+    /// preflight without dispatching any selected tool.
+    fn domain_workflow_verify(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments).map_err(|error| {
+            format!("cannot encode domain workflow verification input: {error}")
+        })?;
+        if encoded.len() > bioprism_devplat::MAX_DOMAIN_WORKFLOW_BYTES {
+            return Err(format!(
+                "domain workflow verification input exceeds the {}-byte safety bound",
+                bioprism_devplat::MAX_DOMAIN_WORKFLOW_BYTES
+            ));
+        }
+        let mut output = bioprism_devplat::verify_domain_workflow(
+            &workspace_capabilities(),
+            &Value::Array(tool_definitions()),
+            arguments,
+        )
+        .map_err(|error| format!("domain workflow verification refused: {error}"))?;
+        let instantiation = arguments
+            .get("instantiation")
+            .ok_or("domain workflow verification requires instantiation")?;
+        let mission = instantiation
+            .get("mission")
+            .ok_or("domain workflow verification instantiation omitted mission")?;
+        let preflight = match self.preflight_agent_mission(mission) {
+            Ok(value) => value,
+            Err(error) => json!({
+                "ok": false,
+                "workflow": "agent_mission",
+                "preflight": true,
+                "dispatch": "not_started",
+                "schema_valid": false,
+                "error": error,
+                "fail_closed": true,
+            }),
+        };
+        let preflight_ok = preflight.get("ok") == Some(&Value::Bool(true));
+        let expected_plan_digest = instantiation
+            .pointer("/preflight_report/plan/digest")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let observed_plan_digest = preflight
+            .pointer("/plan/digest")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let mut mismatches = output
+            .get("mismatches")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let preflight_status = if !preflight_ok {
+            mismatches.push(json!({
+                "code": "mission_preflight_blocked",
+                "expected": expected_plan_digest,
+                "observed": observed_plan_digest,
+            }));
+            "blocked"
+        } else if expected_plan_digest.is_null() {
+            mismatches.push(json!({
+                "code": "retained_preflight_missing",
+                "message": "the retained instantiation has no authoritative preflight plan digest",
+                "observed": observed_plan_digest,
+            }));
+            "retained_projection_missing"
+        } else if expected_plan_digest != observed_plan_digest {
+            mismatches.push(json!({
+                "code": "mission_plan_digest_mismatch",
+                "expected": expected_plan_digest,
+                "observed": observed_plan_digest,
+            }));
+            "mismatched"
+        } else {
+            "matched"
+        };
+        output["mission_preflight"] = json!({
+            "requested": true,
+            "status": preflight_status,
+            "matched": preflight_status == "matched",
+            "ok": preflight_ok,
+            "expected_plan_digest": expected_plan_digest,
+            "observed_plan_digest": observed_plan_digest,
+            "dispatch": "not_started",
+        });
+        output["preflight_report"] = preflight;
+        output["mismatches"] = Value::Array(mismatches.clone());
+        let valid = mismatches.is_empty();
+        let replay_status = output
+            .pointer("/replay/status")
+            .and_then(Value::as_str)
+            .unwrap_or("not_requested")
+            .to_owned();
+        let replay_requested = output
+            .pointer("/replay/requested")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        output["valid"] = json!(valid);
+        output["verification_status"] = json!(if valid {
+            if replay_requested {
+                "verified"
+            } else {
+                "verified_without_replay"
+            }
+        } else if replay_status == "blocked" {
+            "blocked_by_replay"
+        } else if preflight_status == "blocked" || preflight_status == "retained_projection_missing"
+        {
+            "blocked_by_mission_preflight"
+        } else {
+            "mismatch"
+        });
+        output["execution"] = json!("not_started");
+        output["dispatch"] = json!("not_started");
+        Ok(output)
+    }
+
     /// Reconcile a retained mission report or evidence bundle against an instantiated workflow.
     ///
     /// This is an audit projection only. It checks plan and tool identity, result counters,
@@ -33395,7 +33511,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "documentation_and_knowledge",
             "domains": ["repository navigation", "documentation graph", "task routes", "context bundles"],
             "crates": ["bioprism-docgraph", "bioprism-graph", "bioprism-lens"],
-            "mcp_tools": ["workspace_capabilities", "capability_audit", "capability_dashboard", "capability_discover", "capability_route", "capability_route_review", "capability_route_plan", "capability_route_plan_verify", "domain_workflow_catalogue", "domain_workflow_scaffold", "domain_workflow_instantiate", "domain_workflow_reconcile", "domain_workflow_reconciliation_import", "domain_workflow_reconciliation_query", "domain_workflow_reconciliation_get", "repository_catalog", "repository_bundle", "repository_impact", "lens_catalogue", "lens_leakage_check", "projection_bundle"],
+            "mcp_tools": ["workspace_capabilities", "capability_audit", "capability_dashboard", "capability_discover", "capability_route", "capability_route_review", "capability_route_plan", "capability_route_plan_verify", "domain_workflow_catalogue", "domain_workflow_scaffold", "domain_workflow_instantiate", "domain_workflow_verify", "domain_workflow_reconcile", "domain_workflow_reconciliation_import", "domain_workflow_reconciliation_query", "domain_workflow_reconciliation_get", "repository_catalog", "repository_bundle", "repository_impact", "lens_catalogue", "lens_leakage_check", "projection_bundle"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -36592,6 +36708,18 @@ pub fn tool_definitions() -> Vec<Value> {
                     "instantiation": { "type": "object", "description": "The complete accepted result returned by domain_workflow_instantiate." },
                     "mission_report": { "type": "object", "description": "The exact agent_mission report, when retained. Provide this or evidence_bundle." },
                     "evidence_bundle": { "type": "object", "description": "A verified mission_evidence_bundle_export, including result when full retention is available. Provide this or mission_report." }
+                },
+                "required": ["instantiation"]
+            }
+        }),
+        json!({
+            "name": "domain_workflow_verify",
+            "description": "Verify a retained domain_workflow_instantiate result against its internal workflow binding, the live catalogue, and authoritative no-dispatch mission preflight. Optionally replay the original instantiation request and compare workflow, catalogue, domain-contract, evidence-plan, mission, selection, and execution identities. This is a structural freshness check only: it never dispatches, retries, resumes, grants readiness, or establishes semantic, scientific, clinical, or provider validity.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "instantiation": { "type": "object", "description": "Complete result returned by domain_workflow_instantiate, including its authoritative preflight_report." },
+                    "replay_request": { "type": "object", "description": "Optional original domain_workflow_instantiate request. When supplied, the live catalogue is used to recompute and compare the retained contract." }
                 },
                 "required": ["instantiation"]
             }

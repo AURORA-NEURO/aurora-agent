@@ -181,6 +181,12 @@ Convenience methods currently cover:
   per-tool argument contracts, and return structured ready/blocked preflight without dispatch.
   `DomainWorkflowScaffoldResult.readiness_claimed` is the literal `false`; the scaffold is never
   permission, evidence, clinical guidance, or a domain conclusion;
+- `domainWorkflowVerify` / `domainWorkflowVerifyQuery`: retained-instantiation verification that
+  checks current catalogue and domain-contract identities, workflow binding, mission identity, and
+  authoritative mission preflight. Supplying the original bounded `replay_request` rebuilds the
+  workflow and compares contract, evidence, selection, mission, and execution projections; without
+  it the result is explicitly `verified_without_replay`. Mismatch witnesses are digest-based and
+  the typed result always preserves `dispatch: "not_started"` and `execution: "not_started"`;
 - `domainWorkflowReconcileQuery` / `domainWorkflowReconcile`: correlate a retained mission report
   or evidence bundle with an instantiation and return typed integrity, per-step evidence, trace,
   completion, and omission posture. The result remains review-required and non-executing.

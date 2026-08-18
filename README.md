@@ -905,6 +905,12 @@ The instantiated mission also carries a bounded `workflow_binding` containing th
 catalogue, domain-contract, and evidence-plan digests plus the contract snapshots needed to
 reconstruct that exact scope after dispatch. The binding is validated as structure and provenance;
 it is not an authorization token, readiness claim, or domain conclusion.
+`domain_workflow_verify` is the retained-handoff gate before re-review: it validates the current
+catalogue and contract identities, checks the workflow binding and mission projection, reruns
+authoritative mission preflight, and optionally replays the original bounded instantiation request.
+It reports exact mismatch codes with compact digest witnesses, distinguishes full replay from
+`verified_without_replay`, and remains strictly non-executing with `dispatch` and `execution` both
+`not_started`.
 `domain_workflow_reconcile` is the corresponding post-execution audit: it binds a retained
 `agent_mission` report or verified evidence bundle back to the instantiation, checks plan/result/
 trace consistency, preserves refusals and omissions, and makes structural completion readiness

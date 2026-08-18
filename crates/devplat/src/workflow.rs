@@ -24,6 +24,8 @@ pub const DOMAIN_WORKFLOW_CATALOGUE_SCHEMA_VERSION: &str =
     "bioprism-devplat-domain-workflow-catalogue/0.1";
 pub const DOMAIN_WORKFLOW_INSTANTIATE_SCHEMA_VERSION: &str =
     "bioprism-devplat-domain-workflow-instantiate/0.1";
+pub const DOMAIN_WORKFLOW_VERIFY_SCHEMA_VERSION: &str =
+    "bioprism-devplat-domain-workflow-verify/0.1";
 pub const DOMAIN_WORKFLOW_SCAFFOLD_SCHEMA_VERSION: &str =
     "bioprism-devplat-domain-workflow-scaffold/0.1";
 pub const DOMAIN_WORKFLOW_CONTRACT_SCHEMA_VERSION: &str =
@@ -1101,6 +1103,224 @@ pub fn instantiate_domain_workflow(
     });
     checked_bytes(&output)?;
     Ok(output)
+}
+
+/// Verify a retained domain-workflow instantiation against its internal identities and, when
+/// supplied, the original caller request.
+///
+/// This kernel check is deliberately catalogue-bound but transport-independent. It does not
+/// perform authoritative MCP schema preflight (the MCP server adds that step), and it never
+/// dispatches, retries, resumes, or treats a digest match as semantic or operational validity.
+pub fn verify_domain_workflow(
+    catalogue: &Value,
+    tool_definitions: &Value,
+    request: &Value,
+) -> Result<Value, DomainWorkflowError> {
+    checked_bytes(request)?;
+    let object = request
+        .as_object()
+        .ok_or(DomainWorkflowError::RequestNotObject)?;
+    let instantiation = object
+        .get("instantiation")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            DomainWorkflowError::InvalidRequest(
+                "domain workflow verification requires an instantiation object".into(),
+            )
+        })?;
+    if instantiation.get("workflow").and_then(Value::as_str) != Some("domain_workflow_instantiate")
+    {
+        return Err(DomainWorkflowError::InvalidRequest(
+            "instantiation.workflow must be domain_workflow_instantiate".into(),
+        ));
+    }
+    if instantiation.get("execution").and_then(Value::as_str) != Some("not_started") {
+        return Err(DomainWorkflowError::InvalidRequest(
+            "instantiation.execution must be not_started".into(),
+        ));
+    }
+    let required_text = |field: &str| -> Result<String, DomainWorkflowError> {
+        let value = instantiation
+            .get(field)
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| {
+                DomainWorkflowError::InvalidRequest(format!(
+                    "instantiation.{field} must be a non-empty string"
+                ))
+            })?;
+        ContentHash::parse(value.to_owned()).map_err(|_| {
+            DomainWorkflowError::InvalidRequest(format!(
+                "instantiation.{field} must be a 64-character hexadecimal digest"
+            ))
+        })?;
+        Ok(value.to_owned())
+    };
+    let workflow_id = instantiation
+        .get("workflow_id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            DomainWorkflowError::InvalidRequest(
+                "instantiation.workflow_id must be a non-empty string".into(),
+            )
+        })?
+        .to_owned();
+    let workflow_digest = required_text("workflow_digest")?;
+    let catalog_digest = required_text("catalog_digest")?;
+    let domain_contract_digest = required_text("domain_contract_digest")?;
+    let mission = instantiation
+        .get("mission")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            DomainWorkflowError::InvalidRequest("instantiation.mission must be an object".into())
+        })?;
+    let mission_id = mission
+        .get("mission_id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            DomainWorkflowError::InvalidRequest(
+                "instantiation.mission.mission_id must be a non-empty string".into(),
+            )
+        })?
+        .to_owned();
+    let binding = mission
+        .get("workflow_binding")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            DomainWorkflowError::InvalidRequest(
+                "instantiation.mission.workflow_binding must be an object".into(),
+            )
+        })?;
+    for field in [
+        "workflow_id",
+        "workflow_digest",
+        "catalog_digest",
+        "domain_contract_digest",
+    ] {
+        if instantiation.get(field) != binding.get(field) {
+            return Err(DomainWorkflowError::InvalidRequest(format!(
+                "instantiation identity field {field:?} does not match mission.workflow_binding"
+            )));
+        }
+    }
+    let mission_request: MissionRequest = serde_json::from_value(Value::Object(mission.clone()))
+        .map_err(|error| {
+            DomainWorkflowError::InvalidRequest(format!(
+                "retained workflow mission is invalid: {error}"
+            ))
+        })?;
+    mission_request.validate().map_err(|error| {
+        DomainWorkflowError::InvalidRequest(format!(
+            "retained workflow mission validation failed: {error}"
+        ))
+    })?;
+
+    let replay_requested = object.contains_key("replay_request");
+    let mut replay = json!({
+        "requested": replay_requested,
+        "status": if replay_requested { "pending" } else { "not_requested" },
+        "matched": Value::Null,
+        "mismatches": [],
+    });
+    let mut mismatches = Vec::new();
+    if let Some(replay_request) = object.get("replay_request") {
+        if !replay_request.is_object() {
+            return Err(DomainWorkflowError::InvalidRequest(
+                "replay_request must be an object".into(),
+            ));
+        }
+        let replayed =
+            match instantiate_domain_workflow(catalogue, tool_definitions, replay_request) {
+                Ok(value) => value,
+                Err(error) => {
+                    let message = error.to_string();
+                    mismatches.push(json!({
+                        "code": "workflow_replay_blocked",
+                        "message": message,
+                    }));
+                    replay = json!({
+                        "requested": true,
+                        "status": "blocked",
+                        "matched": false,
+                        "mismatches": mismatches,
+                    });
+                    Value::Null
+                }
+            };
+        if replayed.is_object() {
+            let mut replay_mismatches = Vec::new();
+            for field in [
+                "workflow_id",
+                "workflow_digest",
+                "catalog_digest",
+                "domain_contract",
+                "domain_contract_digest",
+                "execution_contract",
+                "evidence_plan",
+                "mission",
+                "selection",
+                "execution",
+            ] {
+                if instantiation.get(field) != replayed.get(field) {
+                    let expected = instantiation.get(field).cloned().unwrap_or(Value::Null);
+                    let observed = replayed.get(field).cloned().unwrap_or(Value::Null);
+                    let (expected, observed) = if expected.is_object() || expected.is_array() {
+                        (
+                            json!({ "digest": digest(&expected)? }),
+                            json!({ "digest": digest(&observed)? }),
+                        )
+                    } else {
+                        (expected, observed)
+                    };
+                    replay_mismatches.push(json!({
+                        "code": "workflow_replay_field_mismatch",
+                        "field": field,
+                        "expected": expected,
+                        "observed": observed,
+                    }));
+                }
+            }
+            let matched = replay_mismatches.is_empty();
+            replay = json!({
+                "requested": true,
+                "status": if matched { "matched" } else { "mismatched" },
+                "matched": matched,
+                "mismatches": replay_mismatches,
+            });
+            if !matched {
+                mismatches.extend(replay["mismatches"].as_array().cloned().unwrap_or_default());
+            }
+        }
+    }
+    let retained_mission_digest = digest(&Value::Object(mission.clone()))?;
+    Ok(json!({
+        "ok": true,
+        "schema": DOMAIN_WORKFLOW_VERIFY_SCHEMA_VERSION,
+        "workflow": "domain_workflow_verify",
+        "workflow_id": workflow_id,
+        "workflow_digest": workflow_digest,
+        "catalog_digest": catalog_digest,
+        "domain_contract_digest": domain_contract_digest,
+        "mission_id": mission_id,
+        "mission_digest": retained_mission_digest,
+        "structural_valid": mismatches.is_empty(),
+        "replay": replay,
+        "mismatches": mismatches,
+        "dispatch": "not_started",
+        "execution": "not_started",
+        "guarantees": [
+            "retained workflow identities and mission binding are checked before authoritative preflight",
+            "optional replay recomputes the workflow from the caller request against the live catalogue",
+            "verification never dispatches, retries, resumes, or grants readiness"
+        ],
+        "limitations": [
+            "authoritative MCP schema preflight is added by the transport boundary",
+            "without replay_request, current catalogue membership is not proof that the original request is unchanged",
+            "structural identity does not establish semantic sufficiency, provider availability, authorization, or scientific validity"
+        ]
+    }))
 }
 
 /// Build a deterministic, execution-disabled starting mission for one capability-group workflow.

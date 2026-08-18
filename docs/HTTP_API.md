@@ -35,6 +35,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `GET /v1/domain-workflows` | Build one deterministic, digest-bound workflow template for every capability group |
 | `POST /v1/domain-workflows/scaffold` | Select available stage tools, build an execution-disabled workflow, and run bounded preflight |
 | `POST /v1/domain-workflows/instantiate` | Instantiate a group-scoped mission and attach authoritative no-dispatch preflight |
+| `POST /v1/domain-workflows/verify` | Verify a retained instantiation against current catalogue, contract, and mission-preflight state; optionally replay the original request |
 | `POST /v1/domain-workflows/reconcile` | Reconcile retained mission results or evidence bundles against an instantiated workflow contract |
 | `POST /v1/domain-reports` | Validate and index one explicit report projection for a declared capability group and source tool |
 | `GET /v1/domain-reports/coverage?group_id=&domain=&report_class=&bridge_mode=&max_groups=&include_report_digests=` | Count retained structured report projections across the capability catalogue |
@@ -151,6 +152,16 @@ The returned `mission.workflow_binding` is a bounded digest-bound handoff contai
 workflow/catalogue/contract identities, the full domain contract, and the exact evidence plan with
 its own digest. It is structural provenance carried into `agent_mission`; it is never a permission
 or readiness credential.
+
+`POST /v1/domain-workflows/verify` checks a retained `domain_workflow_instantiate` response before
+handoff or re-review. It validates the workflow, catalogue, domain-contract, mission, and binding
+identities; reruns authoritative mission preflight; and, when `replay_request` is supplied, rebuilds
+the instantiation from the original bounded request and compares the resulting contract, evidence,
+selection, mission, and execution projections. A shape-only request is reported as
+`verified_without_replay`; a replay or preflight failure is explicit and blocks verification.
+The response preserves mismatch codes and compact digest witnesses, always returns
+`dispatch: "not_started"` and `execution: "not_started"`, and never executes, retries, or grants
+permission to a domain tool.
 
 `POST /v1/domain-workflows/reconcile` closes the execution handoff without becoming an executor.
 It accepts the exact accepted instantiation result plus either an `agent_mission` report or a

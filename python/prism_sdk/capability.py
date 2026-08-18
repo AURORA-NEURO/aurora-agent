@@ -838,6 +838,35 @@ class DomainWorkflowInstantiateRequest:
 
 
 @dataclass(frozen=True)
+class DomainWorkflowVerifyRequest:
+    """Verify a retained domain-workflow instantiation without dispatch."""
+
+    instantiation: Mapping[str, Any]
+    replay_request: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        instantiation = _route_mapping("workflow verification instantiation", self.instantiation)
+        if instantiation.get("workflow") != "domain_workflow_instantiate":
+            raise ArgumentError("workflow verification instantiation.workflow must be domain_workflow_instantiate")
+        if instantiation.get("execution") not in (None, "not_started"):
+            raise ArgumentError("workflow verification instantiation.execution must be not_started")
+        object.__setattr__(self, "instantiation", instantiation)
+        if self.replay_request is not None:
+            replay_request = _route_mapping("workflow verification replay_request", self.replay_request)
+            for name in ("workflow_id", "mission_id", "goal"):
+                _route_text(f"workflow verification replay_request {name}", replay_request.get(name))
+            if not isinstance(replay_request.get("steps"), Sequence) or isinstance(replay_request.get("steps"), (str, bytes)):
+                raise ArgumentError("workflow verification replay_request steps must be an array")
+            object.__setattr__(self, "replay_request", replay_request)
+
+    def to_arguments(self) -> dict[str, Any]:
+        result: dict[str, Any] = {"instantiation": dict(self.instantiation)}
+        if self.replay_request is not None:
+            result["replay_request"] = dict(self.replay_request)
+        return result
+
+
+@dataclass(frozen=True)
 class DomainWorkflowScaffoldRequest:
     """Caller-owned request for a deterministic, execution-disabled workflow scaffold."""
 
@@ -989,6 +1018,69 @@ class DomainWorkflowInstantiationReport:
         return dict(self.raw)
 
 
+@dataclass(frozen=True)
+class DomainWorkflowVerifyReport:
+    """Typed structural, replay, and authoritative-preflight verification evidence."""
+
+    raw: dict[str, Any]
+    workflow_id: str
+    workflow_digest: str
+    catalog_digest: str
+    domain_contract_digest: str
+    mission_id: str
+    mission_digest: str
+    structural_valid: bool
+    valid: bool
+    verification_status: str
+    replay: Mapping[str, Any]
+    mission_preflight: Mapping[str, Any]
+    mismatches: tuple[Mapping[str, Any], ...]
+    preflight_report: Mapping[str, Any]
+    dispatch: str
+    execution: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainWorkflowVerifyReport":
+        raw = _tool_payload(value, "domain_workflow_verify")
+        for field in ("workflow_digest", "catalog_digest", "domain_contract_digest", "mission_digest"):
+            _digest(f"workflow verification {field}", raw.get(field))
+        structural_valid = raw.get("structural_valid")
+        valid = raw.get("valid")
+        if not isinstance(structural_valid, bool) or not isinstance(valid, bool):
+            raise ArgumentError("workflow verification validity fields must be booleans")
+        status = _route_text("workflow verification status", raw.get("verification_status"))
+        if status not in {"verified", "verified_without_replay", "mismatch", "blocked_by_replay", "blocked_by_mission_preflight"}:
+            raise ArgumentError("unknown workflow verification status")
+        mismatches = raw.get("mismatches", [])
+        if not isinstance(mismatches, Sequence) or isinstance(mismatches, (str, bytes)):
+            raise ArgumentError("workflow verification mismatches must be an array")
+        return cls(
+            raw=raw,
+            workflow_id=_route_text("workflow verification workflow_id", raw.get("workflow_id")),
+            workflow_digest=_digest("workflow verification workflow digest", raw.get("workflow_digest")),
+            catalog_digest=_digest("workflow verification catalog digest", raw.get("catalog_digest")),
+            domain_contract_digest=_digest("workflow verification domain contract digest", raw.get("domain_contract_digest")),
+            mission_id=_route_text("workflow verification mission_id", raw.get("mission_id")),
+            mission_digest=_digest("workflow verification mission digest", raw.get("mission_digest")),
+            structural_valid=structural_valid,
+            valid=valid,
+            verification_status=status,
+            replay=_route_mapping("workflow verification replay", raw.get("replay", {})),
+            mission_preflight=_route_mapping("workflow verification mission_preflight", raw.get("mission_preflight", {})),
+            mismatches=tuple(_route_mapping("workflow verification mismatch", item) for item in mismatches),
+            preflight_report=_route_mapping("workflow verification preflight report", raw.get("preflight_report", {})),
+            dispatch=_route_text("workflow verification dispatch", raw.get("dispatch")),
+            execution=_route_text("workflow verification execution", raw.get("execution")),
+        )
+
+    @property
+    def verified(self) -> bool:
+        return self.valid and self.verification_status in {"verified", "verified_without_replay"}
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
 def domain_workflow_catalogue_report(value: Mapping[str, Any]) -> DomainWorkflowCatalogueReport:
     """Parse a direct REST/MCP workflow catalogue result."""
 
@@ -999,6 +1091,12 @@ def domain_workflow_instantiation_report(value: Mapping[str, Any]) -> DomainWork
     """Parse a direct REST/MCP workflow instantiation result."""
 
     return DomainWorkflowInstantiationReport.from_wire(value)
+
+
+def domain_workflow_verify_report(value: Mapping[str, Any]) -> DomainWorkflowVerifyReport:
+    """Parse a direct REST/MCP domain-workflow verification result."""
+
+    return DomainWorkflowVerifyReport.from_wire(value)
 
 
 @dataclass(frozen=True)
@@ -2854,6 +2952,8 @@ def mission_evaluator_discover_report(value: Mapping[str, Any]) -> MissionEvalua
 
 __all__ = [
     "DomainWorkflowInstantiateRequest",
+    "DomainWorkflowVerifyRequest",
+    "DomainWorkflowVerifyReport",
     "DomainWorkflowScaffoldRequest",
     "DomainWorkflowReconcileRequest",
     "DomainWorkflowCatalogueReport",
@@ -2914,6 +3014,7 @@ __all__ = [
     "capability_route_report",
     "domain_workflow_catalogue_report",
     "domain_workflow_instantiation_report",
+    "domain_workflow_verify_report",
     "domain_workflow_scaffold_report",
     "domain_workflow_reconciliation_report",
     "capability_route_review_report",

@@ -136,6 +136,8 @@ from .capability import (
     DomainWorkflowCatalogueReport,
     DomainWorkflowInstantiateRequest,
     DomainWorkflowInstantiationReport,
+    DomainWorkflowVerifyRequest,
+    DomainWorkflowVerifyReport,
     DomainWorkflowScaffoldRequest,
     DomainWorkflowScaffoldReport,
     DomainWorkflowReconcileRequest,
@@ -170,6 +172,7 @@ from .capability import (
     capability_route_plan_verify_report,
     domain_workflow_catalogue_report,
     domain_workflow_instantiation_report,
+    domain_workflow_verify_report,
     domain_workflow_scaffold_report,
     domain_workflow_reconciliation_report,
     mission_evaluator_discover_report,
@@ -2067,6 +2070,25 @@ class Workspace:
         request: DomainWorkflowInstantiateRequest | Mapping[str, Any],
     ) -> DomainWorkflowInstantiationReport:
         return domain_workflow_instantiation_report(self.domain_workflow_instantiate(request))
+
+    def domain_workflow_verify(
+        self,
+        request: DomainWorkflowVerifyRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Verify a retained workflow contract without dispatch."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowVerifyRequest)
+            else DomainWorkflowVerifyRequest(**dict(request))
+        )
+        return self.tool("domain_workflow_verify", normalized.to_arguments())
+
+    def domain_workflow_verify_report(
+        self,
+        request: DomainWorkflowVerifyRequest | Mapping[str, Any],
+    ) -> DomainWorkflowVerifyReport:
+        return domain_workflow_verify_report(self.domain_workflow_verify(request))
 
     def domain_workflow_reconcile(
         self,
@@ -6019,6 +6041,25 @@ class AsyncWorkspace:
         return domain_workflow_instantiation_report(
             await self.domain_workflow_instantiate(request)
         )
+
+    async def domain_workflow_verify(
+        self,
+        request: DomainWorkflowVerifyRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async verification of a retained workflow contract without dispatch."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowVerifyRequest)
+            else DomainWorkflowVerifyRequest(**dict(request))
+        )
+        return await self.tool("domain_workflow_verify", normalized.to_arguments())
+
+    async def domain_workflow_verify_report(
+        self,
+        request: DomainWorkflowVerifyRequest | Mapping[str, Any],
+    ) -> DomainWorkflowVerifyReport:
+        return domain_workflow_verify_report(await self.domain_workflow_verify(request))
 
     async def domain_workflow_reconcile(
         self,

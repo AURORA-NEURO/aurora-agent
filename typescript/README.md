@@ -38,6 +38,7 @@ if (result.mcp.result?.isError) {
   `telemetryProject`, `developerDeliveryAudit`, `developerWorkbench`, `agentMission`,
   `capabilityDiscover`, `capabilityAudit`, `capabilityRoute`, `adapterPlan`,
   `capabilityRoutePlan`, `capabilityRoutePlanVerify`, and `capabilityRoutePlanVerifyRest`,
+  `domainWorkflowVerify` and `domainWorkflowVerifyQuery`,
   `runtimeExecutionSimulate`, `packCatalogue`, `packHealthAssess`, `securityRedteamSimulate`, and
   `worldGenerate`, `factoryLifecycleSimulate`, `storageLifecycleSimulate`, and
   `registryLifecycleSimulate`, and `cacheInvalidationSimulate`

@@ -5146,6 +5146,11 @@ export interface DomainWorkflowInstantiateArgs extends JsonObject {
   route_review?: JsonObject;
 }
 
+export interface DomainWorkflowVerifyArgs extends JsonObject {
+  instantiation: JsonObject;
+  replay_request?: DomainWorkflowInstantiateArgs;
+}
+
 export interface DomainWorkflowScaffoldArgs extends JsonObject {
   workflow_id: string;
   mission_id: string;
@@ -5252,6 +5257,29 @@ export interface DomainWorkflowInstantiateResult extends JsonObject {
   preflight_report?: JsonObject;
   execution: "not_started";
   execution_contract?: DomainWorkflowExecutionContract;
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface DomainWorkflowVerifyResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "domain_workflow_verify";
+  workflow_id: string;
+  workflow_digest: string;
+  catalog_digest: string;
+  domain_contract_digest: string;
+  mission_id: string;
+  mission_digest: string;
+  structural_valid: boolean;
+  valid: boolean;
+  verification_status: "verified" | "verified_without_replay" | "mismatch" | "blocked_by_replay" | "blocked_by_mission_preflight";
+  replay: JsonObject;
+  mission_preflight: JsonObject;
+  mismatches: JsonObject[];
+  preflight_report: JsonObject;
+  dispatch: "not_started";
+  execution: "not_started";
   guarantees: string[];
   limitations: string[];
 }

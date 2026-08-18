@@ -561,11 +561,11 @@ pub use workbench::{
 };
 pub use workflow::{
     build_domain_workflow_catalogue, instantiate_domain_workflow, scaffold_domain_workflow,
-    DomainWorkflowError, DOMAIN_WORKFLOW_CATALOGUE_SCHEMA_VERSION,
+    verify_domain_workflow, DomainWorkflowError, DOMAIN_WORKFLOW_CATALOGUE_SCHEMA_VERSION,
     DOMAIN_WORKFLOW_CONTRACT_SCHEMA_VERSION, DOMAIN_WORKFLOW_INSTANTIATE_SCHEMA_VERSION,
     DOMAIN_WORKFLOW_SCAFFOLD_SCHEMA_VERSION, DOMAIN_WORKFLOW_SCHEMA_VERSION,
-    MAX_DOMAIN_WORKFLOW_BYTES, MAX_DOMAIN_WORKFLOW_GROUPS, MAX_DOMAIN_WORKFLOW_STEPS,
-    MAX_DOMAIN_WORKFLOW_TOOLS,
+    DOMAIN_WORKFLOW_VERIFY_SCHEMA_VERSION, MAX_DOMAIN_WORKFLOW_BYTES, MAX_DOMAIN_WORKFLOW_GROUPS,
+    MAX_DOMAIN_WORKFLOW_STEPS, MAX_DOMAIN_WORKFLOW_TOOLS,
 };
 pub use workflow_execution_evidence::{
     build_workflow_execution_evidence, validate_workflow_execution_evidence,

@@ -218,6 +218,11 @@ Python SDK backlog: heavyweight biological format adapters and the remaining nin
 ergonomics remain foreign or unimplemented rather than being inferred from the transport or
 authoring clients; bounded text VCF and benchmark distribution utilities are now concrete first
 steps above that boundary.
+The domain-workflow handoff now also has a retained verification boundary: callers can validate
+catalogue/contract/binding identity, rerun mission preflight, and optionally replay the original
+instantiation request before re-review. The verifier is intentionally structural and non-executing;
+it does not remove the remaining domain adapters, external evidence connectors, or durable execution
+orchestration work below.
 The Python layer now also covers the evaluator/oracle/mutation and environment/pack authoring
 contracts: it builds versioned oracle manifests and judgements, preserves tier demotion and
 admissibility, validates distributions and findings, and exposes the oracle mesh, reference-panel,

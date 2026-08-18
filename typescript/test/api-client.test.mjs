@@ -4561,6 +4561,29 @@ test("client exposes scoped domain workflow catalogue and instantiation over RES
     goal: "discover capabilities",
     steps: [{ id: "catalog", tool: "workspace_capabilities", arguments: {} }],
   };
+  const verifyArgs = { instantiation: instantiated, replay_request: args };
+  const verified = {
+    ok: true,
+    schema: "bioprism-devplat-domain-workflow-verify/0.1",
+    workflow: "domain_workflow_verify",
+    workflow_id: "documentation_and_knowledge",
+    workflow_digest: "d".repeat(64),
+    catalog_digest: "c".repeat(64),
+    domain_contract_digest: "k".repeat(64),
+    mission_id: "ts-workflow",
+    mission_digest: "m".repeat(64),
+    structural_valid: true,
+    valid: true,
+    verification_status: "verified",
+    replay: { requested: true, status: "matched", matched: true },
+    mission_preflight: { requested: true, status: "matched", matched: true, ok: true },
+    mismatches: [],
+    preflight_report: { workflow: "agent_mission", dispatch: "not_started" },
+    dispatch: "not_started",
+    execution: "not_started",
+    guarantees: [],
+    limitations: [],
+  };
   const scaffoldArgs = {
     workflow_id: "documentation_and_knowledge",
     mission_id: "ts-scaffold",
@@ -4599,6 +4622,10 @@ test("client exposes scoped domain workflow catalogue and instantiation over RES
         assert.deepEqual(JSON.parse(init.body), scaffoldArgs);
         return jsonResponse(scaffolded);
       }
+      if (url.pathname === "/v1/domain-workflows/verify") {
+        assert.deepEqual(JSON.parse(init.body), verifyArgs);
+        return jsonResponse(verified);
+      }
       assert.equal(url.pathname, "/v1/domain-workflows/instantiate");
       assert.deepEqual(JSON.parse(init.body), args);
       return jsonResponse(instantiated);
@@ -4607,6 +4634,7 @@ test("client exposes scoped domain workflow catalogue and instantiation over RES
   assert.equal((await rest.domainWorkflowCatalogueQuery()).workflow_count, 29);
   assert.equal((await rest.domainWorkflowScaffoldQuery(scaffoldArgs)).readiness_claimed, false);
   assert.equal((await rest.domainWorkflowInstantiateQuery(args)).preflight_report.workflow, "agent_mission");
+  assert.equal((await rest.domainWorkflowVerifyQuery(verifyArgs)).verification_status, "verified");
 
   const reconciliationArgs = {
     instantiation: instantiated,
@@ -4656,6 +4684,10 @@ test("client exposes scoped domain workflow catalogue and instantiation over RES
         assert.deepEqual(JSON.parse(init.body), scaffoldArgs);
         return jsonResponse({ ok: true, tool: name, mcp: { result: { structuredContent: scaffolded } } });
       }
+      if (name === "domain_workflow_verify") {
+        assert.deepEqual(JSON.parse(init.body), verifyArgs);
+        return jsonResponse({ ok: true, tool: name, mcp: { result: { structuredContent: verified } } });
+      }
       assert.deepEqual(JSON.parse(init.body), args);
       return jsonResponse({ ok: true, tool: name, mcp: { result: { structuredContent: instantiated } } });
     },
@@ -4663,6 +4695,7 @@ test("client exposes scoped domain workflow catalogue and instantiation over RES
   assert.equal((await mcp.domainWorkflowCatalogue()).mcp.result.structuredContent.workflow_count, 29);
   assert.equal((await mcp.domainWorkflowScaffold(scaffoldArgs)).mcp.result.structuredContent.readiness_claimed, false);
   assert.equal((await mcp.domainWorkflowInstantiate(args)).mcp.result.structuredContent.execution, "not_started");
+  assert.equal((await mcp.domainWorkflowVerify(verifyArgs)).mcp.result.structuredContent.verification_status, "verified");
   const mcpReconcile = new ApiClient({
     baseUrl: "http://127.0.0.1:18788",
     fetch: async (input, init) => {

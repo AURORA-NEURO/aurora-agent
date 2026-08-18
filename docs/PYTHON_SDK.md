@@ -780,6 +780,13 @@ invent defaults:
   visible on typed mission status/inventory and queue projections; evaluator replay exposes
   `route_review_status`, and workflow reconciliation reports whether retained provenance still
   matches the instantiation. These are integrity/provenance joins, not execution authorization.
+- `DomainWorkflowVerifyRequest` and `DomainWorkflowVerifyReport` verify a retained instantiation
+  against the current catalogue, domain contract, workflow binding, mission identity, and
+  authoritative mission preflight. Supplying `replay_request` reconstructs the original bounded
+  instantiation and compares its contract, evidence plan, selection, mission, and execution
+  projections; omitting it yields the explicit `verified_without_replay` posture. Sync/async
+  Workspace and HTTP clients expose raw and typed MCP/REST variants. Verification preserves compact
+  mismatch witnesses and always remains `dispatch: "not_started"` / `execution: "not_started"`.
 - `DomainWorkflowScaffoldRequest` and `DomainWorkflowScaffoldReport` provide the deterministic
   planning shortcut for all capability groups. `ApiClient`/`AsyncApiClient` expose REST and
   `*_tool` variants, while `Workspace`/`AsyncWorkspace` expose the MCP bridge. The typed request

@@ -63,6 +63,8 @@ from prism_sdk import (
     DomainWorkflowCatalogueReport,
     DomainWorkflowInstantiateRequest,
     DomainWorkflowInstantiationReport,
+    DomainWorkflowVerifyRequest,
+    DomainWorkflowVerifyReport,
     DomainWorkflowScaffoldRequest,
     DomainWorkflowScaffoldReport,
     DomainWorkflowReconcileRequest,
@@ -1772,7 +1774,7 @@ class AnalyticsModelTests(unittest.TestCase):
             "mission": {"mission_id": "workflow-python"},
             "selection": {"selected_tools": ["workspace_capabilities"]},
             "domain_contract": {"posture": "advisory_review_gated"},
-            "domain_contract_digest": "k" * 64,
+            "domain_contract_digest": "d" * 64,
             "execution_contract": {
                 "provider_boundary": {"container": "unavailable"},
                 "readiness_claimed": False,
@@ -1787,6 +1789,34 @@ class AnalyticsModelTests(unittest.TestCase):
         self.assertEqual(instantiation.evidence_plan["steps"][0]["step_id"], "catalog")
         self.assertEqual(instantiation.preflight_report["dispatch"], "not_started")
         self.assertEqual(instantiation.execution_contract["readiness_claimed"], False)
+
+        verify_request = DomainWorkflowVerifyRequest(
+            instantiation=instantiation.to_dict(),
+            replay_request=request.to_arguments(),
+        )
+        self.assertEqual(verify_request.to_arguments()["replay_request"]["workflow_id"], "documentation_and_knowledge")
+        verification = DomainWorkflowVerifyReport.from_wire({
+            "ok": True,
+            "schema": "bioprism-devplat-domain-workflow-verify/0.1",
+            "workflow": "domain_workflow_verify",
+            "workflow_id": "documentation_and_knowledge",
+            "workflow_digest": "d" * 64,
+            "catalog_digest": "c" * 64,
+            "domain_contract_digest": "d" * 64,
+            "mission_id": "workflow-python",
+            "mission_digest": "e" * 64,
+            "structural_valid": True,
+            "valid": True,
+            "verification_status": "verified",
+            "replay": {"requested": True, "status": "matched", "matched": True},
+            "mission_preflight": {"requested": True, "status": "matched", "matched": True, "ok": True},
+            "mismatches": [],
+            "preflight_report": {"workflow": "agent_mission", "dispatch": "not_started"},
+            "dispatch": "not_started",
+            "execution": "not_started",
+        })
+        self.assertTrue(verification.verified)
+        self.assertEqual(verification.replay["status"], "matched")
 
         scaffold_request = DomainWorkflowScaffoldRequest(
             "documentation_and_knowledge",
