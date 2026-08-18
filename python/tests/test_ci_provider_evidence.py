@@ -78,18 +78,22 @@ def registry_payload(name: str) -> dict:
             "provider": "github_actions", "run_id": "run-42", "plan_digest": digest,
             "evidence_digest": digest, "artifact_record_digest": digest,
             "log_record_digest": digest, "attestation_record_digest": digest,
+            "local_byte_hash_artifact_count": 1, "local_byte_hash_log_count": 0,
+            "attestation_subject_digest_binding_count": 1,
             "structurally_valid": True, "conformance_ready": True,
             "created": True, "already_present": False, "registry_generation": 1,
             "registry_size": 1,
         }
     if name == "ci_provider_evidence_query":
         return {
-            "ok": True, "workflow": name, "rows": [{"provider_evidence_digest": digest, "provider": "github_actions"}],
+            "ok": True, "workflow": name, "rows": [{"provider_evidence_digest": digest, "provider": "github_actions", "local_byte_hash_artifact_count": 1, "local_byte_hash_log_count": 0, "attestation_subject_digest_binding_count": 1}],
             "next_after": None, "has_more": False, "registry_generation": 1, "registry_size": 1,
         }
     return {
         "ok": True, "workflow": name, "provider_evidence_digest": digest,
         "provider": "github_actions", "run_id": "run-42", "audit": {"run_id": "run-42"},
+        "local_byte_hash_artifact_count": 1, "local_byte_hash_log_count": 0,
+        "attestation_subject_digest_binding_count": 1,
         "registry_generation": 1, "registry_size": 1,
     }
 class _SyncTool:
@@ -154,17 +158,24 @@ class CiProviderEvidenceTests(unittest.TestCase):
     def test_registry_request_reports_and_all_transport_planes(self) -> None:
         args = request()
         query = CiProviderEvidenceRegistryQueryRequest(
-            provider="github_actions", conformance_ready=True, max_items=12, include_records=True
+            provider="github_actions", conformance_ready=True, min_local_byte_hash_artifacts=1,
+            min_attestation_subject_digest_bindings=1, max_items=12, include_records=True
         )
         self.assertEqual(query.to_mcp_arguments()["max_items"], 12)
+        self.assertEqual(query.to_mcp_arguments()["min_local_byte_hash_artifacts"], 1)
         self.assertEqual(query.to_http_query()["conformance_ready"], "true")
+        with self.assertRaises(ArgumentError):
+            CiProviderEvidenceRegistryQueryRequest(min_attestation_subject_digest_bindings=129)
         self.assertIsInstance(ci_provider_evidence_registry_import_report(registry_payload("ci_provider_evidence_import")), object)
         self.assertEqual(ci_provider_evidence_registry_query_report(registry_payload("ci_provider_evidence_query")).rows[0]["provider"], "github_actions")
-        self.assertEqual(ci_provider_evidence_registry_get_report(registry_payload("ci_provider_evidence_get")).run_id, "run-42")
+        get_report = ci_provider_evidence_registry_get_report(registry_payload("ci_provider_evidence_get"))
+        self.assertEqual(get_report.run_id, "run-42")
+        self.assertEqual(get_report.attestation_subject_digest_binding_count, 1)
 
         workspace = Workspace(_SyncTool())
         self.assertTrue(workspace.ci_provider_evidence_import_report(args).created)
         self.assertEqual(workspace.ci_provider_evidence_query_report(query).rows[0]["provider"], "github_actions")
+        self.assertEqual(workspace.ci_provider_evidence_import_report(args).attestation_subject_digest_binding_count, 1)
         self.assertEqual(workspace.ci_provider_evidence_get_report("c" * 64).run_id, "run-42")
 
         with patch.object(ApiClient, "call_tool", side_effect=lambda name, arguments: registry_payload(name)) as call, \

@@ -128,6 +128,9 @@ impl CiProviderEvidenceRegistry {
             "payload_digest": audit.payload_digest,
             "plan_digest": audit.plan_digest,
             "evidence_digest": audit.evidence_digest,
+            "local_byte_hash_artifact_count": audit.local_byte_hash_artifact_count,
+            "local_byte_hash_log_count": audit.local_byte_hash_log_count,
+            "attestation_subject_digest_binding_count": audit.attestation_subject_digest_binding_count,
             "structurally_valid": audit.structurally_valid,
             "conformance_ready": audit.conformance_ready,
             "audit": audit,
@@ -153,6 +156,9 @@ impl CiProviderEvidenceRegistry {
         plan_digest: Option<&str>,
         structurally_valid: Option<bool>,
         conformance_ready: Option<bool>,
+        min_local_byte_hash_artifacts: Option<usize>,
+        min_local_byte_hash_logs: Option<usize>,
+        min_attestation_subject_digest_bindings: Option<usize>,
         after: Option<&str>,
         max_items: usize,
         include_records: bool,
@@ -183,6 +189,12 @@ impl CiProviderEvidenceRegistry {
                 || plan_digest.is_some_and(|value| audit.plan_digest != value)
                 || structurally_valid.is_some_and(|value| audit.structurally_valid != value)
                 || conformance_ready.is_some_and(|value| audit.conformance_ready != value)
+                || min_local_byte_hash_artifacts
+                    .is_some_and(|value| audit.local_byte_hash_artifact_count < value)
+                || min_local_byte_hash_logs
+                    .is_some_and(|value| audit.local_byte_hash_log_count < value)
+                || min_attestation_subject_digest_bindings
+                    .is_some_and(|value| audit.attestation_subject_digest_binding_count < value)
             {
                 continue;
             }
@@ -219,6 +231,9 @@ impl CiProviderEvidenceRegistry {
                 "plan_digest": plan_digest,
                 "structurally_valid": structurally_valid,
                 "conformance_ready": conformance_ready,
+                "min_local_byte_hash_artifacts": min_local_byte_hash_artifacts,
+                "min_local_byte_hash_logs": min_local_byte_hash_logs,
+                "min_attestation_subject_digest_bindings": min_attestation_subject_digest_bindings,
                 "after": after,
                 "max_items": max_items,
                 "include_records": include_records
@@ -232,6 +247,7 @@ impl CiProviderEvidenceRegistry {
             "guarantees": [
                 "rows are ordered by canonical provider evidence digest",
                 "failed, unknown, and incomplete runs remain visible rather than being discarded",
+                "minimum digest-binding filters are evaluated against retained audit counts rather than inferred from provider labels",
                 "query never contacts a provider or executes a check"
             ],
             "limitations": [
@@ -412,6 +428,9 @@ fn import_response(
         "linked_artifact_count": audit.linked_artifact_count,
         "linked_log_count": audit.linked_log_count,
         "attestation_subject_count": audit.attestation_subject_count,
+        "local_byte_hash_artifact_count": audit.local_byte_hash_artifact_count,
+        "local_byte_hash_log_count": audit.local_byte_hash_log_count,
+        "attestation_subject_digest_binding_count": audit.attestation_subject_digest_binding_count,
         "artifact_record_digest": audit.artifact_record_digest,
         "log_record_digest": audit.log_record_digest,
         "attestation_record_digest": audit.attestation_record_digest,
@@ -459,6 +478,9 @@ fn index_row(
         "linked_artifact_count": audit.linked_artifact_count,
         "linked_log_count": audit.linked_log_count,
         "attestation_subject_count": audit.attestation_subject_count,
+        "local_byte_hash_artifact_count": audit.local_byte_hash_artifact_count,
+        "local_byte_hash_log_count": audit.local_byte_hash_log_count,
+        "attestation_subject_digest_binding_count": audit.attestation_subject_digest_binding_count,
         "finding_count": audit.findings.len(),
         "blocking_finding_count": blocking_findings,
         "artifact_record_digest": audit.artifact_record_digest,
@@ -577,13 +599,77 @@ mod tests {
                 Some(true),
                 Some(true),
                 None,
+                None,
+                None,
+                None,
                 10,
                 false,
             )
             .unwrap();
         assert_eq!(query["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(query["rows"][0]["local_byte_hash_artifact_count"], 0);
         let digest = first["provider_evidence_digest"].as_str().unwrap();
         assert_eq!(registry.get(digest).unwrap()["provider"], "github_actions");
+    }
+
+    #[test]
+    fn query_can_require_retained_digest_binding_posture() {
+        let mut registry = CiProviderEvidenceRegistry::new();
+        let mut value = request(45, "success");
+        value["artifacts"] = serde_json::json!([{
+            "id": "artifact-45",
+            "kind": "package",
+            "digest": "a".repeat(64),
+            "run_id": "45",
+            "provider": "github_actions",
+            "uri": "https://example.test/artifact-45",
+            "digest_scope": "local_response_bytes"
+        }]);
+        value["attestations"] = serde_json::json!([{
+            "id": "attestation-45",
+            "subject": "artifact-45",
+            "issuer": "caller",
+            "statement_digest": "b".repeat(64),
+            "method": "declared_provider_statement",
+            "subject_digest": "a".repeat(64)
+        }]);
+        let imported = registry.import(&value).unwrap();
+        assert_eq!(imported["local_byte_hash_artifact_count"], 1);
+        assert_eq!(imported["attestation_subject_digest_binding_count"], 1);
+
+        let matching = registry
+            .query(
+                Some("github_actions"),
+                Some("45"),
+                None,
+                Some(true),
+                Some(true),
+                Some(1),
+                None,
+                Some(1),
+                None,
+                10,
+                false,
+            )
+            .unwrap();
+        assert_eq!(matching["rows"].as_array().unwrap().len(), 1);
+
+        let absent = registry
+            .query(
+                Some("github_actions"),
+                Some("45"),
+                None,
+                Some(true),
+                Some(true),
+                Some(2),
+                None,
+                None,
+                None,
+                10,
+                false,
+            )
+            .unwrap();
+        assert!(absent["rows"].as_array().unwrap().is_empty());
     }
 
     #[test]

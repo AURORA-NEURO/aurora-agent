@@ -324,7 +324,9 @@ re-audits the complete request, deterministic query/get preserves provider/run/p
 artifact/log/attestation record-family digests, and failed/unknown runs remain explicit retained
 evidence. MCP, REST, CLI, Python, and TypeScript expose the same contract, while
 `--ci-provider-evidence-state` provides atomic restart recovery with snapshot and per-record digest
-checks. This closes local evidence retention and operator lookup, but leaves provider contact,
+checks. Import summaries and compact queries also expose local-byte hash and attestation
+subject-digest binding counts, with minimum-threshold filters for operator posture searches. This
+closes local evidence retention and operator lookup, but leaves provider contact,
 remote byte retrieval, signature verification, hosted execution, and release authority outside the
 repository boundary.
 The bounded HTTP event checkpoint now also restores subscription metadata and signed pending

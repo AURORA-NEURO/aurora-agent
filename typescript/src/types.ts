@@ -4639,6 +4639,9 @@ export interface CiProviderEvidenceRegistryQueryArgs extends JsonObject {
   plan_digest?: string;
   structurally_valid?: boolean;
   conformance_ready?: boolean;
+  min_local_byte_hash_artifacts?: number;
+  min_local_byte_hash_logs?: number;
+  min_attestation_subject_digest_bindings?: number;
   after?: string;
   max_items?: number;
   include_records?: boolean;
@@ -4657,6 +4660,9 @@ export interface CiProviderEvidenceRegistryImportResult extends JsonObject {
   attestation_record_digest: string;
   structurally_valid: boolean;
   conformance_ready: boolean;
+  local_byte_hash_artifact_count: number;
+  local_byte_hash_log_count: number;
+  attestation_subject_digest_binding_count: number;
   artifact_count: number;
   log_count: number;
   attestation_count: number;
@@ -4684,6 +4690,9 @@ export interface CiProviderEvidenceRegistryQueryRow extends JsonObject {
   linked_artifact_count: number;
   linked_log_count: number;
   attestation_subject_count: number;
+  local_byte_hash_artifact_count: number;
+  local_byte_hash_log_count: number;
+  attestation_subject_digest_binding_count: number;
   artifact_record_digest: string;
   log_record_digest: string;
   attestation_record_digest: string;
@@ -4712,6 +4721,9 @@ export interface CiProviderEvidenceRegistryGetResult extends JsonObject {
   payload_digest: string;
   plan_digest: string;
   evidence_digest: string;
+  local_byte_hash_artifact_count: number;
+  local_byte_hash_log_count: number;
+  attestation_subject_digest_binding_count: number;
   structurally_valid: boolean;
   conformance_ready: boolean;
   audit: CiProviderEvidenceAuditResult;

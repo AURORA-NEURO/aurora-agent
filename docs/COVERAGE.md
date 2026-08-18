@@ -103,9 +103,10 @@ the artifact, log, and attestation record-family digests, so operators can join 
 lineage while keeping metadata, caller-declared, and locally byte-hashed scopes distinct from a
 verified signature or provider identity.
 `--ci-provider-evidence-state` enables atomic restart-safe persistence, capped at 512 records and
-32 MiB with 256-item queries. Snapshot and per-record digests are checked on restore; the registry
-is an audit index and never contacts a provider, executes CI, verifies remote content, or approves
-a release.
+32 MiB with 256-item queries. Compact rows retain local-byte hash and attestation subject-digest
+binding counts, and query thresholds can require that posture without loading full audits. Snapshot
+and per-record digests are checked on restore; the registry is an audit index and never contacts a
+provider, executes CI, verifies remote content, or approves a release.
 `developer_delivery_audit` can now carry that audit as the independent `ci_provider_evidence` target,
 while `developer_delivery_receipt` and its verifier preserve and recompute a digest over the complete
 provider-evidence projection. This makes the attached-evidence handoff joinable and tamper-diagnosable

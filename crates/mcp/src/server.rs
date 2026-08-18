@@ -30952,6 +30952,27 @@ impl Server {
                 })
                 .transpose()
         };
+        let optional_usize = |name: &str| -> Result<Option<usize>, String> {
+            arguments
+                .get(name)
+                .map(|value| {
+                    value
+                        .as_u64()
+                        .ok_or_else(|| format!("{name} must be an integer"))
+                        .and_then(|number| {
+                            usize::try_from(number)
+                                .map_err(|_| format!("{name} is too large"))
+                                .and_then(|value| {
+                                    if value <= 128 {
+                                        Ok(value)
+                                    } else {
+                                        Err(format!("{name} must be between 0 and 128"))
+                                    }
+                                })
+                        })
+                })
+                .transpose()
+        };
         let structurally_valid = arguments
             .get("structurally_valid")
             .map(|value| {
@@ -30964,6 +30985,10 @@ impl Server {
             .get("conformance_ready")
             .map(|value| value.as_bool().ok_or("conformance_ready must be a boolean"))
             .transpose()?;
+        let min_local_byte_hash_artifacts = optional_usize("min_local_byte_hash_artifacts")?;
+        let min_local_byte_hash_logs = optional_usize("min_local_byte_hash_logs")?;
+        let min_attestation_subject_digest_bindings =
+            optional_usize("min_attestation_subject_digest_bindings")?;
         let max_items = arguments
             .get("max_items")
             .map(|value| {
@@ -30990,6 +31015,9 @@ impl Server {
                 optional_string("plan_digest")?,
                 structurally_valid,
                 conformance_ready,
+                min_local_byte_hash_artifacts,
+                min_local_byte_hash_logs,
+                min_attestation_subject_digest_bindings,
                 optional_string("after")?,
                 max_items,
                 include_records,
@@ -37720,7 +37748,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "ci_provider_evidence_query",
-            "description": "Query the bounded retained provider evidence registry by provider, run, plan digest, structural validity, conformance posture, and digest cursor. Full audits are opt-in and the query never contacts a provider or executes checks.",
+            "description": "Query the bounded retained provider evidence registry by provider, run, plan digest, structural validity, conformance posture, minimum local-byte hash counts, minimum attestation subject-digest bindings, and digest cursor. Full audits are opt-in and the query never contacts a provider or executes checks.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -37729,6 +37757,9 @@ pub fn tool_definitions() -> Vec<Value> {
                     "plan_digest": { "type": "string", "minLength": 64, "maxLength": 64 },
                     "structurally_valid": { "type": "boolean" },
                     "conformance_ready": { "type": "boolean" },
+                    "min_local_byte_hash_artifacts": { "type": "integer", "minimum": 0, "maximum": 128 },
+                    "min_local_byte_hash_logs": { "type": "integer", "minimum": 0, "maximum": 128 },
+                    "min_attestation_subject_digest_bindings": { "type": "integer", "minimum": 0, "maximum": 128 },
                     "after": { "type": "string", "minLength": 64, "maxLength": 64 },
                     "max_items": { "type": "integer", "minimum": 1, "maximum": 256, "default": 100 },
                     "include_records": { "type": "boolean", "default": false }

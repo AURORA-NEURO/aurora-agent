@@ -1884,6 +1884,12 @@ export class ApiClient {
     if (args.max_items !== undefined && (!Number.isInteger(args.max_items) || args.max_items < 1 || args.max_items > 256)) {
       throw new ArgumentError("max_items must be between 1 and 256");
     }
+    for (const field of ["min_local_byte_hash_artifacts", "min_local_byte_hash_logs", "min_attestation_subject_digest_bindings"] as const) {
+      const value = args[field];
+      if (value !== undefined && (!Number.isInteger(value) || value < 0 || value > 128)) {
+        throw new ArgumentError(`${field} must be an integer between 0 and 128`);
+      }
+    }
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries({ ...args, max_items: args.max_items ?? 100, include_records: args.include_records ?? false })) {
       if (value !== undefined) params.set(key, String(value));

@@ -67,7 +67,8 @@ queries and restart-safe checkpoints; they never execute or re-evaluate the reta
 The provider-evidence registry helpers extend the same retention contract to provider-observed CI
 artifacts, logs, and attestations. They re-audit before import, preserve failed/unknown runs, expose
 digest-ordered provider/run/plan queries and exact lookup, and carry separate record-family digests
-for lineage joins. The shared registry is bounded and restart-safe when configured, but it never
+for lineage joins. Query requests can require minimum local-byte hash and attestation subject-digest
+binding counts, and result rows retain those counts. The shared registry is bounded and restart-safe when configured, but it never
 fetches remote bytes, authenticates a provider, verifies signatures, or approves a release.
 `MissionBinding` supports validated field-level dataflow between direct prerequisite steps,
 and `CapabilityQuery` routes across the complete domain catalogue with optional tool schemas;

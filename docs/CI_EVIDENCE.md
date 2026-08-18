@@ -197,7 +197,8 @@ Rust audit remains the authority for plan/check reconciliation, row subject bind
 registry identity; the action does not claim that its metadata collection is an audit result.
 
 The audit returns separate deterministic record digests for each row family, linked-row counts,
-subject counts, canonical nested CI evidence, and sorted findings. Duplicate ids, invalid digest
+subject counts, explicit local-byte hash counts, subject-digest binding counts, canonical nested CI
+evidence, and sorted findings. Duplicate ids, invalid digest
 syntax, unknown checks, provider/run mismatches, missing bindings, malformed locators, and unknown
 attestation subjects are blocking findings. Rows are preserved even when invalid so an operator can
 inspect and repair the original handoff rather than receiving a rewritten green projection.
@@ -215,6 +216,11 @@ whose digest is computed over the complete provider-evidence projection. Receipt
 recomputes that row and reports `evidence_mismatch` if its digest or retained rows are tampered with.
 The provider-evidence input remains mutually exclusive with `ci_evidence` and `ci_provider` so a
 receipt cannot silently blend provenance paths.
+
+The retained registry exposes the three binding counts in import summaries and compact query rows.
+Queries can require minimum `min_local_byte_hash_artifacts`, `min_local_byte_hash_logs`, or
+`min_attestation_subject_digest_bindings` thresholds before returning a row. These are explicit
+retention predicates over the audited report, not inferred provider trust or release approval.
 
 ## Result semantics
 

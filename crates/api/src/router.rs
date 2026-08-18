@@ -4701,14 +4701,18 @@ impl ApiRouter {
                     | "plan_digest"
                     | "structurally_valid"
                     | "conformance_ready"
+                    | "min_local_byte_hash_artifacts"
+                    | "min_local_byte_hash_logs"
+                    | "min_attestation_subject_digest_bindings"
                     | "after"
                     | "limit"
+                    | "max_items"
                     | "include_records"
             ) {
                 return self.error(
                     400,
                     "invalid_query",
-                    "CI provider evidence query accepts only provider, run_id, plan_digest, structurally_valid, conformance_ready, after, limit, and include_records",
+                    "CI provider evidence query accepts only provider, run_id, plan_digest, structurally_valid, conformance_ready, minimum digest-binding thresholds, after, limit or max_items, and include_records",
                     request_id,
                 );
             }
@@ -4723,11 +4727,46 @@ impl ApiRouter {
             Ok(_) => None,
             Err(error) => return self.error(422, "invalid_query", &error, request_id),
         };
+        let optional_minimum = |name: &str| -> Result<Option<usize>, String> {
+            match query_usize(&query, name, 0) {
+                Ok(_) if !query.contains_key(name) => Ok(None),
+                Ok(value) if value <= 128 => Ok(Some(value)),
+                Ok(_) => Err(format!("{name} must be between 0 and 128")),
+                Err(error) => Err(error),
+            }
+        };
+        let min_local_byte_hash_artifacts = match optional_minimum("min_local_byte_hash_artifacts")
+        {
+            Ok(value) => value,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let min_local_byte_hash_logs = match optional_minimum("min_local_byte_hash_logs") {
+            Ok(value) => value,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let min_attestation_subject_digest_bindings =
+            match optional_minimum("min_attestation_subject_digest_bindings") {
+                Ok(value) => value,
+                Err(error) => return self.error(422, "invalid_query", &error, request_id),
+            };
+        if query.contains_key("limit") && query.contains_key("max_items") {
+            return self.error(
+                400,
+                "invalid_query",
+                "CI provider evidence query accepts either limit or max_items, not both",
+                request_id,
+            );
+        }
+        let item_limit_key = if query.contains_key("max_items") {
+            "max_items"
+        } else {
+            "limit"
+        };
         let include_records = match query_bool(&query, "include_records", false) {
             Ok(value) => value,
             Err(error) => return self.error(422, "invalid_query", &error, request_id),
         };
-        let max_items = match query_usize(&query, "limit", 100) {
+        let max_items = match query_usize(&query, item_limit_key, 100) {
             Ok(value)
                 if (1..=bioprism_devplat::MAX_CI_PROVIDER_EVIDENCE_QUERY_ITEMS)
                     .contains(&value) =>
@@ -4751,6 +4790,9 @@ impl ApiRouter {
                 query.get("plan_digest").map(String::as_str),
                 structurally_valid,
                 conformance_ready,
+                min_local_byte_hash_artifacts,
+                min_local_byte_hash_logs,
+                min_attestation_subject_digest_bindings,
                 query.get("after").map(String::as_str),
                 max_items,
                 include_records,
@@ -13201,7 +13243,8 @@ mod tests {
                 },
                 "artifacts": [{
                     "id": "artifact-1", "kind": "test-report", "digest": "a".repeat(64),
-                    "check": "unit", "run_id": "api-provider-run-1", "provider": "generic"
+                    "check": "unit", "run_id": "api-provider-run-1", "provider": "generic",
+                    "uri": "https://example.test/artifact-1", "digest_scope": "local_response_bytes"
                 }],
                 "logs": [{
                     "id": "log-1", "digest": "b".repeat(64), "check": "unit",
@@ -13209,7 +13252,7 @@ mod tests {
                 }],
                 "attestations": [{
                     "id": "attestation-1", "subject": "artifact-1", "issuer": "test",
-                    "statement_digest": "c".repeat(64), "method": "detached"
+                    "statement_digest": "c".repeat(64), "method": "detached", "subject_digest": "a".repeat(64)
                 }]
             }),
         ));
@@ -13221,6 +13264,8 @@ mod tests {
         );
         let imported: Value = serde_json::from_slice(&imported.body).unwrap();
         assert_eq!(imported["conformance_ready"], true);
+        assert_eq!(imported["local_byte_hash_artifact_count"], 1);
+        assert_eq!(imported["attestation_subject_digest_binding_count"], 1);
         assert_eq!(
             imported["artifact_record_digest"].as_str().unwrap().len(),
             64
@@ -13231,7 +13276,7 @@ mod tests {
             .to_owned();
         let queried = router.handle(request(
             "GET",
-            "/v1/ci/provider-evidence?provider=generic&conformance_ready=true&include_records=true&limit=10",
+            "/v1/ci/provider-evidence?provider=generic&conformance_ready=true&include_records=true&min_local_byte_hash_artifacts=1&min_attestation_subject_digest_bindings=1&max_items=10",
             json!({}),
         ));
         assert_eq!(queried.status, 200);
@@ -13239,6 +13284,13 @@ mod tests {
         assert_eq!(queried["rows"].as_array().unwrap().len(), 1);
         assert_eq!(queried["rows"][0]["provider_evidence_digest"], digest);
         assert_eq!(queried["rows"][0]["audit"]["artifact_count"], 1);
+        assert_eq!(queried["rows"][0]["local_byte_hash_artifact_count"], 1);
+        let ambiguous = router.handle(request(
+            "GET",
+            "/v1/ci/provider-evidence?limit=10&max_items=10",
+            json!({}),
+        ));
+        assert_eq!(ambiguous.status, 400);
         let fetched = router.handle(request(
             "GET",
             &format!("/v1/ci/provider-evidence/{digest}"),

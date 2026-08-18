@@ -212,8 +212,10 @@ run and its external artifact/log/attestation indexes:
   malformed, unbound, or digest-inconsistent rows are rejected.
 - `GET /v1/ci/provider-evidence` returns compact deterministic rows ordered by
   `provider_evidence_digest`. Filters include `provider`, `run_id`, `plan_digest`,
-  `structurally_valid`, `conformance_ready`, `after`, `max_items` (1–256), and
-  `include_records` (false by default).
+  `structurally_valid`, `conformance_ready`, `min_local_byte_hash_artifacts`,
+  `min_local_byte_hash_logs`, `min_attestation_subject_digest_bindings` (each 0–128),
+  `after`, `max_items` (1–256), and `include_records` (false by default). Rows retain the
+  three binding counts for compact provenance posture searches.
 - `GET /v1/ci/provider-evidence/{provider_evidence_digest}` returns one exact retained audit,
   including separate artifact/log/attestation counts and record-family digests.
 - `GET /v1/ci/provider-evidence/persistence` reports checkpoint integrity and

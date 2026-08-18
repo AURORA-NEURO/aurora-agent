@@ -1073,6 +1073,9 @@ response carries separate artifact/log/attestation counts and record-family dige
 the boundary that provider locators are not fetched bytes and supplied digests are not verified
 signatures. `--ci-provider-evidence-state` enables atomic restart-safe persistence with 512-record,
 32 MiB snapshot, and 256-row query bounds; snapshot and per-record digests are checked on restore.
+Import summaries and compact query rows also retain local-byte hash and attestation subject-digest
+binding counts, and queries can require minimum thresholds for those counts without loading full
+audits. This makes provenance posture queryable while keeping it distinct from provider authentication.
 The registry remains an audit index: it never contacts GitHub/GitLab, executes CI, or grants release
 authority.
 `developer_delivery_audit` can compose that normalization directly through an explicit `ci_provider`

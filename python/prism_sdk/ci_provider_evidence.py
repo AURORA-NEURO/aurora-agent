@@ -191,13 +191,16 @@ class CiProviderEvidenceReport:
 
 @dataclass(frozen=True)
 class CiProviderEvidenceRegistryQueryRequest:
-    """Bounded query over retained provider evidence and its lineage joins."""
+    """Bounded query over retained provider evidence, lineage, and binding posture."""
 
     provider: str | None = None
     run_id: str | None = None
     plan_digest: str | None = None
     structurally_valid: bool | None = None
     conformance_ready: bool | None = None
+    min_local_byte_hash_artifacts: int | None = None
+    min_local_byte_hash_logs: int | None = None
+    min_attestation_subject_digest_bindings: int | None = None
     after: str | None = None
     max_items: int = 100
     include_records: bool = False
@@ -212,6 +215,13 @@ class CiProviderEvidenceRegistryQueryRequest:
         for name, value in (("structurally_valid", self.structurally_valid), ("conformance_ready", self.conformance_ready)):
             if value is not None and not isinstance(value, bool):
                 raise ArgumentError(f"{name} must be a boolean")
+        for name, value in (
+            ("min_local_byte_hash_artifacts", self.min_local_byte_hash_artifacts),
+            ("min_local_byte_hash_logs", self.min_local_byte_hash_logs),
+            ("min_attestation_subject_digest_bindings", self.min_attestation_subject_digest_bindings),
+        ):
+            if value is not None and (not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 128):
+                raise ArgumentError(f"{name} must be an integer between 0 and 128")
         if not isinstance(self.max_items, int) or isinstance(self.max_items, bool) or not 1 <= self.max_items <= 256:
             raise ArgumentError("max_items must be between 1 and 256")
         if not isinstance(self.include_records, bool):
@@ -219,7 +229,17 @@ class CiProviderEvidenceRegistryQueryRequest:
 
     def to_mcp_arguments(self) -> dict[str, Any]:
         result: dict[str, Any] = {"max_items": self.max_items, "include_records": self.include_records}
-        for name in ("provider", "run_id", "plan_digest", "structurally_valid", "conformance_ready", "after"):
+        for name in (
+            "provider",
+            "run_id",
+            "plan_digest",
+            "structurally_valid",
+            "conformance_ready",
+            "min_local_byte_hash_artifacts",
+            "min_local_byte_hash_logs",
+            "min_attestation_subject_digest_bindings",
+            "after",
+        ):
             value = getattr(self, name)
             if value is not None:
                 result[name] = value
@@ -242,6 +262,9 @@ class CiProviderEvidenceRegistryImportReport:
     attestation_record_digest: str
     structurally_valid: bool
     conformance_ready: bool
+    local_byte_hash_artifact_count: int
+    local_byte_hash_log_count: int
+    attestation_subject_digest_binding_count: int
     created: bool
     already_present: bool
     registry_generation: int
@@ -262,6 +285,9 @@ class CiProviderEvidenceRegistryImportReport:
             attestation_record_digest=_digest("provider evidence attestation_record_digest", raw.get("attestation_record_digest")),
             structurally_valid=raw.get("structurally_valid") is True,
             conformance_ready=raw.get("conformance_ready") is True,
+            local_byte_hash_artifact_count=int(raw.get("local_byte_hash_artifact_count", 0)),
+            local_byte_hash_log_count=int(raw.get("local_byte_hash_log_count", 0)),
+            attestation_subject_digest_binding_count=int(raw.get("attestation_subject_digest_binding_count", 0)),
             created=raw.get("created") is True,
             already_present=raw.get("already_present") is True,
             registry_generation=int(raw.get("registry_generation", 0)),
@@ -306,6 +332,9 @@ class CiProviderEvidenceRegistryGetReport:
     provider_evidence_digest: str
     provider: str
     run_id: str
+    local_byte_hash_artifact_count: int
+    local_byte_hash_log_count: int
+    attestation_subject_digest_binding_count: int
     audit: dict[str, Any]
     registry_generation: int
     registry_size: int
@@ -318,6 +347,9 @@ class CiProviderEvidenceRegistryGetReport:
             provider_evidence_digest=_digest("provider evidence digest", raw.get("provider_evidence_digest")),
             provider=_route_text("provider evidence provider", raw.get("provider")),
             run_id=_route_text("provider evidence run_id", raw.get("run_id")),
+            local_byte_hash_artifact_count=int(raw.get("local_byte_hash_artifact_count", 0)),
+            local_byte_hash_log_count=int(raw.get("local_byte_hash_log_count", 0)),
+            attestation_subject_digest_binding_count=int(raw.get("attestation_subject_digest_binding_count", 0)),
             audit=_route_mapping("CI provider evidence retained audit", raw.get("audit")),
             registry_generation=int(raw.get("registry_generation", 0)),
             registry_size=int(raw.get("registry_size", 0)),

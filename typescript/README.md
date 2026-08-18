@@ -55,7 +55,9 @@ if (result.mcp.result?.isError) {
 - `ciProviderEvidenceImport`, `ciProviderEvidenceQuery`, and `ciProviderEvidenceGet` provide the
   retained provider-observed CI evidence index over MCP, with matching REST helpers. Imports are
   re-audited and idempotent; query rows preserve provider/run/plan identity and separate
-  artifact/log/attestation record-family digests, including failed and unknown runs. The client
+  artifact/log/attestation record-family digests, including failed and unknown runs. Query arguments
+  can require minimum local-byte hash and attestation subject-digest binding counts, and rows retain
+  those counts. The client
   never treats these joins as fetched bytes, verified signatures, provider authentication, or
   release approval.
 - `traceOtelIngest` returns a typed normalized Event IR preview, OTLP mapping counts, loss-category
