@@ -1243,6 +1243,9 @@ impl ApiRouter {
             ("GET", "/openapi.json") | ("GET", "/v1/openapi.json") => self.openapi(),
             ("GET", "/v1") => self.index(),
             ("GET", "/v1/capabilities") => self.capabilities(),
+            ("GET", "/v1/capabilities/dashboard") => {
+                self.capability_dashboard(&request, &request_id)
+            }
             ("GET", "/v1/recovery") => self.recovery_matrix(),
             ("GET", "/v1/operations/snapshot") => self.operations_snapshot(&request, &request_id),
             ("GET", "/v1/operations/domains") => {
@@ -3276,6 +3279,7 @@ impl ApiRouter {
                     "ready": "/readyz",
                     "openapi": "/v1/openapi.json",
                     "capabilities": "/v1/capabilities",
+                    "capability_dashboard": "/v1/capabilities/dashboard",
                     "recovery": "/v1/recovery",
                     "operations_snapshot": "/v1/operations/snapshot",
                     "operations_domains": "/v1/operations/domains",
@@ -3367,6 +3371,7 @@ impl ApiRouter {
                     "domain_evidence_source_plan": true,
                     "domain_evidence_source_execute": true,
                     "domain_evidence_coverage": true,
+                    "capability_dashboard": true,
                     "recovery_matrix": true,
                     "operations_snapshot": true,
                     "domain_coverage": true,
@@ -4004,6 +4009,51 @@ impl ApiRouter {
             "domain_evidence_coverage",
             Value::Object(arguments),
         )
+    }
+
+    fn capability_dashboard(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        let max_groups = match query_usize(&query, "max_groups", 128) {
+            Ok(value) if (1..=512).contains(&value) => value,
+            Ok(_) => {
+                return self.error(
+                    400,
+                    "invalid_query",
+                    "max_groups must be between 1 and 512",
+                    request_id,
+                )
+            }
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let include_tools = match query_bool(&query, "include_tools", false) {
+            Ok(value) => value,
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let include_gaps = match query_bool(&query, "include_gaps", true) {
+            Ok(value) => value,
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let mut arguments = serde_json::Map::new();
+        arguments.insert("max_groups".into(), json!(max_groups));
+        arguments.insert("include_tools".into(), json!(include_tools));
+        arguments.insert("include_gaps".into(), json!(include_gaps));
+        for name in ["group_id", "domain", "status"] {
+            if let Some(value) = query.get(name) {
+                if value.trim().is_empty() {
+                    return self.error(
+                        400,
+                        "invalid_query",
+                        &format!("{name} must be non-empty when supplied"),
+                        request_id,
+                    );
+                }
+                arguments.insert(name.into(), json!(value));
+            }
+        }
+        self.domain_workflow_tool(request_id, "capability_dashboard", Value::Object(arguments))
     }
 
     fn import_workflow_reconciliation(
@@ -7196,6 +7246,7 @@ impl ApiRouter {
                     "/healthz": { "get": { "responses": { "200": { "description": "liveness" } } } },
                     "/readyz": { "get": { "responses": { "200": { "description": "readiness" } } } },
                     "/v1/capabilities": { "get": { "responses": { "200": { "description": "capability and limit catalog" } } } },
+                    "/v1/capabilities/dashboard": { "get": { "parameters": [{ "name": "group_id", "in": "query" }, { "name": "domain", "in": "query" }, { "name": "status", "in": "query" }, { "name": "max_groups", "in": "query" }, { "name": "include_tools", "in": "query" }, { "name": "include_gaps", "in": "query" }], "responses": { "200": { "description": "bounded digest-bound cross-domain capability dashboard" }, "400": { "description": "dashboard query was invalid" } } } },
                     "/v1/recovery": { "get": { "responses": { "200": { "description": "operator-visible restart recovery matrix" } } } },
                     "/v1/operations/snapshot": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "bounded operator control-plane snapshot" } } } },
                     "/v1/operations/domains": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "bounded per-domain observed activity projection" } } } },
@@ -11436,6 +11487,39 @@ mod tests {
         ));
         assert_eq!(refused.status, 422);
         let _ = std::fs::remove_file(artifact_path);
+    }
+
+    #[test]
+    fn capability_dashboard_route_preserves_filters_and_refuses_unbounded_queries() {
+        let router =
+            ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
+        let response = router.handle(request(
+            "GET",
+            "/v1/capabilities/dashboard?domain=verification&max_groups=4&include_tools=true&include_gaps=false",
+            json!({}),
+        ));
+        assert_eq!(response.status, 200);
+        let payload: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(payload["workflow"], "capability_dashboard");
+        assert_eq!(payload["audit"]["query"]["domain"], "verification");
+        assert_eq!(payload["audit"]["query"]["max_groups"], 4);
+        assert_eq!(payload["audit"]["query"]["include_tools"], true);
+        assert_eq!(payload["audit"]["query"]["include_gaps"], false);
+        assert_eq!(
+            payload["audit"]["selected_group_count"],
+            payload["audit"]["groups"].as_array().unwrap().len()
+        );
+        assert!(payload["audit"]["selected_group_count"].as_u64().unwrap() >= 1);
+        assert_eq!(payload["audit"]["groups"][0]["readiness"], "callable");
+
+        let invalid = router.handle(request(
+            "GET",
+            "/v1/capabilities/dashboard?max_groups=513",
+            json!({}),
+        ));
+        assert_eq!(invalid.status, 400);
+        let invalid: Value = serde_json::from_slice(&invalid.body).unwrap();
+        assert_eq!(invalid["error"]["code"], "invalid_query");
     }
 
     #[test]

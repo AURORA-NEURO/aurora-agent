@@ -1807,6 +1807,24 @@ export class ApiClient {
     return this.callTool<CapabilityDashboardResult>("capability_dashboard", args, options);
   }
 
+  /** Query the capability dashboard through its cache-friendly direct REST route. */
+  async capabilityDashboardQuery(args: CapabilityDashboardArgs = {}, options?: ClientRequestOptions): Promise<CapabilityDashboardResult> {
+    if (!isObject(args)) throw new ArgumentError("capability dashboard arguments must be an object");
+    for (const [name, value] of [["group_id", args.group_id], ["domain", args.domain], ["status", args.status]] as const) {
+      if (value !== undefined && (typeof value !== "string" || value.trim().length === 0)) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    const maxGroups = args.max_groups ?? 128;
+    if (!Number.isSafeInteger(maxGroups) || maxGroups < 1 || maxGroups > 512) throw new ArgumentError("max_groups must be 1..=512");
+    if (args.include_tools !== undefined && typeof args.include_tools !== "boolean") throw new ArgumentError("include_tools must be a boolean");
+    if (args.include_gaps !== undefined && typeof args.include_gaps !== "boolean") throw new ArgumentError("include_gaps must be a boolean");
+    const query = new URLSearchParams({ max_groups: String(maxGroups), include_tools: String(args.include_tools ?? false), include_gaps: String(args.include_gaps ?? true) });
+    for (const name of ["group_id", "domain", "status"] as const) {
+      const value = args[name];
+      if (value !== undefined) query.set(name, value);
+    }
+    return this.request<CapabilityDashboardResult>("GET", `/v1/capabilities/dashboard?${query.toString()}`, undefined, options);
+  }
+
   async capabilityRoute(args: CapabilityRouteArgs, options?: ClientRequestOptions): Promise<RestToolResponse<CapabilityRouteResult>> {
     return this.callTool<CapabilityRouteResult>("capability_route", args, options);
   }

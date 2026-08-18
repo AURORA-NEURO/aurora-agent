@@ -2898,6 +2898,17 @@ class ApiClient:
 
         return capability_dashboard_report(self.capability_dashboard(request))
 
+    def capability_dashboard_rest(self, request: CapabilityDashboardQueryArgs | Mapping[str, Any] | None = None) -> dict[str, Any]:
+        """Query the capability dashboard through the direct cache-friendly REST route."""
+
+        normalized = request if isinstance(request, CapabilityDashboardQueryArgs) else CapabilityDashboardQueryArgs(**dict(request or {}))
+        return self.request("GET", f"/v1/capabilities/dashboard?{urlencode(normalized.to_query_params())}")
+
+    def capability_dashboard_rest_report(self, request: CapabilityDashboardQueryArgs | Mapping[str, Any] | None = None) -> CapabilityDashboardReport:
+        """Return a typed report from the direct capability dashboard REST route."""
+
+        return capability_dashboard_report(self.capability_dashboard_rest(request))
+
     def ci_execution_evidence_audit(
         self,
         request: CiExecutionEvidenceRequest | Mapping[str, Any],
@@ -6926,6 +6937,16 @@ class AsyncApiClient:
         """Return async typed capability dashboard evidence through HTTP."""
 
         return capability_dashboard_report(await self.capability_dashboard(request))
+
+    async def capability_dashboard_rest(self, request: CapabilityDashboardQueryArgs | Mapping[str, Any] | None = None) -> dict[str, Any]:
+        """Async direct REST query for the bounded capability dashboard."""
+
+        return await asyncio.to_thread(self.client.capability_dashboard_rest, request)
+
+    async def capability_dashboard_rest_report(self, request: CapabilityDashboardQueryArgs | Mapping[str, Any] | None = None) -> CapabilityDashboardReport:
+        """Return a typed report from the async direct capability dashboard route."""
+
+        return capability_dashboard_report(await self.capability_dashboard_rest(request))
 
     async def ci_execution_evidence_audit(
         self,

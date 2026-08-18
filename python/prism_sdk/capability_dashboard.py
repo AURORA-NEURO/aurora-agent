@@ -52,6 +52,14 @@ class CapabilityDashboardQueryArgs:
                 result[name] = value
         return result
 
+    def to_query_params(self) -> dict[str, str]:
+        """Return the canonical bounded query used by the direct REST route."""
+
+        return {
+            name: str(value).lower() if isinstance(value, bool) else str(value)
+            for name, value in self.to_mcp_arguments().items()
+        }
+
 
 @dataclass(frozen=True)
 class CapabilityDashboardGroupReport:

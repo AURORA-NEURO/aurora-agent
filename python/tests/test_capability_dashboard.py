@@ -80,6 +80,7 @@ class CapabilityDashboardTests(unittest.TestCase):
         args = CapabilityDashboardQueryArgs(domain="oncology", max_groups=4, include_tools=True)
         self.assertEqual(args.to_mcp_arguments()["domain"], "oncology")
         self.assertEqual(args.to_mcp_arguments()["max_groups"], 4)
+        self.assertEqual(args.to_query_params()["include_tools"], "true")
         with self.assertRaises(ArgumentError):
             CapabilityDashboardQueryArgs(max_groups=0)
 
@@ -100,6 +101,13 @@ class CapabilityDashboardTests(unittest.TestCase):
             report = ApiClient("http://127.0.0.1:1").capability_dashboard_report(args)
         self.assertEqual(report.selected_group_count, 1)
         call.assert_called_once_with("capability_dashboard", args.to_mcp_arguments())
+        with patch.object(ApiClient, "request", return_value=payload()) as request:
+            rest_report = ApiClient("http://127.0.0.1:1").capability_dashboard_rest_report(args)
+        self.assertTrue(rest_report.ready)
+        request.assert_called_once_with(
+            "GET",
+            "/v1/capabilities/dashboard?max_groups=128&include_tools=true&include_gaps=true&domain=oncology",
+        )
 
         async def run() -> None:
             with patch.object(ApiClient, "call_tool", return_value=payload()) as async_call:

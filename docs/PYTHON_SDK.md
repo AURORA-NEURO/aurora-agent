@@ -705,6 +705,10 @@ invent defaults:
   expose separate crate, CLI, Python, MCP-membership, and schema-backed counts, callable/partial/
   declared-only readiness, explicit gap labels, filter provenance, and truncation warnings. A ready
   dashboard is a transport-coverage signal only; it does not execute or authorize a tool.
+- `ApiClient.capability_dashboard_rest(...)` and its async counterpart use the dedicated
+  `GET /v1/capabilities/dashboard` route with the same typed query bounds. The existing
+  `capability_dashboard(...)` tool helper remains available when callers need the MCP envelope;
+  both paths parse into the same `CapabilityDashboardReport` contract.
 - `capability_route(goal, needs, ...)` batches named needs into a digest-bound, non-executing route
   proposal, preserving explicit tool matches separately from ranked candidates. Its raw result also
   includes per-need candidate domains and a `route_coverage` ledger for resolved/unresolved needs.

@@ -318,6 +318,9 @@ invariant flags, duplicate memberships, and optional per-group coverage.
 declared-only readiness, separate crate/CLI/Python/MCP surface counts, schema-backed tool totals,
 explicit gap labels, query provenance, and bounded inventory warnings. Its ready flag describes
 transport coverage only and is not permission, execution, scientific, or deployment readiness.
+`capabilityDashboardQuery` reaches the dedicated `GET /v1/capabilities/dashboard` route with the
+same bounded filters, so applications can use a direct REST projection without unpacking an MCP
+tool envelope; the returned result shape is identical.
 `domainAcquisitionCatalogue` adds a typed cross-domain route registry. Its digest-bound rows keep
 bounded file/plain-HTTP transport, caller-managed connectors, native adapter matches, and
 Python-delegated adapter matches separate for every selected declared domain, with explicit
