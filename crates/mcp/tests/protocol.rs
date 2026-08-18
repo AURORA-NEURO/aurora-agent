@@ -8044,6 +8044,32 @@ fn capability_route_batches_ranked_and_explicit_needs_without_execution() {
     assert_eq!(result["route_coverage"]["needs_total"], json!(2));
     assert_eq!(result["route_coverage"]["needs_resolved"], json!(2));
     assert_eq!(result["route_coverage"]["needs_unresolved"], json!(0));
+    assert_eq!(
+        result["route_coverage"]["candidate_group_evidence_count"],
+        result["route_coverage"]["candidate_group_count"]
+    );
+    assert_eq!(result["evidence"]["readiness_claimed"], json!(false));
+    assert_eq!(
+        result["evidence"]["groups_with_artifact_evidence"],
+        json!(0)
+    );
+    assert_eq!(
+        result["evidence"]["groups_with_workflow_reconciliation"],
+        json!(0)
+    );
+    assert_eq!(result["evidence_digest"].as_str().unwrap().len(), 64);
+    assert_eq!(
+        result["evidence_digest"],
+        result["evidence"]["evidence_digest"]
+    );
+    assert!(!result["needs"][0]["candidate_group_evidence"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        result["needs"][0]["candidate_group_evidence"][0]["artifact_evidence"]["state"],
+        json!("missing")
+    );
     assert!(
         result["route_coverage"]["candidate_domain_count"]
             .as_u64()

@@ -185,6 +185,11 @@ def route_report_payload() -> dict:
                 "candidate_groups": ["oncology"],
                 "candidate_domains": ["oncology"],
                 "candidate_tools": ["oncology_search"],
+                "candidate_group_evidence": [{
+                    "id": "oncology",
+                    "artifact_evidence": {"state": "missing", "matching_record_count": 0},
+                    "workflow_reconciliation_evidence": {"state": "missing", "record_count": 0},
+                }],
                 "search": {"matches": [{"group": {"id": "oncology"}}]},
             }
         ],
@@ -201,7 +206,25 @@ def route_report_payload() -> dict:
             "candidate_domain_count": 1,
             "candidate_domains": ["oncology"],
             "candidate_tool_count": 1,
+            "candidate_group_evidence_count": 1,
             "posture": "routing evidence only",
+        },
+        "evidence_digest": "e" * 64,
+        "evidence_scope": "candidate_capability_groups_current_digest_verified_artifact_and_workflow_reconciliation_registries",
+        "evidence": {
+            "scope": "candidate_capability_groups_current_digest_verified_artifact_and_workflow_reconciliation_registries",
+            "evidence_digest": "e" * 64,
+            "artifact_registry_generation": 0,
+            "artifact_registry_size": 0,
+            "workflow_reconciliation_registry_generation": 0,
+            "workflow_reconciliation_registry_size": 0,
+            "candidate_group_count": 1,
+            "groups_with_artifact_evidence": 0,
+            "artifact_evidence_records": 0,
+            "groups_with_workflow_reconciliation": 0,
+            "workflow_reconciliation_records": 0,
+            "readiness_claimed": False,
+            "execution": "not_started",
         },
         "schema_attachment": {
             "requested": True,
@@ -2432,6 +2455,9 @@ class AnalyticsModelTests(unittest.TestCase):
         report = capability_route_report(envelope)
         self.assertEqual(report.goal, "compose evidence")
         self.assertEqual(report.route_coverage.candidate_domain_count, 1)
+        self.assertEqual(report.evidence_digest, "e" * 64)
+        self.assertEqual(report.evidence.candidate_group_count, 1)
+        self.assertEqual(report.needs[0].candidate_group_evidence[0]["id"], "oncology")
 
     def test_capability_route_report_rejects_inconsistent_coverage(self) -> None:
         payload = route_report_payload()

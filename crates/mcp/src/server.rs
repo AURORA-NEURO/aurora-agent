@@ -27754,6 +27754,7 @@ impl Server {
         let mut unresolved = Vec::new();
         let mut need_reports = Vec::new();
         let mut route_groups = BTreeSet::new();
+        let mut route_group_domains = BTreeMap::<String, BTreeSet<String>>::new();
         let mut route_domains = BTreeSet::new();
         for need in request.needs {
             let mut query = need.query.clone();
@@ -27776,6 +27777,10 @@ impl Server {
                 candidate_groups.insert(matched.group.id.clone());
                 candidate_domains.extend(matched.group.domains.iter().cloned());
                 candidate_tools.extend(matched.matched_tools.iter().cloned());
+                route_group_domains
+                    .entry(matched.group.id.clone())
+                    .or_default()
+                    .extend(matched.group.domains.iter().cloned());
             }
             route_groups.extend(candidate_groups.iter().cloned());
             route_domains.extend(candidate_domains.iter().cloned());
@@ -27798,6 +27803,142 @@ impl Server {
             }));
         }
 
+        let selected_groups = route_group_domains
+            .iter()
+            .map(|(id, domains)| (id.clone(), domains.iter().cloned().collect::<Vec<_>>()))
+            .collect::<Vec<_>>();
+        let (artifact_registry_generation, artifact_registry_size, artifact_postures) = {
+            let registry = self
+                .artifact_registry
+                .lock()
+                .map_err(|_| "artifact registry lock is poisoned".to_string())?;
+            let postures = selected_groups
+                .iter()
+                .map(|(id, domains)| (id.clone(), registry.domain_evidence_posture(id, domains)))
+                .collect::<BTreeMap<_, _>>();
+            (registry.generation(), registry.len(), postures)
+        };
+        let (
+            workflow_reconciliation_registry_generation,
+            workflow_reconciliation_registry_size,
+            reconciliation_postures,
+        ) = {
+            let registry = self
+                .workflow_reconciliation_registry
+                .lock()
+                .map_err(|_| "workflow reconciliation registry lock is poisoned".to_string())?;
+            let postures = selected_groups
+                .iter()
+                .map(|(id, _)| (id.clone(), registry.workflow_posture(id)))
+                .collect::<BTreeMap<_, _>>();
+            (registry.generation(), registry.len(), postures)
+        };
+        let evidence_scope =
+            "candidate_capability_groups_current_digest_verified_artifact_and_workflow_reconciliation_registries";
+        let mut groups_with_artifact_evidence = 0usize;
+        let mut artifact_evidence_records = 0usize;
+        let mut groups_with_workflow_reconciliation = 0usize;
+        let mut workflow_reconciliation_records = 0usize;
+        let mut evidence_rows = Vec::new();
+        let mut evidence_by_group = BTreeMap::new();
+        for (id, _) in &selected_groups {
+            let artifact_evidence = artifact_postures.get(id).cloned().unwrap_or_else(|| {
+                json!({
+                    "ok": true,
+                    "state": "missing",
+                    "group_id": id,
+                    "matching_record_count": 0,
+                    "readiness_claimed": false,
+                    "execution": "not_started"
+                })
+            });
+            let reconciliation_evidence =
+                reconciliation_postures.get(id).cloned().unwrap_or_else(|| {
+                    json!({
+                        "workflow_id": id,
+                        "state": "missing",
+                        "record_count": 0,
+                        "readiness_claimed": false,
+                        "scope": "bounded_digest_valid_reconciliation_registry"
+                    })
+                });
+            let artifact_records = artifact_evidence
+                .get("matching_record_count")
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as usize;
+            let reconciliation_records = reconciliation_evidence
+                .get("record_count")
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as usize;
+            if artifact_records > 0 {
+                groups_with_artifact_evidence += 1;
+                artifact_evidence_records =
+                    artifact_evidence_records.saturating_add(artifact_records);
+            }
+            if reconciliation_records > 0 {
+                groups_with_workflow_reconciliation += 1;
+                workflow_reconciliation_records =
+                    workflow_reconciliation_records.saturating_add(reconciliation_records);
+            }
+            let row = json!({
+                "id": id,
+                "artifact_evidence": artifact_evidence,
+                "workflow_reconciliation_evidence": reconciliation_evidence
+            });
+            evidence_by_group.insert(id.clone(), row.clone());
+            evidence_rows.push(row);
+        }
+        for need_report in &mut need_reports {
+            let candidate_group_evidence = need_report
+                .get("candidate_groups")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .filter_map(|id| evidence_by_group.get(id).cloned())
+                .collect::<Vec<_>>();
+            need_report["candidate_group_evidence"] = Value::Array(candidate_group_evidence);
+        }
+        let evidence_document = json!({
+            "scope": evidence_scope,
+            "artifact_registry_generation": artifact_registry_generation,
+            "artifact_registry_size": artifact_registry_size,
+            "workflow_reconciliation_registry_generation": workflow_reconciliation_registry_generation,
+            "workflow_reconciliation_registry_size": workflow_reconciliation_registry_size,
+            "groups_with_artifact_evidence": groups_with_artifact_evidence,
+            "artifact_evidence_records": artifact_evidence_records,
+            "groups_with_workflow_reconciliation": groups_with_workflow_reconciliation,
+            "workflow_reconciliation_records": workflow_reconciliation_records,
+            "groups": evidence_rows
+        });
+        let evidence_digest = bioprism_ids::ContentHash::of_value(&evidence_document)
+            .map_err(|error| format!("capability route evidence could not be hashed: {error}"))?;
+        let evidence_summary = json!({
+            "scope": evidence_scope,
+            "evidence_digest": evidence_digest.to_string(),
+            "artifact_registry_generation": artifact_registry_generation,
+            "artifact_registry_size": artifact_registry_size,
+            "workflow_reconciliation_registry_generation": workflow_reconciliation_registry_generation,
+            "workflow_reconciliation_registry_size": workflow_reconciliation_registry_size,
+            "candidate_group_count": selected_groups.len(),
+            "groups_with_artifact_evidence": groups_with_artifact_evidence,
+            "artifact_evidence_records": artifact_evidence_records,
+            "groups_with_workflow_reconciliation": groups_with_workflow_reconciliation,
+            "workflow_reconciliation_records": workflow_reconciliation_records,
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "guarantees": [
+                "each candidate capability group has separate artifact and reconciliation posture rows",
+                "postures are read from bounded current registries and retain their own verification semantics",
+                "the evidence digest binds candidate group rows and registry snapshot metadata"
+            ],
+            "limitations": [
+                "registry observations are not one atomic cross-store transaction",
+                "evidence presence does not prove execution, scientific validity, release readiness, or external effect completion",
+                "unresolved needs have no candidate-group evidence rows"
+            ]
+        });
+
         let recommended_tool_count = recommended.len();
         let recommended_tools = recommended
             .iter()
@@ -27812,6 +27953,8 @@ impl Server {
             "capability_schema_version": CAPABILITY_SCHEMA_VERSION,
             "route_id": route_id,
             "catalog_digest": catalogue.digest().to_string(),
+            "evidence_digest": evidence_digest.to_string(),
+            "evidence_scope": evidence_scope,
             "goal": request.goal,
             "needs": need_reports,
             "unresolved_needs": unresolved,
@@ -27827,8 +27970,10 @@ impl Server {
                 "candidate_domain_count": route_domains.len(),
                 "candidate_domains": route_domains,
                 "candidate_tool_count": recommended_tool_count,
+                "candidate_group_evidence_count": selected_groups.len(),
                 "posture": "routing evidence only; caller must review domain contracts, arguments, policy, and authorization"
             },
+            "evidence": evidence_summary,
             "execution": "not_started",
             "guarantees": [
                 "each need retains its complete bounded ranked search result",
@@ -27840,6 +27985,7 @@ impl Server {
                 "candidate ranking does not validate domain-specific arguments",
                 "a route is not an agent_mission allow-list until the caller reviews it",
                 "free-text matches are routing evidence, not scientific or readiness claims",
+                "evidence posture is advisory and does not replace route review, mission preflight, authorization, or execution evidence",
             ],
         });
         if request.include_tools {
@@ -35718,7 +35864,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "capability_route",
-            "description": "Batch multiple named cross-domain needs into one digest-bound candidate report. Each need preserves its bounded ranked discovery result; explicit tool filters are distinguished from free-text/domain/group candidates. The route never executes tools, grants permission, validates domain arguments, or replaces review of an agent_mission allow-list.",
+            "description": "Batch multiple named cross-domain needs into one digest-bound candidate report. Each need preserves its bounded ranked discovery result and candidate-group artifact/workflow-reconciliation posture; explicit tool filters are distinguished from free-text/domain/group candidates. The route never executes tools, grants permission, validates domain arguments, or replaces review of an agent_mission allow-list.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

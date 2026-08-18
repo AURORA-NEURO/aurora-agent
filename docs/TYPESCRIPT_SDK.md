@@ -329,6 +329,10 @@ tool envelope; the returned result shape is identical.
 `capabilityRouteRest` and `capabilityRouteReviewRest` provide the corresponding raw REST planning
 handoff for cross-domain needs and caller-selected tools. A ready review remains
 `mission_preflight_required`; these methods never dispatch the selected tools.
+`CapabilityRouteResult` may also carry an evidence digest and typed evidence summary with registry
+generations/counts, plus per-need candidate-group artifact and workflow-reconciliation postures.
+This is a bounded advisory observation separate from `route_id`, not an execution, authorization,
+scientific-validity, release-readiness, or external-effect claim.
 `domainAcquisitionCatalogue` adds a typed cross-domain route registry. Its digest-bound rows keep
 bounded file/plain-HTTP transport, caller-managed connectors, native adapter matches, and
 Python-delegated adapter matches separate for every selected declared domain, with explicit

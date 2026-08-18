@@ -840,6 +840,12 @@ diagnostics, and keeps mission preflight and execution explicitly separate. Its 
 turning schema conformance into domain readiness. Every review also carries a deterministic,
 content-addressed `review_id` derived from the route provenance, caller selections, and validation
 mode, making the same handoff correlate cleanly across transports and event records.
+Modern route responses also attach a separate `evidence_digest` over the selected candidate-group
+artifact and workflow-reconciliation postures, registry generations, and bounded counts. Each need
+retains its `candidate_group_evidence` rows so discovery can show missing or observed retained
+evidence before review; this is an advisory point-in-time observation, not an execution, readiness,
+authorization, scientific-validity, or release claim, and it is intentionally not folded into the
+catalogue-bound `route_id`.
 `domain_workflow_catalogue` closes the next gap between discovery and planning: it materializes
 one deterministic, digest-bound workflow template for each of the 29 capability groups, including
 available versus missing tool definitions, per-tool schema/evidence contracts, and advisory lexical

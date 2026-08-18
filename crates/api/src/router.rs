@@ -11973,6 +11973,17 @@ mod tests {
         assert_eq!(route["workflow"], "capability_route");
         assert_eq!(route["needs"][0]["resolution"], "explicit");
         assert_eq!(route["execution"], "not_started");
+        assert_eq!(route["evidence"]["readiness_claimed"], false);
+        assert_eq!(route["evidence_digest"].as_str().unwrap().len(), 64);
+        assert_eq!(
+            route["evidence_digest"],
+            route["evidence"]["evidence_digest"]
+        );
+        assert_eq!(
+            route["needs"][0]["candidate_group_evidence"][0]["workflow_reconciliation_evidence"]
+                ["state"],
+            "missing"
+        );
         assert!(route["tool_schemas"]
             .as_array()
             .unwrap()

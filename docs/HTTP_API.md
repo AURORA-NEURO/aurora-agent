@@ -521,6 +521,14 @@ status of `ready_for_capability_route`, `requires_catalogue_review`, `no_actiona
 `capability_route`, review explicit selections with `capability_route_review`, and run
 `/v1/missions/preflight` before any mission dispatch.
 
+`POST /v1/capabilities/route` includes a bounded evidence observation alongside its ranked
+candidate route: each candidate capability group carries digest-verified artifact posture and
+workflow-reconciliation posture, while the route exposes `evidence_digest`, registry generations,
+record counts, and per-need `candidate_group_evidence`. This is a point-in-time advisory join, not
+an atomic cross-store snapshot, execution proof, authorization, scientific validity, release
+readiness, or external-effect claim. The digest is separate from `route_id` because retained
+evidence may change while the catalogue-bound route request remains identical.
+
 `GET /v1/operations/domains` applies the same cursor bounds to a per-domain activity projection.
 Each group retains catalogue counts, missing names, observed event/tool counts, the last observed
 event ID, and an `activity_state` of `catalogue_gap`, `observed_in_page`, or

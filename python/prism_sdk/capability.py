@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 import json
 from typing import Any, Mapping, Sequence
 
+from .artifacts import _digest
 from .errors import ArgumentError
 
 
@@ -82,6 +83,7 @@ class CapabilityRouteNeedReport:
     candidate_groups: tuple[str, ...]
     candidate_domains: tuple[str, ...]
     candidate_tools: tuple[str, ...]
+    candidate_group_evidence: tuple[dict[str, Any], ...]
     search: dict[str, Any]
 
     @classmethod
@@ -90,12 +92,19 @@ class CapabilityRouteNeedReport:
         resolution = _route_text("need resolution", raw.get("resolution"))
         if resolution not in {"explicit", "ranked_candidates", "unresolved"}:
             raise ArgumentError(f"unknown route need resolution: {resolution}")
+        raw_evidence = raw.get("candidate_group_evidence", [])
+        if not isinstance(raw_evidence, Sequence) or isinstance(raw_evidence, (str, bytes)):
+            raise ArgumentError("candidate_group_evidence must be an array")
+        candidate_group_evidence = tuple(
+            _route_mapping("candidate group evidence", item) for item in raw_evidence
+        )
         return cls(
             id=_route_text("need id", raw.get("id")),
             resolution=resolution,
             candidate_groups=_route_strings("candidate_groups", raw.get("candidate_groups", [])),
             candidate_domains=_route_strings("candidate_domains", raw.get("candidate_domains", [])),
             candidate_tools=_route_strings("candidate_tools", raw.get("candidate_tools", [])),
+            candidate_group_evidence=candidate_group_evidence,
             search=_route_mapping("need search", raw.get("search", {})),
         )
 
@@ -112,6 +121,7 @@ class CapabilityRouteCoverage:
     candidate_domain_count: int
     candidate_domains: tuple[str, ...]
     candidate_tool_count: int
+    candidate_group_evidence_count: int | None
     posture: str
 
     @classmethod
@@ -131,6 +141,12 @@ class CapabilityRouteCoverage:
         candidate_tool_count = _route_count(
             "route coverage candidate_tool_count", raw.get("candidate_tool_count")
         )
+        evidence_count_raw = raw.get("candidate_group_evidence_count")
+        candidate_group_evidence_count = (
+            None
+            if evidence_count_raw is None
+            else _route_count("route coverage candidate_group_evidence_count", evidence_count_raw)
+        )
         if needs_resolved + needs_unresolved != needs_total:
             raise ArgumentError("route coverage need counts do not reconcile")
         if candidate_group_count != len(candidate_groups):
@@ -146,6 +162,7 @@ class CapabilityRouteCoverage:
             candidate_domain_count=candidate_domain_count,
             candidate_domains=candidate_domains,
             candidate_tool_count=candidate_tool_count,
+            candidate_group_evidence_count=candidate_group_evidence_count,
             posture=_route_text("route coverage posture", raw.get("posture")),
         )
 
@@ -170,6 +187,9 @@ class CapabilityRouteReport:
     recommended_tool_count: int
     recommended_tool_overflow: int
     route_coverage: CapabilityRouteCoverage
+    evidence_digest: str | None
+    evidence_scope: str | None
+    evidence: "CapabilityRouteEvidenceSummary | None"
     schema_attachment: dict[str, Any]
     execution: str
     guarantees: tuple[str, ...]
@@ -210,6 +230,27 @@ class CapabilityRouteReport:
             raise ArgumentError("recommended_tool_overflow does not match recommended_tools")
         if coverage.candidate_tool_count != recommended_tool_count:
             raise ArgumentError("route coverage candidate_tool_count does not match recommendations")
+        evidence_digest_raw = raw.get("evidence_digest")
+        evidence_digest = (
+            None if evidence_digest_raw is None else _digest("route evidence digest", evidence_digest_raw)
+        )
+        evidence_scope_raw = raw.get("evidence_scope")
+        evidence_scope = (
+            None if evidence_scope_raw is None else _route_text("route evidence scope", evidence_scope_raw)
+        )
+        evidence_raw = raw.get("evidence")
+        evidence = (
+            None
+            if evidence_raw is None
+            else CapabilityRouteEvidenceSummary.from_wire(evidence_raw)
+        )
+        if evidence is not None:
+            if evidence_digest != evidence.evidence_digest:
+                raise ArgumentError("route evidence digest does not match evidence summary")
+            if evidence_scope != evidence.scope:
+                raise ArgumentError("route evidence scope does not match evidence summary")
+            if coverage.candidate_group_evidence_count is not None and coverage.candidate_group_evidence_count != evidence.candidate_group_count:
+                raise ArgumentError("route evidence group count does not match route coverage")
         return cls(
             raw=raw,
             route_id=_route_text("route_id", raw.get("route_id")),
@@ -221,6 +262,9 @@ class CapabilityRouteReport:
             recommended_tool_count=recommended_tool_count,
             recommended_tool_overflow=recommended_tool_overflow,
             route_coverage=coverage,
+            evidence_digest=evidence_digest,
+            evidence_scope=evidence_scope,
+            evidence=evidence,
             schema_attachment=_route_mapping("schema_attachment", raw.get("schema_attachment", {})),
             execution=_route_text("route execution", raw.get("execution")),
             guarantees=_route_strings("route guarantees", raw.get("guarantees", [])),
@@ -237,6 +281,49 @@ class CapabilityRouteReport:
 
     def to_dict(self) -> dict[str, Any]:
         return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class CapabilityRouteEvidenceSummary:
+    """Digest-bound retained evidence summary attached to a capability route."""
+
+    raw: dict[str, Any]
+    scope: str
+    evidence_digest: str
+    artifact_registry_generation: int
+    artifact_registry_size: int
+    workflow_reconciliation_registry_generation: int
+    workflow_reconciliation_registry_size: int
+    candidate_group_count: int
+    groups_with_artifact_evidence: int
+    artifact_evidence_records: int
+    groups_with_workflow_reconciliation: int
+    workflow_reconciliation_records: int
+    readiness_claimed: bool
+    execution: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "CapabilityRouteEvidenceSummary":
+        raw = _route_mapping("route evidence summary", value)
+        readiness_claimed = raw.get("readiness_claimed")
+        if not isinstance(readiness_claimed, bool):
+            raise ArgumentError("route evidence readiness_claimed must be a boolean")
+        return cls(
+            raw=raw,
+            scope=_route_text("route evidence summary scope", raw.get("scope")),
+            evidence_digest=_digest("route evidence summary digest", raw.get("evidence_digest")),
+            artifact_registry_generation=_route_count("route artifact registry generation", raw.get("artifact_registry_generation")),
+            artifact_registry_size=_route_count("route artifact registry size", raw.get("artifact_registry_size")),
+            workflow_reconciliation_registry_generation=_route_count("route reconciliation registry generation", raw.get("workflow_reconciliation_registry_generation")),
+            workflow_reconciliation_registry_size=_route_count("route reconciliation registry size", raw.get("workflow_reconciliation_registry_size")),
+            candidate_group_count=_route_count("route evidence candidate_group_count", raw.get("candidate_group_count")),
+            groups_with_artifact_evidence=_route_count("route evidence groups_with_artifact_evidence", raw.get("groups_with_artifact_evidence")),
+            artifact_evidence_records=_route_count("route evidence artifact_evidence_records", raw.get("artifact_evidence_records")),
+            groups_with_workflow_reconciliation=_route_count("route evidence groups_with_workflow_reconciliation", raw.get("groups_with_workflow_reconciliation")),
+            workflow_reconciliation_records=_route_count("route evidence workflow_reconciliation_records", raw.get("workflow_reconciliation_records")),
+            readiness_claimed=readiness_claimed,
+            execution=_route_text("route evidence execution", raw.get("execution")),
+        )
 
 
 @dataclass(frozen=True)
@@ -2462,6 +2549,7 @@ __all__ = [
     "CapabilityRouteRequest",
     "CapabilityRouteNeedReport",
     "CapabilityRouteCoverage",
+    "CapabilityRouteEvidenceSummary",
     "CapabilityRouteReport",
     "CapabilityRouteReviewRequest",
     "CapabilityRouteReviewReport",

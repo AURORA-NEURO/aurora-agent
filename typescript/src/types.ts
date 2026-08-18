@@ -4974,7 +4974,14 @@ export interface CapabilityRouteNeedResult extends JsonObject {
   candidate_groups: string[];
   candidate_domains: string[];
   candidate_tools: string[];
+  candidate_group_evidence?: CapabilityRouteGroupEvidenceResult[];
   search: JsonObject;
+}
+
+export interface CapabilityRouteGroupEvidenceResult extends JsonObject {
+  id: string;
+  artifact_evidence: JsonObject;
+  workflow_reconciliation_evidence: JsonObject;
 }
 
 export interface CapabilityRouteCoverage extends JsonObject {
@@ -4986,7 +4993,26 @@ export interface CapabilityRouteCoverage extends JsonObject {
   candidate_domain_count: number;
   candidate_domains: string[];
   candidate_tool_count: number;
+  candidate_group_evidence_count?: number;
   posture: string;
+}
+
+export interface CapabilityRouteEvidenceResult extends JsonObject {
+  scope: string;
+  evidence_digest: string;
+  artifact_registry_generation: number;
+  artifact_registry_size: number;
+  workflow_reconciliation_registry_generation: number;
+  workflow_reconciliation_registry_size: number;
+  candidate_group_count: number;
+  groups_with_artifact_evidence: number;
+  artifact_evidence_records: number;
+  groups_with_workflow_reconciliation: number;
+  workflow_reconciliation_records: number;
+  readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
 }
 
 export interface CapabilityRouteResult extends JsonObject {
@@ -5001,6 +5027,9 @@ export interface CapabilityRouteResult extends JsonObject {
   recommended_tool_count: number;
   recommended_tool_overflow: number;
   route_coverage: CapabilityRouteCoverage;
+  evidence_digest?: string;
+  evidence_scope?: string;
+  evidence?: CapabilityRouteEvidenceResult;
   schema_attachment: JsonObject;
   execution: "not_started";
 }

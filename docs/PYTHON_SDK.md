@@ -730,6 +730,10 @@ invent defaults:
   `ApiClient.capability_route_report(...)`, and its async counterpart provide bounded typed views
   without executing any candidate. `report.route_coverage.fully_resolved` is routing evidence only,
   not authorization, domain validity, or scientific readiness.
+  Modern responses additionally expose an optional digest-bound evidence summary and per-need
+  `candidate_group_evidence` rows containing artifact and workflow-reconciliation postures. The
+  evidence digest is a separate observation digest from `route_id`; it binds candidate groups and
+  registry generations, and never implies execution or readiness.
 - `CapabilityRouteReviewRequest` and `capability_route_review(...)` validate caller-selected
   handoff inputs, while `CapabilityRouteReviewReport.from_wire(...)` and the corresponding sync,
   async, and HTTP `capability_route_review_report(...)` helpers expose blocked/ready findings,
