@@ -192,7 +192,7 @@ impl WorkflowExecutionBinding {
             binding_digest: self.binding_digest.clone(),
             adaptive,
         };
-        replay.validate_against(self)?;
+        replay.validate_replay_against(self)?;
         Ok(replay)
     }
 
@@ -220,6 +220,26 @@ impl WorkflowExecutionReceipt {
         self.adaptive.validate_shape()?;
         if self.adaptive.plan_digest != binding.adaptive_plan_digest
             || self.adaptive.provider != binding.provider_id
+        {
+            return Err(WorkflowExecutionError::BindingMismatch);
+        }
+        Ok(())
+    }
+
+    fn validate_replay_against(
+        &self,
+        binding: &WorkflowExecutionBinding,
+    ) -> Result<(), WorkflowExecutionError> {
+        if self.schema != WORKFLOW_EXECUTION_SCHEMA
+            || self.workflow != binding.workflow
+            || self.binding_digest != binding.binding_digest
+        {
+            return Err(WorkflowExecutionError::BindingMismatch);
+        }
+        self.adaptive.validate_shape()?;
+        let replay_provider = format!("replay:{}", binding.provider_id);
+        if self.adaptive.plan_digest != binding.adaptive_plan_digest
+            || self.adaptive.provider != replay_provider
         {
             return Err(WorkflowExecutionError::BindingMismatch);
         }
