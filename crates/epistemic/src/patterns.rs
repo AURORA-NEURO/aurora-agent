@@ -22,8 +22,8 @@
 //! `fiber-query/0.1` cannot carry them, and it cannot carry the loss that would rank them. So
 //! [`wire_gap`] reports, for each pattern, the fields that would be lost in translation, and the
 //! result is not "some patterns need an extension" — it is that **no pattern in the registry can
-//! round-trip**. See [`crate::gap`] for the field-level proposal and for the worse finding that
-//! writing the fields anyway produces no error at all.
+//! round-trip**. The versioned decision-contract parser now lives at the FIBER QIR boundary, where
+//! it can be consumed without making this epistemic kernel depend on its compiler.
 //!
 //! ## What is not implemented
 //!
@@ -32,9 +32,18 @@
 //! and `bioprism-worldgen` own them. This registry is the *contract* half of 43.32 — question,
 //! boundary, closure — and it says so rather than implying the rest arrived with it.
 
-use crate::gap::{FieldState, REQUIRED_FOR_RATE_DISTORTION};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+
+const CURRENT_WIRE_SCHEMA_VERSION: &str = "fiber-query/0.2";
+const WIRE_MISSING_FIELDS: &[&str] = &["decision_loss", "permitted_actions"];
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub enum FieldState {
+    Absent { field: &'static str },
+    PresentAndRefused { field: &'static str },
+    PresentAndRead { field: &'static str },
+}
 
 /// How far a pattern's evaluation data may travel. 43.32's "release tier".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,7 +101,7 @@ impl QueryPattern {
     /// a measurement rather than a comparison against a document this crate wrote to fail.
     pub fn to_wire_query(&self) -> Value {
         json!({
-            "schema_version": crate::gap::CURRENT_SCHEMA_VERSION,
+            "schema_version": CURRENT_WIRE_SCHEMA_VERSION,
             "query_id": format!("q-{}-0001", self.id),
             "targets": [self.target],
             "protected_tags": self.protected_closure,
@@ -131,7 +140,11 @@ pub const PATTERNS: &[QueryPattern] = &[
         id: "imaging_specimen_alignment",
         question: "Is the specimen-to-lesion mapping supported, and where is it uncertain?",
         target: "specimen_lesion_mapping_supported",
-        permitted_actions: &["accept_mapping", "request_lineage", "declare_underdetermined"],
+        permitted_actions: &[
+            "accept_mapping",
+            "request_lineage",
+            "declare_underdetermined",
+        ],
         allowed_outputs: &["supported", "unsupported_with_witnesses", "underdetermined"],
         forbidden_outputs: &["patient_treatment_recommendation"],
         protected_closure: &["specimen", "lesion", "coordinate_frame", "time"],
@@ -143,7 +156,11 @@ pub const PATTERNS: &[QueryPattern] = &[
         question: "Do two runs of the integrated diagnosis over the same evidence agree?",
         target: "integrated_diagnosis_reproducible",
         permitted_actions: &["accept", "flag_disagreement", "declare_underdetermined"],
-        allowed_outputs: &["reproducible", "divergent_with_witnesses", "underdetermined"],
+        allowed_outputs: &[
+            "reproducible",
+            "divergent_with_witnesses",
+            "underdetermined",
+        ],
         forbidden_outputs: &["individual_prognosis", "eligibility_determination"],
         protected_closure: &["classifier_version", "subject", "lesion", "assay"],
         oracle: OracleTier::Reproducibility,
@@ -154,7 +171,11 @@ pub const PATTERNS: &[QueryPattern] = &[
         question: "Are the response criteria applied consistently across the timeline?",
         target: "response_criteria_applied_consistently",
         permitted_actions: &["accept", "flag_inconsistency", "declare_underdetermined"],
-        allowed_outputs: &["consistent", "inconsistent_with_witnesses", "underdetermined"],
+        allowed_outputs: &[
+            "consistent",
+            "inconsistent_with_witnesses",
+            "underdetermined",
+        ],
         forbidden_outputs: &["patient_treatment_recommendation", "dose"],
         protected_closure: &["time", "intervention", "classifier_version", "region"],
         oracle: OracleTier::Temporal,
@@ -164,7 +185,11 @@ pub const PATTERNS: &[QueryPattern] = &[
         id: "treatment_related_change",
         question: "Does the evidence distinguish progression from treatment-related change?",
         target: "progression_distinguishable_from_treatment_effect",
-        permitted_actions: &["distinguishable", "not_distinguishable", "acquire_more_evidence"],
+        permitted_actions: &[
+            "distinguishable",
+            "not_distinguishable",
+            "acquire_more_evidence",
+        ],
         allowed_outputs: &["distinguishable", "underdetermined_with_reasons"],
         forbidden_outputs: &[
             "individual_prognosis",
@@ -217,7 +242,11 @@ pub const PATTERNS: &[QueryPattern] = &[
         question: "Does the released artifact reproduce the paper's reported result?",
         target: "artifact_reproduces_reported_result",
         permitted_actions: &["reproduced", "not_reproduced", "declare_underdetermined"],
-        allowed_outputs: &["reproduced", "not_reproduced_with_witnesses", "underdetermined"],
+        allowed_outputs: &[
+            "reproduced",
+            "not_reproduced_with_witnesses",
+            "underdetermined",
+        ],
         forbidden_outputs: &["individual_prognosis", "patient_treatment_recommendation"],
         protected_closure: &["study", "time", "cohort", "classifier_version"],
         oracle: OracleTier::Reproducibility,
@@ -262,17 +291,23 @@ pub fn wire_gap() -> Vec<WireGap> {
         .iter()
         .map(|pattern| {
             let document = pattern.to_wire_query();
-            let states = crate::gap::audit(&document).unwrap_or_default();
+            let states = WIRE_MISSING_FIELDS
+                .iter()
+                .map(|field| {
+                    if document.get(*field).is_some() {
+                        FieldState::PresentAndRead { field }
+                    } else {
+                        FieldState::Absent { field }
+                    }
+                })
+                .collect();
             let mut unrepresentable = Vec::new();
             if !pattern.permitted_actions.is_empty() {
                 unrepresentable.push("permitted_actions".to_string());
             }
-            for field in REQUIRED_FOR_RATE_DISTORTION {
-                if field.name == "permitted_actions" || field.name == "distortion_tolerance" {
-                    continue;
-                }
-                if document.get(field.name).is_none() {
-                    unrepresentable.push(field.name.to_string());
+            for field in WIRE_MISSING_FIELDS {
+                if !unrepresentable.iter().any(|existing| existing == field) {
+                    unrepresentable.push((*field).to_string());
                 }
             }
             WireGap {

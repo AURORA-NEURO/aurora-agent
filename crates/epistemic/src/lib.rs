@@ -18,11 +18,10 @@
 //! > trade distortion against*
 //!
 //! Every decision-theoretic module of §43 is downstream of that one absence. [`ratedistortion`]
-//! and [`voi`] therefore take the loss from the caller and build the calculus on it, and [`gap`]
-//! states in field-level detail what `fiber-query/0.1` would have to carry for the compiler to
-//! reach the same result on its own. Along the way [`gap`] turned up something worse than the
-//! missing field: the v0.1 parser accepts a `decision_loss` key, drops it, and goes on reporting
-//! it as missing, so a caller who supplies it is told nothing.
+//! and [`voi`] therefore take the loss from the caller and build the calculus on it. The FIBER QIR
+//! owns the wire contract that lets the compiler reach the same result on its own. The wire
+//! boundary is deliberately a dependency of this crate's consumer, not the other way around: the
+//! quotient kernel remains usable by any caller without importing the compiler.
 //!
 //! ## What is checked rather than asserted
 //!
@@ -56,7 +55,6 @@
 //! | [`quotient`] | 43.10 | exact decision-equivalence classes under an explicit permitted-action loss profile |
 //! | [`ratedistortion`] | 43.50, 43.12 | decision distortion, the frontier, identification, abstention |
 //! | [`voi`] | 43.50 | value of information, bundles, complementarity |
-//! | [`gap`] | 43.50 | the wire fields `fiber-query/0.1` lacks, and one it silently drops |
 //! | [`objective`] [`submodularity`] [`mod@greedy`] [`optimal`] | 43.14 | set functions, the exhaustive check, greedy, the measured ratio |
 //! | [`separator`] | 43.29 | separators, typed messages, exactness on trees, leak refusal |
 //! | [`library`] | 43.31 | biological scope dimensions and factor templates, and where they disagree with `bioprism-scope` |
@@ -141,7 +139,6 @@ pub mod continuation;
 pub mod decision;
 pub mod error;
 pub mod evidence;
-pub mod gap;
 pub mod greedy;
 pub mod lens;
 pub mod library;
@@ -159,7 +156,6 @@ pub mod voi;
 pub use decision::{Belief, DecisionProblem};
 pub use error::EpistemicError;
 pub use evidence::{Acquisition, EvidenceItem, EvidencePool, Outcome};
-pub use gap::{RequiredField, PROPOSED_SCHEMA_VERSION, REQUIRED_FOR_RATE_DISTORTION};
 pub use greedy::{greedy, lazy_greedy, Constraint, Selection};
 pub use objective::{Coverage, HypothesisElimination, RegretReduction, SetFunction, Tabulated};
 pub use optimal::{brute_force_optimum, measure_ratio, RatioMeasurement};
@@ -182,9 +178,9 @@ pub use voi::{complementarity, joint_value, value_of_information, ValueOfInforma
 /// close one. A missing capability that is stated is a limitation; one that is implied to exist is
 /// a lie.
 pub const NOT_IMPLEMENTED: &[&str] = &[
-    "43.10: the FIBER wire compiler integration remains deferred when fiber-query/0.2 lacks \
-     permitted actions and decision loss; the explicit decision-equivalence kernel is available \
-     through bioprism-epistemic and the MCP/SDK surfaces.",
+    "43.10: fiber-query/0.3 now carries the explicit permitted actions and decision-loss matrix \
+     and FIBER executes the exact decision-equivalence quotient; legacy 0.1/0.2 queries still \
+     defer the pass, and rate-distortion needs additional posterior/evidence bindings.",
     "43.50: causal identification in the do-calculus sense. There is no graph, no back-door or \
      front-door criterion, and no instrument. Identification here is decision-relative — whether \
      the surviving models disagree about what to do — and the type is named to force the \

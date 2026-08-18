@@ -449,6 +449,12 @@ from .context_requests import (
     FiberVerifyRequest,
     ProjectionBundleRequest,
 )
+from .fiber_contract import (
+    FIBER_DECISION_QUOTIENT_BASIS,
+    FIBER_DECISION_QUOTIENT_SCHEMA,
+    FiberDecisionQuotientSummary,
+    fiber_decision_quotient_summary,
+)
 from .dicom import DicomAdapter, DicomAuditResult, DicomFinding, audit_dicom
 from .domain_requests import (
     MAX_DOMAIN_REQUEST_BYTES,
@@ -3188,6 +3194,10 @@ __all__ = [
     "FiberExplainRequest",
     "FiberRefineRequest",
     "FiberVerifyRequest",
+    "FIBER_DECISION_QUOTIENT_BASIS",
+    "FIBER_DECISION_QUOTIENT_SCHEMA",
+    "FiberDecisionQuotientSummary",
+    "fiber_decision_quotient_summary",
     "LifecycleError",
     "InputRef",
     "MutationPlan",

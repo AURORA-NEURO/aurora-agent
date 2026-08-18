@@ -2,14 +2,21 @@
 //!
 //! Blueprint 43.02 defines a query as `q = ⟨Y, A, t, ω, ℓ, B, ε, R⟩` — targets, permitted
 //! actions, time cut, role/policy, decision loss, budget, tolerated distortion and requested
-//! outputs. The `fiber-query/0.2` wire schema carries only targets, protected tags, decision
-//! time, budgets, role, policy, distortion tolerance and goal.
+//! outputs. The legacy `fiber-query/0.1` and `fiber-query/0.2` wire forms carry only targets,
+//! protected tags, decision time, budgets, role, policy, distortion tolerance and goal.
 //!
-//! The permitted-action set `A` and the decision loss `ℓ` are **absent from the wire format**.
-//! That matters: decision-equivalence quotienting (43.10) and rate-distortion optimisation
-//! (43.12) are both defined relative to `A` and `ℓ`, so neither can be implemented against 0.2
-//! without extending the schema. [`Query::missing_contract_fields`] reports the gap rather than
-//! letting a later pass quietly substitute a default.
+//! `fiber-query/0.3` is the first executable decision-contract form. It adds a bounded rectangular
+//! `decision_loss` matrix, its action/model labels, an explicit `loss` or `utility` sense, and the
+//! caller's `permitted_actions`. The parser converts utility to loss exactly once and validates
+//! shape, uniqueness, finite values and identifier bounds before FIBER invokes any pass.
+//!
+//! The permitted-action set `A` and the decision loss `ℓ` are **absent from the legacy wire
+//! formats**. That matters: decision-equivalence quotienting (43.10) and rate-distortion
+//! optimisation (43.12) are both defined relative to `A` and `ℓ`, so neither can be implemented
+//! against 0.2 without extending the schema. [`Query::missing_contract_fields`] reports the gap
+//! rather than letting a later pass quietly substitute a default. 0.3 closes only the 43.10
+//! input gap; compatible-model posteriors and evidence-pool likelihood bindings for 43.12 remain
+//! absent and are still reported as deferred.
 //!
 //! Of the role/policy pair `ω`, only [`Query::policy`] is read — by [`crate::policy`], as the set
 //! of obligations the caller accepts. [`Query::role`] is still parsed and discarded: 43.33 binds
@@ -34,7 +41,7 @@
 //!
 //! # Why a 0.1 label is still read
 //!
-//! [`ACCEPTED_QUERY_SCHEMA_VERSIONS`] holds two entries, which looks like a loophole and is the
+//! [`ACCEPTED_QUERY_SCHEMA_VERSIONS`] holds three entries, which looks like a loophole and is the
 //! opposite. The published `schemas/fiber-v0.1/query.schema.json` has declared
 //! `additionalProperties: false` since 0.1: a document carrying an undeclared key was *never* a
 //! valid 0.1 query, the parser simply was not enforcing the schema it published. So no document
@@ -62,16 +69,27 @@
 //! and this is the first.
 
 use crate::error::FiberError;
+use bioprism_epistemic::{DecisionProblem, EpistemicError};
 use bioprism_ids::{QueryId, VariableName};
 use bioprism_scope::Timestamp;
 use serde_json::{Map, Value};
 use std::collections::BTreeSet;
 
+const MAX_DECISION_CONTRACT_ITEMS: usize = 1_000;
+const MAX_DECISION_IDENTIFIER_BYTES: usize = 256;
+
 /// The version a query this compiler emits or prefers declares.
 pub const QUERY_SCHEMA_VERSION: &str = "fiber-query/0.2";
 
+/// The first wire version whose decision contract is mandatory and executable by FIBER.
+pub const QUERY_DECISION_SCHEMA_VERSION: &str = "fiber-query/0.3";
+
 /// Every version label this parser reads, newest last. See the module docs for why 0.1 is here.
-pub const ACCEPTED_QUERY_SCHEMA_VERSIONS: &[&str] = &["fiber-query/0.1", QUERY_SCHEMA_VERSION];
+pub const ACCEPTED_QUERY_SCHEMA_VERSIONS: &[&str] = &[
+    "fiber-query/0.1",
+    QUERY_SCHEMA_VERSION,
+    QUERY_DECISION_SCHEMA_VERSION,
+];
 
 /// Every key `fiber-query/0.2` declares, as dotted paths, sorted.
 ///
@@ -98,6 +116,32 @@ pub const QUERY_FIELD_PATHS: &[&str] = &[
     "targets",
 ];
 
+/// Every key `fiber-query/0.3` declares, including the decision contract consumed by 43.10.
+///
+/// The 0.2 set remains separately exported because its accepted-key refusal is part of the
+/// published compatibility contract and because a 0.2 caller must not accidentally gain 0.3
+/// semantics merely by passing through this parser.
+pub const QUERY_DECISION_FIELD_PATHS: &[&str] = &[
+    "budgets",
+    "budgets.max_facts",
+    "budgets.max_tokens",
+    "decision_loss",
+    "decision_loss.actions",
+    "decision_loss.loss",
+    "decision_loss.models",
+    "decision_loss.sense",
+    "decision_time",
+    "distortion_tolerance",
+    "goal",
+    "permitted_actions",
+    "policy",
+    "protected_tags",
+    "query_id",
+    "role",
+    "schema_version",
+    "targets",
+];
+
 /// The goal string the CPython reference hard-codes into every Decision Section.
 ///
 /// Hard-coding a radiogenomic goal inside a general compiler is a defect in the reference. A
@@ -105,6 +149,39 @@ pub const QUERY_FIELD_PATHS: &[&str] = &[
 /// byte-comparable with the reference.
 pub const REFERENCE_GOAL: &str =
     "Determine whether the proposed radiogenomic split supports a valid external-generalization analysis.";
+
+/// Whether the query's matrix is written as a loss to minimise or a utility to maximise.
+///
+/// The epistemic kernel uses loss internally. Utility input is negated exactly once at the QIR
+/// boundary, so every downstream pass has one convention and the wire contract remains explicit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecisionSense {
+    Loss,
+    Utility,
+}
+
+impl DecisionSense {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Loss => "loss",
+            Self::Utility => "utility",
+        }
+    }
+}
+
+/// The executable decision contract carried by `fiber-query/0.3`.
+///
+/// Blueprint 43.02 names `A` and `ℓ` as query inputs, and 43.10 quotients only distinctions that
+/// cannot change an allowed decision. The wire parser therefore requires both instead of
+/// widening a research query to every action or inventing a loss. `compatible_models` and
+/// evidence-pool bindings remain future fields for rate-distortion; 43.10 needs only this exact
+/// model/action loss table.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DecisionContract {
+    pub problem: DecisionProblem,
+    pub permitted_actions: Vec<String>,
+    pub sense: DecisionSense,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Budgets {
@@ -125,6 +202,7 @@ pub struct Query {
     pub policy: Vec<String>,
     pub distortion_tolerance: Option<f64>,
     pub goal: Option<String>,
+    pub decision_contract: Option<DecisionContract>,
     raw: Value,
 }
 
@@ -143,7 +221,12 @@ impl Query {
             });
         }
 
-        reject_undeclared_fields(map)?;
+        let accepted_fields = if schema_version == QUERY_DECISION_SCHEMA_VERSION {
+            QUERY_DECISION_FIELD_PATHS
+        } else {
+            QUERY_FIELD_PATHS
+        };
+        reject_undeclared_fields(map, accepted_fields)?;
 
         let query_id_text = map
             .get("query_id")
@@ -189,6 +272,12 @@ impl Query {
             .ok_or(FiberError::MissingQueryField("budgets.max_facts"))?
             as usize;
 
+        let decision_contract = if schema_version == QUERY_DECISION_SCHEMA_VERSION {
+            Some(parse_decision_contract(map)?)
+        } else {
+            None
+        };
+
         Ok(Query {
             query_id,
             targets,
@@ -206,6 +295,7 @@ impl Query {
             policy: string_set(map.get("policy")).into_iter().collect(),
             distortion_tolerance: map.get("distortion_tolerance").and_then(Value::as_f64),
             goal: map.get("goal").and_then(Value::as_str).map(str::to_string),
+            decision_contract,
             raw,
         })
     }
@@ -218,14 +308,20 @@ impl Query {
         self.goal.as_deref().unwrap_or(REFERENCE_GOAL)
     }
 
-    /// Components of the formal decision contract that `fiber-query/0.2` still cannot express.
+    pub fn has_decision_contract(&self) -> bool {
+        self.decision_contract.is_some()
+    }
+
+    /// Components of the formal decision contract that this query cannot express.
     ///
-    /// Any pass that needs one of these must refuse to run rather than assume a default. 0.2
-    /// refused the *undeclared* key without adding the fields, so a caller who writes
-    /// `decision_loss` now gets an error naming it instead of silence — but the gap
-    /// `bioprism-epistemic::gap` specifies is still a gap, and this list still names it.
+    /// Any pass that needs one of these must refuse to run rather than assume a default. Legacy
+    /// 0.1/0.2 queries return the two decision fields; 0.3 returns neither because its explicit
+    /// contract is present. Distortion tolerance is independent and remains optional.
     pub fn missing_contract_fields(&self) -> Vec<&'static str> {
-        let mut missing = vec!["permitted_actions", "decision_loss"];
+        let mut missing = Vec::new();
+        if self.decision_contract.is_none() {
+            missing.extend(["permitted_actions", "decision_loss"]);
+        }
         if self.distortion_tolerance.is_none() {
             missing.push("distortion_tolerance");
         }
@@ -233,7 +329,7 @@ impl Query {
     }
 }
 
-/// Refuses a query carrying any key outside [`QUERY_FIELD_PATHS`].
+/// Refuses a query carrying any key outside the accepted path set for its version.
 ///
 /// Runs immediately after the version check and before any field is read, so a caller is told
 /// their document is not a query of this format before being told which of its fields is missing.
@@ -243,10 +339,13 @@ impl Query {
 /// `budgets` is descended into and nothing else is, because it is the only nested object the
 /// format declares. `policy`, `protected_tags` and `targets` are arrays of strings with no
 /// interior to declare, and a value that is not an object cannot hide a key.
-fn reject_undeclared_fields(map: &Map<String, Value>) -> Result<(), FiberError> {
+fn reject_undeclared_fields(
+    map: &Map<String, Value>,
+    accepted_fields: &'static [&'static str],
+) -> Result<(), FiberError> {
     let mut undeclared: Vec<String> = map
         .keys()
-        .filter(|key| !QUERY_FIELD_PATHS.contains(&key.as_str()))
+        .filter(|key| !accepted_fields.contains(&key.as_str()))
         .cloned()
         .collect();
 
@@ -255,7 +354,7 @@ fn reject_undeclared_fields(map: &Map<String, Value>) -> Result<(), FiberError> 
             budgets
                 .keys()
                 .map(|key| format!("budgets.{key}"))
-                .filter(|path| !QUERY_FIELD_PATHS.contains(&path.as_str())),
+                .filter(|path| !accepted_fields.contains(&path.as_str())),
         );
     }
 
@@ -265,8 +364,166 @@ fn reject_undeclared_fields(map: &Map<String, Value>) -> Result<(), FiberError> 
     undeclared.sort();
     Err(FiberError::UnknownQueryFields {
         fields: undeclared,
-        accepted: QUERY_FIELD_PATHS,
+        accepted: accepted_fields,
     })
+}
+
+fn parse_decision_contract(map: &Map<String, Value>) -> Result<DecisionContract, FiberError> {
+    let decision_loss = map
+        .get("decision_loss")
+        .and_then(Value::as_object)
+        .ok_or(FiberError::MissingQueryField("decision_loss"))?;
+    let allowed = ["actions", "loss", "models", "sense"];
+    let unknown: Vec<&str> = decision_loss
+        .keys()
+        .map(String::as_str)
+        .filter(|key| !allowed.contains(key))
+        .collect();
+    if !unknown.is_empty() {
+        return Err(FiberError::InvalidDecisionContract(format!(
+            "decision_loss carries undeclared field(s) {unknown:?}"
+        )));
+    }
+
+    let sense = match decision_loss.get("sense").and_then(Value::as_str) {
+        None | Some("loss") => DecisionSense::Loss,
+        Some("utility") => DecisionSense::Utility,
+        Some(other) => {
+            return Err(FiberError::InvalidDecisionContract(format!(
+                "sense must be \"loss\" or \"utility\", got {other:?}"
+            )))
+        }
+    };
+    let actions = parse_contract_strings(decision_loss, "actions", "decision_loss.actions")?;
+    let models = parse_contract_strings(decision_loss, "models", "decision_loss.models")?;
+    let loss_value = decision_loss
+        .get("loss")
+        .and_then(Value::as_array)
+        .ok_or(FiberError::MissingQueryField("decision_loss.loss"))?;
+    if loss_value.is_empty() || loss_value.len() > MAX_DECISION_CONTRACT_ITEMS {
+        return Err(FiberError::InvalidDecisionContract(format!(
+            "decision_loss.loss must contain between 1 and {MAX_DECISION_CONTRACT_ITEMS} rows"
+        )));
+    }
+    if loss_value.len() != actions.len() {
+        return Err(FiberError::InvalidDecisionContract(format!(
+            "decision_loss.loss has {} rows but actions declares {}",
+            loss_value.len(),
+            actions.len()
+        )));
+    }
+    let mut loss = Vec::with_capacity(actions.len() * models.len());
+    for (row_index, row) in loss_value.iter().enumerate() {
+        let row = row.as_array().ok_or_else(|| {
+            FiberError::InvalidDecisionContract(format!(
+                "decision_loss.loss[{row_index}] must be an array of finite numbers"
+            ))
+        })?;
+        if row.len() != models.len() {
+            return Err(FiberError::InvalidDecisionContract(format!(
+                "decision_loss.loss[{row_index}] has {} columns but models declares {}",
+                row.len(),
+                models.len()
+            )));
+        }
+        for (model_index, value) in row.iter().enumerate() {
+            let value = value.as_f64().ok_or_else(|| {
+                FiberError::InvalidDecisionContract(format!(
+                    "decision_loss.loss[{row_index}][{model_index}] must be a finite number"
+                ))
+            })?;
+            loss.push(value);
+        }
+    }
+    let problem = match sense {
+        DecisionSense::Loss => DecisionProblem::new(actions, models, loss),
+        DecisionSense::Utility => DecisionProblem::from_utilities(actions, models, loss),
+    }
+    .map_err(decision_contract_error)?;
+
+    let permitted_actions = parse_top_level_strings(map, "permitted_actions")?;
+    if permitted_actions.is_empty() {
+        return Err(FiberError::InvalidDecisionContract(
+            "permitted_actions must contain at least one action".into(),
+        ));
+    }
+    let mut seen = BTreeSet::new();
+    for action in &permitted_actions {
+        if !seen.insert(action.clone()) {
+            return Err(FiberError::InvalidDecisionContract(format!(
+                "permitted_actions repeats {action:?}"
+            )));
+        }
+        problem
+            .action_index(action)
+            .map_err(decision_contract_error)?;
+    }
+
+    Ok(DecisionContract {
+        problem,
+        permitted_actions,
+        sense,
+    })
+}
+
+fn parse_contract_strings(
+    object: &Map<String, Value>,
+    key: &'static str,
+    field: &'static str,
+) -> Result<Vec<String>, FiberError> {
+    let value = object
+        .get(key)
+        .ok_or(FiberError::MissingQueryField(field))?;
+    parse_strings(value, field)
+}
+
+fn parse_top_level_strings(
+    object: &Map<String, Value>,
+    field: &'static str,
+) -> Result<Vec<String>, FiberError> {
+    let value = object
+        .get(field)
+        .ok_or(FiberError::MissingQueryField(field))?;
+    parse_strings(value, field)
+}
+
+fn parse_strings(value: &Value, field: &'static str) -> Result<Vec<String>, FiberError> {
+    let items = value.as_array().ok_or(FiberError::WrongQueryFieldType {
+        field,
+        expected: "array of non-empty strings",
+    })?;
+    if items.len() > MAX_DECISION_CONTRACT_ITEMS {
+        return Err(FiberError::InvalidDecisionContract(format!(
+            "{field} contains {} items; the maximum is {MAX_DECISION_CONTRACT_ITEMS}",
+            items.len()
+        )));
+    }
+    items
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            let text = value
+                .as_str()
+                .ok_or(FiberError::InvalidDecisionContract(format!(
+                    "{field}[{index}] must be a string"
+                )))?;
+            if text.trim().is_empty() {
+                return Err(FiberError::InvalidDecisionContract(format!(
+                    "{field}[{index}] must not be empty"
+                )));
+            }
+            if text.len() > MAX_DECISION_IDENTIFIER_BYTES {
+                return Err(FiberError::InvalidDecisionContract(format!(
+                    "{field}[{index}] exceeds the {MAX_DECISION_IDENTIFIER_BYTES}-byte limit"
+                )));
+            }
+            Ok(text.to_string())
+        })
+        .collect()
+}
+
+fn decision_contract_error(error: EpistemicError) -> FiberError {
+    FiberError::InvalidDecisionContract(error.to_string())
 }
 
 fn string_set(value: Option<&Value>) -> BTreeSet<String> {

@@ -1785,6 +1785,30 @@ impl Server {
                 }),
             );
 
+            if let Some(quotient) = &out.trace.decision_quotient {
+                map.insert(
+                    "decision_quotient".into(),
+                    json!({
+                        "schema": "bioprism-mcp/epistemic-decision-quotient/0.1",
+                        "basis": quotient.basis,
+                        "permitted_actions": quotient.permitted_actions,
+                        "original_model_count": quotient.original_model_count,
+                        "quotient_model_count": quotient.quotient_model_count,
+                        "merged_model_count": quotient.merged_model_count,
+                        "compressed": quotient.compressed(),
+                        "compression_fraction": quotient.compression_fraction(),
+                        "certificate_binding": {
+                            "query_sha256": out.certificate.source_hashes.query_sha256,
+                            "certificate_sha256": context.certificate_sha256,
+                        },
+                        "limitations": [
+                            "decision-relative model compression only; this is not a biological, causal, predictive, clinical, or likelihood equivalence",
+                            "the quotient is not a rate-distortion frontier and does not claim evidence sufficiency",
+                        ],
+                    }),
+                );
+            }
+
             let world = arguments
                 .get("world")
                 .and_then(Value::as_str)
@@ -1833,6 +1857,7 @@ impl Server {
             "passes_not_run": out.trace.deferred_passes.iter().map(|(name, reason)| json!({
                 "name": name, "reason": reason
             })).collect::<Vec<_>>(),
+            "decision_quotient": out.trace.decision_quotient,
             "selection": {
                 "facts": out.certificate.plan.compiled_fact_count,
                 "of_total": out.certificate.plan.total_fact_count,
@@ -31493,7 +31518,7 @@ pub fn tool_definitions() -> Vec<Value> {
         "type": "object",
         "properties": {
             "world": { "type": "string", "description": "Path to a fiber-world/0.1 document or an indexed store directory, relative to the server root." },
-            "query": { "type": "string", "description": "Path to a fiber-query/0.2 document, relative to the server root. A document still labelled fiber-query/0.1 is read; one carrying a key the schema does not declare is refused under either label." }
+            "query": { "type": "string", "description": "Path to a fiber-query/0.1, fiber-query/0.2, or fiber-query/0.3 document, relative to the server root. The 0.3 form carries a required explicit decision-loss matrix and permitted-action boundary." }
         },
         "required": ["world", "query"]
     });

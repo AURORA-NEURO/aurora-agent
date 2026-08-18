@@ -26,12 +26,13 @@ use crate::policy::{self, PolicyEnvelope, PolicyOutcome, PolicyScreen, POLICY_RE
 use crate::qir::Query;
 use crate::slice::{backward_slice, max_selected_arity};
 use crate::temporal::{temporal_cut, TemporalCut};
+use bioprism_epistemic::{decision_equivalence_quotient, DecisionEquivalenceQuotient};
+use bioprism_ids::ContentHash;
 use bioprism_influence::summarise;
 use bioprism_section::{
     ContextCertificate, DecisionSection, EvidenceCapsule, InfluenceClass, OmissionGroup,
     OmissionManifest, ReferenceOmissions, RefinementOption, SourceHashes, UnresolvedObligation,
 };
-use bioprism_ids::ContentHash;
 use bioprism_world::{Fact, WorldSource};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -72,6 +73,9 @@ pub struct CompileTrace {
     pub plan: PlanEvaluation,
     /// Influence bounds on the temporally withheld facts, and the split they license (43.28).
     pub withheld_influence: WithheldSplit,
+    /// The exact 43.10 quotient when the query supplied a `fiber-query/0.3` decision contract.
+    /// `None` is meaningful: older wire versions remain executable but cannot claim this pass.
+    pub decision_quotient: Option<DecisionEquivalenceQuotient>,
 }
 
 #[derive(Debug, Clone)]
@@ -99,6 +103,27 @@ pub fn compile<S: WorldSource + ?Sized>(
 ) -> Result<CompileOutput, FiberError> {
     let mut passes = Vec::new();
 
+    let decision_quotient = query
+        .decision_contract
+        .as_ref()
+        .map(|contract| {
+            decision_equivalence_quotient(&contract.problem, &contract.permitted_actions)
+                .map_err(|error| FiberError::InvalidDecisionContract(error.to_string()))
+        })
+        .transpose()?;
+    if let Some(quotient) = &decision_quotient {
+        passes.push(PassReceipt {
+            name: "decision_quotient",
+            retained: quotient.quotient_model_count,
+            note: format!(
+                "{} model(s) reduced to {} decision-equivalence class(es); {} merged",
+                quotient.original_model_count,
+                quotient.quotient_model_count,
+                quotient.merged_model_count
+            ),
+        });
+    }
+
     let envelope = PolicyEnvelope::resolve(source, query)?;
 
     let protected = protected_closure(source, &query.protected_tags);
@@ -112,7 +137,10 @@ pub fn compile<S: WorldSource + ?Sized>(
     passes.push(PassReceipt {
         name: "backward_slice",
         retained: slice.selected_factors.len(),
-        note: format!("{} variables reachable from targets", slice.needed_variables.len()),
+        note: format!(
+            "{} variables reachable from targets",
+            slice.needed_variables.len()
+        ),
     });
 
     let mut selected_facts: BTreeSet<String> = slice
@@ -208,14 +236,18 @@ pub fn compile<S: WorldSource + ?Sized>(
         .map(|id| UnresolvedObligation::PolicyBlocked {
             detail: PolicyScreen::obligation_detail(
                 id,
-                screen.missing_for(id).expect("withheld ids carry their clauses"),
+                screen
+                    .missing_for(id)
+                    .expect("withheld ids carry their clauses"),
             ),
         })
         .collect();
     unresolved.extend(
         inaccessible
             .iter()
-            .map(|id| UnresolvedObligation::InaccessibleAtCut { fact_id: id.clone() }),
+            .map(|id| UnresolvedObligation::InaccessibleAtCut {
+                fact_id: id.clone(),
+            }),
     );
 
     let mut frontier = Vec::new();
@@ -339,6 +371,7 @@ pub fn compile<S: WorldSource + ?Sized>(
             policy: PolicyOutcome::new(&envelope, &screen),
             plan: evaluation,
             withheld_influence,
+            decision_quotient,
         },
     })
 }
@@ -436,15 +469,15 @@ fn deferred_passes(query: &Query) -> Vec<(&'static str, &'static str)> {
             "43.33 orders outputs by policy label; fiber-world/0.1 declares no labels and no rules attached at scopes, so only read access is decided",
         ),
     ];
-    if query.missing_contract_fields().contains(&"decision_loss") {
+    if !query.has_decision_contract() {
         deferred.push((
             "decision_quotient",
-            "43.10 is defined relative to permitted actions and decision loss, neither of which fiber-query/0.2 carries",
-        ));
-        deferred.push((
-            "rate_distortion",
-            "43.12 optimises against a decision loss the query does not declare",
+            "43.10 is defined relative to permitted actions and decision loss; fiber-query/0.1 and fiber-query/0.2 do not carry the executable contract",
         ));
     }
+    deferred.push((
+        "rate_distortion",
+        "43.12 additionally requires compatible-model posteriors and observed evidence-pool likelihoods; fiber-query/0.3 carries neither binding, so the quotient does not get mislabelled as context optimisation",
+    ));
     deferred
 }

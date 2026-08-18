@@ -18,11 +18,11 @@
 //! ```
 //!
 //! What this engine does *not* do is as important as what it does. It performs no gluing or
-//! obstruction analysis, no abstract interpretation, no decision-equivalence quotienting and no
-//! rate-distortion optimisation, because `fiber-world/0.1` and `fiber-query/0.2` do not carry the
-//! cover, abstract domains, permitted actions or decision loss those passes are defined against.
-//! Every compile reports the gap in [`CompileTrace::deferred_passes`] and on the certificate's
-//! `limitations`.
+//! obstruction analysis, no abstract interpretation and no rate-distortion optimisation. The
+//! versioned `fiber-query/0.3` boundary now carries the explicit permitted actions and decision
+//! loss needed by the 43.10 quotient, while older queries continue to report that pass deferred.
+//! Every compile reports the remaining gaps in [`CompileTrace::deferred_passes`] and on the
+//! certificate's `limitations`.
 //!
 //! The [`policy`] pass is the same story told at one level of detail rather than none: it enforces
 //! the clause grants the wire formats *can* express and names, in its module documentation, the
@@ -55,8 +55,9 @@ pub use influence::{CorrespondenceCheck, NotPosable, WithheldSplit, WithholdingA
 pub use plan::{PlanEvaluation, PortfolioOutcome, RegionStatistics, DELIVERING_BACKEND};
 pub use policy::{PolicyEnvelope, PolicyOutcome, PolicyScreen, PolicyViolation};
 pub use qir::{
-    Budgets, Query, ACCEPTED_QUERY_SCHEMA_VERSIONS, QUERY_FIELD_PATHS, QUERY_SCHEMA_VERSION,
-    REFERENCE_GOAL,
+    Budgets, DecisionContract, DecisionSense, Query, ACCEPTED_QUERY_SCHEMA_VERSIONS,
+    QUERY_DECISION_FIELD_PATHS, QUERY_DECISION_SCHEMA_VERSION, QUERY_FIELD_PATHS,
+    QUERY_SCHEMA_VERSION, REFERENCE_GOAL,
 };
 pub use slice::{backward_slice, Slice};
 pub use temporal::{temporal_cut, TemporalCut};

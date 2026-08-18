@@ -114,9 +114,10 @@ checks, protected closure, exact small-instance comparison, review-gated causal 
 declaration-versus-measurement boundaries; they do not add adaptive acquisition, trajectory replay,
 benchmark execution, pack generation, SDKs, external APIs, or a public evaluation service.
 The quotient additionally preserves model identity, permitted-action boundaries, exact loss-difference
-profiles, tie sets, and deterministic compression across Rust, MCP, Python, and TypeScript. It does
-not close the FIBER wire integration: `fiber-query/0.2` still lacks the permitted-action and loss
-fields needed to invoke the pass from a compiled query.
+profiles, tie sets, and deterministic compression across Rust, MCP, Python, and TypeScript. The
+versioned `fiber-query/0.3` boundary now carries and executes that explicit contract inside FIBER;
+legacy 0.1/0.2 queries still defer the pass. Rate-distortion remains open at the wire boundary
+because compatible-model posteriors and evidence-pool likelihood bindings are not yet declared.
 The foundation contract surface is callable too: it keeps admissibility, refinement, applicability,
 counterfactual world strength, reveal policy, and plane consistency independent, without creating
 clinical authority, causal identification, or runtime world validation.

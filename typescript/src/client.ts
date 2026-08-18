@@ -245,6 +245,8 @@ import type {
   EpistemicVoiResult,
   EpistemicDecisionQuotientArgs,
   EpistemicDecisionQuotientResult,
+  FiberCompileArgs,
+  FiberCompileResult,
   EpistemicContextAuditArgs,
   EpistemicContextAuditResult,
   EpistemicSelectionAuditArgs,
@@ -1494,6 +1496,11 @@ export class ApiClient {
 
   async epistemicDecisionQuotient(args: EpistemicDecisionQuotientArgs, options?: ClientRequestOptions): Promise<RestToolResponse<EpistemicDecisionQuotientResult>> {
     return this.callTool<EpistemicDecisionQuotientResult>("epistemic_decision_quotient", args, options);
+  }
+
+  /** Compile a FIBER query; 0.3 responses carry a typed decision-quotient summary at L0. */
+  async fiberCompile(args: FiberCompileArgs, options?: ClientRequestOptions): Promise<RestToolResponse<FiberCompileResult>> {
+    return this.callTool<FiberCompileResult>("fiber_compile", args, options);
   }
 
   async epistemicContextAudit(args: EpistemicContextAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<EpistemicContextAuditResult>> {

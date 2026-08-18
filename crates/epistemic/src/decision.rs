@@ -6,11 +6,11 @@
 //! distortion of a compressed context, the value of an evidence action, whether a rebase preserved
 //! a decision — is a statement about `A` and `ℓ`.
 //!
-//! `fiber-query/0.1` carries neither. [`crate::gap`] states exactly what it would have to carry.
-//! Until then this crate takes both from the caller, and every entry point that needs them takes
-//! them as arguments rather than reading a default. There is no `DecisionProblem::default()`, and
-//! that is deliberate: a default loss is a decision made by whoever wrote the library, silently,
-//! on behalf of a caller who never saw it.
+//! The legacy `fiber-query/0.1` and `fiber-query/0.2` forms carry neither. The executable
+//! `fiber-query/0.3` boundary owns the wire conversion and passes this kernel an explicit problem.
+//! Every entry point that needs a problem still takes it from the caller rather than reading a
+//! default. There is no `DecisionProblem::default()`, and that is deliberate: a default loss is a
+//! decision made by whoever wrote the library, silently, on behalf of a caller who never saw it.
 //!
 //! ## Loss, not utility
 //!

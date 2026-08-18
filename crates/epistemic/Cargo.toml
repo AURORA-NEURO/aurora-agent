@@ -7,7 +7,6 @@ description = "The remaining FIBER calculus: coverage-aware selection, separator
 [dependencies]
 bioprism-ids = { workspace = true }
 bioprism-scope = { workspace = true }
-bioprism-fiber = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

@@ -8467,6 +8467,67 @@ fn compile_returns_the_contract_not_the_evidence() {
     );
 }
 
+/// The 0.3 decision contract crosses the MCP boundary as an explicit, certificate-bound summary.
+#[test]
+fn compile_projects_the_wire_decision_quotient_without_claiming_rate_distortion() {
+    let mut server = server();
+    let payload = call(
+        &mut server,
+        "fiber_compile",
+        json!({
+            "world": WORLD,
+            "query": "fixtures/fiber-v0.3/decision_contract_query.json"
+        }),
+    );
+
+    assert_eq!(payload["layer"], json!("l0"));
+    let quotient = &payload["decision_quotient"];
+    assert_eq!(
+        quotient["schema"],
+        json!("bioprism-mcp/epistemic-decision-quotient/0.1")
+    );
+    assert_eq!(
+        quotient["permitted_actions"],
+        json!(["accept", "defer", "reject"])
+    );
+    assert_eq!(quotient["original_model_count"], json!(3));
+    assert_eq!(quotient["quotient_model_count"], json!(2));
+    assert_eq!(quotient["merged_model_count"], json!(1));
+    assert_eq!(
+        quotient["certificate_binding"]["query_sha256"]
+            .as_str()
+            .map(str::len),
+        Some(64)
+    );
+    assert_eq!(
+        quotient["certificate_binding"]["certificate_sha256"],
+        payload["certificate_sha256"]
+    );
+    assert!(quotient["limitations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item.as_str().unwrap().contains("rate-distortion")));
+
+    let explained = call(
+        &mut server,
+        "fiber_explain",
+        json!({
+            "world": WORLD,
+            "query": "fixtures/fiber-v0.3/decision_contract_query.json"
+        }),
+    );
+    assert_eq!(
+        explained["decision_quotient"]["quotient_model_count"],
+        json!(2)
+    );
+    assert!(!explained["passes_not_run"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|pass| pass["name"] == "decision_quotient"));
+}
+
 #[test]
 fn a_refinement_handle_is_verified_and_stale_handles_are_refused() {
     let mut server = server();

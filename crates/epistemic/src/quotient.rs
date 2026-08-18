@@ -19,10 +19,11 @@
 //!
 //! The quotient therefore preserves permitted-action ordering and decision regret profiles.  It
 //! does not preserve absolute expected loss, forbidden actions, causal semantics, model
-//! likelihoods, or the truth of any scientific claim.  `fiber-query/0.2` still lacks the fields
-//! needed to invoke this pass from `bioprism-fiber`; the explicit kernel and its MCP entry point
-//! are useful now, while the wire compiler continues to refuse that missing contract rather than
-//! inventing one.
+//! likelihoods, or the truth of any scientific claim. The versioned `fiber-query/0.3` boundary
+//! now carries the exact action/loss table needed to invoke this pass from `bioprism-fiber`; the
+//! older wire forms continue to refuse that missing contract rather than inventing one. The
+//! compatible-model posterior and evidence-pool bindings required by rate-distortion remain a
+//! separate, deliberately deferred boundary.
 
 use crate::decision::{DecisionProblem, LOSS_EPSILON};
 use crate::error::EpistemicError;

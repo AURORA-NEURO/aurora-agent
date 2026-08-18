@@ -11,10 +11,8 @@ use thiserror::Error;
 pub enum FiberError {
     /// The document declares a version outside the accepted set.
     ///
-    /// `expected` is a list rather than a single string because `fiber-query/0.2` changed only
-    /// what a reader does with an undeclared key, so a 0.1 document whose keys are all declared is
-    /// byte-for-byte a valid 0.2 document and is still read. Naming one version here would tell a
-    /// caller holding a valid 0.1 query that it had to be rewritten.
+    /// `expected` is a list because the reader preserves valid legacy 0.1/0.2 documents while
+    /// also accepting the explicitly extended 0.3 decision-contract form.
     #[error("unsupported query schema: expected one of {expected:?}, got {actual:?}")]
     UnsupportedQuerySchema {
         expected: &'static [&'static str],
@@ -24,7 +22,7 @@ pub enum FiberError {
     #[error("query is not a JSON object")]
     QueryNotAnObject,
 
-    /// The query carried a key the wire format does not declare (`fiber-query/0.2`).
+    /// The query carried a key the wire format does not declare.
     ///
     /// Refusing is not pedantry about spelling. Until 0.2 the parser read the keys it knew and
     /// dropped the rest, and the whole query document is hashed into `source_hashes.query_sha256`
@@ -38,17 +36,23 @@ pub enum FiberError {
     /// Every offending path is reported, sorted, rather than the first one found: serde_json runs
     /// with `preserve_order`, so document order is not a stable thing to report, and a caller
     /// fixing a generator wants the whole list rather than one round trip per key.
-    #[error("query carries undeclared field(s) {fields:?}; fiber-query/0.2 declares exactly {accepted:?}")]
+    #[error("query carries undeclared field(s) {fields:?}; this schema version declares exactly {accepted:?}")]
     UnknownQueryFields {
         fields: Vec<String>,
         accepted: &'static [&'static str],
     },
 
+    #[error("invalid decision contract: {0}")]
+    InvalidDecisionContract(String),
+
     #[error("missing required query field {0:?}")]
     MissingQueryField(&'static str),
 
     #[error("query field {field:?} has the wrong type: expected {expected}")]
-    WrongQueryFieldType { field: &'static str, expected: &'static str },
+    WrongQueryFieldType {
+        field: &'static str,
+        expected: &'static str,
+    },
 
     #[error("invalid query identifier: {0}")]
     InvalidIdentifier(String),

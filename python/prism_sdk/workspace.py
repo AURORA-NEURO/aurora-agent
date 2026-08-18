@@ -214,6 +214,7 @@ from .context_requests import (
     FiberVerifyRequest,
     ProjectionBundleRequest,
 )
+from .fiber_contract import FiberDecisionQuotientSummary, fiber_decision_quotient_summary
 from .delivery import DeveloperDeliveryAuditReport, developer_delivery_audit_report
 from .developer_platform import (
     DeveloperPlatformStatusArgs,
@@ -4012,6 +4013,17 @@ class Workspace:
             request = FiberCompileRequest(world, query, layer)
         return self.tool("fiber_compile", request.to_mcp_arguments())
 
+    def fiber_compile_decision_quotient(
+        self,
+        world: str | FiberCompileRequest,
+        query: str | None = None,
+        *,
+        layer: ContextLayer | str = ContextLayer.L0,
+    ) -> FiberDecisionQuotientSummary:
+        """Compile and validate the executable 0.3 decision-quotient projection."""
+
+        return fiber_decision_quotient_summary(self.fiber_compile(world, query, layer=layer))
+
     def fiber_refine(
         self,
         layer: ContextLayer | str | FiberRefineRequest,
@@ -7799,6 +7811,17 @@ class AsyncWorkspace:
         if include_views is not None:
             arguments["include_views"] = include_views
         return (await self.client.call_tool("fiber_compile", arguments)).require_ok()
+
+    async def fiber_compile_decision_quotient(
+        self,
+        world: str | FiberCompileRequest,
+        query: str | None = None,
+        *,
+        layer: ContextLayer | str = ContextLayer.L0,
+    ) -> FiberDecisionQuotientSummary:
+        """Async counterpart to :meth:`Workspace.fiber_compile_decision_quotient`."""
+
+        return fiber_decision_quotient_summary(await self.fiber_compile(world, query, layer=layer))
 
     async def trace_otel_ingest(
         self,

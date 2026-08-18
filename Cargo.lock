@@ -322,7 +322,6 @@ dependencies = [
 name = "bioprism-epistemic"
 version = "0.1.0"
 dependencies = [
- "bioprism-fiber",
  "bioprism-ids",
  "bioprism-scope",
  "serde",
@@ -384,6 +383,7 @@ name = "bioprism-fiber"
 version = "0.1.0"
 dependencies = [
  "bioprism-backends",
+ "bioprism-epistemic",
  "bioprism-governance",
  "bioprism-ids",
  "bioprism-influence",

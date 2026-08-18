@@ -2486,6 +2486,36 @@ export interface EpistemicDecisionQuotientResult extends JsonObject {
   limitations?: string[];
 }
 
+/** Paths into a FIBER world/query pair accepted by the progressive compiler. */
+export interface FiberCompileArgs extends JsonObject {
+  world: string;
+  query: string;
+  layer?: "l0" | "l1" | "l2" | "l3" | "l4";
+}
+
+export interface FiberDecisionQuotientSummary extends JsonObject {
+  schema: "bioprism-mcp/epistemic-decision-quotient/0.1";
+  basis: "permitted_loss_difference_profile";
+  permitted_actions: string[];
+  original_model_count: number;
+  quotient_model_count: number;
+  merged_model_count: number;
+  compressed: boolean;
+  compression_fraction: number;
+  certificate_binding: {
+    query_sha256: string;
+    certificate_sha256: string;
+    [key: string]: JsonValue;
+  };
+  limitations: string[];
+}
+
+export interface FiberCompileResult extends JsonObject {
+  layer?: "l0" | "l1" | "l2" | "l3" | "l4";
+  decision_quotient?: FiberDecisionQuotientSummary;
+  certificate_sha256?: string;
+}
+
 export interface EpistemicEvidenceItemArgs extends JsonObject {
   id: string;
   cost: number;
