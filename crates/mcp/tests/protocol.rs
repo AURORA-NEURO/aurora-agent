@@ -7924,6 +7924,23 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
 #[test]
 fn capability_dashboard_separates_domain_surfaces_and_bounded_inventory() {
     let mut server = server();
+    let source_plan = call(
+        &mut server,
+        "domain_evidence_source_plan",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "dashboard-evidence-subject",
+            "source_tool": "modality_catalog",
+            "connector_kind": "literature",
+            "locator_kind": "uri",
+            "locator": "https://example.org/dashboard-evidence",
+            "retrieval_mode": "metadata_only",
+            "retrieval_policy": {"network": "caller_managed", "max_bytes": 4096, "cache": "content_addressed"},
+            "does_not_claim": ["retrieval occurred"]
+        }),
+    );
+    assert_eq!(source_plan["artifact_registry"]["indexed"], json!(true));
     let oncology = call(
         &mut server,
         "capability_dashboard",
@@ -7948,6 +7965,27 @@ fn capability_dashboard_separates_domain_surfaces_and_bounded_inventory() {
         .unwrap()
         .iter()
         .any(|tool| tool == "onco_response_assess"));
+    assert_eq!(
+        oncology["audit"]["groups"][0]["artifact_evidence"]["state"],
+        json!("observed")
+    );
+    assert_eq!(
+        oncology["audit"]["groups"][0]["artifact_evidence"]["matching_record_count"],
+        json!(1)
+    );
+    assert_eq!(
+        oncology["audit"]["groups"][0]["workflow_reconciliation_evidence"]["state"],
+        json!("missing")
+    );
+    assert_eq!(
+        oncology["audit"]["evidence"]["groups_with_artifact_evidence"],
+        json!(1)
+    );
+    assert_eq!(
+        oncology["audit"]["evidence"]["artifact_evidence_records"],
+        json!(1)
+    );
+    assert_eq!(oncology["evidence_digest"].as_str().unwrap().len(), 64);
     assert_eq!(oncology["capability_dashboard_ready"], json!(true));
     assert_eq!(oncology["catalog_digest"].as_str().unwrap().len(), 64);
     assert_eq!(oncology["dashboard_digest"].as_str().unwrap().len(), 64);

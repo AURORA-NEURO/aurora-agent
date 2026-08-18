@@ -25,6 +25,8 @@ def payload() -> dict:
         "schema": "bioprism-devplat-capability-dashboard/0.1",
         "catalog_digest": "a" * 64,
         "dashboard_digest": "b" * 64,
+        "evidence_digest": "f" * 64,
+        "evidence_scope": "selected_capability_groups_current_digest_verified_artifact_and_workflow_reconciliation_registries",
         "capability_dashboard_ready": True,
         "duplicate_schema_names": [],
         "audit": {
@@ -56,11 +58,65 @@ def payload() -> dict:
                 "invalid_transport_schemas": [],
                 "tools": ["onco_boundary_check", "onco_response_assess"],
                 "gaps": ["no_cli_entrypoints", "no_python_artifact"],
+                "artifact_evidence": {
+                    "ok": True,
+                    "schema": "bioprism-devplat-artifact-domain-evidence-posture/0.1",
+                    "workflow": "artifact_registry_domain_evidence_posture",
+                    "group_id": "biological_domains",
+                    "requested_domains": ["oncology"],
+                    "registry_generation": 4,
+                    "registry_size": 8,
+                    "state": "observed",
+                    "matching_record_count": 2,
+                    "integrity_verified_record_count": 2,
+                    "kind_counts": {"domain_report": 2},
+                    "family_counts": {"domain_report": 2},
+                    "verification_state_counts": {"verified_integrity": 2},
+                    "match_basis_counts": {"artifact_domain_intersection": 2},
+                    "subject_count": 2,
+                    "parent_linked_record_count": 1,
+                    "matched_domain_labels": ["oncology"],
+                    "scope": "exact_declared_registration_domain_intersection_or_explicit_artifact_group_id",
+                    "readiness_claimed": False,
+                    "execution": "not_started",
+                    "guarantees": [],
+                    "limitations": [],
+                },
+                "workflow_reconciliation_evidence": {
+                    "workflow_id": "biological_domains",
+                    "state": "missing",
+                    "record_count": 0,
+                    "completion_status_counts": {},
+                    "ready_count": 0,
+                    "review_required_count": 0,
+                    "integrity_invalid_count": 0,
+                    "evidence_invalid_count": 0,
+                    "readiness_claimed": False,
+                    "scope": "bounded_digest_valid_reconciliation_registry",
+                    "guarantees": [],
+                    "limitations": [],
+                },
             }],
             "warnings": [],
             "guarantees": [],
             "limitations": [],
             "ready": True,
+            "evidence": {
+                "scope": "selected_capability_groups_current_digest_verified_artifact_and_workflow_reconciliation_registries",
+                "evidence_digest": "f" * 64,
+                "artifact_registry_generation": 4,
+                "artifact_registry_size": 8,
+                "workflow_reconciliation_registry_generation": 2,
+                "workflow_reconciliation_registry_size": 0,
+                "groups_with_artifact_evidence": 1,
+                "artifact_evidence_records": 2,
+                "groups_with_workflow_reconciliation": 0,
+                "workflow_reconciliation_records": 0,
+                "readiness_claimed": False,
+                "execution": "not_started",
+                "guarantees": [],
+                "limitations": [],
+            },
         },
     }
 
@@ -91,6 +147,10 @@ class CapabilityDashboardTests(unittest.TestCase):
         self.assertEqual(report.callable[0].id, "biological_domains")
         self.assertEqual(report.gap_labels, ("no_cli_entrypoints", "no_python_artifact"))
         self.assertEqual(report.groups[0].tools[-1], "onco_response_assess")
+        self.assertEqual(report.evidence_digest, "f" * 64)
+        self.assertEqual(report.evidence.groups_with_artifact_evidence, 1)
+        self.assertEqual(report.groups[0].artifact_evidence.matching_record_count, 2)
+        self.assertEqual(report.groups[0].workflow_reconciliation_evidence.state, "missing")
         self.assertTrue(capability_dashboard_report({"ok": True, "mcp": {"result": {"structuredContent": payload()}}}).ready)
 
     def test_all_facades_keep_dashboard_typed(self) -> None:

@@ -22,7 +22,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 |---|---|
 | `GET /healthz`, `GET /readyz` | Liveness/readiness and retention metrics |
 | `GET /v1/capabilities` | Tool/resource counts, transport support, limits, and workspace catalogue |
-| `GET /v1/capabilities/dashboard` | Bounded digest-bound callable/partial/declared-only capability inventory with explicit transport gaps |
+| `GET /v1/capabilities/dashboard` | Bounded capability inventory with transport gaps plus advisory artifact and workflow-reconciliation evidence posture |
 | `POST /v1/capabilities/route` | Raw non-executing cross-domain route proposal without an MCP response envelope |
 | `POST /v1/capabilities/route/review` | Raw non-executing caller-selection review and mission handoff without an MCP response envelope |
 | `GET /v1/recovery` | One operator-visible matrix of restart, secret, outbox, delivery-provenance, and external-effect boundaries |
@@ -258,6 +258,17 @@ matching counts. This adjunct does not change the intake-only meanings of `compl
 an adapter, provider, source, report, or workflow executed or became scientifically, clinically,
 or operationally valid. Python exposes parsed artifact postures when present and keeps legacy
 responses explicit; TypeScript exposes the same group and summary fields.
+
+`GET /v1/capabilities/dashboard` now joins two additional, independently inspectable views to every
+returned capability group: `artifact_evidence` from the current digest-verified artifact registry
+and `workflow_reconciliation_evidence` from the bounded digest-valid reconciliation registry. The
+`audit.evidence` summary reports registry generations/sizes, selected-group counts, record counts,
+and a separate `evidence_digest` that binds the selected group postures and registry metadata.
+`dashboard_digest` continues to identify the catalogue/schema dashboard itself; it is intentionally
+not silently redefined as an execution or readiness digest. The dashboard's `capability_dashboard_ready`
+flag remains transport-schema coverage only, and neither evidence posture implies that a tool ran,
+a workflow reconciled successfully, or a scientific, clinical, regulatory, release, or external
+effect claim is valid. Older clients may ignore these additive fields.
 `POST /v1/domain-evidence/sources` builds the external-source planning boundary. It binds a
 connector family, locator class, retrieval mode, bounded network/cache policy, optional expected
 content digest, and domain scope into an exact plan artifact. Credentials remain caller-managed;

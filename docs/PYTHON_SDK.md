@@ -710,8 +710,12 @@ invent defaults:
 - `capability_dashboard(...)` returns a bounded, digest-bound projection of the selected catalogue
   groups. `CapabilityDashboardReport.from_wire(...)` plus the sync/async Workspace and HTTP helpers
   expose separate crate, CLI, Python, MCP-membership, and schema-backed counts, callable/partial/
-  declared-only readiness, explicit gap labels, filter provenance, and truncation warnings. A ready
-  dashboard is a transport-coverage signal only; it does not execute or authorize a tool.
+  declared-only readiness, explicit gap labels, filter provenance, and truncation warnings. Each
+  selected group also exposes optional typed `artifact_evidence` and
+  `workflow_reconciliation_evidence` postures, while `report.evidence` carries the selected-group
+  registry generations, counts, and separate evidence digest. A ready dashboard is a
+  transport-coverage signal only; the joined evidence is advisory and does not execute, authorize,
+  or validate a tool or workflow.
 - `ApiClient.capability_dashboard_rest(...)` and its async counterpart use the dedicated
   `GET /v1/capabilities/dashboard` route with the same typed query bounds. The existing
   `capability_dashboard(...)` tool helper remains available when callers need the MCP envelope;

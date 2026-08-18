@@ -11929,6 +11929,19 @@ mod tests {
         );
         assert!(payload["audit"]["selected_group_count"].as_u64().unwrap() >= 1);
         assert_eq!(payload["audit"]["groups"][0]["readiness"], "callable");
+        assert_eq!(
+            payload["audit"]["groups"][0]["artifact_evidence"]["state"],
+            "missing"
+        );
+        assert_eq!(
+            payload["audit"]["groups"][0]["workflow_reconciliation_evidence"]["state"],
+            "missing"
+        );
+        assert_eq!(
+            payload["audit"]["evidence"]["groups_with_artifact_evidence"],
+            0
+        );
+        assert_eq!(payload["evidence_digest"].as_str().unwrap().len(), 64);
 
         let invalid = router.handle(request(
             "GET",

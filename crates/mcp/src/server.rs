@@ -27523,25 +27523,190 @@ impl Server {
         }
         let audit = build_dashboard(&catalogue, &schema_quality, &query)
             .map_err(|error| format!("capability dashboard refused: {error}"))?;
+        let mut audit_value = serde_json::to_value(&audit).map_err(|error| {
+            format!("capability dashboard audit could not be serialized: {error}")
+        })?;
+        let selected_groups = audit_value
+            .get("groups")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|group| {
+                let id = group.get("id").and_then(Value::as_str)?.to_string();
+                let domains = group
+                    .get("domains")
+                    .and_then(Value::as_array)
+                    .map(|values| {
+                        values
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .map(str::to_owned)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                Some((id, domains))
+            })
+            .collect::<Vec<_>>();
+        let (artifact_registry_generation, artifact_registry_size, artifact_postures) = {
+            let registry = self
+                .artifact_registry
+                .lock()
+                .map_err(|_| "artifact registry lock is poisoned".to_string())?;
+            let postures = selected_groups
+                .iter()
+                .map(|(id, domains)| (id.clone(), registry.domain_evidence_posture(id, domains)))
+                .collect::<BTreeMap<_, _>>();
+            (registry.generation(), registry.len(), postures)
+        };
+        let (
+            workflow_reconciliation_registry_generation,
+            workflow_reconciliation_registry_size,
+            reconciliation_postures,
+        ) = {
+            let registry = self
+                .workflow_reconciliation_registry
+                .lock()
+                .map_err(|_| "workflow reconciliation registry lock is poisoned".to_string())?;
+            let postures = selected_groups
+                .iter()
+                .map(|(id, _)| (id.clone(), registry.workflow_posture(id)))
+                .collect::<BTreeMap<_, _>>();
+            (registry.generation(), registry.len(), postures)
+        };
+        let mut groups_with_artifact_evidence = 0usize;
+        let mut artifact_evidence_records = 0usize;
+        let mut groups_with_workflow_reconciliation = 0usize;
+        let mut workflow_reconciliation_records = 0usize;
+        let mut evidence_rows = Vec::new();
+        if let Some(groups) = audit_value.get_mut("groups").and_then(Value::as_array_mut) {
+            for group in groups {
+                let Some(group_object) = group.as_object_mut() else {
+                    continue;
+                };
+                let Some(id) = group_object
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                else {
+                    continue;
+                };
+                let artifact_evidence = artifact_postures.get(&id).cloned().unwrap_or_else(|| {
+                    json!({
+                        "ok": true,
+                        "state": "missing",
+                        "group_id": id,
+                        "matching_record_count": 0,
+                        "readiness_claimed": false,
+                        "execution": "not_started"
+                    })
+                });
+                let reconciliation_evidence = reconciliation_postures
+                    .get(&id)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        json!({
+                            "workflow_id": id,
+                            "state": "missing",
+                            "record_count": 0,
+                            "readiness_claimed": false,
+                            "scope": "bounded_digest_valid_reconciliation_registry"
+                        })
+                    });
+                let artifact_records = artifact_evidence
+                    .get("matching_record_count")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0) as usize;
+                let reconciliation_records = reconciliation_evidence
+                    .get("record_count")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0) as usize;
+                if artifact_records > 0 {
+                    groups_with_artifact_evidence += 1;
+                    artifact_evidence_records =
+                        artifact_evidence_records.saturating_add(artifact_records);
+                }
+                if reconciliation_records > 0 {
+                    groups_with_workflow_reconciliation += 1;
+                    workflow_reconciliation_records =
+                        workflow_reconciliation_records.saturating_add(reconciliation_records);
+                }
+                group_object.insert("artifact_evidence".into(), artifact_evidence.clone());
+                group_object.insert(
+                    "workflow_reconciliation_evidence".into(),
+                    reconciliation_evidence.clone(),
+                );
+                evidence_rows.push(json!({
+                    "id": id,
+                    "artifact_evidence": artifact_evidence,
+                    "workflow_reconciliation_evidence": reconciliation_evidence
+                }));
+            }
+        }
+        let evidence_scope =
+            "selected_capability_groups_current_digest_verified_artifact_and_workflow_reconciliation_registries";
+        let evidence_document = json!({
+            "scope": evidence_scope,
+            "artifact_registry_generation": artifact_registry_generation,
+            "artifact_registry_size": artifact_registry_size,
+            "workflow_reconciliation_registry_generation": workflow_reconciliation_registry_generation,
+            "workflow_reconciliation_registry_size": workflow_reconciliation_registry_size,
+            "groups_with_artifact_evidence": groups_with_artifact_evidence,
+            "artifact_evidence_records": artifact_evidence_records,
+            "groups_with_workflow_reconciliation": groups_with_workflow_reconciliation,
+            "workflow_reconciliation_records": workflow_reconciliation_records,
+            "groups": evidence_rows
+        });
+        let evidence_digest =
+            bioprism_ids::ContentHash::of_value(&evidence_document).map_err(|error| {
+                format!("capability dashboard evidence could not be hashed: {error}")
+            })?;
+        audit_value["evidence"] = json!({
+            "scope": evidence_scope,
+            "evidence_digest": evidence_digest.to_string(),
+            "artifact_registry_generation": artifact_registry_generation,
+            "artifact_registry_size": artifact_registry_size,
+            "workflow_reconciliation_registry_generation": workflow_reconciliation_registry_generation,
+            "workflow_reconciliation_registry_size": workflow_reconciliation_registry_size,
+            "groups_with_artifact_evidence": groups_with_artifact_evidence,
+            "artifact_evidence_records": artifact_evidence_records,
+            "groups_with_workflow_reconciliation": groups_with_workflow_reconciliation,
+            "workflow_reconciliation_records": workflow_reconciliation_records,
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "guarantees": [
+                "every returned capability group receives an independent artifact and reconciliation posture",
+                "postures are joined only from the bounded current registries and preserve their own verification semantics",
+                "the evidence digest binds the selected group rows and registry snapshot metadata"
+            ],
+            "limitations": [
+                "registry observations are not one atomic cross-store transaction",
+                "artifact or reconciliation presence does not prove execution, scientific validity, release readiness, or external effect completion",
+                "bounded or filtered output does not describe unselected capability groups"
+            ]
+        });
         let output = json!({
             "ok": true,
             "workflow": "capability_dashboard",
             "schema": bioprism_devplat::CAPABILITY_DASHBOARD_SCHEMA,
             "catalog_digest": audit.catalog_digest,
             "dashboard_digest": audit.dashboard_digest,
+            "evidence_digest": evidence_digest.to_string(),
+            "evidence_scope": evidence_scope,
             "capability_dashboard_ready": audit.ready,
-            "audit": audit,
+            "audit": audit_value,
             "schema_source": "authoritative tools/list definitions",
             "duplicate_schema_names": duplicate_schema_names,
             "guarantees": [
                 "domain rows are sorted and bound to the catalogue digest and query",
                 "MCP callable status requires a present, well-formed authoritative input schema",
-                "crate, CLI, Python, and MCP surfaces are reported independently rather than collapsed into one score"
+                "crate, CLI, Python, and MCP surfaces are reported independently rather than collapsed into one score",
+                "artifact and workflow-reconciliation evidence are advisory joins and never promote the dashboard to readiness"
             ],
             "limitations": [
                 "declared crate, CLI, and Python surfaces are not executed or import-checked",
                 "callable means transport-schema availability, not permission, scientific validity, or execution success",
-                "filtered or bounded output must not be interpreted as a complete inventory without its warnings"
+                "filtered or bounded output must not be interpreted as a complete inventory without its warnings",
+                "evidence registries are observed independently and do not provide an atomic cross-store snapshot"
             ]
         });
         let output_bytes = serde_json::to_vec(&output)
@@ -36100,7 +36265,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "capability_dashboard",
-            "description": "Build a bounded digest-bound dashboard over every selected capability group. It separates callable MCP tools, authoritative schema coverage, crate ownership, CLI entrypoints, Python artifacts, readiness classes, and explicit gaps; it does not grant permission, execute tools, or claim scientific or deployment readiness.",
+            "description": "Build a bounded digest-bound dashboard over every selected capability group. It separates callable MCP tools, authoritative schema coverage, crate ownership, CLI entrypoints, Python artifacts, readiness classes, explicit gaps, digest-verified artifact evidence, and workflow-reconciliation posture; it does not grant permission, execute tools, or claim scientific, clinical, release, or deployment readiness.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

@@ -4891,6 +4891,25 @@ export interface CapabilityDashboardGroupResult extends JsonObject {
   invalid_transport_schemas: string[];
   tools?: string[];
   gaps?: string[];
+  artifact_evidence?: OperationsArtifactEvidencePosture;
+  workflow_reconciliation_evidence?: OperationsReconciliationPosture;
+}
+
+export interface CapabilityDashboardEvidenceResult extends JsonObject {
+  scope: string;
+  evidence_digest: string;
+  artifact_registry_generation: number;
+  artifact_registry_size: number;
+  workflow_reconciliation_registry_generation: number;
+  workflow_reconciliation_registry_size: number;
+  groups_with_artifact_evidence: number;
+  artifact_evidence_records: number;
+  groups_with_workflow_reconciliation: number;
+  workflow_reconciliation_records: number;
+  readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
 }
 
 export interface CapabilityDashboardAuditResult extends JsonObject {
@@ -4910,6 +4929,7 @@ export interface CapabilityDashboardAuditResult extends JsonObject {
   readiness_counts: Record<string, number>;
   gap_counts: Record<string, number>;
   groups: CapabilityDashboardGroupResult[];
+  evidence?: CapabilityDashboardEvidenceResult;
   warnings: string[];
   guarantees: string[];
   limitations: string[];
@@ -4922,6 +4942,8 @@ export interface CapabilityDashboardResult extends JsonObject {
   schema: "bioprism-devplat-capability-dashboard/0.1";
   catalog_digest: string;
   dashboard_digest: string;
+  evidence_digest?: string;
+  evidence_scope?: string;
   capability_dashboard_ready: boolean;
   audit: CapabilityDashboardAuditResult;
   duplicate_schema_names?: string[];
