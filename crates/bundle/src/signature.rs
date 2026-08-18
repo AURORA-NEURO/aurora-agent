@@ -5,10 +5,10 @@
 //! verify can also forge. This module adds the missing asymmetric boundary without changing the
 //! wire meaning of existing [`crate::Attestation`] values.
 //!
-//! The key registry remains outside this crate. A [`VerificationKey`] proves only that the holder
-//! of the corresponding private key signed the canonical bytes. It does not prove that the key
-//! identity belongs to the self-reported producer, that the key was authorized for a role, or that
-//! the signed timestamp was externally observed. Those are separate policy inputs.
+//! A [`VerificationKey`] proves only that the holder of the corresponding private key signed the
+//! canonical bytes. The sibling [`crate::trust`] module can apply an explicit caller-supplied
+//! registry policy for producer binding and roles, but that policy does not become an external
+//! identity service or timestamp authority.
 
 use crate::attestation::{AttestationPurpose, ClaimedProducer, KeyHolderAuthenticated};
 use crate::error::BundleError;
@@ -221,7 +221,7 @@ impl SigningKey {
         }
     }
 
-    fn sign(&self, message: &[u8]) -> Ed25519Signature {
+    pub(crate) fn sign_bytes(&self, message: &[u8]) -> Ed25519Signature {
         let signing = ed25519_dalek::SigningKey::from_bytes(&self.seed);
         Ed25519Signature::from_bytes(signing.sign(message).to_bytes())
     }
@@ -265,7 +265,11 @@ impl VerificationKey {
         &self.validity
     }
 
-    fn verify(&self, message: &[u8], signature: &Ed25519Signature) -> Result<(), SignatureError> {
+    pub(crate) fn verify_bytes(
+        &self,
+        message: &[u8],
+        signature: &Ed25519Signature,
+    ) -> Result<(), SignatureError> {
         let public = ed25519_dalek::VerifyingKey::from_bytes(self.public_key.as_bytes())
             .map_err(|error| SignatureError::InvalidPublicKey(error.to_string()))?;
         let signature = ed25519_dalek::Signature::from_bytes(signature.as_bytes());
@@ -339,7 +343,7 @@ impl PublicKeyAttestation {
             signed_at,
             scheme: AuthenticationScheme::Ed25519PublicKey,
             repudiability: Repudiability::NotForgeableByVerifier,
-            signature: key.sign(&preimage),
+            signature: key.sign_bytes(&preimage),
         })
     }
 
@@ -413,7 +417,7 @@ impl PublicKeyAttestation {
             Ok(bytes) => bytes,
             Err(error) => return PublicKeyAttestationCheck::Malformed(error.to_string()),
         };
-        match key.verify(&preimage, &self.signature) {
+        match key.verify_bytes(&preimage, &self.signature) {
             Ok(()) => PublicKeyAttestationCheck::PublicKeyAuthenticated(
                 KeyHolderAuthenticated::public_key_verified(
                     self.key_identity.clone(),

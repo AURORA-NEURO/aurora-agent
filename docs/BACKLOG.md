@@ -151,8 +151,10 @@ digest-bound disclosure ratchets, publication-state score withholding, comparabi
 unranked reasons. `release_audit` composes registry, bundle, quality, conformance, research-CI,
 operations, pack-health, repository-impact, and developer-platform evidence into a strict required
 gate plus advisory projection. These are bounded local workflows, not durable queues, identity
-providers, web pages, key registries/delegation, CI runners, or deployment approvals. The bundle
-layer now verifies explicit offline Ed25519 signatures, but the authority
+providers, web pages, CI runners, or deployment approvals. The bundle layer now verifies explicit
+offline Ed25519 signatures and caller-supplied registry policy with signed delegation, rotation,
+revocation, role, producer, and validity checks, but that bounded snapshot is not an external
+identity authority or release service. The authority
 coordinates cooperating processes on one local filesystem, but does not implement multi-host
 consensus, network-partition tolerance, or tenant fairness.
 `developer_delivery_audit` now composes the developer-platform and repository baselines with

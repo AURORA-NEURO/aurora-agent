@@ -4979,3 +4979,36 @@ test("client exposes scoped domain workflow catalogue and instantiation over RES
   assert.equal((await mcpRegistry.domainWorkflowReconciliationQueryTool({ mission_id: "ts-workflow" })).mcp.result.structuredContent.rows.length, 1);
   assert.equal((await mcpRegistry.domainWorkflowReconciliationGetTool(reconciliationDigest)).mcp.result.structuredContent.record.workflow, "domain_workflow_reconcile");
 });
+
+test("client sends registry-backed public bundle verification as an explicit policy mode", async () => {
+  const args = {
+    publicly_attested_bundle: { bundle: {}, attestation: {} },
+    trust_registry: {
+      schema_version: "bioprism-key-registry/0.1",
+      keys: {},
+      delegations: {},
+      rotations: {},
+      revocations: {},
+    },
+    trust_policy: { purpose: "publisher_manifest", max_delegation_depth: 32 },
+  };
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/bundle_verify");
+      assert.deepEqual(JSON.parse(init.body), args);
+      return jsonResponse({ ok: true, tool: "bundle_verify", mcp: { result: { structuredContent: {
+        ok: true,
+        verification_mode: "ed25519_registry_policy",
+        manifest_digest: "a".repeat(64),
+        trust_report: { verdict: "trusted" },
+      } } } });
+    },
+  });
+  const result = await client.bundleVerify(args);
+  assert.equal(result.mcp.result.structuredContent.verification_mode, "ed25519_registry_policy");
+  await assert.rejects(
+    client.bundleVerify({ publicly_attested_bundle: {}, trust_registry: args.trust_registry, trust_policy: args.trust_policy, verification_key: { key_identity: "x", public_key: `ed25519:${"a".repeat(64)}`, validity: {} } }),
+    ArgumentError,
+  );
+});

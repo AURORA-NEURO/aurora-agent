@@ -22,7 +22,10 @@ use bioprism_bioevalx::repro::{Observed, OutputSpec, Reexecution};
 use bioprism_bioevalx::trajectory::{PathProperty, Step, Trajectory};
 use bioprism_bioevalx::worldline::{Decision, Observation as EvalObservation, Worldline};
 use bioprism_biolang::{BioType, CollectionDecl, QuerySchema};
-use bioprism_bundle::{EntryRole, ResultBundle};
+use bioprism_bundle::{
+    AttestationPurpose, ClaimedProducer, EntryRole, KeyIdentity, KeyRegistry, KeyRole, KeyValidity,
+    PubliclyAttestedBundle, RegisteredKey, ResultBundle, SigningKey, TrustPolicy,
+};
 use bioprism_devplat::{
     build_domain_workflow_catalogue, instantiate_domain_workflow, plan_mission,
     reconcile_domain_workflow, MissionRequest,
@@ -9727,6 +9730,60 @@ fn bundle_verify_recomputes_carried_content_and_refuses_tampering() {
     );
     assert_eq!(refused["ok"], json!(false));
     assert!(refused["refusal"].as_str().unwrap().contains("digest"));
+}
+
+#[test]
+fn bundle_verify_applies_an_offline_registry_policy_to_public_attestations() {
+    let bundle = ResultBundle::builder("policy-bundle")
+        .carrying("query", EntryRole::Query, json!({ "goal": "policy" }))
+        .unwrap()
+        .build()
+        .unwrap();
+    let signing = SigningKey::new(KeyIdentity::new("policy-publisher"), [0x71; 32]);
+    let public = signing.verification_key(KeyValidity::unbounded());
+    let signed = PubliclyAttestedBundle::produce_with(
+        bundle,
+        &signing,
+        AttestationPurpose::PublisherManifest,
+        ClaimedProducer::new("AURORA Policy Publisher"),
+        None,
+        None,
+        Some(100),
+    )
+    .unwrap();
+    let mut registry = KeyRegistry::new();
+    registry
+        .register_root(
+            RegisteredKey::root(
+                public.identity().clone(),
+                public.public_key(),
+                KeyValidity::unbounded(),
+                "AURORA Policy Publisher",
+                [KeyRole::Publisher].into_iter().collect(),
+                std::collections::BTreeSet::new(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let result = call(
+        &mut server(),
+        "bundle_verify",
+        json!({
+            "publicly_attested_bundle": serde_json::to_value(signed).unwrap(),
+            "trust_registry": serde_json::to_value(registry).unwrap(),
+            "trust_policy": serde_json::to_value(TrustPolicy::for_purpose(AttestationPurpose::PublisherManifest)).unwrap(),
+        }),
+    );
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(
+        result["verification_mode"],
+        json!("ed25519_registry_policy")
+    );
+    assert_eq!(result["trust_report"]["verdict"], json!("trusted"));
+    assert_eq!(
+        result["trust_report"]["key_identity"],
+        json!("policy-publisher")
+    );
 }
 
 #[test]

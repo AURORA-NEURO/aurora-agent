@@ -54,6 +54,7 @@ use crate::mac::SecretKey;
 use crate::manifest::{BundleManifest, EntryBody, EntryRole, ManifestEntry, BUNDLE_SCHEMA_VERSION};
 use crate::provenance::{ProvenanceState, SupplyChainPosture};
 use crate::signature::{PublicKeyAttestation, SigningKey, VerificationKey};
+use crate::trust::{KeyRegistry, TrustPolicy, TrustReport};
 use bioprism_ids::ContentHash;
 use bioprism_section::{CertificateProfile, CertificateVerification, ContextCertificate};
 use serde::{Deserialize, Serialize};
@@ -426,6 +427,29 @@ impl PubliclyAttestedBundle {
         Ok((verified, authenticated))
     }
 
+    /// Recomputes the bundle, verifies its Ed25519 attestation, and then applies a caller-supplied
+    /// registry-backed lifecycle policy. The direct [`Self::verify`] method remains available for
+    /// callers that intentionally only have one verification key and do not want registry policy.
+    pub fn verify_with_registry(
+        &self,
+        registry: &KeyRegistry,
+        policy: &TrustPolicy,
+    ) -> Result<(VerifiedBundle, KeyHolderAuthenticated, TrustReport), BundleError> {
+        let verified = self.bundle.verify()?;
+        if &self.attestation.subject_digest != verified.manifest_digest() {
+            return Err(BundleError::AttestationCoversDifferentManifest {
+                attested: self.attestation.subject_digest.as_str().to_string(),
+                actual: verified.manifest_digest().as_str().to_string(),
+            });
+        }
+        let (authenticated, report) = registry
+            .verify_attestation(&self.attestation, policy)
+            .map_err(|error| BundleError::TrustPolicyRejected {
+                detail: error.to_string(),
+            })?;
+        Ok((verified, authenticated, report))
+    }
+
     pub fn schema_version(&self) -> &str {
         BUNDLE_SCHEMA_VERSION
     }
@@ -482,6 +506,7 @@ mod tests {
     use crate::mac::{AuthenticationScheme, KeyIdentity, Repudiability};
     use crate::provenance::RecordedProvenance;
     use crate::signature::KeyValidity;
+    use crate::trust::{KeyRole, RegisteredKey, TrustVerdict};
     use serde_json::json;
 
     fn key() -> SecretKey {
@@ -727,6 +752,46 @@ mod tests {
         assert!(authenticated
             .honest_label()
             .contains("third parties can verify"));
+    }
+
+    #[test]
+    fn a_publicly_attested_bundle_can_apply_registry_backed_policy() {
+        let signing = signing_key();
+        let public = signing.verification_key(KeyValidity::unbounded());
+        let attested = PubliclyAttestedBundle::produce_with(
+            bundle(),
+            &signing,
+            AttestationPurpose::PublisherManifest,
+            ClaimedProducer::new("AURORA Working Group"),
+            None,
+            Some("2026-08-18T20:00:00Z".into()),
+            Some(1_755_552_000),
+        )
+        .expect("attests");
+        let mut registry = KeyRegistry::new();
+        registry
+            .register_root(
+                RegisteredKey::root(
+                    public.identity().clone(),
+                    public.public_key(),
+                    KeyValidity::unbounded(),
+                    "AURORA Working Group",
+                    [KeyRole::Publisher].into_iter().collect(),
+                    std::collections::BTreeSet::new(),
+                )
+                .expect("registered key"),
+            )
+            .expect("root registration");
+        let (verified, authenticated, report) = attested
+            .verify_with_registry(
+                &registry,
+                &TrustPolicy::for_purpose(AttestationPurpose::PublisherManifest),
+            )
+            .expect("registry policy verifies");
+        assert_eq!(authenticated.key_identity().as_str(), "hub-ed25519");
+        assert_eq!(verified.manifest_digest(), authenticated.subject_digest());
+        assert_eq!(report.verdict, TrustVerdict::Trusted);
+        assert_eq!(report.producer, "AURORA Working Group");
     }
 
     #[test]

@@ -132,17 +132,51 @@ class ReleaseAuditTests(unittest.TestCase):
         self.assertIn("publicly_attested_bundle", request.to_mcp_arguments())
         self.assertEqual(request.to_mcp_arguments()["verification_key"]["key_identity"], "publisher-ed25519")
 
+    def test_bundle_verify_request_supports_explicit_registry_policy_mode(self) -> None:
+        with self.assertRaises(ArgumentError):
+            BundleVerifyArgs(
+                publicly_attested_bundle={"bundle": {}},
+                trust_registry={"schema_version": "bioprism-key-registry/0.1"},
+            )
+        request = BundleVerifyArgs(
+            document="signed-bundle.json",
+            trust_registry={
+                "schema_version": "bioprism-key-registry/0.1",
+                "keys": {},
+                "delegations": {},
+                "rotations": {},
+                "revocations": {},
+            },
+            trust_policy={
+                "purpose": "publisher_manifest",
+                "require_producer_binding": True,
+                "max_delegation_depth": 32,
+            },
+        )
+        arguments = request.to_mcp_arguments()
+        self.assertEqual(arguments["trust_policy"]["purpose"], "publisher_manifest")
+        self.assertIn("trust_registry", arguments)
+
     def test_bundle_verify_report_keeps_public_verification_and_fail_closed_refusal_typed(self) -> None:
         report = BundleVerifyReport.from_wire({
             "ok": True,
             "verification_mode": "ed25519_public_key",
             "manifest_digest": "d" * 64,
             "authentication": {"scheme": "ed25519_public_key"},
+            "trust_report": {"verdict": "trusted"},
             "guarantees": ["signature checked"],
             "limitations": ["key registry external"],
         })
         self.assertTrue(report.is_public_key_verified)
         self.assertEqual(report.manifest_digest, "d" * 64)
+        policy_report = BundleVerifyReport.from_wire({
+            "ok": True,
+            "verification_mode": "ed25519_registry_policy",
+            "manifest_digest": "e" * 64,
+            "trust_report": {"verdict": "trusted"},
+        })
+        self.assertTrue(policy_report.is_public_key_verified)
+        self.assertTrue(policy_report.is_trust_policy_verified)
         refused = BundleVerifyReport.from_wire({
             "ok": False,
             "refusal": "signature mismatch",

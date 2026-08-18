@@ -648,9 +648,10 @@ unranked entries into agent-callable public-hub projections. `release_audit` com
 registry, bundle, quality, conformance, research-CI, operations, and pack-health gates while
 retaining repository impact and developer-platform diagnostics as advisory evidence. These
 surfaces remain bounded and local: they do not create durable queues, identity providers, web UI,
-key registries, delegation, revocation, CI execution, deployment, or network publication. The bundle
-layer now has deterministic offline Ed25519 verification; that cryptographic primitive is not an
-identity or release-authorization service.
+CI execution, deployment, or network publication. The bundle layer now has deterministic offline
+Ed25519 verification plus an explicit caller-supplied key-registry policy layer for roles,
+delegation, rotation, revocation, producer binding, and validity. The registry is a bounded local
+snapshot, not an external identity, transparency, timestamp, or release-authorization service.
 The Python and TypeScript SDKs expose the factory result as an ordered, typed trace: successful
 leases, recovery variants, staged-output invisibility, committed-result snapshots, quarantined and
 dead-lettered jobs, and fail-closed action refusals remain independently inspectable across sync,

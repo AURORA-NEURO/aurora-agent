@@ -100,6 +100,12 @@ pub enum BundleError {
     #[error("attestation was produced for purpose `{attested}` and cannot be reused for purpose `{requested}`")]
     PurposeMismatch { attested: String, requested: String },
 
+    /// A caller-supplied trust registry or policy rejected an otherwise well-formed public-key
+    /// attestation. Keeping this distinct from [`BundleError::SignatureMismatch`] makes it clear
+    /// that cryptographic validity and authorization are separate decisions.
+    #[error("trust registry policy rejected the attestation: {detail}")]
+    TrustPolicyRejected { detail: String },
+
     /// The audit chain's link digests do not form an unbroken sequence.
     #[error("audit chain breaks at sequence {sequence}: entry records previous={recorded} but the preceding entry hashes to {computed}")]
     AuditChainBroken {

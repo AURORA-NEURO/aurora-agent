@@ -66,12 +66,14 @@ def _optional_mapping(name: str, value: Any) -> dict[str, Any] | None:
 
 @dataclass(frozen=True)
 class BundleVerifyArgs:
-    """Bounded request for keyless or Ed25519 result-bundle verification."""
+    """Bounded request for digest, direct-key, or registry-policy bundle verification."""
 
     bundle: Mapping[str, Any] | None = None
     document: str | None = None
     publicly_attested_bundle: Mapping[str, Any] | None = None
     verification_key: Mapping[str, Any] | None = None
+    trust_registry: Mapping[str, Any] | None = None
+    trust_policy: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         sources = sum(value is not None for value in (self.bundle, self.document, self.publicly_attested_bundle))
@@ -83,8 +85,18 @@ class BundleVerifyArgs:
             raise ArgumentError("publicly_attested_bundle must be an object")
         if self.document is not None and (not isinstance(self.document, str) or not self.document.strip()):
             raise ArgumentError("document must be a non-empty path")
-        if self.publicly_attested_bundle is not None and self.verification_key is None:
-            raise ArgumentError("verification_key is required for publicly_attested_bundle")
+        if self.trust_registry is not None and self.bundle is not None:
+            raise ArgumentError("trust_registry requires publicly attested bundle input, not a legacy bundle")
+        if self.trust_registry is not None and not isinstance(self.trust_registry, Mapping):
+            raise ArgumentError("trust_registry must be an object")
+        if self.trust_policy is not None and not isinstance(self.trust_policy, Mapping):
+            raise ArgumentError("trust_policy must be an object")
+        if (self.trust_registry is None) != (self.trust_policy is None):
+            raise ArgumentError("trust_registry and trust_policy must be supplied together")
+        if self.verification_key is not None and self.trust_registry is not None:
+            raise ArgumentError("verification_key and trust_registry are mutually exclusive")
+        if self.publicly_attested_bundle is not None and self.verification_key is None and self.trust_registry is None:
+            raise ArgumentError("publicly_attested_bundle requires verification_key or trust_registry")
         if self.verification_key is not None:
             key = _route_mapping("verification_key", self.verification_key)
             identity = _route_text("verification_key.key_identity", key.get("key_identity"))
@@ -112,6 +124,10 @@ class BundleVerifyArgs:
             result["publicly_attested_bundle"] = dict(self.publicly_attested_bundle)
         if self.verification_key is not None:
             result["verification_key"] = dict(self.verification_key)
+        if self.trust_registry is not None:
+            result["trust_registry"] = dict(self.trust_registry)
+        if self.trust_policy is not None:
+            result["trust_policy"] = dict(self.trust_policy)
         return result
 
 
@@ -124,6 +140,7 @@ class BundleVerifyReport:
     verification_mode: str | None
     manifest_digest: str | None
     authentication: dict[str, Any] | None
+    trust_report: dict[str, Any] | None
     refusal: str | None
     fail_closed: bool | None
     guarantees: tuple[str, ...]
@@ -136,6 +153,7 @@ class BundleVerifyReport:
         mode = _optional_text("bundle verification mode", raw.get("verification_mode"))
         digest = _optional_text("bundle verification manifest_digest", raw.get("manifest_digest"))
         authentication = _optional_mapping("bundle verification authentication", raw.get("authentication"))
+        trust_report = _optional_mapping("bundle verification trust_report", raw.get("trust_report"))
         refusal = _optional_text("bundle verification refusal", raw.get("refusal"))
         fail_closed = _optional_bool("bundle verification fail_closed", raw.get("fail_closed"))
         if ok:
@@ -143,7 +161,7 @@ class BundleVerifyReport:
                 raise ArgumentError("successful bundle verification cannot contain refusal fields")
             if digest is None:
                 raise ArgumentError("successful bundle verification must contain manifest_digest")
-            if mode is not None and mode != "ed25519_public_key":
+            if mode is not None and mode not in {"ed25519_public_key", "ed25519_registry_policy"}:
                 raise ArgumentError("bundle verification mode is unknown")
         else:
             if refusal is None or fail_closed is not True:
@@ -154,6 +172,7 @@ class BundleVerifyReport:
             verification_mode=mode,
             manifest_digest=digest,
             authentication=authentication,
+            trust_report=trust_report,
             refusal=refusal,
             fail_closed=fail_closed,
             guarantees=_route_strings("bundle verification guarantees", raw.get("guarantees", [])),
@@ -162,7 +181,11 @@ class BundleVerifyReport:
 
     @property
     def is_public_key_verified(self) -> bool:
-        return self.ok and self.verification_mode == "ed25519_public_key"
+        return self.ok and self.verification_mode in {"ed25519_public_key", "ed25519_registry_policy"}
+
+    @property
+    def is_trust_policy_verified(self) -> bool:
+        return self.ok and self.verification_mode == "ed25519_registry_policy"
 
 
 @dataclass(frozen=True)

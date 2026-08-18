@@ -110,7 +110,9 @@ use bioprism_bioevalx::waiver::{
 use bioprism_bioevalx::{OutputVerdict, Reexecution, Trajectory, Worldline as EvaluationWorldline};
 use bioprism_biolang::{compile as compile_bioql, QuerySchema};
 use bioprism_bioworlds::SliceCatalog;
-use bioprism_bundle::{PubliclyAttestedBundle, ResultBundle, VerificationKey};
+use bioprism_bundle::{
+    KeyRegistry, PubliclyAttestedBundle, ResultBundle, TrustPolicy, VerificationKey,
+};
 use bioprism_choreography::{
     ExplorationBound, GlobalType, System as ChoreographySystem, WellFormedGlobal,
 };
@@ -18046,6 +18048,8 @@ impl Server {
         let publicly_attested = arguments.get("publicly_attested_bundle").cloned();
         let document = arguments.get("document").and_then(Value::as_str);
         let verification_key = arguments.get("verification_key").cloned();
+        let trust_registry = arguments.get("trust_registry").cloned();
+        let trust_policy = arguments.get("trust_policy").cloned();
         if [
             inline.is_some(),
             publicly_attested.is_some(),
@@ -18060,9 +18064,24 @@ impl Server {
                 "provide either bundle or document, or publicly_attested_bundle as the signed-bundle alternative".into(),
             );
         }
-        if publicly_attested.is_some() != verification_key.is_some() {
+        if verification_key.is_some() && trust_registry.is_some() {
             return Err(
-                "publicly_attested_bundle and verification_key must be supplied together".into(),
+                "verification_key and trust_registry are mutually exclusive verification modes"
+                    .into(),
+            );
+        }
+        if trust_registry.is_some() != trust_policy.is_some() {
+            return Err("trust_registry and trust_policy must be supplied together".into());
+        }
+        if publicly_attested.is_some() && verification_key.is_none() && trust_registry.is_none() {
+            return Err(
+                "publicly_attested_bundle requires verification_key or trust_registry".into(),
+            );
+        }
+        if trust_registry.is_some() && inline.is_some() {
+            return Err(
+                "trust_registry requires publicly attested bundle input, not a legacy HMAC bundle"
+                    .into(),
             );
         }
         let raw = match (inline, publicly_attested, document) {
@@ -18085,9 +18104,7 @@ impl Server {
             (None, None, None) => return Err("bundle_verify requires bundle or document".into()),
             _ => unreachable!("bundle inputs were checked as exclusive"),
         };
-        if let Some(raw_key) = verification_key {
-            let key: VerificationKey = serde_json::from_value(raw_key)
-                .map_err(|error| format!("invalid Ed25519 verification key: {error}"))?;
+        if verification_key.is_some() || trust_registry.is_some() {
             let signed: PubliclyAttestedBundle = serde_json::from_value(raw)
                 .map_err(|error| format!("invalid publicly attested result bundle: {error}"))?;
             if signed.bundle.manifest.entries.len() > 10_000
@@ -18097,6 +18114,54 @@ impl Server {
                     "bundle may contain at most 10000 manifest entries and contents".into(),
                 );
             }
+            if let Some(raw_registry) = trust_registry {
+                let registry: KeyRegistry = serde_json::from_value(raw_registry)
+                    .map_err(|error| format!("invalid trust registry: {error}"))?;
+                let policy: TrustPolicy =
+                    serde_json::from_value(trust_policy.ok_or_else(|| {
+                        "trust_policy is required with trust_registry".to_string()
+                    })?)
+                    .map_err(|error| format!("invalid trust policy: {error}"))?;
+                return match signed.verify_with_registry(&registry, &policy) {
+                    Ok((verified, authenticated, trust_report)) => Ok(json!({
+                        "ok": true,
+                        "verification_mode": "ed25519_registry_policy",
+                        "schema_version": signed.bundle.manifest.schema_version,
+                        "bundle_id": signed.bundle.manifest.bundle_id,
+                        "manifest_digest": verified.manifest_digest(),
+                        "entry_checks": verified.entry_checks(),
+                        "not_recomputed": verified.not_recomputed(),
+                        "certificate": verified.certificate(),
+                        "supply_chain_posture": verified.supply_chain_posture(),
+                        "authentication": authenticated,
+                        "trust_report": trust_report,
+                        "honest_label": authenticated.honest_label(),
+                        "guarantees": [
+                            "every carried inline digest is recomputed before registry policy accepts the Ed25519 signature",
+                            "the registry snapshot authorizes purpose, role, producer binding, validity, delegation, revocation, and rotation",
+                            "registry policy is evaluated at the explicit signed_at or as_of instant without reading the verifier clock",
+                        ],
+                        "limitations": [
+                            "the registry is caller-supplied and is not an external identity, transparency, or timestamp authority",
+                            "reference locators are not dereferenced; this is a local value check, not closure fetching",
+                            "verification establishes cryptographic origin and local authorization, not scientific validity, provenance truth, or deployment security",
+                        ],
+                    })),
+                    Err(error) => Ok(json!({
+                        "ok": false,
+                        "verification_mode": "ed25519_registry_policy",
+                        "stage": "bundle_verification",
+                        "refusal": error.to_string(),
+                        "fail_closed": true,
+                        "guarantee": "a registry, lifecycle, role, producer, digest, signature, purpose, identity, or key-validity mismatch never becomes a successful release result",
+                    })),
+                };
+            }
+            let raw_key = verification_key.ok_or_else(|| {
+                "verification_key is required for direct public-key verification".to_string()
+            })?;
+            let key: VerificationKey = serde_json::from_value(raw_key)
+                .map_err(|error| format!("invalid Ed25519 verification key: {error}"))?;
             return match signed.verify(&key) {
                 Ok((verified, authenticated)) => Ok(json!({
                     "ok": true,
@@ -35894,14 +35959,16 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "bundle_verify",
-            "description": "Recompute and verify an inline or root-confined ResultBundle, or verify a PubliclyAttestedBundle with a caller-supplied Ed25519 public key. It checks carried entry digests, unlisted or missing content, embedded certificate integrity, provenance posture, signature purpose, key identity, and bounded key validity; referenced entries remain not-recomputed and producer identity remains an external registry claim.",
+            "description": "Recompute and verify an inline or root-confined ResultBundle, or verify a PubliclyAttestedBundle with either a direct Ed25519 public key or an offline trust registry and explicit policy. Registry mode checks carried entry digests, lifecycle signatures, purpose, role, producer binding, delegation, rotation, revocation, and bounded key validity; referenced entries remain not-recomputed and external authority boundaries remain explicit.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "bundle": { "type": "object", "description": "Optional inline bioprism-bundle ResultBundle; mutually exclusive with document and publicly_attested_bundle." },
                     "document": { "type": "string", "description": "Optional root-confined JSON ResultBundle or PubliclyAttestedBundle path; mutually exclusive with bundle and publicly_attested_bundle." },
-                    "publicly_attested_bundle": { "type": "object", "description": "Optional inline bioprism-bundle PubliclyAttestedBundle; requires verification_key and is mutually exclusive with bundle/document." },
-                    "verification_key": { "type": "object", "description": "Ed25519 VerificationKey for publicly_attested_bundle or a signed document. It carries key_identity, public_key as ed25519:<64 hex>, and validity {not_before?, not_after?}." }
+                    "publicly_attested_bundle": { "type": "object", "description": "Optional inline bioprism-bundle PubliclyAttestedBundle; requires exactly one of verification_key or trust_registry and is mutually exclusive with bundle/document." },
+                    "verification_key": { "type": "object", "description": "Direct Ed25519 VerificationKey for a public attestation. It carries key_identity, public_key as ed25519:<64 hex>, and validity {not_before?, not_after?}; mutually exclusive with trust_registry." },
+                    "trust_registry": { "type": "object", "description": "Offline bioprism-key-registry/0.1 snapshot containing registered keys and signed delegation, rotation, and revocation records; mutually exclusive with verification_key." },
+                    "trust_policy": { "type": "object", "description": "Explicit registry policy containing purpose plus optional required_role, expected_producer, validity instant as_of, root/delegation requirements, and max_delegation_depth; required with trust_registry." }
                 },
                 "required": []
             }

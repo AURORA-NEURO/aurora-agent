@@ -7052,16 +7052,38 @@ export interface BundleVerificationKey extends JsonObject {
   validity: BundleVerificationKeyValidity;
 }
 
+export interface BundleTrustPolicy extends JsonObject {
+  purpose: string;
+  required_role?: string | null;
+  expected_producer?: string | null;
+  require_producer_binding?: boolean;
+  require_signed_at?: boolean;
+  require_delegated?: boolean;
+  allow_root?: boolean;
+  as_of?: number | null;
+  max_delegation_depth?: number;
+}
+
+export interface BundleTrustRegistry extends JsonObject {
+  schema_version: string;
+  keys: JsonObject;
+  delegations: JsonObject;
+  rotations: JsonObject;
+  revocations: JsonObject;
+}
+
 export interface BundleVerifyArgs extends JsonObject {
   bundle?: JsonObject;
   document?: string;
   publicly_attested_bundle?: JsonObject;
   verification_key?: BundleVerificationKey;
+  trust_registry?: BundleTrustRegistry;
+  trust_policy?: BundleTrustPolicy;
 }
 
 export interface BundleVerifyResult extends JsonObject {
   ok: boolean;
-  verification_mode?: "ed25519_public_key";
+  verification_mode?: "ed25519_public_key" | "ed25519_registry_policy";
   schema_version?: string;
   bundle_id?: string;
   manifest_digest?: string;
@@ -7070,6 +7092,7 @@ export interface BundleVerifyResult extends JsonObject {
   certificate?: string;
   supply_chain_posture?: JsonObject;
   authentication?: JsonObject;
+  trust_report?: JsonObject;
   honest_label?: string;
   refusal?: string;
   fail_closed?: boolean;

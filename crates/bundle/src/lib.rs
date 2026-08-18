@@ -44,27 +44,26 @@
 //! This list is load-bearing. A missing capability that is stated is a limitation; one that is
 //! implied to exist is a lie.
 //!
-//! - **No identity authority or delegation.** Ed25519 proves possession of the private key
-//!   corresponding to a public key, not that a registry assigned that key to the claimed producer,
-//!   role, organization, or release channel.
+//! - **No external identity authority.** [`trust`] can evaluate a bounded caller-supplied registry
+//!   with signed delegation, roles, rotations, and revocations, but importing that snapshot does
+//!   not make it an independent organization, transparency, or release authority.
 //! - **No legal non-repudiation.** Public-key signatures make verifier-side forgery infeasible under
 //!   the algorithm's security assumptions, but this crate does not establish custody, compromise
 //!   history, authorization, or legal attribution of a key to a person.
 //! - **No key management.** No generation, derivation, agreement, storage, rotation or escrow. A key
 //!   is bytes the caller supplies.
-//! - **No registry-backed revocation or key authority.** Ed25519 verification can apply the
-//!   caller-declared [`KeyValidity`] window to a caller-supplied signing instant, but there is no
-//!   CRL, OCSP-equivalent, rotation store, or authoritative clock.
+//! - **No remote key lifecycle service.** [`trust`] applies signed lifecycle records from the
+//!   caller's snapshot, while there is no CRL/OCSP-equivalent transport, remote rotation store,
+//!   compromise feed, or authoritative clock.
 //! - **No transparency log.** 13.20 §Transparency asks for a public log of releases, withdrawals and
 //!   revocations. [`audit`] provides a hash-linked local log, which gives tamper *evidence* against
 //!   a party without the key and nothing at all against a party with it. There is no witness, no
 //!   gossip protocol, no inclusion proof against an external log and no Merkle consistency proof.
 //! - **No timestamping authority.** This crate reads no clock. Every time value in a bundle is a
 //!   string the caller asserted, and nothing corroborates it.
-//! - **No role-key policy or delegation.** [`attestation::AttestationPurpose`] is inside both
-//!   authenticated preimages, so cross-purpose replay is refused. The crate still does not require
-//!   different Ed25519 keys for publisher, builder, and hub roles; that policy belongs to a key
-//!   registry or release controller.
+//! - **No organization-wide role authority.** [`trust::TrustPolicy`] can require publisher,
+//!   builder, hub, auditor, or reproducer roles and can enforce signed attenuation, but the local
+//!   policy is not a universal release-controller decision.
 //! - **No scanning, no sandboxing, no build isolation.** 13.15 §Scanning and §Build isolation are
 //!   out of scope for a library of plain Rust types; this crate records provenance, it does not
 //!   establish it.
@@ -91,17 +90,18 @@
 //! artifacts "will be content-addressed and signed".
 //!
 //! Ed25519 is the local scheme, selected for deterministic offline verification and a small public
-//! key representation. It fills only the verification-versus-forgery portion of the gap. Delegation,
-//! cross-signing, HSM custody of a private key, revocation, timestamp authority, and a transparency
-//! log remain separate capabilities and remain visible as limitations in higher-level projections.
+//! key representation. [`trust`] fills the offline delegation, role, rotation, and revocation
+//! policy seam, while cross-signing, HSM custody of a private key, timestamp authority, and a
+//! transparency log remain separate capabilities and remain visible as limitations in higher-level
+//! projections.
 //!
 //! # What the examples catalogue can now exercise
 //!
 //! `PubliclyAttestedBundle` makes the signed-result-bundle claim executable: a bundle verifies
 //! independently of the compiler and without giving the verifier private signing material. The
-//! producer-name, key-registry, revocation, timestamp-authority, and external-closure portions of
-//! the claim remain deliberately outside this crate. [`AttestedBundle`] remains available for the
-//! symmetric shared-secret compatibility path.
+//! producer-name, external identity authority, timestamp-authority, and external-closure portions
+//! of the claim remain deliberately outside this crate. [`AttestedBundle`] remains available for
+//! the symmetric shared-secret compatibility path.
 
 pub mod attestation;
 pub mod audit;
@@ -113,6 +113,7 @@ pub mod manifest;
 pub mod provenance;
 pub mod reproduce;
 pub mod signature;
+pub mod trust;
 
 pub use attestation::{
     Attestation, AttestationCheck, AttestationPurpose, ClaimedProducer, KeyHolderAuthenticated,
@@ -143,4 +144,9 @@ pub use signature::{
     Ed25519PublicKey, Ed25519Signature, KeyValidity, PublicKeyAttestation,
     PublicKeyAttestationCheck, SignatureError, SigningKey, VerificationKey,
     PUBLIC_KEY_ATTESTATION_SCHEMA_VERSION,
+};
+pub use trust::{
+    KeyDelegation, KeyRegistry, KeyRevocation, KeyRole, KeyRotation, RegisteredKey, TrustError,
+    TrustPolicy, TrustReport, TrustVerdict, MAX_DELEGATION_DEPTH, MAX_TRUST_EVENTS, MAX_TRUST_KEYS,
+    TRUST_REGISTRY_SCHEMA_VERSION,
 };

@@ -2380,7 +2380,12 @@ export class ApiClient {
     if (args.bundle !== undefined && !isObject(args.bundle)) throw new ArgumentError("bundle must be an object");
     if (args.publicly_attested_bundle !== undefined && !isObject(args.publicly_attested_bundle)) throw new ArgumentError("publicly_attested_bundle must be an object");
     if (args.document !== undefined && (typeof args.document !== "string" || args.document.trim().length === 0)) throw new ArgumentError("document must be a non-empty path");
-    if (args.publicly_attested_bundle !== undefined && args.verification_key === undefined) throw new ArgumentError("verification_key is required for publicly_attested_bundle");
+    if (args.trust_registry !== undefined && !isObject(args.trust_registry)) throw new ArgumentError("trust_registry must be an object");
+    if (args.trust_policy !== undefined && !isObject(args.trust_policy)) throw new ArgumentError("trust_policy must be an object");
+    if (args.trust_registry !== undefined && args.bundle !== undefined) throw new ArgumentError("trust_registry requires publicly attested bundle input, not a legacy bundle");
+    if ((args.trust_registry === undefined) !== (args.trust_policy === undefined)) throw new ArgumentError("trust_registry and trust_policy must be supplied together");
+    if (args.verification_key !== undefined && args.trust_registry !== undefined) throw new ArgumentError("verification_key and trust_registry are mutually exclusive");
+    if (args.publicly_attested_bundle !== undefined && args.verification_key === undefined && args.trust_registry === undefined) throw new ArgumentError("publicly_attested_bundle requires verification_key or trust_registry");
     if (args.verification_key !== undefined) {
       if (!isObject(args.verification_key) || typeof args.verification_key.key_identity !== "string" || !/^ed25519:[0-9a-f]{64}$/.test(args.verification_key.public_key) || !isObject(args.verification_key.validity)) {
         throw new ArgumentError("verification_key must contain key_identity, an ed25519 public_key, and validity");

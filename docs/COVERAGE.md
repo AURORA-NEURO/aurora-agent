@@ -19,8 +19,10 @@ contract, and observability projection workflows. `factory_lifecycle_simulate` a
 `hub_disclosure_review`, `hub_card_render`, `hub_leaderboard_render`, `release_audit`, and
 `developer_delivery_audit` now
 compose the factory recovery, public-hub publication, and release-evidence contracts while keeping
-multi-node durable queues, identity, key registries/delegation, UI, OTLP export, and network publication
-explicit as unimplemented; the factory now has a shared-local-file authority envelope with a
+multi-node durable queues, external identity/transparency services, UI, OTLP export, and network
+publication explicit as unimplemented; the bundle layer now also carries a bounded caller-supplied
+key-registry policy for signed delegation, rotation, revocation, roles, producer binding, and
+validity, while the factory has a shared-local-file authority envelope with a
 hash-chained transition journal, not a multi-host distributed queue;
 the Python MCP transport foundation is documented separately and does not imply the full SDK.
 `trace_otel_ingest` adds a bounded, dependency-free OTLP JSON span importer with source-preserving
