@@ -28067,6 +28067,77 @@ impl Server {
             .and_then(Value::as_str)
             .filter(|value| !value.trim().is_empty())
             .ok_or("route.catalog_digest must be a non-empty string")?;
+        let route_evidence_digest = match route.get("evidence_digest") {
+            None | Some(Value::Null) => None,
+            Some(value) => {
+                let digest = value
+                    .as_str()
+                    .filter(|value| !value.trim().is_empty())
+                    .ok_or("route.evidence_digest must be a non-empty string")?;
+                bioprism_ids::ContentHash::parse(digest.to_string())
+                    .map_err(|_| "route.evidence_digest must be a valid content digest")?;
+                Some(digest.to_string())
+            }
+        };
+        let route_evidence_scope = match route.get("evidence_scope") {
+            None | Some(Value::Null) => None,
+            Some(value) => Some(
+                value
+                    .as_str()
+                    .filter(|value| !value.trim().is_empty())
+                    .ok_or("route.evidence_scope must be a non-empty string")?
+                    .to_string(),
+            ),
+        };
+        let route_evidence = route.get("evidence").cloned();
+        if route_evidence_digest.is_some() != route_evidence.is_some()
+            || route_evidence_digest.is_some() != route_evidence_scope.is_some()
+        {
+            return Err(
+                "route evidence must provide evidence_digest, evidence_scope, and evidence together"
+                    .into(),
+            );
+        }
+        if let (Some(evidence_digest), Some(evidence_scope), Some(evidence)) = (
+            route_evidence_digest.as_deref(),
+            route_evidence_scope.as_deref(),
+            route_evidence.as_ref(),
+        ) {
+            let evidence_object = evidence
+                .as_object()
+                .ok_or("route.evidence must be an object")?;
+            if evidence_object
+                .get("evidence_digest")
+                .and_then(Value::as_str)
+                != Some(evidence_digest)
+                || evidence_object.get("scope").and_then(Value::as_str) != Some(evidence_scope)
+            {
+                return Err(
+                    "route evidence summary does not match its top-level digest and scope".into(),
+                );
+            }
+        }
+        let evidence_binding = match (
+            route_evidence_digest.as_deref(),
+            route_evidence_scope.as_deref(),
+            route_evidence.as_ref(),
+        ) {
+            (Some(digest), Some(scope), Some(evidence)) => json!({
+                "present": true,
+                "evidence_digest": digest,
+                "scope": scope,
+                "summary": evidence,
+                "posture": "carried_forward_not_recomputed",
+                "readiness_claimed": false,
+                "execution": "not_started"
+            }),
+            _ => json!({
+                "present": false,
+                "posture": "not_supplied",
+                "readiness_claimed": false,
+                "execution": "not_started"
+            }),
+        };
         let goal = route
             .get("goal")
             .and_then(Value::as_str)
@@ -28161,6 +28232,7 @@ impl Server {
         let review_document = json!({
             "route_id": route_id,
             "catalog_digest": catalog_digest,
+            "evidence_digest": route_evidence_digest,
             "selections": raw_selections,
             "validate_schemas": validate_schemas,
         });
@@ -28516,6 +28588,8 @@ impl Server {
                 "goal": goal,
                 "steps": ordered_steps,
                 "dependency_waves": dependency_waves.clone(),
+                "route_evidence_digest": route_evidence_digest,
+                "route_evidence_scope": route_evidence_scope,
             })
         });
         let mut output = json!({
@@ -28524,6 +28598,8 @@ impl Server {
             "review_id": review_id,
             "route_id": route_id,
             "catalog_digest": catalog_digest,
+            "evidence_digest": route_evidence_digest,
+            "evidence_scope": route_evidence_scope,
             "goal": goal,
             "need_count": need_ids.len(),
             "selection_count": raw_selections.len(),
@@ -28535,6 +28611,7 @@ impl Server {
             "review_status": if ready_for_handoff { "ready" } else { "blocked" },
             "handoff_status": if ready_for_handoff { "mission_preflight_required" } else { "requires_caller_correction" },
             "mission_draft": mission_draft,
+            "evidence_binding": evidence_binding,
             "schema_review": {
                 "requested": validate_schemas,
                 "checked": schema_reports.len(),
@@ -28549,6 +28626,7 @@ impl Server {
                 "route candidates were reviewed without executing any tool",
                 "each ready selection is present in its need's bounded candidate list",
                 "dependency waves are deterministic and use only explicit caller selections",
+                "when supplied, the route evidence digest and scope are carried into review provenance and the mission draft",
             ],
             "limitations": [
                 "this review checks transport-shaped handoff structure, not domain-specific argument semantics",

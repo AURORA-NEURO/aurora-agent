@@ -529,6 +529,13 @@ an atomic cross-store snapshot, execution proof, authorization, scientific valid
 readiness, or external-effect claim. The digest is separate from `route_id` because retained
 evidence may change while the catalogue-bound route request remains identical.
 
+`POST /v1/capabilities/route/review` validates that modern route evidence is internally consistent
+and carries its digest and scope into `evidence_binding`, the review identity, and any generated
+`mission_draft`. The binding posture is `carried_forward_not_recomputed`: review preserves the
+route’s retained observation but does not turn it into execution, authorization, readiness, or
+scientific validity. Legacy routes without the optional evidence fields remain reviewable with an
+explicit `present: false` binding.
+
 `GET /v1/operations/domains` applies the same cursor bounds to a per-domain activity projection.
 Each group retains catalogue counts, missing names, observed event/tool counts, the last observed
 event ID, and an `activity_state` of `catalogue_gap`, `observed_in_page`, or

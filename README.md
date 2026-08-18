@@ -846,6 +846,10 @@ retains its `candidate_group_evidence` rows so discovery can show missing or obs
 evidence before review; this is an advisory point-in-time observation, not an execution, readiness,
 authorization, scientific-validity, or release claim, and it is intentionally not folded into the
 catalogue-bound `route_id`.
+`capability_route_review` now validates and carries that digest/scope through `evidence_binding`,
+the review identity, and the generated mission draft. Its explicit `carried_forward_not_recomputed`
+posture prevents retained discovery observations from being silently dropped or promoted into
+execution/readiness claims; legacy routes report `present: false`.
 `domain_workflow_catalogue` closes the next gap between discovery and planning: it materializes
 one deterministic, digest-bound workflow template for each of the 29 capability groups, including
 available versus missing tool definitions, per-tool schema/evidence contracts, and advisory lexical

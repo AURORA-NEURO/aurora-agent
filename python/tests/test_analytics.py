@@ -244,6 +244,20 @@ def route_review_payload() -> dict:
         "review_id": "v" * 64,
         "route_id": "r" * 64,
         "catalog_digest": "c" * 64,
+        "evidence_digest": "e" * 64,
+        "evidence_scope": "candidate_capability_groups_current_digest_verified_artifact_and_workflow_reconciliation_registries",
+        "evidence_binding": {
+            "present": True,
+            "evidence_digest": "e" * 64,
+            "scope": "candidate_capability_groups_current_digest_verified_artifact_and_workflow_reconciliation_registries",
+            "summary": {
+                "evidence_digest": "e" * 64,
+                "scope": "candidate_capability_groups_current_digest_verified_artifact_and_workflow_reconciliation_registries",
+            },
+            "posture": "carried_forward_not_recomputed",
+            "readiness_claimed": False,
+            "execution": "not_started",
+        },
         "goal": "compose evidence",
         "need_count": 1,
         "selection_count": 1,
@@ -258,6 +272,8 @@ def route_review_payload() -> dict:
             "goal": "compose evidence",
             "steps": [{"id": "oncology", "tool": "oncology_search"}],
             "dependency_waves": [["oncology"]],
+            "route_evidence_digest": "e" * 64,
+            "route_evidence_scope": "candidate_capability_groups_current_digest_verified_artifact_and_workflow_reconciliation_registries",
         },
         "execution": "not_started",
         "route_coverage": {"needs_total": 1, "needs_resolved": 1},
@@ -2488,6 +2504,18 @@ class AnalyticsModelTests(unittest.TestCase):
         self.assertEqual(len(report.review_id), 64)
         self.assertEqual(report.dependency_waves, (("oncology",),))
         self.assertTrue(report.schema_review["valid"])
+        self.assertEqual(report.evidence_digest, "e" * 64)
+        self.assertTrue(report.evidence_binding["present"])
+
+        inconsistent = route_review_payload()
+        inconsistent["mission_draft"]["route_evidence_scope"] = "wrong_scope"
+        with self.assertRaises(ArgumentError):
+            CapabilityRouteReviewReport.from_wire(inconsistent)
+
+        partial = route_review_payload()
+        partial.pop("evidence_scope")
+        with self.assertRaises(ArgumentError):
+            CapabilityRouteReviewReport.from_wire(partial)
 
     def test_capability_route_review_report_extracts_http_structured_projection(self) -> None:
         envelope = {

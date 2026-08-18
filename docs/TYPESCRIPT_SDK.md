@@ -333,6 +333,9 @@ handoff for cross-domain needs and caller-selected tools. A ready review remains
 generations/counts, plus per-need candidate-group artifact and workflow-reconciliation postures.
 This is a bounded advisory observation separate from `route_id`, not an execution, authorization,
 scientific-validity, release-readiness, or external-effect claim.
+`CapabilityRouteReviewResult` carries the same digest/scope through an explicit `evidence_binding`
+and the mission-draft provenance fields; its `carried_forward_not_recomputed` posture preserves the
+observation without treating it as a runtime or readiness claim.
 `domainAcquisitionCatalogue` adds a typed cross-domain route registry. Its digest-bound rows keep
 bounded file/plain-HTTP transport, caller-managed connectors, native adapter matches, and
 Python-delegated adapter matches separate for every selected declared domain, with explicit

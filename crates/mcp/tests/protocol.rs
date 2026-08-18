@@ -8146,6 +8146,59 @@ fn capability_route_review_builds_non_executing_handoff_and_reports_bad_selectio
         json!("mission_preflight_required")
     );
     assert_eq!(review["execution"], json!("not_started"));
+    assert_eq!(review["evidence_binding"]["present"], json!(true));
+    assert_eq!(
+        review["evidence_binding"]["evidence_digest"],
+        route["evidence_digest"]
+    );
+    assert_eq!(
+        review["mission_draft"]["route_evidence_digest"],
+        route["evidence_digest"]
+    );
+    assert_eq!(
+        review["mission_draft"]["route_evidence_scope"],
+        route["evidence_scope"]
+    );
+    let mut tampered_route = route.clone();
+    tampered_route["evidence_scope"] = json!("tampered_scope");
+    let refused_tampering = call(
+        &mut server,
+        "capability_route_review",
+        json!({
+            "route": tampered_route,
+            "selections": []
+        }),
+    );
+    assert_eq!(refused_tampering["__isError"], json!(true));
+    assert!(refused_tampering["error"]
+        .as_str()
+        .unwrap()
+        .contains("route evidence summary does not match"));
+
+    let mut legacy_route = route.clone();
+    legacy_route.as_object_mut().unwrap().remove("evidence");
+    legacy_route
+        .as_object_mut()
+        .unwrap()
+        .remove("evidence_digest");
+    legacy_route
+        .as_object_mut()
+        .unwrap()
+        .remove("evidence_scope");
+    let legacy_review = call(
+        &mut server,
+        "capability_route_review",
+        json!({
+            "route": legacy_route,
+            "selections": []
+        }),
+    );
+    assert_eq!(legacy_review["review_status"], json!("blocked"));
+    assert_eq!(legacy_review["evidence_binding"]["present"], json!(false));
+    assert_eq!(
+        legacy_review["evidence_binding"]["posture"],
+        json!("not_supplied")
+    );
     assert_eq!(
         review["dependency_waves"],
         json!([["oncology"], ["release"]])

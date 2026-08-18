@@ -364,6 +364,9 @@ class CapabilityRouteReviewReport:
     review_id: str
     route_id: str
     catalog_digest: str
+    evidence_digest: str | None
+    evidence_scope: str | None
+    evidence_binding: dict[str, Any]
     goal: str
     review_status: str
     handoff_status: str
@@ -408,6 +411,37 @@ class CapabilityRouteReviewReport:
         findings = tuple(_route_mapping("route finding", finding) for finding in raw_findings)
         mission_draft_value = raw.get("mission_draft")
         mission_draft = None if mission_draft_value is None else _route_mapping("mission_draft", mission_draft_value)
+        evidence_digest_raw = raw.get("evidence_digest")
+        evidence_digest = (
+            None if evidence_digest_raw is None else _digest("review evidence digest", evidence_digest_raw)
+        )
+        evidence_scope_raw = raw.get("evidence_scope")
+        evidence_scope = (
+            None if evidence_scope_raw is None else _route_text("review evidence scope", evidence_scope_raw)
+        )
+        if (evidence_digest is None) != (evidence_scope is None):
+            raise ArgumentError("review evidence_digest and evidence_scope must be supplied together")
+        evidence_binding = _route_mapping("review evidence_binding", raw.get("evidence_binding", {}))
+        binding_present = evidence_binding.get("present", False)
+        if not isinstance(binding_present, bool):
+            raise ArgumentError("review evidence_binding.present must be a boolean")
+        if binding_present:
+            if evidence_digest is None or evidence_scope is None:
+                raise ArgumentError("present review evidence_binding requires a digest and scope")
+            if evidence_binding.get("evidence_digest") != evidence_digest:
+                raise ArgumentError("review evidence_binding digest does not match evidence_digest")
+            if evidence_binding.get("scope") != evidence_scope:
+                raise ArgumentError("review evidence_binding scope does not match evidence_scope")
+            summary = _route_mapping("review evidence_binding.summary", evidence_binding.get("summary", {}))
+            if summary.get("evidence_digest") != evidence_digest:
+                raise ArgumentError("review evidence summary digest does not match evidence_digest")
+            if summary.get("scope") != evidence_scope:
+                raise ArgumentError("review evidence summary scope does not match evidence_scope")
+        if mission_draft is not None and evidence_digest is not None:
+            if mission_draft.get("route_evidence_digest") != evidence_digest:
+                raise ArgumentError("mission_draft route evidence digest does not match evidence_digest")
+            if mission_draft.get("route_evidence_scope") != evidence_scope:
+                raise ArgumentError("mission_draft route evidence scope does not match evidence_scope")
         if review_status == "ready":
             if findings or mission_draft is None or handoff_status != "mission_preflight_required":
                 raise ArgumentError("ready route review must have no findings and a mission draft")
@@ -418,6 +452,9 @@ class CapabilityRouteReviewReport:
             review_id=_route_text("review review_id", raw.get("review_id")),
             route_id=_route_text("review route_id", raw.get("route_id")),
             catalog_digest=_route_text("review catalog_digest", raw.get("catalog_digest")),
+            evidence_digest=evidence_digest,
+            evidence_scope=evidence_scope,
+            evidence_binding=evidence_binding,
             goal=_route_text("review goal", raw.get("goal")),
             review_status=review_status,
             handoff_status=handoff_status,

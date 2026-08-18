@@ -5053,6 +5053,9 @@ export interface CapabilityRouteReviewResult extends JsonObject {
   review_id: string;
   route_id: string;
   catalog_digest: string;
+  evidence_digest?: string;
+  evidence_scope?: string;
+  evidence_binding?: JsonObject;
   goal: string;
   need_count: number;
   selection_count: number;

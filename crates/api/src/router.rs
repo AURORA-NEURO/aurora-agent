@@ -11994,7 +11994,7 @@ mod tests {
             "POST",
             "/v1/capabilities/route/review",
             json!({
-                "route": route,
+                "route": route.clone(),
                 "selections": [{
                     "need_id": "audit",
                     "tool": "capability_audit",
@@ -12011,6 +12011,12 @@ mod tests {
         assert_eq!(review["workflow"], "capability_route_review");
         assert_eq!(review["review_status"], "ready");
         assert_eq!(review["execution"], "not_started");
+        assert_eq!(review["evidence_binding"]["present"], true);
+        assert_eq!(review["evidence_digest"], route["evidence_digest"]);
+        assert_eq!(
+            review["mission_draft"]["route_evidence_digest"],
+            route["evidence_digest"]
+        );
     }
 
     #[test]

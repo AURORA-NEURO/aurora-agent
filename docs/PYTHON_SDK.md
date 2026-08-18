@@ -742,6 +742,9 @@ invent defaults:
   `validate_schemas=True` to request authoritative per-tool schema digests and bounded issue paths
   in `report.schema_review`. The resulting `report.review_id` is a deterministic,
   content-addressed correlation key for the route provenance, selections, and validation mode.
+  Modern review reports also expose `evidence_binding`, `evidence_digest`, and `evidence_scope`,
+  preserving the route observation in the generated mission draft without recomputing or promoting
+  it to execution/readiness evidence. Legacy route payloads retain an explicit absent binding.
   `ApiClient.capability_route_rest(...)` and `capability_route_review_rest(...)`, with async
   counterparts, use the dedicated raw REST handoff endpoints when an HTTP automation caller does
   not want to unpack an MCP envelope; they return the same raw and typed route contracts and still
