@@ -246,6 +246,108 @@ class ArtifactLineageReport:
 
 
 @dataclass(frozen=True)
+class ArtifactDomainEvidenceLineageRequest:
+    """Filters for the digest-bound domain-evidence intake trace view."""
+
+    content_digest: str | None = None
+    group_id: str | None = None
+    domain: str | None = None
+    subject_id: str | None = None
+    source_tool: str | None = None
+    outcome: str | None = None
+    request_digest: str | None = None
+    response_digest: str | None = None
+    intake_digest: str | None = None
+    source_plan_digest: str | None = None
+    after: str | None = None
+    max_items: int = 100
+    include_children: bool = True
+
+    def __post_init__(self) -> None:
+        for name in (
+            "content_digest",
+            "request_digest",
+            "response_digest",
+            "intake_digest",
+            "source_plan_digest",
+            "after",
+        ):
+            value = getattr(self, name)
+            if value is not None:
+                _digest(f"domain evidence lineage {name}", value)
+        for name in ("group_id", "domain", "subject_id", "source_tool", "outcome"):
+            value = getattr(self, name)
+            if value is not None:
+                _text(f"domain evidence lineage {name}", value)
+        if isinstance(self.max_items, bool) or not isinstance(self.max_items, int) or not 1 <= self.max_items <= 256:
+            raise ArgumentError("domain evidence lineage max_items must be between 1 and 256")
+        if not isinstance(self.include_children, bool):
+            raise ArgumentError("domain evidence lineage include_children must be a boolean")
+
+    def to_arguments(self) -> dict[str, Any]:
+        arguments: dict[str, Any] = {
+            "max_items": self.max_items,
+            "include_children": self.include_children,
+        }
+        for name in (
+            "content_digest",
+            "group_id",
+            "domain",
+            "subject_id",
+            "source_tool",
+            "outcome",
+            "request_digest",
+            "response_digest",
+            "intake_digest",
+            "source_plan_digest",
+            "after",
+        ):
+            value = getattr(self, name)
+            if value is not None:
+                arguments[name] = value
+        return arguments
+
+    def to_query_params(self) -> dict[str, str]:
+        return {key: str(value).lower() if isinstance(value, bool) else str(value) for key, value in self.to_arguments().items()}
+
+
+@dataclass(frozen=True)
+class ArtifactDomainEvidenceLineageReport:
+    raw: dict[str, Any]
+    rows: tuple[Mapping[str, Any], ...]
+    next_after: str | None
+    has_more: bool
+    registry_generation: int
+    registry_size: int
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "ArtifactDomainEvidenceLineageReport":
+        raw = dict(value)
+        if raw.get("workflow") != "artifact_registry_domain_evidence_lineage":
+            raise ArgumentError("domain evidence lineage workflow is invalid")
+        rows = raw.get("rows", [])
+        if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
+            raise ArgumentError("domain evidence lineage rows must be an array")
+        next_after = raw.get("next_after")
+        if next_after is not None:
+            _digest("domain evidence lineage next cursor", next_after)
+        has_more = raw.get("has_more")
+        if not isinstance(has_more, bool):
+            raise ArgumentError("domain evidence lineage has_more must be a boolean")
+        return cls(
+            raw=raw,
+            rows=tuple(_mapping("domain evidence lineage row", row) for row in rows),
+            next_after=next_after,
+            has_more=has_more,
+            registry_generation=_count("domain evidence lineage generation", raw.get("registry_generation")),
+            registry_size=_count("domain evidence lineage size", raw.get("registry_size")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
 class ArtifactCrossStoreAuditReport:
     """Digest-only consistency diagnostics across the three bounded local registries."""
 

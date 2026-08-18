@@ -7,7 +7,7 @@ import threading
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from prism_sdk import AdapterPlanReport, ApiClient, ApiError, ArgumentError, ArtifactCrossStoreAuditReport, ArtifactGetReport, ArtifactLineageReport, ArtifactQueryRequest, ArtifactRegistrationRequest, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, CiExecutionEvidenceRequest, CiProviderNormalizationRequest, ClaimRequest, ConformanceRunReport, DeliveryAttemptPage, DeliveryPage, DeliveryReceiptAttempts, DeliveryReceiptEvents, DeveloperDeliveryAuditReport, DeveloperDeliveryReceiptRequest, DeveloperDeliveryReceiptVerificationRequest, DeveloperPlatformStatusReport, EventPage, EventPersistenceStatus, EvidenceItem, ExecutionProvenanceRequest, HubLockArgs, HubResolveArgs, HubSearchArgs, InfluenceAnalyzeArgs, LabPlanRequest, MedicalBoundaryRequest, MeasurementCompareArgs, MissionClaimLineage, MissionInventoryPage, MissionPersistenceStatus, MissionQueueFlushResult, MissionQueueInventory, MissionQueueLockReleaseResult, MissionQueueStatus, MissionRequest, MissionStep, MissionWaitTimeout, ObservedWorldDeclareArgs, OperationsCatalogReport, OperationsDomainActivity, OperationsDomainGates, OperationsGateReviewRequest, OperationsHandoff, OperationsSnapshot, OperationsGateReviews, OpsAcceptanceReport, ProviderCapabilityGateArgs, RecoveryMatrix, ReleaseAuditArgs, ReleaseAuditReport, ReleaseAuditCheckRequest, RiskAssessmentRequest, RouteReviewEvidence, RoutingDecisionRequest, SdkRegistryCheckArgs, SseSnapshot, StressProfileArgs, StressReportArgs, TabularIngestReport, TabularIngestRequest, TokenContextPlanArgs, TokenContextPlanningReport, WeaveLangCompileArgs, WeaveLangCompileReport, WorldClaimCheckRequest
+from prism_sdk import AdapterPlanReport, ApiClient, ApiError, ArgumentError, ArtifactCrossStoreAuditReport, ArtifactDomainEvidenceLineageReport, ArtifactDomainEvidenceLineageRequest, ArtifactGetReport, ArtifactLineageReport, ArtifactQueryRequest, ArtifactRegistrationRequest, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, CiExecutionEvidenceRequest, CiProviderNormalizationRequest, ClaimRequest, ConformanceRunReport, DeliveryAttemptPage, DeliveryPage, DeliveryReceiptAttempts, DeliveryReceiptEvents, DeveloperDeliveryAuditReport, DeveloperDeliveryReceiptRequest, DeveloperDeliveryReceiptVerificationRequest, DeveloperPlatformStatusReport, EventPage, EventPersistenceStatus, EvidenceItem, ExecutionProvenanceRequest, HubLockArgs, HubResolveArgs, HubSearchArgs, InfluenceAnalyzeArgs, LabPlanRequest, MedicalBoundaryRequest, MeasurementCompareArgs, MissionClaimLineage, MissionInventoryPage, MissionPersistenceStatus, MissionQueueFlushResult, MissionQueueInventory, MissionQueueLockReleaseResult, MissionQueueStatus, MissionRequest, MissionStep, MissionWaitTimeout, ObservedWorldDeclareArgs, OperationsCatalogReport, OperationsDomainActivity, OperationsDomainGates, OperationsGateReviewRequest, OperationsHandoff, OperationsSnapshot, OperationsGateReviews, OpsAcceptanceReport, ProviderCapabilityGateArgs, RecoveryMatrix, ReleaseAuditArgs, ReleaseAuditReport, ReleaseAuditCheckRequest, RiskAssessmentRequest, RouteReviewEvidence, RoutingDecisionRequest, SdkRegistryCheckArgs, SseSnapshot, StressProfileArgs, StressReportArgs, TabularIngestReport, TabularIngestRequest, TokenContextPlanArgs, TokenContextPlanningReport, WeaveLangCompileArgs, WeaveLangCompileReport, WorldClaimCheckRequest
 
 
 def adapter_plan_payload() -> dict:
@@ -370,6 +370,8 @@ class FakeApiHandler(BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "ready": True})
         elif self.path.startswith("/v1/artifacts?"):
             self._send(200, {"ok": True, "schema": "bioprism-devplat-artifact-query/0.1", "workflow": "artifact_registry_query", "filters": {}, "registry_generation": 1, "registry_size": 1, "rows": [{"content_digest": "a" * 64, "kind": "domain_report", "subject_id": "subject-1", "domains": ["oncology"], "parent_digests": [], "declared_digest": None, "verification": {}}], "next_after": None, "has_more": False, "execution": "not_started", "guarantees": [], "does_not_claim": []})
+        elif self.path.startswith("/v1/domain-evidence/lineage?"):
+            self._send(200, {"ok": True, "schema": "bioprism-devplat-artifact-domain-evidence-lineage/0.1", "workflow": "artifact_registry_domain_evidence_lineage", "filters": {}, "registry_generation": 1, "registry_size": 1, "rows": [{"content_digest": "a" * 64, "request_digest": "b" * 64, "response_digest": "c" * 64, "intake_digest": "d" * 64, "source_plan": {"binding_state": "retained_and_content_parented"}, "parents": [], "children": []}], "next_after": None, "has_more": False, "execution": "not_started", "guarantees": [], "does_not_claim": []})
         elif self.path == "/v1/artifacts/cross-store":
             self._send(200, {"ok": True, "schema": "bioprism-devplat-cross-domain-artifact-audit/0.1", "workflow": "artifact_registry_cross_store_audit", "consistent": True, "bounded": True, "truncated": False, "stores": {}, "coverage": {}, "artifact_kind_counts": {"domain_report": 1}, "findings": [], "execution": "not_started", "guarantees": [], "does_not_claim": ["the four stores were read in one atomic transaction"]})
         elif self.path.endswith("/lineage") and self.path.startswith("/v1/artifacts/"):
@@ -572,6 +574,16 @@ class HttpApiClientTests(unittest.TestCase):
         lineage = client.artifact_lineage("a" * 64)
         self.assertIsInstance(lineage, ArtifactLineageReport)
         self.assertEqual(lineage.missing_parent_digests, ("b" * 64,))
+        intake_lineage = client.domain_evidence_lineage(
+            ArtifactDomainEvidenceLineageRequest(
+                content_digest="a" * 64,
+                group_id="biological_domains",
+                domain="modalities",
+                outcome="observed",
+            )
+        )
+        self.assertIsInstance(intake_lineage, ArtifactDomainEvidenceLineageReport)
+        self.assertEqual(intake_lineage.rows[0]["source_plan"]["binding_state"], "retained_and_content_parented")
         self.assertIsInstance(client.artifact_cross_store_audit(), ArtifactCrossStoreAuditReport)
         self.assertTrue(client.artifact_registry_persistence()["integrity_verified"])
 

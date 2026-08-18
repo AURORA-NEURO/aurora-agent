@@ -91,6 +91,13 @@ COMMANDS
   evidence query    --store <path> [--mission-id <id>] [--domain <name>] [--after <digest>]
                     [--limit <n>] [--include-bundles]
                     Query a local registry checkpoint without executing any mission or tool.
+  evidence domain-lineage --store <path> [--digest <digest>] [--group-id <id>]
+                    [--domain <name>] [--subject-id <id>] [--source-tool <tool>]
+                    [--outcome observed|partial|refused|error|unknown]
+                    [--request-digest <digest>] [--response-digest <digest>]
+                    [--intake-digest <digest>] [--source-plan-digest <digest>]
+                    [--after <digest>] [--limit <n>] [--no-children]
+                    Trace retained domain-evidence intake digests and explicit registry lineage.
 
   workflow catalogue
                     Build one deterministic, digest-bound workflow template for every capability
@@ -228,6 +235,22 @@ pub enum Command {
         after: Option<String>,
         limit: usize,
         include_bundles: bool,
+    },
+    EvidenceDomainLineage {
+        store: PathBuf,
+        digest: Option<String>,
+        group_id: Option<String>,
+        domain: Option<String>,
+        subject_id: Option<String>,
+        source_tool: Option<String>,
+        outcome: Option<String>,
+        request_digest: Option<String>,
+        response_digest: Option<String>,
+        intake_digest: Option<String>,
+        source_plan_digest: Option<String>,
+        after: Option<String>,
+        limit: usize,
+        include_children: bool,
     },
     WorkflowCatalogue,
     WorkflowScaffold {
@@ -473,6 +496,27 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
                     .map_err(|_| usage(format!("--limit must be a number, got {text:?}")))?,
             },
             include_bundles: options.take_switch("--include-bundles"),
+        },
+        ("evidence", "domain-lineage") => Command::EvidenceDomainLineage {
+            store: options.take_path("--store")?,
+            digest: options.take_optional("--digest"),
+            group_id: options.take_optional("--group-id"),
+            domain: options.take_optional("--domain"),
+            subject_id: options.take_optional("--subject-id"),
+            source_tool: options.take_optional("--source-tool"),
+            outcome: options.take_optional("--outcome"),
+            request_digest: options.take_optional("--request-digest"),
+            response_digest: options.take_optional("--response-digest"),
+            intake_digest: options.take_optional("--intake-digest"),
+            source_plan_digest: options.take_optional("--source-plan-digest"),
+            after: options.take_optional("--after"),
+            limit: match options.take_optional("--limit") {
+                None => 100,
+                Some(text) => text
+                    .parse()
+                    .map_err(|_| usage(format!("--limit must be a number, got {text:?}")))?,
+            },
+            include_children: !options.take_switch("--no-children"),
         },
         ("workflow", "catalogue") => Command::WorkflowCatalogue,
         ("workflow", "scaffold") => Command::WorkflowScaffold {
@@ -1107,6 +1151,68 @@ mod tests {
                 command: Command::CiProviderEvidenceGet {
                     store: PathBuf::from("state.json"),
                     digest: "c".repeat(64),
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn evidence_domain_lineage_parses_digest_filters_and_child_control() {
+        let parsed = parse(
+            [
+                "evidence",
+                "domain-lineage",
+                "--store",
+                "artifacts.json",
+                "--digest",
+                &"a".repeat(64),
+                "--group-id",
+                "biological_domains",
+                "--domain",
+                "modalities",
+                "--subject-id",
+                "subject-1",
+                "--source-tool",
+                "modality_catalog",
+                "--outcome",
+                "partial",
+                "--request-digest",
+                &"b".repeat(64),
+                "--response-digest",
+                &"c".repeat(64),
+                "--intake-digest",
+                &"d".repeat(64),
+                "--source-plan-digest",
+                &"e".repeat(64),
+                "--after",
+                &"f".repeat(64),
+                "--limit",
+                "7",
+                "--no-children",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse domain evidence lineage");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::EvidenceDomainLineage {
+                    store: PathBuf::from("artifacts.json"),
+                    digest: Some("a".repeat(64)),
+                    group_id: Some("biological_domains".into()),
+                    domain: Some("modalities".into()),
+                    subject_id: Some("subject-1".into()),
+                    source_tool: Some("modality_catalog".into()),
+                    outcome: Some("partial".into()),
+                    request_digest: Some("b".repeat(64)),
+                    response_digest: Some("c".repeat(64)),
+                    intake_digest: Some("d".repeat(64)),
+                    source_plan_digest: Some("e".repeat(64)),
+                    after: Some("f".repeat(64)),
+                    limit: 7,
+                    include_children: false,
                 },
             })
         );

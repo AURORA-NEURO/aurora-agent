@@ -173,6 +173,8 @@ from .analytics import (
 from .artifacts import (
     ARTIFACT_KINDS,
     ArtifactCrossStoreAuditReport,
+    ArtifactDomainEvidenceLineageReport,
+    ArtifactDomainEvidenceLineageRequest,
     ArtifactGetReport,
     ArtifactGetRequest,
     ArtifactLineageReport,

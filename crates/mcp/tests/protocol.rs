@@ -755,6 +755,65 @@ fn artifact_registry_audit_joins_cross_domain_records_without_inventing_provenan
 }
 
 #[test]
+fn artifact_registry_domain_evidence_lineage_traces_intake_and_reverse_children() {
+    let mut server = server();
+    let intake = call(
+        &mut server,
+        "domain_evidence_intake",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "mcp-lineage-subject",
+            "source_tool": "modality_catalog",
+            "request": {"modality": "single_cell"},
+            "response": {"modalities": ["single_cell"]},
+            "outcome": "observed",
+            "claim_posture": {
+                "status": "observed",
+                "does_not_claim": ["clinical validity"]
+            }
+        }),
+    );
+    let intake_digest = intake["artifact_registry"]["content_digest"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let trace = call(
+        &mut server,
+        "artifact_registry_audit",
+        json!({
+            "operation": "domain_evidence_lineage",
+            "content_digest": intake_digest,
+            "include_children": true
+        }),
+    );
+    assert_eq!(
+        trace["workflow"],
+        json!("artifact_registry_domain_evidence_lineage")
+    );
+    assert_eq!(trace["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(trace["rows"][0]["outcome"], json!("observed"));
+    assert_eq!(
+        trace["rows"][0]["source_plan"]["binding_state"],
+        json!("not_declared")
+    );
+    assert_eq!(
+        trace["rows"][0]["request_digest"].as_str().unwrap().len(),
+        64
+    );
+    assert!(trace["rows"][0]["artifact_lookup"]
+        .as_str()
+        .unwrap()
+        .contains("/v1/artifacts/"));
+    assert!(trace["guarantees"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item
+            == "reverse child links are computed only from exact declared parent content digests"));
+}
+
+#[test]
 fn domain_report_projection_checks_catalogue_indexes_idempotently_and_reports_coverage() {
     let mut server = server();
     let arguments = json!({

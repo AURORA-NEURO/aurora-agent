@@ -376,6 +376,8 @@ import type {
   MissionEvidenceBundleVerifyResult,
   ArtifactRegistrationArgs,
   ArtifactRegistrationResult,
+  ArtifactDomainEvidenceLineageOptions,
+  ArtifactDomainEvidenceLineageResult,
   ArtifactCrossStoreAuditResult,
   ArtifactQueryOptions,
   ArtifactQueryResult,
@@ -2129,6 +2131,37 @@ export class ApiClient {
   async artifactLineage(contentDigest: string, options?: ClientRequestOptions): Promise<ArtifactLineageResult> {
     const digest = pathSegment(contentDigest, "artifact content digest");
     return this.request<ArtifactLineageResult>("GET", `/v1/artifacts/${encodeURIComponent(digest)}/lineage`, undefined, options);
+  }
+
+  async domainEvidenceLineage(
+    args: ArtifactDomainEvidenceLineageOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<ArtifactDomainEvidenceLineageResult> {
+    if (!isObject(args)) throw new ArgumentError("domain evidence lineage arguments must be an object");
+    const stringFields = ["content_digest", "group_id", "domain", "subject_id", "source_tool", "outcome", "request_digest", "response_digest", "intake_digest", "source_plan_digest", "after"] as const;
+    for (const name of stringFields) {
+      const value = args[name];
+      if (value !== undefined && (typeof value !== "string" || value.trim().length === 0)) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    const maxItems = args.max_items ?? 100;
+    if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 256) throw new ArgumentError("max_items must be 1..=256");
+    if (args.include_children !== undefined && typeof args.include_children !== "boolean") throw new ArgumentError("include_children must be a boolean");
+    const query = new URLSearchParams({ max_items: String(maxItems), include_children: String(args.include_children ?? true) });
+    for (const name of stringFields) {
+      const value = args[name];
+      if (value !== undefined) query.set(name, value);
+    }
+    return this.request<ArtifactDomainEvidenceLineageResult>("GET", `/v1/domain-evidence/lineage?${query.toString()}`, undefined, options);
+  }
+
+  async artifactDomainEvidenceLineageTool(
+    args: ArtifactDomainEvidenceLineageOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<ArtifactDomainEvidenceLineageResult>> {
+    if (!isObject(args)) throw new ArgumentError("domain evidence lineage arguments must be an object");
+    const maxItems = args.max_items ?? 100;
+    if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 256) throw new ArgumentError("max_items must be 1..=256");
+    return this.callTool<ArtifactDomainEvidenceLineageResult>("artifact_registry_audit", { operation: "domain_evidence_lineage", ...args, max_items: maxItems }, options);
   }
 
   async artifactRegistryPersistence(options?: ClientRequestOptions): Promise<ArtifactRegistryPersistenceStatus> {

@@ -633,6 +633,16 @@ imports, and digest-valid workflow reconciliations into this shared index automa
 response carries an `artifact_registry` projection with the exact registry digest or an explicit
 indexing failure; generic domain-tool outputs remain unindexed unless the caller registers them
 deliberately.
+`artifact_registry_audit` with `operation: "domain_evidence_lineage"` is the intake-specific read
+model over that same index. It filters any of the 29 capability groups by exact content, request,
+response, intake, source-plan, subject, source-tool, outcome, or domain identity; each returned row
+keeps the recoverable request/response digests, direct declared parent states, source-plan
+`plan_digest` versus indexed content-digest binding, and reverse direct child links. The MCP
+operation, `GET /v1/domain-evidence/lineage`, `bioprism evidence domain-lineage`, and the sync/
+async Python and TypeScript facades all preserve cursor bounds and the distinction between a
+missing parent, a retained parent, and a digest that is merely declared. It is a structural
+lineage view only: no digest, parent edge, child edge, or intake outcome becomes execution,
+causal provenance, scientific, clinical, provider, release, or readiness authority.
 carry disclosure ratchets, fail-closed score publication, comparability conditions, and typed
 unranked entries into agent-callable public-hub projections. `release_audit` composes required
 registry, bundle, quality, conformance, research-CI, operations, and pack-health gates while

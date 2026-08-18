@@ -31,6 +31,8 @@ from .adapter_execution_evidence_query import (
 )
 from .artifacts import (
     ArtifactCrossStoreAuditReport,
+    ArtifactDomainEvidenceLineageReport,
+    ArtifactDomainEvidenceLineageRequest,
     ArtifactGetReport,
     ArtifactGetRequest,
     ArtifactLineageReport,
@@ -876,6 +878,24 @@ class ApiClient:
             self.request(
                 "GET",
                 f"/v1/artifacts/{quote(normalized.content_digest, safe='')}/lineage",
+            )
+        )
+
+    def domain_evidence_lineage(
+        self,
+        request: ArtifactDomainEvidenceLineageRequest | Mapping[str, Any] | None = None,
+    ) -> ArtifactDomainEvidenceLineageReport:
+        """Read exact intake digests and retained direct parent/child linkage over REST."""
+
+        normalized = (
+            request
+            if isinstance(request, ArtifactDomainEvidenceLineageRequest)
+            else ArtifactDomainEvidenceLineageRequest(**dict(request or {}))
+        )
+        return ArtifactDomainEvidenceLineageReport.from_wire(
+            self.request(
+                "GET",
+                f"/v1/domain-evidence/lineage?{urlencode(normalized.to_query_params())}",
             )
         )
 
@@ -5955,6 +5975,12 @@ class AsyncApiClient:
         request: ArtifactGetRequest | Mapping[str, Any] | str,
     ) -> ArtifactLineageReport:
         return await asyncio.to_thread(self.client.artifact_lineage, request)
+
+    async def domain_evidence_lineage(
+        self,
+        request: ArtifactDomainEvidenceLineageRequest | Mapping[str, Any] | None = None,
+    ) -> ArtifactDomainEvidenceLineageReport:
+        return await asyncio.to_thread(self.client.domain_evidence_lineage, request)
 
     async def artifact_registry_persistence(self) -> dict[str, Any]:
         return await asyncio.to_thread(self.client.artifact_registry_persistence)

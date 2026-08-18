@@ -2869,6 +2869,11 @@ impl Server {
                     .lineage(digest)
                     .map_err(|error| format!("artifact registry lineage refused: {error}"))
             }
+            "domain_evidence_lineage" => registry
+                .domain_evidence_lineage(arguments)
+                .map_err(|error| {
+                    format!("artifact registry domain evidence lineage refused: {error}")
+                }),
             "verify_snapshot" => {
                 let snapshot = arguments
                     .get("snapshot")
@@ -2893,7 +2898,7 @@ impl Server {
                 }))
             }
             other => Err(format!(
-                "unknown artifact registry operation {other:?}; choose register, query, get, lineage, cross_store, or verify_snapshot"
+                "unknown artifact registry operation {other:?}; choose register, query, get, lineage, domain_evidence_lineage, cross_store, or verify_snapshot"
             )),
         }
     }
@@ -34304,11 +34309,11 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "artifact_registry_audit",
-            "description": "Register, query, fetch, and traverse a bounded cross-domain artifact index keyed by exact JSON content digest. Trusted mission, evaluator-replay, verified evidence-bundle, and workflow-reconciliation boundaries also project records automatically; generic domain results remain manual. Known evidence bundles and workflow reconciliation records are independently re-verified before registration. The registry preserves missing parents and never turns index presence into scientific, clinical, publication, or external-provenance authority.",
+            "description": "Register, query, fetch, and traverse a bounded cross-domain artifact index keyed by exact JSON content digest. domain_evidence_lineage adds a digest-bound intake trace with request/response/intake identities, source-plan binding posture, declared parent presence, and reverse retained-child links for any capability group. Trusted mission, evaluator-replay, verified evidence-bundle, and workflow-reconciliation boundaries also project records automatically; generic domain results remain manual. Known evidence bundles and workflow reconciliation records are independently re-verified before registration. The registry preserves missing parents and never turns index presence into scientific, clinical, publication, or external-provenance authority.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "operation": { "type": "string", "enum": ["register", "query", "get", "lineage", "cross_store", "verify_snapshot"], "description": "Operation to perform; defaults to query. cross_store compares exact identities across the artifact, mission evidence, workflow reconciliation, and workflow execution evidence registries." },
+                    "operation": { "type": "string", "enum": ["register", "query", "get", "lineage", "domain_evidence_lineage", "cross_store", "verify_snapshot"], "description": "Operation to perform; defaults to query. domain_evidence_lineage traces retained domain_evidence_intake rows; cross_store compares exact identities across the artifact, mission evidence, workflow reconciliation, and workflow execution evidence registries." },
                     "registration": { "type": "object", "description": "For register: {kind, subject_id, domains, parent_digests, declared_digest?, artifact}." },
                     "kind": { "type": "string", "description": "For query: artifact kind such as mission_evidence_bundle, workflow_reconciliation, evaluator_replay, domain_report, or domain_evidence_harmonization." },
                     "domain": { "type": "string", "description": "For query: one explicit domain label." },
@@ -34317,6 +34322,14 @@ pub fn tool_definitions() -> Vec<Value> {
                     "max_items": { "type": "integer", "minimum": 1, "maximum": 256, "description": "For query: bounded row count; defaults to 100." },
                     "include_artifacts": { "type": "boolean", "description": "For query: include full bounded artifact bodies; defaults false." },
                     "content_digest": { "type": "string", "description": "For get or lineage: exact content digest returned by register/query." },
+                    "group_id": { "type": "string", "description": "For domain_evidence_lineage: optional exact capability-group filter." },
+                    "source_tool": { "type": "string", "description": "For domain_evidence_lineage: optional exact retained source-tool filter." },
+                    "outcome": { "type": "string", "enum": ["observed", "partial", "refused", "error", "unknown"], "description": "For domain_evidence_lineage: optional caller-declared intake outcome filter." },
+                    "request_digest": { "type": "string", "description": "For domain_evidence_lineage: optional exact canonical request digest." },
+                    "response_digest": { "type": "string", "description": "For domain_evidence_lineage: optional exact canonical response digest." },
+                    "intake_digest": { "type": "string", "description": "For domain_evidence_lineage: optional exact canonical intake digest." },
+                    "source_plan_digest": { "type": "string", "description": "For domain_evidence_lineage: optional canonical source plan digest; the result separately reports its retained content-parent binding." },
+                    "include_children": { "type": "boolean", "description": "For domain_evidence_lineage: include direct retained child links found by exact parent content digest; defaults true." },
                     "snapshot": { "type": "object", "description": "For verify_snapshot: serialized artifact registry checkpoint." }
                 },
                 "required": []

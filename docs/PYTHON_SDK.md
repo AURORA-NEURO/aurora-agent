@@ -13,11 +13,18 @@ domain invariants, release gates, and evidence semantics.
 
 The artifact registry is available through typed `ArtifactRegistrationRequest`,
 `ArtifactQueryRequest`, `ArtifactGetRequest`, `ArtifactRegistrationReport`, `ArtifactQueryReport`,
-`ArtifactGetReport`, `ArtifactLineageReport`, and `ArtifactCrossStoreAuditReport` models. `ApiClient` exposes REST registration,
+`ArtifactGetReport`, `ArtifactLineageReport`, `ArtifactDomainEvidenceLineageRequest`,
+`ArtifactDomainEvidenceLineageReport`, and `ArtifactCrossStoreAuditReport` models. `ApiClient` exposes REST registration,
 query, lookup, lineage, persistence status, and flush methods; `Workspace` and
 `AsyncWorkspace` expose the MCP `artifact_registry_audit` flow. Parent presence remains an index
 observation, missing parents remain explicit, and no client model treats a digest as scientific,
 clinical, publication, causal, or external-effect authority.
+`artifact_domain_evidence_lineage()` adds the shared-index intake trace across sync/async HTTP and
+MCP facades. Its bounded request can select any declared capability group by exact intake/content,
+request/response, source-plan, subject, source-tool, outcome, or domain digest and can include
+reverse direct-child links. Rows expose recoverable payload digests, present/missing direct parents,
+and the separate canonical source-plan digest versus indexed content-parent binding; full intake
+bodies remain available only through explicit artifact lookup.
 `ApiClient.artifact_cross_store_audit()` and `Workspace.artifact_cross_store_audit()` compare
 retained exact identities across the artifact, evidence, and reconciliation registries. They
 return missing projections, orphaned projections, wrong-kind findings, store generations, and

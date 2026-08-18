@@ -46,6 +46,8 @@ pub const ARTIFACT_REGISTRY_LINEAGE_SCHEMA_VERSION: &str = "bioprism-devplat-art
 pub const ARTIFACT_REGISTRY_GET_SCHEMA_VERSION: &str = "bioprism-devplat-artifact-get/0.1";
 pub const ARTIFACT_REGISTRY_DOMAIN_EVIDENCE_POSTURE_SCHEMA_VERSION: &str =
     "bioprism-devplat-artifact-domain-evidence-posture/0.1";
+pub const ARTIFACT_REGISTRY_DOMAIN_EVIDENCE_LINEAGE_SCHEMA_VERSION: &str =
+    "bioprism-devplat-artifact-domain-evidence-lineage/0.1";
 pub const MAX_ARTIFACT_REGISTRY_RECORDS: usize = 512;
 pub const MAX_ARTIFACT_REGISTRY_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_ARTIFACT_REGISTRY_QUERY_ITEMS: usize = 256;
@@ -255,6 +257,232 @@ impl ArtifactRegistry {
     /// kind information.
     pub fn records_for_audit(&self) -> Vec<ArtifactRecord> {
         self.records.values().cloned().collect()
+    }
+
+    /// Trace retained domain-evidence intake artifacts through exact digest references.
+    ///
+    /// This is a derived read model over the same durable artifact index; it deliberately does
+    /// not create a second intake store. Each row exposes the canonical request, response, and
+    /// intake digests, direct declared parents, direct retained children, and the distinction
+    /// between a source plan's internal `plan_digest` and its indexed artifact content digest.
+    /// That distinction matters because a plan digest identifies the canonical plan body while a
+    /// content digest identifies the exact indexed record and is the only value traversable by
+    /// the registry's parent graph.
+    pub fn domain_evidence_lineage(&self, request: &Value) -> Result<Value, ArtifactRegistryError> {
+        let object = request
+            .as_object()
+            .ok_or(ArtifactRegistryError::RegistrationNotObject)?;
+        let content_digest = optional_digest(object, "content_digest")?;
+        let group_id = optional_text(object, "group_id")?;
+        let domain = optional_text(object, "domain")?;
+        let subject_id = optional_text(object, "subject_id")?;
+        let source_tool = optional_text(object, "source_tool")?;
+        let outcome = optional_text(object, "outcome")?;
+        let request_digest = optional_digest(object, "request_digest")?;
+        let response_digest = optional_digest(object, "response_digest")?;
+        let intake_digest = optional_digest(object, "intake_digest")?;
+        let source_plan_digest = optional_digest(object, "source_plan_digest")?;
+        let after = optional_digest(object, "after")?;
+        let max_items = object
+            .get("max_items")
+            .map(|value| {
+                value
+                    .as_u64()
+                    .ok_or_else(|| {
+                        ArtifactRegistryError::InvalidInput("max_items must be an integer".into())
+                    })
+                    .and_then(|number| {
+                        usize::try_from(number).map_err(|_| {
+                            ArtifactRegistryError::InvalidInput("max_items is too large".into())
+                        })
+                    })
+            })
+            .transpose()?
+            .unwrap_or(100);
+        if !(1..=MAX_ARTIFACT_REGISTRY_QUERY_ITEMS).contains(&max_items) {
+            return Err(ArtifactRegistryError::InvalidInput(format!(
+                "max_items must be between 1 and {MAX_ARTIFACT_REGISTRY_QUERY_ITEMS}"
+            )));
+        }
+        let include_children = object
+            .get("include_children")
+            .map(|value| {
+                value.as_bool().ok_or_else(|| {
+                    ArtifactRegistryError::InvalidInput("include_children must be a boolean".into())
+                })
+            })
+            .transpose()?
+            .unwrap_or(true);
+        if let Some(outcome) = &outcome {
+            if !matches!(
+                outcome.as_str(),
+                "observed" | "partial" | "refused" | "error" | "unknown"
+            ) {
+                return Err(ArtifactRegistryError::InvalidInput(
+                    "outcome must be observed, partial, refused, error, or unknown".into(),
+                ));
+            }
+        }
+        if content_digest.is_some() && after.is_some() {
+            return Err(ArtifactRegistryError::InvalidInput(
+                "after cannot be combined with content_digest".into(),
+            ));
+        }
+
+        let records = self.records.values().collect::<Vec<_>>();
+        let root = if let Some(digest) = &content_digest {
+            let record =
+                self.records
+                    .get(digest)
+                    .ok_or_else(|| ArtifactRegistryError::NotFound {
+                        digest: digest.clone(),
+                    })?;
+            if record.kind != "domain_evidence_intake" {
+                return Err(ArtifactRegistryError::InvalidInput(format!(
+                    "content_digest {digest} is {}, not domain_evidence_intake",
+                    record.kind
+                )));
+            }
+            Some(record)
+        } else {
+            None
+        };
+        let mut matching = records
+            .into_iter()
+            .filter(|record| record.kind == "domain_evidence_intake")
+            .filter(|record| {
+                root.is_none_or(|candidate| candidate.content_digest == record.content_digest)
+            })
+            .filter(|record| {
+                after
+                    .as_ref()
+                    .is_none_or(|cursor| record.content_digest > *cursor)
+            })
+            .filter(|record| {
+                group_id.as_ref().is_none_or(|value| {
+                    record.artifact.get("group_id").and_then(Value::as_str) == Some(value.as_str())
+                })
+            })
+            .filter(|record| {
+                domain.as_ref().is_none_or(|value| {
+                    record
+                        .artifact
+                        .get("domains")
+                        .and_then(Value::as_array)
+                        .is_some_and(|domains| {
+                            domains
+                                .iter()
+                                .filter_map(Value::as_str)
+                                .any(|candidate| candidate.eq_ignore_ascii_case(value))
+                        })
+                })
+            })
+            .filter(|record| {
+                subject_id
+                    .as_ref()
+                    .is_none_or(|value| record.subject_id == *value)
+            })
+            .filter(|record| {
+                source_tool.as_ref().is_none_or(|value| {
+                    record.artifact.get("source_tool").and_then(Value::as_str)
+                        == Some(value.as_str())
+                })
+            })
+            .filter(|record| {
+                outcome.as_ref().is_none_or(|value| {
+                    record.artifact.get("outcome").and_then(Value::as_str) == Some(value.as_str())
+                })
+            })
+            .filter(|record| {
+                request_digest.as_ref().is_none_or(|value| {
+                    record
+                        .artifact
+                        .get("request_digest")
+                        .and_then(Value::as_str)
+                        == Some(value.as_str())
+                })
+            })
+            .filter(|record| {
+                response_digest.as_ref().is_none_or(|value| {
+                    record
+                        .artifact
+                        .get("response_digest")
+                        .and_then(Value::as_str)
+                        == Some(value.as_str())
+                })
+            })
+            .filter(|record| {
+                intake_digest.as_ref().is_none_or(|value| {
+                    record.artifact.get("intake_digest").and_then(Value::as_str)
+                        == Some(value.as_str())
+                })
+            })
+            .filter(|record| {
+                source_plan_digest.as_ref().is_none_or(|value| {
+                    record
+                        .artifact
+                        .get("source_plan_digest")
+                        .and_then(Value::as_str)
+                        == Some(value.as_str())
+                })
+            })
+            .collect::<Vec<_>>();
+        let has_more = matching.len() > max_items;
+        if has_more {
+            matching.truncate(max_items);
+        }
+        let rows = matching
+            .iter()
+            .map(|record| domain_evidence_lineage_row(record, &self.records, include_children))
+            .collect::<Vec<_>>();
+        let next_after = if has_more {
+            rows.last()
+                .and_then(|row| row.get("content_digest"))
+                .cloned()
+                .unwrap_or(Value::Null)
+        } else {
+            Value::Null
+        };
+        Ok(json!({
+            "ok": true,
+            "schema": ARTIFACT_REGISTRY_DOMAIN_EVIDENCE_LINEAGE_SCHEMA_VERSION,
+            "workflow": "artifact_registry_domain_evidence_lineage",
+            "filters": {
+                "content_digest": content_digest,
+                "group_id": group_id,
+                "domain": domain,
+                "subject_id": subject_id,
+                "source_tool": source_tool,
+                "outcome": outcome,
+                "request_digest": request_digest,
+                "response_digest": response_digest,
+                "intake_digest": intake_digest,
+                "source_plan_digest": source_plan_digest,
+                "after": after,
+                "max_items": max_items,
+                "include_children": include_children
+            },
+            "registry_generation": self.generation,
+            "registry_size": self.records.len(),
+            "rows": rows,
+            "next_after": next_after,
+            "has_more": has_more,
+            "trace_scope": "domain_evidence_intake_direct_declared_parents_and_direct_retained_children",
+            "execution": "not_started",
+            "guarantees": [
+                "request, response, and intake digests are read from independently validated canonical intake artifacts",
+                "declared parent digests remain distinct from retained parent records and missing parents",
+                "source plan identity reports both the canonical plan_digest and the indexed content digest when available",
+                "reverse child links are computed only from exact declared parent content digests",
+                "all rows come from the same bounded artifact registry used by artifact get and artifact lineage"
+            ],
+            "does_not_claim": [
+                "a digest match proves that a source tool executed or that its response is true",
+                "a retained source plan or child artifact proves causal provenance, scientific, clinical, provider, release, or readiness validity",
+                "missing parents or children prove that an artifact never existed",
+                "the bounded local registry is a complete view of external evidence or workspace history"
+            ]
+        }))
     }
 
     /// Register one bounded artifact and preserve the verification method that admitted it.
@@ -649,6 +877,176 @@ impl ArtifactRegistry {
 
 fn normalize_domain_label(value: &str) -> String {
     value.trim().to_ascii_lowercase()
+}
+
+fn optional_text(
+    object: &Map<String, Value>,
+    field: &str,
+) -> Result<Option<String>, ArtifactRegistryError> {
+    match object.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) if !value.trim().is_empty() => {
+            if value.len() > MAX_ARTIFACT_REGISTRY_TEXT_BYTES {
+                return Err(ArtifactRegistryError::InvalidInput(format!(
+                    "{field} exceeds the {MAX_ARTIFACT_REGISTRY_TEXT_BYTES}-byte bound"
+                )));
+            }
+            Ok(Some(value.clone()))
+        }
+        Some(_) => Err(ArtifactRegistryError::InvalidInput(format!(
+            "{field} must be non-empty text or null"
+        ))),
+    }
+}
+
+fn domain_evidence_lineage_row(
+    record: &ArtifactRecord,
+    records: &BTreeMap<String, ArtifactRecord>,
+    include_children: bool,
+) -> Value {
+    let artifact = &record.artifact;
+    let source_plan_digest = artifact
+        .get("source_plan_digest")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let declared_parents = record
+        .parent_digests
+        .iter()
+        .map(|digest| {
+            if let Some(parent) = records.get(digest) {
+                json!({
+                    "content_digest": digest,
+                    "present": true,
+                    "kind": parent.kind,
+                    "subject_id": parent.subject_id,
+                    "domains": parent.domains,
+                    "declared_digest": parent.declared_digest,
+                    "verification": parent.verification,
+                    "relation": "declared_parent_content_digest"
+                })
+            } else {
+                json!({
+                    "content_digest": digest,
+                    "present": false,
+                    "kind": Value::Null,
+                    "subject_id": Value::Null,
+                    "domains": [],
+                    "declared_digest": Value::Null,
+                    "verification": Value::Null,
+                    "relation": "declared_parent_content_digest"
+                })
+            }
+        })
+        .collect::<Vec<_>>();
+    let source_plan_matches = source_plan_digest
+        .as_ref()
+        .map(|digest| {
+            records
+                .values()
+                .filter(|candidate| {
+                    candidate.kind == "domain_evidence_source_plan"
+                        && candidate.artifact.get("plan_digest").and_then(Value::as_str)
+                            == Some(digest.as_str())
+                })
+                .map(|candidate| {
+                    json!({
+                        "plan_digest": digest,
+                        "content_digest": candidate.content_digest,
+                        "subject_id": candidate.subject_id,
+                        "domains": candidate.domains,
+                        "parent_declared": record.parent_digests.contains(&candidate.content_digest),
+                        "verification": candidate.verification
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let source_plan_parent_content_linked = source_plan_matches
+        .iter()
+        .any(|candidate| candidate.get("parent_declared").and_then(Value::as_bool) == Some(true));
+    let source_plan_binding_state = match (
+        source_plan_digest.as_ref(),
+        source_plan_matches.is_empty(),
+        source_plan_parent_content_linked,
+    ) {
+        (None, _, _) => "not_declared",
+        (Some(_), true, _) => "declared_plan_digest_unresolved",
+        (Some(_), false, true) => "retained_and_content_parented",
+        (Some(_), false, false)
+            if record
+                .parent_digests
+                .iter()
+                .any(|parent| source_plan_digest.as_deref() == Some(parent.as_str())) =>
+        {
+            "retained_declared_digest_only"
+        }
+        (Some(_), false, false) => "retained_but_not_parented",
+    };
+    let children = if include_children {
+        records
+            .values()
+            .filter(|candidate| {
+                candidate.content_digest != record.content_digest
+                    && candidate.parent_digests.contains(&record.content_digest)
+            })
+            .map(|candidate| {
+                json!({
+                    "content_digest": candidate.content_digest,
+                    "kind": candidate.kind,
+                    "subject_id": candidate.subject_id,
+                    "domains": candidate.domains,
+                    "declared_digest": candidate.declared_digest,
+                    "verification": candidate.verification,
+                    "relation": "direct_retained_child_content_digest"
+                })
+            })
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    let request_digest = artifact
+        .get("request_digest")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let response_digest = artifact
+        .get("response_digest")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let intake_digest = artifact
+        .get("intake_digest")
+        .cloned()
+        .unwrap_or(Value::Null);
+    json!({
+        "content_digest": record.content_digest,
+        "kind": record.kind,
+        "subject_id": record.subject_id,
+        "group_id": artifact.get("group_id"),
+        "domains": artifact.get("domains"),
+        "source_tool": artifact.get("source_tool"),
+        "outcome": artifact.get("outcome"),
+        "request_supplied": artifact.get("request_supplied"),
+        "request_digest": request_digest,
+        "response_digest": response_digest,
+        "intake_digest": intake_digest,
+        "artifact_lookup": format!("/v1/artifacts/{}", record.content_digest),
+        "artifact_lineage_lookup": format!("/v1/artifacts/{}/lineage", record.content_digest),
+        "source_plan": {
+            "plan_digest": source_plan_digest,
+            "binding_state": source_plan_binding_state,
+            "matches": source_plan_matches,
+            "content_parent_linked": source_plan_parent_content_linked
+        },
+        "parents": declared_parents,
+        "children": children,
+        "parent_count": record.parent_digests.len(),
+        "present_parent_count": record.parent_digests.iter().filter(|digest| records.contains_key(*digest)).count(),
+        "missing_parent_count": record.parent_digests.iter().filter(|digest| !records.contains_key(*digest)).count(),
+        "child_count": if include_children { children.len() } else { 0 },
+        "verification": record.verification,
+        "lineage_scope": "direct_declared_parents_and_direct_retained_children",
+        "readiness_claimed": false,
+        "execution": "not_started"
+    })
 }
 
 fn artifact_family(kind: &str) -> &'static str {
@@ -1367,6 +1765,117 @@ mod tests {
             registry.register(&invalid_evidence),
             Err(ArtifactRegistryError::InvalidInput(_))
         ));
+    }
+
+    #[test]
+    fn domain_evidence_lineage_joins_exact_intake_digests_and_reverse_children() {
+        let mut registry = ArtifactRegistry::new();
+        let intake = crate::intake_domain_evidence(&json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "subject-lineage",
+            "source_tool": "modality_catalog",
+            "request": {"modality": "single_cell"},
+            "response": {"modalities": ["single_cell"]},
+            "outcome": "observed",
+            "claim_posture": {
+                "status": "observed",
+                "does_not_claim": ["clinical validity"]
+            }
+        }))
+        .unwrap();
+        let intake_registration = json!({
+            "kind": "domain_evidence_intake",
+            "subject_id": "subject-lineage",
+            "domains": ["modalities"],
+            "parent_digests": [],
+            "artifact": intake
+        });
+        let intake_report = registry.register(&intake_registration).unwrap();
+        let intake_content_digest = intake_report["content_digest"].as_str().unwrap();
+        registry
+            .register(&json!({
+                "kind": "external_reference",
+                "subject_id": "subject-lineage",
+                "domains": ["modalities"],
+                "parent_digests": [intake_content_digest],
+                "artifact": {"locator": "caller://child"}
+            }))
+            .unwrap();
+
+        let trace = registry
+            .domain_evidence_lineage(&json!({
+                "content_digest": intake_content_digest,
+                "request_digest": intake_registration["artifact"]["request_digest"],
+                "include_children": true
+            }))
+            .unwrap();
+        assert_eq!(
+            trace["workflow"],
+            "artifact_registry_domain_evidence_lineage"
+        );
+        assert_eq!(trace["rows"].as_array().unwrap().len(), 1);
+        let row = &trace["rows"][0];
+        assert_eq!(row["content_digest"], intake_content_digest);
+        assert_eq!(
+            row["request_digest"],
+            intake_registration["artifact"]["request_digest"]
+        );
+        assert_eq!(
+            row["response_digest"],
+            intake_registration["artifact"]["response_digest"]
+        );
+        assert_eq!(row["present_parent_count"], 0);
+        assert_eq!(row["missing_parent_count"], 0);
+        assert_eq!(row["child_count"], 1);
+        assert_eq!(row["source_plan"]["binding_state"], "not_declared");
+        assert_eq!(
+            row["children"][0]["relation"],
+            "direct_retained_child_content_digest"
+        );
+    }
+
+    #[test]
+    fn domain_evidence_lineage_keeps_plan_digest_and_content_parent_posture_separate() {
+        let mut registry = ArtifactRegistry::new();
+        let intake = crate::intake_domain_evidence(&json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "subject-plan",
+            "source_tool": "modality_catalog",
+            "response": {"status": "partial"},
+            "outcome": "partial",
+            "source_plan_digest": "f".repeat(64),
+            "claim_posture": {
+                "status": "review_required",
+                "does_not_claim": ["source provenance"]
+            }
+        }))
+        .unwrap();
+        let intake_parents = intake["parent_digests"].clone();
+        let report = registry
+            .register(&json!({
+                "kind": "domain_evidence_intake",
+                "subject_id": "subject-plan",
+                "domains": ["modalities"],
+                "parent_digests": intake_parents,
+                "artifact": intake
+            }))
+            .unwrap();
+        let trace = registry
+            .domain_evidence_lineage(&json!({
+                "content_digest": report["content_digest"]
+            }))
+            .unwrap();
+        assert_eq!(
+            trace["rows"][0]["source_plan"]["plan_digest"],
+            "f".repeat(64)
+        );
+        assert_eq!(
+            trace["rows"][0]["source_plan"]["binding_state"],
+            "declared_plan_digest_unresolved"
+        );
+        assert_eq!(trace["rows"][0]["missing_parent_count"], 1);
     }
 
     #[test]

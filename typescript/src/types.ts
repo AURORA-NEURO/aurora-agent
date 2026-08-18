@@ -9802,6 +9802,38 @@ export interface ArtifactLineageResult extends JsonObject {
   does_not_claim: string[];
 }
 
+export interface ArtifactDomainEvidenceLineageOptions extends JsonObject {
+  content_digest?: string;
+  group_id?: string;
+  domain?: string;
+  subject_id?: string;
+  source_tool?: string;
+  outcome?: "observed" | "partial" | "refused" | "error" | "unknown";
+  request_digest?: string;
+  response_digest?: string;
+  intake_digest?: string;
+  source_plan_digest?: string;
+  after?: string;
+  max_items?: number;
+  include_children?: boolean;
+}
+
+export interface ArtifactDomainEvidenceLineageResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "artifact_registry_domain_evidence_lineage";
+  filters: ArtifactDomainEvidenceLineageOptions;
+  registry_generation: number;
+  registry_size: number;
+  rows: JsonObject[];
+  next_after: string | null;
+  has_more: boolean;
+  trace_scope: string;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
 export interface ArtifactCrossStoreAuditResult extends JsonObject {
   ok: boolean;
   schema: string;

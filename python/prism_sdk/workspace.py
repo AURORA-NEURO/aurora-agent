@@ -16,6 +16,8 @@ from .analytics import (
 from .authoring import PackArtifact
 from .artifacts import (
     ArtifactCrossStoreAuditReport,
+    ArtifactDomainEvidenceLineageReport,
+    ArtifactDomainEvidenceLineageRequest,
     ArtifactGetReport,
     ArtifactGetRequest,
     ArtifactLineageReport,
@@ -2794,6 +2796,23 @@ class Workspace:
         return ArtifactLineageReport.from_wire(
             self.artifact_registry_audit(
                 {"operation": "lineage", "content_digest": normalized.content_digest}
+            )
+        )
+
+    def artifact_domain_evidence_lineage(
+        self,
+        request: ArtifactDomainEvidenceLineageRequest | Mapping[str, Any] | None = None,
+    ) -> ArtifactDomainEvidenceLineageReport:
+        """Trace retained intake digests and explicit parent/child links for any domain group."""
+
+        normalized = (
+            request
+            if isinstance(request, ArtifactDomainEvidenceLineageRequest)
+            else ArtifactDomainEvidenceLineageRequest(**dict(request or {}))
+        )
+        return ArtifactDomainEvidenceLineageReport.from_wire(
+            self.artifact_registry_audit(
+                {"operation": "domain_evidence_lineage", **normalized.to_arguments()}
             )
         )
 
@@ -6897,6 +6916,21 @@ class AsyncWorkspace:
         return ArtifactLineageReport.from_wire(
             await self.artifact_registry_audit(
                 {"operation": "lineage", "content_digest": normalized.content_digest}
+            )
+        )
+
+    async def artifact_domain_evidence_lineage(
+        self,
+        request: ArtifactDomainEvidenceLineageRequest | Mapping[str, Any] | None = None,
+    ) -> ArtifactDomainEvidenceLineageReport:
+        normalized = (
+            request
+            if isinstance(request, ArtifactDomainEvidenceLineageRequest)
+            else ArtifactDomainEvidenceLineageRequest(**dict(request or {}))
+        )
+        return ArtifactDomainEvidenceLineageReport.from_wire(
+            await self.artifact_registry_audit(
+                {"operation": "domain_evidence_lineage", **normalized.to_arguments()}
             )
         )
 

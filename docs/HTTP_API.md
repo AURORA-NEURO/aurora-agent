@@ -266,6 +266,19 @@ generations, and each store's digest-protected checkpoint identity. The three re
 sampled independently; `consistent=true` means agreement among those bounded observations, not a
 transaction or proof that an omitted record never existed.
 
+`GET /v1/domain-evidence/lineage` is the intake-specific read model over the same artifact
+registry. It is bounded to retained `domain_evidence_intake` artifacts and supports an exact
+`content_digest` lookup or cursor-paginated filters for `group_id`, `domain`, `subject_id`,
+`source_tool`, `outcome`, `request_digest`, `response_digest`, `intake_digest`, and
+`source_plan_digest`. Each row exposes the exact request/response/intake identities, direct
+declared parent rows with `present` versus missing state, and optional reverse direct-child rows
+found by exact parent content digest. A source-plan section reports the canonical plan digest,
+any retained plan's separate content digest, and whether that content record is actually declared
+as a parent. The endpoint never includes full payload bodies; use the returned artifact lookup or
+`GET /v1/artifacts/{content_digest}` for the independently bounded canonical intake. This is a
+structural local index projection, not proof of execution, causal provenance, source authenticity,
+scientific or clinical validity, release readiness, or external-effect completion.
+
 `POST /v1/domain-reports` is the explicit projection boundary for the workspace's 29 capability
 groups. Its body requires `group_id`, one or more catalogue-declared `domains`, `subject_id`, a
 catalogue-declared `source_tool`, an object `report`, and a `claim_posture` with one of

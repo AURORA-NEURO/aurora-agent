@@ -1704,6 +1704,9 @@ impl ApiRouter {
             ("GET", "/v1/domain-evidence/harmonization/coverage") => {
                 self.domain_evidence_harmonization_coverage(&request, &request_id)
             }
+            ("GET", "/v1/domain-evidence/lineage") => {
+                self.domain_evidence_lineage(&request, &request_id)
+            }
             ("POST", "/v1/domain-evidence/intake") => {
                 self.domain_evidence_intake(&request, &request_id)
             }
@@ -3782,6 +3785,7 @@ impl ApiRouter {
                     "domain_report_coverage": "/v1/domain-reports/coverage",
                     "domain_evidence_harmonize": "/v1/domain-evidence/harmonize",
                     "domain_evidence_harmonization_coverage": "/v1/domain-evidence/harmonization/coverage",
+                    "domain_evidence_lineage": "/v1/domain-evidence/lineage",
                     "domain_evidence_intake": "/v1/domain-evidence/intake",
                     "domain_evidence_source_plan": "/v1/domain-evidence/sources",
                     "domain_evidence_source_execute": "/v1/domain-evidence/sources/execute",
@@ -3871,6 +3875,7 @@ impl ApiRouter {
                     "domain_report_coverage": true,
                     "domain_evidence_harmonization": true,
                     "domain_evidence_harmonization_coverage": true,
+                    "domain_evidence_lineage": true,
                     "domain_evidence_intake": true,
                     "domain_evidence_source_plan": true,
                     "domain_evidence_source_execute": true,
@@ -5031,6 +5036,85 @@ impl ApiRouter {
             "domain_evidence_intake",
             Value::Object(arguments),
         )
+    }
+
+    fn domain_evidence_lineage(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        const ALLOWED: &[&str] = &[
+            "content_digest",
+            "group_id",
+            "domain",
+            "subject_id",
+            "source_tool",
+            "outcome",
+            "request_digest",
+            "response_digest",
+            "intake_digest",
+            "source_plan_digest",
+            "after",
+            "max_items",
+            "include_children",
+        ];
+        if let Some(unknown) = query.keys().find(|key| !ALLOWED.contains(&key.as_str())) {
+            return self.error(
+                400,
+                "invalid_query",
+                &format!("unknown domain evidence lineage query parameter {unknown:?}"),
+                request_id,
+            );
+        }
+        let max_items = match query_usize(&query, "max_items", 100) {
+            Ok(value) => value,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let include_children = match query_bool(&query, "include_children", true) {
+            Ok(value) => value,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let mut arguments = serde_json::Map::new();
+        arguments.insert("max_items".into(), json!(max_items));
+        arguments.insert("include_children".into(), json!(include_children));
+        for name in [
+            "content_digest",
+            "group_id",
+            "domain",
+            "subject_id",
+            "source_tool",
+            "outcome",
+            "request_digest",
+            "response_digest",
+            "intake_digest",
+            "source_plan_digest",
+            "after",
+        ] {
+            if let Some(value) = query.get(name) {
+                arguments.insert(name.into(), json!(value));
+            }
+        }
+        let result = match self.artifact_registry.lock() {
+            Ok(registry) => registry.domain_evidence_lineage(&Value::Object(arguments)),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "artifact_registry_unavailable",
+                    "artifact registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match result {
+            Ok(value) => HttpResponse::json(200, &value),
+            Err(ArtifactRegistryError::NotFound { .. }) => self.error(
+                404,
+                "not_found",
+                "domain evidence intake does not exist",
+                request_id,
+            ),
+            Err(error) => self.error(422, "invalid_query", &error.to_string(), request_id),
+        }
     }
 
     fn domain_evidence_source_plan(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
@@ -8468,6 +8552,7 @@ impl ApiRouter {
                     "/v1/domain-reports/coverage": { "get": { "responses": { "200": { "description": "domain-report coverage diagnostic" } } } },
                     "/v1/domain-evidence/harmonize": { "post": { "responses": { "200": { "description": "digest-addressed domain evidence harmonization" }, "422": { "description": "report identity, catalogue, or traceability input was refused" } } } },
                     "/v1/domain-evidence/harmonization/coverage": { "get": { "parameters": [{ "name": "subject_id", "in": "query" }, { "name": "domain", "in": "query" }, { "name": "report_class", "in": "query" }, { "name": "bridge_mode", "in": "query" }, { "name": "traceability_state", "in": "query" }, { "name": "after", "in": "query" }, { "name": "max_items", "in": "query" }, { "name": "include_report_digests", "in": "query" }], "responses": { "200": { "description": "bounded retained harmonization coverage" }, "422": { "description": "coverage filter was invalid" } } } },
+                    "/v1/domain-evidence/lineage": { "get": { "parameters": [{ "name": "content_digest", "in": "query" }, { "name": "group_id", "in": "query" }, { "name": "domain", "in": "query" }, { "name": "subject_id", "in": "query" }, { "name": "source_tool", "in": "query" }, { "name": "outcome", "in": "query" }, { "name": "request_digest", "in": "query" }, { "name": "response_digest", "in": "query" }, { "name": "intake_digest", "in": "query" }, { "name": "source_plan_digest", "in": "query" }, { "name": "after", "in": "query" }, { "name": "max_items", "in": "query" }, { "name": "include_children", "in": "query" }], "responses": { "200": { "description": "digest-bound retained intake request/response lineage and reverse child links" }, "404": { "description": "requested intake digest is not present" }, "422": { "description": "lineage filter was invalid" } } } },
                     "/v1/domain-evidence/intake": { "post": { "responses": { "200": { "description": "exact-digest raw domain evidence intake" }, "422": { "description": "envelope, outcome, or catalogue input was refused" } } } },
                     "/v1/domain-evidence/sources": { "post": { "responses": { "200": { "description": "digest-addressed, non-fetching external evidence source plan" }, "422": { "description": "source locator, policy, or catalogue input was refused" } } } },
                     "/v1/domain-evidence/sources/execute": { "post": { "responses": { "200": { "description": "bounded source execution with raw-byte and canonical-response digests plus retained intake" }, "422": { "description": "retained plan, connector policy, root confinement, or intake binding was refused" } } } },
@@ -13649,6 +13734,40 @@ mod tests {
         assert_eq!(artifacts.status, 200);
         let artifacts: Value = serde_json::from_slice(&artifacts.body).unwrap();
         assert_eq!(artifacts["rows"].as_array().unwrap().len(), 1);
+        let lineage = router.handle(request(
+            "GET",
+            &format!(
+                "/v1/domain-evidence/lineage?content_digest={}",
+                response["artifact_registry"]["content_digest"]
+                    .as_str()
+                    .unwrap()
+            ),
+            json!({}),
+        ));
+        assert_eq!(lineage.status, 200);
+        let lineage: Value = serde_json::from_slice(&lineage.body).unwrap();
+        assert_eq!(
+            lineage["workflow"],
+            "artifact_registry_domain_evidence_lineage"
+        );
+        assert_eq!(lineage["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            lineage["rows"][0]["source_plan"]["binding_state"],
+            "retained_and_content_parented"
+        );
+        assert_eq!(
+            lineage["rows"][0]["source_plan"]["content_parent_linked"],
+            true
+        );
+        assert_eq!(lineage["rows"][0]["missing_parent_count"], 1);
+        let filtered_lineage = router.handle(request(
+            "GET",
+            "/v1/domain-evidence/lineage?group_id=biological_domains&domain=MODALITIES&outcome=observed&max_items=1",
+            json!({}),
+        ));
+        assert_eq!(filtered_lineage.status, 200);
+        let filtered_lineage: Value = serde_json::from_slice(&filtered_lineage.body).unwrap();
+        assert_eq!(filtered_lineage["rows"].as_array().unwrap().len(), 1);
         let coverage = router.handle(request(
             "GET",
             "/v1/domain-evidence/coverage?include_intake_digests=true",
@@ -13697,6 +13816,23 @@ mod tests {
         assert_eq!(restored_artifacts.status, 200);
         let restored_artifacts: Value = serde_json::from_slice(&restored_artifacts.body).unwrap();
         assert_eq!(restored_artifacts["rows"].as_array().unwrap().len(), 1);
+        let restored_lineage = restored.handle(request(
+            "GET",
+            &format!(
+                "/v1/domain-evidence/lineage?content_digest={}",
+                response["artifact_registry"]["content_digest"]
+                    .as_str()
+                    .unwrap()
+            ),
+            json!({}),
+        ));
+        assert_eq!(restored_lineage.status, 200);
+        let restored_lineage: Value = serde_json::from_slice(&restored_lineage.body).unwrap();
+        assert_eq!(restored_lineage["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            restored_lineage["rows"][0]["intake_digest"],
+            response["intake_digest"]
+        );
 
         let refused = router.handle(request(
             "POST",

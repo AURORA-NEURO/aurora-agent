@@ -17,7 +17,7 @@ use args::{Command, CompileOptions, Family, GenerateOptions, Invocation, Parsed,
 use bioprism_devplat::{
     build_domain_workflow_catalogue, build_domain_workflow_portfolio, instantiate_domain_workflow,
     reconcile_domain_workflow, scaffold_domain_workflow, verify_domain_workflow_portfolio,
-    verify_workbench, CiProviderEvidenceRegistry, WorkbenchReportRegistry,
+    verify_workbench, ArtifactRegistry, CiProviderEvidenceRegistry, WorkbenchReportRegistry,
     WorkbenchVerificationRequest,
 };
 use bioprism_devplat::{
@@ -173,6 +173,37 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
             after.as_deref(),
             *limit,
             *include_bundles,
+        ),
+        Command::EvidenceDomainLineage {
+            store,
+            digest,
+            group_id,
+            domain,
+            subject_id,
+            source_tool,
+            outcome,
+            request_digest,
+            response_digest,
+            intake_digest,
+            source_plan_digest,
+            after,
+            limit,
+            include_children,
+        } => evidence_domain_lineage(
+            store,
+            digest.as_deref(),
+            group_id.as_deref(),
+            domain.as_deref(),
+            subject_id.as_deref(),
+            source_tool.as_deref(),
+            outcome.as_deref(),
+            request_digest.as_deref(),
+            response_digest.as_deref(),
+            intake_digest.as_deref(),
+            source_plan_digest.as_deref(),
+            after.as_deref(),
+            *limit,
+            *include_children,
         ),
         Command::WorkflowCatalogue => workflow_catalogue(),
         Command::WorkflowScaffold {
@@ -501,6 +532,79 @@ fn load_ci_provider_evidence_registry(store_path: &Path) -> CliResult<CiProvider
     CiProviderEvidenceRegistry::from_snapshot(&snapshot).map_err(|error| {
         CliError::invalid(error.to_string()).about(store_path.display().to_string())
     })
+}
+
+fn load_artifact_registry(store_path: &Path) -> CliResult<ArtifactRegistry> {
+    if !store_path.exists() {
+        return Ok(ArtifactRegistry::new());
+    }
+    let snapshot = io::read_json(store_path)?;
+    ArtifactRegistry::from_snapshot(&snapshot).map_err(|error| {
+        CliError::invalid(error.to_string()).about(store_path.display().to_string())
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn evidence_domain_lineage(
+    store_path: &Path,
+    digest: Option<&str>,
+    group_id: Option<&str>,
+    domain: Option<&str>,
+    subject_id: Option<&str>,
+    source_tool: Option<&str>,
+    outcome: Option<&str>,
+    request_digest: Option<&str>,
+    response_digest: Option<&str>,
+    intake_digest: Option<&str>,
+    source_plan_digest: Option<&str>,
+    after: Option<&str>,
+    limit: usize,
+    include_children: bool,
+) -> CliResult<Outcome> {
+    let registry = load_artifact_registry(store_path)?;
+    let mut request = json!({
+        "max_items": limit,
+        "include_children": include_children
+    });
+    let fields = [
+        ("content_digest", digest),
+        ("group_id", group_id),
+        ("domain", domain),
+        ("subject_id", subject_id),
+        ("source_tool", source_tool),
+        ("outcome", outcome),
+        ("request_digest", request_digest),
+        ("response_digest", response_digest),
+        ("intake_digest", intake_digest),
+        ("source_plan_digest", source_plan_digest),
+        ("after", after),
+    ];
+    for (name, value) in fields {
+        if let Some(value) = value {
+            request[name] = json!(value);
+        }
+    }
+    let report = registry
+        .domain_evidence_lineage(&request)
+        .map_err(|error| {
+            CliError::invalid(error.to_string()).about(store_path.display().to_string())
+        })?;
+    let rows = report
+        .get("rows")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    let human = format!(
+        "domain evidence lineage\n  store: {}\n  rows: {}\n  has more: {}\n  next after: {}\n  execution: not started\n\nNext: bioprism evidence domain-lineage --store {} --after <digest>\n",
+        store_path.display(),
+        rows,
+        report.get("has_more").and_then(Value::as_bool).unwrap_or(false),
+        report
+            .get("next_after")
+            .and_then(Value::as_str)
+            .unwrap_or("<none>"),
+        store_path.display()
+    );
+    Ok(Outcome::ok(report, human))
 }
 
 fn ci_provider_evidence_import(

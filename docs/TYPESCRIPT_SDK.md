@@ -99,11 +99,18 @@ list. `callTool` accepts any path-safe tool name and a JSON object, so a client 
 tools before the TypeScript package has a convenience method.
 
 The typed artifact registry facade covers `artifactRegister`, `artifactQuery`, `artifactGet`,
-`artifactLineage`, `artifactCrossStoreAudit`, `artifactRegistryPersistence`, and `flushArtifactRegistryPersistence`, plus
+`artifactLineage`, `domainEvidenceLineage`, `artifactDomainEvidenceLineageTool`,
+`artifactCrossStoreAudit`, `artifactRegistryPersistence`, and `flushArtifactRegistryPersistence`, plus
 the generic `artifactRegistryAudit` MCP call. Artifact records are exact-content indexed and
 lineage responses preserve missing parent digests and cycles; the SDK does not promote index
 presence into causal provenance, scientific validity, clinical safety, publication authority, or
 external-effect completion.
+`domainEvidenceLineage` reads the REST trace for any retained `domain_evidence_intake`; its
+bounded options filter capability group, domain, subject, source tool, outcome, request/response/
+intake/source-plan digest, and cursor, while `include_children` controls reverse direct-child
+links. The typed result keeps request/response/intake identities, present versus missing parents,
+the canonical source-plan digest versus indexed content-parent binding, and explicit non-claims;
+full intake payloads remain behind the ordinary artifact lookup.
 `artifactCrossStoreAudit` reports bounded exact-digest agreement across the artifact, evidence,
 and workflow-reconciliation stores, including missing projections, orphaned projections,
 wrong-kind findings, generations, and checkpoint identities. The stores are observed separately;
