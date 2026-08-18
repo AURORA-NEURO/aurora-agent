@@ -191,11 +191,11 @@ use bioprism_docgraph::{
 use bioprism_epistemic::submodularity::check_with_tolerance as epistemic_submodularity_check;
 use bioprism_epistemic::{
     brute_force_optimum as epistemic_brute_force_optimum,
-    complementarity as epistemic_complementarity, evaluate_context as epistemic_evaluate_context,
+    complementarity as epistemic_complementarity,
     decision_equivalence_quotient as epistemic_decision_equivalence_quotient,
-    frontier as epistemic_frontier, greedy as epistemic_greedy,
-    identification as epistemic_identification, joint_value as epistemic_joint_value,
-    lazy_greedy as epistemic_lazy_greedy,
+    evaluate_context as epistemic_evaluate_context, frontier as epistemic_frontier,
+    greedy as epistemic_greedy, identification as epistemic_identification,
+    joint_value as epistemic_joint_value, lazy_greedy as epistemic_lazy_greedy,
     minimal_sufficient_context as epistemic_minimal_sufficient_context,
     value_of_information as epistemic_value_of_information, Acquisition as EpistemicAcquisition,
     Belief as EpistemicBelief, Constraint as EpistemicConstraint,

@@ -130,7 +130,9 @@ pub enum EpistemicError {
     #[error("factor {factor:?} repeats variable {variable:?} in its scope")]
     RepeatedVariableInScope { factor: String, variable: String },
 
-    #[error("factor {factor:?} entry {index} is {value}, which is not a finite non-negative potential")]
+    #[error(
+        "factor {factor:?} entry {index} is {value}, which is not a finite non-negative potential"
+    )]
     InadmissiblePotential {
         factor: String,
         index: usize,

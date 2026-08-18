@@ -37,7 +37,9 @@ jobs:
             echo "No Rust files changed in this revision."
             exit 0
           fi
-          rustfmt --edition 2021 --check "${rust_files[@]}"
+          # lib.rs declares legacy child modules; skip_children keeps this revision gate scoped
+          # to the changed source file instead of reformatting the entire historical crate.
+          rustfmt --edition 2021 --check --config skip_children=true "${rust_files[@]}"
       - name: clippy
         # This legacy CLI query mirrors eight independently filterable flags;
         # keep all other warnings as errors while documenting the one known

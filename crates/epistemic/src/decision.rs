@@ -156,23 +156,21 @@ impl DecisionProblem {
     }
 
     pub fn action_index(&self, name: &str) -> Result<usize, EpistemicError> {
-        self.actions
-            .iter()
-            .position(|a| a == name)
-            .ok_or_else(|| EpistemicError::UnknownIdentifier {
+        self.actions.iter().position(|a| a == name).ok_or_else(|| {
+            EpistemicError::UnknownIdentifier {
                 collection: "actions".to_string(),
                 id: name.to_string(),
-            })
+            }
+        })
     }
 
     pub fn model_index(&self, name: &str) -> Result<usize, EpistemicError> {
-        self.models
-            .iter()
-            .position(|m| m == name)
-            .ok_or_else(|| EpistemicError::UnknownIdentifier {
+        self.models.iter().position(|m| m == name).ok_or_else(|| {
+            EpistemicError::UnknownIdentifier {
                 collection: "models".to_string(),
                 id: name.to_string(),
-            })
+            }
+        })
     }
 
     /// Expected loss of `action` under `belief`.
