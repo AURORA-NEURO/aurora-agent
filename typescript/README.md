@@ -52,6 +52,12 @@ if (result.mcp.result?.isError) {
   policy, trace, and optional observed-metric boundary without silently treating projected
   telemetry as a claim. Its `TelemetryProjectionResult` keeps record metadata, exact dropped /
   coarsened loss, and the supported-versus-refused metric union typed in the REST/MCP envelope.
+- `ciProviderEvidenceImport`, `ciProviderEvidenceQuery`, and `ciProviderEvidenceGet` provide the
+  retained provider-observed CI evidence index over MCP, with matching REST helpers. Imports are
+  re-audited and idempotent; query rows preserve provider/run/plan identity and separate
+  artifact/log/attestation record-family digests, including failed and unknown runs. The client
+  never treats these joins as fetched bytes, verified signatures, provider authentication, or
+  release approval.
 - `traceOtelIngest` returns a typed normalized Event IR preview, OTLP mapping counts, loss-category
   ledger, and compilation-readiness state; it never implies OTLP export or collector connectivity.
 - `qualityGateRun` returns typed serialized quality check unions, concrete failure witnesses,

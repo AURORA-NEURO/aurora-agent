@@ -17,7 +17,8 @@ use args::{Command, CompileOptions, Family, GenerateOptions, Invocation, Parsed,
 use bioprism_devplat::{
     build_domain_workflow_catalogue, build_domain_workflow_portfolio, instantiate_domain_workflow,
     reconcile_domain_workflow, scaffold_domain_workflow, verify_domain_workflow_portfolio,
-    verify_workbench, WorkbenchReportRegistry, WorkbenchVerificationRequest,
+    verify_workbench, CiProviderEvidenceRegistry, WorkbenchReportRegistry,
+    WorkbenchVerificationRequest,
 };
 use bioprism_devplat::{
     verify_mission_evidence_bundle, DomainWorkflowReconciliationRegistry, EvidenceBundleRegistry,
@@ -268,6 +269,33 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
             *include_reports,
         ),
         Command::WorkbenchGet { store, digest } => workbench_get(store, digest),
+        Command::CiProviderEvidenceImport {
+            request,
+            store,
+            dry_run,
+        } => ci_provider_evidence_import(request, store, *dry_run),
+        Command::CiProviderEvidenceQuery {
+            store,
+            provider,
+            run_id,
+            plan_digest,
+            structurally_valid,
+            conformance_ready,
+            after,
+            limit,
+            include_records,
+        } => ci_provider_evidence_query(
+            store,
+            provider.as_deref(),
+            run_id.as_deref(),
+            plan_digest.as_deref(),
+            *structurally_valid,
+            *conformance_ready,
+            after.as_deref(),
+            *limit,
+            *include_records,
+        ),
+        Command::CiProviderEvidenceGet { store, digest } => ci_provider_evidence_get(store, digest),
         Command::WorkflowReconcile {
             instantiation,
             mission,
@@ -460,6 +488,144 @@ fn workbench_get(store_path: &Path, digest: &str) -> CliResult<Outcome> {
     let human = format!(
         "developer workbench report\n  digest: {}\n  store: {}\n  execution: not started\n",
         digest,
+        store_path.display()
+    );
+    Ok(Outcome::ok(report, human))
+}
+
+fn load_ci_provider_evidence_registry(store_path: &Path) -> CliResult<CiProviderEvidenceRegistry> {
+    if !store_path.exists() {
+        return Ok(CiProviderEvidenceRegistry::new());
+    }
+    let snapshot = io::read_json(store_path)?;
+    CiProviderEvidenceRegistry::from_snapshot(&snapshot).map_err(|error| {
+        CliError::invalid(error.to_string()).about(store_path.display().to_string())
+    })
+}
+
+fn ci_provider_evidence_import(
+    request_path: &Path,
+    store_path: &Path,
+    dry_run: bool,
+) -> CliResult<Outcome> {
+    let request = io::read_json(request_path)?;
+    let mut registry = load_ci_provider_evidence_registry(store_path)?;
+    let result = registry.import(&request).map_err(|error| {
+        CliError::invalid(error.to_string()).about(request_path.display().to_string())
+    })?;
+    let snapshot = registry.snapshot().map_err(|error| {
+        CliError::internal(error.to_string()).about(store_path.display().to_string())
+    })?;
+    let artifact = if result.get("created").and_then(Value::as_bool) == Some(true) {
+        Some(io::write_artifact(store_path, &snapshot, dry_run)?)
+    } else {
+        None
+    };
+    let mut document = result;
+    document["store"] = json!(store_path.display().to_string());
+    document["request"] = json!(request_path.display().to_string());
+    document["dry_run"] = json!(dry_run);
+    document["state_digest"] = snapshot.get("state_digest").cloned().unwrap_or(Value::Null);
+    document["artifact"] = artifact
+        .as_ref()
+        .map(|value| {
+            json!({
+                "path": value.path.display().to_string(),
+                "bytes": value.bytes,
+                "written": value.written
+            })
+        })
+        .unwrap_or(Value::Null);
+    let digest = document
+        .get("provider_evidence_digest")
+        .and_then(Value::as_str)
+        .unwrap_or("<missing>");
+    let human = format!(
+        "CI provider evidence {}\n  digest: {}\n  provider: {}\n  run: {}\n  conformance ready: {}\n  lineage rows: artifacts={} logs={} attestations={}\n  registry: {} (generation {})\n  state: {}\n\nNext: bioprism ci provider-evidence-query --store {}\n",
+        if document.get("created").and_then(Value::as_bool) == Some(true) {
+            if dry_run { "planned for import" } else { "imported" }
+        } else {
+            "already present"
+        },
+        digest,
+        document.get("provider").and_then(Value::as_str).unwrap_or("<unknown>"),
+        document.get("run_id").and_then(Value::as_str).unwrap_or("<unknown>"),
+        document
+            .get("conformance_ready")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        document.get("artifact_count").and_then(Value::as_u64).unwrap_or(0),
+        document.get("log_count").and_then(Value::as_u64).unwrap_or(0),
+        document
+            .get("attestation_count")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        store_path.display(),
+        document
+            .get("registry_generation")
+            .and_then(Value::as_u64)
+            .unwrap_or_default(),
+        if dry_run { "not written (dry run)" } else { "checkpoint updated" },
+        store_path.display()
+    );
+    Ok(Outcome::ok(document, human))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn ci_provider_evidence_query(
+    store_path: &Path,
+    provider: Option<&str>,
+    run_id: Option<&str>,
+    plan_digest: Option<&str>,
+    structurally_valid: bool,
+    conformance_ready: bool,
+    after: Option<&str>,
+    limit: usize,
+    include_records: bool,
+) -> CliResult<Outcome> {
+    let registry = load_ci_provider_evidence_registry(store_path)?;
+    let report = registry
+        .query(
+            provider,
+            run_id,
+            plan_digest,
+            structurally_valid.then_some(true),
+            conformance_ready.then_some(true),
+            after,
+            limit,
+            include_records,
+        )
+        .map_err(|error| {
+            CliError::invalid(error.to_string()).about(store_path.display().to_string())
+        })?;
+    let rows = report
+        .get("rows")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    let human = format!(
+        "CI provider evidence registry query\n  store: {}\n  rows: {}\n  has more: {}\n  next after: {}\n\nNext: bioprism ci provider-evidence-query --store {} --after <digest>\n",
+        store_path.display(),
+        rows,
+        report.get("has_more").and_then(Value::as_bool).unwrap_or(false),
+        report
+            .get("next_after")
+            .and_then(Value::as_str)
+            .unwrap_or("<none>"),
+        store_path.display()
+    );
+    Ok(Outcome::ok(report, human))
+}
+
+fn ci_provider_evidence_get(store_path: &Path, digest: &str) -> CliResult<Outcome> {
+    let registry = load_ci_provider_evidence_registry(store_path)?;
+    let report = registry.get(digest).map_err(|error| {
+        CliError::invalid(error.to_string()).about(store_path.display().to_string())
+    })?;
+    let human = format!(
+        "CI provider evidence report\n  digest: {}\n  provider: {}\n  run: {}\n  store: {}\n  execution: not started\n",
+        digest,
+        report.get("provider").and_then(Value::as_str).unwrap_or("<unknown>"),
+        report.get("run_id").and_then(Value::as_str).unwrap_or("<unknown>"),
         store_path.display()
     );
     Ok(Outcome::ok(report, human))

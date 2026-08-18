@@ -323,7 +323,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 229);
+    assert_eq!(tools.len(), 232);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -7139,6 +7139,97 @@ fn ci_provider_evidence_audit_binds_rows_and_preserves_structural_limits() {
 }
 
 #[test]
+fn ci_provider_evidence_registry_import_query_get_and_failed_retention_are_deterministic() {
+    let mut server = server();
+    let ci = json!({
+        "workflow": "provider-registry",
+        "triggers": ["push"],
+        "rust_toolchain": "stable",
+        "offline": true,
+        "checks": [{"name": "tests", "run": "cargo test -p core", "required": true}]
+    });
+    let digest = |label: &str| ContentHash::of_bytes(label.as_bytes()).to_string();
+    let request = json!({
+        "ci": ci.clone(),
+        "provider": "github_actions",
+        "payload": {
+            "run": {"id": 9030, "conclusion": "success"},
+            "jobs": [{"name": "tests", "conclusion": "success"}]
+        },
+        "artifacts": [{
+            "id": "artifact-registry", "kind": "junit", "digest": digest("artifact-registry"),
+            "check": "tests", "run_id": "9030", "provider": "github_actions"
+        }],
+        "logs": [{
+            "id": "log-registry", "digest": digest("log-registry"), "check": "tests",
+            "run_id": "9030", "provider": "github_actions"
+        }],
+        "attestations": [{
+            "id": "attestation-registry", "subject": "artifact-registry", "issuer": "ci",
+            "statement_digest": digest("statement-registry"), "method": "declared"
+        }]
+    });
+    let imported = call(&mut server, "ci_provider_evidence_import", request.clone());
+    assert_eq!(imported["created"], json!(true));
+    assert_eq!(imported["conformance_ready"], json!(true));
+    assert_eq!(
+        imported["artifact_record_digest"].as_str().unwrap().len(),
+        64
+    );
+    assert_eq!(imported["log_record_digest"].as_str().unwrap().len(), 64);
+    assert_eq!(
+        imported["attestation_record_digest"]
+            .as_str()
+            .unwrap()
+            .len(),
+        64
+    );
+    let digest = imported["provider_evidence_digest"].clone();
+    let duplicate = call(&mut server, "ci_provider_evidence_import", request);
+    assert_eq!(duplicate["created"], json!(false));
+    assert_eq!(duplicate["already_present"], json!(true));
+    assert_eq!(duplicate["provider_evidence_digest"], digest);
+    let queried = call(
+        &mut server,
+        "ci_provider_evidence_query",
+        json!({"provider": "github_actions", "conformance_ready": true, "include_records": true}),
+    );
+    assert_eq!(queried["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(queried["rows"][0]["provider_evidence_digest"], digest);
+    assert_eq!(queried["rows"][0]["audit"]["artifact_count"], json!(1));
+    let fetched = call(
+        &mut server,
+        "ci_provider_evidence_get",
+        json!({"provider_evidence_digest": digest}),
+    );
+    assert_eq!(fetched["audit"]["run_id"], json!("9030"));
+    assert_eq!(fetched["audit"]["verification"], json!("structural_only"));
+
+    let failed = call(
+        &mut server,
+        "ci_provider_evidence_import",
+        json!({
+            "ci": ci,
+            "provider": "generic",
+            "payload": {
+                "run_id": "9031",
+                "conclusion": "failure",
+                "checks": [{"name": "tests", "status": "failure"}]
+            }
+        }),
+    );
+    assert_eq!(failed["created"], json!(true));
+    assert_eq!(failed["structurally_valid"], json!(true));
+    assert_eq!(failed["conformance_ready"], json!(false));
+    let failed_rows = call(
+        &mut server,
+        "ci_provider_evidence_query",
+        json!({"conformance_ready": false}),
+    );
+    assert_eq!(failed_rows["rows"].as_array().unwrap().len(), 1);
+}
+
+#[test]
 fn developer_delivery_composes_provider_normalization_into_ci_release_evidence() {
     let mut server = server();
     let ci = json!({
@@ -8200,12 +8291,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(229));
-    assert_eq!(result["advertised_tool_count"], json!(229));
+    assert_eq!(result["unique_catalog_tools"], json!(232));
+    assert_eq!(result["advertised_tool_count"], json!(232));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(229));
-    assert_eq!(result["schema_quality"]["valid"], json!(229));
+    assert_eq!(result["schema_quality"]["checked"], json!(232));
+    assert_eq!(result["schema_quality"]["valid"], json!(232));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

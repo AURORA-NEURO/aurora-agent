@@ -143,9 +143,9 @@ use bioprism_devplat::{
     verify_mission_evidence_bundle, verify_workbench, AdapterExecutionEvidenceQueryRequest,
     AdapterExecutionEvidenceRequest, ArtifactRegistry, CapabilityCatalogue,
     CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest, CiExecutionEvidenceRequest,
-    CiProviderEvidenceRequest, CiProviderNormalizationRequest, DeliveryReceiptRequest,
-    DeliveryReceiptVerificationRequest, DevPlatReport, DomainAcquisitionQuery,
-    DomainEvidenceProviderExternalPayloadEvidenceQueryRequest,
+    CiProviderEvidenceRegistry, CiProviderEvidenceRequest, CiProviderNormalizationRequest,
+    DeliveryReceiptRequest, DeliveryReceiptVerificationRequest, DevPlatReport,
+    DomainAcquisitionQuery, DomainEvidenceProviderExternalPayloadEvidenceQueryRequest,
     DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest,
     DomainEvidenceProviderExternalPayloadLineageAuditRequest,
     DomainEvidenceProviderExternalPayloadNormalizationRequest,
@@ -566,6 +566,7 @@ pub struct Server {
     workflow_reconciliation_registry: Arc<Mutex<DomainWorkflowReconciliationRegistry>>,
     workflow_execution_evidence_registry: Arc<Mutex<WorkflowExecutionEvidenceRegistry>>,
     workbench_registry: Arc<Mutex<WorkbenchReportRegistry>>,
+    ci_provider_evidence_registry: Arc<Mutex<CiProviderEvidenceRegistry>>,
     artifact_registry: Arc<Mutex<ArtifactRegistry>>,
 }
 
@@ -1257,6 +1258,30 @@ impl Server {
         workbench_registry: Arc<Mutex<WorkbenchReportRegistry>>,
         artifact_registry: Arc<Mutex<ArtifactRegistry>>,
     ) -> Self {
+        Self::with_all_registries_and_ci_provider_evidence(
+            root,
+            evidence_registry,
+            workflow_reconciliation_registry,
+            workflow_execution_evidence_registry,
+            workbench_registry,
+            Arc::new(Mutex::new(CiProviderEvidenceRegistry::new())),
+            artifact_registry,
+        )
+    }
+
+    /// Construct a server over every caller-owned registry, including retained provider evidence.
+    ///
+    /// The API gateway uses this seam so provider imports and operator queries share the same
+    /// restart-restored index with MCP, while artifact storage remains an independent join.
+    pub fn with_all_registries_and_ci_provider_evidence(
+        root: PathBuf,
+        evidence_registry: Arc<Mutex<EvidenceBundleRegistry>>,
+        workflow_reconciliation_registry: Arc<Mutex<DomainWorkflowReconciliationRegistry>>,
+        workflow_execution_evidence_registry: Arc<Mutex<WorkflowExecutionEvidenceRegistry>>,
+        workbench_registry: Arc<Mutex<WorkbenchReportRegistry>>,
+        ci_provider_evidence_registry: Arc<Mutex<CiProviderEvidenceRegistry>>,
+        artifact_registry: Arc<Mutex<ArtifactRegistry>>,
+    ) -> Self {
         Server {
             root: std::fs::canonicalize(&root).unwrap_or(root),
             lifecycle: Lifecycle::New,
@@ -1265,6 +1290,7 @@ impl Server {
             workflow_reconciliation_registry,
             workflow_execution_evidence_registry,
             workbench_registry,
+            ci_provider_evidence_registry,
             artifact_registry,
         }
     }
@@ -1828,6 +1854,9 @@ impl Server {
             "developer_workbench_get" => self.developer_workbench_get(&arguments),
             "ci_provider_normalize" => self.ci_provider_normalize(&arguments),
             "ci_provider_evidence_audit" => self.ci_provider_evidence_audit(&arguments),
+            "ci_provider_evidence_import" => self.ci_provider_evidence_import(&arguments),
+            "ci_provider_evidence_query" => self.ci_provider_evidence_query(&arguments),
+            "ci_provider_evidence_get" => self.ci_provider_evidence_get(&arguments),
             "ci_execution_evidence_audit" => self.ci_execution_evidence_audit(&arguments),
             "execution_provenance_audit" => self.execution_provenance_audit(&arguments),
             "agent_mission" => self.agent_mission(&arguments),
@@ -30883,6 +30912,99 @@ impl Server {
         }))
     }
 
+    /// Re-audit and retain one provider evidence request in the shared bounded registry.
+    fn ci_provider_evidence_import(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode CI provider evidence import input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err(
+                "CI provider evidence import input exceeds the 20000000-byte safety bound".into(),
+            );
+        }
+        self.ci_provider_evidence_registry
+            .lock()
+            .map_err(|_| "CI provider evidence registry lock is poisoned".to_string())?
+            .import(arguments)
+            .map_err(|error| format!("CI provider evidence import refused: {error}"))
+    }
+
+    /// Query retained provider evidence without contacting a provider or executing checks.
+    fn ci_provider_evidence_query(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode CI provider evidence query input: {error}"))?;
+        if encoded.len() > 1_000_000 {
+            return Err(
+                "CI provider evidence query input exceeds the 1000000-byte safety bound".into(),
+            );
+        }
+        let optional_string = |name: &str| -> Result<Option<&str>, String> {
+            arguments
+                .get(name)
+                .map(|value| {
+                    value
+                        .as_str()
+                        .ok_or_else(|| format!("{name} must be a string"))
+                })
+                .transpose()
+        };
+        let structurally_valid = arguments
+            .get("structurally_valid")
+            .map(|value| {
+                value
+                    .as_bool()
+                    .ok_or("structurally_valid must be a boolean")
+            })
+            .transpose()?;
+        let conformance_ready = arguments
+            .get("conformance_ready")
+            .map(|value| value.as_bool().ok_or("conformance_ready must be a boolean"))
+            .transpose()?;
+        let max_items = arguments
+            .get("max_items")
+            .map(|value| {
+                value
+                    .as_u64()
+                    .ok_or_else(|| "max_items must be an integer".to_string())
+                    .and_then(|number| {
+                        usize::try_from(number).map_err(|_| "max_items is too large".to_string())
+                    })
+            })
+            .transpose()?
+            .unwrap_or(100);
+        let include_records = arguments
+            .get("include_records")
+            .map(|value| value.as_bool().ok_or("include_records must be a boolean"))
+            .transpose()?
+            .unwrap_or(false);
+        self.ci_provider_evidence_registry
+            .lock()
+            .map_err(|_| "CI provider evidence registry lock is poisoned".to_string())?
+            .query(
+                optional_string("provider")?,
+                optional_string("run_id")?,
+                optional_string("plan_digest")?,
+                structurally_valid,
+                conformance_ready,
+                optional_string("after")?,
+                max_items,
+                include_records,
+            )
+            .map_err(|error| format!("CI provider evidence query refused: {error}"))
+    }
+
+    /// Fetch one retained provider evidence audit by its canonical record digest.
+    fn ci_provider_evidence_get(&self, arguments: &Value) -> Result<Value, String> {
+        let digest = arguments
+            .get("provider_evidence_digest")
+            .and_then(Value::as_str)
+            .ok_or("provider_evidence_digest is required and must be a content hash")?;
+        self.ci_provider_evidence_registry
+            .lock()
+            .map_err(|_| "CI provider evidence registry lock is poisoned".to_string())?
+            .get(digest)
+            .map_err(|error| format!("CI provider evidence get refused: {error}"))
+    }
+
     fn engineering_manifest_audit(&self, arguments: &Value) -> Result<Value, String> {
         let raw_manifest = arguments
             .get("manifest")
@@ -33972,7 +34094,7 @@ pub fn workspace_capabilities() -> Value {
             "domains": ["diagnostics", "conformance", "cookbook", "SDK contracts", "signed bundles"],
             "crates": ["bioprism-devx", "bioprism-devplat", "bioprism-conformance", "bioprism-cookbook", "bioprism-sdk", "bioprism-bundle", "bioprism-scale", "bioprism-stewardship"],
             "python_artifacts": ["python/prism_sdk"],
-            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "engineering_execution_plan", "release_pipeline_audit", "operational_readiness_audit", "security_privacy_audit", "sandbox_admission_audit", "sandbox_runtime_simulate", "security_program_audit", "agent_mission", "developer_workbench", "developer_workbench_verify", "developer_workbench_import", "developer_workbench_query", "developer_workbench_get", "ci_provider_normalize", "ci_provider_evidence_audit", "ci_execution_evidence_audit", "execution_provenance_audit", "developer_delivery_audit", "developer_delivery_receipt", "developer_delivery_receipt_verify", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
+            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "engineering_execution_plan", "release_pipeline_audit", "operational_readiness_audit", "security_privacy_audit", "sandbox_admission_audit", "sandbox_runtime_simulate", "security_program_audit", "agent_mission", "developer_workbench", "developer_workbench_verify", "developer_workbench_import", "developer_workbench_query", "developer_workbench_get", "ci_provider_normalize", "ci_provider_evidence_audit", "ci_provider_evidence_import", "ci_provider_evidence_query", "ci_provider_evidence_get", "ci_execution_evidence_audit", "execution_provenance_audit", "developer_delivery_audit", "developer_delivery_receipt", "developer_delivery_receipt_verify", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
             "cli_entrypoints": ["--help", "--json"],
             "status": "available"
         }
@@ -37564,6 +37686,52 @@ pub fn tool_definitions() -> Vec<Value> {
                     }
                 },
                 "required": ["ci", "provider", "payload"]
+            }
+        }),
+        json!({
+            "name": "ci_provider_evidence_import",
+            "description": "Re-run ci_provider_evidence_audit and retain its complete provider/run/artifact/log/attestation report in the bounded shared registry. Failed and unknown runs remain explicit records; import never contacts a provider, executes checks, verifies signatures, or approves a release.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "ci": { "type": "object", "description": "Canonical CiRequest used to regenerate the exact plan." },
+                    "provider": { "type": "string", "enum": ["github_actions", "gitlab_ci", "generic"] },
+                    "payload": { "type": "object", "description": "Provider-shaped run and check payload." },
+                    "source": { "type": "string", "enum": ["caller_attested", "provider_observed"] },
+                    "artifacts": { "type": "array", "maxItems": 128, "items": { "type": "object" } },
+                    "logs": { "type": "array", "maxItems": 128, "items": { "type": "object" } },
+                    "attestations": { "type": "array", "maxItems": 128, "items": { "type": "object" } }
+                },
+                "required": ["ci", "provider", "payload"]
+            }
+        }),
+        json!({
+            "name": "ci_provider_evidence_query",
+            "description": "Query the bounded retained provider evidence registry by provider, run, plan digest, structural validity, conformance posture, and digest cursor. Full audits are opt-in and the query never contacts a provider or executes checks.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "provider": { "type": "string" },
+                    "run_id": { "type": "string" },
+                    "plan_digest": { "type": "string", "minLength": 64, "maxLength": 64 },
+                    "structurally_valid": { "type": "boolean" },
+                    "conformance_ready": { "type": "boolean" },
+                    "after": { "type": "string", "minLength": 64, "maxLength": 64 },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 256, "default": 100 },
+                    "include_records": { "type": "boolean", "default": false }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "ci_provider_evidence_get",
+            "description": "Fetch one retained provider evidence audit by its canonical SHA-256 registry digest. Lookup returns the exact re-audited record and never re-executes or recontacts the provider.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "provider_evidence_digest": { "type": "string", "minLength": 64, "maxLength": 64 }
+                },
+                "required": ["provider_evidence_digest"]
             }
         }),
         json!({

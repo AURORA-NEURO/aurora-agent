@@ -249,6 +249,12 @@ unindexed unless explicitly registered.
   MCP registry, while `developerWorkbenchImportRest`, `developerWorkbenchQueryRest`, and
   `developerWorkbenchGetRest` target the REST registry. Imports are digest-normalized and
   idempotent; queries use bounded digest cursors and omit full reports unless requested;
+- `ciProviderEvidenceImport`, `ciProviderEvidenceQuery`, and `ciProviderEvidenceGet` expose the
+  durable provider-observed evidence registry over MCP and REST. Imports re-run the canonical
+  audit and retain failed/unknown runs; query/get results preserve deterministic provider/run/plan
+  identity plus separate artifact/log/attestation counts and record-family digests. The typed
+  surface keeps those joins structural and does not imply remote byte retrieval, signature
+  verification, provider authentication, CI execution, or release approval;
 - `ciExecutionEvidenceAudit`: digest-bound reconciliation of a supplied CI run against a freshly
   generated workbench plan, with per-check result digests, complete/missing/non-passing findings,
   provider provenance, and structural-only verification. Its ready flag is a handoff signal, not

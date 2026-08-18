@@ -417,7 +417,14 @@ from .ci_provider_evidence import (
     MAX_PROVIDER_EVIDENCE_ROWS,
     CiProviderEvidenceReport,
     CiProviderEvidenceRequest,
+    CiProviderEvidenceRegistryGetReport,
+    CiProviderEvidenceRegistryImportReport,
+    CiProviderEvidenceRegistryQueryReport,
+    CiProviderEvidenceRegistryQueryRequest,
     ci_provider_evidence_report,
+    ci_provider_evidence_registry_get_report,
+    ci_provider_evidence_registry_import_report,
+    ci_provider_evidence_registry_query_report,
 )
 from .execution_provenance import (
     EXECUTION_PROVENANCE_SCHEMA,

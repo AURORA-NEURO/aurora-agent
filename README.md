@@ -1043,6 +1043,15 @@ it validates unique ids, content-digest syntax, provider/run/check bindings, and
 preserves the original rows, and emits separate deterministic record digests. Its `conformance_ready`
 signal is structural only; the route does not fetch remote bytes, execute checks, authenticate providers,
 or cryptographically verify attestation statements.
+The retained provider-evidence registry makes this handoff durable and joinable: imports re-run the
+canonical audit, retain failed and unknown provider runs as explicit evidence, and expose deterministic
+provider/run/plan queries plus exact digest lookup through MCP, REST, CLI, Python, and TypeScript. The
+response carries separate artifact/log/attestation counts and record-family digests, while preserving
+the boundary that provider locators are not fetched bytes and supplied digests are not verified
+signatures. `--ci-provider-evidence-state` enables atomic restart-safe persistence with 512-record,
+32 MiB snapshot, and 256-row query bounds; snapshot and per-record digests are checked on restore.
+The registry remains an audit index: it never contacts GitHub/GitLab, executes CI, or grants release
+authority.
 `developer_delivery_audit` can compose that normalization directly through an explicit `ci_provider`
 argument; it returns both the normalized provider projection and the downstream `ci_evidence` audit,
 while rejecting simultaneous `ci_provider` and canonical `ci_evidence` inputs.

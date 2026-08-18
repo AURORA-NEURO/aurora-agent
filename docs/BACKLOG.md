@@ -313,6 +313,14 @@ The delivery audit and content-addressed receipt now accept this conformance res
 `ci_provider_evidence` target/evidence row. Receipt verification recomputes the complete retained
 projection and distinguishes provider-evidence tampering from target or canonical CI tampering; this
 still does not create a remote artifact verifier or external CI authority.
+The provider-evidence retention seam is now implemented as a bounded shared registry: import
+re-audits the complete request, deterministic query/get preserves provider/run/plan joins and
+artifact/log/attestation record-family digests, and failed/unknown runs remain explicit retained
+evidence. MCP, REST, CLI, Python, and TypeScript expose the same contract, while
+`--ci-provider-evidence-state` provides atomic restart recovery with snapshot and per-record digest
+checks. This closes local evidence retention and operator lookup, but leaves provider contact,
+remote byte retrieval, signature verification, hosted execution, and release authority outside the
+repository boundary.
 The bounded HTTP event checkpoint now also restores subscription metadata and signed pending
 outbox envelopes. Restored subscriptions are paused, pending rows expose
 `secret_rebind_required`, and an explicit in-memory rebind re-signs them before activation; webhook

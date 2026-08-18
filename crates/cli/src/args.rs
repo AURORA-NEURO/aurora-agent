@@ -123,6 +123,15 @@ COMMANDS
                     Query retained report posture without executing or re-evaluating a workbench.
   workbench get     --store <path> --digest <digest>
                     Fetch one retained report by canonical content digest.
+  ci provider-evidence-import --request <path> --store <path> [--dry-run]
+                    Re-audit and retain provider-shaped CI evidence with bounded artifact/log/
+                    attestation lineage joins; no provider is contacted.
+  ci provider-evidence-query --store <path> [--provider <name>] [--run-id <id>]
+                    [--plan-digest <digest>] [--structurally-valid] [--conformance-ready]
+                    [--after <digest>] [--limit <n>] [--include-records]
+                    Query retained provider evidence without executing checks.
+  ci provider-evidence-get --store <path> --digest <digest>
+                    Fetch one retained provider evidence report by canonical content digest.
   workflow reconcile --instantiation <path> [--mission <path>] [--evidence-bundle <path>]
                     Reconcile a retained agent_mission report or evidence bundle against the
                     instantiated workflow. Exit 1 when completion evidence is not ready.
@@ -274,6 +283,26 @@ pub enum Command {
         include_reports: bool,
     },
     WorkbenchGet {
+        store: PathBuf,
+        digest: String,
+    },
+    CiProviderEvidenceImport {
+        request: PathBuf,
+        store: PathBuf,
+        dry_run: bool,
+    },
+    CiProviderEvidenceQuery {
+        store: PathBuf,
+        provider: Option<String>,
+        run_id: Option<String>,
+        plan_digest: Option<String>,
+        structurally_valid: bool,
+        conformance_ready: bool,
+        after: Option<String>,
+        limit: usize,
+        include_records: bool,
+    },
+    CiProviderEvidenceGet {
         store: PathBuf,
         digest: String,
     },
@@ -516,6 +545,33 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
             include_reports: options.take_switch("--include-reports"),
         },
         ("workbench", "get") => Command::WorkbenchGet {
+            store: options.take_path("--store")?,
+            digest: options
+                .take_optional("--digest")
+                .ok_or_else(|| usage("--digest is required"))?,
+        },
+        ("ci", "provider-evidence-import") => Command::CiProviderEvidenceImport {
+            request: options.take_path("--request")?,
+            store: options.take_path("--store")?,
+            dry_run: options.take_switch("--dry-run"),
+        },
+        ("ci", "provider-evidence-query") => Command::CiProviderEvidenceQuery {
+            store: options.take_path("--store")?,
+            provider: options.take_optional("--provider"),
+            run_id: options.take_optional("--run-id"),
+            plan_digest: options.take_optional("--plan-digest"),
+            structurally_valid: options.take_switch("--structurally-valid"),
+            conformance_ready: options.take_switch("--conformance-ready"),
+            after: options.take_optional("--after"),
+            limit: match options.take_optional("--limit") {
+                None => 100,
+                Some(text) => text
+                    .parse()
+                    .map_err(|_| usage(format!("--limit must be a number, got {text:?}")))?,
+            },
+            include_records: options.take_switch("--include-records"),
+        },
+        ("ci", "provider-evidence-get") => Command::CiProviderEvidenceGet {
             store: options.take_path("--store")?,
             digest: options
                 .take_optional("--digest")
@@ -954,6 +1010,101 @@ mod tests {
             Parsed::Run(super::Invocation {
                 json: false,
                 command: Command::WorkbenchGet {
+                    store: PathBuf::from("state.json"),
+                    digest: "c".repeat(64),
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn ci_provider_evidence_registry_commands_parse_lineage_controls() {
+        let imported = parse(
+            [
+                "ci",
+                "provider-evidence-import",
+                "--request",
+                "provider.json",
+                "--store",
+                "state.json",
+                "--dry-run",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse provider evidence import");
+        assert_eq!(
+            imported,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::CiProviderEvidenceImport {
+                    request: PathBuf::from("provider.json"),
+                    store: PathBuf::from("state.json"),
+                    dry_run: true,
+                },
+            })
+        );
+
+        let queried = parse(
+            [
+                "ci",
+                "provider-evidence-query",
+                "--store",
+                "state.json",
+                "--provider",
+                "github_actions",
+                "--run-id",
+                "9030",
+                "--plan-digest",
+                &"a".repeat(64),
+                "--structurally-valid",
+                "--conformance-ready",
+                "--after",
+                &"b".repeat(64),
+                "--limit",
+                "12",
+                "--include-records",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse provider evidence query");
+        assert_eq!(
+            queried,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::CiProviderEvidenceQuery {
+                    store: PathBuf::from("state.json"),
+                    provider: Some("github_actions".into()),
+                    run_id: Some("9030".into()),
+                    plan_digest: Some("a".repeat(64)),
+                    structurally_valid: true,
+                    conformance_ready: true,
+                    after: Some("b".repeat(64)),
+                    limit: 12,
+                    include_records: true,
+                },
+            })
+        );
+
+        let fetched = parse(
+            [
+                "ci",
+                "provider-evidence-get",
+                "--store",
+                "state.json",
+                "--digest",
+                &"c".repeat(64),
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse provider evidence get");
+        assert_eq!(
+            fetched,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::CiProviderEvidenceGet {
                     store: PathBuf::from("state.json"),
                     digest: "c".repeat(64),
                 },

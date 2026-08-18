@@ -1,6 +1,6 @@
 //! `bioprism-api` — bounded HTTP/REST and event gateway.
 //!
-//! Usage: `bioprism-api [--bind <host:port>] [--root <dir>] [--token <bearer-token>] [--mission-state <file>] [--mission-queue-state <file>] [--event-state <file>] [--evidence-state <file>] [--reconciliation-state <file>] [--artifact-state <file>] [--workflow-execution-evidence-state <file>] [--workbench-state <file>]`
+//! Usage: `bioprism-api [--bind <host:port>] [--root <dir>] [--token <bearer-token>] [--mission-state <file>] [--mission-queue-state <file>] [--event-state <file>] [--evidence-state <file>] [--reconciliation-state <file>] [--artifact-state <file>] [--workflow-execution-evidence-state <file>] [--workbench-state <file>] [--ci-provider-evidence-state <file>]`
 
 use bioprism_api::{serve, ApiConfig, ApiRouter};
 use std::net::TcpListener;
@@ -22,6 +22,7 @@ fn main() {
     let mut artifact_state_path = None;
     let mut workflow_execution_evidence_state_path = None;
     let mut workbench_state_path = None;
+    let mut ci_provider_evidence_state_path = None;
     let mut max_body_bytes = ApiConfig::default().max_body_bytes;
     let mut event_capacity = ApiConfig::default().event_capacity;
 
@@ -89,6 +90,12 @@ fn main() {
                 workbench_state_path =
                     Some(PathBuf::from(value("--workbench-state", &mut arguments)))
             }
+            "--ci-provider-evidence-state" => {
+                ci_provider_evidence_state_path = Some(PathBuf::from(value(
+                    "--ci-provider-evidence-state",
+                    &mut arguments,
+                )))
+            }
             "--max-body-bytes" => {
                 max_body_bytes = value("--max-body-bytes", &mut arguments)
                     .parse()
@@ -108,7 +115,7 @@ fn main() {
             "-h" | "--help" => {
                 println!(
                     "bioprism-api — bounded HTTP/REST and event gateway\n\n\
-                     USAGE\n  bioprism-api [--bind <host:port>] [--root <dir>] [--token <bearer-token>] [--mission-state <file>] [--mission-queue-state <file>] [--mission-queue-max-jobs <n>] [--mission-queue-max-active-leases <n>] [--event-state <file>] [--evidence-state <file>] [--reconciliation-state <file>] [--artifact-state <file>] [--workflow-execution-evidence-state <file>] [--workbench-state <file>]\n\n\
+                     USAGE\n  bioprism-api [--bind <host:port>] [--root <dir>] [--token <bearer-token>] [--mission-state <file>] [--mission-queue-state <file>] [--mission-queue-max-jobs <n>] [--mission-queue-max-active-leases <n>] [--event-state <file>] [--evidence-state <file>] [--reconciliation-state <file>] [--artifact-state <file>] [--workflow-execution-evidence-state <file>] [--workbench-state <file>] [--ci-provider-evidence-state <file>]\n\n\
                      GET /healthz and /readyz are public. Other /v1 routes require --token when configured.\n\
                      REST tools: POST /v1/tools/<name> with a JSON object body.\n\
                      JSON-RPC: POST /v1/rpc. Events: GET /v1/events or /v1/events/stream.\n\
@@ -119,6 +126,7 @@ fn main() {
                      Artifacts: --artifact-state enables bounded restart-safe cross-domain artifact registration, querying, and lineage inspection.\n\
                      Workflow execution evidence: --workflow-execution-evidence-state enables bounded restart-safe imports of digest-valid workflow receipts and evidence projections.\n\
                      Workbench reports: --workbench-state enables bounded restart-safe retention of structurally valid developer_workbench reports.\n\
+                     CI provider evidence: --ci-provider-evidence-state enables bounded restart-safe retention of re-audited provider/run/artifact/log/attestation reports; it does not authenticate providers or verify remote bytes.\n\
                      Webhooks: register, poll signed deliveries, retry, and acknowledge.\n\
                      The gateway does not terminate TLS, speak gRPC, or send arbitrary outbound requests."
                 );
@@ -149,6 +157,7 @@ fn main() {
         artifact_state_path,
         workflow_execution_evidence_state_path,
         workbench_state_path,
+        ci_provider_evidence_state_path,
         ..ApiConfig::default()
     };
     let router = match ApiRouter::new(root, config) {

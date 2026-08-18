@@ -4625,6 +4625,97 @@ export interface CiProviderEvidenceResult extends JsonObject {
   limitations: string[];
 }
 
+export interface CiProviderEvidenceRegistryImportArgs extends CiProviderEvidenceArgs {}
+
+export interface CiProviderEvidenceRegistryQueryArgs extends JsonObject {
+  provider?: "github_actions" | "gitlab_ci" | "generic";
+  run_id?: string;
+  plan_digest?: string;
+  structurally_valid?: boolean;
+  conformance_ready?: boolean;
+  after?: string;
+  max_items?: number;
+  include_records?: boolean;
+}
+
+export interface CiProviderEvidenceRegistryImportResult extends JsonObject {
+  ok: boolean;
+  workflow: "ci_provider_evidence_import";
+  provider_evidence_digest: string;
+  provider: string;
+  run_id: string;
+  plan_digest: string;
+  evidence_digest: string;
+  artifact_record_digest: string;
+  log_record_digest: string;
+  attestation_record_digest: string;
+  structurally_valid: boolean;
+  conformance_ready: boolean;
+  artifact_count: number;
+  log_count: number;
+  attestation_count: number;
+  created: boolean;
+  already_present: boolean;
+  registry_generation: number;
+  registry_size: number;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface CiProviderEvidenceRegistryQueryRow extends JsonObject {
+  provider_evidence_digest: string;
+  provider: string;
+  run_id: string;
+  payload_digest: string;
+  plan_digest: string;
+  evidence_digest: string;
+  structurally_valid: boolean;
+  conformance_ready: boolean;
+  artifact_count: number;
+  log_count: number;
+  attestation_count: number;
+  linked_artifact_count: number;
+  linked_log_count: number;
+  attestation_subject_count: number;
+  artifact_record_digest: string;
+  log_record_digest: string;
+  attestation_record_digest: string;
+  audit?: CiProviderEvidenceAuditResult;
+}
+
+export interface CiProviderEvidenceRegistryQueryResult extends JsonObject {
+  ok: boolean;
+  workflow: "ci_provider_evidence_query";
+  rows: CiProviderEvidenceRegistryQueryRow[];
+  next_after: string | null;
+  has_more: boolean;
+  registry_generation: number;
+  registry_size: number;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface CiProviderEvidenceRegistryGetResult extends JsonObject {
+  ok: boolean;
+  workflow: "ci_provider_evidence_get";
+  provider_evidence_digest: string;
+  provider: string;
+  run_id: string;
+  payload_digest: string;
+  plan_digest: string;
+  evidence_digest: string;
+  structurally_valid: boolean;
+  conformance_ready: boolean;
+  audit: CiProviderEvidenceAuditResult;
+  registry_generation: number;
+  registry_size: number;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface DelegatedCheckEvidenceArgs extends JsonObject {
   name: string;
   kind: string;

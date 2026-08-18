@@ -583,6 +583,13 @@ invent defaults:
   `conformance_ready` signal across the same four facades. The SDK validates mapping/array bounds
   locally; Rust remains authoritative for digest syntax, identity binding, and attestation subject
   semantics.
+- `CiProviderEvidenceRegistryQueryRequest` plus the import/query/get report parsers expose the
+  durable provider-observed evidence index. `Workspace`/`AsyncWorkspace` provide MCP helpers, and
+  `ApiClient`/`AsyncApiClient` provide both MCP and REST helpers. Query rows are digest-ordered and
+  compact by default; `include_records=True` is explicit. Retained imports re-audit the canonical
+  request, preserve failed/unknown runs, and expose artifact/log/attestation record-family digests.
+  The registry uses the same 512-record, 32 MiB snapshot, and 256-row query bounds as the Rust
+  service and remains structural evidence rather than provider authentication or release approval.
 - `developer_delivery_audit(..., ci_provider_evidence=...)` carries that report as an independent
   fail-closed release target. `DeveloperDeliveryAuditReport` preserves the target readiness and
   provider-evidence projection, while `DeveloperDeliveryReceiptReport`/verification report expose

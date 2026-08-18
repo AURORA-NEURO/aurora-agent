@@ -203,6 +203,28 @@ through the other. `--workbench-state <file>` enables atomic restart-safe persis
 verifies the snapshot digest and every retained report. The registry is capped at 512 reports and
 32 MiB, and all registry operations remain non-executing audit lookups.
 
+The provider-observed CI evidence registry provides the corresponding durable join for an audited
+run and its external artifact/log/attestation indexes:
+
+- `POST /v1/ci/provider-evidence` accepts a typed `CiProviderEvidenceRequest`, re-runs the
+  canonical provider-evidence audit, and imports the complete digest-addressed record idempotently.
+  Failed and unknown provider runs remain retainable evidence with `conformance_ready: false`;
+  malformed, unbound, or digest-inconsistent rows are rejected.
+- `GET /v1/ci/provider-evidence` returns compact deterministic rows ordered by
+  `provider_evidence_digest`. Filters include `provider`, `run_id`, `plan_digest`,
+  `structurally_valid`, `conformance_ready`, `after`, `max_items` (1–256), and
+  `include_records` (false by default).
+- `GET /v1/ci/provider-evidence/{provider_evidence_digest}` returns one exact retained audit,
+  including separate artifact/log/attestation counts and record-family digests.
+- `GET /v1/ci/provider-evidence/persistence` reports checkpoint integrity and
+  `POST /v1/ci/provider-evidence/persistence/flush` forces an atomic snapshot when persistence
+  is configured.
+
+The API shares this registry with MCP. `--ci-provider-evidence-state <file>` enables restart-safe
+startup recovery; the bounded registry accepts at most 512 records and a 32 MiB snapshot. The
+lineage fields are provider-observed joins only: the gateway does not fetch remote bytes, contact
+GitHub/GitLab, verify signatures, execute CI, or establish deployment or release authority.
+
 `POST /v1/domain-workflows/verify` checks a retained `domain_workflow_instantiate` response before
 handoff or re-review. It validates the workflow, catalogue, domain-contract, mission, and binding
 identities; reruns authoritative mission preflight; and, when `replay_request` is supplied, rebuilds

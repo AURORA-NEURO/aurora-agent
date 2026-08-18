@@ -205,7 +205,14 @@ from .ci_provider import (
 from .ci_provider_evidence import (
     CiProviderEvidenceReport,
     CiProviderEvidenceRequest,
+    CiProviderEvidenceRegistryGetReport,
+    CiProviderEvidenceRegistryImportReport,
+    CiProviderEvidenceRegistryQueryReport,
+    CiProviderEvidenceRegistryQueryRequest,
     ci_provider_evidence_report,
+    ci_provider_evidence_registry_get_report,
+    ci_provider_evidence_registry_import_report,
+    ci_provider_evidence_registry_query_report,
 )
 from .execution_provenance import (
     ExecutionProvenanceReport,
@@ -1952,6 +1959,40 @@ class Workspace:
         """Return typed structural provider-evidence conformance evidence."""
 
         return ci_provider_evidence_report(self.ci_provider_evidence_audit(request))
+
+    def ci_provider_evidence_import(
+        self,
+        request: CiProviderEvidenceRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Re-audit and retain provider evidence in the shared MCP registry."""
+
+        normalized = request if isinstance(request, CiProviderEvidenceRequest) else CiProviderEvidenceRequest(**dict(request))
+        return self.tool("ci_provider_evidence_import", normalized.to_mcp_arguments())
+
+    def ci_provider_evidence_import_report(
+        self,
+        request: CiProviderEvidenceRequest | Mapping[str, Any],
+    ) -> CiProviderEvidenceRegistryImportReport:
+        return ci_provider_evidence_registry_import_report(self.ci_provider_evidence_import(request))
+
+    def ci_provider_evidence_query(
+        self,
+        request: CiProviderEvidenceRegistryQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, CiProviderEvidenceRegistryQueryRequest) else CiProviderEvidenceRegistryQueryRequest(**dict(request or {}))
+        return self.tool("ci_provider_evidence_query", normalized.to_mcp_arguments())
+
+    def ci_provider_evidence_query_report(
+        self,
+        request: CiProviderEvidenceRegistryQueryRequest | Mapping[str, Any] | None = None,
+    ) -> CiProviderEvidenceRegistryQueryReport:
+        return ci_provider_evidence_registry_query_report(self.ci_provider_evidence_query(request))
+
+    def ci_provider_evidence_get(self, digest: str) -> dict[str, Any]:
+        return self.tool("ci_provider_evidence_get", {"provider_evidence_digest": digest})
+
+    def ci_provider_evidence_get_report(self, digest: str) -> CiProviderEvidenceRegistryGetReport:
+        return ci_provider_evidence_registry_get_report(self.ci_provider_evidence_get(digest))
 
     def execution_provenance_audit(
         self,
@@ -6010,6 +6051,38 @@ class AsyncWorkspace:
         """Return typed async provider-evidence conformance evidence."""
 
         return ci_provider_evidence_report(await self.ci_provider_evidence_audit(request))
+
+    async def ci_provider_evidence_import(
+        self,
+        request: CiProviderEvidenceRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, CiProviderEvidenceRequest) else CiProviderEvidenceRequest(**dict(request))
+        return await self.tool("ci_provider_evidence_import", normalized.to_mcp_arguments())
+
+    async def ci_provider_evidence_import_report(
+        self,
+        request: CiProviderEvidenceRequest | Mapping[str, Any],
+    ) -> CiProviderEvidenceRegistryImportReport:
+        return ci_provider_evidence_registry_import_report(await self.ci_provider_evidence_import(request))
+
+    async def ci_provider_evidence_query(
+        self,
+        request: CiProviderEvidenceRegistryQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, CiProviderEvidenceRegistryQueryRequest) else CiProviderEvidenceRegistryQueryRequest(**dict(request or {}))
+        return await self.tool("ci_provider_evidence_query", normalized.to_mcp_arguments())
+
+    async def ci_provider_evidence_query_report(
+        self,
+        request: CiProviderEvidenceRegistryQueryRequest | Mapping[str, Any] | None = None,
+    ) -> CiProviderEvidenceRegistryQueryReport:
+        return ci_provider_evidence_registry_query_report(await self.ci_provider_evidence_query(request))
+
+    async def ci_provider_evidence_get(self, digest: str) -> dict[str, Any]:
+        return await self.tool("ci_provider_evidence_get", {"provider_evidence_digest": digest})
+
+    async def ci_provider_evidence_get_report(self, digest: str) -> CiProviderEvidenceRegistryGetReport:
+        return ci_provider_evidence_registry_get_report(await self.ci_provider_evidence_get(digest))
 
     async def execution_provenance_audit(
         self,

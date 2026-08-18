@@ -10,7 +10,7 @@ an implementation — so read the numbers as *"someone has read this and taken a
 never as *"this is done"*. The stronger criterion would be a conformance test per module. It does
 not exist and is not being claimed.
 
-The MCP integration layer currently exposes 229 callable tools. That count is intentionally
+The MCP integration layer currently exposes 232 callable tools. That count is intentionally
 separate from this citation denominator: `pack_health_assess`, `sdk_registry_check`, and
 `repository_impact` make existing typed contracts agent-callable, while `world_generate`,
 `hub_submission_review`, and `telemetry_project` add bounded in-tree generation, public-hub
@@ -93,6 +93,16 @@ rows. It validates unique identities, content-digest syntax, provider/run/check 
 shape, and attestation subjects; preserves every row; emits separate record digests; and reports
 structural `conformance_ready` without fetching remote content, executing checks, authenticating a
 provider, or cryptographically verifying an attestation.
+The retained provider-evidence registry is the durable continuation of that handoff: it re-runs the
+canonical audit before accepting a record, retains structurally valid failed and unknown runs as
+explicit evidence, and exposes deterministic digest-ordered import/query/get operations through MCP,
+REST, CLI, Python, and TypeScript. Each retained row carries the provider/run/plan identity plus
+the artifact, log, and attestation record-family digests, so operators can join provider-observed
+lineage without confusing a locator or digest with a locally fetched byte or verified signature.
+`--ci-provider-evidence-state` enables atomic restart-safe persistence, capped at 512 records and
+32 MiB with 256-item queries. Snapshot and per-record digests are checked on restore; the registry
+is an audit index and never contacts a provider, executes CI, verifies remote content, or approves
+a release.
 `developer_delivery_audit` can now carry that audit as the independent `ci_provider_evidence` target,
 while `developer_delivery_receipt` and its verifier preserve and recompute a digest over the complete
 provider-evidence projection. This makes the attached-evidence handoff joinable and tamper-diagnosable

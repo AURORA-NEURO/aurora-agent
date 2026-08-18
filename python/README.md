@@ -64,6 +64,11 @@ keeps authoring/notebook sessions, stale digests, capability holes, release post
 CI planning in one evidence-bearing response; it does not pretend to execute a hosted UI or GitHub
 runner. The registry helpers retain structurally valid workbench reports behind bounded digest
 queries and restart-safe checkpoints; they never execute or re-evaluate the retained report.
+The provider-evidence registry helpers extend the same retention contract to provider-observed CI
+artifacts, logs, and attestations. They re-audit before import, preserve failed/unknown runs, expose
+digest-ordered provider/run/plan queries and exact lookup, and carry separate record-family digests
+for lineage joins. The shared registry is bounded and restart-safe when configured, but it never
+fetches remote bytes, authenticates a provider, verifies signatures, or approves a release.
 `MissionBinding` supports validated field-level dataflow between direct prerequisite steps,
 and `CapabilityQuery` routes across the complete domain catalogue with optional tool schemas;
 `capability_audit()` verifies the catalogue against the authoritative MCP schema set, and

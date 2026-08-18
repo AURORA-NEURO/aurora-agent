@@ -210,6 +210,7 @@ pub mod capability_dashboard;
 pub mod ci_evidence;
 pub mod ci_provider;
 pub mod ci_provider_evidence;
+pub mod ci_provider_evidence_registry;
 pub mod citations;
 pub mod claim;
 pub mod classify;
@@ -301,6 +302,13 @@ pub use ci_provider::{
 pub use ci_provider_evidence::{
     audit_ci_provider_evidence, CiProviderArtifact, CiProviderAttestation, CiProviderEvidenceAudit,
     CiProviderEvidenceError, CiProviderEvidenceRequest, CiProviderLog, CI_PROVIDER_EVIDENCE_SCHEMA,
+};
+pub use ci_provider_evidence_registry::{
+    CiProviderEvidenceRegistry, CiProviderEvidenceRegistryError,
+    CI_PROVIDER_EVIDENCE_GET_SCHEMA_VERSION, CI_PROVIDER_EVIDENCE_IMPORT_SCHEMA_VERSION,
+    CI_PROVIDER_EVIDENCE_QUERY_SCHEMA_VERSION, CI_PROVIDER_EVIDENCE_REGISTRY_SCHEMA_VERSION,
+    MAX_CI_PROVIDER_EVIDENCE_QUERY_ITEMS, MAX_CI_PROVIDER_EVIDENCE_RECORDS,
+    MAX_CI_PROVIDER_EVIDENCE_REGISTRY_BYTES,
 };
 pub use citations::{audit as audit_citations, scan as scan_citations, CitationAudit};
 pub use claim::{ApiClaim, ApiClaimDraft, ApiName, Evidence};

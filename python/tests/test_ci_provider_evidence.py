@@ -11,6 +11,10 @@ from prism_sdk import (
     AsyncWorkspace,
     CiProviderEvidenceReport,
     CiProviderEvidenceRequest,
+    CiProviderEvidenceRegistryQueryRequest,
+    ci_provider_evidence_registry_get_report,
+    ci_provider_evidence_registry_import_report,
+    ci_provider_evidence_registry_query_report,
     Workspace,
     ci_provider_evidence_report,
 )
@@ -63,14 +67,38 @@ def payload() -> dict:
     }
 
 
+def registry_payload(name: str) -> dict:
+    digest = "c" * 64
+    if name == "ci_provider_evidence_import":
+        return {
+            "ok": True, "workflow": name, "provider_evidence_digest": digest,
+            "provider": "github_actions", "run_id": "run-42", "plan_digest": digest,
+            "evidence_digest": digest, "artifact_record_digest": digest,
+            "log_record_digest": digest, "attestation_record_digest": digest,
+            "structurally_valid": True, "conformance_ready": True,
+            "created": True, "already_present": False, "registry_generation": 1,
+            "registry_size": 1,
+        }
+    if name == "ci_provider_evidence_query":
+        return {
+            "ok": True, "workflow": name, "rows": [{"provider_evidence_digest": digest, "provider": "github_actions"}],
+            "next_after": None, "has_more": False, "registry_generation": 1, "registry_size": 1,
+        }
+    return {
+        "ok": True, "workflow": name, "provider_evidence_digest": digest,
+        "provider": "github_actions", "run_id": "run-42", "audit": {"run_id": "run-42"},
+        "registry_generation": 1, "registry_size": 1,
+    }
 class _SyncTool:
     def call_tool(self, name: str, arguments: dict) -> ToolResult:
-        return ToolResult(name, {"isError": False, "content": [{"type": "text", "text": json.dumps(payload())}]})
+        value = payload() if name == "ci_provider_evidence_audit" else registry_payload(name)
+        return ToolResult(name, {"isError": False, "content": [{"type": "text", "text": json.dumps(value)}]})
 
 
 class _AsyncTool:
     async def call_tool(self, name: str, arguments: dict) -> ToolResult:
-        return ToolResult(name, {"isError": False, "content": [{"type": "text", "text": json.dumps(payload())}]})
+        value = payload() if name == "ci_provider_evidence_audit" else registry_payload(name)
+        return ToolResult(name, {"isError": False, "content": [{"type": "text", "text": json.dumps(value)}]})
 
 
 def request() -> CiProviderEvidenceRequest:
@@ -117,6 +145,42 @@ class CiProviderEvidenceTests(unittest.TestCase):
             async_call.assert_called_once_with("ci_provider_evidence_audit", args.to_mcp_arguments())
 
         asyncio.run(run())
+
+    def test_registry_request_reports_and_all_transport_planes(self) -> None:
+        args = request()
+        query = CiProviderEvidenceRegistryQueryRequest(
+            provider="github_actions", conformance_ready=True, max_items=12, include_records=True
+        )
+        self.assertEqual(query.to_mcp_arguments()["max_items"], 12)
+        self.assertEqual(query.to_http_query()["conformance_ready"], "true")
+        self.assertIsInstance(ci_provider_evidence_registry_import_report(registry_payload("ci_provider_evidence_import")), object)
+        self.assertEqual(ci_provider_evidence_registry_query_report(registry_payload("ci_provider_evidence_query")).rows[0]["provider"], "github_actions")
+        self.assertEqual(ci_provider_evidence_registry_get_report(registry_payload("ci_provider_evidence_get")).run_id, "run-42")
+
+        workspace = Workspace(_SyncTool())
+        self.assertTrue(workspace.ci_provider_evidence_import_report(args).created)
+        self.assertEqual(workspace.ci_provider_evidence_query_report(query).rows[0]["provider"], "github_actions")
+        self.assertEqual(workspace.ci_provider_evidence_get_report("c" * 64).run_id, "run-42")
+
+        with patch.object(ApiClient, "call_tool", side_effect=lambda name, arguments: registry_payload(name)) as call, \
+             patch.object(ApiClient, "request", side_effect=lambda method, path, payload=None: registry_payload("ci_provider_evidence_import" if method == "POST" else ("ci_provider_evidence_get" if path.count("/") >= 4 else "ci_provider_evidence_query"))) as rest:
+            client = ApiClient("http://127.0.0.1:1")
+            self.assertTrue(client.ci_provider_evidence_import_report(args).created)
+            self.assertTrue(client.ci_provider_evidence_import_rest_report(args).created)
+            self.assertFalse(client.ci_provider_evidence_query_rest_report(query).has_more)
+            self.assertEqual(client.ci_provider_evidence_get_rest_report("c" * 64).run_id, "run-42")
+            self.assertEqual(call.call_args_list[0].args[0], "ci_provider_evidence_import")
+            self.assertEqual(rest.call_args_list[0].args[0], "POST")
+
+        async def run_registry() -> None:
+            async_client = AsyncApiClient(ApiClient("http://127.0.0.1:1"))
+            with patch.object(ApiClient, "call_tool", side_effect=lambda name, arguments: registry_payload(name)), \
+                 patch.object(ApiClient, "request", side_effect=lambda method, path, payload=None: registry_payload("ci_provider_evidence_query")):
+                self.assertTrue((await async_client.ci_provider_evidence_import_report(args)).created)
+                self.assertEqual((await async_client.ci_provider_evidence_query_rest_report(query)).registry_size, 1)
+                self.assertEqual((await async_client.ci_provider_evidence_get_report("c" * 64)).run_id, "run-42")
+
+        asyncio.run(run_registry())
 
 
 if __name__ == "__main__":

@@ -249,6 +249,20 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         guarantees: [],
         limitations: [],
       } } } });
+      if (path === "/v1/tools/ci_provider_evidence_import") return jsonResponse({ ok: true, tool: "ci_provider_evidence_import", request_id: "r30i", mcp: { result: { structuredContent: {
+        ok: true, workflow: "ci_provider_evidence_import", provider_evidence_digest: "b".repeat(64), provider: "github_actions", run_id: "9001", plan_digest: "p".repeat(64), evidence_digest: "e".repeat(64), artifact_record_digest: "a".repeat(64), log_record_digest: "l".repeat(64), attestation_record_digest: "t".repeat(64), structurally_valid: true, conformance_ready: true, artifact_count: 1, log_count: 1, attestation_count: 1, created: true, already_present: false, registry_generation: 1, registry_size: 1, execution: "not_started", guarantees: [], limitations: [],
+      } } } });
+      if (path === "/v1/tools/ci_provider_evidence_query") return jsonResponse({ ok: true, tool: "ci_provider_evidence_query", request_id: "r30q", mcp: { result: { structuredContent: {
+        ok: true, workflow: "ci_provider_evidence_query", rows: [{ provider_evidence_digest: "b".repeat(64), provider: "github_actions", run_id: "9001", payload_digest: "q".repeat(64), plan_digest: "p".repeat(64), evidence_digest: "e".repeat(64), structurally_valid: true, conformance_ready: true, artifact_count: 1, log_count: 1, attestation_count: 1, linked_artifact_count: 1, linked_log_count: 1, attestation_subject_count: 1, artifact_record_digest: "a".repeat(64), log_record_digest: "l".repeat(64), attestation_record_digest: "t".repeat(64) }], next_after: null, has_more: false, registry_generation: 1, registry_size: 1, execution: "not_started", guarantees: [], limitations: [],
+      } } } });
+      if (path === "/v1/tools/ci_provider_evidence_get") return jsonResponse({ ok: true, tool: "ci_provider_evidence_get", request_id: "r30g", mcp: { result: { structuredContent: {
+        ok: true, workflow: "ci_provider_evidence_get", provider_evidence_digest: "b".repeat(64), provider: "github_actions", run_id: "9001", payload_digest: "q".repeat(64), plan_digest: "p".repeat(64), evidence_digest: "e".repeat(64), structurally_valid: true, conformance_ready: true, audit: { run_id: "9001", artifact_count: 1 }, registry_generation: 1, registry_size: 1, execution: "not_started", guarantees: [], limitations: [],
+      } } } });
+      if (path === "/v1/ci/provider-evidence") {
+        if (init?.method === "GET") return jsonResponse({ ok: true, workflow: "ci_provider_evidence_query", rows: [], next_after: null, has_more: false, registry_generation: 1, registry_size: 1, execution: "not_started", guarantees: [], limitations: [] });
+        return jsonResponse({ ok: true, workflow: "ci_provider_evidence_import", provider_evidence_digest: "b".repeat(64), provider: "github_actions", run_id: "9001", plan_digest: "p".repeat(64), evidence_digest: "e".repeat(64), artifact_record_digest: "a".repeat(64), log_record_digest: "l".repeat(64), attestation_record_digest: "t".repeat(64), structurally_valid: true, conformance_ready: true, artifact_count: 1, log_count: 1, attestation_count: 1, created: true, already_present: false, registry_generation: 1, registry_size: 1, execution: "not_started", guarantees: [], limitations: [] });
+      }
+      if (path === "/v1/ci/provider-evidence/" + "b".repeat(64)) return jsonResponse({ ok: true, workflow: "ci_provider_evidence_get", provider_evidence_digest: "b".repeat(64), provider: "github_actions", run_id: "9001", payload_digest: "q".repeat(64), plan_digest: "p".repeat(64), evidence_digest: "e".repeat(64), structurally_valid: true, conformance_ready: true, audit: { run_id: "9001", artifact_count: 1 }, registry_generation: 1, registry_size: 1, execution: "not_started", guarantees: [], limitations: [] });
       if (path === "/v1/tools/execution_provenance_audit") return jsonResponse({ ok: true, tool: "execution_provenance_audit", request_id: "r28", mcp: { result: { structuredContent: {
         ok: true,
         workflow: "execution_provenance_audit",
@@ -1919,6 +1933,26 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(providerEvidence.mcp.result.structuredContent.workflow, "ci_provider_evidence_audit");
   assert.equal(providerEvidence.mcp.result.structuredContent.conformance_ready, true);
   assert.equal(providerEvidence.mcp.result.structuredContent.audit.artifact_count, 1);
+  const providerRegistryRequest = {
+    ci: { workflow: "contracts" },
+    provider: "github_actions",
+    payload: { run: { id: 9001, conclusion: "success" }, jobs: [{ name: "tests", conclusion: "success" }] },
+    artifacts: [{ id: "artifact-1", kind: "junit", digest: "d".repeat(64) }],
+  };
+  const providerImported = await client.ciProviderEvidenceImport(providerRegistryRequest);
+  assert.equal(providerImported.mcp.result.structuredContent.created, true);
+  assert.equal(providerImported.mcp.result.structuredContent.artifact_record_digest.length, 64);
+  const providerImportedRest = await client.ciProviderEvidenceImportRest(providerRegistryRequest);
+  assert.equal(providerImportedRest.provider_evidence_digest, "b".repeat(64));
+  const providerQuery = await client.ciProviderEvidenceQuery({ provider: "github_actions", conformance_ready: true, include_records: true });
+  assert.equal(providerQuery.mcp.result.structuredContent.rows[0].artifact_count, 1);
+  const providerQueryRest = await client.ciProviderEvidenceQueryRest({ provider: "github_actions" });
+  assert.deepEqual(providerQueryRest.rows, []);
+  const providerGet = await client.ciProviderEvidenceGet("b".repeat(64));
+  assert.equal(providerGet.mcp.result.structuredContent.audit.run_id, "9001");
+  const providerGetRest = await client.ciProviderEvidenceGetRest("b".repeat(64));
+  assert.equal(providerGetRest.provider_evidence_digest, "b".repeat(64));
+  await assert.rejects(client.ciProviderEvidenceGet("bad"), ArgumentError);
   const provenance = await client.executionProvenanceAudit({
     mission: { plan: { mission_id: "mission-ts", digest: "p".repeat(64) }, execution: "executed" },
     delegated_checks: [{ name: "unit_tests", kind: "test", required: true, status: "passed", result_digest: "r".repeat(64), source: "caller_attested" }],

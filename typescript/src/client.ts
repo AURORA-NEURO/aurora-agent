@@ -333,6 +333,11 @@ import type {
   CiProviderNormalizationResult,
   CiProviderEvidenceArgs,
   CiProviderEvidenceResult,
+  CiProviderEvidenceRegistryGetResult,
+  CiProviderEvidenceRegistryImportArgs,
+  CiProviderEvidenceRegistryImportResult,
+  CiProviderEvidenceRegistryQueryArgs,
+  CiProviderEvidenceRegistryQueryResult,
   CiExecutionEvidenceArgs,
   CiExecutionEvidenceResult,
   ExecutionProvenanceArgs,
@@ -1844,6 +1849,67 @@ export class ApiClient {
 
   async ciProviderEvidenceAudit(args: CiProviderEvidenceArgs, options?: ClientRequestOptions): Promise<RestToolResponse<CiProviderEvidenceResult>> {
     return this.callTool<CiProviderEvidenceResult>("ci_provider_evidence_audit", args, options);
+  }
+
+  async ciProviderEvidenceImportRest(
+    args: CiProviderEvidenceRegistryImportArgs,
+    options?: ClientRequestOptions,
+  ): Promise<CiProviderEvidenceRegistryImportResult> {
+    if (!isObject(args) || !isObject(args.ci) || !isObject(args.payload)) {
+      throw new ArgumentError("CI provider evidence import requires ci and payload objects");
+    }
+    return this.request<CiProviderEvidenceRegistryImportResult>("POST", "/v1/ci/provider-evidence", args, options);
+  }
+
+  async ciProviderEvidenceImport(
+    args: CiProviderEvidenceRegistryImportArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<CiProviderEvidenceRegistryImportResult>> {
+    return this.callTool<CiProviderEvidenceRegistryImportResult>("ci_provider_evidence_import", args, options);
+  }
+
+  async ciProviderEvidenceQueryRest(
+    args: CiProviderEvidenceRegistryQueryArgs = {},
+    options?: ClientRequestOptions,
+  ): Promise<CiProviderEvidenceRegistryQueryResult> {
+    if (!isObject(args)) throw new ArgumentError("CI provider evidence query arguments must be an object");
+    for (const field of ["plan_digest", "after"]) {
+      const value = args[field];
+      if (value !== undefined && (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value))) {
+        throw new ArgumentError(`${field} must be a lowercase SHA-256 digest`);
+      }
+    }
+    if (args.max_items !== undefined && (!Number.isInteger(args.max_items) || args.max_items < 1 || args.max_items > 256)) {
+      throw new ArgumentError("max_items must be between 1 and 256");
+    }
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries({ ...args, max_items: args.max_items ?? 100, include_records: args.include_records ?? false })) {
+      if (value !== undefined) params.set(key, String(value));
+    }
+    return this.request<CiProviderEvidenceRegistryQueryResult>("GET", `/v1/ci/provider-evidence?${params.toString()}`, undefined, options);
+  }
+
+  async ciProviderEvidenceQuery(
+    args: CiProviderEvidenceRegistryQueryArgs = {},
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<CiProviderEvidenceRegistryQueryResult>> {
+    return this.callTool<CiProviderEvidenceRegistryQueryResult>("ci_provider_evidence_query", args, options);
+  }
+
+  async ciProviderEvidenceGetRest(
+    digest: string,
+    options?: ClientRequestOptions,
+  ): Promise<CiProviderEvidenceRegistryGetResult> {
+    if (!/^[0-9a-f]{64}$/.test(digest)) throw new ArgumentError("provider_evidence_digest must be a lowercase SHA-256 digest");
+    return this.request<CiProviderEvidenceRegistryGetResult>("GET", `/v1/ci/provider-evidence/${encodeURIComponent(digest)}`, undefined, options);
+  }
+
+  async ciProviderEvidenceGet(
+    digest: string,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<CiProviderEvidenceRegistryGetResult>> {
+    if (!/^[0-9a-f]{64}$/.test(digest)) throw new ArgumentError("provider_evidence_digest must be a lowercase SHA-256 digest");
+    return this.callTool<CiProviderEvidenceRegistryGetResult>("ci_provider_evidence_get", { provider_evidence_digest: digest }, options);
   }
 
   async executionProvenanceAudit(args: ExecutionProvenanceArgs, options?: ClientRequestOptions): Promise<RestToolResponse<ExecutionProvenanceResult>> {

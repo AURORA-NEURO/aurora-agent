@@ -166,10 +166,160 @@ class CiProviderEvidenceReport:
         return dict(self.raw)
 
 
+@dataclass(frozen=True)
+class CiProviderEvidenceRegistryQueryRequest:
+    """Bounded query over retained provider evidence and its lineage joins."""
+
+    provider: str | None = None
+    run_id: str | None = None
+    plan_digest: str | None = None
+    structurally_valid: bool | None = None
+    conformance_ready: bool | None = None
+    after: str | None = None
+    max_items: int = 100
+    include_records: bool = False
+
+    def __post_init__(self) -> None:
+        for name, value in (("provider", self.provider), ("run_id", self.run_id)):
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                raise ArgumentError(f"{name} must be a non-empty string")
+        for name, value in (("plan_digest", self.plan_digest), ("after", self.after)):
+            if value is not None:
+                _digest(name, value)
+        for name, value in (("structurally_valid", self.structurally_valid), ("conformance_ready", self.conformance_ready)):
+            if value is not None and not isinstance(value, bool):
+                raise ArgumentError(f"{name} must be a boolean")
+        if not isinstance(self.max_items, int) or isinstance(self.max_items, bool) or not 1 <= self.max_items <= 256:
+            raise ArgumentError("max_items must be between 1 and 256")
+        if not isinstance(self.include_records, bool):
+            raise ArgumentError("include_records must be a boolean")
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        result: dict[str, Any] = {"max_items": self.max_items, "include_records": self.include_records}
+        for name in ("provider", "run_id", "plan_digest", "structurally_valid", "conformance_ready", "after"):
+            value = getattr(self, name)
+            if value is not None:
+                result[name] = value
+        return result
+
+    def to_http_query(self) -> dict[str, str]:
+        return {key: str(value).lower() if isinstance(value, bool) else str(value) for key, value in self.to_mcp_arguments().items()}
+
+
+@dataclass(frozen=True)
+class CiProviderEvidenceRegistryImportReport:
+    raw: dict[str, Any]
+    provider_evidence_digest: str
+    provider: str
+    run_id: str
+    plan_digest: str
+    evidence_digest: str
+    artifact_record_digest: str
+    log_record_digest: str
+    attestation_record_digest: str
+    structurally_valid: bool
+    conformance_ready: bool
+    created: bool
+    already_present: bool
+    registry_generation: int
+    registry_size: int
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "CiProviderEvidenceRegistryImportReport":
+        raw = _tool_payload(value, "ci_provider_evidence_import")
+        return cls(
+            raw=raw,
+            provider_evidence_digest=_digest("provider evidence digest", raw.get("provider_evidence_digest")),
+            provider=_route_text("provider evidence provider", raw.get("provider")),
+            run_id=_route_text("provider evidence run_id", raw.get("run_id")),
+            plan_digest=_digest("provider evidence plan_digest", raw.get("plan_digest")),
+            evidence_digest=_digest("provider evidence evidence_digest", raw.get("evidence_digest")),
+            artifact_record_digest=_digest("provider evidence artifact_record_digest", raw.get("artifact_record_digest")),
+            log_record_digest=_digest("provider evidence log_record_digest", raw.get("log_record_digest")),
+            attestation_record_digest=_digest("provider evidence attestation_record_digest", raw.get("attestation_record_digest")),
+            structurally_valid=raw.get("structurally_valid") is True,
+            conformance_ready=raw.get("conformance_ready") is True,
+            created=raw.get("created") is True,
+            already_present=raw.get("already_present") is True,
+            registry_generation=int(raw.get("registry_generation", 0)),
+            registry_size=int(raw.get("registry_size", 0)),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class CiProviderEvidenceRegistryQueryReport:
+    raw: dict[str, Any]
+    rows: tuple[dict[str, Any], ...]
+    next_after: str | None
+    has_more: bool
+    registry_generation: int
+    registry_size: int
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "CiProviderEvidenceRegistryQueryReport":
+        raw = _tool_payload(value, "ci_provider_evidence_query")
+        rows = raw.get("rows", [])
+        if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
+            raise ArgumentError("CI provider evidence query rows must be an array")
+        return cls(
+            raw=raw,
+            rows=tuple(_route_mapping("CI provider evidence query row", item) for item in rows),
+            next_after=raw.get("next_after") if isinstance(raw.get("next_after"), str) else None,
+            has_more=raw.get("has_more") is True,
+            registry_generation=int(raw.get("registry_generation", 0)),
+            registry_size=int(raw.get("registry_size", 0)),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class CiProviderEvidenceRegistryGetReport:
+    raw: dict[str, Any]
+    provider_evidence_digest: str
+    provider: str
+    run_id: str
+    audit: dict[str, Any]
+    registry_generation: int
+    registry_size: int
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "CiProviderEvidenceRegistryGetReport":
+        raw = _tool_payload(value, "ci_provider_evidence_get")
+        return cls(
+            raw=raw,
+            provider_evidence_digest=_digest("provider evidence digest", raw.get("provider_evidence_digest")),
+            provider=_route_text("provider evidence provider", raw.get("provider")),
+            run_id=_route_text("provider evidence run_id", raw.get("run_id")),
+            audit=_route_mapping("CI provider evidence retained audit", raw.get("audit")),
+            registry_generation=int(raw.get("registry_generation", 0)),
+            registry_size=int(raw.get("registry_size", 0)),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
 def ci_provider_evidence_report(value: Mapping[str, Any]) -> CiProviderEvidenceReport:
     """Parse a direct MCP result or HTTP REST tool envelope."""
 
     return CiProviderEvidenceReport.from_wire(value)
+
+
+def ci_provider_evidence_registry_import_report(value: Mapping[str, Any]) -> CiProviderEvidenceRegistryImportReport:
+    return CiProviderEvidenceRegistryImportReport.from_wire(value)
+
+
+def ci_provider_evidence_registry_query_report(value: Mapping[str, Any]) -> CiProviderEvidenceRegistryQueryReport:
+    return CiProviderEvidenceRegistryQueryReport.from_wire(value)
+
+
+def ci_provider_evidence_registry_get_report(value: Mapping[str, Any]) -> CiProviderEvidenceRegistryGetReport:
+    return CiProviderEvidenceRegistryGetReport.from_wire(value)
 
 
 __all__ = [
@@ -177,5 +327,12 @@ __all__ = [
     "MAX_PROVIDER_EVIDENCE_ROWS",
     "CiProviderEvidenceRequest",
     "CiProviderEvidenceReport",
+    "CiProviderEvidenceRegistryQueryRequest",
+    "CiProviderEvidenceRegistryImportReport",
+    "CiProviderEvidenceRegistryQueryReport",
+    "CiProviderEvidenceRegistryGetReport",
     "ci_provider_evidence_report",
+    "ci_provider_evidence_registry_import_report",
+    "ci_provider_evidence_registry_query_report",
+    "ci_provider_evidence_registry_get_report",
 ]

@@ -12,11 +12,12 @@ use crate::events::{
 use crate::http::{HttpRequest, HttpResponse};
 use bioprism_devplat::{
     build_cross_domain_audit, plan_mission, verify_mission_evidence_bundle, ArtifactRegistry,
-    ArtifactRegistryError, DomainWorkflowReconciliationRegistry, EvidenceBundleError,
-    EvidenceBundleRegistry, EvidenceRegistryError, MissionEvaluatorCatalogue,
+    ArtifactRegistryError, CiProviderEvidenceRegistry, DomainWorkflowReconciliationRegistry,
+    EvidenceBundleError, EvidenceBundleRegistry, EvidenceRegistryError, MissionEvaluatorCatalogue,
     MissionEvaluatorReplayCompareRequest, MissionEvaluatorReplayRequest, MissionRequest,
     WorkbenchReportRegistry, WorkflowExecutionEvidenceRegistry, MAX_ARTIFACT_REGISTRY_BYTES,
-    MAX_EVIDENCE_REGISTRY_BYTES, MAX_WORKFLOW_EXECUTION_EVIDENCE_BYTES,
+    MAX_CI_PROVIDER_EVIDENCE_REGISTRY_BYTES, MAX_EVIDENCE_REGISTRY_BYTES,
+    MAX_WORKFLOW_EXECUTION_EVIDENCE_BYTES,
 };
 use bioprism_factory::{
     AuthorityMutation, ExecutionOperation, Idempotency as FactoryIdempotency, Job as FactoryJob,
@@ -57,6 +58,8 @@ pub const MAX_WORKFLOW_RECONCILIATION_STATE_BYTES: usize =
     bioprism_devplat::MAX_DOMAIN_WORKFLOW_RECONCILIATION_BYTES;
 pub const MAX_WORKBENCH_REGISTRY_STATE_BYTES: usize =
     bioprism_devplat::MAX_WORKBENCH_REGISTRY_BYTES;
+pub const MAX_CI_PROVIDER_EVIDENCE_REGISTRY_STATE_BYTES: usize =
+    MAX_CI_PROVIDER_EVIDENCE_REGISTRY_BYTES;
 pub const MISSION_QUEUE_LEASE_DURATION_NANOS: i128 = 24 * 60 * 60 * 1_000_000_000;
 const MISSION_QUEUE_WORKER_ID: &str = "bioprism-api-mission-worker";
 static NEXT_CHECKPOINT_TEMP_ID: AtomicU64 = AtomicU64::new(1);
@@ -95,6 +98,8 @@ pub struct ApiConfig {
     pub workflow_execution_evidence_state_path: Option<PathBuf>,
     /// Optional atomic JSON checkpoint for retained, structurally valid workbench reports.
     pub workbench_state_path: Option<PathBuf>,
+    /// Optional atomic JSON checkpoint for retained, re-audited provider-shaped CI evidence.
+    pub ci_provider_evidence_state_path: Option<PathBuf>,
 }
 
 impl Default for ApiConfig {
@@ -114,6 +119,7 @@ impl Default for ApiConfig {
             artifact_state_path: None,
             workflow_execution_evidence_state_path: None,
             workbench_state_path: None,
+            ci_provider_evidence_state_path: None,
         }
     }
 }
@@ -203,6 +209,13 @@ impl ApiConfig {
         {
             return Err("workbench_state_path must not be empty".into());
         }
+        if self
+            .ci_provider_evidence_state_path
+            .as_ref()
+            .is_some_and(|path| path.as_os_str().is_empty())
+        {
+            return Err("ci_provider_evidence_state_path must not be empty".into());
+        }
         Ok(())
     }
 }
@@ -227,6 +240,8 @@ pub struct ApiRouter {
     workflow_execution_evidence_persistence: Arc<WorkflowExecutionEvidencePersistence>,
     workbench_registry: Arc<Mutex<WorkbenchReportRegistry>>,
     workbench_persistence: Arc<WorkbenchPersistence>,
+    ci_provider_evidence_registry: Arc<Mutex<CiProviderEvidenceRegistry>>,
+    ci_provider_evidence_persistence: Arc<CiProviderEvidencePersistence>,
 }
 
 struct MissionJob {
@@ -280,6 +295,12 @@ struct WorkflowExecutionEvidencePersistence {
 struct WorkbenchPersistence {
     path: Option<PathBuf>,
     registry: Arc<Mutex<WorkbenchReportRegistry>>,
+    lock: Mutex<()>,
+}
+
+struct CiProviderEvidencePersistence {
+    path: Option<PathBuf>,
+    registry: Arc<Mutex<CiProviderEvidenceRegistry>>,
     lock: Mutex<()>,
 }
 
@@ -990,6 +1011,77 @@ impl WorkbenchPersistence {
     }
 }
 
+impl CiProviderEvidencePersistence {
+    fn persist(&self) -> Result<usize, String> {
+        let Some(_) = self.path.as_deref() else {
+            return Ok(0);
+        };
+        let registry = self
+            .registry
+            .lock()
+            .map_err(|_| "CI provider evidence registry is unavailable".to_string())?;
+        let document = registry.snapshot().map_err(|error| error.to_string())?;
+        self.persist_snapshot(&document)
+    }
+
+    fn persist_snapshot(&self, document: &Value) -> Result<usize, String> {
+        let Some(path) = self.path.as_deref() else {
+            return Ok(0);
+        };
+        let _write_guard = self
+            .lock
+            .lock()
+            .map_err(|_| "CI provider evidence persistence lock is unavailable".to_string())?;
+        let bytes = serde_json::to_vec_pretty(document).map_err(|error| {
+            format!("CI provider evidence state could not be serialized: {error}")
+        })?;
+        if bytes.len() > MAX_CI_PROVIDER_EVIDENCE_REGISTRY_STATE_BYTES {
+            return Err(format!(
+                "CI provider evidence state snapshot is {} bytes, above the {}-byte bound",
+                bytes.len(),
+                MAX_CI_PROVIDER_EVIDENCE_REGISTRY_STATE_BYTES
+            ));
+        }
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                format!("CI provider evidence state directory could not be created: {error}")
+            })?;
+        }
+        let filename = path
+            .file_name()
+            .ok_or_else(|| "ci_provider_evidence_state_path must name a file".to_string())?
+            .to_string_lossy();
+        let temporary = path.with_file_name(format!(
+            ".{filename}.tmp-{}",
+            NEXT_CHECKPOINT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::write(&temporary, &bytes).map_err(|error| {
+            format!("CI provider evidence state temporary file could not be written: {error}")
+        })?;
+        if let Err(first_error) = std::fs::rename(&temporary, path) {
+            #[cfg(windows)]
+            {
+                let _ = std::fs::remove_file(path);
+                std::fs::rename(&temporary, path).map_err(|second_error| {
+                    format!(
+                        "CI provider evidence state could not replace the previous snapshot ({first_error}; retry: {second_error})"
+                    )
+                })?;
+            }
+            #[cfg(not(windows))]
+            {
+                return Err(format!(
+                    "CI provider evidence state snapshot could not be installed: {first_error}"
+                ));
+            }
+        }
+        Ok(bytes.len())
+    }
+}
+
 impl MissionPersistence {
     fn persist(&self) -> Result<(), String> {
         let Some(path) = self.path.as_deref() else {
@@ -1260,18 +1352,22 @@ impl ApiRouter {
             config.workflow_execution_evidence_state_path.as_deref(),
         )?;
         let restored_workbench = load_workbench_registry(config.workbench_state_path.as_deref())?;
+        let restored_ci_provider_evidence =
+            load_ci_provider_evidence_registry(config.ci_provider_evidence_state_path.as_deref())?;
         let evidence_registry = Arc::new(Mutex::new(restored_evidence));
         let reconciliation_registry = Arc::new(Mutex::new(restored_reconciliations));
         let artifact_registry = Arc::new(Mutex::new(restored_artifacts));
         let workflow_execution_evidence_registry =
             Arc::new(Mutex::new(restored_workflow_execution_evidence));
         let workbench_registry = Arc::new(Mutex::new(restored_workbench));
-        let mut server = bioprism_mcp::Server::with_all_registries(
+        let ci_provider_evidence_registry = Arc::new(Mutex::new(restored_ci_provider_evidence));
+        let mut server = bioprism_mcp::Server::with_all_registries_and_ci_provider_evidence(
             root,
             Arc::clone(&evidence_registry),
             Arc::clone(&reconciliation_registry),
             Arc::clone(&workflow_execution_evidence_registry),
             Arc::clone(&workbench_registry),
+            Arc::clone(&ci_provider_evidence_registry),
             Arc::clone(&artifact_registry),
         );
         let initialize = Request {
@@ -1330,6 +1426,11 @@ impl ApiRouter {
             registry: Arc::clone(&workbench_registry),
             lock: Mutex::new(()),
         });
+        let ci_provider_evidence_persistence = Arc::new(CiProviderEvidencePersistence {
+            path: config.ci_provider_evidence_state_path.clone(),
+            registry: Arc::clone(&ci_provider_evidence_registry),
+            lock: Mutex::new(()),
+        });
         let router = Self {
             server,
             mission_executor,
@@ -1350,6 +1451,8 @@ impl ApiRouter {
             workflow_execution_evidence_persistence,
             workbench_registry,
             workbench_persistence,
+            ci_provider_evidence_registry,
+            ci_provider_evidence_persistence,
         };
         if router.config.mission_state_path.is_some() {
             router.persist_mission_registry()?;
@@ -1395,6 +1498,14 @@ impl ApiRouter {
                 format!("workbench state checkpoint failed during startup: {error}")
             })?;
         }
+        if router.config.ci_provider_evidence_state_path.is_some() {
+            router
+                .ci_provider_evidence_persistence
+                .persist()
+                .map_err(|error| {
+                    format!("CI provider evidence state checkpoint failed during startup: {error}")
+                })?;
+        }
         Ok(router)
     }
 
@@ -1424,6 +1535,10 @@ impl ApiRouter {
 
     fn persist_workbench_registry(&self) -> Result<usize, String> {
         self.workbench_persistence.persist()
+    }
+
+    fn persist_ci_provider_evidence_registry(&self) -> Result<usize, String> {
+        self.ci_provider_evidence_persistence.persist()
     }
 
     pub fn handle(&self, request: HttpRequest) -> HttpResponse {
@@ -1544,6 +1659,21 @@ impl ApiRouter {
             }
             ("GET", path) if path.starts_with("/v1/developer-workbench/reports/") => {
                 self.get_workbench_report(&request, &request_id)
+            }
+            ("POST", "/v1/ci/provider-evidence") => {
+                self.import_ci_provider_evidence(&request, &request_id)
+            }
+            ("GET", "/v1/ci/provider-evidence") => {
+                self.query_ci_provider_evidence(&request, &request_id)
+            }
+            ("GET", "/v1/ci/provider-evidence/persistence") => {
+                self.ci_provider_evidence_persistence_status()
+            }
+            ("POST", "/v1/ci/provider-evidence/persistence/flush") => {
+                self.flush_ci_provider_evidence_persistence(&request_id)
+            }
+            ("GET", path) if path.starts_with("/v1/ci/provider-evidence/") => {
+                self.get_ci_provider_evidence(&request, &request_id)
             }
             ("POST", "/v1/domain-workflows/verify") => {
                 self.domain_workflow_verify(&request, &request_id)
@@ -1983,6 +2113,16 @@ impl ApiRouter {
             .get("file_present")
             .and_then(Value::as_bool)
             .unwrap_or(false);
+        let ci_provider_evidence_persistence =
+            response_value(self.ci_provider_evidence_persistence_status());
+        let ci_provider_evidence_enabled = ci_provider_evidence_persistence
+            .get("enabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let ci_provider_evidence_checkpoint_present = ci_provider_evidence_persistence
+            .get("file_present")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         HttpResponse::json(
             200,
             &json!({
@@ -2143,6 +2283,23 @@ impl ApiRouter {
                         "operator_action": "inspect /v1/artifacts/{content_digest}/lineage and treat missing parents as unresolved evidence"
                     },
                     {
+                        "id": "ci_provider_evidence_registry",
+                        "configured": ci_provider_evidence_enabled,
+                        "checkpoint_present": ci_provider_evidence_checkpoint_present,
+                        "schema_version": ci_provider_evidence_persistence.get("schema").cloned().unwrap_or(Value::Null),
+                        "state_digest": ci_provider_evidence_persistence.get("state_digest").cloned().unwrap_or(Value::Null),
+                        "integrity_verified": ci_provider_evidence_persistence.get("integrity_verified").cloned().unwrap_or(Value::Null),
+                        "registry_size": ci_provider_evidence_persistence.get("registry_size").cloned().unwrap_or(json!(0)),
+                        "restores": [
+                            "re-audited provider/run/check evidence with deterministic artifact, log, and attestation record-digest joins",
+                            "failed and unknown provider runs as explicit non-conformant evidence records"
+                        ],
+                        "does_not_restore": [
+                            "provider authentication, remote artifact/log bytes, signature verification, execution, or release authority"
+                        ],
+                        "operator_action": "inspect provider_evidence_digest, then correlate artifact_record_digest, log_record_digest, and attestation_record_digest before making a separate release decision"
+                    },
+                    {
                         "id": "webhook_signing_secrets",
                         "configured": event_enabled,
                         "checkpoint_present": false,
@@ -2209,6 +2366,9 @@ impl ApiRouter {
                     "workflow_reconciliation_persistence_flush": "/v1/domain-workflows/reconciliations/persistence/flush",
                     "artifact_persistence": "/v1/artifacts/persistence",
                     "artifact_persistence_flush": "/v1/artifacts/persistence/flush",
+                    "ci_provider_evidence": "/v1/ci/provider-evidence",
+                    "ci_provider_evidence_persistence": "/v1/ci/provider-evidence/persistence",
+                    "ci_provider_evidence_persistence_flush": "/v1/ci/provider-evidence/persistence/flush",
                     "event_flush": "/v1/events/persistence/flush",
                     "mission_flush": "/v1/missions/persistence/flush",
                     "delivery_attempts": "/v1/webhooks/subscriptions/{id}/attempts",
@@ -2277,6 +2437,8 @@ impl ApiRouter {
         let evidence_persistence = response_value(self.evidence_persistence_status());
         let reconciliation_persistence = response_value(self.reconciliation_persistence_status());
         let artifact_persistence = response_value(self.artifact_persistence_status());
+        let ci_provider_evidence_persistence =
+            response_value(self.ci_provider_evidence_persistence_status());
         let reconciliation_summary = match self.reconciliation_registry.lock() {
             Ok(registry) => registry.operator_summary(),
             Err(_) => {
@@ -2332,6 +2494,11 @@ impl ApiRouter {
                 "configure artifact_state_path if cross-domain artifact records and parent-lineage inspection must survive an API restart".to_string(),
             );
         }
+        if self.config.ci_provider_evidence_state_path.is_none() {
+            operator_actions.push(
+                "configure ci_provider_evidence_state_path if re-audited provider CI evidence and its artifact/log/attestation joins must survive an API restart".to_string(),
+            );
+        }
 
         HttpResponse::json(
             200,
@@ -2352,7 +2519,8 @@ impl ApiRouter {
                     "events": event_persistence,
                     "evidence_bundles": evidence_persistence,
                     "workflow_reconciliations": reconciliation_persistence,
-                    "artifacts": artifact_persistence
+                    "artifacts": artifact_persistence,
+                    "ci_provider_evidence": ci_provider_evidence_persistence
                 },
                 "reconciliation_summary": reconciliation_summary,
                 "recovery": recovery,
@@ -2386,6 +2554,8 @@ impl ApiRouter {
                     "mission_evidence_bundle_persistence": self.config.evidence_state_path.is_some(),
                     "workflow_reconciliation_registry": true,
                     "workflow_reconciliation_persistence": self.config.reconciliation_state_path.is_some(),
+                    "ci_provider_evidence_registry": true,
+                    "ci_provider_evidence_persistence": self.config.ci_provider_evidence_state_path.is_some(),
                     "operations_snapshot": true,
                     "domain_coverage": true,
                     "operations_domains": true,
@@ -2427,6 +2597,9 @@ impl ApiRouter {
                     "workflow_reconciliations": "/v1/domain-workflows/reconciliations",
                     "workflow_reconciliation_persistence": "/v1/domain-workflows/reconciliations/persistence",
                     "workflow_reconciliation_persistence_flush": "/v1/domain-workflows/reconciliations/persistence/flush",
+                    "ci_provider_evidence": "/v1/ci/provider-evidence",
+                    "ci_provider_evidence_persistence": "/v1/ci/provider-evidence/persistence",
+                    "ci_provider_evidence_persistence_flush": "/v1/ci/provider-evidence/persistence/flush",
                     "capabilities": "/v1/capabilities",
                     "delivery_attempts": "/v1/webhooks/subscriptions/{id}/attempts"
                 }
@@ -3621,6 +3794,9 @@ impl ApiRouter {
                     "developer_workbench_reports": "/v1/developer-workbench/reports",
                     "developer_workbench_report_persistence": "/v1/developer-workbench/reports/persistence",
                     "developer_workbench_report_persistence_flush": "/v1/developer-workbench/reports/persistence/flush",
+                    "ci_provider_evidence": "/v1/ci/provider-evidence",
+                    "ci_provider_evidence_persistence": "/v1/ci/provider-evidence/persistence",
+                    "ci_provider_evidence_persistence_flush": "/v1/ci/provider-evidence/persistence/flush",
                     "domain_workflow_verify": "/v1/domain-workflows/verify",
                     "domain_workflow_reconcile": "/v1/domain-workflows/reconcile",
                     "domain_workflow_reconciliations": "/v1/domain-workflows/reconciliations",
@@ -3688,6 +3864,9 @@ impl ApiRouter {
                     "artifact_registry": true,
                     "artifact_registry_lineage": true,
                     "artifact_registry_persistence": self.config.artifact_state_path.is_some(),
+                    "ci_provider_evidence_registry": true,
+                    "ci_provider_evidence_lineage": true,
+                    "ci_provider_evidence_persistence": self.config.ci_provider_evidence_state_path.is_some(),
                     "domain_report_projection": true,
                     "domain_report_coverage": true,
                     "domain_evidence_harmonization": true,
@@ -3752,6 +3931,9 @@ impl ApiRouter {
                     "artifact_registry_file_bytes": MAX_ARTIFACT_REGISTRY_BYTES,
                     "artifact_registry_max_records": bioprism_devplat::MAX_ARTIFACT_REGISTRY_RECORDS,
                     "artifact_registry_max_query_items": bioprism_devplat::MAX_ARTIFACT_REGISTRY_QUERY_ITEMS,
+                    "ci_provider_evidence_registry_file_bytes": MAX_CI_PROVIDER_EVIDENCE_REGISTRY_STATE_BYTES,
+                    "ci_provider_evidence_max_records": bioprism_devplat::MAX_CI_PROVIDER_EVIDENCE_RECORDS,
+                    "ci_provider_evidence_max_query_items": bioprism_devplat::MAX_CI_PROVIDER_EVIDENCE_QUERY_ITEMS,
                     "delivery_error_bytes": crate::events::MAX_DELIVERY_ERROR_BYTES,
                     "webhook_filters": MAX_FILTERS
                 }
@@ -4078,6 +4260,7 @@ impl ApiRouter {
             let _ = self.reconciliation_persistence.persist();
             let _ = self.artifact_persistence.persist();
             let _ = self.workflow_execution_evidence_persistence.persist();
+            let _ = self.ci_provider_evidence_persistence.persist();
         }
         HttpResponse::json(response_status(&wire), &wire)
     }
@@ -4114,6 +4297,7 @@ impl ApiRouter {
         let _ = self.reconciliation_persistence.persist();
         let _ = self.artifact_persistence.persist();
         let _ = self.workflow_execution_evidence_persistence.persist();
+        let _ = self.ci_provider_evidence_persistence.persist();
         let transport_ok = wire.get("error").is_none();
         HttpResponse::json(
             if transport_ok {
@@ -4432,6 +4616,267 @@ impl ApiRouter {
         match self.persist_workbench_registry() {
             Ok(_) => self.workbench_persistence_status(),
             Err(error) => self.error(503, "workbench_persistence_unavailable", &error, request_id),
+        }
+    }
+
+    fn import_ci_provider_evidence(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        let mut registry = match self.ci_provider_evidence_registry.lock() {
+            Ok(registry) => registry,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "ci_provider_evidence_registry_unavailable",
+                    "CI provider evidence registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let before = registry.clone();
+        let result = match registry.import(&Value::Object(arguments)) {
+            Ok(result) => result,
+            Err(error) => {
+                return self.error(
+                    422,
+                    "invalid_ci_provider_evidence",
+                    &error.to_string(),
+                    request_id,
+                )
+            }
+        };
+        if self.config.ci_provider_evidence_state_path.is_some() && result["created"] == true {
+            let snapshot = match registry.snapshot() {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    *registry = before;
+                    return self.error(
+                        503,
+                        "ci_provider_evidence_persistence_unavailable",
+                        &error.to_string(),
+                        request_id,
+                    );
+                }
+            };
+            if let Err(error) = self
+                .ci_provider_evidence_persistence
+                .persist_snapshot(&snapshot)
+            {
+                *registry = before;
+                return self.error(
+                    503,
+                    "ci_provider_evidence_persistence_unavailable",
+                    &error,
+                    request_id,
+                );
+            }
+        }
+        HttpResponse::json(
+            if result["created"].as_bool().unwrap_or(false) {
+                201
+            } else {
+                200
+            },
+            &result,
+        )
+    }
+
+    fn query_ci_provider_evidence(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        for key in query.keys() {
+            if !matches!(
+                key.as_str(),
+                "provider"
+                    | "run_id"
+                    | "plan_digest"
+                    | "structurally_valid"
+                    | "conformance_ready"
+                    | "after"
+                    | "limit"
+                    | "include_records"
+            ) {
+                return self.error(
+                    400,
+                    "invalid_query",
+                    "CI provider evidence query accepts only provider, run_id, plan_digest, structurally_valid, conformance_ready, after, limit, and include_records",
+                    request_id,
+                );
+            }
+        }
+        let structurally_valid = match query_bool(&query, "structurally_valid", false) {
+            Ok(value) if query.contains_key("structurally_valid") => Some(value),
+            Ok(_) => None,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let conformance_ready = match query_bool(&query, "conformance_ready", false) {
+            Ok(value) if query.contains_key("conformance_ready") => Some(value),
+            Ok(_) => None,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let include_records = match query_bool(&query, "include_records", false) {
+            Ok(value) => value,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let max_items = match query_usize(&query, "limit", 100) {
+            Ok(value)
+                if (1..=bioprism_devplat::MAX_CI_PROVIDER_EVIDENCE_QUERY_ITEMS)
+                    .contains(&value) =>
+            {
+                value
+            }
+            Ok(_) => {
+                return self.error(
+                    422,
+                    "invalid_query",
+                    "limit must be between 1 and 256",
+                    request_id,
+                )
+            }
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let result = match self.ci_provider_evidence_registry.lock() {
+            Ok(registry) => registry.query(
+                query.get("provider").map(String::as_str),
+                query.get("run_id").map(String::as_str),
+                query.get("plan_digest").map(String::as_str),
+                structurally_valid,
+                conformance_ready,
+                query.get("after").map(String::as_str),
+                max_items,
+                include_records,
+            ),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "ci_provider_evidence_registry_unavailable",
+                    "CI provider evidence registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match result {
+            Ok(value) => HttpResponse::json(200, &value),
+            Err(error) => self.error(422, "invalid_query", &error.to_string(), request_id),
+        }
+    }
+
+    fn get_ci_provider_evidence(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let segments = match request.path_segments() {
+            Ok(segments) => segments,
+            Err(error) => return self.error(400, "invalid_path", &error.to_string(), request_id),
+        };
+        if segments.len() != 4
+            || segments[0] != "v1"
+            || segments[1] != "ci"
+            || segments[2] != "provider-evidence"
+        {
+            return self.error(
+                404,
+                "not_found",
+                "CI provider evidence route does not exist",
+                request_id,
+            );
+        }
+        let digest = &segments[3];
+        if ContentHash::parse(digest.clone()).is_err() {
+            return self.error(
+                422,
+                "invalid_digest",
+                "provider_evidence_digest must be a 64-character SHA-256 digest",
+                request_id,
+            );
+        }
+        let result = match self.ci_provider_evidence_registry.lock() {
+            Ok(registry) => registry.get(digest),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "ci_provider_evidence_registry_unavailable",
+                    "CI provider evidence registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match result {
+            Ok(value) => HttpResponse::json(200, &value),
+            Err(_) => self.error(
+                404,
+                "not_found",
+                "CI provider evidence record does not exist",
+                request_id,
+            ),
+        }
+    }
+
+    fn ci_provider_evidence_persistence_status(&self) -> HttpResponse {
+        let enabled = self.config.ci_provider_evidence_state_path.is_some();
+        let file_bytes = self
+            .config
+            .ci_provider_evidence_state_path
+            .as_deref()
+            .and_then(|path| std::fs::metadata(path).ok())
+            .map(|metadata| metadata.len());
+        let (registry_size, generation) = self
+            .ci_provider_evidence_registry
+            .lock()
+            .map(|registry| (registry.len(), registry.generation()))
+            .unwrap_or((0, 0));
+        let (state_digest, integrity_verified) = self
+            .config
+            .ci_provider_evidence_state_path
+            .as_deref()
+            .and_then(|path| std::fs::read(path).ok())
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+            .map(|document| {
+                let digest = document.get("state_digest").cloned().unwrap_or(Value::Null);
+                let valid = CiProviderEvidenceRegistry::from_snapshot(&document).is_ok();
+                (digest, Value::Bool(valid))
+            })
+            .unwrap_or((Value::Null, Value::Null));
+        HttpResponse::json(
+            200,
+            &json!({
+                "ok": true,
+                "enabled": enabled,
+                "file_present": file_bytes.is_some(),
+                "file_bytes": file_bytes,
+                "schema": bioprism_devplat::CI_PROVIDER_EVIDENCE_REGISTRY_SCHEMA_VERSION,
+                "state_digest": state_digest,
+                "integrity_verified": integrity_verified,
+                "registry_size": registry_size,
+                "registry_generation": generation,
+                "max_records": bioprism_devplat::MAX_CI_PROVIDER_EVIDENCE_RECORDS,
+                "max_query_items": bioprism_devplat::MAX_CI_PROVIDER_EVIDENCE_QUERY_ITEMS,
+                "max_file_bytes": MAX_CI_PROVIDER_EVIDENCE_REGISTRY_STATE_BYTES,
+                "recovery_policy": "only re-audited provider evidence records restore; failed and unknown provider runs remain explicit and never resume execution",
+                "lineage_policy": "artifact, log, and attestation record digests are retained as provider-observed joins; remote bytes and signatures are not verified",
+                "flush": "/v1/ci/provider-evidence/persistence/flush"
+            }),
+        )
+    }
+
+    fn flush_ci_provider_evidence_persistence(&self, request_id: &str) -> HttpResponse {
+        if self.config.ci_provider_evidence_state_path.is_none() {
+            return self.error(
+                409,
+                "ci_provider_evidence_persistence_disabled",
+                "configure ci_provider_evidence_state_path before flushing a CI provider evidence snapshot",
+                request_id,
+            );
+        }
+        match self.persist_ci_provider_evidence_registry() {
+            Ok(_) => self.ci_provider_evidence_persistence_status(),
+            Err(error) => self.error(
+                503,
+                "ci_provider_evidence_persistence_unavailable",
+                &error,
+                request_id,
+            ),
         }
     }
 
@@ -7997,6 +8442,10 @@ impl ApiRouter {
                     "/v1/domain-workflows/portfolio": { "post": { "responses": { "200": { "description": "bounded multi-domain workflow portfolio with per-item authoritative no-dispatch preflight" }, "400": { "description": "workflow portfolio JSON was invalid" }, "422": { "description": "workflow portfolio was refused" } } } },
                     "/v1/domain-workflows/portfolio/verify": { "post": { "responses": { "200": { "description": "retained multi-domain workflow portfolio digest, replay, coverage, and authoritative mission-preflight verification" }, "400": { "description": "workflow portfolio verification JSON was invalid" }, "422": { "description": "workflow portfolio verification was refused" } } } },
                     "/v1/developer-workbench/verify": { "post": { "responses": { "200": { "description": "retained authoring/notebook workbench digest, dashboard, and optional CI-plan replay verification" }, "400": { "description": "developer workbench verification JSON was invalid" }, "422": { "description": "developer workbench verification was refused" } } } },
+                    "/v1/ci/provider-evidence": { "get": { "parameters": [{ "name": "provider", "in": "query" }, { "name": "run_id", "in": "query" }, { "name": "plan_digest", "in": "query" }, { "name": "structurally_valid", "in": "query" }, { "name": "conformance_ready", "in": "query" }, { "name": "after", "in": "query" }, { "name": "max_items", "in": "query" }, { "name": "include_records", "in": "query" }], "responses": { "200": { "description": "bounded deterministic provider-observed CI evidence registry query" }, "400": { "description": "provider-evidence query was invalid" } } }, "post": { "responses": { "201": { "description": "provider-evidence audit imported" }, "200": { "description": "idempotent re-import" }, "413": { "description": "registry capacity or snapshot bound exceeded" }, "422": { "description": "provider-evidence audit failed" } } } },
+                    "/v1/ci/provider-evidence/{provider_evidence_digest}": { "get": { "parameters": [{ "name": "provider_evidence_digest", "in": "path", "required": true }], "responses": { "200": { "description": "one retained provider-observed CI evidence audit with lineage joins" }, "404": { "description": "provider-evidence digest is not present" } } } },
+                    "/v1/ci/provider-evidence/persistence": { "get": { "responses": { "200": { "description": "restart-aware provider-evidence registry checkpoint status" } } } },
+                    "/v1/ci/provider-evidence/persistence/flush": { "post": { "responses": { "200": { "description": "force a bounded provider-evidence registry checkpoint" }, "409": { "description": "persistence is disabled" } } } },
                     "/v1/domain-workflows/verify": { "post": { "responses": { "200": { "description": "retained domain-workflow replay and authoritative mission-preflight verification" }, "400": { "description": "workflow verification JSON was invalid" }, "422": { "description": "workflow verification was refused" } } } },
                     "/v1/domain-workflows/reconcile": { "post": { "responses": { "200": { "description": "digest-bound workflow execution and evidence reconciliation" }, "422": { "description": "workflow evidence source or contract was refused" } } } },
                     "/v1/domain-workflows/reconciliations": { "get": { "parameters": [{ "name": "mission_id", "in": "query" }, { "name": "workflow_id", "in": "query" }, { "name": "mission_plan_digest", "in": "query" }, { "name": "completion_status", "in": "query" }, { "name": "after", "in": "query" }, { "name": "limit", "in": "query" }, { "name": "include_records", "in": "query" }], "responses": { "200": { "description": "bounded deterministic workflow reconciliation registry index" } } }, "post": { "responses": { "201": { "description": "digest-valid workflow reconciliation imported" }, "200": { "description": "idempotent re-import" }, "422": { "description": "reconciliation record failed digest validation" } } } },
@@ -9285,6 +9734,36 @@ fn load_workbench_registry(path: Option<&Path>) -> Result<WorkbenchReportRegistr
         .map_err(|error| format!("workbench state snapshot is invalid JSON: {error}"))?;
     WorkbenchReportRegistry::from_snapshot(&document)
         .map_err(|error| format!("workbench state snapshot is invalid: {error}"))
+}
+
+fn load_ci_provider_evidence_registry(
+    path: Option<&Path>,
+) -> Result<CiProviderEvidenceRegistry, String> {
+    let Some(path) = path else {
+        return Ok(CiProviderEvidenceRegistry::new());
+    };
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(CiProviderEvidenceRegistry::new())
+        }
+        Err(error) => {
+            return Err(format!(
+                "CI provider evidence state snapshot could not be read: {error}"
+            ))
+        }
+    };
+    if bytes.len() > MAX_CI_PROVIDER_EVIDENCE_REGISTRY_STATE_BYTES {
+        return Err(format!(
+            "CI provider evidence state snapshot is {} bytes, above the {}-byte bound",
+            bytes.len(),
+            MAX_CI_PROVIDER_EVIDENCE_REGISTRY_STATE_BYTES
+        ));
+    }
+    let document: Value = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("CI provider evidence state snapshot is invalid JSON: {error}"))?;
+    CiProviderEvidenceRegistry::from_snapshot(&document)
+        .map_err(|error| format!("CI provider evidence state snapshot is invalid: {error}"))
 }
 
 fn load_mission_jobs(path: Option<&Path>) -> Result<BTreeMap<String, Arc<MissionJob>>, String> {
@@ -12602,6 +13081,92 @@ mod tests {
         let status = restored.handle(request(
             "GET",
             "/v1/developer-workbench/reports/persistence",
+            json!({}),
+        ));
+        let status: Value = serde_json::from_slice(&status.body).unwrap();
+        assert_eq!(status["integrity_verified"], true);
+        assert_eq!(status["registry_size"], 1);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn ci_provider_evidence_registry_reaudits_joins_and_restores() {
+        let path = test_state_path("ci-provider-evidence-registry");
+        let config = ApiConfig {
+            ci_provider_evidence_state_path: Some(path.clone()),
+            ..ApiConfig::default()
+        };
+        let router = ApiRouter::new(std::env::current_dir().unwrap(), config.clone()).unwrap();
+        let imported = router.handle(request(
+            "POST",
+            "/v1/ci/provider-evidence",
+            json!({
+                "ci": {
+                    "workflow": "api-ci",
+                    "triggers": ["push"],
+                    "rust_toolchain": "stable",
+                    "checks": [{"name": "unit", "run": "cargo test -p bioprism-devplat", "required": true}],
+                    "offline": true
+                },
+                "provider": "generic",
+                "payload": {
+                    "run_id": "api-provider-run-1",
+                    "conclusion": "success",
+                    "checks": [{"name": "unit", "status": "success"}]
+                },
+                "artifacts": [{
+                    "id": "artifact-1", "kind": "test-report", "digest": "a".repeat(64),
+                    "check": "unit", "run_id": "api-provider-run-1", "provider": "generic"
+                }],
+                "logs": [{
+                    "id": "log-1", "digest": "b".repeat(64), "check": "unit",
+                    "run_id": "api-provider-run-1", "provider": "generic", "truncated": false
+                }],
+                "attestations": [{
+                    "id": "attestation-1", "subject": "artifact-1", "issuer": "test",
+                    "statement_digest": "c".repeat(64), "method": "detached"
+                }]
+            }),
+        ));
+        assert_eq!(
+            imported.status,
+            201,
+            "{}",
+            String::from_utf8_lossy(&imported.body)
+        );
+        let imported: Value = serde_json::from_slice(&imported.body).unwrap();
+        assert_eq!(imported["conformance_ready"], true);
+        assert_eq!(
+            imported["artifact_record_digest"].as_str().unwrap().len(),
+            64
+        );
+        let digest = imported["provider_evidence_digest"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let queried = router.handle(request(
+            "GET",
+            "/v1/ci/provider-evidence?provider=generic&conformance_ready=true&include_records=true&limit=10",
+            json!({}),
+        ));
+        assert_eq!(queried.status, 200);
+        let queried: Value = serde_json::from_slice(&queried.body).unwrap();
+        assert_eq!(queried["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(queried["rows"][0]["provider_evidence_digest"], digest);
+        assert_eq!(queried["rows"][0]["audit"]["artifact_count"], 1);
+        let fetched = router.handle(request(
+            "GET",
+            &format!("/v1/ci/provider-evidence/{digest}"),
+            json!({}),
+        ));
+        assert_eq!(fetched.status, 200);
+        let fetched: Value = serde_json::from_slice(&fetched.body).unwrap();
+        assert_eq!(fetched["audit"]["run_id"], "api-provider-run-1");
+        drop(router);
+        let restored = ApiRouter::new(std::env::current_dir().unwrap(), config).unwrap();
+        let status = restored.handle(request(
+            "GET",
+            "/v1/ci/provider-evidence/persistence",
             json!({}),
         ));
         let status: Value = serde_json::from_slice(&status.body).unwrap();
