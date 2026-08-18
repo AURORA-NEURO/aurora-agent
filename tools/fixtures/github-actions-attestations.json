@@ -4,6 +4,7 @@
     "subject": "artifact-unit",
     "issuer": "fixture-caller",
     "statement_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-    "method": "declared_fixture_statement"
+    "method": "declared_fixture_statement",
+    "subject_digest": "894512736c84b2dbcd74b6cd8f9bfa52075a36f44b8e0f54039f991d85b174af"
   }
 ]

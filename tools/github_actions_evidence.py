@@ -43,6 +43,9 @@ MAX_DISCOVERY_TIMEOUT_SECONDS = 30
 SCHEMA = "bioprism-actions-github-provider-payload/0.1"
 COLLECTION_SCHEMA = "bioprism-actions-github-provider-evidence-collection/0.1"
 PROVIDER = "github_actions"
+DIGEST_SCOPE_PROVIDER_METADATA = "provider_metadata"
+DIGEST_SCOPE_CALLER_DECLARED = "caller_declared"
+DIGEST_SCOPE_LOCAL_RESPONSE_BYTES = "local_response_bytes"
 
 
 class ExportError(ValueError):
@@ -358,6 +361,11 @@ def _artifact_rows(value: Any, run_id: Any, *, field: str = "artifacts") -> list
                 "digest": digest,
                 "run_id": resolved_run_id,
                 "provider": PROVIDER,
+                "digest_scope": (
+                    DIGEST_SCOPE_CALLER_DECLARED
+                    if supplied_digest is not None
+                    else DIGEST_SCOPE_PROVIDER_METADATA
+                ),
                 **({"uri": uri} if uri is not None else {}),
             }
         )
@@ -390,6 +398,7 @@ def _log_rows(value: Any, run_id: Any, *, field: str = "logs") -> list[dict[str,
                 "run_id": resolved_run_id,
                 "provider": PROVIDER,
                 "truncated": truncated,
+                "digest_scope": DIGEST_SCOPE_CALLER_DECLARED,
                 **({"check": check} if check is not None else {}),
                 **({"uri": uri} if uri is not None else {}),
             }
@@ -397,9 +406,9 @@ def _log_rows(value: Any, run_id: Any, *, field: str = "logs") -> list[dict[str,
     return normalized
 
 
-def _attestation_rows(value: Any, *, field: str = "attestations") -> list[dict[str, str]]:
+def _attestation_rows(value: Any, *, field: str = "attestations") -> list[dict[str, Any]]:
     rows = _rows_array(field, value)
-    normalized: list[dict[str, str]] = []
+    normalized: list[dict[str, Any]] = []
     seen: set[str] = set()
     for index, raw in enumerate(rows):
         attestation_id = _text(f"{field}[{index}].id", raw.get("id"))
@@ -407,6 +416,7 @@ def _attestation_rows(value: Any, *, field: str = "attestations") -> list[dict[s
         if attestation_id in seen:
             raise ExportError(f"duplicate {field} id {attestation_id!r}")
         seen.add(attestation_id)
+        subject_digest = raw.get("subject_digest")
         normalized.append(
             {
                 "id": attestation_id,
@@ -416,6 +426,15 @@ def _attestation_rows(value: Any, *, field: str = "attestations") -> list[dict[s
                     f"{field}[{index}].statement_digest", raw.get("statement_digest")
                 ),
                 "method": _text(f"{field}[{index}].method", raw.get("method")),
+                **(
+                    {
+                        "subject_digest": _sha256_digest(
+                            f"{field}[{index}].subject_digest", subject_digest
+                        )
+                    }
+                    if subject_digest is not None
+                    else {}
+                ),
             }
         )
     return normalized
@@ -457,6 +476,7 @@ def _job_log_rows(raw_jobs: Sequence[Mapping[str, Any]], run_id: Any) -> tuple[l
                 "provider": PROVIDER,
                 "uri": uri,
                 "truncated": False,
+                "digest_scope": DIGEST_SCOPE_PROVIDER_METADATA,
             }
         )
     if len(rows) > MAX_EVIDENCE_ROWS:
@@ -494,6 +514,7 @@ def _download_evidence(
             total_bytes += len(raw)
             updated = dict(row)
             updated["digest"] = hashlib.sha256(raw).hexdigest()
+            updated["digest_scope"] = DIGEST_SCOPE_LOCAL_RESPONSE_BYTES
             destination.append(updated)
 
     download_rows(artifacts, downloaded_artifacts, "artifacts")

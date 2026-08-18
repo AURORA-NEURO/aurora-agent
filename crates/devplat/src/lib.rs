@@ -303,6 +303,8 @@ pub use ci_provider::{
 pub use ci_provider_evidence::{
     audit_ci_provider_evidence, CiProviderArtifact, CiProviderAttestation, CiProviderEvidenceAudit,
     CiProviderEvidenceError, CiProviderEvidenceRequest, CiProviderLog, CI_PROVIDER_EVIDENCE_SCHEMA,
+    DIGEST_SCOPE_CALLER_DECLARED, DIGEST_SCOPE_LOCAL_RESPONSE_BYTES,
+    DIGEST_SCOPE_PROVIDER_METADATA,
 };
 pub use ci_provider_evidence_registry::{
     CiProviderEvidenceRegistry, CiProviderEvidenceRegistryError,

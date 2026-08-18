@@ -123,6 +123,15 @@ extracted or validated, logs are not interpreted or executed, and attestation st
 signature-verified. This is reported as `verification: local_byte_hash_only`, not provider
 authentication or remote-content proof.
 
+Every exporter artifact/log row now carries an optional `digest_scope`: `provider_metadata` means
+the digest covers selected provider metadata, `caller_declared` means the caller supplied the
+digest, and `local_response_bytes` means the exporter hashed a bounded response locally. The Rust
+audit validates the scope, counts local-byte rows, and requires a retained URI for the local scope;
+the scope is provenance metadata, not an independent re-fetch or signature check. Attestation rows
+may additionally carry `subject_digest`. When present, the audit compares it with the digest of the
+named run, artifact, or log and emits a blocking mismatch finding. This is content binding only;
+attestation signatures, provider identity, key validity, and revocation remain unverified.
+
 For a `workflow_run` trigger, discovery prefers the upstream run id in the event over the
 downstream workflow's own `GITHUB_RUN_ID`; callers can still override it explicitly with `run-id`.
 
@@ -177,8 +186,9 @@ refusal tests.
 run summary. It accepts the same provider payload plus bounded `artifacts`, `logs`, and
 `attestations` arrays. Artifact and log rows must carry a unique id, a valid content digest, the
 normalized provider and run id, and—when present—a check name from the regenerated plan. URI text
-is retained as a locator by the Rust audit but is never fetched there. Attestation rows must point to the normalized run,
-an artifact, or a log; their issuer, method, and statement digest are retained as declarations.
+is retained as a locator by the Rust audit but is never fetched there. Rows may declare their digest
+scope, and an attestation may bind `subject_digest` to its named run, artifact, or log. Attestation
+issuer, method, and statement digest remain declarations unless an external verifier is supplied.
 
 The reusable action's collection envelope is intentionally one step earlier than this audit. It
 binds GitHub's run id and provider identity to each discovered row, makes locator/metadata digest

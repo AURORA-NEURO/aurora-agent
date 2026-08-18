@@ -4461,6 +4461,7 @@ export interface CiProviderArtifactArgs extends JsonObject {
   id: string;
   kind: string;
   digest: string;
+  digest_scope?: "provider_metadata" | "caller_declared" | "local_response_bytes";
   check?: string;
   run_id?: string;
   provider?: string;
@@ -4470,6 +4471,7 @@ export interface CiProviderArtifactArgs extends JsonObject {
 export interface CiProviderLogArgs extends JsonObject {
   id: string;
   digest: string;
+  digest_scope?: "provider_metadata" | "caller_declared" | "local_response_bytes";
   check?: string;
   run_id?: string;
   provider?: string;
@@ -4483,6 +4485,7 @@ export interface CiProviderAttestationArgs extends JsonObject {
   issuer: string;
   statement_digest: string;
   method: string;
+  subject_digest?: string;
 }
 
 export interface CiProviderEvidenceArgs extends JsonObject {
@@ -4591,6 +4594,9 @@ export interface CiProviderEvidenceAuditResult extends JsonObject {
   linked_artifact_count: number;
   linked_log_count: number;
   attestation_subject_count: number;
+  local_byte_hash_artifact_count: number;
+  local_byte_hash_log_count: number;
+  attestation_subject_digest_binding_count: number;
   ci_evidence: JsonObject;
   artifacts: CiProviderArtifactArgs[];
   logs: CiProviderLogArgs[];

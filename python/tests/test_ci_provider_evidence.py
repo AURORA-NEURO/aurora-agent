@@ -42,14 +42,17 @@ def payload() -> dict:
         "linked_artifact_count": 1,
         "linked_log_count": 1,
         "attestation_subject_count": 1,
+        "local_byte_hash_artifact_count": 1,
+        "local_byte_hash_log_count": 0,
+        "attestation_subject_digest_binding_count": 1,
         "ci_evidence": {"run_id": "run-42"},
-        "artifacts": [{"id": "artifact-1", "kind": "junit", "digest": digest}],
+        "artifacts": [{"id": "artifact-1", "kind": "junit", "digest": digest, "digest_scope": "local_response_bytes"}],
         "logs": [{"id": "log-1", "digest": digest}],
-        "attestations": [{"id": "attestation-1", "subject": "artifact-1", "issuer": "caller", "statement_digest": digest, "method": "declared"}],
+        "attestations": [{"id": "attestation-1", "subject": "artifact-1", "issuer": "caller", "statement_digest": digest, "method": "declared", "subject_digest": digest}],
         "structurally_valid": True,
         "conformance_ready": True,
         "execution": "evidence_supplied_not_executed_here",
-        "verification": "structural_only",
+        "verification": "structural_only_with_digest_bindings",
         "findings": [],
         "guarantees": [],
         "limitations": [],
@@ -107,9 +110,9 @@ def request() -> CiProviderEvidenceRequest:
         ci={"workflow": "contracts", "checks": []},
         provider="github_actions",
         payload={"run": {"id": 42, "conclusion": "success"}, "jobs": []},
-        artifacts=[{"id": "artifact-1", "kind": "junit", "digest": digest, "run_id": "42", "provider": "github_actions"}],
-        logs=[{"id": "log-1", "digest": digest, "run_id": "42", "provider": "github_actions"}],
-        attestations=[{"id": "attestation-1", "subject": "artifact-1", "issuer": "caller", "statement_digest": digest, "method": "declared"}],
+        artifacts=[{"id": "artifact-1", "kind": "junit", "digest": digest, "digest_scope": "local_response_bytes", "run_id": "42", "provider": "github_actions", "uri": "https://example.test/artifact"}],
+        logs=[{"id": "log-1", "digest": digest, "digest_scope": "caller_declared", "run_id": "42", "provider": "github_actions"}],
+        attestations=[{"id": "attestation-1", "subject": "artifact-1", "issuer": "caller", "statement_digest": digest, "method": "declared", "subject_digest": digest}],
     )
 
 
@@ -122,8 +125,10 @@ class CiProviderEvidenceTests(unittest.TestCase):
         self.assertIsInstance(report, CiProviderEvidenceReport)
         self.assertTrue(report.conformance_ready)
         self.assertEqual(report.attestation_subject_count, 1)
+        self.assertEqual(report.local_byte_hash_artifact_count, 1)
+        self.assertEqual(report.attestation_subject_digest_binding_count, 1)
         self.assertEqual(report.evidence["run_id"], "run-42")
-        self.assertEqual(report.verification, "structural_only")
+        self.assertEqual(report.verification, "structural_only_with_digest_bindings")
         with self.assertRaises(ArgumentError):
             CiProviderEvidenceRequest({}, "generic", {})
         with self.assertRaises(ArgumentError):

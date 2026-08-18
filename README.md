@@ -1049,8 +1049,10 @@ through the GitHub API. With `collect-evidence: true`, discovery also retrieves 
 metadata rows and derives bounded job-log locators from the job response; neither locator is
 followed by default. An explicit `download-evidence: true` switch follows those HTTPS locators (or
 manual artifact/log URIs) under 16 MiB per response and 256 MiB per collection, then replaces the
-row digest with SHA-256 over the locally retrieved response bytes. Redirects remain HTTPS-only and
-never receive the GitHub token. Archives are not extracted, logs are not interpreted, and
+row digest with SHA-256 over the locally retrieved response bytes. Rows retain an explicit digest
+scope (`provider_metadata`, `caller_declared`, or `local_response_bytes`), and optional attestation
+`subject_digest` values are checked against the named row or run digest. Redirects remain HTTPS-only
+and never receive the GitHub token. Archives are not extracted, logs are not interpreted, and
 attestations are not signature-verified. Both modes produce the same canonical provider payload and
 digest, while collection mode emits a separate envelope/digest, row counts, and stable download
 mode/count/byte outputs. Oversized or partial job, artifact, or locator lists are refused, and the

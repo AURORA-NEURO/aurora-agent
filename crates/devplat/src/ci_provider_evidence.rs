@@ -6,7 +6,7 @@
 //! not fetch bytes, inspect logs, verify signatures, authenticate a provider, or turn a caller
 //! declaration into external execution authority.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -20,6 +20,9 @@ use crate::ci_provider::{normalize_ci_provider_payload, CiProviderNormalizationR
 use crate::workbench::CiRequest;
 
 pub const CI_PROVIDER_EVIDENCE_SCHEMA: &str = "bioprism-devplat-ci-provider-evidence/0.1";
+pub const DIGEST_SCOPE_PROVIDER_METADATA: &str = "provider_metadata";
+pub const DIGEST_SCOPE_CALLER_DECLARED: &str = "caller_declared";
+pub const DIGEST_SCOPE_LOCAL_RESPONSE_BYTES: &str = "local_response_bytes";
 const MAX_ROWS: usize = 128;
 const MAX_TEXT: usize = 512;
 
@@ -36,6 +39,8 @@ pub struct CiProviderArtifact {
     pub provider: Option<String>,
     #[serde(default)]
     pub uri: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub digest_scope: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -52,6 +57,8 @@ pub struct CiProviderLog {
     pub uri: Option<String>,
     #[serde(default)]
     pub truncated: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub digest_scope: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -61,6 +68,8 @@ pub struct CiProviderAttestation {
     pub issuer: String,
     pub statement_digest: String,
     pub method: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject_digest: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -98,6 +107,12 @@ pub struct CiProviderEvidenceAudit {
     pub linked_artifact_count: usize,
     pub linked_log_count: usize,
     pub attestation_subject_count: usize,
+    #[serde(default)]
+    pub local_byte_hash_artifact_count: usize,
+    #[serde(default)]
+    pub local_byte_hash_log_count: usize,
+    #[serde(default)]
+    pub attestation_subject_digest_binding_count: usize,
     pub ci_evidence: crate::ci_evidence::CiExecutionEvidenceAudit,
     pub artifacts: Vec<CiProviderArtifact>,
     pub logs: Vec<CiProviderLog>,
@@ -229,6 +244,36 @@ fn validate_uri(findings: &mut Vec<CiEvidenceFinding>, subject: &str, uri: Optio
     }
 }
 
+fn validate_digest_scope(
+    findings: &mut Vec<CiEvidenceFinding>,
+    subject: &str,
+    scope: Option<&str>,
+    uri: Option<&str>,
+) {
+    match scope {
+        None => {}
+        Some(DIGEST_SCOPE_PROVIDER_METADATA | DIGEST_SCOPE_CALLER_DECLARED) => {}
+        Some(DIGEST_SCOPE_LOCAL_RESPONSE_BYTES) => {
+            if uri.is_none() {
+                finding(
+                    findings,
+                    "digest_scope_uri_missing",
+                    "blocking",
+                    subject.to_owned(),
+                    "local_response_bytes digest scope requires the retained source URI",
+                );
+            }
+        }
+        Some(value) => finding(
+            findings,
+            "digest_scope_invalid",
+            "blocking",
+            subject.to_owned(),
+            format!("unsupported provider evidence digest scope {value:?}"),
+        ),
+    }
+}
+
 fn digest_rows<T: Serialize>(rows: &[T]) -> Result<String, CiProviderEvidenceError> {
     let value = serde_json::to_value(rows)
         .map_err(|error| CiProviderEvidenceError::Canonical(error.to_string()))?;
@@ -282,8 +327,14 @@ pub fn audit_ci_provider_evidence(
     let mut artifact_ids = BTreeSet::new();
     let mut log_ids = BTreeSet::new();
     let mut known_subjects = BTreeSet::from([normalized.evidence.run_id.clone()]);
+    let mut known_subject_digests = BTreeMap::from([(
+        normalized.evidence.run_id.clone(),
+        normalized.payload_digest.clone(),
+    )]);
     let mut linked_artifact_count = 0;
     let mut linked_log_count = 0;
+    let mut local_byte_hash_artifact_count = 0;
+    let mut local_byte_hash_log_count = 0;
 
     for artifact in &request.artifacts {
         if !artifact_ids.insert(artifact.id.clone()) {
@@ -324,10 +375,20 @@ pub fn audit_ci_provider_evidence(
             );
         }
         validate_uri(&mut findings, &artifact.id, artifact.uri.as_deref());
+        validate_digest_scope(
+            &mut findings,
+            &artifact.id,
+            artifact.digest_scope.as_deref(),
+            artifact.uri.as_deref(),
+        );
+        if artifact.digest_scope.as_deref() == Some(DIGEST_SCOPE_LOCAL_RESPONSE_BYTES) {
+            local_byte_hash_artifact_count += 1;
+        }
         if artifact.check.is_some() {
             linked_artifact_count += 1;
         }
         known_subjects.insert(artifact.id.clone());
+        known_subject_digests.insert(artifact.id.clone(), artifact.digest.clone());
     }
 
     for log in &request.logs {
@@ -360,14 +421,25 @@ pub fn audit_ci_provider_evidence(
             );
         }
         validate_uri(&mut findings, &log.id, log.uri.as_deref());
+        validate_digest_scope(
+            &mut findings,
+            &log.id,
+            log.digest_scope.as_deref(),
+            log.uri.as_deref(),
+        );
+        if log.digest_scope.as_deref() == Some(DIGEST_SCOPE_LOCAL_RESPONSE_BYTES) {
+            local_byte_hash_log_count += 1;
+        }
         if log.check.is_some() {
             linked_log_count += 1;
         }
         known_subjects.insert(log.id.clone());
+        known_subject_digests.insert(log.id.clone(), log.digest.clone());
     }
 
     let mut attestation_ids = BTreeSet::new();
     let mut attestation_subject_count = 0;
+    let mut attestation_subject_digest_binding_count = 0;
     for attestation in &request.attestations {
         if !attestation_ids.insert(attestation.id.clone()) {
             finding(
@@ -395,6 +467,32 @@ pub fn audit_ci_provider_evidence(
                 attestation.id.clone(),
                 "attestation statement_digest is not a valid content digest",
             );
+        }
+        if let Some(subject_digest) = attestation.subject_digest.as_deref() {
+            if !valid_digest(subject_digest) {
+                finding(
+                    &mut findings,
+                    "attestation_subject_digest_invalid",
+                    "blocking",
+                    attestation.id.clone(),
+                    "attestation subject_digest is not a valid content digest",
+                );
+            } else if let Some(expected_digest) = known_subject_digests.get(&attestation.subject) {
+                if expected_digest == subject_digest {
+                    attestation_subject_digest_binding_count += 1;
+                } else {
+                    finding(
+                        &mut findings,
+                        "attestation_subject_digest_mismatch",
+                        "blocking",
+                        attestation.id.clone(),
+                        format!(
+                            "attestation subject_digest does not match the digest retained for subject {:?}",
+                            attestation.subject
+                        ),
+                    );
+                }
+            }
         }
         if !known_subjects.contains(&attestation.subject) {
             finding(
@@ -440,6 +538,9 @@ pub fn audit_ci_provider_evidence(
         linked_artifact_count,
         linked_log_count,
         attestation_subject_count,
+        local_byte_hash_artifact_count,
+        local_byte_hash_log_count,
+        attestation_subject_digest_binding_count,
         ci_evidence,
         artifacts: request.artifacts.clone(),
         logs: request.logs.clone(),
@@ -447,17 +548,27 @@ pub fn audit_ci_provider_evidence(
         structurally_valid,
         conformance_ready,
         execution: "evidence_supplied_not_executed_here".into(),
-        verification: "structural_only".into(),
+        verification: if local_byte_hash_artifact_count > 0
+            || local_byte_hash_log_count > 0
+            || attestation_subject_digest_binding_count > 0
+        {
+            "structural_only_with_digest_bindings"
+        } else {
+            "structural_only"
+        }
+        .into(),
         findings,
         guarantees: vec![
             "provider payloads are normalized and the canonical CI plan is regenerated before evidence rows are assessed".into(),
             "artifact, log, and attestation records remain separately digest-bound and linked to provider/run/check identities".into(),
+            "digest scopes and optional attestation subject digests remain explicit, countable, and mismatch-detectable".into(),
             "duplicate, unknown, unbound, malformed, and tampered-looking rows remain blocking findings rather than being discarded".into(),
         ],
         limitations: vec![
             "the route does not fetch artifacts or logs, verify signatures, authenticate providers, or execute checks".into(),
             "row digests identify caller-supplied records and do not prove the content at a remote URI".into(),
             "attestation statements are preserved for later external verification but are not cryptographically verified here".into(),
+            "local_response_bytes describes a caller's bounded local retrieval; the audit does not re-fetch or independently prove those bytes".into(),
             "conformance_ready is a structural handoff signal, not deployment, scientific, clinical, security, or production approval".into(),
         ],
     })
@@ -501,6 +612,7 @@ mod tests {
                 run_id: Some("99".into()),
                 provider: Some("github_actions".into()),
                 uri: Some("https://example.test/artifact".into()),
+                digest_scope: None,
             }],
             logs: vec![CiProviderLog {
                 id: "log-unit".into(),
@@ -510,6 +622,7 @@ mod tests {
                 provider: Some("github_actions".into()),
                 uri: Some("https://example.test/log".into()),
                 truncated: false,
+                digest_scope: None,
             }],
             attestations: vec![CiProviderAttestation {
                 id: "attestation-unit".into(),
@@ -517,6 +630,7 @@ mod tests {
                 issuer: "caller".into(),
                 statement_digest: digest("statement"),
                 method: "declared_provider_statement".into(),
+                subject_digest: None,
             }],
         }
     }
@@ -551,6 +665,40 @@ mod tests {
             "unknown_check_binding",
             "attestation_subject_unknown",
         ] {
+            assert!(audit.findings.iter().any(|finding| finding.code == code));
+        }
+    }
+
+    #[test]
+    fn local_byte_scopes_and_matching_attestation_subject_digests_are_counted() {
+        let mut request = request();
+        request.artifacts[0].digest_scope = Some(DIGEST_SCOPE_LOCAL_RESPONSE_BYTES.into());
+        request.attestations[0].subject_digest = Some(request.artifacts[0].digest.clone());
+        let audit = audit_ci_provider_evidence(&request).unwrap();
+        assert!(audit.structurally_valid);
+        assert_eq!(audit.local_byte_hash_artifact_count, 1);
+        assert_eq!(audit.local_byte_hash_log_count, 0);
+        assert_eq!(audit.attestation_subject_digest_binding_count, 1);
+        assert_eq!(audit.verification, "structural_only_with_digest_bindings");
+
+        request.attestations[0].subject_digest = Some(digest("different-artifact"));
+        let mismatched = audit_ci_provider_evidence(&request).unwrap();
+        assert!(!mismatched.structurally_valid);
+        assert!(mismatched
+            .findings
+            .iter()
+            .any(|finding| finding.code == "attestation_subject_digest_mismatch"));
+    }
+
+    #[test]
+    fn invalid_digest_scope_and_local_scope_without_uri_are_blocking() {
+        let mut request = request();
+        request.artifacts[0].digest_scope = Some("untrusted_remote_claim".into());
+        request.logs[0].digest_scope = Some(DIGEST_SCOPE_LOCAL_RESPONSE_BYTES.into());
+        request.logs[0].uri = None;
+        let audit = audit_ci_provider_evidence(&request).unwrap();
+        assert!(!audit.structurally_valid);
+        for code in ["digest_scope_invalid", "digest_scope_uri_missing"] {
             assert!(audit.findings.iter().any(|finding| finding.code == code));
         }
     }

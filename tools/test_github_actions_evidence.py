@@ -265,7 +265,9 @@ class GithubActionsEvidenceTests(unittest.TestCase):
             discovered["artifacts"][0]["digest"],
             hashlib.sha256(artifact_bytes).hexdigest(),
         )
+        self.assertEqual(discovered["artifacts"][0]["digest_scope"], "local_response_bytes")
         self.assertEqual(discovered["logs"][0]["digest"], hashlib.sha256(log_bytes).hexdigest())
+        self.assertEqual(discovered["logs"][0]["digest_scope"], "local_response_bytes")
         self.assertEqual(
             discovered["download_stats"],
             {
@@ -350,8 +352,14 @@ class GithubActionsEvidenceTests(unittest.TestCase):
             self.assertEqual(evidence["source"], "caller_attested")
             self.assertEqual(evidence["ci"]["checks"][0]["name"], "unit")
             self.assertEqual(evidence["artifacts"][0]["run_id"], "ci-fixture-run")
+            self.assertEqual(evidence["artifacts"][0]["digest_scope"], "provider_metadata")
             self.assertEqual(evidence["logs"][0]["check"], "unit")
+            self.assertEqual(evidence["logs"][0]["digest_scope"], "caller_declared")
             self.assertEqual(evidence["attestations"][0]["subject"], "artifact-unit")
+            self.assertEqual(
+                evidence["attestations"][0]["subject_digest"],
+                "894512736c84b2dbcd74b6cd8f9bfa52075a36f44b8e0f54039f991d85b174af",
+            )
             self.assertNotIn("token", json.dumps(collection).lower())
 
     def test_evidence_builders_do_not_infer_a_ci_plan(self) -> None:

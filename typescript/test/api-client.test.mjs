@@ -233,15 +233,18 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
           linked_artifact_count: 1,
           linked_log_count: 1,
           attestation_subject_count: 1,
+          local_byte_hash_artifact_count: 1,
+          local_byte_hash_log_count: 0,
+          attestation_subject_digest_binding_count: 1,
           evidence: { run_id: "9001", provider: "github_actions", checks: [] },
           ci_evidence: {},
-          artifacts: [{ id: "artifact-1", kind: "junit", digest: "d".repeat(64) }],
+          artifacts: [{ id: "artifact-1", kind: "junit", digest: "d".repeat(64), digest_scope: "local_response_bytes", uri: "https://example.test/artifact" }],
           logs: [{ id: "log-1", digest: "f".repeat(64) }],
-          attestations: [{ id: "attestation-1", subject: "artifact-1", issuer: "caller", statement_digest: "s".repeat(64), method: "declared" }],
+          attestations: [{ id: "attestation-1", subject: "artifact-1", issuer: "caller", statement_digest: "s".repeat(64), method: "declared", subject_digest: "d".repeat(64) }],
           structurally_valid: true,
           conformance_ready: true,
           execution: "evidence_supplied_not_executed_here",
-          verification: "structural_only",
+          verification: "structural_only_with_digest_bindings",
           findings: [],
           guarantees: [],
           limitations: [],
@@ -1933,11 +1936,13 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(providerEvidence.mcp.result.structuredContent.workflow, "ci_provider_evidence_audit");
   assert.equal(providerEvidence.mcp.result.structuredContent.conformance_ready, true);
   assert.equal(providerEvidence.mcp.result.structuredContent.audit.artifact_count, 1);
+  assert.equal(providerEvidence.mcp.result.structuredContent.audit.local_byte_hash_artifact_count, 1);
+  assert.equal(providerEvidence.mcp.result.structuredContent.audit.attestation_subject_digest_binding_count, 1);
   const providerRegistryRequest = {
     ci: { workflow: "contracts" },
     provider: "github_actions",
     payload: { run: { id: 9001, conclusion: "success" }, jobs: [{ name: "tests", conclusion: "success" }] },
-    artifacts: [{ id: "artifact-1", kind: "junit", digest: "d".repeat(64) }],
+    artifacts: [{ id: "artifact-1", kind: "junit", digest: "d".repeat(64), digest_scope: "local_response_bytes", uri: "https://example.test/artifact" }],
   };
   const providerImported = await client.ciProviderEvidenceImport(providerRegistryRequest);
   assert.equal(providerImported.mcp.result.structuredContent.created, true);

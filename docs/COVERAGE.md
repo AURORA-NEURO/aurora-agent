@@ -90,15 +90,18 @@ and labels those derivations. Invalid supplied digests are refused; unknown and 
 remain downstream audit findings. The route still does not contact providers or authenticate them.
 `ci_provider_evidence_audit` extends that boundary to provider-bound artifact, log, and attestation
 rows. It validates unique identities, content-digest syntax, provider/run/check bindings, URI
-shape, and attestation subjects; preserves every row; emits separate record digests; and reports
-structural `conformance_ready` without fetching remote content, executing checks, authenticating a
-provider, or cryptographically verifying an attestation.
+shape, digest provenance scopes, and attestation subjects; preserves every row; emits separate
+record digests; and reports structural `conformance_ready` without fetching remote content,
+executing checks, authenticating a provider, or cryptographically verifying an attestation. A
+`local_response_bytes` scope and optional attestation subject digest can establish a mismatch-
+detectable content binding, but remain caller/provider declarations to this Rust audit.
 The retained provider-evidence registry is the durable continuation of that handoff: it re-runs the
 canonical audit before accepting a record, retains structurally valid failed and unknown runs as
 explicit evidence, and exposes deterministic digest-ordered import/query/get operations through MCP,
 REST, CLI, Python, and TypeScript. Each retained row carries the provider/run/plan identity plus
 the artifact, log, and attestation record-family digests, so operators can join provider-observed
-lineage without confusing a locator or digest with a locally fetched byte or verified signature.
+lineage while keeping metadata, caller-declared, and locally byte-hashed scopes distinct from a
+verified signature or provider identity.
 `--ci-provider-evidence-state` enables atomic restart-safe persistence, capped at 512 records and
 32 MiB with 256-item queries. Snapshot and per-record digests are checked on restore; the registry
 is an audit index and never contacts a provider, executes CI, verifies remote content, or approves

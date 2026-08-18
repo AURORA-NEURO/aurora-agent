@@ -16,6 +16,7 @@ from .errors import ArgumentError
 
 CI_PROVIDER_EVIDENCE_SCHEMA = "bioprism-devplat-ci-provider-evidence/0.1"
 MAX_PROVIDER_EVIDENCE_ROWS = 128
+DIGEST_SCOPES = frozenset({"provider_metadata", "caller_declared", "local_response_bytes"})
 
 
 def _mapping(name: str, value: Mapping[str, Any]) -> dict[str, Any]:
@@ -33,7 +34,14 @@ def _rows(name: str, value: Sequence[Mapping[str, Any]] | None) -> tuple[dict[st
         raise ArgumentError(f"{name} must contain at most {MAX_PROVIDER_EVIDENCE_ROWS} rows")
     result: list[dict[str, Any]] = []
     for index, row in enumerate(value):
-        result.append(_mapping(f"{name}[{index}]", row))
+        mapped = _mapping(f"{name}[{index}]", row)
+        scope = mapped.get("digest_scope")
+        if scope is not None and scope not in DIGEST_SCOPES:
+            raise ArgumentError(f"{name}[{index}].digest_scope is not a supported digest scope")
+        for digest_name in ("subject_digest",):
+            if digest_name in mapped and mapped[digest_name] is not None:
+                _digest(f"{name}[{index}].{digest_name}", mapped[digest_name])
+        result.append(mapped)
     return tuple(result)
 
 
@@ -101,6 +109,9 @@ class CiProviderEvidenceReport:
     linked_artifact_count: int
     linked_log_count: int
     attestation_subject_count: int
+    local_byte_hash_artifact_count: int
+    local_byte_hash_log_count: int
+    attestation_subject_digest_binding_count: int
     structurally_valid: bool
     conformance_ready: bool
     execution: str
@@ -145,6 +156,18 @@ class CiProviderEvidenceReport:
             linked_artifact_count=_route_count("CI provider evidence linked_artifact_count", audit.get("linked_artifact_count")),
             linked_log_count=_route_count("CI provider evidence linked_log_count", audit.get("linked_log_count")),
             attestation_subject_count=_route_count("CI provider evidence attestation_subject_count", audit.get("attestation_subject_count")),
+            local_byte_hash_artifact_count=_route_count(
+                "CI provider evidence local_byte_hash_artifact_count",
+                audit.get("local_byte_hash_artifact_count", 0),
+            ),
+            local_byte_hash_log_count=_route_count(
+                "CI provider evidence local_byte_hash_log_count",
+                audit.get("local_byte_hash_log_count", 0),
+            ),
+            attestation_subject_digest_binding_count=_route_count(
+                "CI provider evidence attestation_subject_digest_binding_count",
+                audit.get("attestation_subject_digest_binding_count", 0),
+            ),
             structurally_valid=audit.get("structurally_valid") is True,
             conformance_ready=raw.get("conformance_ready") is True,
             execution=_route_text("CI provider evidence execution", audit.get("execution")),
@@ -325,6 +348,7 @@ def ci_provider_evidence_registry_get_report(value: Mapping[str, Any]) -> CiProv
 __all__ = [
     "CI_PROVIDER_EVIDENCE_SCHEMA",
     "MAX_PROVIDER_EVIDENCE_ROWS",
+    "DIGEST_SCOPES",
     "CiProviderEvidenceRequest",
     "CiProviderEvidenceReport",
     "CiProviderEvidenceRegistryQueryRequest",
