@@ -5293,11 +5293,13 @@ impl Server {
             .iter()
             .map(|group| group.id.as_str())
             .collect::<BTreeSet<_>>();
-        let records = self
+        let artifact_registry = self
             .artifact_registry
             .lock()
-            .map_err(|_| "artifact registry lock is poisoned".to_string())?
-            .records_for_audit();
+            .map_err(|_| "artifact registry lock is poisoned".to_string())?;
+        let artifact_registry_generation = artifact_registry.generation();
+        let artifact_registry_size = artifact_registry.len();
+        let records = artifact_registry.records_for_audit();
         let mut group_intakes: BTreeMap<String, Vec<&bioprism_devplat::ArtifactRecord>> =
             BTreeMap::new();
         for record in &records {
@@ -5323,8 +5325,21 @@ impl Server {
         let mut missing_tool_group_ids = Vec::new();
         let mut missing_domain_group_ids = Vec::new();
         let mut domain_summary: BTreeMap<String, (usize, usize, usize)> = BTreeMap::new();
+        let mut groups_with_artifact_evidence = 0usize;
+        let mut artifact_evidence_records = 0usize;
         for group in selected {
             let intakes = group_intakes.get(&group.id).cloned().unwrap_or_default();
+            let artifact_evidence =
+                artifact_registry.domain_evidence_posture(&group.id, &group.domains);
+            let matching_artifact_records = artifact_evidence
+                .get("matching_record_count")
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as usize;
+            if matching_artifact_records > 0 {
+                groups_with_artifact_evidence += 1;
+                artifact_evidence_records =
+                    artifact_evidence_records.saturating_add(matching_artifact_records);
+            }
             if intakes.is_empty() {
                 missing_group_ids.push(group.id.clone());
             }
@@ -5448,7 +5463,9 @@ impl Server {
                 "missing_domains": missing_domains,
                 "tool_coverage_state": tool_coverage_state,
                 "domain_coverage_state": domain_coverage_state,
-                "coverage_state": if intakes.is_empty() { "missing" } else { "reported" }
+                "coverage_state": if intakes.is_empty() { "missing" } else { "reported" },
+                "artifact_evidence": artifact_evidence,
+                "artifact_evidence_scope": "current_digest_verified_artifact_registry_exact_declared_matches"
             });
             if include_intake_digests {
                 row["intake_digests"] = json!(intake_digests.into_iter().collect::<Vec<_>>());
@@ -5491,6 +5508,11 @@ impl Server {
             "missing_tool_group_ids": missing_tool_group_ids,
             "domain_coverage_complete": missing_domain_group_ids.is_empty(),
             "missing_domain_group_ids": missing_domain_group_ids,
+            "groups_with_artifact_evidence": groups_with_artifact_evidence,
+            "artifact_evidence_records": artifact_evidence_records,
+            "artifact_registry_generation": artifact_registry_generation,
+            "artifact_registry_size": artifact_registry_size,
+            "artifact_evidence_scope": "current_digest_verified_artifact_registry_exact_declared_matches",
             "groups": groups,
             "domain_summary": domain_summary,
             "readiness_claimed": false,
@@ -5499,10 +5521,12 @@ impl Server {
                 "coverage counts only retained, structurally verified domain-evidence-intake artifacts",
                 "group, domain, outcome, subject, source-tool, and digest rows remain separately inspectable",
                 "declared source-tool and domain gaps remain explicit instead of being hidden by one intake",
-                "missing intake remains visible instead of being inferred as absent capability"
+                "missing intake remains visible instead of being inferred as absent capability",
+                "artifact-family evidence is joined for every selected capability group without changing intake coverage semantics"
             ],
             "does_not_claim": [
                 "intake presence proves that every tool was executed or that a response is true",
+                "artifact-family presence proves that a provider, adapter, source, report, or workflow was executed",
                 "complete local intake coverage proves scientific, clinical, causal, provenance, release, or readiness validity",
                 "missing intake proves that a capability or external source does not exist"
             ]
@@ -32875,7 +32899,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "domain_evidence_coverage",
-            "description": "Audit retained raw domain-evidence intake across the authoritative capability catalogue. The coverage rows preserve missing groups, declared domains, intake counts, subjects, source tools, outcome states, and optional exact artifact digests; complete local intake is never treated as execution coverage, scientific or clinical validity, provenance completeness, release readiness, or external-effect completion.",
+            "description": "Audit retained raw domain-evidence intake across the authoritative capability catalogue and join advisory digest-verified evidence from adapter, provider, source/harmonization, domain-report, workflow/mission, and external-reference artifact families. The coverage rows preserve missing groups, declared domains, intake counts, subjects, source tools, outcome states, exact artifact-family posture, and optional exact intake digests; complete local intake or artifact presence is never treated as execution coverage, scientific or clinical validity, provenance completeness, release readiness, or external-effect completion.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

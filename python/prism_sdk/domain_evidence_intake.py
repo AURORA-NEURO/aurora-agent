@@ -8,6 +8,7 @@ from typing import Any, Mapping, Sequence
 from .artifacts import _digest, _mapping, _text
 from .domain_reports import DOMAIN_REPORT_CLAIM_STATUSES, _bounded_text_list
 from .errors import ArgumentError
+from .events import OperationsArtifactEvidencePosture
 
 DOMAIN_EVIDENCE_INTAKE_SCHEMA = "bioprism-devplat-domain-evidence-intake/0.1"
 DOMAIN_EVIDENCE_INTAKE_WORKFLOW = "domain_evidence_intake"
@@ -213,6 +214,12 @@ class DomainEvidenceIntakeCoverageReport:
     domain_coverage_complete: bool
     missing_domain_group_ids: tuple[str, ...]
     groups: tuple[Mapping[str, Any], ...]
+    artifact_evidence_postures: tuple[OperationsArtifactEvidencePosture, ...]
+    groups_with_artifact_evidence: int
+    artifact_evidence_records: int
+    artifact_registry_generation: int
+    artifact_registry_size: int
+    artifact_evidence_scope: str
     catalogue_digest: str
     coverage_digest: str
 
@@ -238,6 +245,11 @@ class DomainEvidenceIntakeCoverageReport:
         groups = raw.get("groups", [])
         if not isinstance(groups, Sequence) or isinstance(groups, (str, bytes)):
             raise ArgumentError("domain evidence intake coverage groups must be an array")
+        artifact_evidence_postures = tuple(
+            OperationsArtifactEvidencePosture.from_wire(group["artifact_evidence"])
+            for group in groups
+            if isinstance(group, Mapping) and isinstance(group.get("artifact_evidence"), Mapping)
+        )
         return cls(
             raw=raw,
             complete=complete,
@@ -258,6 +270,30 @@ class DomainEvidenceIntakeCoverageReport:
                 "domain evidence intake missing_domain_group_ids", raw.get("missing_domain_group_ids")
             ),
             groups=tuple(_mapping("domain evidence intake coverage group", group) for group in groups),
+            artifact_evidence_postures=artifact_evidence_postures,
+            groups_with_artifact_evidence=_count(
+                "domain evidence intake groups_with_artifact_evidence",
+                raw.get("groups_with_artifact_evidence", 0),
+            ),
+            artifact_evidence_records=_count(
+                "domain evidence intake artifact_evidence_records",
+                raw.get("artifact_evidence_records", 0),
+            ),
+            artifact_registry_generation=_count(
+                "domain evidence intake artifact_registry_generation",
+                raw.get("artifact_registry_generation", 0),
+            ),
+            artifact_registry_size=_count(
+                "domain evidence intake artifact_registry_size",
+                raw.get("artifact_registry_size", 0),
+            ),
+            artifact_evidence_scope=_text(
+                "domain evidence intake artifact_evidence_scope",
+                raw.get(
+                    "artifact_evidence_scope",
+                    "legacy_response_without_artifact_registry_join",
+                ),
+            ),
             catalogue_digest=_digest(
                 "domain evidence intake catalogue digest", raw.get("catalogue_digest")
             ),

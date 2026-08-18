@@ -41,7 +41,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `POST /v1/domain-evidence/intake` | Normalize and index one supplied raw request/response envelope from any declared capability-group tool |
 | `POST /v1/domain-evidence/sources` | Build and index a non-fetching, digest-addressed external evidence source plan |
 | `POST /v1/domain-evidence/sources/execute` | Execute a retained source plan through bounded file/plain-HTTP connectors and retain the response intake |
-| `GET /v1/domain-evidence/coverage?group_id=&domain=&max_groups=&include_intake_digests=` | Count retained raw-intake envelopes by authoritative group, outcome, source tool, subject, domain, and exact digest |
+| `GET /v1/domain-evidence/coverage?group_id=&domain=&max_groups=&include_intake_digests=` | Count retained raw-intake envelopes plus advisory digest-verified artifact-family evidence by authoritative group |
 | `POST /v1/domain-workflows/reconciliations` | Verify and idempotently import one reconciliation report into the bounded audit registry |
 | `GET /v1/domain-workflows/reconciliations?mission_id=&workflow_id=&mission_plan_digest=&completion_status=&after=&limit=&include_records=` | Query digest-ordered reconciliation index rows |
 | `GET /v1/domain-workflows/reconciliations/{reconciliation_digest}` | Fetch one digest-verified reconciliation report |
@@ -249,6 +249,15 @@ The existing `complete` flag means only that an intake artifact was retained for
 group; `tool_coverage_complete` and `domain_coverage_complete` separately report whether every
 declared source tool and domain has an intake row. None of these flags means a tool ran or that a
 response is true, complete, safe, reproducible, or release-ready.
+The same coverage response now includes an advisory `artifact_evidence` posture for every selected
+group, joined from the current digest-verified artifact registry. It covers adapter execution,
+provider, source/harmonization, domain-report, workflow/mission, and external-reference families;
+reports verification states, parent linkage, exact match basis, registry generation/size, and
+matching counts. This adjunct does not change the intake-only meanings of `complete`,
+`tool_coverage_complete`, or `domain_coverage_complete`, and artifact presence never implies that
+an adapter, provider, source, report, or workflow executed or became scientifically, clinically,
+or operationally valid. Python exposes parsed artifact postures when present and keeps legacy
+responses explicit; TypeScript exposes the same group and summary fields.
 `POST /v1/domain-evidence/sources` builds the external-source planning boundary. It binds a
 connector family, locator class, retrieval mode, bounded network/cache policy, optional expected
 content digest, and domain scope into an exact plan artifact. Credentials remain caller-managed;

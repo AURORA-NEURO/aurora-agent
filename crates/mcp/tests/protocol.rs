@@ -1292,6 +1292,12 @@ fn domain_evidence_coverage_preserves_missing_groups_outcomes_and_digest_rows() 
     assert_eq!(coverage["complete"], json!(false));
     assert_eq!(coverage["tool_coverage_complete"], json!(false));
     assert_eq!(coverage["domain_coverage_complete"], json!(false));
+    assert_eq!(coverage["groups_with_artifact_evidence"], json!(1));
+    assert_eq!(coverage["artifact_evidence_records"], json!(1));
+    assert_eq!(
+        coverage["artifact_evidence_scope"],
+        json!("current_digest_verified_artifact_registry_exact_declared_matches")
+    );
     assert_eq!(
         coverage["domain_summary"]["modalities"]["intake_count"],
         json!(1)
@@ -1311,6 +1317,15 @@ fn domain_evidence_coverage_preserves_missing_groups_outcomes_and_digest_rows() 
         .any(|tool| tool == "bioworlds_catalog"));
     assert_eq!(group["tool_coverage_state"], json!("partial"));
     assert_eq!(group["domain_coverage_state"], json!("partial"));
+    assert_eq!(group["artifact_evidence"]["state"], json!("observed"));
+    assert_eq!(
+        group["artifact_evidence"]["matching_record_count"],
+        json!(1)
+    );
+    assert_eq!(
+        group["artifact_evidence"]["family_counts"]["source_or_harmonization"],
+        json!(1)
+    );
     assert_eq!(
         group["source_tool_coverage"]
             .as_array()

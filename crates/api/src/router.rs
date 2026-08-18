@@ -12202,6 +12202,8 @@ mod tests {
         assert_eq!(coverage["reported_group_count"], 1);
         assert_eq!(coverage["missing_group_count"], 28);
         assert_eq!(coverage["complete"], false);
+        assert_eq!(coverage["groups_with_artifact_evidence"], 1);
+        assert_eq!(coverage["artifact_evidence_records"], 2);
         let reported_group = coverage["groups"]
             .as_array()
             .unwrap()
@@ -12211,6 +12213,11 @@ mod tests {
         assert_eq!(
             reported_group["intake_digests"].as_array().unwrap().len(),
             1
+        );
+        assert_eq!(reported_group["artifact_evidence"]["state"], "observed");
+        assert_eq!(
+            reported_group["artifact_evidence"]["matching_record_count"],
+            2
         );
         let filtered = router.handle(request(
             "GET",

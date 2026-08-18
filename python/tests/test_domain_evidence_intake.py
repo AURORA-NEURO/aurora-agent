@@ -78,6 +78,11 @@ def coverage_payload() -> dict:
         "missing_tool_group_ids": ["biological_domains"],
         "domain_coverage_complete": True,
         "missing_domain_group_ids": [],
+        "groups_with_artifact_evidence": 1,
+        "artifact_evidence_records": 2,
+        "artifact_registry_generation": 4,
+        "artifact_registry_size": 5,
+        "artifact_evidence_scope": "current_digest_verified_artifact_registry_exact_declared_matches",
         "groups": [
             {
                 "id": "biological_domains",
@@ -95,6 +100,31 @@ def coverage_payload() -> dict:
                 "missing_domains": [],
                 "tool_coverage_state": "complete",
                 "domain_coverage_state": "complete",
+                "artifact_evidence": {
+                    "ok": True,
+                    "schema": "bioprism-devplat-artifact-domain-evidence-posture/0.1",
+                    "workflow": "artifact_registry_domain_evidence_posture",
+                    "group_id": "biological_domains",
+                    "requested_domains": ["modalities"],
+                    "registry_generation": 4,
+                    "registry_size": 5,
+                    "state": "observed",
+                    "matching_record_count": 2,
+                    "integrity_verified_record_count": 2,
+                    "kind_counts": {"domain_evidence_intake": 1, "domain_evidence_source_plan": 1},
+                    "family_counts": {"source_or_harmonization": 2},
+                    "verification_state_counts": {"verified": 2},
+                    "match_basis_counts": {"declared_group_and_domain": 2},
+                    "subject_count": 1,
+                    "parent_linked_record_count": 1,
+                    "matched_domain_labels": ["modalities"],
+                    "scope": "current_digest_verified_artifact_registry_exact_declared_matches",
+                    "readiness_claimed": False,
+                    "execution": "not_started",
+                    "guarantees": ["digest verified"],
+                    "limitations": ["presence is not execution"],
+                },
+                "artifact_evidence_scope": "current_digest_verified_artifact_registry_exact_declared_matches",
                 "intake_digests": ["c" * 64],
                 "coverage_state": "reported",
             }
@@ -220,8 +250,30 @@ class DomainEvidenceIntakeModelTests(unittest.TestCase):
         self.assertTrue(report.complete)
         self.assertFalse(report.tool_coverage_complete)
         self.assertEqual(report.groups[0]["outcomes"], ["observed"])
+        self.assertEqual(report.groups_with_artifact_evidence, 1)
+        self.assertEqual(report.artifact_evidence_records, 2)
+        self.assertEqual(report.artifact_evidence_postures[0].group_id, "biological_domains")
+        self.assertEqual(report.artifact_evidence_postures[0].matching_record_count, 2)
+        self.assertEqual(
+            report.artifact_evidence_postures[0].family_counts["source_or_harmonization"],
+            2,
+        )
         with self.assertRaises(ArgumentError):
             DomainEvidenceIntakeCoverageRequest(max_groups=129)
+
+    def test_legacy_coverage_keeps_artifact_join_explicit(self) -> None:
+        payload = coverage_payload()
+        payload.pop("groups_with_artifact_evidence")
+        payload.pop("artifact_evidence_records")
+        payload.pop("artifact_registry_generation")
+        payload.pop("artifact_registry_size")
+        payload.pop("artifact_evidence_scope")
+        payload["groups"][0].pop("artifact_evidence")
+        payload["groups"][0].pop("artifact_evidence_scope")
+        report = DomainEvidenceIntakeCoverageReport.from_wire(payload)
+        self.assertEqual(report.artifact_evidence_postures, ())
+        self.assertEqual(report.groups_with_artifact_evidence, 0)
+        self.assertEqual(report.artifact_evidence_scope, "legacy_response_without_artifact_registry_join")
 
     def test_sync_rest_and_tool_helpers(self) -> None:
         with patch.object(ApiClient, "request", return_value=intake_payload()) as rest:

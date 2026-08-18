@@ -52,6 +52,11 @@ const coverage = {
   missing_tool_group_ids: ["biological_domains"],
   domain_coverage_complete: true,
   missing_domain_group_ids: [],
+  groups_with_artifact_evidence: 1,
+  artifact_evidence_records: 2,
+  artifact_registry_generation: 4,
+  artifact_registry_size: 5,
+  artifact_evidence_scope: "current_digest_verified_artifact_registry_exact_declared_matches",
   groups: [{
     id: "biological_domains",
     domains: ["modalities"],
@@ -68,6 +73,31 @@ const coverage = {
     missing_domains: [],
     tool_coverage_state: "complete",
     domain_coverage_state: "complete",
+    artifact_evidence: {
+      ok: true,
+      schema: "bioprism-devplat-artifact-domain-evidence-posture/0.1",
+      workflow: "artifact_registry_domain_evidence_posture",
+      group_id: "biological_domains",
+      requested_domains: ["modalities"],
+      registry_generation: 4,
+      registry_size: 5,
+      state: "observed",
+      matching_record_count: 2,
+      integrity_verified_record_count: 2,
+      kind_counts: { domain_evidence_intake: 1, domain_evidence_source_plan: 1 },
+      family_counts: { source_or_harmonization: 2 },
+      verification_state_counts: { verified: 2 },
+      match_basis_counts: { declared_group_and_domain: 2 },
+      subject_count: 1,
+      parent_linked_record_count: 1,
+      matched_domain_labels: ["modalities"],
+      scope: "current_digest_verified_artifact_registry_exact_declared_matches",
+      readiness_claimed: false,
+      execution: "not_started",
+      guarantees: ["digest verified"],
+      limitations: ["presence is not execution"],
+    },
+    artifact_evidence_scope: "current_digest_verified_artifact_registry_exact_declared_matches",
     intake_digests: ["c".repeat(64)],
     coverage_state: "reported",
   }],
@@ -619,7 +649,11 @@ test("domain evidence intake REST and tool clients preserve exact envelope metad
   });
   assert.equal((await client.domainEvidenceIntake(args)).outcome, "observed");
   assert.equal((await client.domainEvidenceIntakeTool(args)).mcp.result.structuredContent.intake_digest, "c".repeat(64));
-  assert.equal((await client.domainEvidenceCoverage({ include_intake_digests: true })).coverage_digest, "f".repeat(64));
+  const coverageReport = await client.domainEvidenceCoverage({ include_intake_digests: true });
+  assert.equal(coverageReport.coverage_digest, "f".repeat(64));
+  assert.equal(coverageReport.groups_with_artifact_evidence, 1);
+  assert.equal(coverageReport.groups[0].artifact_evidence.matching_record_count, 2);
+  assert.equal(coverageReport.groups[0].artifact_evidence.family_counts.source_or_harmonization, 2);
   assert.equal((await client.domainEvidenceCoverageTool({ group_id: "biological_domains" })).mcp.result.structuredContent.complete, true);
   assert.equal((await client.domainEvidenceSourcePlan(sourceArgs)).retrieval_status, "not_started");
   assert.equal((await client.domainEvidenceSourcePlanTool(sourceArgs)).mcp.result.structuredContent.plan_digest, "g".repeat(64));

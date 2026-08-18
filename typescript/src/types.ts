@@ -5565,6 +5565,8 @@ export interface DomainEvidenceIntakeCoverageGroup extends JsonObject {
   missing_domains: string[];
   tool_coverage_state: "complete" | "partial" | "missing";
   domain_coverage_state: "complete" | "partial" | "missing";
+  artifact_evidence: OperationsArtifactEvidencePosture;
+  artifact_evidence_scope: "current_digest_verified_artifact_registry_exact_declared_matches";
   intake_digests?: string[];
   coverage_state: "reported" | "missing";
 }
@@ -5585,6 +5587,11 @@ export interface DomainEvidenceIntakeCoverageResult extends JsonObject {
   missing_tool_group_ids: string[];
   domain_coverage_complete: boolean;
   missing_domain_group_ids: string[];
+  groups_with_artifact_evidence: number;
+  artifact_evidence_records: number;
+  artifact_registry_generation: number;
+  artifact_registry_size: number;
+  artifact_evidence_scope: "current_digest_verified_artifact_registry_exact_declared_matches";
   groups: DomainEvidenceIntakeCoverageGroup[];
   domain_summary: JsonObject;
   readiness_claimed: false;
