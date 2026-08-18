@@ -32,7 +32,14 @@ jobs:
         run: |
           set -euo pipefail
           base_sha="$(git rev-parse "$CHECK_SHA^1")"
-          mapfile -t rust_files < <(git diff --name-only "$base_sha" "$CHECK_SHA" -- '*.rs')
+          mapfile -t changed_rust_files < <(git diff --name-only "$base_sha" "$CHECK_SHA" -- '*.rs')
+          rust_files=()
+          for file in "${changed_rust_files[@]}"; do
+            # Deletions are valid revisions but are not valid rustfmt inputs.
+            if [[ -f "$file" ]]; then
+              rust_files+=("$file")
+            fi
+          done
           if ((${#rust_files[@]} == 0)); then
             echo "No Rust files changed in this revision."
             exit 0
