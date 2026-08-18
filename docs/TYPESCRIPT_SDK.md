@@ -849,6 +849,10 @@ mission, and returns `plan_digest`, the reviewed mission, preflight diagnostics,
 `dispatch: "not_started"` posture. A caller must inspect the result before invoking
 `agentMission`; `blocked_by_route_review` and `blocked_by_mission_preflight` remain structured
 outcomes rather than transport errors.
+`capabilityRoutePlanVerify` and `capabilityRoutePlanVerifyRest` provide the matching replay boundary
+for retained plans. They rerun mission preflight and optionally route review, compare route/review/
+catalogue/plan/selection identities, and preserve mismatch diagnostics. A shape-only verification is
+reported as `verified_without_route_replay`; neither method dispatches a domain tool.
 Pass the ready result as `routeReview` to `missionFromRoute` to carry it into
 `AgentMissionArgs.route_review`; local preflight and the Rust boundary then reject changed goals,
 steps, findings, or evidence bindings. The returned `route_review_provenance` is compact audit

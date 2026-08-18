@@ -54,6 +54,8 @@ from prism_sdk import (
     CapabilityRouteNeed,
     CapabilityRoutePlanReport,
     CapabilityRoutePlanRequest,
+    CapabilityRoutePlanVerifyReport,
+    CapabilityRoutePlanVerifyRequest,
     CapabilityRouteRequest,
     CapabilityRouteReviewReport,
     CapabilityRouteReviewRequest,
@@ -105,6 +107,7 @@ from prism_sdk import (
     capability_discover_report,
     capability_route_report,
     capability_route_plan_report,
+    capability_route_plan_verify_report,
     capability_route_review_report,
     mission_evaluator_discover_report,
     mission_evaluator_replay_report,
@@ -2583,6 +2586,64 @@ class AnalyticsModelTests(unittest.TestCase):
                 policy={"execute": True},
             )
 
+    def test_capability_route_plan_verifier_request_and_report_are_replay_explicit(self) -> None:
+        plan = {
+            "workflow": "capability_route_plan",
+            "ok": True,
+            "mission_id": "mission-route-plan",
+            "route_id": "r" * 64,
+            "review_id": "v" * 64,
+            "catalog_digest": "c" * 64,
+            "goal": "compose evidence",
+            "plan_status": "ready_for_caller_inspection",
+            "review": route_review_payload(),
+            "mission": {"mission_id": "mission-route-plan"},
+            "preflight": {"ok": True},
+            "plan_digest": "a" * 64,
+            "dispatch": "not_started",
+            "execution": "not_started",
+        }
+        selection = {
+            "need_id": "oncology",
+            "tool": "oncology_search",
+            "domain": "oncology",
+            "capability": "evidence",
+            "objective": "review evidence",
+            "arguments": {},
+        }
+        request = CapabilityRoutePlanVerifyRequest(
+            plan=plan,
+            route=route_report_payload(),
+            selections=[selection],
+            validate_schemas=True,
+        )
+        arguments = request.to_mcp_arguments()
+        self.assertEqual(arguments["plan"]["workflow"], "capability_route_plan")
+        self.assertEqual(arguments["selections"][0]["tool"], selection["tool"])
+        self.assertEqual(arguments["selections"][0]["required"], True)
+        payload = {
+            "workflow": "capability_route_plan_verify",
+            "ok": True,
+            "mission_id": "mission-route-plan",
+            "route_id": "r" * 64,
+            "review_id": "v" * 64,
+            "catalog_digest": "c" * 64,
+            "plan_status": "ready_for_caller_inspection",
+            "plan_digest": "a" * 64,
+            "valid": True,
+            "verification_status": "verified",
+            "route_replay": {"requested": True, "status": "matched", "matched": True},
+            "mission_preflight": {"requested": True, "status": "matched", "matched": True, "ok": True},
+            "mismatches": [],
+            "dispatch": "not_started",
+            "execution": "not_started",
+        }
+        report = CapabilityRoutePlanVerifyReport.from_wire(payload)
+        self.assertTrue(report.verified)
+        self.assertEqual(capability_route_plan_verify_report(payload).verification_status, "verified")
+        with self.assertRaises(ArgumentError):
+            CapabilityRoutePlanVerifyRequest(plan=plan, route=route_report_payload())
+
 
 class AnalyticsWorkspaceTests(unittest.TestCase):
     def test_sync_workspace_sends_typed_analytics_request(self) -> None:
@@ -2957,7 +3018,11 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
                     "arguments": {},
                 }],
             })
+            verification = Workspace(client).capability_route_plan_verify({
+                "plan": {"workflow": "capability_route_plan", "mission_id": "route-plan"},
+            })
         self.assertEqual(result["echo"]["mission_id"], "route-plan")
+        self.assertEqual(verification["echo"]["plan"]["workflow"], "capability_route_plan")
 
     def test_sync_workspace_typed_capability_route_plan_report_delegates(self) -> None:
         payload = {
@@ -3332,7 +3397,11 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
                     "arguments": {},
                 }],
             })
+            verification = await AsyncWorkspace(client).capability_route_plan_verify({
+                "plan": {"workflow": "capability_route_plan", "mission_id": "route-plan"},
+            })
         self.assertEqual(result["echo"]["mission_id"], "route-plan")
+        self.assertEqual(verification["echo"]["plan"]["workflow"], "capability_route_plan")
 
     async def test_async_workspace_typed_capability_route_plan_report_delegates(self) -> None:
         payload = {

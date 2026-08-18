@@ -274,6 +274,9 @@ The Python clients also expose `capability_route_plan`, which composes caller-se
 candidates with authoritative mission preflight across MCP and REST. It returns a digest-bound
 mission and `plan_digest` with explicit `dispatch: "not_started"`; route-review and preflight
 blockers remain structured, and no nested domain tool is dispatched.
+They also expose `capability_route_plan_verify`, which rechecks a retained plan without dispatch;
+supplying the original route and selections enables full route-review replay, while a shape-only
+check is reported explicitly as `verified_without_route_replay`.
 
 For every current or future MCP domain, the Python layer also exposes a schema-aware fallback:
 `tool_catalogue()` snapshots the live definitions, `plan_tool()` performs bounded transport-shape
@@ -861,6 +864,9 @@ explicit arguments, carries optional claim/evaluator/workflow bindings, returns 
 mission and `plan_digest`, and fails closed with `dispatch: "not_started"` when route review or
 preflight is blocked. It never dispatches a nested tool or turns routing evidence into
 authorization; callers must inspect the preflight before invoking `agent_mission`.
+`capability_route_plan_verify` provides the matching non-executing replay boundary: it reruns mission
+preflight, optionally recomputes route review from caller-supplied inputs, and exposes digest and
+identity mismatches without treating missing replay inputs as proof of current membership.
 The reviewed handoff can now be supplied directly as `route_review` on `agent_mission` or
 `/v1/missions/preflight`. The mission boundary requires the ready review to match the submitted
 goal and exact serialized steps, binds its review/route/catalogue identities into the plan digest,

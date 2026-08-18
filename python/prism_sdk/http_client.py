@@ -131,6 +131,8 @@ from .capability import (
     CapabilityRouteReviewRequest,
     CapabilityRoutePlanReport,
     CapabilityRoutePlanRequest,
+    CapabilityRoutePlanVerifyReport,
+    CapabilityRoutePlanVerifyRequest,
     CapabilityRouteRequest,
     DomainWorkflowCatalogueReport,
     DomainWorkflowInstantiateRequest,
@@ -170,6 +172,7 @@ from .capability import (
     capability_discover_report,
     capability_route_review_report,
     capability_route_plan_report,
+    capability_route_plan_verify_report,
     domain_workflow_catalogue_report,
     domain_workflow_instantiation_report,
     domain_workflow_scaffold_report,
@@ -3403,6 +3406,48 @@ class ApiClient:
                 workflow_binding=workflow_binding,
             )
         )
+
+    def capability_route_plan_verify(
+        self,
+        request: CapabilityRoutePlanVerifyRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Verify a retained route plan through MCP without dispatch or execution."""
+
+        normalized = (
+            request
+            if isinstance(request, CapabilityRoutePlanVerifyRequest)
+            else CapabilityRoutePlanVerifyRequest(**dict(request))
+        )
+        return self.call_tool("capability_route_plan_verify", normalized.to_mcp_arguments())
+
+    def capability_route_plan_verify_report(
+        self,
+        request: CapabilityRoutePlanVerifyRequest | Mapping[str, Any],
+    ) -> CapabilityRoutePlanVerifyReport:
+        return capability_route_plan_verify_report(self.capability_route_plan_verify(request))
+
+    def capability_route_plan_verify_rest(
+        self,
+        request: CapabilityRoutePlanVerifyRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Verify a retained route plan through the dedicated REST endpoint."""
+
+        normalized = (
+            request
+            if isinstance(request, CapabilityRoutePlanVerifyRequest)
+            else CapabilityRoutePlanVerifyRequest(**dict(request))
+        )
+        return self.request(
+            "POST",
+            "/v1/capabilities/route/plan/verify",
+            normalized.to_mcp_arguments(),
+        )
+
+    def capability_route_plan_verify_rest_report(
+        self,
+        request: CapabilityRoutePlanVerifyRequest | Mapping[str, Any],
+    ) -> CapabilityRoutePlanVerifyReport:
+        return capability_route_plan_verify_report(self.capability_route_plan_verify_rest(request))
 
     def adapter_plan(
         self,
@@ -7788,6 +7833,47 @@ class AsyncApiClient:
                 workflow_binding=workflow_binding,
             )
         )
+
+    async def capability_route_plan_verify(
+        self,
+        request: CapabilityRoutePlanVerifyRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async MCP verification of a retained route plan."""
+
+        normalized = (
+            request
+            if isinstance(request, CapabilityRoutePlanVerifyRequest)
+            else CapabilityRoutePlanVerifyRequest(**dict(request))
+        )
+        return await self.call_tool("capability_route_plan_verify", normalized.to_mcp_arguments())
+
+    async def capability_route_plan_verify_report(
+        self,
+        request: CapabilityRoutePlanVerifyRequest | Mapping[str, Any],
+    ) -> CapabilityRoutePlanVerifyReport:
+        return capability_route_plan_verify_report(await self.capability_route_plan_verify(request))
+
+    async def capability_route_plan_verify_rest(
+        self,
+        request: CapabilityRoutePlanVerifyRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async REST verification of a retained route plan."""
+
+        normalized = (
+            request
+            if isinstance(request, CapabilityRoutePlanVerifyRequest)
+            else CapabilityRoutePlanVerifyRequest(**dict(request))
+        )
+        return await asyncio.to_thread(
+            self.client.capability_route_plan_verify_rest,
+            normalized,
+        )
+
+    async def capability_route_plan_verify_rest_report(
+        self,
+        request: CapabilityRoutePlanVerifyRequest | Mapping[str, Any],
+    ) -> CapabilityRoutePlanVerifyReport:
+        return capability_route_plan_verify_report(await self.capability_route_plan_verify_rest(request))
 
     async def adapter_plan(
         self,

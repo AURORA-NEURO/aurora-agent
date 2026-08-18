@@ -1375,6 +1375,9 @@ impl ApiRouter {
             ("POST", "/v1/capabilities/route/plan") => {
                 self.capability_route_plan(&request, &request_id)
             }
+            ("POST", "/v1/capabilities/route/plan/verify") => {
+                self.capability_route_plan_verify(&request, &request_id)
+            }
             ("GET", "/v1/recovery") => self.recovery_matrix(),
             ("GET", "/v1/operations/snapshot") => self.operations_snapshot(&request, &request_id),
             ("GET", "/v1/operations/domains") => {
@@ -3459,6 +3462,7 @@ impl ApiRouter {
                     "capability_route": "/v1/capabilities/route",
                     "capability_route_review": "/v1/capabilities/route/review",
                     "capability_route_plan": "/v1/capabilities/route/plan",
+                    "capability_route_plan_verify": "/v1/capabilities/route/plan/verify",
                     "recovery": "/v1/recovery",
                     "operations_snapshot": "/v1/operations/snapshot",
                     "operations_domains": "/v1/operations/domains",
@@ -3553,6 +3557,8 @@ impl ApiRouter {
                     "capability_dashboard": true,
                     "capability_route": true,
                     "capability_route_review": true,
+                    "capability_route_plan": true,
+                    "capability_route_plan_verify": true,
                     "recovery_matrix": true,
                     "operations_snapshot": true,
                     "domain_coverage": true,
@@ -4267,6 +4273,22 @@ impl ApiRouter {
         self.domain_workflow_tool(
             request_id,
             "capability_route_plan",
+            Value::Object(arguments),
+        )
+    }
+
+    fn capability_route_plan_verify(
+        &self,
+        request: &HttpRequest,
+        request_id: &str,
+    ) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        self.domain_workflow_tool(
+            request_id,
+            "capability_route_plan_verify",
             Value::Object(arguments),
         )
     }
@@ -7513,6 +7535,7 @@ impl ApiRouter {
                     "/v1/capabilities/route": { "post": { "responses": { "200": { "description": "bounded non-executing cross-domain capability route proposal" }, "400": { "description": "route request JSON was invalid" }, "422": { "description": "route request was refused" } } } },
                     "/v1/capabilities/route/review": { "post": { "responses": { "200": { "description": "bounded non-executing route review and mission handoff" }, "400": { "description": "route review JSON was invalid" }, "422": { "description": "route review was refused" } } } },
                     "/v1/capabilities/route/plan": { "post": { "responses": { "200": { "description": "bounded route review composed with authoritative non-executing mission preflight" }, "400": { "description": "route plan JSON was invalid" }, "422": { "description": "route plan was refused" } } } },
+                    "/v1/capabilities/route/plan/verify": { "post": { "responses": { "200": { "description": "bounded route-plan replay and authoritative mission-preflight verification" }, "400": { "description": "route-plan verification JSON was invalid" }, "422": { "description": "route-plan verification was refused" } } } },
                     "/v1/recovery": { "get": { "responses": { "200": { "description": "operator-visible restart recovery matrix" } } } },
                     "/v1/operations/snapshot": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "bounded operator control-plane snapshot" } } } },
                     "/v1/operations/domains": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "bounded per-domain observed activity projection" } } } },
@@ -12126,6 +12149,44 @@ mod tests {
             review["review_id"]
         );
         assert_eq!(planned["route_id"], review["route_id"]);
+
+        let verified = router.handle(request(
+            "POST",
+            "/v1/capabilities/route/plan/verify",
+            json!({
+                "plan": planned,
+                "route": route,
+                "selections": [{
+                    "need_id": "audit",
+                    "tool": "capability_audit",
+                    "domain": "developer_platform",
+                    "capability": "capability_audit",
+                    "objective": "audit the capability catalogue",
+                    "arguments": {}
+                }]
+            }),
+        ));
+        assert_eq!(verified.status, 200);
+        let verified: Value = serde_json::from_slice(&verified.body).unwrap();
+        assert_eq!(verified["workflow"], "capability_route_plan_verify");
+        assert_eq!(verified["valid"], true);
+        assert_eq!(verified["verification_status"], "verified");
+        assert_eq!(verified["route_replay"]["status"], "matched");
+        assert_eq!(verified["mission_preflight"]["status"], "matched");
+        assert_eq!(verified["dispatch"], "not_started");
+
+        let shape_only = router.handle(request(
+            "POST",
+            "/v1/capabilities/route/plan/verify",
+            json!({"plan": planned}),
+        ));
+        assert_eq!(shape_only.status, 200);
+        let shape_only: Value = serde_json::from_slice(&shape_only.body).unwrap();
+        assert_eq!(shape_only["valid"], true);
+        assert_eq!(
+            shape_only["verification_status"],
+            "verified_without_route_replay"
+        );
 
         let refused = router.handle(request(
             "POST",

@@ -17,6 +17,8 @@ import type {
   CapabilityRouteArgs,
   CapabilityRoutePlanArgs,
   CapabilityRoutePlanResult,
+  CapabilityRoutePlanVerifyArgs,
+  CapabilityRoutePlanVerifyResult,
   CapabilityRouteReviewArgs,
   CapabilityRouteReviewResult,
   CapabilityRouteResult,
@@ -1962,6 +1964,34 @@ export class ApiClient {
   async capabilityRoutePlanRest(args: CapabilityRoutePlanArgs, options?: ClientRequestOptions): Promise<CapabilityRoutePlanResult> {
     if (!isObject(args)) throw new ArgumentError("capability route plan arguments must be an object");
     return this.request<CapabilityRoutePlanResult>("POST", "/v1/capabilities/route/plan", args, options);
+  }
+
+  /** Verify a retained route plan through MCP without dispatch or execution. */
+  async capabilityRoutePlanVerify(
+    args: CapabilityRoutePlanVerifyArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<CapabilityRoutePlanVerifyResult>> {
+    if (!isObject(args)) throw new ArgumentError("capability route plan verification arguments must be an object");
+    if (!isObject(args.plan)) throw new ArgumentError("capability route plan verification plan must be an object");
+    if ((args.route === undefined) !== (args.selections === undefined)) throw new ArgumentError("route and selections must be supplied together");
+    if (args.route !== undefined && !isObject(args.route)) throw new ArgumentError("capability route plan verification route must be an object");
+    if (args.selections !== undefined && (!Array.isArray(args.selections) || args.selections.length < 1 || args.selections.length > 128)) throw new ArgumentError("capability route plan verification selections must contain 1..=128 choices");
+    if (args.validate_schemas !== undefined && typeof args.validate_schemas !== "boolean") throw new ArgumentError("validate_schemas must be a boolean");
+    return this.callTool<CapabilityRoutePlanVerifyResult>("capability_route_plan_verify", args, options);
+  }
+
+  /** Verify a retained route plan through the dedicated REST endpoint. */
+  async capabilityRoutePlanVerifyRest(
+    args: CapabilityRoutePlanVerifyArgs,
+    options?: ClientRequestOptions,
+  ): Promise<CapabilityRoutePlanVerifyResult> {
+    if (!isObject(args)) throw new ArgumentError("capability route plan verification arguments must be an object");
+    if (!isObject(args.plan)) throw new ArgumentError("capability route plan verification plan must be an object");
+    if ((args.route === undefined) !== (args.selections === undefined)) throw new ArgumentError("route and selections must be supplied together");
+    if (args.route !== undefined && !isObject(args.route)) throw new ArgumentError("capability route plan verification route must be an object");
+    if (args.selections !== undefined && (!Array.isArray(args.selections) || args.selections.length < 1 || args.selections.length > 128)) throw new ArgumentError("capability route plan verification selections must contain 1..=128 choices");
+    if (args.validate_schemas !== undefined && typeof args.validate_schemas !== "boolean") throw new ArgumentError("validate_schemas must be a boolean");
+    return this.request<CapabilityRoutePlanVerifyResult>("POST", "/v1/capabilities/route/plan/verify", args, options);
   }
 
   async adapterPlan(args: AdapterPlanArgs, options?: ClientRequestOptions): Promise<RestToolResponse<AdapterPlanResult>> {

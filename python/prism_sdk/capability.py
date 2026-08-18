@@ -536,6 +536,47 @@ class CapabilityRoutePlanRequest:
 
 
 @dataclass(frozen=True)
+class CapabilityRoutePlanVerifyRequest:
+    """Replay or structurally verify a previously returned route plan."""
+
+    plan: Mapping[str, Any]
+    route: Mapping[str, Any] | None = None
+    selections: Sequence[Mapping[str, Any]] | None = None
+    validate_schemas: bool | None = None
+
+    def __post_init__(self) -> None:
+        plan = _route_mapping("route plan verification plan", self.plan)
+        if plan.get("workflow") != "capability_route_plan":
+            raise ArgumentError("route plan verification plan.workflow must be capability_route_plan")
+        if (self.route is None) != (self.selections is None):
+            raise ArgumentError("route plan verification route and selections must be supplied together")
+        if self.route is not None:
+            route = _route_mapping("route plan verification route", self.route)
+            if route.get("workflow") != "capability_route":
+                raise ArgumentError("route plan verification route.workflow must be capability_route")
+            object.__setattr__(self, "route", route)
+        if self.selections is not None:
+            if not isinstance(self.selections, Sequence) or isinstance(self.selections, (str, bytes)):
+                raise ArgumentError("route plan verification selections must be an array")
+            if not 1 <= len(self.selections) <= 128:
+                raise ArgumentError("route plan verification selections must contain between 1 and 128 choices")
+            object.__setattr__(self, "selections", tuple(_review_selection(value) for value in self.selections))
+        if self.validate_schemas is not None and not isinstance(self.validate_schemas, bool):
+            raise ArgumentError("route plan verification validate_schemas must be a boolean")
+        object.__setattr__(self, "plan", plan)
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        result: dict[str, Any] = {"plan": dict(self.plan)}
+        if self.route is not None:
+            result["route"] = dict(self.route)
+        if self.selections is not None:
+            result["selections"] = [dict(value) for value in self.selections]
+        if self.validate_schemas is not None:
+            result["validate_schemas"] = self.validate_schemas
+        return result
+
+
+@dataclass(frozen=True)
 class CapabilityRoutePlanReport:
     """Validated route-review plus authoritative mission-preflight projection."""
 
@@ -550,6 +591,9 @@ class CapabilityRoutePlanReport:
     mission: dict[str, Any] | None
     preflight: dict[str, Any] | None
     plan_digest: str | None
+    route_input_digest: str | None
+    selection_digest: str | None
+    selection_count: int | None
     route_review_provenance: dict[str, Any] | None
     dispatch: str
     execution: str
@@ -579,6 +623,23 @@ class CapabilityRoutePlanReport:
             raise ArgumentError("route plan mission_id must match the mission projection")
         plan_digest_raw = raw.get("plan_digest")
         plan_digest = None if plan_digest_raw is None else _digest("route plan plan digest", plan_digest_raw)
+        route_input_digest_raw = raw.get("route_input_digest")
+        route_input_digest = (
+            None
+            if route_input_digest_raw is None
+            else _digest("route plan route input digest", route_input_digest_raw)
+        )
+        selection_digest_raw = raw.get("selection_digest")
+        selection_digest = (
+            None
+            if selection_digest_raw is None
+            else _digest("route plan selection digest", selection_digest_raw)
+        )
+        selection_count_raw = raw.get("selection_count")
+        if selection_count_raw is not None and (
+            not isinstance(selection_count_raw, int) or isinstance(selection_count_raw, bool) or selection_count_raw < 0
+        ):
+            raise ArgumentError("route plan selection_count must be a non-negative integer")
         provenance_value = raw.get("route_review_provenance")
         provenance = None if provenance_value is None else _route_mapping("route plan route_review_provenance", provenance_value)
         return cls(
@@ -593,6 +654,9 @@ class CapabilityRoutePlanReport:
             mission=mission,
             preflight=preflight,
             plan_digest=plan_digest,
+            route_input_digest=route_input_digest,
+            selection_digest=selection_digest,
+            selection_count=selection_count_raw,
             route_review_provenance=provenance,
             dispatch=_route_text("route plan dispatch", raw.get("dispatch")),
             execution=_route_text("route plan execution", raw.get("execution")),
@@ -601,6 +665,72 @@ class CapabilityRoutePlanReport:
     @property
     def ready_for_inspection(self) -> bool:
         return self.plan_status == "ready_for_caller_inspection"
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class CapabilityRoutePlanVerifyReport:
+    """Validated replay and live-preflight verification of a route plan."""
+
+    raw: dict[str, Any]
+    mission_id: str
+    route_id: str
+    review_id: str
+    catalog_digest: str
+    plan_status: str
+    plan_digest: str | None
+    valid: bool
+    verification_status: str
+    route_replay: dict[str, Any]
+    mission_preflight: dict[str, Any]
+    mismatches: tuple[dict[str, Any], ...]
+    dispatch: str
+    execution: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "CapabilityRoutePlanVerifyReport":
+        raw = _route_mapping("capability route plan verification report", value)
+        if raw.get("workflow") != "capability_route_plan_verify":
+            raise ArgumentError("route plan verification.workflow must be capability_route_plan_verify")
+        valid = raw.get("valid")
+        if not isinstance(valid, bool):
+            raise ArgumentError("route plan verification valid must be a boolean")
+        verification_status = _route_text("route plan verification status", raw.get("verification_status"))
+        if verification_status not in {
+            "verified",
+            "verified_without_route_replay",
+            "mismatch",
+            "blocked_by_route_replay",
+            "blocked_by_mission_preflight",
+        }:
+            raise ArgumentError("unknown route plan verification status")
+        mismatches_raw = raw.get("mismatches", [])
+        if not isinstance(mismatches_raw, Sequence) or isinstance(mismatches_raw, (str, bytes)):
+            raise ArgumentError("route plan verification mismatches must be an array")
+        mismatches = tuple(_route_mapping("route plan verification mismatch", item) for item in mismatches_raw)
+        plan_digest_raw = raw.get("plan_digest")
+        return cls(
+            raw=raw,
+            mission_id=_route_text("route plan verification mission_id", raw.get("mission_id")),
+            route_id=_route_text("route plan verification route_id", raw.get("route_id")),
+            review_id=_route_text("route plan verification review_id", raw.get("review_id")),
+            catalog_digest=_route_text("route plan verification catalog_digest", raw.get("catalog_digest")),
+            plan_status=_route_text("route plan verification plan_status", raw.get("plan_status")),
+            plan_digest=None if plan_digest_raw is None else _digest("route plan verification plan digest", plan_digest_raw),
+            valid=valid,
+            verification_status=verification_status,
+            route_replay=_route_mapping("route plan verification route_replay", raw.get("route_replay")),
+            mission_preflight=_route_mapping("route plan verification mission_preflight", raw.get("mission_preflight")),
+            mismatches=mismatches,
+            dispatch=_route_text("route plan verification dispatch", raw.get("dispatch")),
+            execution=_route_text("route plan verification execution", raw.get("execution")),
+        )
+
+    @property
+    def verified(self) -> bool:
+        return self.valid and self.verification_status in {"verified", "verified_without_route_replay"}
 
     def to_dict(self) -> dict[str, Any]:
         return dict(self.raw)
@@ -649,6 +779,14 @@ def capability_route_plan_report(value: Mapping[str, Any]) -> CapabilityRoutePla
     """Parse a direct route-plan payload or an HTTP tool envelope."""
 
     return CapabilityRoutePlanReport.from_wire(_tool_payload(value, "capability_route_plan"))
+
+
+def capability_route_plan_verify_report(value: Mapping[str, Any]) -> CapabilityRoutePlanVerifyReport:
+    """Parse a direct route-plan verification payload or an HTTP tool envelope."""
+
+    return CapabilityRoutePlanVerifyReport.from_wire(
+        _tool_payload(value, "capability_route_plan_verify")
+    )
 
 
 @dataclass(frozen=True)
@@ -2747,6 +2885,8 @@ __all__ = [
     "CapabilityRouteReviewReport",
     "CapabilityRoutePlanRequest",
     "CapabilityRoutePlanReport",
+    "CapabilityRoutePlanVerifyRequest",
+    "CapabilityRoutePlanVerifyReport",
     "MissionEvaluatorQuery",
     "MissionEvaluatorReviewRequest",
     "MissionEvaluatorBindingReport",
@@ -2778,6 +2918,7 @@ __all__ = [
     "domain_workflow_reconciliation_report",
     "capability_route_review_report",
     "capability_route_plan_report",
+    "capability_route_plan_verify_report",
     "capability_discover_report",
     "capability_audit_report",
     "mission_evaluator_discover_report",

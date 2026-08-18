@@ -10,7 +10,7 @@ an implementation — so read the numbers as *"someone has read this and taken a
 never as *"this is done"*. The stronger criterion would be a conformance test per module. It does
 not exist and is not being claimed.
 
-The MCP integration layer currently exposes 211 callable tools. That count is intentionally
+The MCP integration layer currently exposes 222 callable tools. That count is intentionally
 separate from this citation denominator: `pack_health_assess`, `sdk_registry_check`, and
 `repository_impact` make existing typed contracts agent-callable, while `world_generate`,
 `hub_submission_review`, and `telemetry_project` add bounded in-tree generation, public-hub
@@ -247,6 +247,11 @@ diagnostics, optional claim/evaluator/workflow bindings, and explicit `dispatch:
 blocked route review or blocked preflight remains a structured plan status rather than an inferred
 partial mission. The compiler never chooses tools, invents arguments, dispatches nested tools, or
 turns routing evidence into authorization.
+`capability_route_plan_verify` is the companion offline/replay boundary. It validates a retained plan,
+reruns the authoritative mission preflight, and optionally reruns route review when the original route
+and selections are supplied. It reports identity/digest mismatches explicitly, distinguishes
+`verified_without_route_replay` from full replay verification, and remains permanently
+`dispatch: "not_started"` / `execution: "not_started"`.
 The HTTP event page and bounded SSE snapshot accept the same exact `review_id` filter, and
 `/v1/route-reviews/{review_id}/evidence` provides a typed retained-evidence lookup. Missing
 retained evidence is reported as an empty bounded window, never upgraded into a historical

@@ -1815,6 +1815,7 @@ impl Server {
             "capability_route" => self.capability_route(&arguments),
             "capability_route_review" => self.capability_route_review(&arguments),
             "capability_route_plan" => self.capability_route_plan(&arguments),
+            "capability_route_plan_verify" => self.capability_route_plan_verify(&arguments),
             "domain_workflow_catalogue" => self.domain_workflow_catalogue(&arguments),
             "domain_workflow_scaffold" => self.domain_workflow_scaffold(&arguments),
             "domain_workflow_instantiate" => self.domain_workflow_instantiate(&arguments),
@@ -28713,6 +28714,13 @@ impl Server {
             "selections": selections,
             "validate_schemas": validate_schemas,
         });
+        let route_input_digest = bioprism_ids::ContentHash::of_value(&Value::Object(route.clone()))
+            .map_err(|error| format!("cannot hash capability route plan route input: {error}"))?
+            .to_string();
+        let selection_digest =
+            bioprism_ids::ContentHash::of_value(&Value::Array(selections.clone()))
+                .map_err(|error| format!("cannot hash capability route plan selections: {error}"))?
+                .to_string();
         let review = self.capability_route_review(&review_arguments)?;
         let review_ready = review.get("review_status").and_then(Value::as_str) == Some("ready");
 
@@ -28725,6 +28733,9 @@ impl Server {
             "catalog_digest": review.get("catalog_digest").cloned().unwrap_or(Value::Null),
             "goal": review.get("goal").cloned().unwrap_or(Value::Null),
             "review": review.clone(),
+            "route_input_digest": route_input_digest,
+            "selection_digest": selection_digest,
+            "selection_count": selections.len(),
             "mission": Value::Null,
             "preflight": Value::Null,
             "plan_status": if review_ready { "preflight_pending" } else { "blocked_by_route_review" },
@@ -28810,6 +28821,269 @@ impl Server {
             );
         }
         Ok(output)
+    }
+
+    /// Verify a previously returned route plan against its content-addressed inputs and the live
+    /// authoritative mission boundary without executing any nested tool.
+    ///
+    /// A caller may provide the original route and selections to replay the complete route-review
+    /// and preflight composition. Without them, the verifier still checks the retained plan shape,
+    /// nested identities, and mission preflight, but reports that route replay was not requested;
+    /// it never upgrades that weaker check into proof that the original candidate membership is
+    /// still current.
+    fn capability_route_plan_verify(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments).map_err(|error| {
+            format!("cannot encode capability route plan verification input: {error}")
+        })?;
+        if encoded.len() > 20_000_000 {
+            return Err(
+                "capability route plan verification input exceeds the 20000000-byte safety bound"
+                    .into(),
+            );
+        }
+        let object = arguments
+            .as_object()
+            .ok_or("capability route plan verification input must be an object")?;
+        let plan = object
+            .get("plan")
+            .and_then(Value::as_object)
+            .ok_or("capability route plan verification requires a plan object")?;
+        let plan_value = Value::Object(plan.clone());
+        if plan.get("workflow").and_then(Value::as_str) != Some("capability_route_plan") {
+            return Err("plan.workflow must be capability_route_plan".into());
+        }
+        let mission_id = plan
+            .get("mission_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or("plan.mission_id must be a non-empty string")?;
+        let plan_status = plan
+            .get("plan_status")
+            .and_then(Value::as_str)
+            .ok_or("plan.plan_status must be a non-empty string")?;
+        let route_id = plan
+            .get("route_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or("plan.route_id must be a non-empty string")?;
+        let review_id = plan
+            .get("review_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or("plan.review_id must be a non-empty string")?;
+        let catalog_digest = plan
+            .get("catalog_digest")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or("plan.catalog_digest must be a non-empty string")?;
+        let review = plan
+            .get("review")
+            .and_then(Value::as_object)
+            .ok_or("plan.review must be an object")?;
+        let mut mismatches = Vec::<Value>::new();
+        for (field, expected) in [
+            ("route_id", route_id),
+            ("review_id", review_id),
+            ("catalog_digest", catalog_digest),
+        ] {
+            if review.get(field).and_then(Value::as_str) != Some(expected) {
+                mismatches.push(json!({
+                    "code": "review_identity_mismatch",
+                    "field": field,
+                    "expected": expected,
+                    "observed": review.get(field).cloned().unwrap_or(Value::Null),
+                }));
+            }
+        }
+        if plan.get("dispatch").and_then(Value::as_str) != Some("not_started") {
+            mismatches.push(json!({
+                "code": "dispatch_started",
+                "message": "a route plan verifier accepts only non-dispatching plans"
+            }));
+        }
+        if plan.get("execution").and_then(Value::as_str) != Some("not_started") {
+            mismatches.push(json!({
+                "code": "execution_started",
+                "message": "a route plan verifier accepts only non-executing plans"
+            }));
+        }
+        let route = object.get("route");
+        let selections = object.get("selections");
+        if route.is_some() != selections.is_some() {
+            mismatches.push(json!({
+                "code": "incomplete_route_replay_input",
+                "message": "route and selections must be supplied together for route replay"
+            }));
+        }
+        let validate_schemas = match object.get("validate_schemas") {
+            None => review
+                .get("schema_review")
+                .and_then(Value::as_object)
+                .and_then(|schema| schema.get("requested"))
+                .and_then(Value::as_bool)
+                .unwrap_or(true),
+            Some(Value::Bool(value)) => *value,
+            Some(_) => return Err("validate_schemas must be a boolean".into()),
+        };
+        let mut route_replay = json!({
+            "requested": false,
+            "status": "not_requested",
+            "matched": Value::Null,
+        });
+        if let (Some(route), Some(selections)) = (route, selections) {
+            let route = route
+                .as_object()
+                .ok_or("route replay route must be an object")?;
+            let selections = selections
+                .as_array()
+                .ok_or("route replay selections must be an array")?;
+            let mut replay_arguments = json!({
+                "mission_id": mission_id,
+                "route": route,
+                "selections": selections,
+                "validate_schemas": validate_schemas,
+                "policy": plan_value.pointer("/mission/policy").cloned().unwrap_or_else(|| json!({})),
+                "claim_requests": plan_value.pointer("/mission/claim_requests").cloned().unwrap_or_else(|| json!([])),
+            });
+            for field in ["evaluator_review", "workflow_binding"] {
+                if let Some(value) = plan_value.pointer(&format!("/mission/{field}")) {
+                    if !value.is_null() {
+                        replay_arguments[field] = value.clone();
+                    }
+                }
+            }
+            let replay = match self.capability_route_plan(&replay_arguments) {
+                Ok(value) => value,
+                Err(error) => {
+                    mismatches.push(json!({
+                        "code": "route_replay_blocked",
+                        "message": error.clone(),
+                    }));
+                    route_replay = json!({
+                        "requested": true,
+                        "status": "blocked",
+                        "matched": false,
+                        "error": error,
+                    });
+                    Value::Null
+                }
+            };
+            if replay.is_object() {
+                let mut replay_mismatches = Vec::new();
+                for field in [
+                    "route_id",
+                    "review_id",
+                    "catalog_digest",
+                    "plan_digest",
+                    "plan_status",
+                    "route_input_digest",
+                    "selection_digest",
+                    "selection_count",
+                ] {
+                    if plan.get(field) != replay.get(field) {
+                        replay_mismatches.push(json!({
+                            "code": "replay_field_mismatch",
+                            "field": field,
+                            "expected": plan.get(field).cloned().unwrap_or(Value::Null),
+                            "observed": replay.get(field).cloned().unwrap_or(Value::Null),
+                        }));
+                    }
+                }
+                let matched = replay_mismatches.is_empty();
+                route_replay = json!({
+                    "requested": true,
+                    "status": if matched { "matched" } else { "mismatched" },
+                    "matched": matched,
+                    "mismatches": replay_mismatches,
+                    "route_input_digest": replay.get("route_input_digest").cloned().unwrap_or(Value::Null),
+                    "selection_digest": replay.get("selection_digest").cloned().unwrap_or(Value::Null),
+                });
+                if !matched {
+                    if let Some(rows) = route_replay.get("mismatches").and_then(Value::as_array) {
+                        mismatches.extend(rows.iter().cloned());
+                    }
+                }
+            }
+        }
+        let mut mission_preflight = json!({
+            "requested": false,
+            "status": "not_requested",
+            "matched": Value::Null,
+        });
+        if let Some(mission) = plan.get("mission").and_then(Value::as_object) {
+            let preflight = match self.preflight_agent_mission(&Value::Object(mission.clone())) {
+                Ok(value) => value,
+                Err(error) => json!({
+                    "ok": false,
+                    "dispatch": "not_started",
+                    "error": error,
+                    "fail_closed": true,
+                }),
+            };
+            let preflight_ok = preflight.get("ok") == Some(&Value::Bool(true));
+            let expected_digest = plan.get("plan_digest").cloned().unwrap_or(Value::Null);
+            let observed_digest = preflight
+                .pointer("/plan/digest")
+                .cloned()
+                .unwrap_or(Value::Null);
+            let matched = preflight_ok && expected_digest == observed_digest;
+            if !matched {
+                mismatches.push(json!({
+                    "code": if preflight_ok { "mission_plan_digest_mismatch" } else { "mission_preflight_blocked" },
+                    "expected": expected_digest,
+                    "observed": observed_digest,
+                }));
+            }
+            mission_preflight = json!({
+                "requested": true,
+                "status": if matched { "matched" } else if preflight_ok { "mismatched" } else { "blocked" },
+                "matched": matched,
+                "ok": preflight_ok,
+                "plan_digest": observed_digest,
+                "dispatch": "not_started",
+            });
+        }
+        let valid = mismatches.is_empty();
+        let verification_status = if valid {
+            if route_replay["requested"] == json!(true) {
+                "verified"
+            } else {
+                "verified_without_route_replay"
+            }
+        } else if route_replay["status"] == json!("blocked") {
+            "blocked_by_route_replay"
+        } else if mission_preflight["status"] == json!("blocked") {
+            "blocked_by_mission_preflight"
+        } else {
+            "mismatch"
+        };
+        Ok(json!({
+            "ok": true,
+            "workflow": "capability_route_plan_verify",
+            "mission_id": mission_id,
+            "route_id": route_id,
+            "review_id": review_id,
+            "catalog_digest": catalog_digest,
+            "plan_status": plan_status,
+            "plan_digest": plan.get("plan_digest").cloned().unwrap_or(Value::Null),
+            "valid": valid,
+            "verification_status": verification_status,
+            "route_replay": route_replay,
+            "mission_preflight": mission_preflight,
+            "mismatches": mismatches,
+            "dispatch": "not_started",
+            "execution": "not_started",
+            "guarantees": [
+                "verification is non-executing and reruns only route review and mission preflight",
+                "route replay is explicit; omitted route inputs never become a claim of current candidate membership",
+                "identity and plan-digest mismatches remain visible instead of being coerced into validity"
+            ],
+            "limitations": [
+                "verification cannot establish domain semantics, provider availability, scientific validity, or authorization",
+                "without route and selections, only the retained plan shape and mission preflight are checked",
+                "the verifier does not persist a distributed audit record or resume a mission"
+            ]
+        }))
     }
 
     /// Reconcile a returned mission report with delegated check evidence without executing it.
@@ -33121,7 +33395,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "documentation_and_knowledge",
             "domains": ["repository navigation", "documentation graph", "task routes", "context bundles"],
             "crates": ["bioprism-docgraph", "bioprism-graph", "bioprism-lens"],
-            "mcp_tools": ["workspace_capabilities", "capability_audit", "capability_dashboard", "capability_discover", "capability_route", "capability_route_review", "capability_route_plan", "domain_workflow_catalogue", "domain_workflow_scaffold", "domain_workflow_instantiate", "domain_workflow_reconcile", "domain_workflow_reconciliation_import", "domain_workflow_reconciliation_query", "domain_workflow_reconciliation_get", "repository_catalog", "repository_bundle", "repository_impact", "lens_catalogue", "lens_leakage_check", "projection_bundle"],
+            "mcp_tools": ["workspace_capabilities", "capability_audit", "capability_dashboard", "capability_discover", "capability_route", "capability_route_review", "capability_route_plan", "capability_route_plan_verify", "domain_workflow_catalogue", "domain_workflow_scaffold", "domain_workflow_instantiate", "domain_workflow_reconcile", "domain_workflow_reconciliation_import", "domain_workflow_reconciliation_query", "domain_workflow_reconciliation_get", "repository_catalog", "repository_bundle", "repository_impact", "lens_catalogue", "lens_leakage_check", "projection_bundle"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -36410,6 +36684,20 @@ pub fn tool_definitions() -> Vec<Value> {
                     "workflow_binding": { "type": "object", "description": "Optional digest-bound domain_workflow_instantiate binding passed through to mission preflight." }
                 },
                 "required": ["mission_id", "route", "selections"]
+            }
+        }),
+        json!({
+            "name": "capability_route_plan_verify",
+            "description": "Verify a previously returned capability_route_plan against its retained identities and the live authoritative mission preflight without dispatch. Supplying the original route and selections explicitly replays route review and compares route, selection, review, catalogue, plan digest, and status fields; omitting them performs only retained-plan shape and mission-preflight verification and reports that route replay was not requested.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "plan": { "type": "object", "description": "Complete capability_route_plan result to verify." },
+                    "route": { "type": "object", "description": "Optional original capability_route result. Must be supplied with selections to request route replay." },
+                    "selections": { "type": "array", "minItems": 1, "maxItems": 128, "description": "Optional original caller selections. Must be supplied with route to request route replay." },
+                    "validate_schemas": { "type": "boolean", "description": "Optional schema-validation mode for explicit route replay; defaults to the retained review mode." }
+                },
+                "required": ["plan"]
             }
         }),
         json!({

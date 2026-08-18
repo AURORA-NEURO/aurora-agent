@@ -762,6 +762,12 @@ invent defaults:
   and explicit blocked transport outcomes. `Workspace`, `AsyncWorkspace`, `ApiClient`, and
   `AsyncApiClient` expose MCP and dedicated REST variants; every result remains
   `dispatch: "not_started"` and still requires caller inspection before `agent_mission`.
+- `CapabilityRoutePlanVerifyRequest` and `capability_route_plan_verify(...)` verify a retained plan
+  without dispatch. The verifier reruns mission preflight and optionally replays route review when
+  the caller supplies the original route and selections; `CapabilityRoutePlanVerifyReport` keeps
+  replay status, mismatch diagnostics, and the explicit distinction between full verification and
+  `verified_without_route_replay`. Workspace, async Workspace, HTTP, and async HTTP clients expose
+  raw and typed MCP/REST variants.
 - `DomainWorkflowInstantiateRequest`, `DomainWorkflowCatalogueReport`, and
   `DomainWorkflowInstantiationReport` expose the complete workflow-template bridge. Sync and async
   `Workspace` methods call the MCP tools; `ApiClient` and `AsyncApiClient` also expose the dedicated

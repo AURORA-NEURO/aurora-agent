@@ -37,7 +37,7 @@ if (result.mcp.result?.isError) {
   `bioAtlasPublicationAudit`, `repositoryCatalog`, `repositoryBundle`, `repositoryImpact`,
   `telemetryProject`, `developerDeliveryAudit`, `developerWorkbench`, `agentMission`,
   `capabilityDiscover`, `capabilityAudit`, `capabilityRoute`, `adapterPlan`,
-  `capabilityRoutePlan`,
+  `capabilityRoutePlan`, `capabilityRoutePlanVerify`, and `capabilityRoutePlanVerifyRest`,
   `runtimeExecutionSimulate`, `packCatalogue`, `packHealthAssess`, `securityRedteamSimulate`, and
   `worldGenerate`, `factoryLifecycleSimulate`, `storageLifecycleSimulate`, and
   `registryLifecycleSimulate`, and `cacheInvalidationSimulate`
@@ -140,6 +140,9 @@ if (result.mcp.result?.isError) {
   mission-preflight boundaries. It returns a typed `CapabilityRoutePlanResult` with the reviewed
   mission, `plan_digest`, schema/preflight findings, and `dispatch: "not_started"`; it rejects
   `policy.execute: true` and leaves all tool selection and execution authorization with the caller.
+- `capabilityRoutePlanVerify()` and `capabilityRoutePlanVerifyRest()` recheck a retained plan without
+  dispatch. Supplying the original route and selections enables route-review replay; otherwise the
+  typed result explicitly reports `verified_without_route_replay`.
 - The Rust mission executor performs the final authoritative JSON Schema check against the live
   `tools/list` definitions, including a second check after bindings are materialized; schema
   refusals carry bounded JSON-pointer diagnostics and a schema digest before nested dispatch.

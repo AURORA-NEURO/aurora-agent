@@ -323,7 +323,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 221);
+    assert_eq!(tools.len(), 222);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -7883,12 +7883,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(221));
-    assert_eq!(result["advertised_tool_count"], json!(221));
+    assert_eq!(result["unique_catalog_tools"], json!(222));
+    assert_eq!(result["advertised_tool_count"], json!(222));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(221));
-    assert_eq!(result["schema_quality"]["valid"], json!(221));
+    assert_eq!(result["schema_quality"]["checked"], json!(222));
+    assert_eq!(result["schema_quality"]["valid"], json!(222));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -8313,6 +8313,72 @@ fn capability_route_review_builds_non_executing_handoff_and_reports_bad_selectio
     assert_eq!(schema_review["schema_review"]["requested"], json!(true));
     assert_eq!(schema_review["schema_review"]["valid"], json!(true));
     assert_eq!(schema_review["schema_review"]["checked"], json!(1));
+}
+
+#[test]
+fn capability_route_plan_verifier_replays_inputs_and_preserves_no_dispatch() {
+    let mut server = server();
+    let route = call(
+        &mut server,
+        "capability_route",
+        json!({
+            "goal": "verify a reviewed plan",
+            "needs": [{"id": "audit", "tool": "capability_audit"}],
+            "max_candidates_per_need": 2,
+            "max_tools": 2
+        }),
+    );
+    let selections = json!([{
+        "need_id": "audit",
+        "tool": "capability_audit",
+        "domain": "developer_platform",
+        "capability": "capability_audit",
+        "objective": "audit the capability catalogue",
+        "arguments": {}
+    }]);
+    let plan = call(
+        &mut server,
+        "capability_route_plan",
+        json!({
+            "mission_id": "route-plan-verifier",
+            "route": route,
+            "selections": selections
+        }),
+    );
+    assert_eq!(plan["__isError"], json!(false));
+    assert_eq!(plan["plan_status"], json!("ready_for_caller_inspection"));
+    assert_eq!(plan["route_input_digest"].as_str().unwrap().len(), 64);
+    assert_eq!(plan["selection_digest"].as_str().unwrap().len(), 64);
+    assert_eq!(plan["selection_count"], json!(1));
+    let original_plan = plan.clone();
+
+    let verified = call(
+        &mut server,
+        "capability_route_plan_verify",
+        json!({
+            "plan": original_plan.clone(),
+            "route": route,
+            "selections": selections
+        }),
+    );
+    assert_eq!(verified["__isError"], json!(false));
+    assert_eq!(verified["workflow"], json!("capability_route_plan_verify"));
+    assert_eq!(verified["valid"], json!(true));
+    assert_eq!(verified["verification_status"], json!("verified"));
+    assert_eq!(verified["route_replay"]["status"], json!("matched"));
+    assert_eq!(verified["mission_preflight"]["status"], json!("matched"));
+    assert_eq!(verified["dispatch"], json!("not_started"));
+
+    let mut tampered_plan = original_plan;
+    tampered_plan["plan_digest"] = json!("f");
+    let invalid = call(
+        &mut server,
+        "capability_route_plan_verify",
+        json!({"plan": tampered_plan}),
+    );
+    assert_eq!(invalid["__isError"], json!(false));
+    assert_eq!(invalid["valid"], json!(false));
+    assert_eq!(invalid["verification_status"], json!("mismatch"));
 }
 
 #[test]

@@ -26,6 +26,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `POST /v1/capabilities/route` | Raw non-executing cross-domain route proposal without an MCP response envelope |
 | `POST /v1/capabilities/route/review` | Raw non-executing caller-selection review and mission handoff without an MCP response envelope |
 | `POST /v1/capabilities/route/plan` | Raw non-executing composition of route review and authoritative mission preflight |
+| `POST /v1/capabilities/route/plan/verify` | Raw non-executing structural/replay verification of a retained route plan |
 | `GET /v1/recovery` | One operator-visible matrix of restart, secret, outbox, delivery-provenance, and external-effect boundaries |
 | `GET /v1/operations/snapshot?after=N&limit=M` | One bounded operator control-plane snapshot joining event, mission, persistence, recovery, and capability summaries |
 | `GET /v1/operations/domains?after=N&limit=M` | Per-domain catalogue coverage plus exact local tool activity observed in the requested event page |
@@ -547,6 +548,14 @@ and its preflight; a transport-unavailable or malformed selected tool is returne
 always returns `dispatch: "not_started"`, never chooses a candidate, and never executes a domain
 tool. This applies uniformly to every current capability group because it consumes the live
 catalogue rather than a domain-specific allow-list.
+
+`POST /v1/capabilities/route/plan/verify` verifies a previously returned plan without dispatching it.
+The required `plan` is checked for identity and shape, and its retained mission is sent through the
+authoritative preflight again. Callers may also provide the original `route` and `selections` to
+replay route review and compare the route, review, catalogue, plan, and selection digests. Omitting
+those inputs is intentionally reported as `verified_without_route_replay`; it is not a claim that
+the original candidates are still current. A blocked replay or preflight remains an explicit failed
+verification status, and both dispatch and execution remain `not_started`.
 
 `GET /v1/operations/domains` applies the same cursor bounds to a per-domain activity projection.
 Each group retains catalogue counts, missing names, observed event/tool counts, the last observed

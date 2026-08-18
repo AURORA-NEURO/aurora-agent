@@ -345,6 +345,10 @@ joined across MCP, REST, SDK, event, and webhook records without timestamp coupl
 Python, and TypeScript: it reruns the review, builds the exact selected mission, invokes only the
 authoritative non-executing preflight, and returns a plan digest plus structured route/preflight
 blockers. It intentionally leaves dispatch and authorization with the caller.
+`capability_route_plan_verify` now closes the corresponding replay seam across MCP, REST, Python,
+and TypeScript. It can verify a retained plan structurally, rerun mission preflight, and—when the
+caller preserves the original route and selections—replay route review and compare all content
+digests. Missing replay inputs are explicit limitations rather than an implicit freshness claim.
 The companion `capability_dashboard` provides the missing operator inventory: it binds catalogue
 groups to the authoritative `tools/list` schemas, separates callable/partial/declared-only rows,
 keeps crate, CLI, Python, MCP-membership, and schema-backed counts independent, and reports explicit

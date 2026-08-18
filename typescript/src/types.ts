@@ -5098,7 +5098,37 @@ export interface CapabilityRoutePlanResult extends JsonObject {
   mission: JsonObject | null;
   preflight: JsonObject | null;
   plan_digest?: string | null;
+  route_input_digest?: string | null;
+  selection_digest?: string | null;
+  selection_count?: number;
   route_review_provenance?: JsonObject | null;
+  dispatch: "not_started";
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface CapabilityRoutePlanVerifyArgs extends JsonObject {
+  plan: JsonObject;
+  route?: JsonObject;
+  selections?: MissionRouteSelection[];
+  validate_schemas?: boolean;
+}
+
+export interface CapabilityRoutePlanVerifyResult extends JsonObject {
+  ok: boolean;
+  workflow: "capability_route_plan_verify";
+  mission_id: string;
+  route_id: string;
+  review_id: string;
+  catalog_digest: string;
+  plan_status: string;
+  plan_digest?: string | null;
+  valid: boolean;
+  verification_status: "verified" | "verified_without_route_replay" | "mismatch" | "blocked_by_route_replay" | "blocked_by_mission_preflight";
+  route_replay: JsonObject;
+  mission_preflight: JsonObject;
+  mismatches: JsonObject[];
   dispatch: "not_started";
   execution: "not_started";
   guarantees: string[];
