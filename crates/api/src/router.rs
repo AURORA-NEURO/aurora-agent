@@ -2576,6 +2576,19 @@ impl ApiRouter {
                 )
             }
         };
+        let artifact_registry = match self.artifact_registry.lock() {
+            Ok(registry) => registry,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "artifact_registry_unavailable",
+                    "artifact registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let artifact_registry_generation = artifact_registry.generation();
+        let artifact_registry_size = artifact_registry.len();
         let capability_groups = bioprism_mcp::workspace_capabilities();
         let mut tools_by_group = BTreeMap::<String, BTreeSet<String>>::new();
         if let Some(capability_groups) = capability_groups.as_array() {
@@ -2664,9 +2677,32 @@ impl ApiRouter {
         let mut groups_insufficient_evidence = 0usize;
         let mut groups_review_required = 0usize;
         let mut groups_reconciliation_blocked = 0usize;
+        let mut groups_with_artifact_evidence = 0usize;
+        let mut artifact_evidence_records = 0usize;
         let mut rows = Vec::new();
         for group in groups {
             let id = group.get("id").and_then(Value::as_str).unwrap_or("unknown");
+            let group_domains = group
+                .get("domains")
+                .and_then(Value::as_array)
+                .map(|values| {
+                    values
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let artifact_evidence = artifact_registry.domain_evidence_posture(id, &group_domains);
+            let matching_artifact_records = artifact_evidence
+                .get("matching_record_count")
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as usize;
+            if matching_artifact_records > 0 {
+                groups_with_artifact_evidence += 1;
+                artifact_evidence_records =
+                    artifact_evidence_records.saturating_add(matching_artifact_records);
+            }
             let reconciliation_posture = reconciliation_registry.workflow_posture(id);
             let reconciliation_state = reconciliation_posture
                 .get("state")
@@ -2795,10 +2831,12 @@ impl ApiRouter {
                     },
                     "safety_evidence": channel_gate("safety"),
                     "release_evidence": channel_gate("release"),
-                    "reconciliation_evidence": reconciliation_posture
+                    "reconciliation_evidence": reconciliation_posture,
+                    "artifact_evidence": artifact_evidence
                 },
                 "last_event_id": last_event_id,
-                "evidence_scope": "requested_event_page_only"
+                "evidence_scope": "requested_event_page_only",
+                "artifact_evidence_scope": "current_digest_verified_artifact_registry_exact_declared_matches"
             }));
         }
         let unmatched_tool_events = tool_events_scanned.saturating_sub(attributed_event_ids.len());
@@ -2815,6 +2853,7 @@ impl ApiRouter {
                 "dropped_events": page.dropped_events,
                 "returned_events": page.events.len()
             },
+            "artifact_evidence_scope": "current_digest_verified_artifact_registry_exact_declared_matches",
             "groups": rows,
             "summary": {
                 "group_count": coverage.get("group_count").and_then(Value::as_u64).unwrap_or(0),
@@ -2832,13 +2871,20 @@ impl ApiRouter {
                 "groups_insufficient_evidence": groups_insufficient_evidence,
                 "groups_review_required": groups_review_required,
                 "groups_reconciliation_blocked": groups_reconciliation_blocked,
+                "groups_with_artifact_evidence": groups_with_artifact_evidence,
+                "artifact_evidence_records": artifact_evidence_records,
+                "artifact_registry_generation": artifact_registry_generation,
+                "artifact_registry_size": artifact_registry_size,
                 "readiness_claimed": false
             },
             "gate_policy": {
                 "required_gates": operations_required_gates(),
+                "optional_evidence_gates": ["artifact_evidence"],
                 "decision_rule": "all gates need observed evidence; domain evaluator evidence must bind a completed evaluator tool to the selected capability group; a complete evidence set still requires human or domain authority review",
                 "event_matching": "exact advertised tool name from event payload or subject",
                 "scope": "only the bounded event page requested by the caller",
+                "artifact_evidence_scope": "exact declared artifact registration domain intersection or explicit artifact.group_id for the selected capability group",
+                "artifact_evidence_policy": "advisory; missing artifact evidence is visible and never promoted to readiness or used to pass a required gate",
                 "control_plane_evidence_scope": "completed evaluation, safety, and release tools are pooled across the page and applied to each matched domain group",
                 "domain_evaluator_binding_scope": "only completed evaluation-channel tools with an exact or catalogue-declared capability-group binding",
                 "reconciliation_evidence_scope": "matching workflow_id rows from the bounded digest-valid reconciliation registry",
@@ -2851,6 +2897,7 @@ impl ApiRouter {
                 "reconciliation evidence is joined by exact capability-group workflow_id and cannot be inferred from a different domain",
                 "domain evaluator evidence is a bounded catalogue binding and does not assert scientific validity or evaluator adequacy",
                 "missing evidence is represented as a gate state instead of inferred readiness",
+                "artifact evidence is joined from the current digest-verified registry for every returned capability group",
                 "no tool is invoked by this projection"
             ],
             "non_claims": [
@@ -10004,6 +10051,53 @@ mod tests {
         assert_eq!(
             biological["gates"]["domain_evaluator_evidence"]["scope"],
             "completed_evaluator_tool_exact_or_catalogue_group_binding"
+        );
+        assert_eq!(biological["gates"]["artifact_evidence"]["state"], "missing");
+        assert_eq!(gates["summary"]["groups_with_artifact_evidence"], 0);
+        assert_eq!(
+            gates["gate_policy"]["optional_evidence_gates"],
+            json!(["artifact_evidence"])
+        );
+
+        let artifact = router.handle(request(
+            "POST",
+            "/v1/artifacts",
+            json!({
+                "kind": "domain_report",
+                "subject_id": "gate-artifact",
+                "domains": ["oncology"],
+                "parent_digests": [],
+                "artifact": {"status": "review"}
+            }),
+        ));
+        assert_eq!(artifact.status, 201);
+        let with_artifact = router.handle(request(
+            "GET",
+            "/v1/operations/gates?after=0&limit=10",
+            json!({}),
+        ));
+        assert_eq!(with_artifact.status, 200);
+        let with_artifact: Value = serde_json::from_slice(&with_artifact.body).unwrap();
+        let biological = with_artifact["groups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|group| group["id"] == "biological_domains")
+            .unwrap();
+        assert_eq!(
+            biological["gates"]["artifact_evidence"]["state"],
+            "observed"
+        );
+        assert_eq!(
+            biological["gates"]["artifact_evidence"]["matching_record_count"],
+            1
+        );
+        assert_eq!(biological["gate_state"], "review_required");
+        assert!(
+            with_artifact["summary"]["groups_with_artifact_evidence"]
+                .as_u64()
+                .unwrap()
+                > 0
         );
 
         let mut incomplete_reconciliation = json!({

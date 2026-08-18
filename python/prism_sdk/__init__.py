@@ -543,7 +543,7 @@ from .errors import (
     ToolRefusal,
     TransportError,
 )
-from .events import ApiEvent, DeliveryAttempt, DeliveryAttemptPage, DeliveryPage, DeliveryReceiptAttempts, DeliveryReceiptEvents, DeliveryView, EventPage, EventPersistenceStatus, MAX_EVENT_PAGE, MAX_OPERATIONS_DOMAIN_GROUPS, MAX_OPERATIONS_DOMAIN_TOOLS, MAX_OPERATIONS_SNAPSHOT_LIMIT, OperationsDomainActivity, OperationsDomainActivityGroup, OperationsDomainCoverage, OperationsDomainGateGroup, OperationsDomainGates, OperationsDomainGroup, OperationsGateReview, OperationsGateReviews, OperationsHandoff, OperationsHandoffGroup, OperationsReconciliationPosture, OperationsSnapshot, RecoveryBoundary, RecoveryMatrix, RouteReviewEvidence, SseEvent, SseSnapshot, parse_sse, validate_receipt_id, validate_review_id
+from .events import ApiEvent, DeliveryAttempt, DeliveryAttemptPage, DeliveryPage, DeliveryReceiptAttempts, DeliveryReceiptEvents, DeliveryView, EventPage, EventPersistenceStatus, MAX_EVENT_PAGE, MAX_OPERATIONS_DOMAIN_GROUPS, MAX_OPERATIONS_DOMAIN_TOOLS, MAX_OPERATIONS_SNAPSHOT_LIMIT, OperationsArtifactEvidencePosture, OperationsDomainActivity, OperationsDomainActivityGroup, OperationsDomainCoverage, OperationsDomainGateGroup, OperationsDomainGates, OperationsDomainGroup, OperationsGateReview, OperationsGateReviews, OperationsHandoff, OperationsHandoffGroup, OperationsReconciliationPosture, OperationsSnapshot, RecoveryBoundary, RecoveryMatrix, RouteReviewEvidence, SseEvent, SseSnapshot, parse_sse, validate_receipt_id, validate_review_id
 from .evidence import (
     BioCapabilityEvidenceAuditReport,
     BioCapabilityEvidenceAuditRequest,
@@ -2667,6 +2667,7 @@ __all__ = [
     "OperationsDomainCoverage",
     "OperationsDomainActivity",
     "OperationsDomainActivityGroup",
+    "OperationsArtifactEvidencePosture",
     "OperationsDomainGates",
     "OperationsDomainGateGroup",
     "OperationsReconciliationPosture",

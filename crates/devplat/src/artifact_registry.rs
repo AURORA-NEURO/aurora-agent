@@ -44,6 +44,8 @@ pub const ARTIFACT_REGISTRY_REGISTER_SCHEMA_VERSION: &str =
 pub const ARTIFACT_REGISTRY_QUERY_SCHEMA_VERSION: &str = "bioprism-devplat-artifact-query/0.1";
 pub const ARTIFACT_REGISTRY_LINEAGE_SCHEMA_VERSION: &str = "bioprism-devplat-artifact-lineage/0.1";
 pub const ARTIFACT_REGISTRY_GET_SCHEMA_VERSION: &str = "bioprism-devplat-artifact-get/0.1";
+pub const ARTIFACT_REGISTRY_DOMAIN_EVIDENCE_POSTURE_SCHEMA_VERSION: &str =
+    "bioprism-devplat-artifact-domain-evidence-posture/0.1";
 pub const MAX_ARTIFACT_REGISTRY_RECORDS: usize = 512;
 pub const MAX_ARTIFACT_REGISTRY_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_ARTIFACT_REGISTRY_QUERY_ITEMS: usize = 256;
@@ -127,6 +129,123 @@ impl ArtifactRegistry {
 
     pub fn is_empty(&self) -> bool {
         self.records.is_empty()
+    }
+
+    /// Summarize the explicitly declared evidence that is visible for one capability group.
+    ///
+    /// This is intentionally an advisory projection. A record contributes only when its
+    /// registration metadata names one of the requested domains (case-normalized exact matching)
+    /// or when its artifact body explicitly names the selected `group_id`. Subject labels,
+    /// artifact kind names, and free-form text are never used as inferred domain bindings.
+    pub fn domain_evidence_posture(&self, group_id: &str, domains: &[String]) -> Value {
+        let requested_domains = domains
+            .iter()
+            .map(|domain| domain.trim())
+            .filter(|domain| !domain.is_empty())
+            .map(str::to_owned)
+            .collect::<BTreeSet<_>>();
+        let requested_normalized = requested_domains
+            .iter()
+            .map(|domain| normalize_domain_label(domain))
+            .collect::<BTreeSet<_>>();
+        let mut kind_counts = BTreeMap::<String, usize>::new();
+        let mut family_counts = BTreeMap::<String, usize>::new();
+        let mut verification_state_counts = BTreeMap::<String, usize>::new();
+        let mut match_basis_counts = BTreeMap::<String, usize>::new();
+        let mut matched_domain_labels = BTreeSet::new();
+        let mut subjects = BTreeSet::new();
+        let mut matching_record_count = 0usize;
+        let mut integrity_verified_record_count = 0usize;
+        let mut parent_linked_record_count = 0usize;
+
+        for record in self.records.values() {
+            let artifact_group_id = record
+                .artifact
+                .get("group_id")
+                .and_then(Value::as_str)
+                .filter(|value| *value == group_id);
+            let intersecting_domains = record
+                .domains
+                .iter()
+                .filter(|domain| requested_normalized.contains(&normalize_domain_label(domain)))
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            let domain_match = !intersecting_domains.is_empty();
+            let group_match = artifact_group_id.is_some();
+            if !domain_match && !group_match {
+                continue;
+            }
+
+            matching_record_count += 1;
+            subjects.insert(record.subject_id.clone());
+            if !record.parent_digests.is_empty() {
+                parent_linked_record_count += 1;
+            }
+            for domain in intersecting_domains {
+                matched_domain_labels.insert(domain);
+            }
+            *kind_counts.entry(record.kind.clone()).or_default() += 1;
+            *family_counts
+                .entry(artifact_family(&record.kind).to_string())
+                .or_default() += 1;
+            let verification_state = record
+                .verification
+                .get("state")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+                .to_string();
+            if matches!(
+                verification_state.as_str(),
+                "verified_integrity" | "content_digest_verified"
+            ) {
+                integrity_verified_record_count += 1;
+            }
+            *verification_state_counts
+                .entry(verification_state)
+                .or_default() += 1;
+            let match_basis = match (domain_match, group_match) {
+                (true, true) => "declared_group_id_and_artifact_domain_intersection",
+                (true, false) => "artifact_domain_intersection",
+                (false, true) => "declared_group_id",
+                (false, false) => unreachable!("unmatched artifacts are skipped above"),
+            };
+            *match_basis_counts
+                .entry(match_basis.to_string())
+                .or_default() += 1;
+        }
+
+        json!({
+            "ok": true,
+            "schema": ARTIFACT_REGISTRY_DOMAIN_EVIDENCE_POSTURE_SCHEMA_VERSION,
+            "workflow": "artifact_registry_domain_evidence_posture",
+            "group_id": group_id,
+            "requested_domains": requested_domains,
+            "registry_generation": self.generation,
+            "registry_size": self.records.len(),
+            "state": if matching_record_count > 0 { "observed" } else { "missing" },
+            "matching_record_count": matching_record_count,
+            "integrity_verified_record_count": integrity_verified_record_count,
+            "kind_counts": kind_counts,
+            "family_counts": family_counts,
+            "verification_state_counts": verification_state_counts,
+            "match_basis_counts": match_basis_counts,
+            "subject_count": subjects.len(),
+            "parent_linked_record_count": parent_linked_record_count,
+            "matched_domain_labels": matched_domain_labels,
+            "scope": "exact_declared_registration_domain_intersection_or_explicit_artifact_group_id",
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "guarantees": [
+                "only digest-verified records already present in this bounded registry are counted",
+                "domain labels are matched exactly after case normalization",
+                "an artifact group binding is accepted only from its explicit group_id field"
+            ],
+            "limitations": [
+                "absence is not proof that evidence never existed",
+                "artifact presence and integrity do not establish scientific, clinical, safety, regulatory, or release validity",
+                "the projection does not inspect free-form subject text or infer domain membership"
+            ]
+        })
     }
 
     /// Return bounded metadata copies for cross-store diagnostics.
@@ -525,6 +644,28 @@ impl ArtifactRegistry {
             });
         }
         Ok(())
+    }
+}
+
+fn normalize_domain_label(value: &str) -> String {
+    value.trim().to_ascii_lowercase()
+}
+
+fn artifact_family(kind: &str) -> &'static str {
+    match kind {
+        "adapter_execution_evidence" => "adapter_execution",
+        kind if kind.starts_with("domain_evidence_provider") => "provider",
+        "domain_evidence_source_plan"
+        | "domain_evidence_intake"
+        | "domain_evidence_harmonization" => "source_or_harmonization",
+        "domain_report" => "domain_report",
+        "mission_evidence_bundle"
+        | "workflow_reconciliation"
+        | "workflow_execution_evidence"
+        | "mission_report"
+        | "evaluator_replay" => "workflow_or_mission",
+        "external_reference" => "external_reference",
+        _ => "other",
     }
 }
 
@@ -1157,6 +1298,53 @@ mod tests {
             .unwrap();
         assert_eq!(query["rows"].as_array().unwrap().len(), 1);
         assert_eq!(query["rows"][0]["domains"], json!(["genomics", "oncology"]));
+    }
+
+    #[test]
+    fn domain_evidence_posture_uses_only_exact_declared_bindings() {
+        let mut registry = ArtifactRegistry::new();
+        registry
+            .register(&artifact(
+                "domain_report",
+                "mission-1",
+                json!({"status": "review"}),
+            ))
+            .unwrap();
+        registry
+            .register(&json!({
+                "kind": "external_reference",
+                "subject_id": "mission-2",
+                "domains": ["unrelated"],
+                "parent_digests": [],
+                "artifact": {"group_id": "biological_domains", "locator": "caller://ref-1"}
+            }))
+            .unwrap();
+        registry
+            .register(&json!({
+                "kind": "external_reference",
+                "subject_id": "mission-3",
+                "domains": ["unrelated"],
+                "parent_digests": [],
+                "artifact": {"locator": "caller://ref-2"}
+            }))
+            .unwrap();
+
+        let posture = registry.domain_evidence_posture(
+            "biological_domains",
+            &["ONCOLOGY".into(), "genomics".into()],
+        );
+        assert_eq!(posture["state"], "observed");
+        assert_eq!(posture["matching_record_count"], 2);
+        assert_eq!(posture["subject_count"], 2);
+        assert_eq!(posture["parent_linked_record_count"], 0);
+        assert_eq!(
+            posture["match_basis_counts"]["artifact_domain_intersection"],
+            1
+        );
+        assert_eq!(posture["match_basis_counts"]["declared_group_id"], 1);
+        assert_eq!(posture["family_counts"]["domain_report"], 1);
+        assert_eq!(posture["family_counts"]["external_reference"], 1);
+        assert_eq!(posture["readiness_claimed"], false);
     }
 
     #[test]

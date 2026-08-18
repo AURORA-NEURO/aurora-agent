@@ -28,7 +28,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `GET /v1/recovery` | One operator-visible matrix of restart, secret, outbox, delivery-provenance, and external-effect boundaries |
 | `GET /v1/operations/snapshot?after=N&limit=M` | One bounded operator control-plane snapshot joining event, mission, persistence, recovery, and capability summaries |
 | `GET /v1/operations/domains?after=N&limit=M` | Per-domain catalogue coverage plus exact local tool activity observed in the requested event page |
-| `GET /v1/operations/gates?after=N&limit=M` | Per-domain catalogue, activity, transport, pooled evaluation, domain-evaluator, safety, and release evidence gates without readiness claims |
+| `GET /v1/operations/gates?after=N&limit=M` | Per-domain catalogue, activity, transport, pooled evaluation, domain-evaluator, safety, release, and advisory artifact evidence gates without readiness claims |
 | `POST /v1/operations/handoff` | Build a content-addressed, non-executing domain-to-`capability_route` handoff |
 | `GET /v1/domain-workflows` | Build one deterministic, digest-bound workflow template for every capability group |
 | `POST /v1/domain-workflows/scaffold` | Select available stage tools, build an execution-disabled workflow, and run bounded preflight |
@@ -522,6 +522,13 @@ Evaluation, safety, and release channels are pooled from completed control-plane
 requested bounded event page and then shown on each matched domain group; catalogue, observed
 activity, and transport completion remain group-specific. This is an evidence-shaping rule, not
 proof that a domain-specific scientific or safety claim has been established.
+
+Each group also includes an advisory `gates.artifact_evidence` posture from the current
+digest-verified artifact registry. A record matches only through an exact case-normalized declared
+registration domain intersection or an explicit `artifact.group_id`; subject text and kind names
+are never used for inference. The posture reports matching counts, artifact families, verification
+states, parent linkage, and match basis. `artifact_evidence` is intentionally optional: missing
+records are visible, but they never pass a required gate, change `gate_state`, or create readiness.
 
 Each group also includes `gates.reconciliation_evidence`, a bounded posture lookup joined by exact
 `workflow_id` to a digest-valid retained reconciliation report. Its state is `missing`, `incomplete`,

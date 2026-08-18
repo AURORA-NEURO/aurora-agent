@@ -406,6 +406,14 @@ matching report and never passes by inference; `incomplete` or `invalid` retaine
 safety, clinical, or scientific authorization. The summary exposes `groups_reconciliation_blocked`,
 and the same posture is typed by the Python and TypeScript SDKs, so all currently advertised workspace
 groups receive the same fail-closed join contract.
+The same gate response now carries an advisory `gates.artifact_evidence` posture for every group.
+It counts only records already admitted to the digest-verified artifact registry, matching explicit
+registration domains after case normalization or an artifact body's explicit `group_id`; it never
+infers membership from subjects, kind names, or free text. The posture reports artifact families,
+verification states, parent-linked records, match basis, and registry generation/size. Missing
+artifact evidence remains visible but is not a required gate and cannot change `gate_state` or
+create readiness. Python exposes a typed `OperationsArtifactEvidencePosture` with an explicit
+legacy-response fallback, and TypeScript exposes the corresponding group/summary posture fields.
 Handoffs now carry an `operations_gate_acceptance` execution prerequisite; preflight binds the
 mission’s exact tools to matching capability groups and the current `gate_digest`, while executable
 HTTP missions are refused until an operator acceptance covers every required gate for every group.

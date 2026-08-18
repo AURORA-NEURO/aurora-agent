@@ -1077,6 +1077,8 @@ class HttpApiClientTests(unittest.TestCase):
         gates = client.operations_domain_gates(limit=2)
         self.assertIsInstance(gates, OperationsDomainGates)
         self.assertEqual(gates.groups[0].gate_state, "insufficient_evidence")
+        self.assertEqual(gates.groups[0].artifact_evidence.state, "missing")
+        self.assertEqual(gates.summary["groups_with_artifact_evidence"], 0)
         self.assertEqual(len(gates.gate_digest), 64)
         self.assertFalse(gates.gate_policy["readiness_claimed"])
         review = client.create_operations_gate_review(

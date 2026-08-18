@@ -9836,8 +9836,35 @@ export interface OperationsDomainGateGroup extends OperationsDomainGroup {
   readiness_claimed: false;
   gates: Record<string, JsonObject>;
   reconciliation_evidence: OperationsReconciliationPosture;
+  artifact_evidence: OperationsArtifactEvidencePosture;
   last_event_id: number | null;
   evidence_scope: "requested_event_page_only";
+  artifact_evidence_scope: "current_digest_verified_artifact_registry_exact_declared_matches";
+}
+
+export interface OperationsArtifactEvidencePosture extends JsonObject {
+  ok: boolean;
+  workflow: "artifact_registry_domain_evidence_posture";
+  schema: "bioprism-devplat-artifact-domain-evidence-posture/0.1";
+  group_id: string;
+  requested_domains: string[];
+  registry_generation: number;
+  registry_size: number;
+  state: "missing" | "observed";
+  matching_record_count: number;
+  integrity_verified_record_count: number;
+  kind_counts: Record<string, number>;
+  family_counts: Record<string, number>;
+  verification_state_counts: Record<string, number>;
+  match_basis_counts: Record<string, number>;
+  subject_count: number;
+  parent_linked_record_count: number;
+  matched_domain_labels: string[];
+  scope: string;
+  readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
 }
 
 export type OperationsReconciliationPostureState =
@@ -9867,6 +9894,7 @@ export interface OperationsDomainGates extends JsonObject {
   schema: "bioprism-operations-domain-gates/0.1";
   gate_digest: string;
   gate_digest_scope: "operations_evidence_and_reconciliation_projection_without_gate_digest";
+  artifact_evidence_scope: "current_digest_verified_artifact_registry_exact_declared_matches";
   event_cursor: {
     after: number;
     next_after: number;
@@ -9893,6 +9921,10 @@ export interface OperationsDomainGates extends JsonObject {
     groups_insufficient_evidence: number;
     groups_review_required: number;
     groups_reconciliation_blocked: number;
+    groups_with_artifact_evidence: number;
+    artifact_evidence_records: number;
+    artifact_registry_generation: number;
+    artifact_registry_size: number;
     readiness_claimed: false;
   };
   gate_policy: JsonObject;
