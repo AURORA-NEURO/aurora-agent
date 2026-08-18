@@ -34,6 +34,7 @@ RELEASE_CHECK_KINDS = (
     "developer_platform_status",
 )
 RELEASE_ADVISORY_ONLY_KINDS = frozenset({"repository_impact", "developer_platform_status"})
+BUNDLE_VERIFY_MAX_INPUT_BYTES = 20_000_000
 
 
 def _optional_bool(name: str, value: Any) -> bool | None:
@@ -61,6 +62,107 @@ def _optional_mapping(name: str, value: Any) -> dict[str, Any] | None:
     if value is None:
         return None
     return _route_mapping(name, value)
+
+
+@dataclass(frozen=True)
+class BundleVerifyArgs:
+    """Bounded request for keyless or Ed25519 result-bundle verification."""
+
+    bundle: Mapping[str, Any] | None = None
+    document: str | None = None
+    publicly_attested_bundle: Mapping[str, Any] | None = None
+    verification_key: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        sources = sum(value is not None for value in (self.bundle, self.document, self.publicly_attested_bundle))
+        if sources != 1:
+            raise ArgumentError("bundle verification requires exactly one of bundle, document, or publicly_attested_bundle")
+        if self.bundle is not None and not isinstance(self.bundle, Mapping):
+            raise ArgumentError("bundle must be an object")
+        if self.publicly_attested_bundle is not None and not isinstance(self.publicly_attested_bundle, Mapping):
+            raise ArgumentError("publicly_attested_bundle must be an object")
+        if self.document is not None and (not isinstance(self.document, str) or not self.document.strip()):
+            raise ArgumentError("document must be a non-empty path")
+        if self.publicly_attested_bundle is not None and self.verification_key is None:
+            raise ArgumentError("verification_key is required for publicly_attested_bundle")
+        if self.verification_key is not None:
+            key = _route_mapping("verification_key", self.verification_key)
+            identity = _route_text("verification_key.key_identity", key.get("key_identity"))
+            public_key = _route_text("verification_key.public_key", key.get("public_key"))
+            if not public_key.startswith("ed25519:") or len(public_key) != len("ed25519:") + 64 or any(char not in "0123456789abcdef" for char in public_key[len("ed25519:") :]):
+                raise ArgumentError("verification_key.public_key must be ed25519:<64 lowercase hex characters>")
+            validity = _route_mapping("verification_key.validity", key.get("validity"))
+            for field_name in ("not_before", "not_after"):
+                value = validity.get(field_name)
+                if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
+                    raise ArgumentError(f"verification_key.validity.{field_name} must be a non-negative integer")
+            if not identity:
+                raise ArgumentError("verification_key.key_identity must be non-empty")
+        encoded = json.dumps(self.to_mcp_arguments(), separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        if len(encoded) > BUNDLE_VERIFY_MAX_INPUT_BYTES:
+            raise ArgumentError(f"bundle verification input exceeds the {BUNDLE_VERIFY_MAX_INPUT_BYTES}-byte safety bound")
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        if self.bundle is not None:
+            result["bundle"] = dict(self.bundle)
+        if self.document is not None:
+            result["document"] = self.document
+        if self.publicly_attested_bundle is not None:
+            result["publicly_attested_bundle"] = dict(self.publicly_attested_bundle)
+        if self.verification_key is not None:
+            result["verification_key"] = dict(self.verification_key)
+        return result
+
+
+@dataclass(frozen=True)
+class BundleVerifyReport:
+    """Typed success/refusal projection for result-bundle verification."""
+
+    raw: dict[str, Any]
+    ok: bool
+    verification_mode: str | None
+    manifest_digest: str | None
+    authentication: dict[str, Any] | None
+    refusal: str | None
+    fail_closed: bool | None
+    guarantees: tuple[str, ...]
+    limitations: tuple[str, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "BundleVerifyReport":
+        raw = _bundle_payload(value)
+        ok = _bool("bundle verification ok", raw.get("ok"))
+        mode = _optional_text("bundle verification mode", raw.get("verification_mode"))
+        digest = _optional_text("bundle verification manifest_digest", raw.get("manifest_digest"))
+        authentication = _optional_mapping("bundle verification authentication", raw.get("authentication"))
+        refusal = _optional_text("bundle verification refusal", raw.get("refusal"))
+        fail_closed = _optional_bool("bundle verification fail_closed", raw.get("fail_closed"))
+        if ok:
+            if refusal is not None or fail_closed is not None:
+                raise ArgumentError("successful bundle verification cannot contain refusal fields")
+            if digest is None:
+                raise ArgumentError("successful bundle verification must contain manifest_digest")
+            if mode is not None and mode != "ed25519_public_key":
+                raise ArgumentError("bundle verification mode is unknown")
+        else:
+            if refusal is None or fail_closed is not True:
+                raise ArgumentError("failed bundle verification must preserve a fail-closed refusal")
+        return cls(
+            raw=raw,
+            ok=ok,
+            verification_mode=mode,
+            manifest_digest=digest,
+            authentication=authentication,
+            refusal=refusal,
+            fail_closed=fail_closed,
+            guarantees=_route_strings("bundle verification guarantees", raw.get("guarantees", [])),
+            limitations=_route_strings("bundle verification limitations", raw.get("limitations", [])),
+        )
+
+    @property
+    def is_public_key_verified(self) -> bool:
+        return self.ok and self.verification_mode == "ed25519_public_key"
 
 
 @dataclass(frozen=True)
@@ -348,10 +450,42 @@ def _payload(value: Mapping[str, Any]) -> dict[str, Any]:
     raise ArgumentError("response does not contain a release-audit projection")
 
 
+def _bundle_payload(value: Mapping[str, Any]) -> dict[str, Any]:
+    raw = _route_mapping("bundle verification response", value)
+    if "ok" in raw and ("manifest_digest" in raw or "refusal" in raw):
+        return raw
+    mcp = raw.get("mcp")
+    if isinstance(mcp, Mapping):
+        result = mcp.get("result")
+        if isinstance(result, Mapping):
+            structured = result.get("structuredContent")
+            if isinstance(structured, Mapping) and "ok" in structured:
+                return dict(structured)
+            content = result.get("content")
+            if isinstance(content, Sequence) and not isinstance(content, (str, bytes)):
+                for block in content:
+                    if not isinstance(block, Mapping) or not isinstance(block.get("text"), str):
+                        continue
+                    try:
+                        decoded = json.loads(block["text"])
+                    except json.JSONDecodeError as error:
+                        raise ArgumentError(f"bundle verification response text is not JSON: {error}") from error
+                    decoded_mapping = _route_mapping("decoded bundle verification response", decoded)
+                    if "ok" in decoded_mapping:
+                        return decoded_mapping
+    raise ArgumentError("response does not contain a bundle-verification projection")
+
+
 def release_audit_report(value: Mapping[str, Any]) -> ReleaseAuditReport:
     """Parse direct MCP or HTTP release-audit output."""
 
     return ReleaseAuditReport.from_wire(value)
+
+
+def bundle_verify_report(value: Mapping[str, Any]) -> BundleVerifyReport:
+    """Parse direct MCP or HTTP result-bundle verification output."""
+
+    return BundleVerifyReport.from_wire(value)
 
 
 __all__ = [
@@ -359,6 +493,10 @@ __all__ = [
     "RELEASE_AUDIT_MAX_CHECKS",
     "RELEASE_AUDIT_MAX_INPUT_BYTES",
     "RELEASE_CHECK_KINDS",
+    "BUNDLE_VERIFY_MAX_INPUT_BYTES",
+    "BundleVerifyArgs",
+    "BundleVerifyReport",
+    "bundle_verify_report",
     "ReleaseAuditArgs",
     "ReleaseAuditBlockerReport",
     "ReleaseAuditCheckReport",

@@ -1,4 +1,4 @@
-//! Result bundles, symmetric attestation and reproduction verdicts.
+//! Result bundles, symmetric and public-key attestation, and reproduction verdicts.
 //!
 //! Implements blueprint 34.14 (Result Cards, Signed Bundles and Reproduction), with 13.15 (supply
 //! chain and artifact security) for input provenance and 13.20 (audit log transparency and
@@ -15,23 +15,24 @@
 //! A result bundle wraps a certificate with the rest of what a reproduction needs — the decision
 //! section, the world and query digests, the toolchain and crate versions, declared environment
 //! facts, and the recorded provenance of every input — hashes all of it into a manifest, and
-//! authenticates the manifest. Because the manifest binds every entry digest, one tag over the
-//! manifest covers the whole closure.
+//! authenticates the manifest. Because the manifest binds every entry digest, one authentication
+//! value over the manifest covers the whole closure. HMAC remains available for cooperating
+//! processes; [`PubliclyAttestedBundle`] adds an explicit Ed25519 path for third-party verification.
 //!
 //! # The limitation, which is the point
 //!
-//! This workspace builds offline against pinned dependencies and cannot add an external crate. The
-//! only cryptographic primitive available is `sha2`, from which one can build HMAC-SHA256 and
-//! nothing asymmetric. So this crate offers **symmetric authentication only**, and the platform
-//! consequently **cannot offer third-party verifiability**. A verifier needs the very secret the
-//! producer used; anyone who can verify can also forge.
+//! The two authentication paths have deliberately different claims. HMAC-SHA256 is symmetric: a
+//! verifier needs the producer's secret and anyone who can verify can also forge. Ed25519 uses a
+//! private signing seed and a separate public verification key, so a third party can verify the
+//! signature without receiving signing material. Neither path turns a caller-supplied key label or
+//! producer string into an authenticated organization identity.
 //!
 //! That is stated in the type system, not only in prose:
 //!
 //! | Rule | How it is enforced |
 //! |---|---|
-//! | No value can claim asymmetric signing | [`AuthenticationScheme`] has one variant, `SymmetricSharedSecret` |
-//! | No value can claim non-repudiation | [`Repudiability`] has one variant, `ForgeableByAnyVerifier` |
+//! | The wire names its primitive | [`AuthenticationScheme`] distinguishes HMAC from Ed25519 |
+//! | A verification result states forgeability | [`Repudiability`] distinguishes shared-secret and public-key paths |
 //! | A tag cannot be quoted as a signature | [`MacTag`] always renders with its `hmac-sha256:` prefix |
 //! | A verified result cannot name a party | [`KeyHolderAuthenticated`] has private fields and no accessor for the claimed producer |
 //! | Environment facts cannot claim to be measured | [`FactSource`] has one variant, `DeclaredByCaller` |
@@ -43,26 +44,27 @@
 //! This list is load-bearing. A missing capability that is stated is a limitation; one that is
 //! implied to exist is a lie.
 //!
-//! - **No public-key signatures.** No RSA, no ECDSA, no Ed25519, no post-quantum scheme. There is no
-//!   big-integer type, no field arithmetic and no curve in the dependency set.
-//! - **No third-party verifiability.** Verification requires the producing secret. A reader who does
-//!   not hold the key learns nothing from a tag; a reader who does hold it could have written it.
-//! - **No non-repudiation.** A producer denying authorship is not contradicted by anything here.
+//! - **No identity authority or delegation.** Ed25519 proves possession of the private key
+//!   corresponding to a public key, not that a registry assigned that key to the claimed producer,
+//!   role, organization, or release channel.
+//! - **No legal non-repudiation.** Public-key signatures make verifier-side forgery infeasible under
+//!   the algorithm's security assumptions, but this crate does not establish custody, compromise
+//!   history, authorization, or legal attribution of a key to a person.
 //! - **No key management.** No generation, derivation, agreement, storage, rotation or escrow. A key
 //!   is bytes the caller supplies.
-//! - **No revocation and no key validity window.** 13.20 §Verification asks a CLI to check "key
-//!   validity at signing time, and revocation status". Neither is possible: there is no CRL, no
-//!   OCSP-equivalent, no key expiry field with anything to enforce it, and no clock.
+//! - **No registry-backed revocation or key authority.** Ed25519 verification can apply the
+//!   caller-declared [`KeyValidity`] window to a caller-supplied signing instant, but there is no
+//!   CRL, OCSP-equivalent, rotation store, or authoritative clock.
 //! - **No transparency log.** 13.20 §Transparency asks for a public log of releases, withdrawals and
 //!   revocations. [`audit`] provides a hash-linked local log, which gives tamper *evidence* against
 //!   a party without the key and nothing at all against a party with it. There is no witness, no
 //!   gossip protocol, no inclusion proof against an external log and no Merkle consistency proof.
 //! - **No timestamping authority.** This crate reads no clock. Every time value in a bundle is a
 //!   string the caller asserted, and nothing corroborates it.
-//! - **No signature purpose separation in the cryptographic sense.** 13.15 §Signing wants publisher,
-//!   builder and hub signatures to be purpose-separated. [`attestation::AttestationPurpose`] labels
-//!   the purpose inside the authenticated bytes, which prevents cross-purpose *replay* of a tag but
-//!   is not key separation, because there is one key.
+//! - **No role-key policy or delegation.** [`attestation::AttestationPurpose`] is inside both
+//!   authenticated preimages, so cross-purpose replay is refused. The crate still does not require
+//!   different Ed25519 keys for publisher, builder, and hub roles; that policy belongs to a key
+//!   registry or release controller.
 //! - **No scanning, no sandboxing, no build isolation.** 13.15 §Scanning and §Build isolation are
 //!   out of scope for a library of plain Rust types; this crate records provenance, it does not
 //!   establish it.
@@ -88,33 +90,18 @@
 //! rotation and revocation records. ADR-011, "Accepted for blueprint", decides that published
 //! artifacts "will be content-addressed and signed".
 //!
-//! Every one of those properties — verification by a party who cannot sign, delegation, cross-signing,
-//! HSM custody of a *private* key, revocation, a transparency log — presupposes an **asymmetric**
-//! scheme. None of them means anything under a shared secret.
-//!
-//! The scheme itself is chosen nowhere. The only algorithm named anywhere in the distribution is in
-//! 23.38's WeaveIR event example, a JSON literal `"signature": {"method": "ed25519"}` in a module
-//! whose owner is "Unassigned" — an illustration, not a normative choice. 21.07 states the position
-//! outright: "Sigstore-style signing **may be evaluated; final choice requires ADR and local/offline
-//! support**." No such ADR exists in `20_ARCHITECTURE_DECISIONS`, and ADR-011's own follow-up list
-//! still reads "implement transparency-log integration" and "document revocation and key-rotation
-//! policy".
-//!
-//! So the specification requires signatures, describes an ecosystem that only an asymmetric scheme
-//! can support, and defers the choice of scheme to a decision record that was never written. This
-//! crate does not fill that gap — it cannot, offline against `sha2` — and it declines to paper over
-//! it. What it does instead is make the gap unmissable in the type system, so that whoever writes
-//! that ADR inherits a crate that never claimed the property it was missing.
+//! Ed25519 is the local scheme, selected for deterministic offline verification and a small public
+//! key representation. It fills only the verification-versus-forgery portion of the gap. Delegation,
+//! cross-signing, HSM custody of a private key, revocation, timestamp authority, and a transparency
+//! log remain separate capabilities and remain visible as limitations in higher-level projections.
 //!
 //! # What the examples catalogue can now exercise
 //!
-//! `bioprism-examples` records `signed_result_bundle_replay` as blocked because "no signing or
-//! bundle crate is in this crate's dependency set; certificates are content-addressed but unsigned".
-//! The bundle half of that obstacle is now gone. The claim's own wording — "a signed result bundle
-//! verifies **independently** of the runtime that produced it" — remains only half reachable: a
-//! bundle verifies independently of the *compiler* (`bioprism-section` deliberately does not depend
-//! on `bioprism-fiber`, and neither does this crate), but not independently of the *producer*, who
-//! must share their key with the verifier. See [`attestation`] for the exact statement.
+//! `PubliclyAttestedBundle` makes the signed-result-bundle claim executable: a bundle verifies
+//! independently of the compiler and without giving the verifier private signing material. The
+//! producer-name, key-registry, revocation, timestamp-authority, and external-closure portions of
+//! the claim remain deliberately outside this crate. [`AttestedBundle`] remains available for the
+//! symmetric shared-secret compatibility path.
 
 pub mod attestation;
 pub mod audit;
@@ -125,6 +112,7 @@ pub mod mac;
 pub mod manifest;
 pub mod provenance;
 pub mod reproduce;
+pub mod signature;
 
 pub use attestation::{
     Attestation, AttestationCheck, AttestationPurpose, ClaimedProducer, KeyHolderAuthenticated,
@@ -135,20 +123,24 @@ pub use audit::{
     LinkedEntry, AUDIT_SCHEMA_VERSION,
 };
 pub use bundle::{
-    AttestedBundle, BundleBuilder, EmbeddedCertificate, EntryCheck, ResultBundle, VerifiedBundle,
+    AttestedBundle, BundleBuilder, EmbeddedCertificate, EntryCheck, PubliclyAttestedBundle,
+    ResultBundle, VerifiedBundle,
 };
 pub use environment::{EnvironmentFacts, FactSource, ToolchainDifference, ToolchainFacts};
 pub use error::BundleError;
 pub use mac::{
     AuthenticationScheme, KeyIdentity, MacError, MacTag, Repudiability, SecretKey, TAG_SIZE,
 };
-pub use manifest::{
-    BundleManifest, EntryBody, EntryRole, ManifestEntry, BUNDLE_SCHEMA_VERSION,
-};
+pub use manifest::{BundleManifest, EntryBody, EntryRole, ManifestEntry, BUNDLE_SCHEMA_VERSION};
 pub use provenance::{
     ProvenanceState, RecordedProvenance, RejectedProvenance, RejectionReason, SupplyChainPosture,
 };
 pub use reproduce::{
-    Divergence, NotAttemptedReason, ReproductionAttempt, ReproductionVerdict, Reproduced,
+    Divergence, NotAttemptedReason, Reproduced, ReproductionAttempt, ReproductionVerdict,
     ToolchainPolicy,
+};
+pub use signature::{
+    Ed25519PublicKey, Ed25519Signature, KeyValidity, PublicKeyAttestation,
+    PublicKeyAttestationCheck, SignatureError, SigningKey, VerificationKey,
+    PUBLIC_KEY_ATTESTATION_SCHEMA_VERSION,
 };

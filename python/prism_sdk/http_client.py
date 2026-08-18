@@ -345,7 +345,14 @@ from .mission import (
     preflight_mission,
 )
 from .publication import BioAtlasPublicationAuditReport, bioatlas_publication_audit_report
-from .release import ReleaseAuditArgs, ReleaseAuditReport, release_audit_report
+from .release import (
+    BundleVerifyArgs,
+    BundleVerifyReport,
+    ReleaseAuditArgs,
+    ReleaseAuditReport,
+    bundle_verify_report,
+    release_audit_report,
+)
 from .operations import (
     OpsAcceptanceArgs,
     OpsAcceptanceReport,
@@ -3922,6 +3929,17 @@ class ApiClient:
         """Return typed HTTP release readiness and delegated check evidence."""
 
         return release_audit_report(self.release_audit(request))
+
+    def bundle_verify(self, request: BundleVerifyArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Verify a local result bundle, optionally with an Ed25519 public key."""
+
+        normalized = request if isinstance(request, BundleVerifyArgs) else BundleVerifyArgs(**dict(request))
+        return self.call_tool("bundle_verify", normalized.to_mcp_arguments())
+
+    def bundle_verify_report(self, request: BundleVerifyArgs | Mapping[str, Any]) -> BundleVerifyReport:
+        """Return a typed digest/signature/refusal projection."""
+
+        return bundle_verify_report(self.bundle_verify(request))
 
     def operations_catalog(
         self,
@@ -8584,6 +8602,17 @@ class AsyncApiClient:
         """Return typed async HTTP release gates and delegated evidence."""
 
         return release_audit_report(await self.release_audit(request))
+
+    async def bundle_verify(self, request: BundleVerifyArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.bundle_verify`."""
+
+        normalized = request if isinstance(request, BundleVerifyArgs) else BundleVerifyArgs(**dict(request))
+        return await self.call_tool("bundle_verify", normalized.to_mcp_arguments())
+
+    async def bundle_verify_report(self, request: BundleVerifyArgs | Mapping[str, Any]) -> BundleVerifyReport:
+        """Return a typed async digest/signature/refusal projection."""
+
+        return bundle_verify_report(await self.bundle_verify(request))
 
     async def operations_catalog(
         self,

@@ -8,6 +8,7 @@ description = "Signed result bundles and reproduction: attestation, replay, and 
 bioprism-ids = { workspace = true }
 bioprism-section = { workspace = true }
 sha2 = { workspace = true }
+ed25519-dalek = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

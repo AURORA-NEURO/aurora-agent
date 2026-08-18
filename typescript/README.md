@@ -58,8 +58,9 @@ if (result.mcp.result?.isError) {
   artifact/log/attestation record-family digests, including failed and unknown runs. Query arguments
   can require minimum local-byte hash and attestation subject-digest binding counts, and rows retain
   those counts. The client
-  never treats these joins as fetched bytes, verified signatures, provider authentication, or
-  release approval.
+  never treats these joins as fetched bytes, verified provider signatures, provider authentication,
+  or release approval. `bundleVerify` separately exposes explicit Ed25519 bundle verification with
+  typed key-validity and fail-closed refusal fields; it does not authenticate a key registry.
 - `traceOtelIngest` returns a typed normalized Event IR preview, OTLP mapping counts, loss-category
   ledger, and compilation-readiness state; it never implies OTLP export or collector connectivity.
 - `qualityGateRun` returns typed serialized quality check unions, concrete failure witnesses,

@@ -2,18 +2,17 @@
 //! out of reach.
 //!
 //! `bioprism-examples` states the claim as: *"a signed result bundle verifies independently of the
-//! runtime that produced it"*, and records it blocked because *"no signing or bundle crate is in
-//! this crate's dependency set; certificates are content-addressed but unsigned"*.
+//! runtime that produced it"*. This file keeps the negative HMAC proof visible; the additive
+//! `PubliclyAttestedBundle`/Ed25519 path is covered by the bundle unit tests.
 //!
-//! The claim has two words doing work. **"Bundle"** is now available, and so is authentication over
-//! it. **"Independently"** splits in two:
+//! The claim has two words doing work. **"Bundle"** is now available, and both symmetric
+//! authentication and public-key signing are available. **"Independently"** splits in two:
 //!
 //! - Independent of the *runtime*: reachable, and exercised below. Nothing in the verify path links
 //!   `bioprism-fiber`; this crate depends on `bioprism-ids` and `bioprism-section` only, and
 //!   `bioprism-section` deliberately depends on neither the world model nor the compiler.
-//! - Independent of the *producer*: **not** reachable, and the negative tests below pin down why. A
-//!   verifier must hold the producer's secret, and a verifier holding it can mint an identical
-//!   bundle. That gap needs a public-key signature, which cannot be built from `sha2`.
+//! - Independent of the *producer*: reachable for the Ed25519 wrapper, while the negative tests
+//!   below pin down why the legacy HMAC wrapper remains forgeable by any verifier.
 
 use bioprism_bundle::{
     Attestation, AttestationCheck, AttestationPurpose, AttestedBundle, ClaimedProducer,
@@ -24,7 +23,8 @@ use bioprism_bundle::{
 use bioprism_ids::ContentHash;
 use bioprism_section::{
     Backend, CertificateProfile, ContextCertificate, InfluenceClass, OmissionGroup,
-    OmissionManifest, OracleStatus, OracleVerdict, PlanDescriptor, ReferenceOmissions, SourceHashes,
+    OmissionManifest, OracleStatus, OracleVerdict, PlanDescriptor, ReferenceOmissions,
+    SourceHashes,
 };
 use serde_json::{json, Value};
 
@@ -230,13 +230,17 @@ fn a_replay_that_recompiles_a_different_section_diverges_and_names_the_entry() {
         vec!["certificate".to_string(), "query".to_string()]
     );
     assert_eq!(replay.status_word(), "non-reproducible");
-    assert!(replay.honest_label().contains("diverged at entry `section`"));
+    assert!(replay
+        .honest_label()
+        .contains("diverged at entry `section`"));
 }
 
 #[test]
 fn a_reviewer_without_the_producers_key_cannot_check_the_attestation_at_all() {
     let attested = attested();
-    let check = attested.attestation.verify(&reviewer_key_with_no_shared_secret());
+    let check = attested
+        .attestation
+        .verify(&reviewer_key_with_no_shared_secret());
     assert_eq!(
         check,
         AttestationCheck::WrongKeyOffered {
@@ -349,7 +353,11 @@ fn the_bundle_reports_recorded_unrecorded_and_rejected_provenance_separately() {
 fn a_hub_receipt_tag_cannot_be_passed_off_as_a_publisher_attestation() {
     let receipt = Attestation::produce(
         AttestationPurpose::HubPublicationReceipt,
-        bundle().verify().expect("verifies").manifest_digest().clone(),
+        bundle()
+            .verify()
+            .expect("verifies")
+            .manifest_digest()
+            .clone(),
         &producer_key(),
         ClaimedProducer::new("AURORA BioAtlas"),
     )

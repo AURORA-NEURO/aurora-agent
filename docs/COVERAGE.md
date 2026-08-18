@@ -19,7 +19,7 @@ contract, and observability projection workflows. `factory_lifecycle_simulate` a
 `hub_disclosure_review`, `hub_card_render`, `hub_leaderboard_render`, `release_audit`, and
 `developer_delivery_audit` now
 compose the factory recovery, public-hub publication, and release-evidence contracts while keeping
-multi-node durable queues, identity, public-key signing, UI, OTLP export, and network publication
+multi-node durable queues, identity, key registries/delegation, UI, OTLP export, and network publication
 explicit as unimplemented; the factory now has a shared-local-file authority envelope with a
 hash-chained transition journal, not a multi-host distributed queue;
 the Python MCP transport foundation is documented separately and does not imply the full SDK.

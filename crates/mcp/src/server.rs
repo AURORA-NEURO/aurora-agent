@@ -110,7 +110,7 @@ use bioprism_bioevalx::waiver::{
 use bioprism_bioevalx::{OutputVerdict, Reexecution, Trajectory, Worldline as EvaluationWorldline};
 use bioprism_biolang::{compile as compile_bioql, QuerySchema};
 use bioprism_bioworlds::SliceCatalog;
-use bioprism_bundle::ResultBundle;
+use bioprism_bundle::{PubliclyAttestedBundle, ResultBundle, VerificationKey};
 use bioprism_choreography::{
     ExplorationBound, GlobalType, System as ChoreographySystem, WellFormedGlobal,
 };
@@ -18043,13 +18043,32 @@ impl Server {
 
     fn bundle_verify(&self, arguments: &Value) -> Result<Value, String> {
         let inline = arguments.get("bundle").cloned();
+        let publicly_attested = arguments.get("publicly_attested_bundle").cloned();
         let document = arguments.get("document").and_then(Value::as_str);
-        if inline.is_some() && document.is_some() {
-            return Err("provide either bundle or document, not both".into());
+        let verification_key = arguments.get("verification_key").cloned();
+        if [
+            inline.is_some(),
+            publicly_attested.is_some(),
+            document.is_some(),
+        ]
+        .into_iter()
+        .filter(|present| *present)
+        .count()
+            > 1
+        {
+            return Err(
+                "provide exactly one of bundle, publicly_attested_bundle, or document".into(),
+            );
         }
-        let raw = match (inline, document) {
-            (Some(bundle), None) => bundle,
-            (None, Some(relative)) => {
+        if publicly_attested.is_some() != verification_key.is_some() {
+            return Err(
+                "publicly_attested_bundle and verification_key must be supplied together".into(),
+            );
+        }
+        let raw = match (inline, publicly_attested, document) {
+            (Some(bundle), None, None) => bundle,
+            (None, Some(bundle), None) => bundle,
+            (None, None, Some(relative)) => {
                 let path = self.resolve(relative)?;
                 if path.is_dir() {
                     return Err(
@@ -18063,9 +18082,56 @@ impl Server {
                 }
                 self.read_json(&path)?
             }
-            (None, None) => return Err("bundle_verify requires bundle or document".into()),
-            (Some(_), Some(_)) => unreachable!("bundle inputs were checked as exclusive"),
+            (None, None, None) => return Err("bundle_verify requires bundle or document".into()),
+            _ => unreachable!("bundle inputs were checked as exclusive"),
         };
+        if let Some(raw_key) = verification_key {
+            let key: VerificationKey = serde_json::from_value(raw_key)
+                .map_err(|error| format!("invalid Ed25519 verification key: {error}"))?;
+            let signed: PubliclyAttestedBundle = serde_json::from_value(raw)
+                .map_err(|error| format!("invalid publicly attested result bundle: {error}"))?;
+            if signed.bundle.manifest.entries.len() > 10_000
+                || signed.bundle.contents.len() > 10_000
+            {
+                return Err(
+                    "bundle may contain at most 10000 manifest entries and contents".into(),
+                );
+            }
+            return match signed.verify(&key) {
+                Ok((verified, authenticated)) => Ok(json!({
+                    "ok": true,
+                    "verification_mode": "ed25519_public_key",
+                    "schema_version": signed.bundle.manifest.schema_version,
+                    "bundle_id": signed.bundle.manifest.bundle_id,
+                    "manifest_digest": verified.manifest_digest(),
+                    "entry_checks": verified.entry_checks(),
+                    "not_recomputed": verified.not_recomputed(),
+                    "certificate": verified.certificate(),
+                    "supply_chain_posture": verified.supply_chain_posture(),
+                    "authentication": authenticated,
+                    "honest_label": authenticated.honest_label(),
+                    "guarantees": [
+                        "every carried inline digest is recomputed before the Ed25519 signature is accepted",
+                        "the signature is bound to the manifest digest, purpose, key identity, producer claim, nonce, and signed instant",
+                        "bounded key validity is checked against the caller-supplied signed_at value without reading the verifier clock",
+                    ],
+                    "limitations": [
+                        "reference locators are not dereferenced; this is a local value check, not closure fetching",
+                        "the public key identity and claimed producer are not authenticated by a registry or certificate chain",
+                        "signed_at is caller-supplied and is not timestamp-authority evidence",
+                        "verification establishes cryptographic origin of bytes, not scientific validity, provenance truth, or deployment security",
+                    ],
+                })),
+                Err(error) => Ok(json!({
+                    "ok": false,
+                    "verification_mode": "ed25519_public_key",
+                    "stage": "bundle_verification",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "guarantee": "a digest, signature, purpose, identity, or key-validity mismatch never becomes a successful release result",
+                })),
+            };
+        }
         let bundle: ResultBundle = serde_json::from_value(raw)
             .map_err(|error| format!("invalid result bundle: {error}"))?;
         if bundle.manifest.entries.len() > 10_000 || bundle.contents.len() > 10_000 {
@@ -35828,12 +35894,14 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "bundle_verify",
-            "description": "Recompute and verify an inline or root-confined ResultBundle. It checks carried entry digests, unlisted or missing content, embedded certificate integrity, and provenance posture; referenced entries remain not-recomputed and symmetric attestation is explicitly outside this keyless tool.",
+            "description": "Recompute and verify an inline or root-confined ResultBundle, or verify a PubliclyAttestedBundle with a caller-supplied Ed25519 public key. It checks carried entry digests, unlisted or missing content, embedded certificate integrity, provenance posture, signature purpose, key identity, and bounded key validity; referenced entries remain not-recomputed and producer identity remains an external registry claim.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "bundle": { "type": "object", "description": "Optional inline bioprism-bundle ResultBundle; mutually exclusive with document." },
-                    "document": { "type": "string", "description": "Optional root-confined JSON ResultBundle path; mutually exclusive with bundle." }
+                    "bundle": { "type": "object", "description": "Optional inline bioprism-bundle ResultBundle; mutually exclusive with document and publicly_attested_bundle." },
+                    "document": { "type": "string", "description": "Optional root-confined JSON ResultBundle or PubliclyAttestedBundle path; mutually exclusive with bundle and publicly_attested_bundle." },
+                    "publicly_attested_bundle": { "type": "object", "description": "Optional inline bioprism-bundle PubliclyAttestedBundle; requires verification_key and is mutually exclusive with bundle/document." },
+                    "verification_key": { "type": "object", "description": "Ed25519 VerificationKey for publicly_attested_bundle or a signed document. It carries key_identity, public_key as ed25519:<64 hex>, and validity {not_before?, not_after?}." }
                 },
                 "required": []
             }

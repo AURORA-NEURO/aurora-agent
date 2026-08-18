@@ -7041,6 +7041,42 @@ export type ReleaseAuditCheckKind =
   | "repository_impact"
   | "developer_platform_status";
 
+export interface BundleVerificationKeyValidity extends JsonObject {
+  not_before?: number;
+  not_after?: number;
+}
+
+export interface BundleVerificationKey extends JsonObject {
+  key_identity: string;
+  public_key: string;
+  validity: BundleVerificationKeyValidity;
+}
+
+export interface BundleVerifyArgs extends JsonObject {
+  bundle?: JsonObject;
+  document?: string;
+  publicly_attested_bundle?: JsonObject;
+  verification_key?: BundleVerificationKey;
+}
+
+export interface BundleVerifyResult extends JsonObject {
+  ok: boolean;
+  verification_mode?: "ed25519_public_key";
+  schema_version?: string;
+  bundle_id?: string;
+  manifest_digest?: string;
+  entry_checks?: JsonObject;
+  not_recomputed?: string[];
+  certificate?: string;
+  supply_chain_posture?: JsonObject;
+  authentication?: JsonObject;
+  honest_label?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
 export interface ReleaseAuditCheckArgs extends JsonObject {
   kind: ReleaseAuditCheckKind;
   arguments?: JsonObject;

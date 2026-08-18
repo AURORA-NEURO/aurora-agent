@@ -648,7 +648,9 @@ unranked entries into agent-callable public-hub projections. `release_audit` com
 registry, bundle, quality, conformance, research-CI, operations, and pack-health gates while
 retaining repository impact and developer-platform diagnostics as advisory evidence. These
 surfaces remain bounded and local: they do not create durable queues, identity providers, web UI,
-public-key signing, CI execution, deployment, or network publication.
+key registries, delegation, revocation, CI execution, deployment, or network publication. The bundle
+layer now has deterministic offline Ed25519 verification; that cryptographic primitive is not an
+identity or release-authorization service.
 The Python and TypeScript SDKs expose the factory result as an ordered, typed trace: successful
 leases, recovery variants, staged-output invisibility, committed-result snapshots, quarantined and
 dead-lettered jobs, and fail-closed action refusals remain independently inspectable across sync,
@@ -717,7 +719,11 @@ declaration soundness. The SDKs preserve the same layers and fail-closed policy 
 `ops_acceptance` reports typed operational acceptance findings without turning unverifiable criteria
 into passes. `ops_capacity` projects qualified work and demand, refusing unbounded work or silent
 degradation. `bundle_verify` recomputes carried result-bundle content and keeps referenced,
-unrecomputed, and provenance-limited entries explicit; it does not claim public-key authentication.
+unrecomputed, and provenance-limited entries explicit; it also accepts an explicit Ed25519
+PubliclyAttestedBundle plus verification key, checking purpose, key identity, signed instant, and
+caller-declared key validity without claiming registry-backed identity or external closure fetching.
+The complete wire format, threat-model boundary, and SDK/MCP mapping are documented in
+[`docs/BUNDLE_SIGNATURES.md`](docs/BUNDLE_SIGNATURES.md).
 `oracle_reference_panel` preserves independent reader calls, minority evidence, adjudication
 blinding, and unresolved splits. `oracle_missingness` checks missingness informativeness,
 complete-case admissibility, and small-cell egress under an explicit caller policy.

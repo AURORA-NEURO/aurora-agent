@@ -90,6 +90,8 @@ import type {
   TabularIngestResult,
   ConformanceRunArgs,
   ConformanceRunResult,
+  BundleVerifyArgs,
+  BundleVerifyResult,
   ReleaseAuditArgs,
   ReleaseAuditResult,
   OperationsCatalogArgs,
@@ -2369,6 +2371,26 @@ export class ApiClient {
 
   async releaseAudit(args: ReleaseAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<ReleaseAuditResult>> {
     return this.callTool<ReleaseAuditResult>("release_audit", args, options);
+  }
+
+  async bundleVerify(args: BundleVerifyArgs, options?: ClientRequestOptions): Promise<RestToolResponse<BundleVerifyResult>> {
+    if (!isObject(args)) throw new ArgumentError("bundle verification arguments must be an object");
+    const sources = [args.bundle !== undefined, args.document !== undefined, args.publicly_attested_bundle !== undefined].filter(Boolean).length;
+    if (sources !== 1) throw new ArgumentError("bundle verification requires exactly one of bundle, document, or publicly_attested_bundle");
+    if (args.bundle !== undefined && !isObject(args.bundle)) throw new ArgumentError("bundle must be an object");
+    if (args.publicly_attested_bundle !== undefined && !isObject(args.publicly_attested_bundle)) throw new ArgumentError("publicly_attested_bundle must be an object");
+    if (args.document !== undefined && (typeof args.document !== "string" || args.document.trim().length === 0)) throw new ArgumentError("document must be a non-empty path");
+    if (args.publicly_attested_bundle !== undefined && args.verification_key === undefined) throw new ArgumentError("verification_key is required for publicly_attested_bundle");
+    if (args.verification_key !== undefined) {
+      if (!isObject(args.verification_key) || typeof args.verification_key.key_identity !== "string" || !/^ed25519:[0-9a-f]{64}$/.test(args.verification_key.public_key) || !isObject(args.verification_key.validity)) {
+        throw new ArgumentError("verification_key must contain key_identity, an ed25519 public_key, and validity");
+      }
+      for (const field of ["not_before", "not_after"] as const) {
+        const value = args.verification_key.validity[field];
+        if (value !== undefined && (!Number.isSafeInteger(value) || value < 0)) throw new ArgumentError(`verification_key.validity.${field} must be a non-negative integer`);
+      }
+    }
+    return this.callTool<BundleVerifyResult>("bundle_verify", args, options);
   }
 
   async operationsCatalog(args: OperationsCatalogArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<OperationsCatalogResult>> {

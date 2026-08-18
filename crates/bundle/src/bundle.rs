@@ -53,6 +53,7 @@ use crate::error::BundleError;
 use crate::mac::SecretKey;
 use crate::manifest::{BundleManifest, EntryBody, EntryRole, ManifestEntry, BUNDLE_SCHEMA_VERSION};
 use crate::provenance::{ProvenanceState, SupplyChainPosture};
+use crate::signature::{PublicKeyAttestation, SigningKey, VerificationKey};
 use bioprism_ids::ContentHash;
 use bioprism_section::{CertificateProfile, CertificateVerification, ContextCertificate};
 use serde::{Deserialize, Serialize};
@@ -351,14 +352,83 @@ impl VerifiedBundle {
     }
 }
 
-/// A bundle with an attestation over its manifest digest.
+/// A bundle with an HMAC attestation over its manifest digest.
 ///
-/// Named for what it is. There is no `SignedBundle` type in this crate, because there is no
-/// signature, and a name is the first thing anyone copies.
+/// This compatibility wrapper is intentionally distinct from [`PubliclyAttestedBundle`], whose
+/// Ed25519 signature can be verified with public material only.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttestedBundle {
     pub bundle: ResultBundle,
     pub attestation: Attestation,
+}
+
+/// A bundle with an Ed25519 attestation that a verifier can check using public material only.
+///
+/// This is deliberately a separate type from [`AttestedBundle`]. Existing HMAC bundles remain
+/// valid and retain their weaker semantics; a caller must opt into the stronger public-key wire
+/// contract rather than having a deserializer reinterpret an old MAC as a signature.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PubliclyAttestedBundle {
+    pub bundle: ResultBundle,
+    pub attestation: PublicKeyAttestation,
+}
+
+impl PubliclyAttestedBundle {
+    pub fn produce(
+        bundle: ResultBundle,
+        key: &SigningKey,
+        purpose: AttestationPurpose,
+        claimed_producer: ClaimedProducer,
+    ) -> Result<Self, BundleError> {
+        Self::produce_with(bundle, key, purpose, claimed_producer, None, None, None)
+    }
+
+    pub fn produce_with(
+        bundle: ResultBundle,
+        key: &SigningKey,
+        purpose: AttestationPurpose,
+        claimed_producer: ClaimedProducer,
+        nonce: Option<String>,
+        recorded_at: Option<String>,
+        signed_at: Option<u64>,
+    ) -> Result<Self, BundleError> {
+        let verified = bundle.verify()?;
+        let attestation = PublicKeyAttestation::produce_with(
+            purpose,
+            verified.manifest_digest().clone(),
+            key,
+            claimed_producer,
+            nonce,
+            recorded_at,
+            signed_at,
+        )?;
+        Ok(Self {
+            bundle,
+            attestation,
+        })
+    }
+
+    /// Recomputes the bundle before checking the public-key signature.
+    pub fn verify(
+        &self,
+        key: &VerificationKey,
+    ) -> Result<(VerifiedBundle, KeyHolderAuthenticated), BundleError> {
+        let verified = self.bundle.verify()?;
+        if &self.attestation.subject_digest != verified.manifest_digest() {
+            return Err(BundleError::AttestationCoversDifferentManifest {
+                attested: self.attestation.subject_digest.as_str().to_string(),
+                actual: verified.manifest_digest().as_str().to_string(),
+            });
+        }
+        let authenticated = self
+            .attestation
+            .verify_for_or_error(key, self.attestation.purpose)?;
+        Ok((verified, authenticated))
+    }
+
+    pub fn schema_version(&self) -> &str {
+        BUNDLE_SCHEMA_VERSION
+    }
 }
 
 impl AttestedBundle {
@@ -409,12 +479,17 @@ impl AttestedBundle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mac::KeyIdentity;
+    use crate::mac::{AuthenticationScheme, KeyIdentity, Repudiability};
     use crate::provenance::RecordedProvenance;
+    use crate::signature::KeyValidity;
     use serde_json::json;
 
     fn key() -> SecretKey {
         SecretKey::new(KeyIdentity::new("hub-2026"), vec![0x44; 32])
+    }
+
+    fn signing_key() -> SigningKey {
+        SigningKey::new(KeyIdentity::new("hub-ed25519"), [0x24; 32])
     }
 
     fn certificate() -> ContextCertificate {
@@ -482,13 +557,20 @@ mod tests {
                 ContentHash::of_bytes(b"world bytes"),
                 Some("registry://worlds/world-1".into()),
                 ProvenanceState::Recorded(
-                    RecordedProvenance::new("registry://worlds", ContentHash::of_bytes(b"world bytes"))
-                        .pinned_at("rev-7"),
+                    RecordedProvenance::new(
+                        "registry://worlds",
+                        ContentHash::of_bytes(b"world bytes"),
+                    )
+                    .pinned_at("rev-7"),
                 ),
             )
             .carrying("query", EntryRole::Query, json!({"target": "t"}))
             .expect("carries the query")
-            .in_environment(EnvironmentFacts::undeclared().with_os("linux").with_arch("x86_64"))
+            .in_environment(
+                EnvironmentFacts::undeclared()
+                    .with_os("linux")
+                    .with_arch("x86_64"),
+            )
             .with_toolchain(ToolchainFacts::declared().with_rustc_version("1.85.0"))
             .build()
             .expect("builds")
@@ -582,7 +664,9 @@ mod tests {
             .digest = digest;
 
         match broken.verify().expect_err("must not verify") {
-            BundleError::EmbeddedCertificateInvalid { entry, .. } => assert_eq!(entry, "certificate"),
+            BundleError::EmbeddedCertificateInvalid { entry, .. } => {
+                assert_eq!(entry, "certificate")
+            }
             other => panic!("expected a certificate failure, got {other:?}"),
         }
     }
@@ -610,11 +694,67 @@ mod tests {
         )
         .expect("attests");
         let (verified, authenticated) = attested.verify(&key()).expect("verifies");
-        assert_eq!(
-            authenticated.subject_digest(),
-            verified.manifest_digest()
-        );
+        assert_eq!(authenticated.subject_digest(), verified.manifest_digest());
         assert_eq!(authenticated.key_identity().as_str(), "hub-2026");
+    }
+
+    #[test]
+    fn a_publicly_attested_bundle_verifies_after_transport_with_public_material_only() {
+        let signing = signing_key();
+        let public = signing.verification_key(KeyValidity::unbounded());
+        let attested = PubliclyAttestedBundle::produce_with(
+            bundle(),
+            &signing,
+            AttestationPurpose::PublisherManifest,
+            ClaimedProducer::new("AURORA Working Group"),
+            Some("bundle-nonce".into()),
+            Some("2026-08-18T20:00:00Z".into()),
+            Some(1_755_552_000),
+        )
+        .expect("attests");
+        let wire = serde_json::to_string(&attested).expect("serialises");
+        let received: PubliclyAttestedBundle = serde_json::from_str(&wire).expect("deserialises");
+        let (verified, authenticated) = received.verify(&public).expect("verifies");
+        assert_eq!(
+            authenticated.scheme(),
+            AuthenticationScheme::Ed25519PublicKey
+        );
+        assert_eq!(
+            authenticated.repudiability(),
+            Repudiability::NotForgeableByVerifier
+        );
+        assert_eq!(authenticated.subject_digest(), verified.manifest_digest());
+        assert!(authenticated
+            .honest_label()
+            .contains("third parties can verify"));
+    }
+
+    #[test]
+    fn a_public_signature_does_not_survive_content_or_manifest_rewriting() {
+        let signing = signing_key();
+        let public = signing.verification_key(KeyValidity::unbounded());
+        let attested = PubliclyAttestedBundle::produce(
+            bundle(),
+            &signing,
+            AttestationPurpose::PublisherManifest,
+            ClaimedProducer::new("AURORA Working Group"),
+        )
+        .expect("attests");
+        let mut rewritten = attested.clone();
+        rewritten
+            .bundle
+            .contents
+            .insert("query".into(), json!({"target": "rewritten"}));
+        assert!(matches!(
+            rewritten.verify(&public),
+            Err(BundleError::EntryDigestMismatch { entry, .. }) if entry == "query"
+        ));
+        let mut relabelled = attested;
+        relabelled.bundle.manifest.environment.os = Some("darwin".into());
+        assert!(matches!(
+            relabelled.verify(&public),
+            Err(BundleError::AttestationCoversDifferentManifest { .. })
+        ));
     }
 
     #[test]
@@ -684,7 +824,11 @@ mod tests {
         assert_eq!(posture.recorded, vec!["world".to_string()]);
         assert_eq!(
             posture.unrecorded,
-            vec!["certificate".to_string(), "query".to_string(), "section".to_string()]
+            vec![
+                "certificate".to_string(),
+                "query".to_string(),
+                "section".to_string()
+            ]
         );
         assert!(posture.rejected.is_empty());
         assert!(!posture.is_fully_recorded());
@@ -768,7 +912,11 @@ mod tests {
         )
         .expect("attests");
         assert_eq!(attested.schema_version(), BUNDLE_SCHEMA_VERSION);
-        let bytes = attested.bundle.manifest.canonical_bytes().expect("canonical");
+        let bytes = attested
+            .bundle
+            .manifest
+            .canonical_bytes()
+            .expect("canonical");
         assert!(String::from_utf8(bytes)
             .expect("utf8")
             .contains(BUNDLE_SCHEMA_VERSION));

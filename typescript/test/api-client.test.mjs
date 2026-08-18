@@ -1297,6 +1297,14 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         guarantees: ["required checks are conjunctive"],
         limitations: ["local evidence only"],
       } } } });
+      if (path === "/v1/tools/bundle_verify") return jsonResponse({ ok: true, tool: "bundle_verify", request_id: "r13b", mcp: { result: { structuredContent: {
+        ok: true,
+        verification_mode: "ed25519_public_key",
+        manifest_digest: "m".repeat(64),
+        authentication: { outcome: "public_key_authenticated", scheme: "ed25519_public_key" },
+        guarantees: ["signature checked"],
+        limitations: ["key registry external"],
+      } } } });
       if (path === "/v1/tools/operations_catalog") return jsonResponse({ ok: true, tool: "operations_catalog", request_id: "r14", mcp: { result: { structuredContent: {
         ok: true,
         detail_mode: "summary",
@@ -2360,6 +2368,10 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   const tabular = await client.tabularIngest({ source_id: "cohort.csv", profile: { profile_id: "RG-DEMO-001" }, csv: "subject\nS1\n", format: "text/csv", include_facts: true });
   const conformance = await client.conformanceRun({ include_details: false, max_items: 100 });
   const release = await client.releaseAudit({ checks: [{ kind: "conformance_run", arguments: {} }] });
+  const bundleVerification = await client.bundleVerify({
+    publicly_attested_bundle: { bundle: {} },
+    verification_key: { key_identity: "publisher-ed25519", public_key: `ed25519:${"a".repeat(64)}`, validity: {} },
+  });
   const operations = await client.operationsCatalog({ include_details: false, max_items: 2 });
   const acceptance = await client.opsAcceptance({ max_items: 3 });
   const safety = await client.safetyReleaseGate({ assessment: { subject: "pack/biological-design@1", category: "biological_design", ratings: { capability_uplift: "low" } } });
@@ -2443,6 +2455,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(conformance.mcp.result.structuredContent.suite.pyramid.counts.unit, 1);
   assert.equal(release.mcp.result.structuredContent.release_ready, true);
   assert.equal(release.mcp.result.structuredContent.checks[0].advisory, false);
+  assert.equal(bundleVerification.mcp.result.structuredContent.verification_mode, "ed25519_public_key");
   assert.equal(operations.mcp.result.structuredContent.topologies.promise_parity.holds, true);
   assert.equal(operations.mcp.result.structuredContent.metrics.named_but_undefined, 117);
   assert.equal(acceptance.mcp.result.structuredContent.summary.is_decidable, false);
