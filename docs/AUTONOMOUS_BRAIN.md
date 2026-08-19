@@ -239,6 +239,49 @@ report. Unknown strategies, invalid epsilon values, non-finite rewards, disabled
 eligible sets are refused. A policy choice remains routing evidence—not permission, truth, or a
 claim of biological reinforcement learning.
 
+### Provider-free automatic domain routing
+
+Explicit `run(..., domain=...)` remains the strongest integration boundary, but an application does
+not always know the domain at intake. `AutonomousTaskRouter` provides a deterministic first pass
+over the complete built-in catalogue (`coding`, `browser`, `data`, `science`, `biomedical`,
+`neuroscience`, `operations`, `enterprise`, `multi_agent`, `multimodal`, `cross_domain`, and
+`evaluation`):
+
+```python
+from prism_sdk import AutonomousAgent
+
+proposal = agent.route(
+    task="compare EEG and fMRI preprocessing choices for a reproducible study",
+    min_confidence=0.25,
+    min_margin=0.10,
+)
+print(proposal.to_dict())  # digests, fixed-term evidence, confidence, and abstention state
+
+blueprint = agent.prepare_auto(
+    task="write Python code for the dataset quality pipeline",
+    allow_cross_domain=True,
+)
+```
+
+The router matches only reviewed fixed vocabulary and profile labels. It never calls a provider,
+stores the task text, grants a tool, or infers authorization. A strong separated match selects one
+domain; close matches can select a bounded cross-domain fan-out; no evidence, low confidence, or
+insufficient margin produces `abstained=true`. `prepare_auto()` converts a routed result into the
+same normal blueprint and workflow contracts used by explicit execution, while an abstained result
+contains no executable blueprint.
+
+For an application that wants the route-and-execute convenience, `agent.run_auto(...)` uses the
+same opaque credential session, provider approval, tool authorization, execution journal, health
+ledger, and learning arguments as `run()`/`run_cross_domain()`. It returns
+`status="route_review_required"` without making a provider call when routing abstains. The result
+is a routing proposal, not a claim that classification is correct; callers should allow a human or
+domain-specific classifier to override it before high-impact work.
+
+The route catalogue is included in `agent.readiness()` as `route_catalogue`, alongside the domain
+profiles and workflow contracts. This lets a UI explain the available routes without showing task
+text, prompts, credentials, or provider payloads. The TypeScript SDK exposes the corresponding
+`AutonomousRouteProposal`, `AutonomousAutoBlueprint`, and `AutonomousAutoResult` wire types.
+
 ### Restart-safe autonomous execution and tool outcome learning
 
 Long-horizon autonomy has a second persistence layer in addition to provider health, episodic

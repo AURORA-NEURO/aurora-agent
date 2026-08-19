@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import math
 import uuid
 from typing import Any, Mapping, Sequence
 
@@ -103,7 +104,81 @@ AUTONOMOUS_CROSS_DOMAIN_LEARNING_SCHEMA = "bioprism-python-autonomous-cross-doma
 AUTONOMOUS_CROSS_DOMAIN_TRAJECTORY_LEARNING_SCHEMA = "bioprism-python-autonomous-cross-domain-trajectory-learning/0.1"
 AUTONOMOUS_WORKFLOW_LEARNING_SCHEMA = "bioprism-python-autonomous-workflow-learning/0.1"
 AUTONOMOUS_WORKFLOW_TRAJECTORY_LEARNING_SCHEMA = "bioprism-python-autonomous-workflow-trajectory-learning/0.1"
+AUTONOMOUS_ROUTE_SCHEMA = "bioprism-python-autonomous-route/0.1"
+AUTONOMOUS_ROUTE_REASONS = (
+    "routed",
+    "cross_domain",
+    "no_matching_evidence",
+    "insufficient_confidence",
+    "insufficient_margin",
+)
+MAX_AUTONOMOUS_ROUTE_CANDIDATES = 8
+MAX_AUTONOMOUS_ROUTE_DOMAINS = 4
 _SAFE_IDENTIFIER_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-")
+
+
+# This is an intentionally small, reviewed routing vocabulary rather than a claim that a
+# lexical match understands a task.  It gives a provider-free first pass for applications that
+# do not yet have a classifier, and the route result always carries an abstention path.  Terms are
+# fixed catalogue evidence; arbitrary task tokens are never returned or persisted.
+_BUILTIN_DOMAIN_ROUTE_TERMS: dict[str, tuple[str, ...]] = {
+    "coding": (
+        "coding", "code", "bug", "debug", "repository", "repo", "pull request", "github",
+        "python", "rust", "typescript", "compile", "build", "test", "tests", "refactor",
+        "implement", "function", "api", "software",
+    ),
+    "browser": (
+        "browser", "web", "webpage", "website", "research online", "search", "source",
+        "citation", "citations", "retrieve", "retrieval", "navigate", "freshness", "current",
+        "url", "internet",
+    ),
+    "data": (
+        "data", "dataset", "table", "csv", "parquet", "schema", "lineage", "pipeline",
+        "missingness", "quality", "transform", "join", "cohort", "units", "analytics",
+        "statistics", "query", "warehouse",
+    ),
+    "science": (
+        "science", "scientific", "research", "hypothesis", "experiment", "causal", "causality",
+        "literature", "paper", "papers", "replicate", "reproducibility", "statistics", "estimand",
+        "prediction", "mechanism", "study design",
+    ),
+    "biomedical": (
+        "biomedical", "medicine", "medical", "clinical", "patient", "diagnosis", "diagnostic",
+        "treatment", "therapy", "drug", "disease", "safety", "clinician", "healthcare", "fhir",
+        "phenotype", "biomarker",
+    ),
+    "neuroscience": (
+        "neuroscience", "neural", "brain", "neuron", "eeg", "fmri", "meg", "neuroimaging",
+        "electrophysiology", "cognitive", "cognition", "signal", "preprocessing", "connectome",
+        "neurobiology", "neural signal",
+    ),
+    "operations": (
+        "operations", "ops", "incident", "outage", "runbook", "deployment", "deploy", "rollback",
+        "recovery", "reliability", "observability", "telemetry", "on call", "production", "blast radius",
+        "change management", "sre",
+    ),
+    "enterprise": (
+        "enterprise", "business", "organization", "stakeholder", "governance", "compliance", "policy",
+        "approval", "approver", "owner", "workflow", "decision", "procurement", "audit", "risk register",
+        "roadmap",
+    ),
+    "multi_agent": (
+        "multi agent", "multi-agent", "delegate", "delegation", "specialist", "team of agents", "consensus",
+        "handoff", "coordination", "conflict resolution", "subtask", "parallel agents", "agent team",
+    ),
+    "multimodal": (
+        "multimodal", "multi-modal", "image", "images", "audio", "video", "document", "documents",
+        "scan", "screenshot", "transcript", "vision", "cross-modal", "modality", "align modalities",
+    ),
+    "cross_domain": (
+        "cross domain", "cross-domain", "interdisciplinary", "integrate domains", "synthesize domains",
+        "multiple disciplines", "combined analysis", "domain synthesis", "route domains", "compare disciplines",
+    ),
+    "evaluation": (
+        "evaluation", "evaluate", "benchmark", "benchmarking", "rubric", "grader", "held out", "holdout",
+        "replay", "regression", "failure analysis", "test harness", "score", "quality assessment", "red team",
+    ),
+}
 
 
 def _text(name: str, value: Any, *, maximum: int = 512) -> str:
@@ -199,6 +274,331 @@ class AutonomousDomainProfile:
             "evaluator_domain": self.evaluator_domain,
             "execution": "strategy_metadata_only",
         }
+
+
+def _normalize_route_text(value: str) -> str:
+    """Normalize transient task text for deterministic catalogue matching."""
+
+    return " ".join(
+        "".join(character.lower() if character.isalnum() else " " for character in value).split()
+    )
+
+
+def _route_term_matches(normalized_task: str, term: str) -> bool:
+    normalized_term = _normalize_route_text(term)
+    if not normalized_term:
+        return False
+    return f" {normalized_term} " in f" {normalized_task} "
+
+
+def _route_digest(value: Any, name: str) -> str:
+    if not isinstance(value, str) or len(value) != 64 or any(
+        character not in "0123456789abcdef" for character in value
+    ):
+        raise BrainRunError(f"{name} must be a lowercase SHA-256 digest")
+    return value
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousRouteCandidate:
+    """One metadata-only domain candidate produced by the provider-free task router."""
+
+    domain: str
+    score: float
+    matched_terms: tuple[str, ...]
+    capability: str
+    risk_class: str
+    workflow_id: str
+
+    def __post_init__(self) -> None:
+        _identifier("route candidate domain", self.domain)
+        if self.domain not in AUTONOMOUS_DOMAINS:
+            raise BrainRunError(f"route candidate domain is unsupported: {self.domain!r}")
+        if isinstance(self.score, bool) or not isinstance(self.score, (int, float)):
+            raise BrainRunError("route candidate score must be a finite number")
+        if not math.isfinite(float(self.score)) or not 0.0 <= float(self.score) <= 1.0:
+            raise BrainRunError("route candidate score must be within [0, 1]")
+        terms = _sequence("route candidate matched_terms", self.matched_terms, maximum=32)
+        _identifier("route candidate capability", self.capability)
+        _identifier("route candidate risk_class", self.risk_class)
+        _identifier("route candidate workflow_id", self.workflow_id)
+        object.__setattr__(self, "score", float(self.score))
+        object.__setattr__(self, "matched_terms", terms)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "domain": self.domain,
+            "score": self.score,
+            "matched_terms": list(self.matched_terms),
+            "capability": self.capability,
+            "risk_class": self.risk_class,
+            "workflow_id": self.workflow_id,
+            "evidence": "fixed_catalogue_term_matches_only",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousRouteProposal:
+    """A safe-to-inspect route proposal with explicit confidence and abstention semantics."""
+
+    task_digest: str
+    candidates: tuple[AutonomousRouteCandidate, ...]
+    selected_domains: tuple[str, ...]
+    confidence: float
+    abstained: bool
+    reason: str
+    cross_domain: bool = False
+
+    def __post_init__(self) -> None:
+        _route_digest(self.task_digest, "route task_digest")
+        if not isinstance(self.candidates, Sequence) or isinstance(self.candidates, (str, bytes)):
+            raise BrainRunError("route candidates must be a sequence")
+        candidates = tuple(self.candidates)
+        if len(candidates) > MAX_AUTONOMOUS_ROUTE_CANDIDATES:
+            raise BrainRunError("route candidates exceed the bounded maximum")
+        if any(not isinstance(item, AutonomousRouteCandidate) for item in candidates):
+            raise BrainRunError("route candidates must contain AutonomousRouteCandidate values")
+        if len({item.domain for item in candidates}) != len(candidates):
+            raise BrainRunError("route candidates must contain unique domains")
+        selected = _sequence("route selected_domains", self.selected_domains, maximum=MAX_AUTONOMOUS_ROUTE_DOMAINS) if self.selected_domains else ()
+        candidate_domains = {item.domain for item in candidates}
+        if any(domain not in candidate_domains for domain in selected):
+            raise BrainRunError("route selected_domains must be present in candidates")
+        if isinstance(self.confidence, bool) or not isinstance(self.confidence, (int, float)):
+            raise BrainRunError("route confidence must be a finite number")
+        if not math.isfinite(float(self.confidence)) or not 0.0 <= float(self.confidence) <= 1.0:
+            raise BrainRunError("route confidence must be within [0, 1]")
+        if not isinstance(self.abstained, bool) or not isinstance(self.cross_domain, bool):
+            raise BrainRunError("route abstained and cross_domain must be booleans")
+        if self.reason not in AUTONOMOUS_ROUTE_REASONS:
+            raise BrainRunError("route reason is not recognized")
+        if self.abstained and selected:
+            raise BrainRunError("an abstained route cannot select domains")
+        if not self.abstained and not selected:
+            raise BrainRunError("a routed proposal must select at least one domain")
+        if self.cross_domain != (len(selected) > 1):
+            raise BrainRunError("route cross_domain must agree with selected domain count")
+        if self.reason == "cross_domain" and not self.cross_domain:
+            raise BrainRunError("cross_domain route reason requires multiple selected domains")
+        if self.cross_domain and self.reason != "cross_domain":
+            raise BrainRunError("a cross-domain route must use the cross_domain reason")
+        if self.reason == "routed" and self.cross_domain:
+            raise BrainRunError("routed route reason cannot describe a cross-domain selection")
+        object.__setattr__(self, "candidates", candidates)
+        object.__setattr__(self, "selected_domains", selected)
+        object.__setattr__(self, "confidence", float(self.confidence))
+
+    @property
+    def route_digest(self) -> str:
+        return content_digest(
+            {
+                "schema": AUTONOMOUS_ROUTE_SCHEMA,
+                "task_digest": self.task_digest,
+                "candidates": [candidate.to_dict() for candidate in self.candidates],
+                "selected_domains": list(self.selected_domains),
+                "confidence": self.confidence,
+                "abstained": self.abstained,
+                "reason": self.reason,
+                "cross_domain": self.cross_domain,
+            }
+        )
+
+    @property
+    def primary_domain(self) -> str | None:
+        return self.selected_domains[0] if self.selected_domains else None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_ROUTE_SCHEMA,
+            "task_digest": self.task_digest,
+            "candidates": [candidate.to_dict() for candidate in self.candidates],
+            "selected_domains": list(self.selected_domains),
+            "primary_domain": self.primary_domain,
+            "confidence": self.confidence,
+            "abstained": self.abstained,
+            "reason": self.reason,
+            "cross_domain": self.cross_domain,
+            "route_digest": self.route_digest,
+            "retention": "task_text_transient_only; fixed_catalogue_evidence_only",
+            "does_not_claim": [
+                "domain classification truth",
+                "provider suitability",
+                "authorization",
+                "scientific or operational validity",
+            ],
+        }
+
+
+class AutonomousTaskRouter:
+    """Provider-free, deterministic domain router with explicit abstention.
+
+    The router is deliberately a first-pass intake aid. It scores only reviewed vocabulary from
+    the domain catalogue, never sends the task to a provider, and returns a review-required
+    proposal when evidence or separation is insufficient. Applications may replace the
+    vocabulary with their own reviewed terms while keeping the same result contract.
+    """
+
+    def __init__(
+        self,
+        registry: "AutonomousDomainRegistry",
+        terms_by_domain: Mapping[str, Sequence[str]] | None = None,
+        workflow_registry: "AutonomousWorkflowRegistry | None" = None,
+    ) -> None:
+        if not isinstance(registry, AutonomousDomainRegistry):
+            raise BrainRunError("route router requires an AutonomousDomainRegistry")
+        if terms_by_domain is not None and not isinstance(terms_by_domain, Mapping):
+            raise BrainRunError("route terms_by_domain must be a mapping or None")
+        if workflow_registry is not None and not isinstance(workflow_registry, AutonomousWorkflowRegistry):
+            raise BrainRunError("route workflow_registry must be an AutonomousWorkflowRegistry or None")
+        self.registry = registry
+        self.workflow_registry = workflow_registry or AutonomousWorkflowRegistry.with_builtin_strategies()
+        supplied = {} if terms_by_domain is None else dict(terms_by_domain)
+        if any(not isinstance(domain, str) for domain in supplied):
+            raise BrainRunError("route terms must use string domain keys")
+        unknown = sorted(set(supplied).difference(registry._profiles))
+        if unknown:
+            raise BrainRunError("route terms contain unknown domains: " + ", ".join(unknown))
+        terms: dict[str, tuple[str, ...]] = {}
+        for domain, profile in registry._profiles.items():
+            raw_terms = supplied.get(domain, _BUILTIN_DOMAIN_ROUTE_TERMS.get(domain, ()))
+            if not isinstance(raw_terms, Sequence) or isinstance(raw_terms, (str, bytes)):
+                raise BrainRunError(f"route terms for {domain!r} must be a sequence")
+            normalized: list[str] = []
+            for raw_term in raw_terms:
+                term = _text("route term", raw_term, maximum=256)
+                if term not in normalized:
+                    normalized.append(term)
+            # Custom profiles remain routable even when an application has not supplied a full
+            # ontology. These labels are weaker evidence than explicit terms, but keep routing
+            # aligned with the profile without allowing generic model capabilities such as
+            # ``reasoning`` to route every task to every domain.
+            for fallback in (domain, profile.default_capability):
+                if fallback not in normalized:
+                    normalized.append(fallback)
+            if not normalized:
+                raise BrainRunError(f"route terms for {domain!r} cannot be empty")
+            terms[domain] = tuple(normalized)
+        self._terms = terms
+
+    def catalogue(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "schema": AUTONOMOUS_ROUTE_SCHEMA,
+                "domain": domain,
+                "term_count": len(self._terms[domain]),
+                "terms": list(self._terms[domain]),
+                "evidence": "reviewed_catalogue_vocabulary",
+            }
+            for domain in sorted(self._terms)
+        ]
+
+    def route(
+        self,
+        task: str,
+        *,
+        hints: Sequence[str] = (),
+        min_confidence: float = 0.25,
+        min_margin: float = 0.10,
+        max_domains: int = 3,
+        allow_cross_domain: bool = True,
+    ) -> AutonomousRouteProposal:
+        _text("route task", task, maximum=MAX_AUTONOMY_TEXT_BYTES)
+        if not isinstance(hints, Sequence) or isinstance(hints, (str, bytes)):
+            raise BrainRunError("route hints must be a sequence")
+        if len(hints) > 16:
+            raise BrainRunError("route hints may contain at most 16 entries")
+        hint_text = " ".join(_text("route hint", hint, maximum=256) for hint in hints)
+        normalized = _normalize_route_text(f"{task} {hint_text}")
+        if isinstance(min_confidence, bool) or not isinstance(min_confidence, (int, float)) or not math.isfinite(float(min_confidence)) or not 0.0 <= float(min_confidence) <= 1.0:
+            raise BrainRunError("route min_confidence must be within [0, 1]")
+        if isinstance(min_margin, bool) or not isinstance(min_margin, (int, float)) or not math.isfinite(float(min_margin)) or not 0.0 <= float(min_margin) <= 1.0:
+            raise BrainRunError("route min_margin must be within [0, 1]")
+        if not isinstance(max_domains, int) or isinstance(max_domains, bool) or not 1 <= max_domains <= MAX_AUTONOMOUS_ROUTE_DOMAINS:
+            raise BrainRunError(f"route max_domains must be between 1 and {MAX_AUTONOMOUS_ROUTE_DOMAINS}")
+        if not isinstance(allow_cross_domain, bool):
+            raise BrainRunError("route allow_cross_domain must be a boolean")
+
+        scored: list[AutonomousRouteCandidate] = []
+        for domain in sorted(self._terms):
+            profile = self.registry.resolve(domain)
+            workflow = self.workflow_registry.resolve(domain)
+            matched = tuple(term for term in self._terms[domain] if _route_term_matches(normalized, term))
+            if not matched:
+                continue
+            points = sum(
+                2.5 if _normalize_route_text(term) in {domain, _normalize_route_text(profile.default_capability)}
+                else 2.0 if " " in term or len(term) >= 9
+                else 1.0
+                for term in matched
+            )
+            score = min(1.0, points / 4.0)
+            scored.append(
+                AutonomousRouteCandidate(
+                    domain=domain,
+                    score=score,
+                    matched_terms=matched,
+                    capability=profile.default_capability,
+                    risk_class=profile.risk_class,
+                    workflow_id=workflow.workflow_id,
+                )
+            )
+        scored.sort(key=lambda candidate: (-candidate.score, candidate.domain))
+        candidates = tuple(scored[:MAX_AUTONOMOUS_ROUTE_CANDIDATES])
+        task_digest = content_digest({"task": task})
+        if not candidates:
+            return AutonomousRouteProposal(
+                task_digest=task_digest,
+                candidates=(),
+                selected_domains=(),
+                confidence=0.0,
+                abstained=True,
+                reason="no_matching_evidence",
+            )
+        top = candidates[0]
+        second = candidates[1] if len(candidates) > 1 else None
+        if top.score < float(min_confidence):
+            return AutonomousRouteProposal(
+                task_digest=task_digest,
+                candidates=candidates,
+                selected_domains=(),
+                confidence=top.score,
+                abstained=True,
+                reason="insufficient_confidence",
+            )
+        if second is not None and top.score - second.score < float(min_margin):
+            if allow_cross_domain and second.score >= float(min_confidence):
+                selected = tuple(
+                    candidate.domain
+                    for candidate in candidates
+                    if candidate.score >= float(min_confidence)
+                    and candidate.score >= top.score - float(min_margin)
+                )[:max_domains]
+                if len(selected) > 1:
+                    return AutonomousRouteProposal(
+                        task_digest=task_digest,
+                        candidates=candidates,
+                        selected_domains=selected,
+                        confidence=top.score,
+                        abstained=False,
+                        reason="cross_domain",
+                        cross_domain=True,
+                    )
+            return AutonomousRouteProposal(
+                task_digest=task_digest,
+                candidates=candidates,
+                selected_domains=(),
+                confidence=top.score,
+                abstained=True,
+                reason="insufficient_margin",
+            )
+        return AutonomousRouteProposal(
+            task_digest=task_digest,
+            candidates=candidates,
+            selected_domains=(top.domain,),
+            confidence=top.score,
+            abstained=False,
+            reason="routed",
+        )
 
 
 AUTONOMOUS_WORKFLOW_SCHEMA = "bioprism-python-autonomous-workflow/0.1"
@@ -927,6 +1327,78 @@ class AutonomousTaskBlueprint:
             "plan": plan_public,
             "execution": "not_started",
             "credential_posture": "caller_handles_only",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousAutoBlueprint:
+    """Provider-free automatic intake result: one blueprint, fan-out, or review request."""
+
+    route: AutonomousRouteProposal
+    blueprint: AutonomousTaskBlueprint | None = None
+    cross_domain_blueprint: "AutonomousCrossDomainBlueprint | None" = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.route, AutonomousRouteProposal):
+            raise BrainRunError("automatic blueprint requires an AutonomousRouteProposal")
+        if self.blueprint is not None and not isinstance(self.blueprint, AutonomousTaskBlueprint):
+            raise BrainRunError("automatic blueprint contains an invalid single-domain blueprint")
+        if self.cross_domain_blueprint is not None and not isinstance(
+            self.cross_domain_blueprint, AutonomousCrossDomainBlueprint
+        ):
+            raise BrainRunError("automatic blueprint contains an invalid cross-domain blueprint")
+        if self.route.abstained and (self.blueprint is not None or self.cross_domain_blueprint is not None):
+            raise BrainRunError("an abstained route cannot contain an executable blueprint")
+        if not self.route.abstained:
+            if len(self.route.selected_domains) == 1 and self.blueprint is None:
+                raise BrainRunError("a single-domain route requires a blueprint")
+            if len(self.route.selected_domains) > 1 and self.cross_domain_blueprint is None:
+                raise BrainRunError("a cross-domain route requires a cross-domain blueprint")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": "bioprism-python-autonomous-auto-blueprint/0.1",
+            "route": self.route.to_dict(),
+            "blueprint": None if self.blueprint is None else self.blueprint.to_dict(),
+            "cross_domain_blueprint": None
+            if self.cross_domain_blueprint is None
+            else self.cross_domain_blueprint.to_dict(),
+            "execution": "not_started",
+            "authorization": "caller_approval_per_provider_or_effect_boundary",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousAutoResult:
+    """Automatic execution result that preserves the route and review outcome."""
+
+    status: str
+    route: AutonomousRouteProposal
+    result: Any | None = None
+
+    def __post_init__(self) -> None:
+        if self.status not in {"completed", "route_review_required"}:
+            raise BrainRunError("automatic result status is invalid")
+        if not isinstance(self.route, AutonomousRouteProposal):
+            raise BrainRunError("automatic result requires an AutonomousRouteProposal")
+        if self.status == "route_review_required" and (not self.route.abstained or self.result is not None):
+            raise BrainRunError("route review result must contain an abstained route without execution")
+        if self.status == "completed" and (self.route.abstained or self.result is None):
+            raise BrainRunError("completed automatic result requires an executed routed task")
+
+    def to_dict(self) -> dict[str, Any]:
+        result = None
+        if self.result is not None:
+            serializer = getattr(self.result, "to_dict", None)
+            if not callable(serializer):
+                raise BrainRunError("automatic result payload does not expose to_dict")
+            result = serializer()
+        return {
+            "schema": "bioprism-python-autonomous-auto-result/0.1",
+            "status": self.status,
+            "route": self.route.to_dict(),
+            "result": result,
+            "retention": "route_metadata_only; provider_result_caller_owned",
         }
 
 
@@ -1777,6 +2249,7 @@ class AutonomousTaskOrchestrator:
         brain: AutonomousBrain,
         registry: AutonomousDomainRegistry | None = None,
         workflow_registry: AutonomousWorkflowRegistry | None = None,
+        router: AutonomousTaskRouter | None = None,
     ) -> None:
         if not isinstance(brain, AutonomousBrain):
             raise BrainRunError("brain must be an AutonomousBrain")
@@ -1784,9 +2257,49 @@ class AutonomousTaskOrchestrator:
             raise BrainRunError("registry must be an AutonomousDomainRegistry or None")
         if workflow_registry is not None and not isinstance(workflow_registry, AutonomousWorkflowRegistry):
             raise BrainRunError("workflow_registry must be an AutonomousWorkflowRegistry or None")
+        if router is not None and not isinstance(router, AutonomousTaskRouter):
+            raise BrainRunError("router must be an AutonomousTaskRouter or None")
         self.brain = brain
-        self.registry = registry or AutonomousDomainRegistry.with_builtin_profiles()
-        self.workflow_registry = workflow_registry or AutonomousWorkflowRegistry.with_builtin_strategies()
+        self.registry = registry or (router.registry if router is not None else AutonomousDomainRegistry.with_builtin_profiles())
+        self.workflow_registry = workflow_registry or (
+            router.workflow_registry
+            if router is not None
+            else AutonomousWorkflowRegistry.with_builtin_strategies()
+        )
+        if router is not None and (
+            router.registry is not self.registry or router.workflow_registry is not self.workflow_registry
+        ):
+            raise BrainRunError(
+                "router registries must be the same registries supplied to the orchestrator"
+            )
+        self.router = router or AutonomousTaskRouter(
+            self.registry,
+            workflow_registry=self.workflow_registry,
+        )
+
+    def route_task(self, *, task: str, **kwargs: Any) -> AutonomousRouteProposal:
+        """Route an unclassified task without contacting a provider or executing a tool."""
+
+        return self.router.route(task, **kwargs)
+
+    @staticmethod
+    def _route_context(
+        context: Mapping[str, Any] | None,
+        route: AutonomousRouteProposal,
+    ) -> dict[str, Any]:
+        """Bind route identity into transient selection context without accepting spoofing."""
+
+        resolved = {} if context is None else dict(context)
+        if "autonomous_route" in resolved:
+            raise BrainRunError("context cannot override the automatic route binding")
+        resolved["autonomous_route"] = {
+            "route_digest": route.route_digest,
+            "reason": route.reason,
+            "confidence": route.confidence,
+            "selected_domains": list(route.selected_domains),
+            "cross_domain": route.cross_domain,
+        }
+        return resolved
 
     def prepare(
         self,
@@ -1876,6 +2389,95 @@ class AutonomousTaskOrchestrator:
             plan=plan,
             required_capabilities=required,
         )
+
+    def prepare_auto(
+        self,
+        *,
+        task: str,
+        hints: Sequence[str] = (),
+        context: Mapping[str, Any] | None = None,
+        constraints: Sequence[str] = (),
+        desired_outputs: Sequence[str] = (),
+        capability: str | None = None,
+        risk_class: str | None = None,
+        max_steps: int = 8,
+        require_json: bool = False,
+        response_schema: Mapping[str, Any] | None = None,
+        execution_mode: str = "provider",
+        max_input_tokens: int = 4_096,
+        required_model_capabilities: Sequence[str] = (),
+        memory_episodes: Sequence[Mapping[str, Any]] = (),
+        min_confidence: float = 0.25,
+        min_margin: float = 0.10,
+        max_domains: int = 3,
+        allow_cross_domain: bool = True,
+    ) -> AutonomousAutoBlueprint:
+        """Create a single- or cross-domain blueprint, or an explicit review request."""
+
+        route = self.route_task(
+            task=task,
+            hints=hints,
+            min_confidence=min_confidence,
+            min_margin=min_margin,
+            max_domains=max_domains,
+            allow_cross_domain=allow_cross_domain,
+        )
+        if route.abstained:
+            return AutonomousAutoBlueprint(route=route)
+        routed_context = self._route_context(context, route)
+        if len(route.selected_domains) == 1:
+            blueprint = self.prepare(
+                task=task,
+                domain=route.selected_domains[0],
+                capability=capability,
+                risk_class=risk_class,
+                constraints=constraints,
+                desired_outputs=desired_outputs,
+                context=routed_context,
+                max_steps=max_steps,
+                require_json=require_json,
+                response_schema=response_schema,
+                execution_mode=execution_mode,
+                max_input_tokens=max_input_tokens,
+                required_model_capabilities=required_model_capabilities,
+                memory_episodes=memory_episodes,
+            )
+            return AutonomousAutoBlueprint(route=route, blueprint=blueprint)
+        subtasks = [
+            {
+                "id": f"route-{domain}",
+                "task": task,
+                "domain": domain,
+                "capability": capability,
+                "risk_class": risk_class,
+                "constraints": constraints,
+                "desired_outputs": desired_outputs,
+                "context": routed_context,
+                "max_steps": max_steps,
+                "require_json": require_json,
+                "response_schema": response_schema,
+                "execution_mode": execution_mode,
+                "required_model_capabilities": required_model_capabilities,
+            }
+            for domain in route.selected_domains
+        ]
+        cross_domain = self.prepare_cross_domain(
+            task=task,
+            subtasks=subtasks,
+            context=routed_context,
+            desired_outputs=desired_outputs or (
+                "domain-attributed findings",
+                "cross-domain conflicts and uncertainty",
+                "safe next actions",
+            ),
+            child_execution_mode=execution_mode,
+            synthesis_execution_mode=execution_mode,
+            max_steps=max_steps,
+            require_json=require_json,
+            response_schema=response_schema,
+            max_input_tokens=max_input_tokens,
+        )
+        return AutonomousAutoBlueprint(route=route, cross_domain_blueprint=cross_domain)
 
     @staticmethod
     def route_request_for(
@@ -4260,6 +4862,7 @@ class AutonomousAgent:
         brain: AutonomousBrain | None = None,
         registry: AutonomousDomainRegistry | None = None,
         workflow_registry: AutonomousWorkflowRegistry | None = None,
+        router: AutonomousTaskRouter | None = None,
         ledger: BrainLearningLedger | None = None,
         memory: BrainEpisodicMemory | None = None,
         health_ledger: ProviderHealthLedger | None = None,
@@ -4326,6 +4929,7 @@ class AutonomousAgent:
             self.brain,
             registry=registry,
             workflow_registry=workflow_registry,
+            router=router,
         )
 
     def register_model(
@@ -4342,6 +4946,16 @@ class AutonomousAgent:
         """Return deterministic model metadata suitable for a configuration UI."""
 
         return self.catalogue.candidates(enabled_only=enabled_only)
+
+    def domains(self) -> list[dict[str, Any]]:
+        """Return the redacted domain strategy catalogue used by automatic intake."""
+
+        return self.orchestrator.registry.catalogue()
+
+    def workflows(self) -> list[dict[str, Any]]:
+        """Return the deterministic workflow contracts available to automatic intake."""
+
+        return self.orchestrator.workflow_registry.catalogue()
 
     def register_tool(
         self,
@@ -4430,6 +5044,9 @@ class AutonomousAgent:
             "providers": providers,
             "models": models,
             "provider_health": health,
+            "domains": self.domains(),
+            "workflows": self.workflows(),
+            "route_catalogue": self.orchestrator.router.catalogue(),
             "domain_tools": [] if self.tool_registry is None else self.tool_registry.catalogue(),
             "domain_tool_registry_digest": None if self.tool_registry is None else self.tool_registry.digest,
             "next_actions": next_actions,
@@ -4458,6 +5075,16 @@ class AutonomousAgent:
         """Build a domain-aware plan and prompt without contacting any provider."""
 
         return self.orchestrator.prepare(**kwargs)
+
+    def route(self, *, task: str, **kwargs: Any) -> AutonomousRouteProposal:
+        """Return an auditable domain proposal without contacting a provider."""
+
+        return self.orchestrator.route_task(task=task, **kwargs)
+
+    def prepare_auto(self, **kwargs: Any) -> AutonomousAutoBlueprint:
+        """Build an automatic single-domain, cross-domain, or review-required blueprint."""
+
+        return self.orchestrator.prepare_auto(**kwargs)
 
     def prepare_cross_domain(self, **kwargs: Any) -> AutonomousCrossDomainBlueprint:
         """Build bounded specialist fan-out and synthesis work without provider contact."""
@@ -4679,6 +5306,116 @@ class AutonomousAgent:
             raise
         self._finish_execution(execution_controller, result=result)
         return result
+
+    def run_auto(
+        self,
+        *,
+        task: str,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        hints: Sequence[str] = (),
+        min_confidence: float = 0.25,
+        min_margin: float = 0.10,
+        max_domains: int = 3,
+        allow_cross_domain: bool = True,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> AutonomousAutoResult:
+        """Route and execute a task, returning review-required instead of guessing silently.
+
+        A routed task uses the same provider, tool, approval, persistence, and learning paths as
+        explicit ``run``/``run_cross_domain`` calls.  An abstained route never invokes a provider.
+        """
+
+        if "domain" in kwargs:
+            raise BrainRunError("run_auto chooses the domain; pass routing hints instead")
+        blueprint = self.prepare_auto(
+            task=task,
+            hints=hints,
+            min_confidence=min_confidence,
+            min_margin=min_margin,
+            max_domains=max_domains,
+            allow_cross_domain=allow_cross_domain,
+            **{
+                key: value
+                for key, value in kwargs.items()
+                if key
+                in {
+                    "context",
+                    "constraints",
+                    "desired_outputs",
+                    "capability",
+                    "risk_class",
+                    "max_steps",
+                    "require_json",
+                    "response_schema",
+                    "execution_mode",
+                    "max_input_tokens",
+                    "required_model_capabilities",
+                    "memory_episodes",
+                }
+            },
+        )
+        if blueprint.route.abstained:
+            return AutonomousAutoResult(status="route_review_required", route=blueprint.route)
+        execution_kwargs = dict(kwargs)
+        for key in {
+            "context",
+            "constraints",
+            "desired_outputs",
+            "capability",
+            "risk_class",
+            "max_steps",
+            "require_json",
+            "response_schema",
+            "execution_mode",
+            "max_input_tokens",
+            "required_model_capabilities",
+            "memory_episodes",
+        }:
+            execution_kwargs.pop(key, None)
+        routed_context = self.orchestrator._route_context(kwargs.get("context"), blueprint.route)
+        execution_kwargs["context"] = routed_context
+        if blueprint.blueprint is not None:
+            result = self.run(
+                task=task,
+                domain=blueprint.route.selected_domains[0],
+                credentials=credentials,
+                model_candidates=model_candidates,
+                execution_id=execution_id,
+                resume_execution=resume_execution,
+                **execution_kwargs,
+            )
+        else:
+            subtasks = [
+                {
+                    "id": f"route-{domain}",
+                    "task": task,
+                    "domain": domain,
+                    "capability": kwargs.get("capability"),
+                    "risk_class": kwargs.get("risk_class"),
+                    "constraints": kwargs.get("constraints", ()),
+                    "desired_outputs": kwargs.get("desired_outputs", ()),
+                    "context": routed_context,
+                    "max_steps": kwargs.get("max_steps", 8),
+                    "require_json": kwargs.get("require_json", False),
+                    "response_schema": kwargs.get("response_schema"),
+                    "execution_mode": kwargs.get("execution_mode", "provider"),
+                    "required_model_capabilities": kwargs.get("required_model_capabilities", ()),
+                }
+                for domain in blueprint.route.selected_domains
+            ]
+            result = self.run_cross_domain(
+                task=task,
+                subtasks=subtasks,
+                credentials=credentials,
+                model_candidates=model_candidates,
+                execution_id=execution_id,
+                resume_execution=resume_execution,
+                **execution_kwargs,
+            )
+        return AutonomousAutoResult(status="completed", route=blueprint.route, result=result)
 
     def run_cross_domain_learning(
         self,
@@ -4935,6 +5672,10 @@ __all__ = [
     "AUTONOMOUS_EXECUTION_MODES",
     "AUTONOMOUS_CROSS_DOMAIN_LEARNING_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_TRAJECTORY_LEARNING_SCHEMA",
+    "AUTONOMOUS_ROUTE_SCHEMA",
+    "AUTONOMOUS_ROUTE_REASONS",
+    "MAX_AUTONOMOUS_ROUTE_CANDIDATES",
+    "MAX_AUTONOMOUS_ROUTE_DOMAINS",
     "AUTONOMOUS_WORKFLOW_SCHEMA",
     "AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA",
     "AUTONOMOUS_WORKFLOW_EVALUATOR_SCHEMA",
@@ -4943,6 +5684,9 @@ __all__ = [
     "AUTONOMOUS_WORKFLOW_STAGE_STATUSES",
     "AutonomousDomainProfile",
     "AutonomousDomainRegistry",
+    "AutonomousRouteCandidate",
+    "AutonomousRouteProposal",
+    "AutonomousTaskRouter",
     "AutonomousDomainTool",
     "AutonomousDomainToolRegistry",
     "AutonomousDomainToolRuntime",
@@ -4950,6 +5694,8 @@ __all__ = [
     "AutonomousCrossDomainResult",
     "AutonomousCrossDomainLearningResult",
     "AutonomousCrossDomainTrajectoryLearningResult",
+    "AutonomousAutoBlueprint",
+    "AutonomousAutoResult",
     "AutonomousLearningResult",
     "AutonomousAgent",
     "AutonomousWorkflowCheckpoint",

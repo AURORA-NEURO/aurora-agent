@@ -16,6 +16,7 @@ from prism_sdk import (
     AutonomousDomainToolRegistry,
     AutonomousExecutionJournal,
     AutonomousExecutionPolicy,
+    AutonomousTaskRouter,
     AutonomousWorkflowRegistry,
     BrainRunError,
     BrainEpisodicMemory,
@@ -297,6 +298,8 @@ def test_model_catalogue_and_agent_facade_connect_readiness_session_and_executio
         agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=catalogue)
         assert agent.models() == catalogue.candidates()
         before = agent.readiness()
+        assert {row["domain"] for row in before["route_catalogue"]} == set(AUTONOMOUS_DOMAINS)
+        assert len(before["workflows"]) == len(AUTONOMOUS_DOMAINS)
         assert before["models"][0]["eligible_for_selection"] is False
         assert before["providers"][0]["next_action"] == "collect_user_credential"
 
@@ -650,6 +653,92 @@ def test_builtin_domain_registry_covers_every_autonomous_domain_and_blueprint_re
             assert domain_blueprint.workflow.domain == domain
             assert domain_blueprint.workflow.stages
             assert domain_blueprint.plan["workflow_id"] == domain_blueprint.workflow.workflow_id
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_provider_free_router_covers_every_domain_and_abstains_without_evidence():
+    registry = AutonomousDomainRegistry.with_builtin_profiles()
+    router = AutonomousTaskRouter(registry)
+    for domain in AUTONOMOUS_DOMAINS:
+        proposal = router.route(f"please prepare a bounded {domain} task")
+        assert proposal.abstained is False
+        assert proposal.primary_domain == domain
+        assert proposal.route_digest == router.route(f"please prepare a bounded {domain} task").route_digest
+        assert "please prepare" not in json.dumps(proposal.to_dict())
+
+    unknown = router.route("please explain an entirely unclassified household question")
+    assert unknown.abstained is True
+    assert unknown.reason == "no_matching_evidence"
+    assert unknown.selected_domains == ()
+    assert unknown.to_dict()["retention"].startswith("task_text_transient_only")
+
+
+def test_router_explicitly_surfaces_cross_domain_ambiguity_and_review_policy():
+    registry = AutonomousDomainRegistry.with_builtin_profiles()
+    router = AutonomousTaskRouter(registry)
+    proposal = router.route(
+        "write python code for the dataset pipeline",
+        min_confidence=0.20,
+        min_margin=0.10,
+        max_domains=3,
+        allow_cross_domain=True,
+    )
+    assert proposal.abstained is False
+    assert proposal.cross_domain is True
+    assert set(proposal.selected_domains) == {"coding", "data"}
+    assert proposal.reason == "cross_domain"
+
+    review = router.route(
+        "write python code for the dataset pipeline",
+        min_confidence=0.20,
+        min_margin=0.10,
+        allow_cross_domain=False,
+    )
+    assert review.abstained is True
+    assert review.reason == "insufficient_margin"
+
+    agent = AutonomousAgent(_Workspace(), LLMRuntime())
+    auto_blueprint = agent.prepare_auto(
+        task="write python code for the dataset pipeline",
+        min_confidence=0.20,
+        min_margin=0.10,
+    )
+    assert auto_blueprint.route.cross_domain is True
+    assert auto_blueprint.cross_domain_blueprint is not None
+    assert auto_blueprint.blueprint is None
+
+
+def test_agent_prepare_auto_and_run_auto_reuse_explicit_runtime_boundaries():
+    runtime, store, server, thread = _runtime()
+    try:
+        agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+        with agent.onboarding.start_session(session_id="auto-route-session") as session:
+            session.register_value("openai", "auto-route-secret")
+            blueprint = agent.prepare_auto(task="fix the Rust tests in the repository")
+            assert blueprint.route.primary_domain == "coding"
+            assert blueprint.blueprint is not None
+            assert blueprint.cross_domain_blueprint is None
+            assert blueprint.blueprint.spec.context["autonomous_route"]["route_digest"] == blueprint.route.route_digest
+            result = agent.run_auto(
+                task="fix the Rust tests in the repository",
+                credentials=session,
+                approve_provider_call=True,
+            )
+            assert result.status == "completed"
+            assert result.route.primary_domain == "coding"
+            assert result.result is not None
+            assert "auto-route-secret" not in json.dumps(result.to_dict())
+
+            review = agent.run_auto(
+                task="please explain an entirely unclassified household question",
+                credentials=session,
+                approve_provider_call=True,
+            )
+            assert review.status == "route_review_required"
+            assert review.result is None
     finally:
         server.shutdown()
         thread.join(timeout=2)

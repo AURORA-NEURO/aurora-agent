@@ -253,6 +253,65 @@ export interface BrainPlanResult extends JsonObject {
   errors: string[];
 }
 
+/** Provider-free automatic domain intake shared with the Python autonomous façade. */
+export interface AutonomousRouteCandidate extends JsonObject {
+  domain: string;
+  score: number;
+  matched_terms: string[];
+  capability: string;
+  risk_class: string;
+  workflow_id: string;
+  evidence: "fixed_catalogue_term_matches_only" | string;
+}
+
+export type AutonomousRouteReason =
+  | "routed"
+  | "cross_domain"
+  | "no_matching_evidence"
+  | "insufficient_confidence"
+  | "insufficient_margin"
+  | string;
+
+export interface AutonomousRouteProposal extends JsonObject {
+  schema: "bioprism-python-autonomous-route/0.1" | string;
+  task_digest: string;
+  candidates: AutonomousRouteCandidate[];
+  selected_domains: string[];
+  primary_domain: string | null;
+  confidence: number;
+  abstained: boolean;
+  reason: AutonomousRouteReason;
+  cross_domain: boolean;
+  route_digest: string;
+  retention: string;
+  does_not_claim: string[];
+}
+
+export interface AutonomousRouteCatalogueEntry extends JsonObject {
+  schema: "bioprism-python-autonomous-route/0.1" | string;
+  domain: string;
+  term_count: number;
+  terms: string[];
+  evidence: "reviewed_catalogue_vocabulary" | string;
+}
+
+export interface AutonomousAutoBlueprint extends JsonObject {
+  schema: "bioprism-python-autonomous-auto-blueprint/0.1" | string;
+  route: AutonomousRouteProposal;
+  blueprint: JsonObject | null;
+  cross_domain_blueprint: JsonObject | null;
+  execution: "not_started" | string;
+  authorization: string;
+}
+
+export interface AutonomousAutoResult extends JsonObject {
+  schema: "bioprism-python-autonomous-auto-result/0.1" | string;
+  status: "completed" | "route_review_required" | string;
+  route: AutonomousRouteProposal;
+  result: JsonObject | null;
+  retention: string;
+}
+
 export interface BrainBanditPolicy extends JsonObject {
   strategy?: "ucb1" | "epsilon_greedy" | string;
   exploration?: number;
