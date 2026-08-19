@@ -54,6 +54,7 @@ SUPPORTED_PROTOCOLS = {
 PROVIDER_OBSERVATION_SCHEMA = "bioprism-llm-provider-observation/0.1"
 MODEL_CATALOGUE_SCHEMA = "bioprism-llm-model-catalogue/0.1"
 PROVIDER_HEALTH_LEDGER_SCHEMA = "bioprism-llm-provider-health-ledger/0.1"
+CREDENTIAL_ONBOARDING_SCHEMA = "bioprism-llm-credential-onboarding/0.1"
 MAX_MODEL_CANDIDATES = 512
 MAX_MODEL_METADATA_BYTES = 256_000
 MAX_PROVIDER_HEALTH_RECORDS = 16_384
@@ -205,6 +206,44 @@ class CredentialStatus:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class ProviderCredentialInstructions:
+    """Redacted, application-facing contract for collecting one provider credential.
+
+    This is deliberately a process description rather than a credential capability.  A UI can
+    render the next action and select a protected input path, but it cannot obtain a secret from
+    this object.  The raw value must be submitted directly to
+    :meth:`ProviderOnboarding.collect_user_credential` or resolved by the embedding application.
+    """
+
+    provider: str
+    provider_registered: bool
+    requires_credential: bool | None
+    ready: bool
+    next_action: str
+    input_methods: tuple[str, ...]
+    environment_variable: str | None
+    session_required: bool = True
+    secret_transport: str = "caller_supplied_in_memory_handle"
+    secret_persistence: str = "in_memory_only"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": CREDENTIAL_ONBOARDING_SCHEMA,
+            "provider": self.provider,
+            "provider_registered": self.provider_registered,
+            "requires_credential": self.requires_credential,
+            "ready": self.ready,
+            "next_action": self.next_action,
+            "input_methods": list(self.input_methods),
+            "environment_variable": self.environment_variable,
+            "session_required": self.session_required,
+            "secret_transport": self.secret_transport,
+            "secret_persistence": self.secret_persistence,
+            "secret_material": "never_returned",
+        }
+
+
 class CredentialHandle:
     """Opaque capability for one provider credential.
 
@@ -257,7 +296,7 @@ class CredentialStore:
         self._entries: dict[str, _CredentialEntry] = {}
         self._lock = threading.RLock()
 
-    _SOURCES = frozenset({"direct", "prompt", "environment", "external_resolver"})
+    _SOURCES = frozenset({"direct", "protected_ui", "prompt", "environment", "external_resolver"})
 
     def register(
         self,
@@ -2223,6 +2262,31 @@ class ProviderOnboarding:
         self._require_provider(provider)
         return self.runtime.credentials.register(provider, value, ttl_seconds=ttl_seconds)
 
+    def collect_user_credential(
+        self,
+        provider: str,
+        value: str,
+        *,
+        ttl_seconds: float | None = None,
+    ) -> CredentialHandle:
+        """Accept a secret from a protected application input boundary.
+
+        Web/mobile/desktop integrations should call this method only after receiving the value
+        over their own authenticated, encrypted input path.  The value is immediately converted
+        into an opaque in-memory handle; it is never accepted by the brain, a prompt, a tool
+        argument, a journal, or a metadata projection.  This explicit name and source label make
+        the intended onboarding route auditable instead of forcing UIs to use ``register_value``
+        as an undocumented convention.
+        """
+
+        self._require_provider(provider)
+        return self.runtime.credentials.register(
+            provider,
+            value,
+            ttl_seconds=ttl_seconds,
+            source="protected_ui",
+        )
+
     def configure_from_prompt(
         self,
         provider: str,
@@ -2281,20 +2345,69 @@ class ProviderOnboarding:
 
     def status(self, provider: str) -> dict[str, Any]:
         CredentialStore._validate_provider(provider)
-        registered = any(
-            row.get("provider") == provider for row in self.runtime.provider_metadata()
+        metadata = next(
+            (row for row in self.runtime.provider_metadata() if row.get("provider") == provider),
+            None,
+        )
+        registered = metadata is not None
+        requires_credential = (
+            metadata.get("requires_credential") if isinstance(metadata, Mapping) else None
         )
         credential = self.runtime.credentials.status(provider)
+        ready = registered and (
+            requires_credential is False or credential.configured
+        )
         return {
             "provider": provider,
             "provider_registered": registered,
             "credential": credential.to_dict(),
-            "ready": registered and credential.configured,
-            "next_action": "ready" if registered and credential.configured else (
+            "requires_credential": requires_credential,
+            "ready": ready,
+            "next_action": "ready" if ready else (
                 "register_provider" if not registered else "collect_user_credential"
             ),
             "secret_material": "never_returned",
         }
+
+    def instructions(self, provider: str) -> ProviderCredentialInstructions:
+        """Return the redacted onboarding contract a UI can render before key submission."""
+
+        CredentialStore._validate_provider(provider)
+        metadata = next(
+            (row for row in self.runtime.provider_metadata() if row.get("provider") == provider),
+            None,
+        )
+        current = self.status(provider)
+        registered = metadata is not None
+        requires_credential = (
+            metadata.get("requires_credential") if isinstance(metadata, Mapping) else None
+        )
+        ready = bool(current["ready"])
+        if not registered:
+            next_action = "register_provider"
+        elif requires_credential is False:
+            next_action = "ready"
+            ready = True
+        elif ready:
+            next_action = "ready"
+        else:
+            next_action = "collect_user_credential"
+        return ProviderCredentialInstructions(
+            provider=provider,
+            provider_registered=registered,
+            requires_credential=(
+                requires_credential if isinstance(requires_credential, bool) else None
+            ),
+            ready=ready,
+            next_action=next_action,
+            input_methods=(
+                "protected_ui",
+                "no_echo_prompt",
+                "environment_variable",
+                "external_secret_resolver",
+            ),
+            environment_variable=self._environment_variables.get(provider),
+        )
 
     def statuses(self) -> list[dict[str, Any]]:
         providers = {
@@ -2408,6 +2521,23 @@ class CredentialSession:
         )
         return self._attach(handle)
 
+    def collect_user_credential(
+        self,
+        provider: str,
+        value: str,
+        *,
+        ttl_seconds: float | None = None,
+    ) -> CredentialHandle:
+        """Submit one protected UI value into this session's opaque handle boundary."""
+
+        handle = self._onboarded_call(
+            self.onboarding.collect_user_credential,
+            provider,
+            value,
+            ttl_seconds=ttl_seconds,
+        )
+        return self._attach(handle)
+
     def configure_from_prompt(
         self,
         provider: str,
@@ -2486,6 +2616,12 @@ class CredentialSession:
         with self._lock:
             providers = tuple(sorted(self._handles))
         return [self.onboarding.status(provider) for provider in providers]
+
+    def instructions(self, provider: str) -> ProviderCredentialInstructions:
+        """Return the redacted onboarding contract while this session is active."""
+
+        self._assert_active()
+        return self.onboarding.instructions(provider)
 
     def handles(self) -> dict[str, CredentialHandle]:
         """Return a caller-owned snapshot for one bounded execution call.

@@ -30,7 +30,7 @@ flowchart LR
 
 ## Credential lifecycle
 
-Applications collect provider keys themselves. The SDK supports three caller-owned entry points:
+Applications collect provider keys themselves. The SDK supports four caller-owned entry points:
 
 ```python
 from prism_sdk import (
@@ -81,11 +81,14 @@ needs persistence should persist only a secret-manager reference outside this SD
 persists the key or the reference.
 
 `ProviderOnboarding` is the standard BYOK process. It requires non-secret provider transport
-metadata first, then supports no-echo prompt entry, environment injection, direct UI registration,
-or an external resolver callback for a secret-manager reference. `status()` and `statuses()` return
-redacted readiness (`register_provider`, `collect_user_credential`, or `ready`) without returning
-keys or handles. `revoke()` removes the in-memory entry, and TTL expiry is purged before resolution
-or status reporting. The value is held only in process memory. Handles expose only provider, opaque
+metadata first, then supports no-echo prompt entry, environment injection, protected UI
+submission, or an external resolver callback for a secret-manager reference. `instructions()` is
+the UI-facing contract: it reports whether the provider is registered, whether a credential is
+ready, the next action, the supported input methods, and the provider's default environment
+variable. It never returns a key. `status()` and `statuses()` return the same redacted readiness
+(`register_provider`, `collect_user_credential`, or `ready`) without returning keys or handles.
+`revoke()` removes the in-memory entry, and TTL expiry is purged before resolution or status
+reporting. The value is held only in process memory. Handles expose only provider, opaque
 identifier, source, expiry, and `secret_persistence: in_memory_only`; they do not implement a secret
 serialization path. Provider failures do not return upstream response bodies because a proxy or
 upstream error can echo request headers.
@@ -93,12 +96,15 @@ upstream error can echo request headers.
 The application-level key intake process is therefore:
 
 1. Register the provider's non-secret transport configuration during service startup.
-2. Ask `onboarding.status(provider)` which action is required; a UI should show only that
-   redacted state.
+2. Ask `onboarding.instructions(provider).to_dict()` (or
+   `agent.credential_instructions(provider)`) for the redacted onboarding contract; a UI should
+   render only that state and never put a key in browser-visible JSON.
 3. Collect the key over the application's protected input path, or resolve it from the deployment's
-   secret manager. The raw value goes directly into `configure_from_prompt`, `register_value`,
-   `configure_from_environment`, or `configure_from_resolver`; it never goes into an LLM prompt,
-   MCP argument, model catalogue, plan, learning ledger, or browser-visible JSON response.
+   secret manager. For a UI submission, the raw value goes directly into
+   `session.collect_user_credential(provider, value)`; the other paths are
+   `configure_from_prompt`, `configure_from_environment`, or `configure_from_resolver`. It never
+   goes into an LLM prompt, MCP argument, model catalogue, plan, learning ledger, or
+   browser-visible JSON response.
 4. Keep the returned handle server-side inside a short-lived `CredentialSession`, pass that handle
    only to `LLMRuntime`/`AutonomousBrain`, and expose `session.status()` or `onboarding.status()`
    to the UI as the readiness view.
@@ -109,6 +115,29 @@ This means the SDK deliberately does not create a universal key-upload HTTP endp
 application owns authentication, TLS, CSRF protection, tenancy, rate limits, and secret-manager
 permissions. The SDK owns the sensitive part after intake—non-echo collection helpers, bounded
 in-memory lifetime, opaque handles, provider matching, expiry/revocation, and redacted readiness.
+
+For a protected UI, the minimal request lifecycle is:
+
+```python
+with agent.start_credential_session(ttl_seconds=3_600) as session:
+    # The application renders this redacted object before showing its password field.
+    setup = session.instructions("openai").to_dict()
+    if setup["next_action"] == "collect_user_credential":
+        # `submitted_key` must come from the app's authenticated, encrypted form handler.
+        session.collect_user_credential("openai", submitted_key, ttl_seconds=3_600)
+    if session.instructions("openai").ready:
+        result = agent.run(
+            task="Bound the next research step",
+            domain="research",
+            credentials=session,
+            approve_provider_call=True,
+        )
+```
+
+The app should discard `submitted_key` after the call, keep only the live session server-side,
+and call `session.close()` (provided automatically by the context manager) when the request or job
+ends. This is an intake boundary, not a key verifier: the first approved provider invocation is
+where provider authentication is tested, and any returned failure remains redacted.
 
 The core brain and MCP tools never accept `api_key`, `secret`, `Authorization`, or an environment
 variable value. They accept model metadata and opaque outcome references only. Do not put a handle
@@ -160,7 +189,7 @@ provider registration, credential readiness, and model eligibility without expos
 For UI integrations, `agent.credential_status(provider)` and `agent.credential_statuses()` expose
 the same redacted onboarding state, while `agent.start_credential_session()` creates the
 request-scoped handle group. The application sends the entered value directly to
-`session.register_value()` over its protected input boundary; no generic brain or MCP endpoint
+`session.collect_user_credential()` over its protected input boundary; no generic brain or MCP endpoint
 accepts the raw key.
 If `learn=True` is supplied, the same
 facade runs the explicit evaluator and caller-owned bandit state through the existing online
@@ -369,7 +398,7 @@ collected a provider key may opt into one additional, approval-gated classifier 
 
 ```python
 with agent.start_credential_session(ttl_seconds=3_600) as session:
-    session.register_value("openai", protected_user_value)
+    session.collect_user_credential("openai", protected_user_value)
     result = agent.run_auto(
         task="compare synaptic oscillation artifacts across two measurement protocols",
         credentials=session,

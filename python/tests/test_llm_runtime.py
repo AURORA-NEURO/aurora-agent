@@ -251,6 +251,11 @@ class LlmRuntimeTests(unittest.TestCase):
         before = onboarding.status("openai")
         self.assertFalse(before["ready"])
         self.assertEqual(before["next_action"], "collect_user_credential")
+        instructions = onboarding.instructions("openai").to_dict()
+        self.assertEqual(instructions["next_action"], "collect_user_credential")
+        self.assertEqual(instructions["environment_variable"], "OPENAI_API_KEY")
+        self.assertIn("protected_ui", instructions["input_methods"])
+        self.assertEqual(instructions["secret_material"], "never_returned")
 
         prompt_handle = onboarding.configure_from_prompt(
             "openai",
@@ -265,6 +270,16 @@ class LlmRuntimeTests(unittest.TestCase):
 
         onboarding.revoke(prompt_handle)
         self.assertFalse(onboarding.status("openai")["ready"])
+
+        protected_handle = onboarding.collect_user_credential(
+            "openai",
+            "protected-ui-secret",
+            ttl_seconds=60,
+        )
+        self.assertEqual(store.metadata(protected_handle)["source"], "protected_ui")
+        self.assertEqual(onboarding.instructions("openai").to_dict()["next_action"], "ready")
+        self.assertNotIn("protected-ui-secret", json.dumps(onboarding.instructions("openai").to_dict()))
+        onboarding.revoke(protected_handle)
 
         environment_handle = onboarding.configure_from_environment(
             "openai",
@@ -318,10 +333,8 @@ class LlmRuntimeTests(unittest.TestCase):
         onboarding.register_provider(openai_provider(base_url=self.base_url, allow_insecure_http=True))
         now = [100.0]
         session = onboarding.start_session(ttl_seconds=10, session_id="ui-session", clock=lambda: now[0])
-        handle = session.configure_from_prompt(
-            "openai",
-            reader=lambda _prompt: "session-secret",
-        )
+        self.assertEqual(session.instructions("openai").next_action, "collect_user_credential")
+        handle = session.collect_user_credential("openai", "session-secret")
         self.assertIs(session.handle("openai"), handle)
         self.assertTrue(session.status().active)
         self.assertEqual(session.status().providers, ("openai",))
@@ -334,6 +347,24 @@ class LlmRuntimeTests(unittest.TestCase):
         with self.assertRaises(CredentialError):
             session.handle("openai")
         self.assertEqual(store.status("openai").credential_count, 0)
+
+    def test_credentialless_provider_is_ready_without_a_fake_key(self) -> None:
+        runtime = LLMRuntime(CredentialStore())
+        runtime.register_provider(
+            ProviderConfig(
+                provider="local",
+                base_url=self.base_url,
+                allow_insecure_http=True,
+                requires_credential=False,
+            )
+        )
+        onboarding = ProviderOnboarding(runtime)
+        status = onboarding.status("local")
+        self.assertTrue(status["ready"])
+        self.assertEqual(status["next_action"], "ready")
+        instructions = onboarding.instructions("local")
+        self.assertTrue(instructions.ready)
+        self.assertEqual(instructions.requires_credential, False)
 
     def test_openai_responses_call_resolves_secret_only_into_auth_header(self) -> None:
         store = CredentialStore()

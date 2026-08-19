@@ -7630,6 +7630,17 @@ class AutonomousAgent:
 
         return self.onboarding.statuses()
 
+    def credential_instructions(self, provider: str) -> dict[str, Any]:
+        """Return the redacted key-collection contract for a protected application UI.
+
+        The result tells an embedding application whether the provider is registered, which
+        input paths are supported, and what next action to render.  It never returns a key or
+        asks the autonomous brain to collect one; the UI submits its value through the live
+        :class:`CredentialSession` instead.
+        """
+
+        return self.onboarding.instructions(provider).to_dict()
+
     def start_credential_session(
         self,
         *,
