@@ -2266,12 +2266,15 @@ class AutonomousWorkflowCheckpoint:
     workflow_id: str
     workflow_digest: str
     stages: tuple[Mapping[str, Any], ...] = ()
+    plan_refinement_digest: str | None = None
 
     def __post_init__(self) -> None:
         _identifier("workflow checkpoint run_id", self.run_id)
         _workflow_digest(self.task_digest, "workflow checkpoint task_digest")
         _identifier("workflow checkpoint workflow_id", self.workflow_id)
         _workflow_digest(self.workflow_digest, "workflow checkpoint workflow_digest")
+        if self.plan_refinement_digest is not None:
+            _workflow_digest(self.plan_refinement_digest, "workflow checkpoint plan_refinement_digest")
         if not isinstance(self.stages, Sequence) or isinstance(self.stages, (str, bytes)):
             raise BrainRunError("workflow checkpoint stages must be a sequence")
         if len(self.stages) > 16:
@@ -2328,16 +2331,17 @@ class AutonomousWorkflowCheckpoint:
 
     @property
     def checkpoint_digest(self) -> str:
-        return content_digest(
-            {
-                "schema": AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA,
-                "run_id": self.run_id,
-                "task_digest": self.task_digest,
-                "workflow_id": self.workflow_id,
-                "workflow_digest": self.workflow_digest,
-                "stages": [dict(stage) for stage in self.stages],
-            }
-        )
+        payload = {
+            "schema": AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA,
+            "run_id": self.run_id,
+            "task_digest": self.task_digest,
+            "workflow_id": self.workflow_id,
+            "workflow_digest": self.workflow_digest,
+            "stages": [dict(stage) for stage in self.stages],
+        }
+        if self.plan_refinement_digest is not None:
+            payload["plan_refinement_digest"] = self.plan_refinement_digest
+        return content_digest(payload)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -2346,6 +2350,7 @@ class AutonomousWorkflowCheckpoint:
             "task_digest": self.task_digest,
             "workflow_id": self.workflow_id,
             "workflow_digest": self.workflow_digest,
+            "plan_refinement_digest": self.plan_refinement_digest,
             "stages": [dict(stage) for stage in self.stages],
             "completed_stage_ids": list(self.completed_stage_ids),
             "checkpoint_digest": self.checkpoint_digest,
@@ -2362,6 +2367,7 @@ class AutonomousWorkflowCheckpoint:
             workflow_id=value.get("workflow_id"),
             workflow_digest=value.get("workflow_digest"),
             stages=tuple(value.get("stages", ())),
+            plan_refinement_digest=value.get("plan_refinement_digest"),
         )
         supplied_digest = value.get("checkpoint_digest")
         if supplied_digest is not None and supplied_digest != checkpoint.checkpoint_digest:
@@ -4798,6 +4804,7 @@ class AutonomousTaskOrchestrator:
         run_id: str,
         blueprint: AutonomousTaskBlueprint,
         snapshots: Sequence[Mapping[str, Any]],
+        plan_refinement_digest: str | None = None,
     ) -> AutonomousWorkflowCheckpoint:
         return AutonomousWorkflowCheckpoint(
             run_id=run_id,
@@ -4805,7 +4812,37 @@ class AutonomousTaskOrchestrator:
             workflow_id=blueprint.workflow.workflow_id,
             workflow_digest=blueprint.workflow.workflow_digest,
             stages=tuple(dict(snapshot) for snapshot in snapshots),
+            plan_refinement_digest=plan_refinement_digest,
         )
+
+    @staticmethod
+    def _accepted_workflow_plan(
+        blueprint: AutonomousTaskBlueprint,
+        refinement: AutonomousPlanRefinementResult | None,
+    ) -> tuple[dict[str, int], str | None, tuple[str, ...]]:
+        """Validate an explicitly accepted planner proposal before it affects scheduling."""
+
+        if refinement is None:
+            return {}, None, ()
+        if not isinstance(refinement, AutonomousPlanRefinementResult):
+            raise BrainRunError("accepted_plan_refinement must be an AutonomousPlanRefinementResult or None")
+        if refinement.status != "completed" or refinement.review_required:
+            raise BrainRunError("only a completed, non-review plan refinement may be accepted")
+        if refinement.task_digest != blueprint.spec.task_digest:
+            raise BrainRunError("accepted plan refinement task does not match the prepared blueprint")
+        if refinement.base_plan_digest != content_digest(blueprint.plan):
+            raise BrainRunError("accepted plan refinement base plan does not match the prepared blueprint")
+        if refinement.workflow_digest != blueprint.workflow.workflow_digest:
+            raise BrainRunError("accepted plan refinement workflow does not match the prepared blueprint")
+        stage_ids = tuple(stage.id for stage in blueprint.workflow.stages)
+        priority = tuple(refinement.priority_stage_ids)
+        if len(priority) != len(stage_ids) or len(set(priority)) != len(priority) or set(priority) != set(stage_ids):
+            raise BrainRunError("accepted plan refinement must contain every workflow stage exactly once")
+        positions = {stage_id: index for index, stage_id in enumerate(priority)}
+        for stage in blueprint.workflow.stages:
+            if any(positions[dependency] > positions[stage.id] for dependency in stage.depends_on):
+                raise BrainRunError("accepted plan refinement violates workflow dependencies")
+        return positions, content_digest(refinement.to_dict()), tuple(refinement.focus_stage_ids)
 
     def run_workflow(
         self,
@@ -4814,6 +4851,7 @@ class AutonomousTaskOrchestrator:
         model_candidates: Sequence[Mapping[str, Any]],
         credentials: Mapping[str, CredentialHandle],
         checkpoint: AutonomousWorkflowCheckpoint | Mapping[str, Any] | None = None,
+        accepted_plan_refinement: AutonomousPlanRefinementResult | None = None,
         retry_blocked: bool = False,
         max_stage_calls: int | None = None,
         stage_execution_mode: str | None = None,
@@ -4871,6 +4909,10 @@ class AutonomousTaskOrchestrator:
             raise BrainRunError("max_stage_calls must be between 1 and 16")
         if not isinstance(auto_route, bool):
             raise BrainRunError("auto_route must be a boolean")
+        plan_priority, plan_refinement_digest, plan_focus_stage_ids = self._accepted_workflow_plan(
+            blueprint,
+            accepted_plan_refinement,
+        )
         if checkpoint is None:
             current_checkpoint = None
         elif isinstance(checkpoint, AutonomousWorkflowCheckpoint):
@@ -4888,11 +4930,14 @@ class AutonomousTaskOrchestrator:
                 run_id=workflow_run_id,
                 blueprint=blueprint,
                 snapshots=(),
+                plan_refinement_digest=plan_refinement_digest,
             )
         if current_checkpoint.task_digest != blueprint.spec.task_digest:
             raise BrainRunError("workflow checkpoint task does not match the prepared blueprint")
         if current_checkpoint.workflow_id != blueprint.workflow.workflow_id or current_checkpoint.workflow_digest != blueprint.workflow.workflow_digest:
             raise BrainRunError("workflow checkpoint workflow does not match the prepared blueprint")
+        if current_checkpoint.plan_refinement_digest != plan_refinement_digest:
+            raise BrainRunError("workflow checkpoint plan refinement does not match the requested execution")
         if current_checkpoint.run_id != workflow_run_id:
             raise BrainRunError("workflow checkpoint run_id does not match the requested run")
         stage_by_id = {stage.id: stage for stage in blueprint.workflow.stages}
@@ -4909,7 +4954,12 @@ class AutonomousTaskOrchestrator:
                 "stage_blocked" if any(row["status"] == "blocked" for row in snapshots.values()) else "stage_proposed",
                 blueprint,
                 (),
-                self._workflow_checkpoint(run_id=workflow_run_id, blueprint=blueprint, snapshots=tuple(snapshots.values())),
+                self._workflow_checkpoint(
+                    run_id=workflow_run_id,
+                    blueprint=blueprint,
+                    snapshots=tuple(snapshots.values()),
+                    plan_refinement_digest=plan_refinement_digest,
+                ),
                 next_ids,
             )
         if retry_blocked:
@@ -4923,12 +4973,14 @@ class AutonomousTaskOrchestrator:
                 stage_id for stage_id, snapshot in snapshots.items()
                 if snapshot.get("status") == "completed" and snapshot.get("execution_status") == "completed"
             }
-            ready = next(
-                (
-                    stage for stage in blueprint.workflow.stages
-                    if stage.id not in snapshots and set(stage.depends_on).issubset(completed)
-                ),
-                None,
+            ready_candidates = [
+                stage for stage in blueprint.workflow.stages
+                if stage.id not in snapshots and set(stage.depends_on).issubset(completed)
+            ]
+            ready = min(
+                ready_candidates,
+                key=lambda stage: plan_priority.get(stage.id, len(blueprint.workflow.stages)),
+                default=None,
             )
             if ready is None:
                 remaining = [stage.id for stage in blueprint.workflow.stages if stage.id not in snapshots]
@@ -4938,7 +4990,12 @@ class AutonomousTaskOrchestrator:
                     status,
                     blueprint,
                     tuple(stage_results),
-                    self._workflow_checkpoint(run_id=workflow_run_id, blueprint=blueprint, snapshots=tuple(snapshots.values())),
+                    self._workflow_checkpoint(
+                        run_id=workflow_run_id,
+                        blueprint=blueprint,
+                        snapshots=tuple(snapshots.values()),
+                        plan_refinement_digest=plan_refinement_digest,
+                    ),
                     tuple(remaining),
                 )
             calls += 1
@@ -4959,6 +5016,13 @@ class AutonomousTaskOrchestrator:
                 "stage": ready.to_dict(),
                 "dependency_outputs": dependency_outputs,
                 "completed_stage_ids": sorted(completed),
+                "accepted_plan": None
+                if plan_refinement_digest is None
+                else {
+                    "refinement_digest": plan_refinement_digest,
+                    "priority_rank": plan_priority[ready.id],
+                    "focus_stage": ready.id in plan_focus_stage_ids,
+                },
                 "checkpoint_digest": current_checkpoint.checkpoint_digest,
                 "does_not_authorize": [
                     "skipping caller approval",
@@ -5042,7 +5106,12 @@ class AutonomousTaskOrchestrator:
                     "approval_required",
                     blueprint,
                     tuple(stage_results),
-                    self._workflow_checkpoint(run_id=workflow_run_id, blueprint=blueprint, snapshots=tuple(snapshots.values())),
+                    self._workflow_checkpoint(
+                        run_id=workflow_run_id,
+                        blueprint=blueprint,
+                        snapshots=tuple(snapshots.values()),
+                        plan_refinement_digest=plan_refinement_digest,
+                    ),
                     (ready.id,),
                 )
             if execution_status != "completed":
@@ -5051,7 +5120,12 @@ class AutonomousTaskOrchestrator:
                     "stage_failed",
                     blueprint,
                     tuple(stage_results),
-                    self._workflow_checkpoint(run_id=workflow_run_id, blueprint=blueprint, snapshots=tuple(snapshots.values())),
+                    self._workflow_checkpoint(
+                        run_id=workflow_run_id,
+                        blueprint=blueprint,
+                        snapshots=tuple(snapshots.values()),
+                        plan_refinement_digest=plan_refinement_digest,
+                    ),
                     (ready.id,),
                 )
             if declared != "completed" or errors:
@@ -5065,13 +5139,19 @@ class AutonomousTaskOrchestrator:
                     status,
                     blueprint,
                     tuple(stage_results),
-                    self._workflow_checkpoint(run_id=workflow_run_id, blueprint=blueprint, snapshots=tuple(snapshots.values())),
+                    self._workflow_checkpoint(
+                        run_id=workflow_run_id,
+                        blueprint=blueprint,
+                        snapshots=tuple(snapshots.values()),
+                        plan_refinement_digest=plan_refinement_digest,
+                    ),
                     (ready.id,),
                 )
             current_checkpoint = self._workflow_checkpoint(
                 run_id=workflow_run_id,
                 blueprint=blueprint,
                 snapshots=tuple(snapshots.values()),
+                plan_refinement_digest=plan_refinement_digest,
             )
         completed = {
             stage_id for stage_id, snapshot in snapshots.items()
@@ -5088,7 +5168,12 @@ class AutonomousTaskOrchestrator:
             final_status,
             blueprint,
             tuple(stage_results),
-            self._workflow_checkpoint(run_id=workflow_run_id, blueprint=blueprint, snapshots=tuple(snapshots.values())),
+            self._workflow_checkpoint(
+                run_id=workflow_run_id,
+                blueprint=blueprint,
+                snapshots=tuple(snapshots.values()),
+                plan_refinement_digest=plan_refinement_digest,
+            ),
             next_ids,
         )
 
@@ -7049,6 +7134,11 @@ class AutonomousAgent:
         semantic_run_id: str | None = None,
         semantic_max_output_tokens: int = 1_024,
         semantic_temperature: float | None = None,
+        workflow_execution: bool = False,
+        accepted_plan_refinement: AutonomousPlanRefinementResult | None = None,
+        workflow_checkpoint: AutonomousWorkflowCheckpoint | Mapping[str, Any] | None = None,
+        workflow_retry_blocked: bool = False,
+        workflow_max_stage_calls: int | None = None,
         execution_id: str | None = None,
         resume_execution: bool = False,
         **kwargs: Any,
@@ -7056,8 +7146,29 @@ class AutonomousAgent:
         """Route and execute a task, returning review-required instead of guessing silently.
 
         A routed task uses the same provider, tool, approval, persistence, and learning paths as
-        explicit ``run``/``run_cross_domain`` calls.  An abstained route never invokes a provider.
+        explicit ``run``/``run_cross_domain`` calls.  ``workflow_execution=True`` opts a
+        single-domain route into its checkpointable stage DAG. An accepted plan refinement is
+        advisory until the caller passes it explicitly here; it can only reorder ready stages.
+        An abstained route never invokes a provider.
         """
+
+        if not isinstance(workflow_execution, bool):
+            raise BrainRunError("workflow_execution must be a boolean")
+        if not isinstance(workflow_retry_blocked, bool):
+            raise BrainRunError("workflow_retry_blocked must be a boolean")
+        if not workflow_execution and (
+            accepted_plan_refinement is not None
+            or workflow_checkpoint is not None
+            or workflow_retry_blocked
+            or workflow_max_stage_calls is not None
+        ):
+            raise BrainRunError("workflow options require workflow_execution=True")
+        if workflow_max_stage_calls is not None and (
+            not isinstance(workflow_max_stage_calls, int)
+            or isinstance(workflow_max_stage_calls, bool)
+            or not 1 <= workflow_max_stage_calls <= 16
+        ):
+            raise BrainRunError("workflow_max_stage_calls must be between 1 and 16")
 
         if "domain" in kwargs:
             raise BrainRunError("run_auto chooses the domain; pass routing hints instead")
@@ -7136,16 +7247,47 @@ class AutonomousAgent:
         routed_context = self.orchestrator._route_context(kwargs.get("context"), blueprint.route)
         execution_kwargs["context"] = routed_context
         if blueprint.blueprint is not None:
-            result = self.run(
-                task=task,
-                domain=blueprint.route.selected_domains[0],
-                credentials=credentials,
-                model_candidates=model_candidates,
-                execution_id=execution_id,
-                resume_execution=resume_execution,
-                **execution_kwargs,
-            )
+            if workflow_execution:
+                if execution_kwargs.pop("learn", False):
+                    raise BrainRunError(
+                        "workflow_execution does not accept learn=True; use run_workflow_learning with explicit evidence"
+                    )
+                if "checkpoint" in execution_kwargs:
+                    raise BrainRunError("workflow checkpoint must be supplied as workflow_checkpoint")
+                if "retry_blocked" in execution_kwargs or "max_stage_calls" in execution_kwargs:
+                    raise BrainRunError(
+                        "workflow retry and call limits must be supplied as workflow_retry_blocked/workflow_max_stage_calls"
+                    )
+                workflow_options = dict(execution_kwargs)
+                workflow_options.pop("context", None)
+                workflow_options["accepted_plan_refinement"] = accepted_plan_refinement
+                workflow_options["checkpoint"] = workflow_checkpoint
+                workflow_options["retry_blocked"] = workflow_retry_blocked
+                if workflow_max_stage_calls is not None:
+                    workflow_options["max_stage_calls"] = workflow_max_stage_calls
+                result = self.run_workflow(
+                    blueprint=blueprint.blueprint,
+                    credentials=credentials,
+                    model_candidates=model_candidates,
+                    execution_id=execution_id,
+                    resume_execution=resume_execution,
+                    **workflow_options,
+                )
+            else:
+                result = self.run(
+                    task=task,
+                    domain=blueprint.route.selected_domains[0],
+                    credentials=credentials,
+                    model_candidates=model_candidates,
+                    execution_id=execution_id,
+                    resume_execution=resume_execution,
+                    **execution_kwargs,
+                )
         else:
+            if workflow_execution or accepted_plan_refinement is not None:
+                raise BrainRunError(
+                    "workflow_execution and accepted_plan_refinement currently require a single-domain route"
+                )
             subtasks = [
                 {
                     "id": f"route-{domain}",

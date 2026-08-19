@@ -389,6 +389,29 @@ blueprint. `run_auto(..., semantic_routing=True)` performs the same routing step
 execution. The routing call and the eventual execution call each retain their own approval and
 budget boundary.
 
+For a routed single-domain task that should follow the domain workflow instead of one provider
+decision, opt into the staged runner explicitly:
+
+```python
+result = agent.run_auto(
+    task="fix the Rust tests in the repository",
+    credentials=session,
+    workflow_execution=True,
+    workflow_max_stage_calls=2,  # persist result.result.checkpoint for continuation
+    approve_provider_call=True,
+)
+```
+
+The outer result remains `status="completed"` at the intake envelope while the nested workflow
+may be `paused`, `approval_required`, or `stage_blocked`. Pass its caller-owned checkpoint back
+through `workflow_checkpoint` to continue without replaying completed stages. Cross-domain routes
+keep their specialist fan-out/synthesis path; they are never silently coerced into a
+single-domain workflow. A provider planning proposal becomes executable only when the caller
+passes a completed, non-review `AutonomousPlanRefinementResult` as `accepted_plan_refinement`.
+The runner verifies its task, base-plan, workflow, and dependency digests, uses it only to choose
+among currently-ready stages, and binds its digest into every checkpoint so a different plan
+cannot be substituted during resume.
+
 Provider output never becomes authorization. Invalid JSON, missing domains, out-of-range scores,
 provider disagreement, abstention, insufficient confidence, or insufficient margin all produce a
 non-executable review result. A semantic route cannot add a domain, capability, tool, effect,
@@ -815,7 +838,7 @@ if first_pass.status == "paused":
 The runner executes the strategy's dependency DAG, one stage at a time. A dependent stage is
 eligible only after every declared dependency returned a structured `completed` status and
 non-empty evidence. Each stage receives only bounded structured outputs from its completed
-dependencies, plus the workflow and checkpoint digests. The provider response itself remains a
+dependencies, plus the workflow, accepted-plan, and checkpoint digests. The provider response itself remains a
 caller-returned result; it is not silently written to memory or the learning ledger.
 
 The runner stops with an explicit status when a provider call needs approval, a model returns
@@ -824,7 +847,7 @@ Completed-stage uncertainty is preserved as evidence for downstream stages; it i
 converted into a clean-pass signal.
 `AutonomousWorkflowCheckpoint` contains only stage ids, statuses, evidence, uncertainty, bounded
 structured outputs, and digests—never the raw task, credentials, provider messages, or transport
-envelopes. Passing the checkpoint back verifies the task/workflow/run identity and skips completed
+envelopes. Passing the checkpoint back verifies the task/workflow/run/accepted-plan identity and skips completed
 stages. A blocked or proposed stage is not retried implicitly; the caller must pass
 `retry_blocked=True` to make that decision explicit.
 

@@ -1002,6 +1002,68 @@ def test_agent_prepare_auto_and_run_auto_reuse_explicit_runtime_boundaries():
         server.server_close()
 
 
+def test_run_auto_can_execute_a_accepted_plan_through_the_checkpointable_workflow():
+    runtime, store, server, thread = _structured_runtime()
+    agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+    try:
+        task = "fix the Rust tests in the repository"
+        blueprint = agent.prepare_auto(task=task)
+        assert blueprint.blueprint is not None
+        stage_ids = tuple(stage.id for stage in blueprint.blueprint.workflow.stages)
+        refinement = AutonomousPlanRefinementResult(
+            status="completed",
+            task_digest=blueprint.blueprint.spec.task_digest,
+            base_plan_digest=content_digest(blueprint.blueprint.plan),
+            workflow_digest=blueprint.blueprint.workflow.workflow_digest,
+            priority_stage_ids=stage_ids,
+            focus_stage_ids=(stage_ids[1],),
+            review_required=False,
+            confidence=1.0,
+        )
+        handle = store.register("openai", "auto-workflow-secret")
+        first = agent.run_auto(
+            task=task,
+            credentials={"openai": handle},
+            workflow_execution=True,
+            accepted_plan_refinement=refinement,
+            workflow_max_stage_calls=2,
+            approve_provider_call=True,
+            run_id="auto-workflow",
+        )
+        assert first.status == "completed"
+        assert first.result is not None
+        assert first.result.status == "paused"
+        assert [item.stage.id for item in first.result.stage_results] == ["scope", "inspect"]
+        assert first.result.checkpoint.plan_refinement_digest == content_digest(refinement.to_dict())
+
+        resumed = agent.run_auto(
+            task=task,
+            credentials={"openai": handle},
+            workflow_execution=True,
+            accepted_plan_refinement=refinement,
+            workflow_checkpoint=first.result.checkpoint,
+            approve_provider_call=True,
+            run_id="auto-workflow",
+        )
+        assert resumed.result is not None
+        assert resumed.result.status == "completed"
+        assert resumed.result.checkpoint.completed_stage_ids == stage_ids
+        with pytest.raises(BrainRunError, match="plan refinement"):
+            agent.run_auto(
+                task=task,
+                credentials={"openai": handle},
+                workflow_execution=True,
+                workflow_checkpoint=first.result.checkpoint,
+                approve_provider_call=True,
+                run_id="auto-workflow",
+            )
+        assert "auto-workflow-secret" not in json.dumps(resumed.to_dict())
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
 def test_builtin_workflow_registry_drives_all_domains_with_valid_stage_dags():
     registry = AutonomousWorkflowRegistry.with_builtin_strategies()
     strategies = registry.catalogue()

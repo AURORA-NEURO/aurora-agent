@@ -53,6 +53,33 @@ def _domains(name: str, value: Any) -> tuple[str, ...]:
     return result
 
 
+def _digest(name: str, value: Any) -> str:
+    if not isinstance(value, str) or len(value) != 64 or any(
+        character not in "0123456789abcdef" for character in value
+    ):
+        raise BrainRunError(f"{name} must be a lowercase SHA-256 digest")
+    return value
+
+
+def _workflow_order_is_dependency_valid(
+    blueprint: AutonomousTaskBlueprint,
+    order: Sequence[str],
+    *,
+    name: str,
+) -> tuple[str, ...]:
+    if not isinstance(order, Sequence) or isinstance(order, (str, bytes)):
+        raise BrainRunError(f"{name} must be a sequence")
+    normalized = tuple(_text(f"{name} stage id", value, maximum=128) for value in order)
+    stage_ids = tuple(stage.id for stage in blueprint.workflow.stages)
+    if len(normalized) != len(stage_ids) or len(set(normalized)) != len(normalized) or set(normalized) != set(stage_ids):
+        raise BrainRunError(f"{name} must contain every blueprint workflow stage exactly once")
+    positions = {stage_id: index for index, stage_id in enumerate(normalized)}
+    for stage in blueprint.workflow.stages:
+        if any(positions[dependency] >= positions[stage.id] for dependency in stage.depends_on):
+            raise BrainRunError(f"{name} violates workflow dependencies")
+    return normalized
+
+
 @dataclass(frozen=True, slots=True)
 class AutonomousRoutingHoldoutCase:
     """One caller-owned routing case whose label never enters the routing context."""
@@ -129,8 +156,9 @@ class AutonomousRoutingHoldoutReport:
                 raise BrainRunError(f"routing holdout {name} must be within [0, 1]")
         if not isinstance(self.case_statuses, Sequence) or len(self.case_statuses) != self.case_count:
             raise BrainRunError("routing holdout case statuses must align with case_count")
-        if not isinstance(self.confusion_digest, str) or len(self.confusion_digest) != 64:
-            raise BrainRunError("routing holdout confusion_digest must be a SHA-256 digest")
+        if any(not isinstance(status, Mapping) for status in self.case_statuses):
+            raise BrainRunError("routing holdout case statuses must contain mappings")
+        _digest("routing holdout confusion_digest", self.confusion_digest)
         object.__setattr__(self, "exact_accuracy", float(self.exact_accuracy))
         object.__setattr__(self, "coverage", float(self.coverage))
         object.__setattr__(self, "selective_accuracy", float(self.selective_accuracy))
@@ -252,14 +280,21 @@ class AutonomousPlanHoldoutCase:
             raise BrainRunError("plan holdout blueprint must be an AutonomousTaskBlueprint")
         if not isinstance(self.refinement, AutonomousPlanRefinementResult):
             raise BrainRunError("plan holdout refinement must be an AutonomousPlanRefinementResult")
-        expected = tuple(_text("plan holdout stage id", value, maximum=128) for value in self.expected_priority_stage_ids)
-        stage_ids = tuple(stage.id for stage in self.blueprint.workflow.stages)
-        if expected != stage_ids or set(expected) != set(self.refinement.priority_stage_ids):
-            raise BrainRunError("plan holdout expected stages must exactly match the blueprint workflow")
+        expected = _workflow_order_is_dependency_valid(
+            self.blueprint,
+            self.expected_priority_stage_ids,
+            name="plan holdout expected priority order",
+        )
+        _workflow_order_is_dependency_valid(
+            self.blueprint,
+            self.refinement.priority_stage_ids,
+            name="plan holdout refinement priority order",
+        )
         if self.refinement.base_plan_digest != content_digest(self.blueprint.plan):
             raise BrainRunError("plan holdout refinement is not bound to the blueprint plan")
         if self.refinement.workflow_digest != self.blueprint.workflow.workflow_digest:
             raise BrainRunError("plan holdout refinement is not bound to the workflow")
+        object.__setattr__(self, "expected_priority_stage_ids", expected)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -286,6 +321,29 @@ class AutonomousPlanHoldoutReport:
     exact_order_accuracy: float
     case_statuses: tuple[Mapping[str, Any], ...]
     order_digest: str
+
+    def __post_init__(self) -> None:
+        _identifier("plan evaluator_id", self.evaluator_id)
+        _identifier("plan evaluator_version", self.evaluator_version)
+        if not isinstance(self.case_count, int) or isinstance(self.case_count, bool) or not 1 <= self.case_count <= MAX_AUTONOMOUS_HOLDOUT_CASES:
+            raise BrainRunError("plan holdout case_count is outside the bound")
+        for name, value in (
+            ("completed_count", self.completed_count),
+            ("exact_order_count", self.exact_order_count),
+            ("review_count", self.review_count),
+        ):
+            if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= self.case_count:
+                raise BrainRunError(f"plan holdout {name} is outside the bound")
+        if self.exact_order_count > self.completed_count:
+            raise BrainRunError("plan holdout exact orders cannot exceed completed proposals")
+        if not isinstance(self.exact_order_accuracy, (int, float)) or isinstance(self.exact_order_accuracy, bool) or not math.isfinite(float(self.exact_order_accuracy)) or not 0.0 <= float(self.exact_order_accuracy) <= 1.0:
+            raise BrainRunError("plan holdout exact_order_accuracy must be within [0, 1]")
+        if not isinstance(self.case_statuses, Sequence) or len(self.case_statuses) != self.case_count:
+            raise BrainRunError("plan holdout case statuses must align with case_count")
+        if any(not isinstance(status, Mapping) for status in self.case_statuses):
+            raise BrainRunError("plan holdout case statuses must contain mappings")
+        _digest("plan holdout order_digest", self.order_digest)
+        object.__setattr__(self, "exact_order_accuracy", float(self.exact_order_accuracy))
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -360,4 +418,3 @@ class AutonomousPlanHoldoutEvaluator:
             case_statuses=tuple(statuses),
             order_digest=content_digest(orders),
         )
-
