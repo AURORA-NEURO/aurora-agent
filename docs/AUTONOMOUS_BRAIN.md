@@ -300,6 +300,52 @@ uncertainty, summary, and next actions. A caller-provided schema still takes pre
 keeps structured output useful without pretending that a model-generated stage status is external
 verification.
 
+### Executing and resuming workflow stages
+
+`run_autonomous` is the single-decision entrypoint. When a task needs a real multi-stage plan,
+use the prepared blueprint with `run_workflow`:
+
+```python
+blueprint = brain.prepare_autonomous(
+    task="Review the proposed implementation and produce a verified handoff.",
+    domain="coding",
+)
+first_pass = brain.run_workflow(
+    blueprint=blueprint,
+    model_candidates=model_catalogue,
+    credentials={"openai": openai_handle},
+    approve_provider_call=True,
+    run_id="review-42",
+    max_stage_calls=2,       # bounded work per request; the rest becomes resumable
+)
+
+if first_pass.status == "paused":
+    second_pass = brain.run_workflow(
+        blueprint=blueprint,
+        model_candidates=model_catalogue,
+        credentials={"openai": openai_handle},
+        checkpoint=first_pass.checkpoint,
+        # run_id is recovered from the checkpoint when omitted
+        approve_provider_call=True,
+    )
+```
+
+The runner executes the strategy's dependency DAG, one stage at a time. A dependent stage is
+eligible only after every declared dependency returned a structured `completed` status and
+non-empty evidence. Each stage receives only bounded structured outputs from its completed
+dependencies, plus the workflow and checkpoint digests. The provider response itself remains a
+caller-returned result; it is not silently written to memory or the learning ledger.
+
+The runner stops with an explicit status when a provider call needs approval, a model returns
+malformed structured evidence, or a stage declares `blocked`, `proposed`, or `not_attempted`.
+Completed-stage uncertainty is preserved as evidence for downstream stages; it is never silently
+converted into a clean-pass signal.
+`AutonomousWorkflowCheckpoint` contains only stage ids, statuses, evidence, uncertainty, bounded
+structured outputs, and digests—never the raw task, credentials, provider messages, or transport
+envelopes. Passing the checkpoint back verifies the task/workflow/run identity and skips completed
+stages. A blocked or proposed stage is not retried implicitly; the caller must pass
+`retry_blocked=True` to make that decision explicit.
+
 For work that genuinely spans domains, `prepare_cross_domain` and `run_cross_domain` provide a
 bounded fan-out/fan-in path. Child tasks are prepared with their own domain workflow contracts,
 run sequentially in declared order, and are synthesized by the `cross_domain` workflow only after

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import uuid
 from typing import Any, Mapping, Sequence
 
 from .authoring import content_digest
@@ -63,6 +64,19 @@ MAX_AUTONOMY_TEXT_BYTES = 16_000
 MAX_AUTONOMY_CONTEXT_BYTES = 2_000_000
 MAX_AUTONOMY_LIST_ITEMS = 64
 MAX_AUTONOMY_MEMORY_ITEMS = 32
+MAX_AUTONOMOUS_WORKFLOW_STAGE_EVIDENCE = 32
+MAX_AUTONOMOUS_WORKFLOW_CHECKPOINT_BYTES = 1_000_000
+AUTONOMOUS_WORKFLOW_STAGE_STATUSES = ("completed", "proposed", "blocked", "not_attempted")
+AUTONOMOUS_WORKFLOW_EXECUTION_STATUSES = (
+    "completed",
+    "approval_required",
+    "provider_failed",
+    "proposed",
+    "blocked",
+    "not_attempted",
+    "paused",
+)
+AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA = "bioprism-python-autonomous-workflow-checkpoint/0.1"
 _SAFE_IDENTIFIER_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-")
 
 
@@ -312,6 +326,39 @@ class AutonomousWorkflowStrategy:
                 "next_actions": {"type": "array", "items": {"type": "string"}},
             },
             "required": ["workflow_id", "stages", "summary", "uncertainty", "next_actions"],
+            "additionalProperties": False,
+        }
+
+    def stage_response_schema(self, stage_id: str) -> dict[str, Any]:
+        """Return the strict structured-output contract for one executable stage."""
+
+        _identifier("autonomous workflow stage id", stage_id)
+        stage = next((item for item in self.stages if item.id == stage_id), None)
+        if stage is None:
+            raise BrainRunError(f"workflow does not contain stage {stage_id!r}")
+        return {
+            "type": "object",
+            "properties": {
+                "stage_id": {"type": "string", "enum": [stage.id]},
+                "status": {"type": "string", "enum": list(AUTONOMOUS_WORKFLOW_STAGE_STATUSES)},
+                "evidence": {
+                    "type": "array",
+                    "maxItems": MAX_AUTONOMOUS_WORKFLOW_STAGE_EVIDENCE,
+                    "items": {"type": "string", "maxLength": 4_096},
+                },
+                "uncertainty": {
+                    "type": "array",
+                    "maxItems": MAX_AUTONOMOUS_WORKFLOW_STAGE_EVIDENCE,
+                    "items": {"type": "string", "maxLength": 4_096},
+                },
+                "notes": {"type": "string", "maxLength": MAX_AUTONOMY_TEXT_BYTES},
+                "next_actions": {
+                    "type": "array",
+                    "maxItems": MAX_AUTONOMOUS_WORKFLOW_STAGE_EVIDENCE,
+                    "items": {"type": "string", "maxLength": 4_096},
+                },
+            },
+            "required": ["stage_id", "status", "evidence", "uncertainty", "notes", "next_actions"],
             "additionalProperties": False,
         }
 
@@ -920,6 +967,240 @@ class AutonomousCrossDomainResult:
             "synthesis_result": None if self.synthesis_result is None else self.synthesis_result.to_dict(),
             "execution": "completed" if self.synthesis_result is not None else "partial_or_blocked",
             "retention": "provider_responses_returned_to_caller; learning_memory_not_implicit",
+        }
+
+
+def _workflow_digest(value: Any, name: str) -> str:
+    if not isinstance(value, str) or len(value) != 64 or any(
+        character not in "0123456789abcdef" for character in value
+    ):
+        raise BrainRunError(f"{name} must be a lowercase SHA-256 digest")
+    return value
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousWorkflowCheckpoint:
+    """Caller-owned, resumable state for one workflow DAG.
+
+    A checkpoint contains only validated stage metadata and structured stage outputs. It never
+    contains the raw task, provider messages, credentials, or opaque transport envelopes. A
+    caller may persist this value in its own durable store and pass it back to ``run_workflow``;
+    the runner verifies the task/workflow digests before it can skip any completed stage.
+    """
+
+    run_id: str
+    task_digest: str
+    workflow_id: str
+    workflow_digest: str
+    stages: tuple[Mapping[str, Any], ...] = ()
+
+    def __post_init__(self) -> None:
+        _identifier("workflow checkpoint run_id", self.run_id)
+        _workflow_digest(self.task_digest, "workflow checkpoint task_digest")
+        _identifier("workflow checkpoint workflow_id", self.workflow_id)
+        _workflow_digest(self.workflow_digest, "workflow checkpoint workflow_digest")
+        if not isinstance(self.stages, Sequence) or isinstance(self.stages, (str, bytes)):
+            raise BrainRunError("workflow checkpoint stages must be a sequence")
+        if len(self.stages) > 16:
+            raise BrainRunError("workflow checkpoint cannot contain more than 16 stages")
+        normalized: list[Mapping[str, Any]] = []
+        seen: set[str] = set()
+        for raw in self.stages:
+            if not isinstance(raw, Mapping):
+                raise BrainRunError("workflow checkpoint stages must contain mappings")
+            stage_id = _identifier("workflow checkpoint stage_id", raw.get("stage_id"))
+            if stage_id in seen:
+                raise BrainRunError(f"workflow checkpoint contains duplicate stage {stage_id!r}")
+            seen.add(stage_id)
+            status = raw.get("status")
+            if status not in AUTONOMOUS_WORKFLOW_STAGE_STATUSES:
+                raise BrainRunError("workflow checkpoint contains an invalid stage status")
+            execution_status = raw.get("execution_status", "completed")
+            if execution_status not in AUTONOMOUS_WORKFLOW_EXECUTION_STATUSES:
+                raise BrainRunError("workflow checkpoint contains an invalid execution status")
+            structured = raw.get("structured")
+            if not isinstance(structured, Mapping):
+                raise BrainRunError("workflow checkpoint stage structured output must be an object")
+            attempt = raw.get("attempt", 1)
+            if not isinstance(attempt, int) or isinstance(attempt, bool) or attempt < 1:
+                raise BrainRunError("workflow checkpoint stage attempt must be a positive integer")
+            response_digest = raw.get("response_digest")
+            _workflow_digest(response_digest, "workflow checkpoint response_digest")
+            evidence = raw.get("evidence", [])
+            uncertainty = raw.get("uncertainty", [])
+            normalized.append(
+                {
+                    "stage_id": stage_id,
+                    "status": status,
+                    "execution_status": execution_status,
+                    "structured": _safe_json("workflow checkpoint structured output", structured, maximum=250_000),
+                    "evidence": list(_sequence("workflow checkpoint evidence", evidence, maximum=MAX_AUTONOMOUS_WORKFLOW_STAGE_EVIDENCE)),
+                    "uncertainty": list(_sequence("workflow checkpoint uncertainty", uncertainty, maximum=MAX_AUTONOMOUS_WORKFLOW_STAGE_EVIDENCE)),
+                    "attempt": attempt,
+                    "response_digest": response_digest,
+                }
+            )
+        encoded = json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        if len(encoded.encode("utf-8")) > MAX_AUTONOMOUS_WORKFLOW_CHECKPOINT_BYTES:
+            raise BrainRunError("workflow checkpoint exceeds the bounded size")
+        object.__setattr__(self, "stages", tuple(normalized))
+
+    @property
+    def completed_stage_ids(self) -> tuple[str, ...]:
+        return tuple(
+            row["stage_id"]
+            for row in self.stages
+            if row.get("status") == "completed" and row.get("execution_status") == "completed"
+        )
+
+    @property
+    def checkpoint_digest(self) -> str:
+        return content_digest(
+            {
+                "schema": AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA,
+                "run_id": self.run_id,
+                "task_digest": self.task_digest,
+                "workflow_id": self.workflow_id,
+                "workflow_digest": self.workflow_digest,
+                "stages": [dict(stage) for stage in self.stages],
+            }
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA,
+            "run_id": self.run_id,
+            "task_digest": self.task_digest,
+            "workflow_id": self.workflow_id,
+            "workflow_digest": self.workflow_digest,
+            "stages": [dict(stage) for stage in self.stages],
+            "completed_stage_ids": list(self.completed_stage_ids),
+            "checkpoint_digest": self.checkpoint_digest,
+            "retention": "structured_stage_metadata_only; caller_owned",
+        }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "AutonomousWorkflowCheckpoint":
+        if not isinstance(value, Mapping) or value.get("schema") != AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA:
+            raise BrainRunError("workflow checkpoint has an invalid schema")
+        checkpoint = cls(
+            run_id=value.get("run_id"),
+            task_digest=value.get("task_digest"),
+            workflow_id=value.get("workflow_id"),
+            workflow_digest=value.get("workflow_digest"),
+            stages=tuple(value.get("stages", ())),
+        )
+        supplied_digest = value.get("checkpoint_digest")
+        if supplied_digest is not None and supplied_digest != checkpoint.checkpoint_digest:
+            raise BrainRunError("workflow checkpoint digest does not match its contents")
+        return checkpoint
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousWorkflowStageResult:
+    """One executed stage plus its bounded model contract and caller-visible result."""
+
+    stage: AutonomousWorkflowStage
+    execution_status: str
+    declared_status: str | None
+    result: BrainRunResult | BrainToolLoopResult | BrainMissionResult | None
+    structured: Mapping[str, Any] | None
+    evidence: tuple[str, ...] = ()
+    uncertainty: tuple[str, ...] = ()
+    validation_errors: tuple[str, ...] = ()
+    attempt: int = 1
+    response_digest: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.execution_status not in AUTONOMOUS_WORKFLOW_EXECUTION_STATUSES:
+            raise BrainRunError("workflow stage result has an invalid execution status")
+        if self.declared_status is not None and self.declared_status not in AUTONOMOUS_WORKFLOW_STAGE_STATUSES:
+            raise BrainRunError("workflow stage result has an invalid declared status")
+        if self.result is not None and not isinstance(
+            self.result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)
+        ):
+            raise BrainRunError("workflow stage result contains an unsupported brain result")
+        if self.structured is not None:
+            if not isinstance(self.structured, Mapping):
+                raise BrainRunError("workflow stage structured output must be an object")
+            _safe_json("workflow stage structured output", self.structured, maximum=250_000)
+        object.__setattr__(self, "evidence", _sequence("workflow stage evidence", self.evidence, maximum=MAX_AUTONOMOUS_WORKFLOW_STAGE_EVIDENCE))
+        object.__setattr__(self, "uncertainty", _sequence("workflow stage uncertainty", self.uncertainty, maximum=MAX_AUTONOMOUS_WORKFLOW_STAGE_EVIDENCE))
+        object.__setattr__(self, "validation_errors", _sequence("workflow stage validation_errors", self.validation_errors, maximum=16))
+        if not isinstance(self.attempt, int) or isinstance(self.attempt, bool) or self.attempt < 1:
+            raise BrainRunError("workflow stage attempt must be a positive integer")
+        if self.response_digest is not None:
+            _workflow_digest(self.response_digest, "workflow stage response_digest")
+
+    def checkpoint_snapshot(self) -> dict[str, Any] | None:
+        if self.structured is None or self.declared_status is None or self.response_digest is None:
+            return None
+        return {
+            "stage_id": self.stage.id,
+            "status": self.declared_status,
+            "execution_status": self.execution_status,
+            "structured": dict(self.structured),
+            "evidence": list(self.evidence),
+            "uncertainty": list(self.uncertainty),
+            "attempt": self.attempt,
+            "response_digest": self.response_digest,
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "stage": self.stage.to_dict(),
+            "execution_status": self.execution_status,
+            "declared_status": self.declared_status,
+            "structured": None if self.structured is None else dict(self.structured),
+            "evidence": list(self.evidence),
+            "uncertainty": list(self.uncertainty),
+            "validation_errors": list(self.validation_errors),
+            "attempt": self.attempt,
+            "response_digest": self.response_digest,
+            "result": None if self.result is None else self.result.to_dict(),
+            "retention": "provider_result_returned_to_caller; checkpoint_is_structured_only",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousWorkflowRun:
+    """Bounded execution report for a domain workflow stage DAG."""
+
+    run_id: str
+    status: str
+    blueprint: AutonomousTaskBlueprint
+    stage_results: tuple[AutonomousWorkflowStageResult, ...]
+    checkpoint: AutonomousWorkflowCheckpoint
+    next_stage_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        _identifier("workflow run_id", self.run_id)
+        if self.status not in {
+            "completed",
+            "approval_required",
+            "stage_failed",
+            "stage_blocked",
+            "stage_proposed",
+            "stage_not_attempted",
+            "paused",
+        }:
+            raise BrainRunError("workflow run has an invalid status")
+        if not isinstance(self.blueprint, AutonomousTaskBlueprint):
+            raise BrainRunError("workflow run blueprint is malformed")
+        if not isinstance(self.checkpoint, AutonomousWorkflowCheckpoint):
+            raise BrainRunError("workflow run checkpoint is malformed")
+        object.__setattr__(self, "next_stage_ids", _sequence("workflow next_stage_ids", self.next_stage_ids, maximum=16))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": "bioprism-python-autonomous-workflow-run/0.1",
+            "run_id": self.run_id,
+            "status": self.status,
+            "blueprint": self.blueprint.to_dict(),
+            "stage_results": [result.to_dict() for result in self.stage_results],
+            "checkpoint": self.checkpoint.to_dict(),
+            "next_stage_ids": list(self.next_stage_ids),
+            "authorization": "caller_approval_per_provider_and_effect_boundary",
         }
 
 
@@ -1972,6 +2253,391 @@ class AutonomousTaskOrchestrator:
         )
 
     @staticmethod
+    def _workflow_provider_response(
+        result: BrainRunResult | BrainToolLoopResult | BrainMissionResult,
+    ) -> Any:
+        if isinstance(result, BrainRunResult):
+            return result.response
+        if isinstance(result, BrainToolLoopResult):
+            if result.provider_loop is not None and result.provider_loop.final_response is not None:
+                return result.provider_loop.final_response
+            return result.brain_run.response
+        return result.brain_run.response
+
+    @classmethod
+    def _workflow_structured_output(
+        cls,
+        result: BrainRunResult | BrainToolLoopResult | BrainMissionResult,
+    ) -> Mapping[str, Any] | None:
+        response = cls._workflow_provider_response(result)
+        structured = getattr(response, "structured", None)
+        return dict(structured) if isinstance(structured, Mapping) else None
+
+    @staticmethod
+    def _workflow_execution_status(result: BrainRunResult | BrainToolLoopResult | BrainMissionResult) -> str:
+        if result.status == "approval_required":
+            return "approval_required"
+        if not result.status.startswith("completed"):
+            return "provider_failed"
+        return "completed"
+
+    @staticmethod
+    def _workflow_stage_route_request(
+        route_request: Mapping[str, Any] | None,
+        *,
+        task: str,
+        stage: AutonomousWorkflowStage,
+    ) -> dict[str, Any] | None:
+        if route_request is None:
+            return None
+        if not isinstance(route_request, Mapping):
+            raise BrainRunError("workflow route_request must be a mapping or None")
+        route = dict(route_request)
+        route["goal"] = task
+        raw_needs = route.get("needs")
+        if raw_needs is None:
+            route["needs"] = [
+                {
+                    "id": f"stage-{stage.id}",
+                    "query": stage.objective,
+                    "max_items": 128,
+                }
+            ]
+        elif not isinstance(raw_needs, Sequence) or isinstance(raw_needs, (str, bytes)):
+            raise BrainRunError("workflow route_request.needs must be a sequence")
+        return route
+
+    @staticmethod
+    def _validate_workflow_stage_output(
+        stage: AutonomousWorkflowStage,
+        structured: Mapping[str, Any] | None,
+    ) -> tuple[str | None, tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+        """Return declared status, evidence, uncertainty, and semantic validation errors."""
+
+        if structured is None:
+            return None, (), (), ("provider returned no structured stage output",)
+        errors: list[str] = []
+        if structured.get("stage_id") != stage.id:
+            errors.append("provider stage_id does not match the scheduled stage")
+        declared = structured.get("status")
+        if declared not in AUTONOMOUS_WORKFLOW_STAGE_STATUSES:
+            errors.append("provider returned an invalid stage status")
+            declared = None
+        def value_list(name: str) -> tuple[str, ...]:
+            value = structured.get(name, [])
+            if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+                errors.append(f"provider stage {name} must be a string list")
+                return ()
+            try:
+                return _sequence(f"provider stage {name}", value, maximum=MAX_AUTONOMOUS_WORKFLOW_STAGE_EVIDENCE)
+            except BrainRunError:
+                errors.append(f"provider stage {name} is malformed or exceeds its bound")
+                return ()
+        evidence = value_list("evidence")
+        uncertainty = value_list("uncertainty")
+        value_list("next_actions")
+        notes = structured.get("notes", "")
+        if not isinstance(notes, str) or len(notes.encode("utf-8")) > MAX_AUTONOMY_TEXT_BYTES:
+            errors.append("provider stage notes are malformed or exceed their bound")
+        if declared == "completed" and not evidence:
+            errors.append("completed stage returned no evidence")
+        if declared == "completed" and not stage.evidence_outputs:
+            errors.append("workflow stage has no declared evidence outputs")
+        return declared, evidence, uncertainty, tuple(errors)
+
+    def _workflow_checkpoint(
+        self,
+        *,
+        run_id: str,
+        blueprint: AutonomousTaskBlueprint,
+        snapshots: Sequence[Mapping[str, Any]],
+    ) -> AutonomousWorkflowCheckpoint:
+        return AutonomousWorkflowCheckpoint(
+            run_id=run_id,
+            task_digest=blueprint.spec.task_digest,
+            workflow_id=blueprint.workflow.workflow_id,
+            workflow_digest=blueprint.workflow.workflow_digest,
+            stages=tuple(dict(snapshot) for snapshot in snapshots),
+        )
+
+    def run_workflow(
+        self,
+        *,
+        blueprint: AutonomousTaskBlueprint,
+        model_candidates: Sequence[Mapping[str, Any]],
+        credentials: Mapping[str, CredentialHandle],
+        checkpoint: AutonomousWorkflowCheckpoint | Mapping[str, Any] | None = None,
+        retry_blocked: bool = False,
+        max_stage_calls: int | None = None,
+        stage_execution_mode: str | None = None,
+        ledger: BrainLearningLedger | None = None,
+        memory: BrainEpisodicMemory | None = None,
+        memory_query: MemoryQuery | Mapping[str, Any] | None = None,
+        memory_limit: int = 8,
+        contextual_observations: Sequence[Mapping[str, Any]] = (),
+        input_tokens: int = 4_096,
+        requested_output_tokens: int = 2_048,
+        max_cost_per_million_tokens: int | None = None,
+        max_latency_ms: int | None = None,
+        min_quality: float | None = None,
+        selection_overrides: Mapping[str, Any] | None = None,
+        approve_provider_call: bool = False,
+        approve_mission_dispatch: bool = False,
+        run_id: str | None = None,
+        max_output_tokens: int = 2_048,
+        temperature: float | None = None,
+        idempotency_key: str | None = None,
+        mission_policy: MissionPolicy | Mapping[str, Any] | None = None,
+        mission_options: Mapping[str, Any] | None = None,
+        route_request: Mapping[str, Any] | None = None,
+        auto_route: bool = False,
+        enforce_route_tools: bool = True,
+        require_resolved_route: bool = True,
+        provider_tools: Sequence[ProviderTool] = (),
+        tool_choice: str | None = None,
+        max_provider_failovers: int = 2,
+        tool_loop_options: Mapping[str, Any] | None = None,
+    ) -> AutonomousWorkflowRun:
+        """Execute a prepared domain workflow as a resumable, dependency-checked stage DAG.
+
+        Each stage is a separate structured model decision. Only a stage that returned
+        ``completed`` with evidence can unlock its dependents. Approval refusals, malformed
+        structured output, or a model-declared blocked/proposed stage stop the DAG and produce a checkpoint;
+        resuming with that checkpoint never replays completed stages.
+        """
+
+        if not isinstance(blueprint, AutonomousTaskBlueprint):
+            raise BrainRunError("workflow execution requires an AutonomousTaskBlueprint")
+        if not isinstance(retry_blocked, bool):
+            raise BrainRunError("retry_blocked must be a boolean")
+        if stage_execution_mode is not None and stage_execution_mode not in AUTONOMOUS_EXECUTION_MODES:
+            raise BrainRunError("stage_execution_mode must be a supported autonomous execution mode")
+        if max_stage_calls is None:
+            max_stage_calls = len(blueprint.workflow.stages)
+        if not isinstance(max_stage_calls, int) or isinstance(max_stage_calls, bool) or not 1 <= max_stage_calls <= 16:
+            raise BrainRunError("max_stage_calls must be between 1 and 16")
+        if not isinstance(auto_route, bool):
+            raise BrainRunError("auto_route must be a boolean")
+        if checkpoint is None:
+            current_checkpoint = None
+        elif isinstance(checkpoint, AutonomousWorkflowCheckpoint):
+            current_checkpoint = checkpoint
+        elif isinstance(checkpoint, Mapping):
+            current_checkpoint = AutonomousWorkflowCheckpoint.from_dict(checkpoint)
+        else:
+            raise BrainRunError("workflow checkpoint must be a checkpoint, mapping, or None")
+        workflow_run_id = run_id or (
+            current_checkpoint.run_id if current_checkpoint is not None else f"workflow-{uuid.uuid4().hex}"
+        )
+        _identifier("workflow run_id", workflow_run_id)
+        if current_checkpoint is None:
+            current_checkpoint = self._workflow_checkpoint(
+                run_id=workflow_run_id,
+                blueprint=blueprint,
+                snapshots=(),
+            )
+        if current_checkpoint.task_digest != blueprint.spec.task_digest:
+            raise BrainRunError("workflow checkpoint task does not match the prepared blueprint")
+        if current_checkpoint.workflow_id != blueprint.workflow.workflow_id or current_checkpoint.workflow_digest != blueprint.workflow.workflow_digest:
+            raise BrainRunError("workflow checkpoint workflow does not match the prepared blueprint")
+        if current_checkpoint.run_id != workflow_run_id:
+            raise BrainRunError("workflow checkpoint run_id does not match the requested run")
+        stage_by_id = {stage.id: stage for stage in blueprint.workflow.stages}
+        if any(row["stage_id"] not in stage_by_id for row in current_checkpoint.stages):
+            raise BrainRunError("workflow checkpoint contains a stage outside the prepared workflow")
+        snapshots: dict[str, dict[str, Any]] = {row["stage_id"]: dict(row) for row in current_checkpoint.stages}
+        if any(row["status"] in {"blocked", "proposed", "not_attempted"} for row in snapshots.values()) and not retry_blocked:
+            blocked_ids = tuple(
+                row["stage_id"] for row in snapshots.values() if row["status"] in {"blocked", "proposed", "not_attempted"}
+            )
+            next_ids = tuple(sorted(blocked_ids))
+            return AutonomousWorkflowRun(
+                workflow_run_id,
+                "stage_blocked" if any(row["status"] == "blocked" for row in snapshots.values()) else "stage_proposed",
+                blueprint,
+                (),
+                self._workflow_checkpoint(run_id=workflow_run_id, blueprint=blueprint, snapshots=tuple(snapshots.values())),
+                next_ids,
+            )
+        if retry_blocked:
+            for stage_id in tuple(snapshots):
+                if snapshots[stage_id]["status"] in {"blocked", "proposed", "not_attempted"}:
+                    del snapshots[stage_id]
+        stage_results: list[AutonomousWorkflowStageResult] = []
+        calls = 0
+        while calls < max_stage_calls:
+            completed = {
+                stage_id for stage_id, snapshot in snapshots.items()
+                if snapshot.get("status") == "completed" and snapshot.get("execution_status") == "completed"
+            }
+            ready = next(
+                (
+                    stage for stage in blueprint.workflow.stages
+                    if stage.id not in snapshots and set(stage.depends_on).issubset(completed)
+                ),
+                None,
+            )
+            if ready is None:
+                remaining = [stage.id for stage in blueprint.workflow.stages if stage.id not in snapshots]
+                status = "completed" if not remaining else "stage_blocked"
+                return AutonomousWorkflowRun(
+                    workflow_run_id,
+                    status,
+                    blueprint,
+                    tuple(stage_results),
+                    self._workflow_checkpoint(run_id=workflow_run_id, blueprint=blueprint, snapshots=tuple(snapshots.values())),
+                    tuple(remaining),
+                )
+            calls += 1
+            stage_task = _text(
+                "workflow stage task",
+                f"{blueprint.spec.task}\n\nExecute workflow stage {ready.id}: {ready.objective}",
+                maximum=MAX_AUTONOMY_TEXT_BYTES,
+            )
+            dependency_outputs = {
+                dependency: snapshots[dependency]["structured"]
+                for dependency in ready.depends_on
+                if dependency in snapshots
+            }
+            stage_context = {
+                "workflow_id": blueprint.workflow.workflow_id,
+                "workflow_digest": blueprint.workflow.workflow_digest,
+                "parent_task_digest": blueprint.spec.task_digest,
+                "stage": ready.to_dict(),
+                "dependency_outputs": dependency_outputs,
+                "completed_stage_ids": sorted(completed),
+                "checkpoint_digest": current_checkpoint.checkpoint_digest,
+                "does_not_authorize": [
+                    "skipping caller approval",
+                    "claiming an external effect",
+                    "widening the workflow or tool policy",
+                ],
+            }
+            stage_result = self.run(
+                task=stage_task,
+                domain=blueprint.spec.domain,
+                model_candidates=model_candidates,
+                credentials=credentials,
+                capability=blueprint.spec.capability,
+                risk_class=blueprint.spec.risk_class,
+                constraints=blueprint.spec.constraints,
+                desired_outputs=ready.evidence_outputs,
+                context=stage_context,
+                max_steps=blueprint.spec.max_steps,
+                require_json=True,
+                response_schema=blueprint.workflow.stage_response_schema(ready.id),
+                execution_mode=stage_execution_mode or blueprint.spec.execution_mode,
+                required_model_capabilities=blueprint.required_capabilities,
+                ledger=ledger,
+                memory=memory,
+                memory_query=memory_query,
+                memory_limit=memory_limit,
+                contextual_observations=contextual_observations,
+                input_tokens=input_tokens,
+                requested_output_tokens=requested_output_tokens,
+                max_cost_per_million_tokens=max_cost_per_million_tokens,
+                max_latency_ms=max_latency_ms,
+                min_quality=min_quality,
+                selection_overrides=selection_overrides,
+                approve_provider_call=approve_provider_call,
+                approve_mission_dispatch=approve_mission_dispatch,
+                run_id=f"{workflow_run_id}-stage-{ready.id}",
+                max_output_tokens=max_output_tokens,
+                temperature=temperature,
+                idempotency_key=None if idempotency_key is None else f"{idempotency_key}-stage-{ready.id}",
+                mission_policy=mission_policy,
+                mission_options=mission_options,
+                route_request=self._workflow_stage_route_request(route_request, task=stage_task, stage=ready),
+                auto_route=auto_route,
+                enforce_route_tools=enforce_route_tools,
+                require_resolved_route=require_resolved_route,
+                provider_tools=provider_tools,
+                tool_choice=tool_choice,
+                max_provider_failovers=max_provider_failovers,
+                tool_loop_options=tool_loop_options,
+            )
+            if not isinstance(stage_result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
+                raise BrainRunError("workflow stage returned an unsupported result")
+            execution_status = self._workflow_execution_status(stage_result)
+            structured = self._workflow_structured_output(stage_result)
+            declared, evidence, uncertainty, errors = self._validate_workflow_stage_output(ready, structured)
+            response = self._workflow_provider_response(stage_result)
+            response_digest = None if response is None else content_digest(response.to_dict())
+            if errors and execution_status == "completed":
+                execution_status = "provider_failed"
+            stage_report = AutonomousWorkflowStageResult(
+                stage=ready,
+                execution_status=execution_status,
+                declared_status=declared,
+                result=stage_result,
+                structured=structured,
+                evidence=evidence,
+                uncertainty=uncertainty,
+                validation_errors=errors,
+                response_digest=response_digest,
+                attempt=1,
+            )
+            stage_results.append(stage_report)
+            snapshot = stage_report.checkpoint_snapshot()
+            if snapshot is not None and not errors:
+                snapshots[ready.id] = snapshot
+            if execution_status == "approval_required":
+                return AutonomousWorkflowRun(
+                    workflow_run_id,
+                    "approval_required",
+                    blueprint,
+                    tuple(stage_results),
+                    self._workflow_checkpoint(run_id=workflow_run_id, blueprint=blueprint, snapshots=tuple(snapshots.values())),
+                    (ready.id,),
+                )
+            if execution_status != "completed":
+                return AutonomousWorkflowRun(
+                    workflow_run_id,
+                    "stage_failed",
+                    blueprint,
+                    tuple(stage_results),
+                    self._workflow_checkpoint(run_id=workflow_run_id, blueprint=blueprint, snapshots=tuple(snapshots.values())),
+                    (ready.id,),
+                )
+            if declared != "completed" or errors:
+                status = {
+                    "blocked": "stage_blocked",
+                    "proposed": "stage_proposed",
+                    "not_attempted": "stage_not_attempted",
+                }.get(declared, "stage_failed")
+                return AutonomousWorkflowRun(
+                    workflow_run_id,
+                    status,
+                    blueprint,
+                    tuple(stage_results),
+                    self._workflow_checkpoint(run_id=workflow_run_id, blueprint=blueprint, snapshots=tuple(snapshots.values())),
+                    (ready.id,),
+                )
+            current_checkpoint = self._workflow_checkpoint(
+                run_id=workflow_run_id,
+                blueprint=blueprint,
+                snapshots=tuple(snapshots.values()),
+            )
+        completed = {
+            stage_id for stage_id, snapshot in snapshots.items()
+            if snapshot.get("status") == "completed" and snapshot.get("execution_status") == "completed"
+        }
+        next_ids = tuple(
+            stage.id for stage in blueprint.workflow.stages
+            if stage.id not in snapshots and set(stage.depends_on).issubset(completed)
+        )
+        remaining = tuple(stage.id for stage in blueprint.workflow.stages if stage.id not in snapshots)
+        final_status = "completed" if not remaining else ("paused" if next_ids else "stage_blocked")
+        return AutonomousWorkflowRun(
+            workflow_run_id,
+            final_status,
+            blueprint,
+            tuple(stage_results),
+            self._workflow_checkpoint(run_id=workflow_run_id, blueprint=blueprint, snapshots=tuple(snapshots.values())),
+            next_ids,
+        )
+
+    @staticmethod
     def _cross_domain_output(result: BrainRunResult | BrainToolLoopResult | BrainMissionResult) -> str:
         response = None
         if isinstance(result, BrainRunResult):
@@ -2296,11 +2962,16 @@ __all__ = [
     "AUTONOMOUS_DOMAINS",
     "AUTONOMOUS_EXECUTION_MODES",
     "AUTONOMOUS_WORKFLOW_SCHEMA",
+    "AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA",
+    "AUTONOMOUS_WORKFLOW_STAGE_STATUSES",
     "AutonomousDomainProfile",
     "AutonomousDomainRegistry",
     "AutonomousCrossDomainBlueprint",
     "AutonomousCrossDomainResult",
     "AutonomousLearningResult",
+    "AutonomousWorkflowCheckpoint",
+    "AutonomousWorkflowRun",
+    "AutonomousWorkflowStageResult",
     "AutonomousPlanBuilder",
     "AutonomousPromptBuilder",
     "AutonomousTaskBlueprint",

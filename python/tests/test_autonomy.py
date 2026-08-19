@@ -5,11 +5,14 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 import threading
 
+import pytest
+
 from prism_sdk import (
     AUTONOMOUS_DOMAINS,
     AutonomousBrain,
     AutonomousDomainRegistry,
     AutonomousWorkflowRegistry,
+    BrainRunError,
     BrainEpisodicMemory,
     BrainLearningLedger,
     BrainOutcomeEvaluator,
@@ -58,6 +61,43 @@ class _ProviderHandler(BaseHTTPRequestHandler):
                 "output_text": "bounded answer",
                 "usage": {"total_tokens": 4},
             }
+        payload = json.dumps(response).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def log_message(self, *_args: object) -> None:
+        return
+
+
+class _StructuredWorkflowProviderHandler(BaseHTTPRequestHandler):
+    def do_POST(self) -> None:  # noqa: N802 - stdlib handler protocol
+        length = int(self.headers.get("Content-Length", "0"))
+        request = json.loads(self.rfile.read(length).decode("utf-8"))
+        stage_id = "unknown"
+        for item in request.get("input", []):
+            content = item.get("content") if isinstance(item, dict) else None
+            if isinstance(content, str) and "Execute workflow stage " in content:
+                stage_id = content.split("Execute workflow stage ", 1)[1].split(":", 1)[0]
+                break
+        blocked = getattr(self.server, "block_stage", None) == stage_id
+        response = {
+            "id": f"workflow-{stage_id}",
+            "model": "test-model",
+            "output_text": json.dumps(
+                {
+                    "stage_id": stage_id,
+                    "status": "blocked" if blocked else "completed",
+                    "evidence": [] if blocked else [f"evidence for {stage_id}"],
+                    "uncertainty": [],
+                    "notes": "bounded stage result",
+                    "next_actions": [],
+                }
+            ),
+            "usage": {"total_tokens": 8},
+        }
         payload = json.dumps(response).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -185,6 +225,24 @@ def _model() -> list[dict[str, object]]:
 
 def _runtime() -> tuple[LLMRuntime, CredentialStore, HTTPServer, threading.Thread]:
     server = HTTPServer(("127.0.0.1", 0), _ProviderHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    store = CredentialStore()
+    runtime = LLMRuntime(store)
+    runtime.register_provider(
+        openai_provider(
+            base_url=f"http://127.0.0.1:{server.server_port}",
+            allow_insecure_http=True,
+            timeout_seconds=2.0,
+            max_attempts=1,
+        )
+    )
+    return runtime, store, server, thread
+
+
+def _structured_runtime() -> tuple[LLMRuntime, CredentialStore, HTTPServer, threading.Thread]:
+    server = HTTPServer(("127.0.0.1", 0), _StructuredWorkflowProviderHandler)
+    server.block_stage = None  # type: ignore[attr-defined]
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     store = CredentialStore()
@@ -522,6 +580,135 @@ def test_run_cross_domain_fans_out_then_synthesizes_with_approval_boundary():
         assert completed.synthesis_result is not None
         assert completed.synthesis_result.status == "completed_provider_call"
         assert "cross-domain-secret" not in json.dumps(completed.to_dict())
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_run_workflow_executes_stage_dag_and_resumes_only_unfinished_stages():
+    runtime, store, server, thread = _structured_runtime()
+    workspace = _Workspace()
+    handle = store.register("openai", "workflow-secret")
+    brain = AutonomousBrain(workspace, runtime)
+    try:
+        blueprint = brain.prepare_autonomous(
+            task="Produce a bounded implementation review.",
+            domain="coding",
+        )
+        paused = brain.run_workflow(
+            blueprint=blueprint,
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            approve_provider_call=True,
+            run_id="workflow-test",
+            max_stage_calls=2,
+        )
+        assert paused.status == "paused"
+        assert [item.stage.id for item in paused.stage_results] == ["scope", "inspect"]
+        assert paused.checkpoint.completed_stage_ids == ("scope", "inspect")
+        checkpoint_wire = json.dumps(paused.checkpoint.to_dict())
+        assert "Produce a bounded implementation review" not in checkpoint_wire
+        assert "workflow-secret" not in checkpoint_wire
+        tampered = paused.checkpoint.to_dict()
+        tampered["stages"][0]["structured"]["evidence"] = ["tampered"]  # type: ignore[index]
+        with pytest.raises(BrainRunError):
+            brain.run_workflow(
+                blueprint=blueprint,
+                model_candidates=_model(),
+                credentials={"openai": handle},
+                checkpoint=tampered,
+                approve_provider_call=True,
+            )
+
+        resumed = brain.run_workflow(
+            blueprint=blueprint,
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            approve_provider_call=True,
+            checkpoint=paused.checkpoint,
+            run_id="workflow-test",
+        )
+        assert resumed.status == "completed"
+        assert [item.stage.id for item in resumed.stage_results] == ["implement", "verify", "handoff"]
+        assert resumed.checkpoint.completed_stage_ids == ("scope", "inspect", "implement", "verify", "handoff")
+        assert "workflow-secret" not in json.dumps(resumed.to_dict())
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_run_workflow_requires_approval_and_supports_explicit_blocked_stage_retry():
+    runtime, store, server, thread = _structured_runtime()
+    workspace = _Workspace()
+    handle = store.register("openai", "workflow-approval-secret")
+    brain = AutonomousBrain(workspace, runtime)
+    try:
+        blueprint = brain.prepare_autonomous(
+            task="Prepare a reversible implementation change.",
+            domain="coding",
+        )
+        waiting = brain.run_workflow(
+            blueprint=blueprint,
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            run_id="workflow-approval",
+        )
+        assert waiting.status == "approval_required"
+        assert waiting.stage_results[0].execution_status == "approval_required"
+        assert not hasattr(server, "request_body")
+
+        server.block_stage = "scope"  # type: ignore[attr-defined]
+        blocked = brain.run_workflow(
+            blueprint=blueprint,
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            approve_provider_call=True,
+            run_id="workflow-approval",
+        )
+        assert blocked.status == "stage_blocked"
+        assert blocked.checkpoint.stages[0]["status"] == "blocked"
+        server.block_stage = None  # type: ignore[attr-defined]
+        resumed = brain.run_workflow(
+            blueprint=blueprint,
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            approve_provider_call=True,
+            checkpoint=blocked.checkpoint.to_dict(),
+            retry_blocked=True,
+        )
+        assert resumed.status == "completed"
+        assert resumed.checkpoint.completed_stage_ids == ("scope", "inspect", "implement", "verify", "handoff")
+        assert "workflow-approval-secret" not in json.dumps(resumed.to_dict())
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_run_workflow_stage_contract_is_executable_for_every_builtin_domain():
+    runtime, store, server, thread = _structured_runtime()
+    handle = store.register("openai", "all-domain-workflow-secret")
+    brain = AutonomousBrain(_Workspace(), runtime)
+    try:
+        for domain in AUTONOMOUS_DOMAINS:
+            blueprint = brain.prepare_autonomous(
+                task=f"Prepare a bounded {domain} workflow result.",
+                domain=domain,
+            )
+            result = brain.run_workflow(
+                blueprint=blueprint,
+                model_candidates=_model(),
+                credentials={"openai": handle},
+                approve_provider_call=True,
+                run_id=f"all-domain-{domain}",
+                max_stage_calls=1,
+            )
+            assert result.status == "paused"
+            assert result.stage_results[0].stage.id == blueprint.workflow.stages[0].id
+            assert result.stage_results[0].declared_status == "completed"
+            assert result.checkpoint.completed_stage_ids == (blueprint.workflow.stages[0].id,)
     finally:
         server.shutdown()
         thread.join(timeout=2)

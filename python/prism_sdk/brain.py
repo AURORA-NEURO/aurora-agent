@@ -1184,6 +1184,17 @@ class AutonomousBrain:
 
         return AutonomousTaskOrchestrator(self).run(**kwargs)
 
+    def run_workflow(self, **kwargs: Any) -> Any:
+        """Execute a prepared domain workflow as a resumable stage dependency graph.
+
+        Stage outputs are structured and checkpointable; approval, malformed evidence, and
+        model-declared uncertainty stop the graph without replaying completed stages.
+        """
+
+        from .autonomy import AutonomousTaskOrchestrator
+
+        return AutonomousTaskOrchestrator(self).run_workflow(**kwargs)
+
     def run_cross_domain(self, **kwargs: Any) -> Any:
         """Run bounded domain specialists and an optional cross-domain synthesis."""
 
