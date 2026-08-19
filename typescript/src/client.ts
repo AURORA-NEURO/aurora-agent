@@ -478,6 +478,8 @@ import type {
   BrainBanditSelectionResult,
   BrainBanditState,
   BrainBanditUpdate,
+  BrainOutcomeRecordArgs,
+  BrainOutcomeRecordResult,
   BrainModelSelectionArgs,
   BrainModelSelectionResult,
   BrainPlanArgs,
@@ -1674,6 +1676,17 @@ export class ApiClient {
     if (!isObject(state) || !Array.isArray(state.arms)) throw new ArgumentError("brain bandit state must contain arms");
     if (!isObject(update) || typeof update.arm_id !== "string" || typeof update.reward !== "number") throw new ArgumentError("brain bandit update must contain arm_id and reward");
     return this.callTool<BrainBanditState>("brain_bandit_update", { state, update }, options);
+  }
+
+  /** Bind an explicit evaluator judgment to a run and return digest-bound learning evidence. */
+  async brainOutcomeRecord(
+    args: BrainOutcomeRecordArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainOutcomeRecordResult>> {
+    if (!isObject(args) || !isObject(args.run) || !isObject(args.assessment) || !isObject(args.bandit_state) || !Array.isArray(args.bandit_state.arms)) throw new ArgumentError("brain outcome record must contain run, assessment, and bandit_state.arms");
+    if (typeof args.arm_id !== "string" || !args.arm_id.trim()) throw new ArgumentError("brain outcome record arm_id must be a non-empty string");
+    if (typeof args.assessment.reward !== "number" || typeof args.assessment.passed !== "boolean") throw new ArgumentError("brain outcome assessment must contain reward and passed");
+    return this.callTool<BrainOutcomeRecordResult>("brain_outcome_record", args, options);
   }
 
   /** Snapshot the authoritative live tool catalogue and bind it to a SHA-256 digest. */

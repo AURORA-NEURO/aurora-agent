@@ -50,6 +50,19 @@ class CredentialError(ValueError):
 class ProviderError(RuntimeError):
     """A provider call failed without retaining or exposing the credential."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        retryable: bool = False,
+        status_code: int | None = None,
+        circuit_open: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+        self.status_code = status_code
+        self.circuit_open = circuit_open
+
 
 class SecretValue:
     """A non-serializable secret wrapper whose display forms are always redacted."""
@@ -234,6 +247,10 @@ class ProviderConfig:
     max_response_bytes: int = MAX_RESPONSE_BYTES
     allow_insecure_http: bool = False
     api_key_header: str | None = None
+    max_attempts: int = 1
+    retry_backoff_seconds: float = 0.0
+    circuit_breaker_failure_threshold: int = 3
+    circuit_breaker_reset_seconds: float = 30.0
 
     def __post_init__(self) -> None:
         if not self.provider or "/" in self.provider or " " in self.provider:
@@ -247,6 +264,14 @@ class ProviderConfig:
             raise ProviderError("base_url must not contain embedded credentials")
         if self.timeout_seconds <= 0 or self.max_response_bytes <= 0:
             raise ProviderError("provider timeout and response bound must be positive")
+        if not 1 <= self.max_attempts <= 8:
+            raise ProviderError("max_attempts must be within [1, 8]")
+        if not 0 <= self.retry_backoff_seconds <= 60:
+            raise ProviderError("retry_backoff_seconds must be within [0, 60]")
+        if not 1 <= self.circuit_breaker_failure_threshold <= 100:
+            raise ProviderError("circuit_breaker_failure_threshold must be within [1, 100]")
+        if self.circuit_breaker_reset_seconds <= 0:
+            raise ProviderError("circuit_breaker_reset_seconds must be positive")
         if parsed.scheme == "http" and not self.allow_insecure_http:
             raise ProviderError("plain HTTP requires allow_insecure_http=True for local/test use")
 
@@ -273,6 +298,10 @@ class ProviderConfig:
             "requires_credential": self.requires_credential,
             "credential_transport": "caller_supplied_in_memory_handle",
             "secret_logging": "redacted",
+            "max_attempts": self.max_attempts,
+            "retry_backoff_seconds": self.retry_backoff_seconds,
+            "circuit_breaker_failure_threshold": self.circuit_breaker_failure_threshold,
+            "circuit_breaker_reset_seconds": self.circuit_breaker_reset_seconds,
         }
 
 
@@ -282,6 +311,9 @@ class ProviderRequest:
     messages: tuple[Mapping[str, Any], ...]
     max_output_tokens: int = 1024
     temperature: float | None = None
+    require_json: bool = False
+    response_schema: Mapping[str, Any] | None = None
+    idempotency_key: str | None = None
 
     def __post_init__(self) -> None:
         if not self.model or len(self.messages) > MAX_MESSAGES:
@@ -290,6 +322,23 @@ class ProviderRequest:
             raise ProviderError("max_output_tokens must be positive")
         if self.temperature is not None and not 0 <= self.temperature <= 2:
             raise ProviderError("temperature must be within [0, 2]")
+        if not isinstance(self.require_json, bool):
+            raise ProviderError("require_json must be a boolean")
+        if self.response_schema is not None:
+            if not isinstance(self.response_schema, Mapping):
+                raise ProviderError("response_schema must be a JSON object")
+            try:
+                encoded_schema = json.dumps(self.response_schema, allow_nan=False)
+            except (TypeError, ValueError) as error:
+                raise ProviderError("response_schema must be JSON-safe") from error
+            if len(encoded_schema.encode("utf-8")) > 256_000:
+                raise ProviderError("response_schema exceeds the bounded size")
+        if self.idempotency_key is not None and (
+            not isinstance(self.idempotency_key, str)
+            or not self.idempotency_key.strip()
+            or len(self.idempotency_key) > 256
+        ):
+            raise ProviderError("idempotency_key must be a bounded non-empty string")
         for message in self.messages:
             if not isinstance(message, Mapping) or not isinstance(message.get("role"), str):
                 raise ProviderError("each message must contain a string role")
@@ -307,6 +356,7 @@ class ProviderResponse:
     request_id: str | None
     usage: Mapping[str, Any]
     raw: Mapping[str, Any]
+    structured: Any = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -317,22 +367,64 @@ class ProviderResponse:
             "request_id": self.request_id,
             "usage": dict(self.usage),
             "raw": dict(self.raw),
+            "structured": self.structured,
             "credential_posture": "not_in_response",
         }
+
+
+@dataclass(slots=True)
+class _CircuitState:
+    consecutive_failures: int = 0
+    opened_until: float | None = None
 
 
 class LLMRuntime:
     """Invoke configured providers while resolving secrets only at the header boundary."""
 
-    def __init__(self, credentials: CredentialStore | None = None) -> None:
+    def __init__(
+        self,
+        credentials: CredentialStore | None = None,
+        *,
+        clock: Callable[[], float] = time.time,
+        sleeper: Callable[[float], None] = time.sleep,
+    ) -> None:
         self.credentials = credentials or CredentialStore()
         self._providers: dict[str, ProviderConfig] = {}
+        self._circuits: dict[str, _CircuitState] = {}
+        self._clock = clock
+        self._sleeper = sleeper
 
     def register_provider(self, config: ProviderConfig) -> None:
         self._providers[config.provider] = config
+        self._circuits.setdefault(config.provider, _CircuitState())
 
     def provider_metadata(self) -> list[dict[str, Any]]:
         return [self._providers[name].to_metadata() for name in sorted(self._providers)]
+
+    def provider_status(self, provider: str) -> dict[str, Any]:
+        """Return value-only circuit state; no credential or provider response is retained."""
+
+        config = self._providers.get(provider)
+        if config is None:
+            raise ProviderError(f"provider {provider!r} is not configured")
+        state = self._circuits.setdefault(provider, _CircuitState())
+        open_now = state.opened_until is not None and self._clock() < state.opened_until
+        return {
+            "provider": provider,
+            "configured": True,
+            "circuit": "open" if open_now else "closed",
+            "consecutive_failures": state.consecutive_failures,
+            "opened_until": state.opened_until,
+            "max_attempts": config.max_attempts,
+            "credential_posture": "caller_supplied_in_memory_handle",
+        }
+
+    def reset_provider(self, provider: str) -> None:
+        """Explicitly close a circuit after an operator or health check has reviewed it."""
+
+        if provider not in self._providers:
+            raise ProviderError(f"provider {provider!r} is not configured")
+        self._circuits[provider] = _CircuitState()
 
     def invoke(
         self,
@@ -362,7 +454,9 @@ class LLMRuntime:
                 headers["anthropic-version"] = "2023-06-01"
             else:
                 headers[config.api_key_header or "Authorization"] = "Bearer " + secret.expose()
-        return self._post(config, body, headers, request.model)
+        if request.idempotency_key is not None:
+            headers["Idempotency-Key"] = request.idempotency_key
+        return self._post(config, body, headers, request)
 
     @staticmethod
     def _body(config: ProviderConfig, request: ProviderRequest) -> dict[str, Any]:
@@ -396,6 +490,13 @@ class LLMRuntime:
             }
         if request.temperature is not None:
             body["temperature"] = request.temperature
+        if (
+            (request.require_json or request.response_schema is not None)
+            and config.protocol in {"openai_responses", "openai_chat_completions"}
+        ):
+            # OpenAI-compatible protocols accept this hint. Anthropic has a different structured
+            # output surface, so it is validated locally without receiving an unsupported field.
+            body["response_format"] = {"type": "json_object"}
         return body
 
     def _post(
@@ -403,7 +504,46 @@ class LLMRuntime:
         config: ProviderConfig,
         body: Mapping[str, Any],
         headers: Mapping[str, str],
-        model: str,
+        request: ProviderRequest,
+    ) -> ProviderResponse:
+        state = self._circuits.setdefault(config.provider, _CircuitState())
+        now = self._clock()
+        if state.opened_until is not None:
+            if now < state.opened_until:
+                raise ProviderError(
+                    "provider circuit is open; invocation is temporarily refused",
+                    circuit_open=True,
+                )
+            state.opened_until = None
+            state.consecutive_failures = 0
+
+        last_error: ProviderError | None = None
+        for attempt in range(config.max_attempts):
+            try:
+                response = self._post_once(config, body, headers, request)
+                state.consecutive_failures = 0
+                state.opened_until = None
+                return response
+            except ProviderError as error:
+                last_error = error
+                if not error.retryable or attempt + 1 >= config.max_attempts:
+                    break
+                delay = min(config.retry_backoff_seconds * (2**attempt), 60.0)
+                if delay:
+                    self._sleeper(delay)
+        assert last_error is not None
+        if last_error.retryable:
+            state.consecutive_failures += 1
+            if state.consecutive_failures >= config.circuit_breaker_failure_threshold:
+                state.opened_until = self._clock() + config.circuit_breaker_reset_seconds
+        raise last_error
+
+    def _post_once(
+        self,
+        config: ProviderConfig,
+        body: Mapping[str, Any],
+        headers: Mapping[str, str],
+        request: ProviderRequest,
     ) -> ProviderResponse:
         host, port, path, scheme = config.endpoint
         try:
@@ -424,7 +564,10 @@ class LLMRuntime:
             response_headers = {name.lower(): value for name, value in response.getheaders()}
         except (OSError, http.client.HTTPException) as error:
             # Do not include the exception text: proxies and providers can echo request headers.
-            raise ProviderError("provider transport failed; credential material was discarded") from error
+            raise ProviderError(
+                "provider transport failed; credential material was discarded",
+                retryable=True,
+            ) from error
         finally:
             connection.close()
         if len(raw) > config.max_response_bytes:
@@ -438,17 +581,23 @@ class LLMRuntime:
         if status >= 400:
             # The body is intentionally not returned: an upstream error may reflect headers or
             # request content, and callers need a stable safe error rather than diagnostics.
-            raise ProviderError(f"provider returned HTTP status {status}")
+            raise ProviderError(
+                f"provider returned HTTP status {status}",
+                retryable=status == 408 or status == 429 or status >= 500,
+                status_code=status,
+            )
         text = _extract_text(config.protocol, decoded)
+        structured = _validate_structured_response(text, request)
         usage = decoded.get("usage")
         return ProviderResponse(
             provider=config.provider,
-            model=str(decoded.get("model") or model),
+            model=str(decoded.get("model") or request.model),
             text=text,
             status_code=status,
             request_id=_header(response_headers, "x-request-id") or _string_or_none(decoded.get("id")),
             usage=dict(usage) if isinstance(usage, Mapping) else {},
             raw=dict(decoded),
+            structured=structured,
         )
 
 
@@ -506,12 +655,94 @@ def _extract_text(protocol: str, payload: Mapping[str, Any]) -> str:
     raise ProviderError("provider response contained no assistant text")
 
 
+def _validate_structured_response(
+    text: str,
+    request: ProviderRequest,
+) -> Any:
+    """Parse and validate a bounded JSON response without echoing response contents in errors."""
+
+    if not request.require_json and request.response_schema is None:
+        return None
+    try:
+        value = json.loads(text)
+    except (TypeError, ValueError) as error:
+        raise ProviderError("provider response was not valid JSON") from error
+    if request.response_schema is not None:
+        _validate_json_schema(value, request.response_schema, "$")
+    return value
+
+
+def _validate_json_schema(value: Any, schema: Mapping[str, Any], path: str) -> None:
+    """Validate the deliberately small, dependency-free JSON Schema subset used by the brain."""
+
+    schema_type = schema.get("type")
+    if schema_type is not None:
+        allowed_types = [schema_type] if isinstance(schema_type, str) else schema_type
+        if not isinstance(allowed_types, list) or not all(isinstance(item, str) for item in allowed_types):
+            raise ProviderError("structured-output schema has an invalid type declaration")
+        if not any(_json_type_matches(value, item) for item in allowed_types):
+            raise ProviderError("provider response failed structured-output validation")
+    if "enum" in schema:
+        enum = schema["enum"]
+        if not isinstance(enum, list) or value not in enum:
+            raise ProviderError("provider response failed structured-output validation")
+    if isinstance(value, Mapping):
+        required = schema.get("required", [])
+        if not isinstance(required, list) or any(not isinstance(item, str) for item in required):
+            raise ProviderError("structured-output schema has invalid required fields")
+        if any(field not in value for field in required):
+            raise ProviderError("provider response failed structured-output validation")
+        properties = schema.get("properties", {})
+        if properties is not None and not isinstance(properties, Mapping):
+            raise ProviderError("structured-output schema has invalid properties")
+        if isinstance(properties, Mapping):
+            if schema.get("additionalProperties") is False and any(field not in properties for field in value):
+                raise ProviderError("provider response failed structured-output validation")
+            for field, child_schema in properties.items():
+                if field in value:
+                    if not isinstance(child_schema, Mapping):
+                        raise ProviderError("structured-output schema has invalid child schema")
+                    _validate_json_schema(value[field], child_schema, f"{path}.{field}")
+    if isinstance(value, list):
+        if "minItems" in schema and (not isinstance(schema["minItems"], int) or len(value) < schema["minItems"]):
+            raise ProviderError("provider response failed structured-output validation")
+        if "maxItems" in schema and (not isinstance(schema["maxItems"], int) or len(value) > schema["maxItems"]):
+            raise ProviderError("provider response failed structured-output validation")
+        items = schema.get("items")
+        if items is not None:
+            if not isinstance(items, Mapping):
+                raise ProviderError("structured-output schema has invalid array items")
+            for index, item in enumerate(value):
+                _validate_json_schema(item, items, f"{path}[{index}]")
+    if isinstance(value, str):
+        if "minLength" in schema and (not isinstance(schema["minLength"], int) or len(value) < schema["minLength"]):
+            raise ProviderError("provider response failed structured-output validation")
+        if "maxLength" in schema and (not isinstance(schema["maxLength"], int) or len(value) > schema["maxLength"]):
+            raise ProviderError("provider response failed structured-output validation")
+
+
+def _json_type_matches(value: Any, schema_type: str) -> bool:
+    return {
+        "object": isinstance(value, Mapping),
+        "array": isinstance(value, list),
+        "string": isinstance(value, str),
+        "number": isinstance(value, (int, float)) and not isinstance(value, bool),
+        "integer": isinstance(value, int) and not isinstance(value, bool),
+        "boolean": isinstance(value, bool),
+        "null": value is None,
+    }.get(schema_type, False)
+
+
 def openai_provider(
     *,
     base_url: str = "https://api.openai.com",
     path: str | None = None,
     timeout_seconds: float = 60.0,
     allow_insecure_http: bool = False,
+    max_attempts: int = 1,
+    retry_backoff_seconds: float = 0.0,
+    circuit_breaker_failure_threshold: int = 3,
+    circuit_breaker_reset_seconds: float = 30.0,
 ) -> ProviderConfig:
     """Create a metadata-only OpenAI Responses provider configuration."""
 
@@ -522,6 +753,10 @@ def openai_provider(
         path=path,
         timeout_seconds=timeout_seconds,
         allow_insecure_http=allow_insecure_http,
+        max_attempts=max_attempts,
+        retry_backoff_seconds=retry_backoff_seconds,
+        circuit_breaker_failure_threshold=circuit_breaker_failure_threshold,
+        circuit_breaker_reset_seconds=circuit_breaker_reset_seconds,
     )
 
 
@@ -530,6 +765,10 @@ def anthropic_provider(
     base_url: str = "https://api.anthropic.com",
     timeout_seconds: float = 60.0,
     allow_insecure_http: bool = False,
+    max_attempts: int = 1,
+    retry_backoff_seconds: float = 0.0,
+    circuit_breaker_failure_threshold: int = 3,
+    circuit_breaker_reset_seconds: float = 30.0,
 ) -> ProviderConfig:
     """Create a metadata-only Anthropic Messages provider configuration."""
 
@@ -539,6 +778,10 @@ def anthropic_provider(
         protocol="anthropic_messages",
         timeout_seconds=timeout_seconds,
         allow_insecure_http=allow_insecure_http,
+        max_attempts=max_attempts,
+        retry_backoff_seconds=retry_backoff_seconds,
+        circuit_breaker_failure_threshold=circuit_breaker_failure_threshold,
+        circuit_breaker_reset_seconds=circuit_breaker_reset_seconds,
     )
 
 
@@ -548,6 +791,10 @@ def openai_compatible_provider(
     *,
     timeout_seconds: float = 60.0,
     allow_insecure_http: bool = False,
+    max_attempts: int = 1,
+    retry_backoff_seconds: float = 0.0,
+    circuit_breaker_failure_threshold: int = 3,
+    circuit_breaker_reset_seconds: float = 30.0,
 ) -> ProviderConfig:
     """Configure a provider exposing the OpenAI Chat Completions wire shape."""
 
@@ -557,4 +804,8 @@ def openai_compatible_provider(
         protocol="openai_chat_completions",
         timeout_seconds=timeout_seconds,
         allow_insecure_http=allow_insecure_http,
+        max_attempts=max_attempts,
+        retry_backoff_seconds=retry_backoff_seconds,
+        circuit_breaker_failure_threshold=circuit_breaker_failure_threshold,
+        circuit_breaker_reset_seconds=circuit_breaker_reset_seconds,
     )

@@ -111,8 +111,9 @@ use bioprism_bioevalx::{OutputVerdict, Reexecution, Trajectory, Worldline as Eva
 use bioprism_biolang::{compile as compile_bioql, QuerySchema};
 use bioprism_bioworlds::SliceCatalog;
 use bioprism_brain::{
-    assemble_prompt, plan_autonomous, select_bandit_arm, select_model, update_bandit,
-    AutonomousPlanRequest, BanditState, BanditUpdate, ModelSelectionRequest, PromptAssemblyRequest,
+    assemble_prompt, plan_autonomous, record_brain_outcome, select_bandit_arm, select_model,
+    update_bandit, AutonomousPlanRequest, BanditState, BanditUpdate, BrainOutcomeRecordRequest,
+    ModelSelectionRequest, PromptAssemblyRequest,
 };
 use bioprism_bundle::{
     KeyRegistry, PubliclyAttestedBundle, ResultBundle, TrustPolicy, VerificationKey,
@@ -1637,6 +1638,7 @@ impl Server {
             "brain_plan" => self.brain_plan(&arguments),
             "brain_bandit_select" => self.brain_bandit_select(&arguments),
             "brain_bandit_update" => self.brain_bandit_update(&arguments),
+            "brain_outcome_record" => self.brain_outcome_record(&arguments),
             "domain_evidence_harmonization_coverage" => {
                 self.domain_evidence_harmonization_coverage(&arguments)
             }
@@ -2004,6 +2006,17 @@ impl Server {
             .map_err(|error| format!("brain bandit update refused: {error}"))?;
         serde_json::to_value(next)
             .map_err(|error| format!("cannot encode brain bandit state: {error}"))
+    }
+
+    /// Bind one explicit evaluator judgment to a value-only run identity and advance the
+    /// caller-owned bandit state. Provider text and credentials are never accepted here.
+    fn brain_outcome_record(&self, arguments: &Value) -> Result<Value, String> {
+        let request: BrainOutcomeRecordRequest = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid brain outcome record request: {error}"))?;
+        let report = record_brain_outcome(&request)
+            .map_err(|error| format!("brain outcome record refused: {error}"))?;
+        serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode brain learning evidence: {error}"))
     }
 
     fn compiled(
@@ -35527,10 +35540,10 @@ pub fn workspace_capabilities() -> Value {
         },
         {
             "id": "autonomous_brain",
-            "domains": ["model selection", "prompt assembly", "bounded autonomous planning", "online bandit adaptation", "provider-neutral invocation contracts"],
+            "domains": ["model selection", "prompt assembly", "bounded autonomous planning", "online bandit adaptation", "evaluator-backed learning evidence", "provider-neutral invocation contracts"],
             "crates": ["bioprism-brain", "bioprism-runtime", "bioprism-routing", "bioprism-adaptive"],
-            "python_artifacts": ["python/prism_sdk/llm_runtime.py"],
-            "mcp_tools": ["brain_model_select", "brain_prompt_assemble", "brain_plan", "brain_bandit_select", "brain_bandit_update"],
+            "python_artifacts": ["python/prism_sdk/llm_runtime.py", "python/prism_sdk/brain.py"],
+            "mcp_tools": ["brain_model_select", "brain_prompt_assemble", "brain_plan", "brain_bandit_select", "brain_bandit_update", "brain_outcome_record"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -35748,6 +35761,20 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": { "state": { "type": "object" }, "update": { "type": "object" } },
                 "required": ["state", "update"]
+            }
+        }),
+        json!({
+            "name": "brain_outcome_record",
+            "description": "Bind one explicit evaluator judgment to a value-only brain run identity, advance caller-owned bandit state, and return digest-bound learning evidence. The request accepts no provider response text or credential; passed/failed judgments are explicit, reward bounds are enforced, and persistence remains the caller's responsibility.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "run": { "type": "object", "description": "Run ID plus selection, prompt, plan, and outcome SHA-256 digests and provider/model metadata; contains no response text." },
+                    "assessment": { "type": "object", "description": "Explicit evaluator ID/version, bounded reward, pass/fail state, and optional value-free evidence metadata." },
+                    "bandit_state": { "type": "object" },
+                    "arm_id": { "type": "string" }
+                },
+                "required": ["run", "assessment", "bandit_state", "arm_id"]
             }
         }),
         json!({

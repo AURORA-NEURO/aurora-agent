@@ -6,7 +6,7 @@ JSON without recreating domain semantics or silently converting refusals into or
 """
 
 from .async_client import AsyncClient
-from .brain import AutonomousBrain, BrainRunError, BrainRunResult
+from .brain import AutonomousBrain, BrainLearningLedger, BrainRunError, BrainRunResult
 from .llm_runtime import (
     CredentialError,
     CredentialHandle,
@@ -2307,6 +2307,7 @@ __all__ = [
     "BioQlCompileRequest",
     "ApiClient",
     "AutonomousBrain",
+    "BrainLearningLedger",
     "BrainRunError",
     "BrainRunResult",
     "ApiError",

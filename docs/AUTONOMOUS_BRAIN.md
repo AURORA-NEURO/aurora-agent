@@ -13,8 +13,10 @@ flowchart LR
     MS --> PA[Prompt assembly]
     PA --> PL[Bounded plan DAG]
     PL --> RT
-    RT --> O[Value response and evaluator outcome]
-    O --> BU[Explicit bandit update]
+    RT --> O[Value response]
+    O --> EV[Held-out evaluator or human review]
+    EV --> OE[Value-only outcome evidence]
+    OE --> BU[Explicit bandit update]
     BU --> MS
 ```
 
@@ -24,6 +26,7 @@ Applications collect provider keys themselves. The SDK supports three caller-own
 
 ```python
 from prism_sdk import CredentialStore, LLMRuntime, ProviderRequest, openai_provider
+from prism_sdk.brain import AutonomousBrain, BrainLearningLedger
 
 credentials = CredentialStore()
 handle = credentials.prompt("openai")  # getpass: terminal input is not echoed
@@ -61,7 +64,7 @@ must choose their provider data-retention posture separately.
 
 ## Decision loop
 
-The `bioprism-brain` crate exposes five value-only operations through MCP:
+The `bioprism-brain` crate exposes six value-only operations through MCP:
 
 - `brain_model_select` applies capability, context-window, quality, latency, and cost gates, then
   ranks eligible models with deterministic utility plus an exploration bonus.
@@ -73,6 +76,9 @@ The `bioprism-brain` crate exposes five value-only operations through MCP:
   explicit exploration bonus and disabled arms are excluded.
 - `brain_bandit_update` accepts one bounded evaluator reward and returns the next state. A provider
   response is never treated as a reward without an explicit evaluator update.
+- `brain_outcome_record` binds a completed run, selected arm, and explicit evaluator assessment to
+  the next bandit state. It emits a tamper-evident, value-only learning evidence record and never
+  accepts provider response text, API keys, or credentials.
 
 The state is caller-owned so a restart, replay, or audit can identify the exact model observations,
 prompt digest, plan digest, response metadata, and reward that produced a decision. The current
@@ -90,9 +96,50 @@ The current Python runtime supports:
 
 All use the same `ProviderRequest` and `ProviderResponse` contract. The runtime does not follow
 redirects, does not allow plain HTTP unless explicitly enabled for local/test use, bounds response
-bytes, and does not stream yet. Streaming, provider-native tool calling, structured-output
-validation, retries, and circuit breaking are the next runtime layers; they must preserve the same
-credential and approval boundary.
+bytes, retries only classified transient failures, opens a per-provider circuit after repeated
+failures, and can parse/validate bounded structured JSON locally. `AutonomousBrain.run` exposes
+output limits, temperature, structured-output requirements, response schemas, and idempotency
+keys without exposing credential material. Streaming and provider-native tool calling remain
+separate runtime layers; they must preserve the same credential, approval, and value-only learning
+boundaries.
+
+## Run, evaluate, and learn
+
+The model response is not self-rewarding. A caller owns the evaluator and persists only the
+evidence returned by the Rust kernel:
+
+```python
+ledger = BrainLearningLedger("./state/brain-learning.jsonl")
+result = brain.run(
+    task="Summarize the bounded evidence packet.",
+    model_selection=selection_request,
+    prompt=prompt_request,
+    plan=plan_request,
+    credentials={"openai": handle},
+    approve_provider_call=True,
+    require_json=True,
+    response_schema={
+        "type": "object",
+        "required": ["summary"],
+        "properties": {"summary": {"type": "string", "minLength": 1}},
+        "additionalProperties": False,
+    },
+)
+brain.record_evaluator_outcome(
+    result,
+    bandit_state=bandit_state,
+    evaluator_id="held-out-quality-v1",
+    evaluator_version="1",
+    reward=0.8,
+    passed=True,
+    ledger=ledger,
+)
+```
+
+The caller may feed `ledger.latest_state()` into the next `brain_bandit_select` request after
+reviewing the evaluator provenance. The ledger is append-only, bounded, fsynced per record, and
+rejects secret-shaped fields. This is online bandit adaptation over explicit observations—not an
+unbounded self-modifying policy and not a claim of general intelligence.
 
 ## Safety boundary
 

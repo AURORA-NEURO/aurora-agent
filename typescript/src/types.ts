@@ -247,6 +247,55 @@ export interface BrainBanditUpdate extends JsonObject {
   outcome_digest?: string | null;
 }
 
+export interface BrainRunIdentity extends JsonObject {
+  run_id: string;
+  selection_digest: string;
+  prompt_digest: string;
+  plan_digest: string;
+  provider: string;
+  model: string;
+  outcome_digest: string;
+  request_id?: string | null;
+}
+
+export interface BrainEvaluatorAssessment extends JsonObject {
+  evaluator_id: string;
+  evaluator_version: string;
+  reward: number;
+  passed: boolean;
+  failed?: boolean;
+  feedback_digest?: string | null;
+  failure_class?: string | null;
+  evidence_digest?: string | null;
+}
+
+export interface BrainOutcomeRecordArgs extends JsonObject {
+  run: BrainRunIdentity;
+  assessment: BrainEvaluatorAssessment;
+  bandit_state: BrainBanditState;
+  arm_id: string;
+}
+
+export interface BrainLearningEvidence extends JsonObject {
+  schema: string;
+  run: BrainRunIdentity;
+  assessment: BrainEvaluatorAssessment;
+  arm_id: string;
+  bandit_update: BrainBanditUpdate;
+  previous_generation: number;
+  next_generation: number;
+  next_state_digest: string;
+  evidence_digest: string;
+  does_not_claim: string[];
+}
+
+export interface BrainOutcomeRecordResult extends JsonObject {
+  ok: boolean;
+  status: string;
+  next_state: BrainBanditState;
+  learning_evidence: BrainLearningEvidence;
+}
+
 export interface ToolsResponse extends JsonObject {
   api_version: string;
   tools: ToolDefinition[];

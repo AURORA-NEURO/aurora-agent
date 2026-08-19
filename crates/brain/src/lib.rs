@@ -30,11 +30,13 @@ pub const MODEL_SELECTION_SCHEMA: &str = "bioprism-brain-model-selection/0.1";
 pub const PROMPT_ASSEMBLY_SCHEMA: &str = "bioprism-brain-prompt-assembly/0.1";
 pub const PLAN_SCHEMA: &str = "bioprism-brain-plan/0.1";
 pub const BANDIT_SCHEMA: &str = "bioprism-brain-bandit/0.1";
+pub const LEARNING_EVIDENCE_SCHEMA: &str = "bioprism-brain-learning-evidence/0.1";
 
 const MAX_MODELS: usize = 256;
 const MAX_PROMPT_CHUNKS: usize = 512;
 const MAX_PLAN_STEPS: usize = 256;
 const MAX_TOOL_NAME_BYTES: usize = 256;
+const MAX_EVALUATOR_ID_BYTES: usize = 256;
 
 #[derive(Debug, Error)]
 pub enum BrainError {
@@ -64,6 +66,10 @@ pub enum BrainError {
     DuplicateArm(String),
     #[error("bandit reward is outside the configured range")]
     InvalidReward,
+    #[error("assessment cannot be both passed and failed")]
+    ContradictoryAssessment,
+    #[error("{field} must be a lowercase SHA-256 digest")]
+    InvalidDigest { field: &'static str },
     #[error("invalid JSON for digest: {0}")]
     Json(#[from] serde_json::Error),
 }
@@ -89,6 +95,17 @@ fn digest<T: Serialize>(value: &T) -> Result<String, BrainError> {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
     Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn validate_digest_value(value: &str, field: &'static str) -> Result<(), BrainError> {
+    if value.len() != 64
+        || !value
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    {
+        return Err(BrainError::InvalidDigest { field });
+    }
+    Ok(())
 }
 
 /// Metadata describing a model that an application has made available to the brain.
@@ -926,6 +943,168 @@ pub struct BanditUpdate {
     pub outcome_digest: Option<String>,
 }
 
+/// Value-only identity for one provider-backed brain run.
+///
+/// The identity binds the evaluator's later reward to the exact selection, prompt, plan, and
+/// provider outcome without retaining prompt text, provider response text, or credentials.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BrainRunIdentity {
+    pub run_id: String,
+    pub selection_digest: String,
+    pub prompt_digest: String,
+    pub plan_digest: String,
+    pub provider: String,
+    pub model: String,
+    pub outcome_digest: String,
+    #[serde(default)]
+    pub request_id: Option<String>,
+}
+
+/// An explicit evaluator judgment. The brain never derives this from a provider response.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BrainEvaluatorAssessment {
+    pub evaluator_id: String,
+    pub evaluator_version: String,
+    pub reward: f64,
+    pub passed: bool,
+    #[serde(default)]
+    pub failed: bool,
+    /// Digest of evaluator-side notes. Raw notes and provider response text never cross this API.
+    #[serde(default)]
+    pub feedback_digest: Option<String>,
+    #[serde(default)]
+    pub failure_class: Option<String>,
+    #[serde(default)]
+    pub evidence_digest: Option<String>,
+}
+
+/// Input to the append-only learning boundary. State is caller-owned and returned by value.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BrainOutcomeRecordRequest {
+    pub run: BrainRunIdentity,
+    pub assessment: BrainEvaluatorAssessment,
+    pub bandit_state: BanditState,
+    pub arm_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BrainLearningEvidence {
+    pub schema: String,
+    pub run: BrainRunIdentity,
+    pub assessment: BrainEvaluatorAssessment,
+    pub arm_id: String,
+    pub bandit_update: BanditUpdate,
+    pub previous_generation: u64,
+    pub next_generation: u64,
+    pub next_state_digest: String,
+    pub evidence_digest: String,
+    pub does_not_claim: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BrainOutcomeRecordReport {
+    pub ok: bool,
+    pub status: String,
+    pub next_state: BanditState,
+    pub learning_evidence: BrainLearningEvidence,
+}
+
+fn validate_brain_run_identity(run: &BrainRunIdentity) -> Result<(), BrainError> {
+    non_empty(&run.run_id, "run.run_id")?;
+    non_empty(&run.provider, "run.provider")?;
+    non_empty(&run.model, "run.model")?;
+    validate_digest_value(&run.selection_digest, "run.selection_digest")?;
+    validate_digest_value(&run.prompt_digest, "run.prompt_digest")?;
+    validate_digest_value(&run.plan_digest, "run.plan_digest")?;
+    validate_digest_value(&run.outcome_digest, "run.outcome_digest")?;
+    if let Some(request_id) = &run.request_id {
+        non_empty(request_id, "run.request_id")?;
+    }
+    Ok(())
+}
+
+fn validate_brain_assessment(assessment: &BrainEvaluatorAssessment) -> Result<(), BrainError> {
+    non_empty(&assessment.evaluator_id, "assessment.evaluator_id")?;
+    non_empty(
+        &assessment.evaluator_version,
+        "assessment.evaluator_version",
+    )?;
+    if assessment.evaluator_id.len() > MAX_EVALUATOR_ID_BYTES
+        || assessment.evaluator_version.len() > MAX_EVALUATOR_ID_BYTES
+    {
+        return Err(BrainError::TooMany {
+            field: "assessment evaluator metadata",
+            max: MAX_EVALUATOR_ID_BYTES,
+        });
+    }
+    if assessment.passed && assessment.failed {
+        return Err(BrainError::ContradictoryAssessment);
+    }
+    if let Some(feedback_digest) = &assessment.feedback_digest {
+        validate_digest_value(feedback_digest, "assessment.feedback_digest")?;
+    }
+    if let Some(failure_class) = &assessment.failure_class {
+        non_empty(failure_class, "assessment.failure_class")?;
+        if failure_class.len() > MAX_EVALUATOR_ID_BYTES {
+            return Err(BrainError::TooMany {
+                field: "assessment.failure_class",
+                max: MAX_EVALUATOR_ID_BYTES,
+            });
+        }
+    }
+    if let Some(evidence_digest) = &assessment.evidence_digest {
+        validate_digest_value(evidence_digest, "assessment.evidence_digest")?;
+    }
+    Ok(())
+}
+
+/// Bind one explicit evaluator judgment to a run and advance caller-owned bandit state.
+///
+/// This is the durable-learning contract's value layer: applications persist the returned
+/// `learning_evidence` and `next_state` in their own store. No provider text, secret, or hidden
+/// server memory participates in the update.
+pub fn record_brain_outcome(
+    request: &BrainOutcomeRecordRequest,
+) -> Result<BrainOutcomeRecordReport, BrainError> {
+    validate_brain_run_identity(&request.run)?;
+    validate_brain_assessment(&request.assessment)?;
+    non_empty(&request.arm_id, "arm_id")?;
+    validate_bandit_state(&request.bandit_state)?;
+    let bandit_update = BanditUpdate {
+        arm_id: request.arm_id.clone(),
+        reward: request.assessment.reward,
+        failed: request.assessment.failed,
+        outcome_digest: Some(request.run.outcome_digest.clone()),
+    };
+    let next_state = update_bandit(&request.bandit_state, &bandit_update)?;
+    let next_state_digest = digest(&next_state)?;
+    let mut learning_evidence = BrainLearningEvidence {
+        schema: LEARNING_EVIDENCE_SCHEMA.into(),
+        run: request.run.clone(),
+        assessment: request.assessment.clone(),
+        arm_id: request.arm_id.clone(),
+        bandit_update,
+        previous_generation: request.bandit_state.generation,
+        next_generation: next_state.generation,
+        next_state_digest,
+        evidence_digest: String::new(),
+        does_not_claim: vec![
+            "an evaluator reward is not proof that the provider answer is true".into(),
+            "online adaptation is not a claim of general intelligence or biological learning".into(),
+            "the ledger contains value-free digests and judgments, not credentials or response text".into(),
+            "a passed evaluator does not grant tool permission, clinical validity, or release readiness".into(),
+        ],
+    };
+    let digest_input = learning_evidence.clone();
+    learning_evidence.evidence_digest = digest(&digest_input)?;
+    Ok(BrainOutcomeRecordReport {
+        ok: true,
+        status: "recorded_evaluator_reward".into(),
+        next_state,
+        learning_evidence,
+    })
+}
+
 fn validate_bandit_state(state: &BanditState) -> Result<(), BrainError> {
     state.policy.validate()?;
     let mut seen = BTreeSet::new();
@@ -1186,6 +1365,97 @@ mod tests {
         assert_eq!(next.generation, 1);
         assert_eq!(next.arms[1].pulls, 1);
         assert_eq!(next.arms[1].reward_sum, 0.8);
+    }
+
+    #[test]
+    fn outcome_record_binds_evaluator_reward_without_response_text() {
+        let state = BanditState {
+            schema: BANDIT_SCHEMA.into(),
+            generation: 4,
+            policy: BanditPolicy::default(),
+            arms: vec![BanditArm {
+                arm_id: "openai/test-model".into(),
+                pulls: 1,
+                reward_sum: 0.2,
+                failures: 0,
+                disabled: false,
+            }],
+        };
+        let report = record_brain_outcome(&BrainOutcomeRecordRequest {
+            run: BrainRunIdentity {
+                run_id: "run-1".into(),
+                selection_digest: "a".repeat(64),
+                prompt_digest: "b".repeat(64),
+                plan_digest: "c".repeat(64),
+                provider: "openai".into(),
+                model: "test-model".into(),
+                outcome_digest: "d".repeat(64),
+                request_id: Some("request-1".into()),
+            },
+            assessment: BrainEvaluatorAssessment {
+                evaluator_id: "json_contract".into(),
+                evaluator_version: "1".into(),
+                reward: 0.9,
+                passed: true,
+                failed: false,
+                feedback_digest: Some("f".repeat(64)),
+                failure_class: None,
+                evidence_digest: Some("e".repeat(64)),
+            },
+            bandit_state: state,
+            arm_id: "openai/test-model".into(),
+        })
+        .unwrap();
+        assert!(report.ok);
+        assert_eq!(report.status, "recorded_evaluator_reward");
+        assert_eq!(report.next_state.generation, 5);
+        assert_eq!(report.learning_evidence.previous_generation, 4);
+        assert_eq!(report.learning_evidence.next_generation, 5);
+        assert_eq!(report.learning_evidence.evidence_digest.len(), 64);
+        let encoded = serde_json::to_string(&report.learning_evidence).unwrap();
+        assert!(!encoded.contains("provider response"));
+        assert!(!encoded.contains("api_key"));
+    }
+
+    #[test]
+    fn outcome_record_rejects_contradictory_assessments() {
+        let error = record_brain_outcome(&BrainOutcomeRecordRequest {
+            run: BrainRunIdentity {
+                run_id: "run-1".into(),
+                selection_digest: "a".repeat(64),
+                prompt_digest: "b".repeat(64),
+                plan_digest: "c".repeat(64),
+                provider: "openai".into(),
+                model: "test-model".into(),
+                outcome_digest: "d".repeat(64),
+                request_id: None,
+            },
+            assessment: BrainEvaluatorAssessment {
+                evaluator_id: "evaluator".into(),
+                evaluator_version: "1".into(),
+                reward: 0.0,
+                passed: true,
+                failed: true,
+                feedback_digest: None,
+                failure_class: None,
+                evidence_digest: None,
+            },
+            bandit_state: BanditState {
+                schema: BANDIT_SCHEMA.into(),
+                generation: 0,
+                policy: BanditPolicy::default(),
+                arms: vec![BanditArm {
+                    arm_id: "openai/test-model".into(),
+                    pulls: 0,
+                    reward_sum: 0.0,
+                    failures: 0,
+                    disabled: false,
+                }],
+            },
+            arm_id: "openai/test-model".into(),
+        })
+        .unwrap_err();
+        assert!(matches!(error, BrainError::ContradictoryAssessment));
     }
 
     #[test]

@@ -33,6 +33,9 @@ test("client exposes the autonomous brain value-only kernel", async () => {
       if (path.endsWith("brain_bandit_select")) {
         return new Response(JSON.stringify({ ok: true, tool: "brain_bandit_select", mcp: { result: { structuredContent: { selected_arm_id: "openai/test-model" } } } }), { status: 200, headers: { "content-type": "application/json" } });
       }
+      if (path.endsWith("brain_outcome_record")) {
+        return new Response(JSON.stringify({ ok: true, tool: "brain_outcome_record", mcp: { result: { structuredContent: { ok: true, status: "recorded_evaluator_reward" } } } }), { status: 200, headers: { "content-type": "application/json" } });
+      }
       return new Response(JSON.stringify({ ok: true, tool: "brain_bandit_update", mcp: { result: { structuredContent: { generation: 1 } } } }), { status: 200, headers: { "content-type": "application/json" } });
     },
   });
@@ -53,13 +56,20 @@ test("client exposes the autonomous brain value-only kernel", async () => {
   const state = { schema: "bioprism-brain-bandit/0.1", arms: [{ arm_id: "openai/test-model" }] };
   const bandit = await client.brainBanditSelect(state);
   const updated = await client.brainBanditUpdate(state, { arm_id: "openai/test-model", reward: 0.8 });
+  const outcome = await client.brainOutcomeRecord({
+    run: { run_id: "run-1", selection_digest: "a".repeat(64), prompt_digest: "b".repeat(64), plan_digest: "c".repeat(64), provider: "openai", model: "test-model", outcome_digest: "d".repeat(64) },
+    assessment: { evaluator_id: "json-contract", evaluator_version: "1", reward: 0.8, passed: true },
+    bandit_state: state,
+    arm_id: "openai/test-model",
+  });
 
   assert.equal(selected.mcp.result.structuredContent.selected_model_id, "openai/test-model");
   assert.equal(prompt.mcp.result.structuredContent.prompt_digest, "p");
   assert.equal(plan.mcp.result.structuredContent.ok, true);
   assert.equal(bandit.mcp.result.structuredContent.selected_arm_id, "openai/test-model");
   assert.equal(updated.mcp.result.structuredContent.generation, 1);
-  assert.equal(seen.length, 5);
+  assert.equal(outcome.mcp.result.structuredContent.status, "recorded_evaluator_reward");
+  assert.equal(seen.length, 6);
   assert.ok(seen.every(({ body }) => !Object.prototype.hasOwnProperty.call(body, "api_key")));
 });
 
