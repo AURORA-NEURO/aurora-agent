@@ -893,12 +893,14 @@ class BrainWorker:
         execution_kind: str = "mission_learning",
         workflow_checkpoint_sink: Callable[[str, Any], Any] | None = None,
     ) -> None:
-        if execution_kind not in {"mission_learning", "workflow_learning"}:
-            raise BrainRunError("worker execution_kind must be mission_learning or workflow_learning")
+        if execution_kind not in {"mission_learning", "workflow_learning", "cross_domain"}:
+            raise BrainRunError("worker execution_kind must be mission_learning, workflow_learning, or cross_domain")
         required_method = (
             "run_resumable_learning_job"
             if execution_kind == "mission_learning"
             else "run_resumable_workflow_job"
+            if execution_kind == "workflow_learning"
+            else "run_resumable_cross_domain_job"
         )
         if not hasattr(brain, required_method):
             raise BrainRunError(f"worker brain must expose {required_method}")
@@ -911,8 +913,8 @@ class BrainWorker:
             raise BrainRunError("worker resolver must be callable")
         if execution_kind == "mission_learning" and not isinstance(evaluator, BrainOutcomeEvaluator):
             raise BrainRunError("worker evaluator must be a BrainOutcomeEvaluator")
-        if execution_kind == "workflow_learning" and evaluator is not None and not isinstance(evaluator, BrainOutcomeEvaluator):
-            raise BrainRunError("workflow worker evaluator must be a BrainOutcomeEvaluator or None")
+        if execution_kind in {"workflow_learning", "cross_domain"} and evaluator is not None and not isinstance(evaluator, BrainOutcomeEvaluator):
+            raise BrainRunError("workflow and cross-domain worker evaluator must be a BrainOutcomeEvaluator or None")
         if not isinstance(bandit_state, Mapping):
             raise BrainRunError("worker bandit_state must be a mapping")
         BrainLearningLedger._assert_safe(bandit_state)
@@ -1019,6 +1021,8 @@ class BrainWorker:
             if self.execution_kind == "workflow_learning":
                 common["checkpoint_sink"] = self.workflow_checkpoint_sink
                 result = self.brain.run_resumable_workflow_job(self.store, **common)
+            elif self.execution_kind == "cross_domain":
+                result = self.brain.run_resumable_cross_domain_job(self.store, **common)
             else:
                 result = self.brain.run_resumable_learning_job(self.store, **common)
         except Exception as error:
@@ -1056,7 +1060,7 @@ class BrainWorker:
             raise operation_error
         if result is None:
             raise BrainRunError("worker execution returned no result")
-        if result.workflow is not None:
+        if result.workflow is not None and self.execution_kind == "workflow_learning":
             next_state = getattr(result.workflow, "bandit_state", None)
             if isinstance(next_state, Mapping):
                 self.bandit_state = dict(next_state)
@@ -1103,6 +1107,32 @@ class BrainWorker:
                             outcome_digest=getattr(brain_result, "outcome_digest", None),
                         )
                     )
+        elif result.workflow is not None and self.execution_kind == "cross_domain" and self.health is not None:
+            step = result.workflow
+            brain_result = getattr(step, "result", None)
+            brain_result = getattr(brain_result, "brain_run", brain_result)
+            selection = getattr(brain_result, "selection", {})
+            selected = selection.get("selected_model") if isinstance(selection, Mapping) else None
+            if isinstance(selected, Mapping) and isinstance(selected.get("provider"), str) and isinstance(selected.get("model"), str):
+                response = getattr(brain_result, "response", None)
+                outcome = "success" if result.status in {"queued", "succeeded"} else (
+                    "unknown" if result.status == "waiting_approval" else "failure"
+                )
+                self.health.record(
+                    BrainModelObservation(
+                        provider=selected["provider"],
+                        model=selected["model"],
+                        domain=claimed.domain,
+                        capability=claimed.capability,
+                        risk_class=claimed.risk_class,
+                        status=getattr(step, "status", result.status),
+                        outcome=outcome,
+                        latency_ms=(time.perf_counter() - started) * 1000.0,
+                        input_tokens=None if response is None else response.usage.get("input_tokens"),
+                        output_tokens=None if response is None else response.usage.get("output_tokens"),
+                        outcome_digest=getattr(brain_result, "outcome_digest", None),
+                    )
+                )
         if self.health is not None and result.cycle is not None:
             final = result.cycle.final_result
             outcome = (

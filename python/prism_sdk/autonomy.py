@@ -89,6 +89,7 @@ MAX_AUTONOMY_LIST_ITEMS = 64
 MAX_AUTONOMY_MEMORY_ITEMS = 32
 MAX_AUTONOMOUS_WORKFLOW_STAGE_EVIDENCE = 32
 MAX_AUTONOMOUS_WORKFLOW_CHECKPOINT_BYTES = 1_000_000
+MAX_AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_BYTES = 1_000_000
 AUTONOMOUS_WORKFLOW_STAGE_STATUSES = ("completed", "proposed", "blocked", "not_attempted")
 AUTONOMOUS_WORKFLOW_EXECUTION_STATUSES = (
     "completed",
@@ -100,6 +101,8 @@ AUTONOMOUS_WORKFLOW_EXECUTION_STATUSES = (
     "paused",
 )
 AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA = "bioprism-python-autonomous-workflow-checkpoint/0.1"
+AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_SCHEMA = "bioprism-python-autonomous-cross-domain-checkpoint/0.1"
+AUTONOMOUS_CROSS_DOMAIN_STEP_SCHEMA = "bioprism-python-autonomous-cross-domain-step/0.1"
 AUTONOMOUS_WORKFLOW_EVALUATOR_SCHEMA = "bioprism-python-autonomous-workflow-evaluator/0.1"
 AUTONOMOUS_CROSS_DOMAIN_LEARNING_SCHEMA = "bioprism-python-autonomous-cross-domain-learning/0.1"
 AUTONOMOUS_CROSS_DOMAIN_TRAJECTORY_LEARNING_SCHEMA = "bioprism-python-autonomous-cross-domain-trajectory-learning/0.1"
@@ -2360,6 +2363,230 @@ class AutonomousCrossDomainPlanRefinementResult:
         }
 
 
+def _autonomous_result_digest(
+    result: BrainRunResult | BrainToolLoopResult | BrainMissionResult,
+) -> str:
+    """Return the provider outcome identity without retaining its response."""
+
+    brain_result = result if isinstance(result, BrainRunResult) else result.brain_run
+    return _route_digest(brain_result.outcome_digest, "cross-domain result outcome_digest")
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousCrossDomainCheckpoint:
+    """Metadata-only continuation state for one durable cross-domain execution.
+
+    The checkpoint deliberately contains no provider response, prompt, task text, credentials,
+    evaluator evidence, or child output. The caller-owned resolver must rehydrate completed
+    results and the worker verifies their outcome digests before another child or synthesis can
+    run.
+    """
+
+    run_id: str
+    task_digest: str
+    base_plan_digest: str
+    execution_child_ids: tuple[str, ...]
+    completed_child_ids: tuple[str, ...] = ()
+    child_result_digests: Mapping[str, str] = field(default_factory=dict)
+    next_child_id: str | None = None
+    plan_refinement_digest: str | None = None
+    synthesis_result_digest: str | None = None
+    status: str = "children_pending"
+
+    def __post_init__(self) -> None:
+        _identifier("cross-domain checkpoint run_id", self.run_id)
+        _route_digest(self.task_digest, "cross-domain checkpoint task_digest")
+        _route_digest(self.base_plan_digest, "cross-domain checkpoint base_plan_digest")
+        execution = _sequence(
+            "cross-domain checkpoint execution_child_ids",
+            self.execution_child_ids,
+            maximum=MAX_AUTONOMOUS_CROSS_DOMAIN_CHILDREN,
+        )
+        if len(set(execution)) != len(execution):
+            raise BrainRunError("cross-domain checkpoint execution child IDs must be unique")
+        completed = _sequence(
+            "cross-domain checkpoint completed_child_ids",
+            self.completed_child_ids,
+            maximum=MAX_AUTONOMOUS_CROSS_DOMAIN_CHILDREN,
+        )
+        if len(set(completed)) != len(completed) or any(child_id not in execution for child_id in completed):
+            raise BrainRunError("cross-domain checkpoint completed children must be unique known IDs")
+        if tuple(execution[: len(completed)]) != completed:
+            raise BrainRunError("cross-domain checkpoint completed children must preserve execution order")
+        raw_digests = self.child_result_digests
+        if not isinstance(raw_digests, Mapping) or any(
+            not isinstance(key, str) or not isinstance(value, str)
+            for key, value in raw_digests.items()
+        ):
+            raise BrainRunError("cross-domain checkpoint child_result_digests must map IDs to digests")
+        digests = dict(raw_digests)
+        if set(digests) != set(completed):
+            raise BrainRunError("cross-domain checkpoint result digests must match completed children")
+        for child_id, digest in digests.items():
+            _route_digest(digest, f"cross-domain checkpoint result digest for {child_id}")
+        if self.next_child_id is not None:
+            _identifier("cross-domain checkpoint next_child_id", self.next_child_id)
+            expected = execution[len(completed)] if len(completed) < len(execution) else None
+            if self.next_child_id != expected:
+                raise BrainRunError("cross-domain checkpoint next_child_id is not the next ordered child")
+        elif len(completed) < len(execution) and self.status not in {"completed", "approval_required"}:
+            raise BrainRunError("cross-domain checkpoint must name the next child before synthesis")
+        if self.plan_refinement_digest is not None:
+            _route_digest(self.plan_refinement_digest, "cross-domain checkpoint plan_refinement_digest")
+        if self.synthesis_result_digest is not None:
+            _route_digest(self.synthesis_result_digest, "cross-domain checkpoint synthesis_result_digest")
+            if len(completed) != len(execution):
+                raise BrainRunError("cross-domain checkpoint cannot contain synthesis before all children")
+        if self.status not in {"children_pending", "synthesis_pending", "approval_required", "completed"}:
+            raise BrainRunError("cross-domain checkpoint has an invalid status")
+        if self.status == "synthesis_pending" and len(completed) != len(execution):
+            raise BrainRunError("cross-domain synthesis_pending checkpoint has incomplete children")
+        if self.status == "completed" and self.synthesis_result_digest is None:
+            raise BrainRunError("completed cross-domain checkpoint must contain synthesis digest")
+        encoded = json.dumps(
+            {
+                "execution_child_ids": list(execution),
+                "completed_child_ids": list(completed),
+                "child_result_digests": digests,
+                "next_child_id": self.next_child_id,
+                "plan_refinement_digest": self.plan_refinement_digest,
+                "synthesis_result_digest": self.synthesis_result_digest,
+                "status": self.status,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        if len(encoded.encode("utf-8")) > MAX_AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_BYTES:
+            raise BrainRunError("cross-domain checkpoint exceeds the bounded size")
+        object.__setattr__(self, "execution_child_ids", execution)
+        object.__setattr__(self, "completed_child_ids", completed)
+        object.__setattr__(self, "child_result_digests", digests)
+
+    @property
+    def checkpoint_digest(self) -> str:
+        return content_digest(
+            {
+                "schema": AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_SCHEMA,
+                "run_id": self.run_id,
+                "task_digest": self.task_digest,
+                "base_plan_digest": self.base_plan_digest,
+                "execution_child_ids": list(self.execution_child_ids),
+                "completed_child_ids": list(self.completed_child_ids),
+                "child_result_digests": dict(self.child_result_digests),
+                "next_child_id": self.next_child_id,
+                "plan_refinement_digest": self.plan_refinement_digest,
+                "synthesis_result_digest": self.synthesis_result_digest,
+                "status": self.status,
+            }
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_SCHEMA,
+            "run_id": self.run_id,
+            "task_digest": self.task_digest,
+            "base_plan_digest": self.base_plan_digest,
+            "execution_child_ids": list(self.execution_child_ids),
+            "completed_child_ids": list(self.completed_child_ids),
+            "child_result_digests": dict(self.child_result_digests),
+            "next_child_id": self.next_child_id,
+            "plan_refinement_digest": self.plan_refinement_digest,
+            "synthesis_result_digest": self.synthesis_result_digest,
+            "status": self.status,
+            "checkpoint_digest": self.checkpoint_digest,
+            "retention": "child_ids_and_outcome_digests_only; caller_owned_results",
+        }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "AutonomousCrossDomainCheckpoint":
+        if not isinstance(value, Mapping) or value.get("schema") != AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_SCHEMA:
+            raise BrainRunError("cross-domain checkpoint has an invalid schema")
+        checkpoint = cls(
+            run_id=value.get("run_id"),
+            task_digest=value.get("task_digest"),
+            base_plan_digest=value.get("base_plan_digest"),
+            execution_child_ids=tuple(value.get("execution_child_ids", ())),
+            completed_child_ids=tuple(value.get("completed_child_ids", ())),
+            child_result_digests=value.get("child_result_digests", {}),
+            next_child_id=value.get("next_child_id"),
+            plan_refinement_digest=value.get("plan_refinement_digest"),
+            synthesis_result_digest=value.get("synthesis_result_digest"),
+            status=value.get("status", "children_pending"),
+        )
+        supplied_digest = value.get("checkpoint_digest")
+        if supplied_digest is not None and supplied_digest != checkpoint.checkpoint_digest:
+            raise BrainRunError("cross-domain checkpoint digest does not match its contents")
+        return checkpoint
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousCrossDomainStepResult:
+    """One bounded child or synthesis invocation from a durable fan-out."""
+
+    status: str
+    phase: str
+    item_id: str
+    blueprint: AutonomousCrossDomainBlueprint
+    result: BrainRunResult | BrainToolLoopResult | BrainMissionResult
+    execution_child_ids: tuple[str, ...]
+    completed_child_ids: tuple[str, ...] = ()
+    child_result_digests: Mapping[str, str] = field(default_factory=dict)
+    plan_refinement_digest: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.phase not in {"child", "synthesis"}:
+            raise BrainRunError("cross-domain step phase must be child or synthesis")
+        if not isinstance(self.item_id, str) or not self.item_id.strip():
+            raise BrainRunError("cross-domain step item_id must be non-empty")
+        if not isinstance(self.blueprint, AutonomousCrossDomainBlueprint):
+            raise BrainRunError("cross-domain step blueprint is invalid")
+        if not isinstance(self.result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
+            raise BrainRunError("cross-domain step result is unsupported")
+        execution = _sequence(
+            "cross-domain step execution_child_ids",
+            self.execution_child_ids,
+            maximum=MAX_AUTONOMOUS_CROSS_DOMAIN_CHILDREN,
+        )
+        completed = _sequence(
+            "cross-domain step completed_child_ids",
+            self.completed_child_ids,
+            maximum=MAX_AUTONOMOUS_CROSS_DOMAIN_CHILDREN,
+        )
+        if self.phase == "child" and self.item_id not in execution:
+            raise BrainRunError("cross-domain child step item_id is unknown")
+        if self.phase == "synthesis" and self.item_id != "synthesis":
+            raise BrainRunError("cross-domain synthesis step item_id must be synthesis")
+        if any(child_id not in execution for child_id in completed):
+            raise BrainRunError("cross-domain step completed child is unknown")
+        raw_digests = self.child_result_digests
+        if not isinstance(raw_digests, Mapping) or set(raw_digests) != set(completed):
+            raise BrainRunError("cross-domain step result digests must match completed children")
+        digests = dict(raw_digests)
+        for child_id, digest in digests.items():
+            _route_digest(digest, f"cross-domain step result digest for {child_id}")
+        if self.plan_refinement_digest is not None:
+            _route_digest(self.plan_refinement_digest, "cross-domain step plan_refinement_digest")
+        object.__setattr__(self, "execution_child_ids", execution)
+        object.__setattr__(self, "completed_child_ids", completed)
+        object.__setattr__(self, "child_result_digests", digests)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_CROSS_DOMAIN_STEP_SCHEMA,
+            "status": self.status,
+            "phase": self.phase,
+            "item_id": self.item_id,
+            "execution_child_ids": list(self.execution_child_ids),
+            "completed_child_ids": list(self.completed_child_ids),
+            "child_result_digests": dict(self.child_result_digests),
+            "plan_refinement_digest": self.plan_refinement_digest,
+            "result": self.result.to_dict(),
+            "retention": "provider_result_caller_owned; continuation_metadata_digest_bound",
+        }
+
+
 @dataclass(frozen=True, slots=True)
 class AutonomousCrossDomainLearningResult:
     """Cross-domain execution with sequential evaluator credit assignment.
@@ -4514,7 +4741,7 @@ class AutonomousTaskOrchestrator:
         memory_query: MemoryQuery | Mapping[str, Any] | None,
         memory_limit: int,
     ) -> tuple[BrainEpisodicMemory | None, tuple[Mapping[str, Any], ...]]:
-        store = memory or brain.memory
+        store = memory if memory is not None else brain.memory
         if store is None:
             return None, ()
         if not isinstance(store, BrainEpisodicMemory):
@@ -5282,6 +5509,220 @@ class AutonomousTaskOrchestrator:
             tuple(refinement.focus_child_ids),
         )
 
+    def run_cross_domain_step(
+        self,
+        *,
+        blueprint: AutonomousCrossDomainBlueprint,
+        model_candidates: Sequence[Mapping[str, Any]],
+        credentials: Mapping[str, CredentialHandle],
+        completed_child_results: Mapping[str, BrainRunResult | BrainToolLoopResult | BrainMissionResult] | None = None,
+        next_child_id: str | None = None,
+        accepted_plan_refinement: AutonomousCrossDomainPlanRefinementResult | None = None,
+        ledger: BrainLearningLedger | None = None,
+        memory: BrainEpisodicMemory | None = None,
+        memory_query: MemoryQuery | Mapping[str, Any] | None = None,
+        memory_limit: int = 8,
+        contextual_observations: Sequence[Mapping[str, Any]] = (),
+        input_tokens: int = 4_096,
+        requested_output_tokens: int = 2_048,
+        max_cost_per_million_tokens: int | None = None,
+        max_latency_ms: int | None = None,
+        min_quality: float | None = None,
+        selection_overrides: Mapping[str, Any] | None = None,
+        approve_provider_call: bool = False,
+        approve_mission_dispatch: bool = False,
+        run_id: str | None = None,
+        max_output_tokens: int = 2_048,
+        temperature: float | None = None,
+        idempotency_key: str | None = None,
+        mission_policy: MissionPolicy | Mapping[str, Any] | None = None,
+        mission_options: Mapping[str, Any] | None = None,
+        route_request: Mapping[str, Any] | None = None,
+        auto_route: bool = False,
+        enforce_route_tools: bool = True,
+        require_resolved_route: bool = True,
+        provider_tools: Sequence[ProviderTool] = (),
+        tool_choice: str | None = None,
+        max_provider_failovers: int = 2,
+        tool_loop_options: Mapping[str, Any] | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        execution_controller: AutonomousExecutionController | None = None,
+    ) -> AutonomousCrossDomainStepResult:
+        """Execute exactly one child or the final synthesis for restart-safe fan-out.
+
+        Completed child results are caller-owned rehydrated values. Their outcome digests are
+        checked by the durable worker before this method is called; this method also refuses to
+        skip a child or synthesize from an incomplete ordered prefix.
+        """
+
+        if not isinstance(blueprint, AutonomousCrossDomainBlueprint):
+            raise BrainRunError("cross-domain step requires an AutonomousCrossDomainBlueprint")
+        plan_priority, plan_refinement_digest, plan_focus_child_ids = self._accepted_cross_domain_plan(
+            blueprint,
+            accepted_plan_refinement,
+        )
+        execution_child_ids = tuple(
+            sorted(blueprint.child_ids, key=lambda child_id: plan_priority.get(child_id, len(plan_priority)))
+        )
+        if completed_child_results is None:
+            completed_child_results = {}
+        if not isinstance(completed_child_results, Mapping):
+            raise BrainRunError("cross-domain step completed_child_results must be a mapping")
+        child_by_id = dict(zip(blueprint.child_ids, blueprint.child_blueprints))
+        prior: dict[str, BrainRunResult | BrainToolLoopResult | BrainMissionResult] = {}
+        for child_id, result in completed_child_results.items():
+            if child_id not in child_by_id:
+                raise BrainRunError("cross-domain step contains an unknown completed child")
+            if not isinstance(result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
+                raise BrainRunError("cross-domain step completed child result is unsupported")
+            if not result.status.startswith("completed"):
+                raise BrainRunError("cross-domain step cannot rehydrate an incomplete child result")
+            prior[child_id] = result
+
+        def child_context_for(child_id: str) -> dict[str, Any]:
+            child = child_by_id[child_id]
+            child_context = dict(child.spec.context)
+            if plan_refinement_digest is not None:
+                child_context["accepted_cross_domain_plan"] = {
+                    "refinement_digest": plan_refinement_digest,
+                    "priority_rank": plan_priority[child_id],
+                    "focus": child_id in plan_focus_child_ids,
+                }
+            return child_context
+
+        def execute_item(
+            item: AutonomousTaskBlueprint,
+            *,
+            item_id: str,
+            context: Mapping[str, Any],
+            identity_suffix: str,
+        ) -> BrainRunResult | BrainToolLoopResult | BrainMissionResult:
+            result = self.run(
+                task=item.spec.task,
+                domain=item.spec.domain,
+                model_candidates=model_candidates,
+                credentials=credentials,
+                capability=item.spec.capability,
+                risk_class=item.spec.risk_class,
+                constraints=item.spec.constraints,
+                desired_outputs=item.spec.desired_outputs,
+                context=context,
+                max_steps=item.spec.max_steps,
+                require_json=item.spec.require_json,
+                response_schema=item.spec.response_schema,
+                execution_mode=item.spec.execution_mode,
+                required_model_capabilities=tuple(
+                    capability
+                    for capability in item.required_capabilities
+                    if capability not in item.profile.required_model_capabilities
+                ),
+                ledger=ledger,
+                memory=memory,
+                memory_query=memory_query,
+                memory_limit=memory_limit,
+                contextual_observations=contextual_observations,
+                input_tokens=input_tokens,
+                requested_output_tokens=requested_output_tokens,
+                max_cost_per_million_tokens=max_cost_per_million_tokens,
+                max_latency_ms=max_latency_ms,
+                min_quality=min_quality,
+                selection_overrides=selection_overrides,
+                bandit_state=bandit_state,
+                approve_provider_call=approve_provider_call,
+                approve_mission_dispatch=approve_mission_dispatch,
+                run_id=self._cross_domain_identity(f"cross-{identity_suffix}", run_id, item_id),
+                max_output_tokens=max_output_tokens,
+                temperature=temperature,
+                idempotency_key=self._cross_domain_identity("cross-key", idempotency_key, item_id),
+                mission_policy=mission_policy,
+                mission_options=mission_options,
+                route_request=route_request,
+                auto_route=auto_route,
+                enforce_route_tools=enforce_route_tools,
+                require_resolved_route=require_resolved_route,
+                provider_tools=provider_tools,
+                tool_choice=tool_choice,
+                max_provider_failovers=max_provider_failovers,
+                tool_loop_options=tool_loop_options,
+                execution_controller=execution_controller,
+            )
+            if not isinstance(result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
+                raise BrainRunError("cross-domain step returned an unsupported brain result")
+            return result
+
+        if next_child_id is not None:
+            if next_child_id not in execution_child_ids:
+                raise BrainRunError("cross-domain step next_child_id is unknown")
+            index = execution_child_ids.index(next_child_id)
+            expected_prior = execution_child_ids[:index]
+            if set(prior) != set(expected_prior):
+                raise BrainRunError("cross-domain step must rehydrate exactly the completed ordered prefix")
+            result = execute_item(
+                child_by_id[next_child_id],
+                item_id=next_child_id,
+                context=child_context_for(next_child_id),
+                identity_suffix="child",
+            )
+            next_completed = expected_prior + ((next_child_id,) if result.status.startswith("completed") else ())
+            digests = {child_id: _autonomous_result_digest(prior[child_id]) for child_id in expected_prior}
+            if result.status.startswith("completed"):
+                digests[next_child_id] = _autonomous_result_digest(result)
+            return AutonomousCrossDomainStepResult(
+                status=result.status,
+                phase="child",
+                item_id=next_child_id,
+                blueprint=blueprint,
+                result=result,
+                execution_child_ids=execution_child_ids,
+                completed_child_ids=next_completed,
+                child_result_digests=digests,
+                plan_refinement_digest=plan_refinement_digest,
+            )
+
+        if set(prior) != set(execution_child_ids):
+            raise BrainRunError("cross-domain synthesis requires every completed child result")
+        child_outputs = [
+            {
+                "id": child_id,
+                "domain": child_by_id[child_id].profile.domain,
+                "workflow_id": child_by_id[child_id].workflow.workflow_id,
+                "workflow_digest": child_by_id[child_id].workflow.workflow_digest,
+                "status": prior[child_id].status,
+                "output": self._cross_domain_output(prior[child_id]),
+                "output_digest": content_digest({"output": self._cross_domain_output(prior[child_id])}),
+            }
+            for child_id in execution_child_ids
+        ]
+        synthesis = blueprint.synthesis_blueprint
+        synthesis_context = dict(synthesis.spec.context)
+        synthesis_context["child_outputs"] = child_outputs
+        if plan_refinement_digest is not None:
+            synthesis_context["accepted_cross_domain_plan"] = {
+                "refinement_digest": plan_refinement_digest,
+                "priority_child_ids": list(execution_child_ids),
+                "focus_child_ids": list(plan_focus_child_ids),
+            }
+        synthesis_result = execute_item(
+            synthesis,
+            item_id="synthesis",
+            context=synthesis_context,
+            identity_suffix="synthesis",
+        )
+        return AutonomousCrossDomainStepResult(
+            status=synthesis_result.status,
+            phase="synthesis",
+            item_id="synthesis",
+            blueprint=blueprint,
+            result=synthesis_result,
+            execution_child_ids=execution_child_ids,
+            completed_child_ids=execution_child_ids,
+            child_result_digests={
+                child_id: _autonomous_result_digest(prior[child_id])
+                for child_id in execution_child_ids
+            },
+            plan_refinement_digest=plan_refinement_digest,
+        )
+
     def run_workflow(
         self,
         *,
@@ -5696,7 +6137,7 @@ class AutonomousTaskOrchestrator:
             if any(not isinstance(stage_id, str) or not isinstance(value, Mapping) for stage_id, value in stage_evidence.items()):
                 raise BrainRunError("workflow stage_evidence must map stage ids to mappings")
             _safe_json("workflow stage_evidence", stage_evidence, maximum=1_000_000)
-        memory_store = memory or self.brain.memory
+        memory_store = memory if memory is not None else self.brain.memory
         if memory_store is not None and not isinstance(memory_store, BrainEpisodicMemory):
             raise BrainRunError("workflow learning memory must be a BrainEpisodicMemory or None")
         normalized_tags = _sequence("workflow learning memory_tags", memory_tags, maximum=32)
@@ -5870,7 +6311,7 @@ class AutonomousTaskOrchestrator:
             ):
                 raise BrainRunError("workflow trajectory stage_evidence must map stage ids to mappings")
             _safe_json("workflow trajectory stage_evidence", stage_evidence, maximum=1_000_000)
-        memory_store = memory or self.brain.memory
+        memory_store = memory if memory is not None else self.brain.memory
         if memory_store is not None and not isinstance(memory_store, BrainEpisodicMemory):
             raise BrainRunError("workflow trajectory memory must be a BrainEpisodicMemory or None")
         normalized_tags = _sequence("workflow trajectory memory_tags", memory_tags, maximum=32)
@@ -6338,7 +6779,7 @@ class AutonomousTaskOrchestrator:
         if not isinstance(bandit_state, Mapping):
             raise BrainRunError("cross-domain learning bandit_state must be a mapping")
         BrainLearningLedger._assert_safe(bandit_state)
-        memory_store = memory or self.brain.memory
+        memory_store = memory if memory is not None else self.brain.memory
         if memory_store is None:
             raise BrainRunError("memory is required for cross-domain online learning")
         if not isinstance(memory_store, BrainEpisodicMemory):
@@ -6688,6 +7129,137 @@ class AutonomousTaskOrchestrator:
         )
         return AutonomousCrossDomainLearningResult(status, cross_domain, tuple(evaluations), state, tuple(memory_receipts))
 
+    def settle_cross_domain_trajectory_learning(
+        self,
+        *,
+        cross_domain: AutonomousCrossDomainResult,
+        bandit_state: Mapping[str, Any],
+        evaluator: BrainOutcomeEvaluator,
+        evidence: Mapping[str, Mapping[str, Any]] | None = None,
+        memory: BrainEpisodicMemory | None = None,
+        memory_tags: Sequence[str] = (),
+        trajectory_id: str | None = None,
+        trajectory_discount: float = 0.90,
+        trajectory_terminal_reward: float | None = None,
+        ledger: BrainLearningLedger | None = None,
+    ) -> AutonomousCrossDomainTrajectoryLearningResult:
+        """Settle delayed credit for already-executed caller-owned cross-domain results.
+
+        This is the durable-job handoff: a caller can collect one raw result from each worker
+        lease, assemble the verified ``AutonomousCrossDomainResult``, and apply one evaluator
+        trajectory without re-invoking any provider.
+        """
+
+        if not isinstance(cross_domain, AutonomousCrossDomainResult):
+            raise BrainRunError("cross-domain trajectory settlement requires an execution result")
+        if not isinstance(bandit_state, Mapping):
+            raise BrainRunError("cross-domain trajectory bandit_state must be a mapping")
+        BrainLearningLedger._assert_safe(bandit_state)
+        if not isinstance(evaluator, BrainOutcomeEvaluator):
+            raise BrainRunError("cross-domain trajectory evaluator must be a BrainOutcomeEvaluator")
+        if evidence is not None:
+            if not isinstance(evidence, Mapping) or any(
+                not isinstance(key, str) or not isinstance(value, Mapping)
+                for key, value in evidence.items()
+            ):
+                raise BrainRunError("cross-domain trajectory evidence must map ids to mappings")
+            _safe_json("cross-domain trajectory evidence", evidence, maximum=1_000_000)
+        memory_store = memory if memory is not None else self.brain.memory
+        if not isinstance(memory_store, BrainEpisodicMemory):
+            raise BrainRunError("cross-domain trajectory memory must be a BrainEpisodicMemory")
+        normalized_tags = _sequence("cross-domain trajectory memory_tags", memory_tags, maximum=32)
+        child_by_id = dict(zip(cross_domain.blueprint.child_ids, cross_domain.blueprint.child_blueprints))
+        items: list[tuple[str, str, AutonomousTaskBlueprint, BrainRunResult | BrainToolLoopResult | BrainMissionResult]] = []
+        for child_id, result in zip(cross_domain.execution_child_ids, cross_domain.child_results):
+            child = child_by_id[child_id]
+            items.append(("child", child_id, child, result))
+        if cross_domain.synthesis_result is not None:
+            items.append(("synthesis", "synthesis", cross_domain.blueprint.synthesis_blueprint, cross_domain.synthesis_result))
+        if not items:
+            raise BrainRunError("cross-domain trajectory contains no results to evaluate")
+        results = [item[3] for item in items]
+        evidence_packets = [None if evidence is None else evidence.get(item[1]) for item in items]
+        trajectory = self.brain.prepare_learning_trajectory(
+            results,
+            evidence_by_step=evidence_packets,
+            trajectory_id=trajectory_id or f"cross-domain-{content_digest({'task_digest': cross_domain.blueprint.task_digest, 'runs': [_autonomous_result_digest(result) for result in results]})}",
+            discount=trajectory_discount,
+            terminal_reward=trajectory_terminal_reward,
+            ledger=ledger,
+        )
+        trajectory_result = evaluator.evaluate_trajectory(
+            self.brain,
+            trajectory,
+            bandit_state=bandit_state,
+            evidence_by_step=evidence_packets,
+            ledger=ledger,
+        )
+        evaluations: list[Mapping[str, Any]] = []
+        memory_receipts: list[Mapping[str, Any]] = []
+        for index, ((scope, item_id, blueprint_item, result), decision, recording) in enumerate(
+            zip(items, trajectory_result.decisions, trajectory_result.recordings)
+        ):
+            episode_id = trajectory.episodes[index].episode_id
+            episode_receipt = self.brain.remember_result(
+                result,
+                task=blueprint_item.spec.task,
+                episode_id=episode_id,
+                context=blueprint_item.selection_context,
+                tags=[
+                    *normalized_tags,
+                    f"domain:{blueprint_item.spec.domain}",
+                    f"cross_domain:{scope}",
+                    f"item:{item_id}",
+                    "learning:trajectory",
+                ],
+                lesson=decision.replan_instruction if decision.replan_requested else None,
+                provenance={
+                    "scope": scope,
+                    "item_id": item_id,
+                    "trajectory_id": trajectory.trajectory_id,
+                    "trajectory_step": index,
+                    "credited_reward": trajectory_result.credited_rewards[index],
+                    "cross_domain_plan_refinement_digest": cross_domain.plan_refinement_digest,
+                    "evaluator_id": decision.evaluator_id,
+                    "evaluator_version": decision.evaluator_version,
+                },
+                memory=memory_store,
+            )
+            try:
+                evaluation_receipt = memory_store.record_evaluation(
+                    episode_id,
+                    {
+                        **decision.to_dict(),
+                        "decision_digest": content_digest(decision.to_dict()),
+                    },
+                ).to_dict()
+            except BrainMemoryError as error:
+                raise BrainRunError("cross-domain trajectory evaluation memory record failed") from error
+            memory_receipts.extend((episode_receipt, evaluation_receipt))
+            evaluations.append(
+                {
+                    "scope": scope,
+                    "item_id": item_id,
+                    "decision": decision.to_dict(),
+                    "recording": {
+                        "status": recording.get("status"),
+                        "next_state": recording.get("next_state"),
+                        "learning_evidence": recording.get("learning_evidence"),
+                        "trajectory_id": trajectory.trajectory_id,
+                        "trajectory_step": index,
+                        "credited_reward": trajectory_result.credited_rewards[index],
+                    },
+                }
+            )
+        return AutonomousCrossDomainTrajectoryLearningResult(
+            status=cross_domain.status,
+            cross_domain=cross_domain,
+            trajectory_result=trajectory_result,
+            evaluations=tuple(evaluations),
+            bandit_state=trajectory_result.bandit_state,
+            memory_receipts=tuple(memory_receipts),
+        )
+
     def run_cross_domain_trajectory_learning(
         self,
         *,
@@ -6726,7 +7298,7 @@ class AutonomousTaskOrchestrator:
             ):
                 raise BrainRunError("cross-domain trajectory evidence must map ids to mappings")
             _safe_json("cross-domain trajectory evidence", evidence, maximum=1_000_000)
-        memory_store = memory or self.brain.memory
+        memory_store = memory if memory is not None else self.brain.memory
         if not isinstance(memory_store, BrainEpisodicMemory):
             raise BrainRunError("cross-domain trajectory memory must be a BrainEpisodicMemory")
         normalized_tags = _sequence("cross-domain trajectory memory_tags", memory_tags, maximum=32)
@@ -7660,6 +8232,35 @@ class AutonomousAgent:
         self._finish_execution(execution_controller, result=result)
         return result
 
+    def settle_cross_domain_trajectory_learning(
+        self,
+        *,
+        cross_domain: AutonomousCrossDomainResult,
+        bandit_state: Mapping[str, Any],
+        evaluator: BrainOutcomeEvaluator,
+        evidence: Mapping[str, Mapping[str, Any]] | None = None,
+        memory: BrainEpisodicMemory | None = None,
+        memory_tags: Sequence[str] = (),
+        trajectory_id: str | None = None,
+        trajectory_discount: float = 0.90,
+        trajectory_terminal_reward: float | None = None,
+        ledger: BrainLearningLedger | None = None,
+    ) -> AutonomousCrossDomainTrajectoryLearningResult:
+        """Apply delayed credit to already-completed durable cross-domain results."""
+
+        return self.orchestrator.settle_cross_domain_trajectory_learning(
+            cross_domain=cross_domain,
+            bandit_state=bandit_state,
+            evaluator=evaluator,
+            evidence=evidence,
+            memory=memory if memory is not None else self.memory,
+            memory_tags=memory_tags,
+            trajectory_id=trajectory_id,
+            trajectory_discount=trajectory_discount,
+            trajectory_terminal_reward=trajectory_terminal_reward,
+            ledger=ledger,
+        )
+
     def run_auto(
         self,
         *,
@@ -8248,12 +8849,15 @@ __all__ = [
     "AUTONOMOUS_CROSS_DOMAIN_LEARNING_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_TRAJECTORY_LEARNING_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_PLAN_REFINEMENT_SCHEMA",
+    "AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_SCHEMA",
+    "AUTONOMOUS_CROSS_DOMAIN_STEP_SCHEMA",
     "AUTONOMOUS_ROUTE_SCHEMA",
     "AUTONOMOUS_DOMAIN_PACK_SCHEMA",
     "AUTONOMOUS_ROUTE_REASONS",
     "MAX_AUTONOMOUS_ROUTE_CANDIDATES",
     "MAX_AUTONOMOUS_ROUTE_DOMAINS",
     "MAX_AUTONOMOUS_CROSS_DOMAIN_CHILDREN",
+    "MAX_AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_BYTES",
     "AUTONOMOUS_WORKFLOW_SCHEMA",
     "AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA",
     "AUTONOMOUS_WORKFLOW_EVALUATOR_SCHEMA",
@@ -8273,6 +8877,8 @@ __all__ = [
     "AutonomousCrossDomainBlueprint",
     "AutonomousCrossDomainResult",
     "AutonomousCrossDomainPlanRefinementResult",
+    "AutonomousCrossDomainCheckpoint",
+    "AutonomousCrossDomainStepResult",
     "AutonomousCrossDomainLearningResult",
     "AutonomousCrossDomainTrajectoryLearningResult",
     "AutonomousAutoBlueprint",

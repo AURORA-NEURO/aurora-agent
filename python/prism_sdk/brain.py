@@ -18,7 +18,7 @@ from pathlib import Path
 import re
 import threading
 import uuid
-from typing import Any, Callable, Mapping, Protocol, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Protocol, Sequence
 
 from .llm_runtime import (
     CredentialError,
@@ -39,6 +39,9 @@ from .memory import BrainEpisodicMemory, BrainMemoryError, MemoryQuery
 from .tooling import ToolCatalogue, ToolSchemaError
 from .autonomy_persistence import AutonomousExecutionController
 from .autonomy_provider import AutonomousProviderInvocationSession
+
+if TYPE_CHECKING:
+    from .jobs import BrainJobStore
 
 
 class BrainRunError(RuntimeError):
@@ -1556,7 +1559,7 @@ class MissionToolAuthorizer:
         try:
             preflight_raw = self.workspace.tool("agent_mission", request.to_mcp_arguments())
             preflight = _bounded_mission_report_projection(preflight_raw, include_outputs=False)
-        except Exception as error:
+        except Exception:
             return self._refuse(calls, "mission preflight transport or validation failed", mission_id=mission_id)
         if not self._preflight_ready(preflight_raw):
             self._record_receipt(
@@ -1858,7 +1861,7 @@ class AutonomousBrain:
     ) -> list[dict[str, Any]]:
         """Recall bounded metadata/lessons from the configured episodic memory."""
 
-        store = memory or self.memory
+        store = memory if memory is not None else self.memory
         if store is None:
             raise BrainRunError("episodic memory is not configured")
         if not isinstance(store, BrainEpisodicMemory):
@@ -1908,7 +1911,7 @@ class AutonomousBrain:
             raise BrainRunError("memory tags must contain non-empty strings")
         if provenance is not None and not isinstance(provenance, Mapping):
             raise BrainRunError("memory provenance must be a mapping or None")
-        store = memory or self.memory
+        store = memory if memory is not None else self.memory
         if store is None:
             raise BrainRunError("episodic memory is not configured")
         if not isinstance(store, BrainEpisodicMemory):
@@ -3033,7 +3036,7 @@ class AutonomousBrain:
             if not isinstance(evidence, Mapping):
                 raise BrainRunError("evidence must be a mapping or None")
             BrainLearningLedger._assert_safe(evidence)
-        store = memory or self.memory
+        store = memory if memory is not None else self.memory
         if store is None:
             raise BrainRunError("episodic memory is required for a learning cycle")
         if not isinstance(store, BrainEpisodicMemory):
@@ -3425,7 +3428,7 @@ class AutonomousBrain:
                 evaluator=evaluator,
                 bandit_state=bandit_state,
                 ledger=ledger,
-                memory=memory or self.memory,
+                memory=memory if memory is not None else self.memory,
             )
             final_result = cycle.final_result
             requires_approval = getattr(final_result, "status", None) in {
@@ -3775,7 +3778,7 @@ class AutonomousBrain:
                 bandit_state=previous_checkpoint.get("bandit_state", bandit_state),
                 evaluator=evaluator,
                 ledger=ledger,
-                memory=memory or self.memory,
+                memory=memory if memory is not None else self.memory,
                 **options,
             )
             _persist_workflow_state(
@@ -3886,6 +3889,413 @@ class AutonomousBrain:
             except (BrainJobError, BrainRunError) as persistence_error:
                 raise BrainRunError("workflow job failure could not be durably recorded") from persistence_error
             raise BrainRunError("workflow job execution failed") from error
+
+    def run_resumable_cross_domain_job(
+        self,
+        store: "BrainJobStore",
+        *,
+        job_id: str,
+        worker_id: str,
+        resolver: Callable[[Mapping[str, Any]], Mapping[str, Any]],
+        evaluator: "BrainOutcomeEvaluator | None" = None,
+        bandit_state: Mapping[str, Any],
+        provider_health: Mapping[str, Any] | None = None,
+        lease_seconds: float = 60.0,
+        ledger: BrainLearningLedger | None = None,
+        memory: BrainEpisodicMemory | None = None,
+        approval_router: Any | None = None,
+        approval_scope: str | None = None,
+        required_approval_role: str = "operator",
+    ) -> BrainJobRunResult:
+        """Execute one provider-only child or synthesis step under a durable job lease.
+
+        The resolver is the process-restart and BYOK boundary. It rehydrates the cross-domain
+        blueprint, live credential handles, and caller-owned completed child results. The job
+        journal stores only ordered IDs, outcome digests, plan identity, and synthesis state.
+        Provider approval is parked without advancing the next item; an approved retry therefore
+        cannot skip a child or replay a completed result.
+        """
+
+        from .autonomy import (
+            AutonomousCrossDomainBlueprint,
+            AutonomousCrossDomainCheckpoint,
+            AutonomousCrossDomainPlanRefinementResult,
+            AutonomousCrossDomainStepResult,
+            AutonomousTaskOrchestrator,
+            _cross_domain_plan_digest,
+            _autonomous_result_digest,
+        )
+        from .control_plane import BrainApprovalRouter
+        from .jobs import BrainJobError, BrainJobStore
+
+        if not isinstance(store, BrainJobStore):
+            raise BrainRunError("store must be a BrainJobStore")
+        if not callable(resolver):
+            raise BrainRunError("resolver must be callable")
+        if evaluator is not None and not isinstance(evaluator, BrainOutcomeEvaluator):
+            raise BrainRunError("cross-domain durable evaluator must be a BrainOutcomeEvaluator or None")
+        if not isinstance(bandit_state, Mapping):
+            raise BrainRunError("cross-domain durable bandit_state must be a mapping")
+        BrainLearningLedger._assert_safe(bandit_state)
+        if provider_health is not None:
+            if not isinstance(provider_health, Mapping):
+                raise BrainRunError("provider_health must be a mapping or None")
+            BrainLearningLedger._assert_safe(provider_health)
+        if not isinstance(lease_seconds, (int, float)) or isinstance(lease_seconds, bool) or not 1 <= lease_seconds <= 86_400:
+            raise BrainRunError("lease_seconds must be within [1, 86400]")
+        if approval_router is None:
+            approval_router = BrainApprovalRouter(store)
+        elif not isinstance(approval_router, BrainApprovalRouter):
+            raise BrainRunError("approval_router must be a BrainApprovalRouter or None")
+        if approval_scope is not None and (
+            not isinstance(approval_scope, str)
+            or not approval_scope.strip()
+            or len(approval_scope.encode("utf-8")) > 512
+        ):
+            raise BrainRunError("approval_scope must be a bounded non-empty string or None")
+        if (
+            not isinstance(required_approval_role, str)
+            or not required_approval_role.strip()
+            or len(required_approval_role.encode("utf-8")) > 128
+        ):
+            raise BrainRunError("required_approval_role must be a bounded non-empty string")
+
+        try:
+            job = store.claim(job_id, worker_id, lease_seconds=lease_seconds)
+        except BrainJobError as error:
+            raise BrainRunError("brain cross-domain job claim failed") from error
+        if job.terminal:
+            return BrainJobRunResult(status="already_terminal", job=job.to_dict(), cycle=None, workflow=None)
+
+        execution_started = False
+        step_result: AutonomousCrossDomainStepResult | None = None
+        current_boundary = job.side_effect_boundary
+
+        def checkpoint_metadata(
+            checkpoint: AutonomousCrossDomainCheckpoint,
+            *,
+            phase: str,
+            step: AutonomousCrossDomainStepResult | None = None,
+        ) -> dict[str, Any]:
+            return {
+                "job_kind": "autonomous_cross_domain",
+                "cross_domain_checkpoint": checkpoint.to_dict(),
+                "cross_domain_checkpoint_digest": checkpoint.checkpoint_digest,
+                "task_digest": checkpoint.task_digest,
+                "base_plan_digest": checkpoint.base_plan_digest,
+                "execution_child_ids": list(checkpoint.execution_child_ids),
+                "completed_child_ids": list(checkpoint.completed_child_ids),
+                "next_child_id": checkpoint.next_child_id,
+                "plan_refinement_digest": checkpoint.plan_refinement_digest,
+                "synthesis_result_digest": checkpoint.synthesis_result_digest,
+                "cross_domain_status": checkpoint.status,
+                "last_item_id": None if step is None else step.item_id,
+                "last_item_phase": None if step is None else step.phase,
+                "phase": phase,
+            }
+
+        try:
+            previous_checkpoint = job.checkpoint
+            previous_kind = previous_checkpoint.get("job_kind")
+            if previous_kind is not None and previous_kind != "autonomous_cross_domain":
+                raise BrainRunError("job checkpoint belongs to a different execution kind")
+            approval_released = previous_checkpoint.get("phase") == "approval_released"
+            resolving = store.checkpoint(
+                job.job_id,
+                worker_id,
+                phase="resolving_cross_domain",
+                checkpoint={
+                    **dict(previous_checkpoint),
+                    "job_kind": "autonomous_cross_domain",
+                    "spec_digest": job.spec_digest,
+                    "attempt": job.attempts,
+                },
+                side_effect_boundary=current_boundary,
+            )
+            resolved = resolver(resolving.to_dict())
+            if not isinstance(resolved, Mapping):
+                raise BrainRunError("cross-domain job resolver must return a mapping")
+            allowed = {
+                "blueprint",
+                "model_candidates",
+                "credentials",
+                "completed_child_results",
+                "checkpoint",
+                "cross_domain_options",
+            }
+            unknown = sorted(set(resolved).difference(allowed))
+            if unknown:
+                raise BrainRunError("cross-domain job resolver returned unsupported fields: " + ", ".join(unknown))
+            required = {"blueprint", "model_candidates", "credentials"}
+            missing = sorted(required.difference(resolved))
+            if missing:
+                raise BrainRunError("cross-domain job resolver omitted required fields: " + ", ".join(missing))
+            blueprint = resolved["blueprint"]
+            if not isinstance(blueprint, AutonomousCrossDomainBlueprint):
+                raise BrainRunError("cross-domain job blueprint must be an AutonomousCrossDomainBlueprint")
+            if any(
+                item.spec.execution_mode == "mission"
+                for item in (*blueprint.child_blueprints, blueprint.synthesis_blueprint)
+            ):
+                raise BrainRunError(
+                    "durable cross-domain jobs currently require provider or tool-loop execution; "
+                    "mission effects need reconciliation-aware continuation"
+                )
+            options = resolved.get("cross_domain_options", {})
+            if not isinstance(options, Mapping):
+                raise BrainRunError("cross_domain_options must be a mapping")
+            options = dict(options)
+            allowed_options = {
+                "ledger", "memory", "memory_query", "memory_limit", "contextual_observations",
+                "input_tokens", "requested_output_tokens", "max_cost_per_million_tokens",
+                "max_latency_ms", "min_quality", "selection_overrides", "approve_provider_call",
+                "approve_mission_dispatch", "run_id", "max_output_tokens", "temperature",
+                "idempotency_key", "mission_policy", "mission_options", "route_request", "auto_route",
+                "enforce_route_tools", "require_resolved_route", "provider_tools", "tool_choice",
+                "max_provider_failovers", "tool_loop_options", "bandit_state",
+                "accepted_plan_refinement",
+            }
+            unknown_options = sorted(set(options).difference(allowed_options))
+            if unknown_options:
+                raise BrainRunError("cross_domain_options contains unsupported fields: " + ", ".join(unknown_options))
+            accepted_plan = options.get("accepted_plan_refinement")
+            if accepted_plan is not None and not isinstance(
+                accepted_plan,
+                AutonomousCrossDomainPlanRefinementResult,
+            ):
+                raise BrainRunError(
+                    "cross_domain_options.accepted_plan_refinement must be an AutonomousCrossDomainPlanRefinementResult"
+                )
+            orchestrator = AutonomousTaskOrchestrator(self)
+            plan_priority, plan_digest, _ = orchestrator._accepted_cross_domain_plan(blueprint, accepted_plan)
+            execution_child_ids = tuple(
+                sorted(blueprint.child_ids, key=lambda child_id: plan_priority.get(child_id, len(plan_priority)))
+            )
+            base_plan_digest = _cross_domain_plan_digest(blueprint)
+            previous_wire = previous_checkpoint.get("cross_domain_checkpoint")
+            if previous_wire is None:
+                current = AutonomousCrossDomainCheckpoint(
+                    run_id=options.get("run_id") or f"job-{job.job_id}",
+                    task_digest=blueprint.task_digest,
+                    base_plan_digest=base_plan_digest,
+                    execution_child_ids=execution_child_ids,
+                    next_child_id=execution_child_ids[0],
+                    plan_refinement_digest=plan_digest,
+                )
+            else:
+                if not isinstance(previous_wire, Mapping):
+                    raise BrainRunError("persisted cross-domain checkpoint is malformed")
+                current = AutonomousCrossDomainCheckpoint.from_dict(previous_wire)
+                if current.task_digest != blueprint.task_digest or current.base_plan_digest != base_plan_digest:
+                    raise BrainRunError("rehydrated cross-domain blueprint does not match the job checkpoint")
+                if current.execution_child_ids != execution_child_ids:
+                    raise BrainRunError("rehydrated cross-domain ordering does not match the job checkpoint")
+                if current.plan_refinement_digest != plan_digest:
+                    raise BrainRunError("rehydrated cross-domain accepted plan does not match the job checkpoint")
+            supplied_checkpoint = resolved.get("checkpoint")
+            if supplied_checkpoint is not None:
+                if isinstance(supplied_checkpoint, AutonomousCrossDomainCheckpoint):
+                    supplied = supplied_checkpoint
+                elif isinstance(supplied_checkpoint, Mapping):
+                    supplied = AutonomousCrossDomainCheckpoint.from_dict(supplied_checkpoint)
+                else:
+                    raise BrainRunError("cross-domain resolver checkpoint must be a checkpoint or mapping")
+                if supplied.checkpoint_digest != current.checkpoint_digest:
+                    raise BrainRunError("rehydrated cross-domain checkpoint does not match the job journal")
+
+            raw_results = resolved.get("completed_child_results", {})
+            if not isinstance(raw_results, Mapping):
+                raise BrainRunError("completed_child_results must be a mapping")
+            completed_results = dict(raw_results)
+            if set(completed_results) != set(current.completed_child_ids):
+                raise BrainRunError("resolver must rehydrate exactly the checkpointed completed children")
+            for child_id, result in completed_results.items():
+                if not isinstance(result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
+                    raise BrainRunError("completed_child_results contains an unsupported result")
+                if not result.status.startswith("completed"):
+                    raise BrainRunError("completed_child_results contains an incomplete result")
+                if _autonomous_result_digest(result) != current.child_result_digests[child_id]:
+                    raise BrainRunError(
+                        f"rehydrated child result digest does not match the checkpoint for {child_id}"
+                    )
+            options["accepted_plan_refinement"] = accepted_plan
+            options["run_id"] = current.run_id
+            options["bandit_state"] = bandit_state
+            options["ledger"] = ledger
+            options["memory"] = memory if memory is not None else self.memory
+            options["completed_child_results"] = completed_results
+            if approval_released:
+                options["approve_provider_call"] = True
+            if provider_health is not None:
+                overrides = options.get("selection_overrides", {})
+                if not isinstance(overrides, Mapping):
+                    raise BrainRunError("cross_domain_options.selection_overrides must be a mapping")
+                merged_overrides = dict(overrides)
+                prior_health = merged_overrides.get("provider_health", {})
+                if not isinstance(prior_health, Mapping):
+                    raise BrainRunError("cross_domain_options.provider_health must be a mapping")
+                merged_health = dict(prior_health)
+                for provider, snapshot in provider_health.items():
+                    if not isinstance(provider, str) or not isinstance(snapshot, Mapping):
+                        raise BrainRunError("provider_health must map provider names to objects")
+                    merged_health[provider] = dict(snapshot)
+                merged_overrides["provider_health"] = merged_health
+                options["selection_overrides"] = merged_overrides
+            store.checkpoint(
+                job.job_id,
+                worker_id,
+                phase="cross_domain_step_started",
+                checkpoint=checkpoint_metadata(current, phase="cross_domain_step_started"),
+                side_effect_boundary="preflight",
+            )
+            execution_started = True
+            step_result = orchestrator.run_cross_domain_step(
+                blueprint=blueprint,
+                model_candidates=resolved["model_candidates"],
+                credentials=resolved["credentials"],
+                next_child_id=current.next_child_id,
+                **options,
+            )
+            if not isinstance(step_result, AutonomousCrossDomainStepResult):
+                raise BrainRunError("cross-domain durable execution returned an unsupported step")
+            if step_result.status in {"approval_required", "mission_approval_required"}:
+                approval_checkpoint = AutonomousCrossDomainCheckpoint(
+                    run_id=current.run_id,
+                    task_digest=current.task_digest,
+                    base_plan_digest=current.base_plan_digest,
+                    execution_child_ids=current.execution_child_ids,
+                    completed_child_ids=step_result.completed_child_ids,
+                    child_result_digests=step_result.child_result_digests,
+                    next_child_id=current.next_child_id,
+                    plan_refinement_digest=current.plan_refinement_digest,
+                    status="approval_required",
+                )
+                request_digest = _json_digest(
+                    {
+                        "job_kind": "autonomous_cross_domain",
+                        "checkpoint_digest": approval_checkpoint.checkpoint_digest,
+                        "item_id": step_result.item_id,
+                        "phase": step_result.phase,
+                    }
+                )
+                store.checkpoint(
+                    job.job_id,
+                    worker_id,
+                    phase="cross_domain_approval_required",
+                    checkpoint=checkpoint_metadata(
+                        approval_checkpoint,
+                        phase="cross_domain_approval_required",
+                        step=step_result,
+                    ),
+                    side_effect_boundary="preflight",
+                )
+                effective_scope = approval_scope or f"{job.domain}:{job.capability}:{job.risk_class}:provider_call"
+                approval_router.request(
+                    job.job_id,
+                    worker_id,
+                    approval_scope=effective_scope,
+                    request_digest=request_digest,
+                    required_role=required_approval_role,
+                )
+                waiting = store.get(job.job_id)
+                if waiting is None:
+                    raise BrainRunError("cross-domain approval-waiting job disappeared from the durable store")
+                return BrainJobRunResult(status="waiting_approval", job=waiting.to_dict(), cycle=None, workflow=step_result)
+            if not step_result.status.startswith("completed"):
+                failed = store.fail(
+                    job.job_id,
+                    worker_id,
+                    reason=f"cross-domain {step_result.phase} {step_result.item_id} did not complete",
+                    retryable=False,
+                )
+                return BrainJobRunResult(
+                    status=failed.state,
+                    job=failed.to_dict(),
+                    cycle=None,
+                    workflow=step_result,
+                )
+            if step_result.phase == "child":
+                is_last_child = len(step_result.completed_child_ids) == len(current.execution_child_ids)
+                next_child = None if is_last_child else current.execution_child_ids[len(step_result.completed_child_ids)]
+                next_checkpoint = AutonomousCrossDomainCheckpoint(
+                    run_id=current.run_id,
+                    task_digest=current.task_digest,
+                    base_plan_digest=current.base_plan_digest,
+                    execution_child_ids=current.execution_child_ids,
+                    completed_child_ids=step_result.completed_child_ids,
+                    child_result_digests=step_result.child_result_digests,
+                    next_child_id=next_child,
+                    plan_refinement_digest=current.plan_refinement_digest,
+                    status="synthesis_pending" if is_last_child else "children_pending",
+                )
+                store.checkpoint(
+                    job.job_id,
+                    worker_id,
+                    phase="cross_domain_child_checkpointed",
+                    checkpoint=checkpoint_metadata(next_checkpoint, phase="cross_domain_child_checkpointed", step=step_result),
+                    side_effect_boundary="preflight",
+                )
+                released = store.release(job.job_id, worker_id)
+                return BrainJobRunResult(
+                    status="queued",
+                    job=released.to_dict(),
+                    cycle=None,
+                    workflow=step_result,
+                )
+            synthesis_checkpoint = AutonomousCrossDomainCheckpoint(
+                run_id=current.run_id,
+                task_digest=current.task_digest,
+                base_plan_digest=current.base_plan_digest,
+                execution_child_ids=current.execution_child_ids,
+                completed_child_ids=current.completed_child_ids,
+                child_result_digests=current.child_result_digests,
+                next_child_id=None,
+                plan_refinement_digest=current.plan_refinement_digest,
+                synthesis_result_digest=_autonomous_result_digest(step_result.result),
+                status="completed",
+            )
+            completed = store.complete(
+                job.job_id,
+                worker_id,
+                result_metadata=checkpoint_metadata(synthesis_checkpoint, phase="completed", step=step_result),
+            )
+            return BrainJobRunResult(status=completed.state, job=completed.to_dict(), cycle=None, workflow=step_result)
+        except Exception as error:
+            error_class = type(error).__name__
+            try:
+                boundary = "unknown" if execution_started else current_boundary
+                current_job = store.get(job.job_id)
+                if current_job is not None and current_job.lease_owner == worker_id and current_job.state in {"leased", "running"}:
+                    store.checkpoint(
+                        job.job_id,
+                        worker_id,
+                        phase="cross_domain_execution_error",
+                        checkpoint={
+                            **dict(current_job.checkpoint),
+                            "error_class": error_class,
+                        },
+                        side_effect_boundary=boundary,
+                    )
+                    failed = store.fail(
+                        job.job_id,
+                        worker_id,
+                        reason=(
+                            "cross-domain execution failed before provider dispatch"
+                            if not execution_started
+                            else "cross-domain execution outcome is uncertain; reconciliation required"
+                        ),
+                        retryable=False,
+                    )
+                    return BrainJobRunResult(
+                        status=failed.state,
+                        job=failed.to_dict(),
+                        cycle=None,
+                        error_class=error_class,
+                        workflow=step_result,
+                    )
+            except (BrainJobError, BrainRunError) as persistence_error:
+                raise BrainRunError("cross-domain job failure could not be durably recorded") from persistence_error
+            raise BrainRunError("cross-domain job execution failed") from error
 
     def run(
         self,

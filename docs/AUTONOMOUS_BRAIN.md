@@ -509,6 +509,47 @@ trajectory item. Without explicit acceptance, children retain declaration order.
 transcript and task text remain transient; returned planning and learning records retain only
 child identifiers, bounded confidence, model identity, and digests.
 
+For long-running fan-out, `BrainWorker` can execute one provider or tool-loop child per lease and
+then one synthesis call. Submit a normal `BrainJobStore` packet with a caller-owned resolver and
+select `execution_kind="cross_domain"`:
+
+```python
+def resolve(job_metadata):
+    checkpoint = job_metadata.get("checkpoint", {}).get("cross_domain_checkpoint", {})
+    completed = {
+        child_id: result_cache[child_id]
+        for child_id in checkpoint.get("completed_child_ids", [])
+    }
+    return {
+        "blueprint": cross_blueprint,
+        "model_candidates": model_candidates,
+        "credentials": session.handles(),
+        "completed_child_results": completed,
+        "cross_domain_options": {
+            "accepted_plan_refinement": accepted_refinement,
+            "approve_provider_call": True,
+        },
+    }
+
+worker = BrainWorker(
+    brain,
+    jobs,
+    worker_id="cross-domain-worker",
+    resolver=resolve,
+    evaluator=None,
+    bandit_state=caller_owned_bandit_state,
+    execution_kind="cross_domain",
+)
+```
+
+The resolver receives only public job metadata and must rehydrate completed child results from a
+caller-owned cache. The journal stores child IDs, result digests, accepted-plan identity, the
+next child, and synthesis state—not task text, prompts, credentials, or provider output. Each
+rehydrated result is digest-checked before continuation. Provider approval parks the same item
+without advancing the checkpoint; restart therefore resumes the next exact child or synthesis
+step instead of replaying completed work. Durable cross-domain jobs currently reject mission
+effects until an effect-specific reconciliation protocol is available.
+
 ### Held-out routing and planning evaluation
 
 Use the held-out evaluators with caller-owned cases that are never passed as labels or reference

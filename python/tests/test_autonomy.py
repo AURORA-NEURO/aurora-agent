@@ -21,6 +21,8 @@ from prism_sdk import (
     AutonomousPlanHoldoutEvaluator,
     AutonomousPlanRefinementResult,
     AutonomousCrossDomainPlanRefinementResult,
+    AutonomousCrossDomainCheckpoint,
+    AutonomousCrossDomainResult,
     AutonomousRoutingHoldoutCase,
     AutonomousRoutingHoldoutEvaluator,
     AutonomousTaskRouter,
@@ -2073,6 +2075,198 @@ def test_durable_workflow_worker_releases_one_stage_and_resumes_after_store_rest
         server.shutdown()
         thread.join(timeout=2)
         server.server_close()
+
+
+def test_durable_cross_domain_worker_resumes_children_and_synthesis_across_restart(tmp_path: Path):
+    runtime, credentials, server, thread = _runtime()
+    handle = credentials.register("openai", "durable-cross-domain-secret")
+    brain = AutonomousBrain(_Workspace(), runtime)
+    job_path = tmp_path / "durable-cross-domain.sqlite3"
+    task = "Execute a restart-safe engineering and data review package."
+    subtasks = [
+        {"id": "engineering", "task": "Review implementation risk.", "domain": "coding"},
+        {"id": "data", "task": "Review data lineage risk.", "domain": "data"},
+    ]
+    blueprint = brain.prepare_cross_domain(task=task, subtasks=subtasks)
+    caller_results: dict[str, object] = {}
+    try:
+        packet = {
+            "idempotency_key": "durable-cross-domain-review",
+            "spec_digest": "d" * 64,
+            "domain": "cross_domain",
+            "capability": "cross_domain_synthesis",
+            "risk_class": "review",
+            "max_attempts": 8,
+        }
+
+        def resolve(metadata: dict[str, object]) -> dict[str, object]:
+            serialized = json.dumps(metadata)
+            assert task not in serialized
+            assert "durable-cross-domain-secret" not in serialized
+            record_checkpoint = metadata.get("checkpoint", {})
+            checkpoint = record_checkpoint if isinstance(record_checkpoint, dict) else {}
+            checkpoint = checkpoint.get("cross_domain_checkpoint")
+            completed: dict[str, object] = {}
+            if isinstance(checkpoint, dict):
+                for child_id in checkpoint.get("completed_child_ids", []):
+                    if child_id in caller_results:
+                        completed[child_id] = caller_results[child_id]
+            return {
+                "blueprint": blueprint,
+                "model_candidates": _model(),
+                "credentials": {"openai": handle},
+                "completed_child_results": completed,
+                "cross_domain_options": {"approve_provider_call": True},
+            }
+
+        with BrainJobStore(job_path) as store:
+            job, _ = store.submit(packet)
+            worker = BrainWorker(
+                brain,
+                store,
+                worker_id="cross-domain-worker-a",
+                resolver=resolve,
+                evaluator=None,
+                bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+                execution_kind="cross_domain",
+                lease_seconds=10,
+                heartbeat_seconds=0.1,
+            )
+            first = worker.run_once(job.job_id)
+            assert first is not None and first.status == "queued"
+            assert first.workflow is not None
+            caller_results[first.workflow.item_id] = first.workflow.result
+            first_record = store.get(job.job_id)
+            assert first_record is not None
+            assert first_record.checkpoint["job_kind"] == "autonomous_cross_domain"
+            assert first_record.checkpoint["completed_child_ids"] == ["engineering"]
+            checkpoint = AutonomousCrossDomainCheckpoint.from_dict(first_record.checkpoint["cross_domain_checkpoint"])
+            assert checkpoint.next_child_id == "data"
+            assert checkpoint.child_result_digests == {"engineering": first.workflow.child_result_digests["engineering"]}
+            assert task not in json.dumps(first_record.to_dict())
+            assert "durable-cross-domain-secret" not in json.dumps(first_record.to_dict())
+
+        with BrainJobStore(job_path) as reopened:
+            restarted = BrainWorker(
+                brain,
+                reopened,
+                worker_id="cross-domain-worker-b",
+                resolver=resolve,
+                evaluator=None,
+                bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+                execution_kind="cross_domain",
+                lease_seconds=10,
+                heartbeat_seconds=0.1,
+            )
+            second = restarted.run_once(job.job_id)
+            assert second is not None and second.status == "queued"
+            assert second.workflow is not None
+            caller_results[second.workflow.item_id] = second.workflow.result
+            third = restarted.run_once(job.job_id)
+            assert third is not None and third.status == "succeeded"
+            assert third.workflow is not None
+            assert third.workflow.phase == "synthesis"
+            final = reopened.get(job.job_id)
+            assert final is not None and final.state == "succeeded"
+            metadata = final.checkpoint["result_metadata"]
+            assert metadata["completed_child_ids"] == ["engineering", "data"]
+            assert metadata["synthesis_result_digest"] == third.workflow.result.outcome_digest
+            assert task not in json.dumps(final.to_dict())
+            assert "durable-cross-domain-secret" not in json.dumps(final.to_dict())
+            assert reopened.verify_integrity()["ok"] is True
+            memory = BrainEpisodicMemory(tmp_path / "durable-cross-domain-learning.sqlite3")
+            try:
+                settled = AutonomousAgent(_Workspace(), runtime, memory=memory).settle_cross_domain_trajectory_learning(
+                    cross_domain=AutonomousCrossDomainResult(
+                        status="completed",
+                        blueprint=blueprint,
+                        child_results=tuple(caller_results[child_id] for child_id in ("engineering", "data")),  # type: ignore[arg-type]
+                        synthesis_result=third.workflow.result,
+                        execution_child_ids=third.workflow.execution_child_ids,
+                    ),
+                    bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+                    evaluator=BrainOutcomeEvaluator(
+                        lambda _input: {"reward": 0.7, "passed": True, "failed": False},
+                        evaluator_id="durable-cross-domain-quality",
+                        evaluator_version="1",
+                    ),
+                    trajectory_discount=0.5,
+                )
+                assert len(settled.evaluations) == 3
+                assert settled.trajectory_result.credited_rewards[0] >= settled.trajectory_result.credited_rewards[-1]
+            finally:
+                memory.close()
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+
+def test_durable_cross_domain_worker_parks_and_releases_provider_approval(tmp_path: Path):
+    runtime, credentials, server, thread = _runtime()
+    handle = credentials.register("openai", "durable-cross-domain-approval-secret")
+    brain = AutonomousBrain(_Workspace(), runtime)
+    blueprint = brain.prepare_cross_domain(
+        task="Prepare an approved cross-domain review.",
+        subtasks=[
+            {"id": "engineering", "task": "Review implementation risk.", "domain": "coding"},
+            {"id": "data", "task": "Review lineage risk.", "domain": "data"},
+        ],
+    )
+    approved = False
+    try:
+        def resolve(metadata: dict[str, object]) -> dict[str, object]:
+            record_checkpoint = metadata.get("checkpoint", {})
+            checkpoint = record_checkpoint if isinstance(record_checkpoint, dict) else {}
+            completed = {}
+            nested = checkpoint.get("cross_domain_checkpoint")
+            if isinstance(nested, dict):
+                assert nested.get("completed_child_ids") == []
+            return {
+                "blueprint": blueprint,
+                "model_candidates": _model(),
+                "credentials": {"openai": handle},
+                "completed_child_results": completed,
+                "cross_domain_options": {"approve_provider_call": approved},
+            }
+
+        with BrainJobStore(tmp_path / "cross-domain-approval.sqlite3") as store:
+            job, _ = store.submit(
+                {
+                    "idempotency_key": "cross-domain-approval",
+                    "spec_digest": "e" * 64,
+                    "domain": "cross_domain",
+                    "capability": "cross_domain_synthesis",
+                    "risk_class": "review",
+                    "max_attempts": 4,
+                }
+            )
+            worker = BrainWorker(
+                brain,
+                store,
+                worker_id="cross-domain-approval-worker",
+                resolver=resolve,
+                evaluator=None,
+                bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+                execution_kind="cross_domain",
+                lease_seconds=10,
+                heartbeat_seconds=0.1,
+            )
+            waiting = worker.run_once(job.job_id)
+            assert waiting is not None and waiting.status == "waiting_approval"
+            record = store.get(job.job_id)
+            assert record is not None and record.state == "waiting_approval"
+            assert record.checkpoint["cross_domain_status"] == "approval_required"
+            assert record.checkpoint["next_child_id"] == "engineering"
+            assert BrainApprovalRouter(store).get(job.job_id) is not None
+            approved = True
+            BrainApprovalRouter(store).approve(job.job_id, approver="operator-1")
+            resumed = worker.run_once(job.job_id)
+            assert resumed is not None and resumed.status == "queued"
+            assert resumed.workflow is not None and resumed.workflow.item_id == "engineering"
+            assert "durable-cross-domain-approval-secret" not in json.dumps(resumed.job)
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
 
 
 def test_durable_workflow_worker_rehydrates_accepted_plan_refinement_across_restart(tmp_path: Path):
