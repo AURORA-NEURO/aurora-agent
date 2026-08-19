@@ -471,6 +471,44 @@ digests; accepting the proposal remains an application decision. This keeps mode
 planning useful for novel tasks while preserving deterministic workflow and caller approval as
 the execution authority.
 
+Cross-domain fan-out can use the same bounded planning boundary. The planner receives the
+transient parent and child task context plus reviewed child workflow, domain-pack, capability,
+and synthesis metadata. It may reorder and focus existing specialists, but it cannot add a
+domain, alter a workflow, grant a tool, or authorize synthesis:
+
+```python
+cross_blueprint = agent.prepare_cross_domain(
+    task="combine the implementation review with the migration-quality review",
+    subtasks=(
+        {"id": "engineering", "task": "review implementation risk", "domain": "coding"},
+        {"id": "data", "task": "review schema and lineage risk", "domain": "data"},
+    ),
+)
+refinement = agent.plan_cross_domain_with_provider(
+    blueprint=cross_blueprint,
+    credentials=session,
+    approve_provider_call=True,
+)
+if refinement.status == "completed" and not refinement.review_required:
+    result = agent.run_cross_domain(
+        task="combine the implementation review with the migration-quality review",
+        subtasks=(
+            {"id": "engineering", "task": "review implementation risk", "domain": "coding"},
+            {"id": "data", "task": "review schema and lineage risk", "domain": "data"},
+        ),
+        credentials=session,
+        accepted_plan_refinement=refinement,
+        approve_provider_call=True,
+    )
+```
+
+Acceptance verifies the parent task digest, every child task and context digest, workflow and
+domain-pack identities, and an exact one-time priority permutation. The accepted refinement
+digest is included in each child context, synthesis context, execution result, and delayed
+trajectory item. Without explicit acceptance, children retain declaration order. The planner
+transcript and task text remain transient; returned planning and learning records retain only
+child identifiers, bounded confidence, model identity, and digests.
+
 ### Held-out routing and planning evaluation
 
 Use the held-out evaluators with caller-owned cases that are never passed as labels or reference

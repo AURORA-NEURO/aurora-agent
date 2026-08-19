@@ -22,7 +22,7 @@ establish scientific, operational, or biomedical truth by itself.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import math
 import uuid
@@ -103,6 +103,7 @@ AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA = "bioprism-python-autonomous-workflow-che
 AUTONOMOUS_WORKFLOW_EVALUATOR_SCHEMA = "bioprism-python-autonomous-workflow-evaluator/0.1"
 AUTONOMOUS_CROSS_DOMAIN_LEARNING_SCHEMA = "bioprism-python-autonomous-cross-domain-learning/0.1"
 AUTONOMOUS_CROSS_DOMAIN_TRAJECTORY_LEARNING_SCHEMA = "bioprism-python-autonomous-cross-domain-trajectory-learning/0.1"
+AUTONOMOUS_CROSS_DOMAIN_PLAN_REFINEMENT_SCHEMA = "bioprism-python-autonomous-cross-domain-plan-refinement/0.1"
 AUTONOMOUS_WORKFLOW_LEARNING_SCHEMA = "bioprism-python-autonomous-workflow-learning/0.1"
 AUTONOMOUS_WORKFLOW_TRAJECTORY_LEARNING_SCHEMA = "bioprism-python-autonomous-workflow-trajectory-learning/0.1"
 AUTONOMOUS_ROUTE_SCHEMA = "bioprism-python-autonomous-route/0.1"
@@ -116,6 +117,7 @@ AUTONOMOUS_ROUTE_REASONS = (
 )
 MAX_AUTONOMOUS_ROUTE_CANDIDATES = len(AUTONOMOUS_DOMAINS)
 MAX_AUTONOMOUS_ROUTE_DOMAINS = 4
+MAX_AUTONOMOUS_CROSS_DOMAIN_CHILDREN = 8
 MAX_AUTONOMOUS_DOMAIN_PACK_ITEMS = 64
 AUTONOMOUS_SEMANTIC_ROUTE_SCHEMA = "bioprism-python-autonomous-semantic-route/0.1"
 AUTONOMOUS_PLAN_REFINEMENT_SCHEMA = "bioprism-python-autonomous-plan-refinement/0.1"
@@ -885,6 +887,42 @@ def _plan_refinement_response_schema(stage_ids: Sequence[str]) -> dict[str, Any]
         "required": [
             "priority_order",
             "focus_stage_ids",
+            "review_required",
+            "confidence",
+            "abstain",
+        ],
+        "additionalProperties": False,
+    }
+
+
+def _cross_domain_plan_response_schema(child_ids: Sequence[str]) -> dict[str, Any]:
+    """Return a strict schema that can only order and focus existing specialists."""
+
+    children = list(child_ids)
+    if not 1 <= len(children) <= MAX_AUTONOMOUS_CROSS_DOMAIN_CHILDREN or len(set(children)) != len(children):
+        raise BrainRunError("cross-domain planning requires a unique bounded child catalogue")
+    child_enum = {"type": "string", "enum": children}
+    return {
+        "type": "object",
+        "properties": {
+            "priority_order": {
+                "type": "array",
+                "minItems": len(children),
+                "maxItems": len(children),
+                "items": child_enum,
+            },
+            "focus_child_ids": {
+                "type": "array",
+                "maxItems": len(children),
+                "items": child_enum,
+            },
+            "review_required": {"type": "boolean"},
+            "confidence": {"type": "number"},
+            "abstain": {"type": "boolean"},
+        },
+        "required": [
+            "priority_order",
+            "focus_child_ids",
             "review_required",
             "confidence",
             "abstain",
@@ -2101,16 +2139,21 @@ class AutonomousCrossDomainBlueprint:
     child_blueprints: tuple[AutonomousTaskBlueprint, ...]
     synthesis_blueprint: AutonomousTaskBlueprint
     child_ids: tuple[str, ...] = ()
+    task: str | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not isinstance(self.task_digest, str) or len(self.task_digest) != 64:
             raise BrainRunError("cross-domain task_digest must be a SHA-256 digest")
-        if not 1 <= len(self.child_blueprints) <= 8:
+        if not 1 <= len(self.child_blueprints) <= MAX_AUTONOMOUS_CROSS_DOMAIN_CHILDREN:
             raise BrainRunError("cross-domain blueprint must contain between 1 and 8 child tasks")
         if any(not isinstance(item, AutonomousTaskBlueprint) for item in self.child_blueprints):
             raise BrainRunError("cross-domain children must be AutonomousTaskBlueprint values")
         if not isinstance(self.synthesis_blueprint, AutonomousTaskBlueprint):
             raise BrainRunError("cross-domain synthesis must be an AutonomousTaskBlueprint")
+        if self.task is not None:
+            _text("cross-domain task", self.task, maximum=MAX_AUTONOMY_TEXT_BYTES)
+            if content_digest({"task": self.task}) != self.task_digest:
+                raise BrainRunError("cross-domain task does not match task_digest")
         child_ids = self.child_ids or tuple(f"child-{index + 1}" for index in range(len(self.child_blueprints)))
         if len(child_ids) != len(self.child_blueprints):
             raise BrainRunError("cross-domain child_ids must align with child_blueprints")
@@ -2138,6 +2181,42 @@ class AutonomousCrossDomainBlueprint:
         }
 
 
+def _cross_domain_plan_digest(blueprint: AutonomousCrossDomainBlueprint) -> str:
+    """Bind the reviewed cross-domain structure without retaining task text."""
+
+    return content_digest(
+        {
+            "schema": AUTONOMOUS_CROSS_DOMAIN_PLAN_REFINEMENT_SCHEMA,
+            "task_digest": blueprint.task_digest,
+            "children": [
+                {
+                    "id": child_id,
+                    "task_digest": child.spec.task_digest,
+                    "context_digest": child.spec.context_digest,
+                    "domain": child.profile.domain,
+                    "capability": child.spec.capability,
+                    "risk_class": child.spec.risk_class,
+                    "workflow_id": child.workflow.workflow_id,
+                    "workflow_digest": child.workflow.workflow_digest,
+                    "domain_pack_digest": child.domain_pack.pack_digest,
+                    "required_capabilities": list(child.required_capabilities),
+                }
+                for child_id, child in zip(blueprint.child_ids, blueprint.child_blueprints)
+            ],
+            "synthesis": {
+                "domain": blueprint.synthesis_blueprint.profile.domain,
+                "capability": blueprint.synthesis_blueprint.spec.capability,
+                "risk_class": blueprint.synthesis_blueprint.spec.risk_class,
+                "workflow_id": blueprint.synthesis_blueprint.workflow.workflow_id,
+                "workflow_digest": blueprint.synthesis_blueprint.workflow.workflow_digest,
+                "domain_pack_digest": blueprint.synthesis_blueprint.domain_pack.pack_digest,
+                "task_digest": blueprint.synthesis_blueprint.spec.task_digest,
+                "context_digest": blueprint.synthesis_blueprint.spec.context_digest,
+            },
+        }
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class AutonomousCrossDomainResult:
     """Results from bounded child execution and optional cross-domain synthesis."""
@@ -2146,6 +2225,35 @@ class AutonomousCrossDomainResult:
     blueprint: AutonomousCrossDomainBlueprint
     child_results: tuple[BrainRunResult | BrainToolLoopResult | BrainMissionResult, ...]
     synthesis_result: BrainRunResult | BrainToolLoopResult | BrainMissionResult | None
+    plan_refinement_digest: str | None = None
+    execution_child_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.blueprint, AutonomousCrossDomainBlueprint):
+            raise BrainRunError("cross-domain result contains an invalid blueprint")
+        if not isinstance(self.child_results, Sequence) or isinstance(self.child_results, (str, bytes)):
+            raise BrainRunError("cross-domain child_results must be a sequence")
+        if len(self.child_results) > len(self.blueprint.child_ids):
+            raise BrainRunError("cross-domain result contains too many child results")
+        if any(not isinstance(result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)) for result in self.child_results):
+            raise BrainRunError("cross-domain child_results contain an unsupported result")
+        if self.synthesis_result is not None and not isinstance(
+            self.synthesis_result,
+            (BrainRunResult, BrainToolLoopResult, BrainMissionResult),
+        ):
+            raise BrainRunError("cross-domain synthesis_result is unsupported")
+        if self.plan_refinement_digest is not None:
+            _route_digest(self.plan_refinement_digest, "cross-domain result plan_refinement_digest")
+        order = self.execution_child_ids or self.blueprint.child_ids[: len(self.child_results)]
+        order = _sequence(
+            "cross-domain result execution_child_ids",
+            order,
+            maximum=MAX_AUTONOMOUS_CROSS_DOMAIN_CHILDREN,
+        )
+        expected = set(self.blueprint.child_ids)
+        if len(order) != len(self.child_results) or len(set(order)) != len(order) or not set(order).issubset(expected):
+            raise BrainRunError("cross-domain result execution_child_ids must align with child_results")
+        object.__setattr__(self, "execution_child_ids", order)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -2154,8 +2262,101 @@ class AutonomousCrossDomainResult:
             "blueprint": self.blueprint.to_dict(),
             "child_results": [result.to_dict() for result in self.child_results],
             "synthesis_result": None if self.synthesis_result is None else self.synthesis_result.to_dict(),
+            "plan_refinement_digest": self.plan_refinement_digest,
+            "execution_child_ids": list(self.execution_child_ids),
             "execution": "completed" if self.synthesis_result is not None else "partial_or_blocked",
             "retention": "provider_responses_returned_to_caller; learning_memory_not_implicit",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousCrossDomainPlanRefinementResult:
+    """A reviewed provider proposal for ordering an existing cross-domain fan-out.
+
+    The proposal can prioritize and focus existing child specialists only. It cannot add a
+    domain, change a child workflow, grant a tool, or authorize synthesis. Acceptance remains a
+    caller decision and the resulting digest is bound into the cross-domain execution receipt.
+    """
+
+    status: str
+    task_digest: str
+    base_plan_digest: str
+    priority_child_ids: tuple[str, ...] = ()
+    focus_child_ids: tuple[str, ...] = ()
+    review_required: bool = True
+    confidence: float = 0.0
+    selected_model: Mapping[str, str] | None = None
+    selection_digest: str | None = None
+    planner_prompt_digest: str | None = None
+    planner_plan_digest: str | None = None
+    outcome_digest: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.status not in {
+            "completed",
+            "approval_required",
+            "plan_refused",
+            "provider_invalid",
+            "provider_disagreement",
+        }:
+            raise BrainRunError("cross-domain plan refinement result has an invalid status")
+        _route_digest(self.task_digest, "cross-domain plan refinement task_digest")
+        _route_digest(self.base_plan_digest, "cross-domain plan refinement base_plan_digest")
+        priority = _sequence(
+            "cross-domain plan refinement priority_child_ids",
+            self.priority_child_ids,
+            maximum=MAX_AUTONOMOUS_CROSS_DOMAIN_CHILDREN,
+        )
+        focus = _sequence(
+            "cross-domain plan refinement focus_child_ids",
+            self.focus_child_ids,
+            maximum=MAX_AUTONOMOUS_CROSS_DOMAIN_CHILDREN,
+        )
+        if any(child_id not in priority for child_id in focus):
+            raise BrainRunError("cross-domain plan refinement focus children must be prioritized")
+        if not isinstance(self.review_required, bool):
+            raise BrainRunError("cross-domain plan refinement review_required must be a boolean")
+        if isinstance(self.confidence, bool) or not isinstance(self.confidence, (int, float)):
+            raise BrainRunError("cross-domain plan refinement confidence must be finite")
+        if not math.isfinite(float(self.confidence)) or not 0.0 <= float(self.confidence) <= 1.0:
+            raise BrainRunError("cross-domain plan refinement confidence must be within [0, 1]")
+        if self.selected_model is not None:
+            if not isinstance(self.selected_model, Mapping):
+                raise BrainRunError("cross-domain plan refinement selected_model must be a mapping or None")
+            if set(self.selected_model) != {"provider", "model"} or any(
+                not isinstance(value, str) or not value.strip() for value in self.selected_model.values()
+            ):
+                raise BrainRunError("cross-domain plan refinement selected_model must contain provider and model")
+            object.__setattr__(self, "selected_model", dict(self.selected_model))
+        for name, value in (
+            ("selection_digest", self.selection_digest),
+            ("planner_prompt_digest", self.planner_prompt_digest),
+            ("planner_plan_digest", self.planner_plan_digest),
+            ("outcome_digest", self.outcome_digest),
+        ):
+            if value is not None:
+                _route_digest(value, f"cross-domain plan refinement {name}")
+        object.__setattr__(self, "priority_child_ids", priority)
+        object.__setattr__(self, "focus_child_ids", focus)
+        object.__setattr__(self, "confidence", float(self.confidence))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_CROSS_DOMAIN_PLAN_REFINEMENT_SCHEMA,
+            "status": self.status,
+            "task_digest": self.task_digest,
+            "base_plan_digest": self.base_plan_digest,
+            "priority_child_ids": list(self.priority_child_ids),
+            "focus_child_ids": list(self.focus_child_ids),
+            "review_required": self.review_required,
+            "confidence": self.confidence,
+            "selected_model": None if self.selected_model is None else dict(self.selected_model),
+            "selection_digest": self.selection_digest,
+            "planner_prompt_digest": self.planner_prompt_digest,
+            "planner_plan_digest": self.planner_plan_digest,
+            "outcome_digest": self.outcome_digest,
+            "retention": "child_ids_and_digests_only; planner_transcript_not_retained",
+            "authorization": "plan_proposal_only; caller_acceptance_required",
         }
 
 
@@ -2163,10 +2364,10 @@ class AutonomousCrossDomainResult:
 class AutonomousCrossDomainLearningResult:
     """Cross-domain execution with sequential evaluator credit assignment.
 
-    Child specialists are evaluated in declaration order before synthesis is selected. The next
-    child therefore sees the value-only state produced by prior children, while the synthesis
-    call sees all prior updates. Provider responses remain caller-visible only; the learning
-    receipts contain identities, digests, decisions, and next state.
+    Child specialists are evaluated in accepted priority order before synthesis is selected. The
+    next child therefore sees the value-only state produced by prior children, while the
+    synthesis call sees all prior updates. Provider responses remain caller-visible only; the
+    learning receipts contain identities, digests, decisions, and next state.
     """
 
     status: str
@@ -3595,6 +3796,213 @@ class AutonomousTaskOrchestrator:
             **metadata,
         )
 
+    def plan_cross_domain_with_provider(
+        self,
+        *,
+        blueprint: AutonomousCrossDomainBlueprint,
+        model_candidates: Sequence[Mapping[str, Any]],
+        credentials: Mapping[str, CredentialHandle],
+        context: Mapping[str, Any] | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        contextual_observations: Sequence[Mapping[str, Any]] = (),
+        selection_overrides: Mapping[str, Any] | None = None,
+        input_tokens: int = 4_096,
+        requested_output_tokens: int = 1_024,
+        max_cost_per_million_tokens: int | None = None,
+        max_latency_ms: int | None = None,
+        min_quality: float | None = None,
+        approve_provider_call: bool = False,
+        run_id: str | None = None,
+        max_output_tokens: int = 1_024,
+        temperature: float | None = None,
+    ) -> AutonomousCrossDomainPlanRefinementResult:
+        """Ask a provider to prioritize existing cross-domain specialists only."""
+
+        if not isinstance(blueprint, AutonomousCrossDomainBlueprint):
+            raise BrainRunError("cross-domain plan refinement requires an AutonomousCrossDomainBlueprint")
+        if not isinstance(model_candidates, Sequence) or isinstance(model_candidates, (str, bytes)):
+            raise BrainRunError("cross-domain plan refinement model_candidates must be a sequence")
+        if not isinstance(credentials, Mapping):
+            raise BrainRunError("cross-domain plan refinement credentials must be a mapping")
+        if any(
+            not isinstance(provider, str)
+            or not isinstance(handle, CredentialHandle)
+            or provider != handle.provider
+            for provider, handle in credentials.items()
+        ):
+            raise BrainRunError("cross-domain plan refinement credentials must map providers to matching handles")
+        if not isinstance(contextual_observations, Sequence) or isinstance(
+            contextual_observations, (str, bytes)
+        ):
+            raise BrainRunError("cross-domain plan refinement contextual_observations must be a sequence")
+        child_ids = tuple(blueprint.child_ids)
+        base_plan_digest = _cross_domain_plan_digest(blueprint)
+        planner_task = (
+            "Propose a bounded cross-domain planning refinement. Return only the required JSON object. "
+            "Reorder and focus the existing specialist children only; preserve every child and the "
+            "final synthesis. Do not add domains, tools, credentials, effects, permissions, factual "
+            "claims, or completed evidence. Mark review_required when a human should inspect the "
+            "proposal."
+        )
+        _text("cross-domain plan refinement task", planner_task, maximum=MAX_AUTONOMY_TEXT_BYTES)
+        required_model_capabilities = tuple(
+            sorted(
+                {
+                    capability
+                    for child in blueprint.child_blueprints
+                    for capability in child.required_capabilities
+                }
+            )
+        )
+        planner_context: dict[str, Any] = {
+            "planning_contract": {
+                "schema": AUTONOMOUS_CROSS_DOMAIN_PLAN_REFINEMENT_SCHEMA,
+                "task_digest": blueprint.task_digest,
+                "base_plan_digest": base_plan_digest,
+                "child_catalogue": [
+                    {
+                        "id": child_id,
+                        "task": child.spec.task,
+                        "task_digest": child.spec.task_digest,
+                        "context_digest": child.spec.context_digest,
+                        "domain": child.profile.domain,
+                        "capability": child.spec.capability,
+                        "risk_class": child.spec.risk_class,
+                        "workflow_id": child.workflow.workflow_id,
+                        "workflow_digest": child.workflow.workflow_digest,
+                        "domain_pack_digest": child.domain_pack.pack_digest,
+                        "stage_ids": [stage.id for stage in child.workflow.stages],
+                    }
+                    for child_id, child in zip(blueprint.child_ids, blueprint.child_blueprints)
+                ],
+                "synthesis": {
+                    "domain": blueprint.synthesis_blueprint.profile.domain,
+                    "workflow_digest": blueprint.synthesis_blueprint.workflow.workflow_digest,
+                    "domain_pack_digest": blueprint.synthesis_blueprint.domain_pack.pack_digest,
+                },
+                "reconciliation": "priority_order_must_contain_each_existing_child_exactly_once",
+                "does_not_authorize": ["tools", "provider effects", "external writes", "credentials"],
+            },
+            "base_plan_metadata": {
+                "task": blueprint.task,
+                "task_digest": blueprint.task_digest,
+                "child_count": len(child_ids),
+                "selected_domains": [child.profile.domain for child in blueprint.child_blueprints],
+                "synthesis_workflow_id": blueprint.synthesis_blueprint.workflow.workflow_id,
+            },
+        }
+        if context is not None:
+            BrainLearningLedger._assert_safe(context)
+            planner_context["caller_context"] = dict(context)
+        response_schema = _cross_domain_plan_response_schema(child_ids)
+        planner_blueprint = self.prepare(
+            task=planner_task,
+            domain="cross_domain",
+            capability="planning",
+            context=planner_context,
+            desired_outputs=("dependency-aware specialist priority", "focus children", "review decision"),
+            max_steps=blueprint.synthesis_blueprint.spec.max_steps,
+            require_json=True,
+            response_schema=response_schema,
+            execution_mode="provider",
+            max_input_tokens=input_tokens,
+            required_model_capabilities=required_model_capabilities,
+        )
+        selection_request = self.brain.build_adaptive_model_selection(
+            task=planner_task,
+            model_candidates=model_candidates,
+            credentials=credentials,
+            bandit_state=bandit_state,
+            context=planner_blueprint.selection_context,
+            contextual_observations=contextual_observations,
+            required_capabilities=required_model_capabilities,
+            input_tokens=input_tokens,
+            requested_output_tokens=requested_output_tokens,
+            max_cost_per_million_tokens=max_cost_per_million_tokens,
+            max_latency_ms=max_latency_ms,
+            min_quality=min_quality,
+            selection_overrides=selection_overrides,
+        )
+        run = self.brain.run(
+            task=planner_task,
+            model_selection=selection_request,
+            prompt=planner_blueprint.prompt,
+            plan=planner_blueprint.plan,
+            credentials=credentials,
+            approve_provider_call=approve_provider_call,
+            run_id=run_id,
+            max_output_tokens=max_output_tokens,
+            temperature=temperature,
+            require_json=True,
+            response_schema=response_schema,
+            context=planner_blueprint.selection_context,
+            contextual_observations=contextual_observations,
+        )
+        selected_model = run.selection.get("selected_model")
+        safe_model = None
+        if isinstance(selected_model, Mapping) and isinstance(selected_model.get("provider"), str) and isinstance(
+            selected_model.get("model"), str
+        ):
+            safe_model = {"provider": selected_model["provider"], "model": selected_model["model"]}
+        planner_plan_value = run.plan.get("plan")
+        planner_plan_digest = planner_plan_value.get("plan_digest") if isinstance(planner_plan_value, Mapping) else None
+        metadata = {
+            "task_digest": blueprint.task_digest,
+            "base_plan_digest": base_plan_digest,
+            "selected_model": safe_model,
+            "selection_digest": run.selection.get("decision_digest"),
+            "planner_prompt_digest": run.prompt.get("prompt_digest"),
+            "planner_plan_digest": planner_plan_digest,
+            "outcome_digest": run.outcome_digest,
+        }
+        if run.status != "completed_provider_call" or run.response is None:
+            return AutonomousCrossDomainPlanRefinementResult(
+                status=run.status if run.status in {"approval_required", "plan_refused"} else "provider_invalid",
+                **metadata,
+            )
+        raw = run.response.structured
+        if not isinstance(raw, Mapping):
+            return AutonomousCrossDomainPlanRefinementResult(status="provider_invalid", **metadata)
+        priority = raw.get("priority_order")
+        focus = raw.get("focus_child_ids")
+        review_required = raw.get("review_required")
+        confidence = raw.get("confidence")
+        abstain = raw.get("abstain")
+        if (
+            not isinstance(priority, list)
+            or not isinstance(focus, list)
+            or not isinstance(review_required, bool)
+            or not isinstance(confidence, (int, float))
+            or isinstance(confidence, bool)
+            or not math.isfinite(float(confidence))
+            or not 0.0 <= float(confidence) <= 1.0
+            or not isinstance(abstain, bool)
+            or any(not isinstance(child_id, str) for child_id in [*priority, *focus])
+            or len(priority) != len(child_ids)
+            or tuple(priority) != tuple(dict.fromkeys(priority))
+            or set(priority) != set(child_ids)
+            or len(focus) != len(set(focus))
+            or any(child_id not in child_ids for child_id in focus)
+        ):
+            return AutonomousCrossDomainPlanRefinementResult(status="provider_invalid", **metadata)
+        if abstain:
+            return AutonomousCrossDomainPlanRefinementResult(
+                status="provider_disagreement",
+                priority_child_ids=tuple(priority),
+                focus_child_ids=tuple(focus),
+                review_required=True,
+                confidence=confidence,
+                **metadata,
+            )
+        return AutonomousCrossDomainPlanRefinementResult(
+            status="completed",
+            priority_child_ids=tuple(priority),
+            focus_child_ids=tuple(focus),
+            review_required=review_required,
+            confidence=confidence,
+            **metadata,
+        )
+
     @staticmethod
     def _route_context(
         context: Mapping[str, Any] | None,
@@ -4096,6 +4504,7 @@ class AutonomousTaskOrchestrator:
             child_blueprints=tuple(children),
             synthesis_blueprint=synthesis,
             child_ids=tuple(child_ids),
+            task=task,
         )
 
     @staticmethod
@@ -4843,6 +5252,35 @@ class AutonomousTaskOrchestrator:
             if any(positions[dependency] > positions[stage.id] for dependency in stage.depends_on):
                 raise BrainRunError("accepted plan refinement violates workflow dependencies")
         return positions, content_digest(refinement.to_dict()), tuple(refinement.focus_stage_ids)
+
+    @staticmethod
+    def _accepted_cross_domain_plan(
+        blueprint: AutonomousCrossDomainBlueprint,
+        refinement: AutonomousCrossDomainPlanRefinementResult | None,
+    ) -> tuple[dict[str, int], str | None, tuple[str, ...]]:
+        """Validate an explicitly accepted child-priority proposal before fan-out."""
+
+        if refinement is None:
+            return {}, None, ()
+        if not isinstance(refinement, AutonomousCrossDomainPlanRefinementResult):
+            raise BrainRunError(
+                "accepted cross-domain plan refinement must be an AutonomousCrossDomainPlanRefinementResult or None"
+            )
+        if refinement.status != "completed" or refinement.review_required:
+            raise BrainRunError("only a completed, non-review cross-domain plan may be accepted")
+        if refinement.task_digest != blueprint.task_digest:
+            raise BrainRunError("accepted cross-domain plan task does not match the prepared blueprint")
+        if refinement.base_plan_digest != _cross_domain_plan_digest(blueprint):
+            raise BrainRunError("accepted cross-domain plan base does not match the prepared blueprint")
+        child_ids = tuple(blueprint.child_ids)
+        priority = tuple(refinement.priority_child_ids)
+        if len(priority) != len(child_ids) or len(set(priority)) != len(priority) or set(priority) != set(child_ids):
+            raise BrainRunError("accepted cross-domain plan must contain every child exactly once")
+        return (
+            {child_id: index for index, child_id in enumerate(priority)},
+            content_digest(refinement.to_dict()),
+            tuple(refinement.focus_child_ids),
+        )
 
     def run_workflow(
         self,
@@ -5675,12 +6113,14 @@ class AutonomousTaskOrchestrator:
         synthesize: bool = True,
         allow_partial: bool = False,
         bandit_state: Mapping[str, Any] | None = None,
+        accepted_plan_refinement: AutonomousCrossDomainPlanRefinementResult | None = None,
         execution_controller: AutonomousExecutionController | None = None,
     ) -> AutonomousCrossDomainResult:
         """Execute bounded domain specialists, then optionally synthesize their outputs.
 
-        Children run sequentially in declared order so approval, provider health, and failure
-        boundaries are observable. A child failure or pending approval prevents synthesis unless
+        Children run sequentially in accepted priority order (or declaration order when no
+        refinement is accepted), so approval, provider health, and failure boundaries are
+        observable. A child failure or pending approval prevents synthesis unless
         ``allow_partial`` is explicitly enabled. This method never invents a child permission or
         silently persists provider output into learning memory.
         """
@@ -5703,8 +6143,24 @@ class AutonomousTaskOrchestrator:
             response_schema=response_schema,
             max_input_tokens=input_tokens,
         )
+        plan_priority, plan_refinement_digest, plan_focus_child_ids = self._accepted_cross_domain_plan(
+            blueprint,
+            accepted_plan_refinement,
+        )
+        child_by_id = dict(zip(blueprint.child_ids, blueprint.child_blueprints))
+        execution_child_ids = tuple(
+            sorted(blueprint.child_ids, key=lambda child_id: plan_priority.get(child_id, len(plan_priority)))
+        )
         child_results: list[BrainRunResult | BrainToolLoopResult | BrainMissionResult] = []
-        for child_id, child in zip(blueprint.child_ids, blueprint.child_blueprints):
+        for child_id in execution_child_ids:
+            child = child_by_id[child_id]
+            child_context = dict(child.spec.context)
+            if plan_refinement_digest is not None:
+                child_context["accepted_cross_domain_plan"] = {
+                    "refinement_digest": plan_refinement_digest,
+                    "priority_rank": plan_priority[child_id],
+                    "focus": child_id in plan_focus_child_ids,
+                }
             result = self.run(
                 task=child.spec.task,
                 domain=child.spec.domain,
@@ -5714,7 +6170,7 @@ class AutonomousTaskOrchestrator:
                 risk_class=child.spec.risk_class,
                 constraints=child.spec.constraints,
                 desired_outputs=child.spec.desired_outputs,
-                context=child.spec.context,
+                context=child_context,
                 max_steps=child.spec.max_steps,
                 require_json=child.spec.require_json,
                 response_schema=child.spec.response_schema,
@@ -5761,13 +6217,22 @@ class AutonomousTaskOrchestrator:
         complete = [result.status.startswith("completed") for result in child_results]
         if not all(complete) and not allow_partial:
             status = "approval_required" if any(result.status == "approval_required" for result in child_results) else "child_incomplete"
-            return AutonomousCrossDomainResult(status, blueprint, tuple(child_results), None)
+            return AutonomousCrossDomainResult(
+                status,
+                blueprint,
+                tuple(child_results),
+                None,
+                plan_refinement_digest,
+                execution_child_ids,
+            )
         if not synthesize:
             return AutonomousCrossDomainResult(
                 "children_completed" if all(complete) else "children_partial",
                 blueprint,
                 tuple(child_results),
                 None,
+                plan_refinement_digest,
+                execution_child_ids,
             )
         child_outputs = [
             {
@@ -5779,10 +6244,17 @@ class AutonomousTaskOrchestrator:
                 "output": self._cross_domain_output(result),
                 "output_digest": content_digest({"output": self._cross_domain_output(result)}),
             }
-            for child_id, child, result in zip(blueprint.child_ids, blueprint.child_blueprints, child_results)
+            for child_id, result in zip(execution_child_ids, child_results)
+            for child in (child_by_id[child_id],)
         ]
         synthesis_context = dict(blueprint.synthesis_blueprint.spec.context)
         synthesis_context["child_outputs"] = child_outputs
+        if plan_refinement_digest is not None:
+            synthesis_context["accepted_cross_domain_plan"] = {
+                "refinement_digest": plan_refinement_digest,
+                "priority_child_ids": list(execution_child_ids),
+                "focus_child_ids": list(plan_focus_child_ids),
+            }
         synthesis = blueprint.synthesis_blueprint
         synthesis_result = self.run(
             task=synthesis.spec.task,
@@ -5835,6 +6307,8 @@ class AutonomousTaskOrchestrator:
             blueprint,
             tuple(child_results),
             synthesis_result,
+            plan_refinement_digest,
+            execution_child_ids,
         )
 
     def run_cross_domain_learning(
@@ -5851,6 +6325,7 @@ class AutonomousTaskOrchestrator:
         memory: BrainEpisodicMemory | None = None,
         memory_tags: Sequence[str] = (),
         ledger: BrainLearningLedger | None = None,
+        accepted_plan_refinement: AutonomousCrossDomainPlanRefinementResult | None = None,
         **kwargs: Any,
     ) -> AutonomousCrossDomainLearningResult:
         """Run specialists and synthesis with sequential online learning updates.
@@ -5941,6 +6416,14 @@ class AutonomousTaskOrchestrator:
             response_schema=response_schema,
             max_input_tokens=input_tokens,
         )
+        plan_priority, plan_refinement_digest, plan_focus_child_ids = self._accepted_cross_domain_plan(
+            blueprint,
+            accepted_plan_refinement,
+        )
+        child_by_id = dict(zip(blueprint.child_ids, blueprint.child_blueprints))
+        execution_child_ids = tuple(
+            sorted(blueprint.child_ids, key=lambda child_id: plan_priority.get(child_id, len(plan_priority)))
+        )
         state: Mapping[str, Any] = dict(bandit_state)
         child_results: list[BrainRunResult | BrainToolLoopResult | BrainMissionResult] = []
         evaluations: list[Mapping[str, Any]] = []
@@ -6025,7 +6508,15 @@ class AutonomousTaskOrchestrator:
                 }
             )
 
-        for child_id, child in zip(blueprint.child_ids, blueprint.child_blueprints):
+        for child_id in execution_child_ids:
+            child = child_by_id[child_id]
+            child_context = dict(child.spec.context)
+            if plan_refinement_digest is not None:
+                child_context["accepted_cross_domain_plan"] = {
+                    "refinement_digest": plan_refinement_digest,
+                    "priority_rank": plan_priority[child_id],
+                    "focus": child_id in plan_focus_child_ids,
+                }
             result = self.run(
                 task=child.spec.task,
                 domain=child.spec.domain,
@@ -6035,7 +6526,7 @@ class AutonomousTaskOrchestrator:
                 risk_class=child.spec.risk_class,
                 constraints=child.spec.constraints,
                 desired_outputs=child.spec.desired_outputs,
-                context=child.spec.context,
+                context=child_context,
                 max_steps=child.spec.max_steps,
                 require_json=child.spec.require_json,
                 response_schema=child.spec.response_schema,
@@ -6090,11 +6581,25 @@ class AutonomousTaskOrchestrator:
         complete = [result.status.startswith("completed") for result in child_results]
         if not all(complete) and not allow_partial:
             status = "approval_required" if any(result.status == "approval_required" for result in child_results) else "child_incomplete"
-            cross_domain = AutonomousCrossDomainResult(status, blueprint, tuple(child_results), None)
+            cross_domain = AutonomousCrossDomainResult(
+                status,
+                blueprint,
+                tuple(child_results),
+                None,
+                plan_refinement_digest,
+                execution_child_ids,
+            )
             return AutonomousCrossDomainLearningResult(status, cross_domain, tuple(evaluations), state, tuple(memory_receipts))
         if not synthesize:
             status = "children_completed" if all(complete) else "children_partial"
-            cross_domain = AutonomousCrossDomainResult(status, blueprint, tuple(child_results), None)
+            cross_domain = AutonomousCrossDomainResult(
+                status,
+                blueprint,
+                tuple(child_results),
+                None,
+                plan_refinement_digest,
+                execution_child_ids,
+            )
             return AutonomousCrossDomainLearningResult(status, cross_domain, tuple(evaluations), state, tuple(memory_receipts))
 
         child_outputs = [
@@ -6107,11 +6612,18 @@ class AutonomousTaskOrchestrator:
                 "output": self._cross_domain_output(result),
                 "output_digest": content_digest({"output": self._cross_domain_output(result)}),
             }
-            for child_id, child, result in zip(blueprint.child_ids, blueprint.child_blueprints, child_results)
+            for child_id, result in zip(execution_child_ids, child_results)
+            for child in (child_by_id[child_id],)
         ]
         synthesis = blueprint.synthesis_blueprint
         synthesis_context = dict(synthesis.spec.context)
         synthesis_context["child_outputs"] = child_outputs
+        if plan_refinement_digest is not None:
+            synthesis_context["accepted_cross_domain_plan"] = {
+                "refinement_digest": plan_refinement_digest,
+                "priority_child_ids": list(execution_child_ids),
+                "focus_child_ids": list(plan_focus_child_ids),
+            }
         synthesis_result = self.run(
             task=synthesis.spec.task,
             domain=synthesis.spec.domain,
@@ -6166,7 +6678,14 @@ class AutonomousTaskOrchestrator:
             item_evidence=None if evidence is None else evidence.get("synthesis"),
         )
         status = "completed" if synthesis_result.status.startswith("completed") else synthesis_result.status
-        cross_domain = AutonomousCrossDomainResult(status, blueprint, tuple(child_results), synthesis_result)
+        cross_domain = AutonomousCrossDomainResult(
+            status,
+            blueprint,
+            tuple(child_results),
+            synthesis_result,
+            plan_refinement_digest,
+            execution_child_ids,
+        )
         return AutonomousCrossDomainLearningResult(status, cross_domain, tuple(evaluations), state, tuple(memory_receipts))
 
     def run_cross_domain_trajectory_learning(
@@ -6224,11 +6743,9 @@ class AutonomousTaskOrchestrator:
             **execution_options,
         )
         items: list[tuple[str, str, AutonomousTaskBlueprint, BrainRunResult | BrainToolLoopResult | BrainMissionResult]] = []
-        for child_id, child, result in zip(
-            cross_domain.blueprint.child_ids,
-            cross_domain.blueprint.child_blueprints,
-            cross_domain.child_results,
-        ):
+        child_by_id = dict(zip(cross_domain.blueprint.child_ids, cross_domain.blueprint.child_blueprints))
+        for child_id, result in zip(cross_domain.execution_child_ids, cross_domain.child_results):
+            child = child_by_id[child_id]
             items.append(("child", child_id, child, result))
         if cross_domain.synthesis_result is not None:
             items.append(("synthesis", "synthesis", cross_domain.blueprint.synthesis_blueprint, cross_domain.synthesis_result))
@@ -6874,6 +7391,39 @@ class AutonomousAgent:
             **kwargs,
         )
 
+    def plan_cross_domain_with_provider(
+        self,
+        *,
+        blueprint: AutonomousCrossDomainBlueprint,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> AutonomousCrossDomainPlanRefinementResult:
+        """Ask a BYOK provider to prioritize an existing cross-domain fan-out."""
+
+        candidates = self._resolve_candidates(model_candidates)
+        resolved_credentials = self._credential_mapping(credentials)
+        selection_overrides = kwargs.pop("selection_overrides", None)
+        if self.health_ledger is not None:
+            historical = self.health_ledger.selection_overrides()
+            if selection_overrides is None:
+                selection_overrides = historical or None
+            elif isinstance(selection_overrides, Mapping):
+                merged = dict(historical)
+                merged.update(selection_overrides)
+                historical_health = historical.get("provider_health")
+                supplied_health = selection_overrides.get("provider_health")
+                if isinstance(historical_health, Mapping) and isinstance(supplied_health, Mapping):
+                    merged["provider_health"] = {**dict(historical_health), **dict(supplied_health)}
+                selection_overrides = merged
+        return self.orchestrator.plan_cross_domain_with_provider(
+            blueprint=blueprint,
+            model_candidates=candidates,
+            credentials=resolved_credentials,
+            selection_overrides=selection_overrides,
+            **kwargs,
+        )
+
     def prepare_cross_domain(self, **kwargs: Any) -> AutonomousCrossDomainBlueprint:
         """Build bounded specialist fan-out and synthesis work without provider contact."""
 
@@ -7146,6 +7696,7 @@ class AutonomousAgent:
         cross_domain_evaluator: BrainOutcomeEvaluator | None = None,
         cross_domain_trajectory_discount: float = 0.90,
         cross_domain_trajectory_terminal_reward: float | None = None,
+        accepted_cross_domain_plan_refinement: AutonomousCrossDomainPlanRefinementResult | None = None,
         accepted_plan_refinement: AutonomousPlanRefinementResult | None = None,
         workflow_checkpoint: AutonomousWorkflowCheckpoint | Mapping[str, Any] | None = None,
         workflow_retry_blocked: bool = False,
@@ -7163,7 +7714,8 @@ class AutonomousAgent:
         ``workflow_learning`` and ``workflow_trajectory_learning`` make the evaluator boundary
         explicit and never infer reward from provider success. ``cross_domain_learning`` and
         ``cross_domain_trajectory_learning`` expose the same explicit evaluator and value-only
-        bandit controls for automatically classified fan-out/synthesis routes.
+        bandit controls for automatically classified fan-out/synthesis routes. An accepted
+        cross-domain plan can reorder existing specialists only after explicit caller acceptance.
         An abstained route never invokes a provider.
         """
 
@@ -7282,6 +7834,7 @@ class AutonomousAgent:
                 or cross_domain_trajectory_learning
                 or cross_domain_evidence is not None
                 or cross_domain_evaluator is not None
+                or accepted_cross_domain_plan_refinement is not None
             ):
                 raise BrainRunError("cross-domain learning options require a cross-domain route")
             if workflow_execution:
@@ -7397,6 +7950,12 @@ class AutonomousAgent:
                 if "evaluator" in execution_kwargs:
                     raise BrainRunError("cross_domain_evaluator cannot be combined with evaluator")
                 execution_kwargs["evaluator"] = cross_domain_evaluator
+            if accepted_cross_domain_plan_refinement is not None:
+                if "accepted_plan_refinement" in execution_kwargs:
+                    raise BrainRunError(
+                        "accepted_cross_domain_plan_refinement cannot be combined with accepted_plan_refinement"
+                    )
+                execution_kwargs["accepted_plan_refinement"] = accepted_cross_domain_plan_refinement
             if cross_domain_learning:
                 result = self.run_cross_domain_learning(
                     task=task,
@@ -7688,11 +8247,13 @@ __all__ = [
     "AUTONOMOUS_EXECUTION_MODES",
     "AUTONOMOUS_CROSS_DOMAIN_LEARNING_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_TRAJECTORY_LEARNING_SCHEMA",
+    "AUTONOMOUS_CROSS_DOMAIN_PLAN_REFINEMENT_SCHEMA",
     "AUTONOMOUS_ROUTE_SCHEMA",
     "AUTONOMOUS_DOMAIN_PACK_SCHEMA",
     "AUTONOMOUS_ROUTE_REASONS",
     "MAX_AUTONOMOUS_ROUTE_CANDIDATES",
     "MAX_AUTONOMOUS_ROUTE_DOMAINS",
+    "MAX_AUTONOMOUS_CROSS_DOMAIN_CHILDREN",
     "AUTONOMOUS_WORKFLOW_SCHEMA",
     "AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA",
     "AUTONOMOUS_WORKFLOW_EVALUATOR_SCHEMA",
@@ -7711,6 +8272,7 @@ __all__ = [
     "AutonomousDomainToolRuntime",
     "AutonomousCrossDomainBlueprint",
     "AutonomousCrossDomainResult",
+    "AutonomousCrossDomainPlanRefinementResult",
     "AutonomousCrossDomainLearningResult",
     "AutonomousCrossDomainTrajectoryLearningResult",
     "AutonomousAutoBlueprint",

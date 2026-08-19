@@ -20,6 +20,7 @@ from prism_sdk import (
     AutonomousPlanHoldoutCase,
     AutonomousPlanHoldoutEvaluator,
     AutonomousPlanRefinementResult,
+    AutonomousCrossDomainPlanRefinementResult,
     AutonomousRoutingHoldoutCase,
     AutonomousRoutingHoldoutEvaluator,
     AutonomousTaskRouter,
@@ -51,6 +52,28 @@ class _ProviderHandler(BaseHTTPRequestHandler):
         self.server.request_body = self.rfile.read(length)  # type: ignore[attr-defined]
         request = json.loads(self.server.request_body.decode("utf-8"))  # type: ignore[attr-defined]
         request_text = json.dumps(request)
+        if "Propose a bounded cross-domain planning refinement" in request_text:
+            response = {
+                "id": "autonomy-cross-domain-plan-refinement",
+                "model": "test-model",
+                "output_text": json.dumps(
+                    {
+                        "priority_order": ["data-review", "engineering-review"],
+                        "focus_child_ids": ["data-review"],
+                        "review_required": False,
+                        "confidence": 0.82,
+                        "abstain": False,
+                    }
+                ),
+                "usage": {"total_tokens": 10},
+            }
+            payload = json.dumps(response).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
         if "Propose a bounded planning refinement for the reviewed workflow" in request_text:
             response = {
                 "id": "autonomy-plan-refinement",
@@ -927,6 +950,82 @@ def test_provider_plan_refinement_is_dependency_closed_and_approval_gated():
             public = json.dumps(refined.to_dict())
             assert "plan-refinement-secret" not in public
             assert blueprint.spec.task not in public
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_provider_cross_domain_plan_refinement_reorders_only_existing_children():
+    runtime, _, server, thread = _runtime()
+    workspace = _Workspace()
+    agent = AutonomousAgent(workspace, runtime)
+    task = "Combine engineering and data review into one decision package."
+    subtasks = [
+        {
+            "id": "engineering-review",
+            "task": "Review the implementation risk and verification plan.",
+            "domain": "coding",
+        },
+        {
+            "id": "data-review",
+            "task": "Review the migration schema and lineage risks.",
+            "domain": "data",
+        },
+    ]
+    try:
+        blueprint = agent.prepare_cross_domain(task=task, subtasks=subtasks)
+        with agent.onboarding.start_session(session_id="cross-domain-plan-session") as session:
+            session.register_value("openai", "cross-domain-plan-secret")
+            waiting = agent.plan_cross_domain_with_provider(
+                blueprint=blueprint,
+                credentials=session,
+                model_candidates=_model(),
+            )
+            assert waiting.status == "approval_required"
+            refined = agent.plan_cross_domain_with_provider(
+                blueprint=blueprint,
+                credentials=session,
+                model_candidates=_model(),
+                approve_provider_call=True,
+            )
+            assert isinstance(refined, AutonomousCrossDomainPlanRefinementResult)
+            assert refined.status == "completed"
+            assert refined.priority_child_ids == ("data-review", "engineering-review")
+            assert refined.focus_child_ids == ("data-review",)
+            assert refined.review_required is False
+            public = json.dumps(refined.to_dict())
+            assert task not in public
+            assert "cross-domain-plan-secret" not in public
+
+            executed = agent.run_cross_domain(
+                task=task,
+                subtasks=subtasks,
+                credentials=session,
+                model_candidates=_model(),
+                accepted_plan_refinement=refined,
+                approve_provider_call=True,
+            )
+            assert executed.status == "completed"
+            assert executed.execution_child_ids == ("data-review", "engineering-review")
+            assert executed.plan_refinement_digest == content_digest(refined.to_dict())
+            assert executed.synthesis_result is not None
+            with pytest.raises(BrainRunError, match="base"):
+                agent.run_cross_domain(
+                    task=task,
+                    subtasks=[
+                        {
+                            "id": "engineering-review",
+                            "task": "Review a changed implementation scope and verification plan.",
+                            "domain": "coding",
+                        },
+                        subtasks[1],
+                    ],
+                    credentials=session,
+                    model_candidates=_model(),
+                    accepted_plan_refinement=refined,
+                    approve_provider_call=True,
+                )
     finally:
         server.shutdown()
         thread.join(timeout=2)
