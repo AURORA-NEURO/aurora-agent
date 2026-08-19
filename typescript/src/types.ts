@@ -339,6 +339,203 @@ export interface BrainOutcomeRecordResult extends JsonObject {
   learning_evidence: BrainLearningEvidence;
 }
 
+export interface BrainControlDurability extends JsonObject {
+  scope: "mcp_process" | string;
+  restart: "caller_must_rehydrate_from_durable_job_store" | string;
+  secrets: "never_retained" | string;
+}
+
+export interface BrainJobSubmitArgs extends JsonObject {
+  job_id?: string;
+  idempotency_key: string;
+  spec_digest: string;
+  domain: string;
+  capability: string;
+  risk_class: string;
+  priority?: number;
+  max_attempts?: number;
+  checkpoint_digest?: string | null;
+}
+
+export interface BrainJobRecord extends JsonObject {
+  schema: string;
+  job_id: string;
+  idempotency_key_digest: string;
+  spec_digest: string;
+  domain: string;
+  capability: string;
+  risk_class: string;
+  priority: number;
+  max_attempts: number;
+  state: "queued" | "waiting_approval" | "cancelled" | string;
+  attempts: number;
+  lease_owner?: string | null;
+  lease_expires_ns?: number | null;
+  checkpoint_digest?: string | null;
+  side_effect_boundary: string;
+  recovered_after_restart: boolean;
+  reason_digest?: string | null;
+  created_sequence: number;
+  updated_sequence: number;
+  record_digest: string;
+  spec: "not_returned; caller resolver owns rehydration" | string;
+  retention: string;
+}
+
+export interface BrainControlEvent extends JsonObject {
+  schema: string;
+  sequence: number;
+  event_type: string;
+  job_id: string;
+  payload: JsonObject;
+  previous_digest: string;
+  event_digest: string;
+  head_digest: string;
+  created_ns: number;
+  retention: string;
+}
+
+export interface BrainJobSubmitResult extends JsonObject {
+  schema: string;
+  ok: boolean;
+  created: boolean;
+  idempotent: boolean;
+  job: BrainJobRecord;
+  event: BrainControlEvent;
+  retention: string;
+  durability: BrainControlDurability;
+}
+
+export interface BrainJobStatusArgs extends JsonObject {
+  job_id: string;
+}
+
+export interface BrainJobStatusResult extends JsonObject {
+  schema: string;
+  ok: boolean;
+  job: BrainJobRecord;
+  head_digest: string;
+  durability: BrainControlDurability;
+}
+
+export interface BrainJobEventsArgs extends JsonObject {
+  job_id?: string;
+  after?: number;
+  limit?: number;
+}
+
+export interface BrainJobEventsResult extends JsonObject {
+  schema: string;
+  ok: boolean;
+  events: BrainControlEvent[];
+  after: number;
+  next_after: number;
+  head_digest: string;
+  chain: "sha256_prev_digest" | string;
+  retention: string;
+  durability: BrainControlDurability;
+}
+
+export type BrainJobApprovalAction = "request" | "approve" | "deny";
+
+export interface BrainJobApprovalArgs extends JsonObject {
+  job_id: string;
+  action: BrainJobApprovalAction;
+  reason?: string;
+  authorization_digest?: string;
+}
+
+export interface BrainJobApprovalResult extends JsonObject {
+  schema: string;
+  ok: boolean;
+  job: BrainJobRecord;
+  event: BrainControlEvent;
+  authorization: {
+    posture: string;
+    verified_by_server: false;
+    execution: "not_started" | string;
+    [key: string]: JsonValue | undefined;
+  };
+  durability: BrainControlDurability;
+}
+
+export type BrainHealthOperation = "snapshot" | "record";
+export type BrainHealthStatus = "success" | "failure" | "timeout" | "rate_limited" | "circuit_open" | "unknown";
+
+export interface BrainModelHealthArgs extends JsonObject {
+  operation?: BrainHealthOperation;
+  provider?: string;
+  model?: string;
+  status?: BrainHealthStatus;
+  latency_ms?: number;
+  quality?: number;
+  tokens?: number;
+  registered?: boolean;
+  credential_ready?: boolean;
+  eligible?: boolean;
+}
+
+export interface BrainModelHealthRow extends JsonObject {
+  provider: string;
+  model: string;
+  observations: number;
+  successes: number;
+  failures: number;
+  consecutive_failures: number;
+  average_latency_ms: number;
+  average_quality?: number | null;
+  last_status: BrainHealthStatus;
+  last_sequence: number;
+  registered: boolean;
+  credential_ready: boolean;
+  eligible: boolean;
+}
+
+export interface BrainModelHealthResult extends JsonObject {
+  schema: string;
+  ok: boolean;
+  operation: BrainHealthOperation;
+  provider_health: Record<string, BrainProviderHealth>;
+  models: BrainModelHealthRow[];
+  retention: string;
+  durability: BrainControlDurability;
+  observed_tokens?: number;
+}
+
+export interface BrainReplayEvaluateArgs extends JsonObject {
+  case_id: string;
+  domain: string;
+  capability: string;
+  risk_class: string;
+  evidence_digest: string;
+  signals: Record<string, boolean | number>;
+  references?: string[];
+  limitations?: string[];
+  required_signals?: string[];
+  signal_weights?: Record<string, number>;
+  pass_threshold?: number;
+}
+
+export interface BrainReplayEvaluateResult extends JsonObject {
+  schema: string;
+  ok: boolean;
+  case_id: string;
+  domain: string;
+  evaluator_id: string;
+  evaluator_version: string;
+  evidence_digest: string;
+  reward: number;
+  passed: boolean;
+  failed: boolean;
+  failure_class?: string | null;
+  feedback_digest: string;
+  replan_requested: boolean;
+  replan_instruction?: string | null;
+  execution: "offline_value_only_replay" | string;
+  truth_authority: string;
+  retention: string;
+}
+
 export interface ToolsResponse extends JsonObject {
   api_version: string;
   tools: ToolDefinition[];

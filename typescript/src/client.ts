@@ -478,6 +478,16 @@ import type {
   BrainBanditSelectionResult,
   BrainBanditState,
   BrainBanditUpdate,
+  BrainJobApprovalArgs,
+  BrainJobApprovalResult,
+  BrainJobEventsArgs,
+  BrainJobEventsResult,
+  BrainJobStatusArgs,
+  BrainJobStatusResult,
+  BrainJobSubmitArgs,
+  BrainJobSubmitResult,
+  BrainModelHealthArgs,
+  BrainModelHealthResult,
   BrainOutcomeRecordArgs,
   BrainOutcomeRecordResult,
   BrainModelSelectionArgs,
@@ -488,6 +498,8 @@ import type {
   BrainPlanResult,
   BrainPromptArgs,
   BrainPromptResult,
+  BrainReplayEvaluateArgs,
+  BrainReplayEvaluateResult,
 } from "./types.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -497,6 +509,32 @@ const MAX_EVENT_PAGE = 1_000;
 const MAX_REQUEST_ID_BYTES = 256;
 const MAX_MISSION_WAIT_MS = 86_400_000;
 const MAX_MISSION_POLL_INTERVAL_MS = 60_000;
+
+const BRAIN_SECRET_FIELDS = new Set([
+  "api_key",
+  "access_token",
+  "credential",
+  "credential_material",
+  "credentials",
+  "password",
+  "prompt",
+  "task_payload",
+  "provider_response",
+  "response_text",
+]);
+
+function rejectBrainSecretFields(value: JsonObject, label: string): void {
+  const forbidden = Object.keys(value).filter((key) => BRAIN_SECRET_FIELDS.has(key));
+  if (forbidden.length > 0) throw new ArgumentError(`${label} cannot contain secret or private-work fields: ${forbidden.join(", ")}`);
+}
+
+function validateOptionalBoundedInteger(value: number | undefined, minimum: number, maximum: number, label: string): void {
+  if (value !== undefined && (!Number.isSafeInteger(value) || value < minimum || value > maximum)) throw new ArgumentError(`${label} must be a safe integer within [${minimum}, ${maximum}]`);
+}
+
+function validateDigestList(value: string[] | undefined, maximum: number, label: string): void {
+  if (value !== undefined && (!Array.isArray(value) || value.length > maximum || value.some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)))) throw new ArgumentError(`${label} must contain at most ${maximum} lowercase SHA-256 digests`);
+}
 
 function validateAdapterExecutionEvidenceArgs(args: AdapterExecutionEvidenceArgs): AdapterExecutionEvidenceArgs {
   if (!isObject(args)) throw new ArgumentError("adapter execution evidence arguments must be an object");
@@ -1722,6 +1760,96 @@ export class ApiClient {
     if (typeof args.arm_id !== "string" || !args.arm_id.trim()) throw new ArgumentError("brain outcome record arm_id must be a non-empty string");
     if (typeof args.assessment.reward !== "number" || typeof args.assessment.passed !== "boolean") throw new ArgumentError("brain outcome assessment must contain reward and passed");
     return this.callTool<BrainOutcomeRecordResult>("brain_outcome_record", args, options);
+  }
+
+  /** Admit a metadata-only, rehydratable job; prompts, tasks, responses, and credentials are refused. */
+  async brainJobSubmit(
+    args: BrainJobSubmitArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainJobSubmitResult>> {
+    if (!isObject(args)) throw new ArgumentError("brain job submission must be an object");
+    rejectBrainSecretFields(args, "brain job submission");
+    for (const field of ["idempotency_key", "spec_digest", "domain", "capability", "risk_class"] as const) {
+      if (typeof args[field] !== "string" || !args[field].trim()) throw new ArgumentError(`${field} must be a non-empty string`);
+    }
+    if (!/^[0-9a-f]{64}$/.test(args.spec_digest)) throw new ArgumentError("spec_digest must be a lowercase SHA-256 digest");
+    if (args.job_id !== undefined && (typeof args.job_id !== "string" || !args.job_id.trim())) throw new ArgumentError("job_id must be a non-empty string when supplied");
+    validateOptionalBoundedInteger(args.priority, 0, 255, "priority");
+    validateOptionalBoundedInteger(args.max_attempts, 1, 8, "max_attempts");
+    if (args.checkpoint_digest !== undefined && args.checkpoint_digest !== null && !/^[0-9a-f]{64}$/.test(args.checkpoint_digest)) throw new ArgumentError("checkpoint_digest must be a lowercase SHA-256 digest or null");
+    return this.callTool<BrainJobSubmitResult>("brain_job_submit", args, options);
+  }
+
+  /** Read a value-only job projection; the caller rehydrates the private work specification. */
+  async brainJobStatus(
+    args: BrainJobStatusArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainJobStatusResult>> {
+    if (!isObject(args) || typeof args.job_id !== "string" || !args.job_id.trim()) throw new ArgumentError("brain job status job_id must be a non-empty string");
+    return this.callTool<BrainJobStatusResult>("brain_job_status", args, options);
+  }
+
+  /** Read the bounded metadata-only hash chain using a monotonic sequence cursor. */
+  async brainJobEvents(
+    args: BrainJobEventsArgs = {},
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainJobEventsResult>> {
+    if (!isObject(args)) throw new ArgumentError("brain job events arguments must be an object");
+    if (args.job_id !== undefined && (typeof args.job_id !== "string" || !args.job_id.trim())) throw new ArgumentError("job_id must be a non-empty string when supplied");
+    validateOptionalBoundedInteger(args.after, 0, Number.MAX_SAFE_INTEGER, "after");
+    validateOptionalBoundedInteger(args.limit, 1, 256, "limit");
+    return this.callTool<BrainJobEventsResult>("brain_job_events", args, options);
+  }
+
+  /** Request, approve, or deny a job checkpoint using a caller-authenticated proof digest. */
+  async brainJobApproval(
+    args: BrainJobApprovalArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainJobApprovalResult>> {
+    if (!isObject(args) || typeof args.job_id !== "string" || !args.job_id.trim()) throw new ArgumentError("brain job approval job_id must be a non-empty string");
+    rejectBrainSecretFields(args, "brain job approval");
+    if (!["request", "approve", "deny"].includes(args.action)) throw new ArgumentError("brain job approval action must be request, approve, or deny");
+    if ((args.action === "approve" || args.action === "deny") && (typeof args.authorization_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.authorization_digest))) throw new ArgumentError("approve and deny require a lowercase authorization_digest");
+    if (args.reason !== undefined && (typeof args.reason !== "string" || args.reason.length > 2048)) throw new ArgumentError("reason must be at most 2048 characters");
+    return this.callTool<BrainJobApprovalResult>("brain_job_approval", args, options);
+  }
+
+  /** Record or inspect provider/model posture without accepting credential material or payloads. */
+  async brainModelHealth(
+    args: BrainModelHealthArgs = {},
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainModelHealthResult>> {
+    if (!isObject(args)) throw new ArgumentError("brain model health arguments must be an object");
+    rejectBrainSecretFields(args, "brain model health");
+    if (args.operation !== undefined && !["snapshot", "record"].includes(args.operation)) throw new ArgumentError("brain model health operation must be snapshot or record");
+    if (args.provider !== undefined && (typeof args.provider !== "string" || !args.provider.trim())) throw new ArgumentError("provider must be a non-empty string when supplied");
+    if (args.model !== undefined && (typeof args.model !== "string" || !args.model.trim())) throw new ArgumentError("model must be a non-empty string when supplied");
+    if (args.status !== undefined && !["success", "failure", "timeout", "rate_limited", "circuit_open", "unknown"].includes(args.status)) throw new ArgumentError("brain model health status is invalid");
+    validateOptionalBoundedInteger(args.latency_ms, 0, 600_000, "latency_ms");
+    validateOptionalBoundedInteger(args.tokens, 0, 1_000_000_000, "tokens");
+    if (args.quality !== undefined && (typeof args.quality !== "number" || !Number.isFinite(args.quality) || args.quality < 0 || args.quality > 1)) throw new ArgumentError("quality must be within [0, 1]");
+    for (const field of ["registered", "credential_ready", "eligible"] as const) if (args[field] !== undefined && typeof args[field] !== "boolean") throw new ArgumentError(`${field} must be boolean`);
+    return this.callTool<BrainModelHealthResult>("brain_model_health", args, options);
+  }
+
+  /** Re-evaluate caller-normalized evidence offline; this never invokes a provider or domain tool. */
+  async brainReplayEvaluate(
+    args: BrainReplayEvaluateArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainReplayEvaluateResult>> {
+    if (!isObject(args)) throw new ArgumentError("brain replay arguments must be an object");
+    rejectBrainSecretFields(args, "brain replay");
+    for (const field of ["case_id", "domain", "capability", "risk_class"] as const) if (typeof args[field] !== "string" || !args[field].trim()) throw new ArgumentError(`${field} must be a non-empty string`);
+    if (typeof args.evidence_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.evidence_digest)) throw new ArgumentError("evidence_digest must be a lowercase SHA-256 digest");
+    if (!isObject(args.signals)) throw new ArgumentError("signals must be an object");
+    const signalEntries = Object.entries(args.signals);
+    if (signalEntries.length > 64 || signalEntries.some(([name, value]) => !name.trim() || (typeof value !== "boolean" && (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1)))) throw new ArgumentError("signals must contain at most 64 finite booleans or numbers within [0, 1]");
+    validateDigestList(args.references, 64, "references");
+    if (args.limitations !== undefined && (!Array.isArray(args.limitations) || args.limitations.length > 32 || args.limitations.some((value) => typeof value !== "string" || value.length > 2048))) throw new ArgumentError("limitations must contain at most 32 bounded strings");
+    if (args.required_signals !== undefined && (!Array.isArray(args.required_signals) || args.required_signals.length > 64 || args.required_signals.some((value) => typeof value !== "string" || !value.trim()))) throw new ArgumentError("required_signals must contain at most 64 non-empty strings");
+    if (args.signal_weights !== undefined && (!isObject(args.signal_weights) || Object.entries(args.signal_weights).length > 64 || Object.values(args.signal_weights).some((value) => typeof value !== "number" || !Number.isFinite(value) || value < 0))) throw new ArgumentError("signal_weights must contain at most 64 non-negative finite numbers");
+    if (args.pass_threshold !== undefined && (typeof args.pass_threshold !== "number" || !Number.isFinite(args.pass_threshold) || args.pass_threshold < 0 || args.pass_threshold > 1)) throw new ArgumentError("pass_threshold must be within [0, 1]");
+    return this.callTool<BrainReplayEvaluateResult>("brain_replay_evaluate", args, options);
   }
 
   /** Snapshot the authoritative live tool catalogue and bind it to a SHA-256 digest. */

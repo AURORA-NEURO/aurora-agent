@@ -61,6 +61,10 @@ if (result.mcp.result?.isError) {
   never treats these joins as fetched bytes, verified provider signatures, provider authentication,
   or release approval. `bundleVerify` separately exposes explicit Ed25519 bundle verification with
   typed key-validity and fail-closed refusal fields; it does not authenticate a key registry.
+- `brainJobSubmit`, `brainJobStatus`, `brainJobEvents`, `brainJobApproval`, `brainModelHealth`,
+  and `brainReplayEvaluate` expose the value-only autonomous-brain control plane. They accept
+  metadata, bounded signals, and digests only; prompts, task payloads, provider responses, and
+  credentials remain in the application-owned worker and `LLMRuntime` boundary.
 - `traceOtelIngest` returns a typed normalized Event IR preview, OTLP mapping counts, loss-category
   ledger, and compilation-readiness state; it never implies OTLP export or collector connectivity.
 - `qualityGateRun` returns typed serialized quality check unions, concrete failure witnesses,

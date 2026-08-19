@@ -39,6 +39,24 @@ test("client exposes the autonomous brain value-only kernel", async () => {
       if (path.endsWith("brain_outcome_record")) {
         return new Response(JSON.stringify({ ok: true, tool: "brain_outcome_record", mcp: { result: { structuredContent: { ok: true, status: "recorded_evaluator_reward" } } } }), { status: 200, headers: { "content-type": "application/json" } });
       }
+      if (path.endsWith("brain_job_submit")) {
+        return new Response(JSON.stringify({ ok: true, tool: "brain_job_submit", mcp: { result: { structuredContent: { ok: true, created: true, idempotent: false } } } }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (path.endsWith("brain_job_status")) {
+        return new Response(JSON.stringify({ ok: true, tool: "brain_job_status", mcp: { result: { structuredContent: { ok: true, job: { job_id: "job-1", state: "queued" } } } } }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (path.endsWith("brain_job_events")) {
+        return new Response(JSON.stringify({ ok: true, tool: "brain_job_events", mcp: { result: { structuredContent: { ok: true, events: [], next_after: 0 } } } }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (path.endsWith("brain_job_approval")) {
+        return new Response(JSON.stringify({ ok: true, tool: "brain_job_approval", mcp: { result: { structuredContent: { ok: true, job: { job_id: "job-1", state: "waiting_approval" } } } } }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (path.endsWith("brain_model_health")) {
+        return new Response(JSON.stringify({ ok: true, tool: "brain_model_health", mcp: { result: { structuredContent: { ok: true, operation: "snapshot", models: [] } } } }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (path.endsWith("brain_replay_evaluate")) {
+        return new Response(JSON.stringify({ ok: true, tool: "brain_replay_evaluate", mcp: { result: { structuredContent: { ok: true, passed: true, reward: 1 } } } }), { status: 200, headers: { "content-type": "application/json" } });
+      }
       return new Response(JSON.stringify({ ok: true, tool: "brain_bandit_update", mcp: { result: { structuredContent: { generation: 1 } } } }), { status: 200, headers: { "content-type": "application/json" } });
     },
   });
@@ -73,6 +91,25 @@ test("client exposes the autonomous brain value-only kernel", async () => {
     bandit_state: state,
     arm_id: "openai/test-model",
   });
+  const submitted = await client.brainJobSubmit({
+    idempotency_key: "request-1",
+    spec_digest: "a".repeat(64),
+    domain: "engineering",
+    capability: "code_change",
+    risk_class: "reversible",
+  });
+  const status = await client.brainJobStatus({ job_id: "job-1" });
+  const events = await client.brainJobEvents({ after: 0, limit: 10 });
+  const approval = await client.brainJobApproval({ job_id: "job-1", action: "request", reason: "review" });
+  const health = await client.brainModelHealth({ operation: "snapshot", provider: "openai" });
+  const replay = await client.brainReplayEvaluate({
+    case_id: "case-1",
+    domain: "engineering",
+    capability: "code_change",
+    risk_class: "reversible",
+    evidence_digest: "b".repeat(64),
+    signals: { schema_valid: true, tests_passed: 1, evidence_complete: 1 },
+  });
 
   assert.equal(selected.mcp.result.structuredContent.selected_model_id, "openai/test-model");
   assert.equal(contextual.mcp.result.structuredContent.context_digest, "c".repeat(64));
@@ -81,11 +118,18 @@ test("client exposes the autonomous brain value-only kernel", async () => {
   assert.equal(bandit.mcp.result.structuredContent.selected_arm_id, "openai/test-model");
   assert.equal(updated.mcp.result.structuredContent.generation, 1);
   assert.equal(outcome.mcp.result.structuredContent.status, "recorded_evaluator_reward");
+  assert.equal(submitted.mcp.result.structuredContent.created, true);
+  assert.equal(status.mcp.result.structuredContent.job.job_id, "job-1");
+  assert.deepEqual(events.mcp.result.structuredContent.events, []);
+  assert.equal(approval.mcp.result.structuredContent.job.state, "waiting_approval");
+  assert.equal(health.mcp.result.structuredContent.operation, "snapshot");
+  assert.equal(replay.mcp.result.structuredContent.passed, true);
   assert.deepEqual(seen.find(({ path }) => path.endsWith("brain_model_select")).body.provider_health, {
     openai: { registered: true, circuit: "closed", credential_ready: true, eligible: true },
   });
-  assert.equal(seen.length, 7);
+  assert.equal(seen.length, 13);
   assert.ok(seen.every(({ body }) => !Object.prototype.hasOwnProperty.call(body, "api_key")));
+  assert.ok(seen.every(({ body }) => !Object.prototype.hasOwnProperty.call(body, "prompt")));
 });
 
 test("brain client methods fail before transport on malformed input", async () => {
@@ -105,5 +149,22 @@ test("brain client methods fail before transport on malformed input", async () =
     requested_output_tokens: 1,
     models: [model],
     provider_health: { openai: { circuit: "unknown" } },
+  }), ArgumentError);
+  await assert.rejects(() => client.brainJobSubmit({
+    idempotency_key: "request-1",
+    spec_digest: "a".repeat(64),
+    domain: "engineering",
+    capability: "code_change",
+    risk_class: "reversible",
+    prompt: "must be rejected",
+  }), ArgumentError);
+  await assert.rejects(() => client.brainJobApproval({ job_id: "job-1", action: "approve" }), ArgumentError);
+  await assert.rejects(() => client.brainReplayEvaluate({
+    case_id: "case-1",
+    domain: "engineering",
+    capability: "code_change",
+    risk_class: "reversible",
+    evidence_digest: "b".repeat(64),
+    signals: { schema_valid: 2 },
   }), ArgumentError);
 });
