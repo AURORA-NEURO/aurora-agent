@@ -1064,6 +1064,69 @@ def test_run_auto_can_execute_a_accepted_plan_through_the_checkpointable_workflo
         server.server_close()
 
 
+def test_run_auto_exposes_explicit_workflow_online_learning_modes():
+    runtime, store, server, thread = _structured_runtime()
+    agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+    try:
+        task = "fix the Rust tests in the repository"
+        handle = store.register("openai", "auto-workflow-learning-secret")
+        bandit_state = {
+            "schema": "bioprism-brain-bandit/0.1",
+            "generation": 0,
+            "arms": [
+                {
+                    "arm_id": "openai/test-model",
+                    "pulls": 0,
+                    "reward_sum": 0.0,
+                    "failures": 0,
+                    "disabled": False,
+                }
+            ],
+        }
+        evidence = {
+            "scope": {"signals": {"schema_valid": True}},
+            "inspect": {"signals": {"evidence_complete": True}},
+        }
+        online = agent.run_auto(
+            task=task,
+            credentials={"openai": handle},
+            workflow_execution=True,
+            workflow_learning=True,
+            workflow_stage_evidence=evidence,
+            workflow_max_stage_calls=2,
+            bandit_state=bandit_state,
+            approve_provider_call=True,
+            run_id="auto-workflow-online",
+        )
+        assert online.result is not None
+        assert online.result.status == "paused"
+        assert [item.stage_id for item in online.result.evaluations] == ["scope", "inspect"]
+        assert all(item.decision.passed for item in online.result.evaluations)
+        assert online.result.bandit_state["generation"] == 1
+
+        trajectory = agent.run_auto(
+            task=task,
+            credentials={"openai": handle},
+            workflow_execution=True,
+            workflow_trajectory_learning=True,
+            workflow_stage_evidence=evidence,
+            workflow_max_stage_calls=2,
+            workflow_trajectory_discount=0.5,
+            workflow_trajectory_terminal_reward=0.25,
+            bandit_state=bandit_state,
+            approve_provider_call=True,
+            run_id="auto-workflow-trajectory",
+        )
+        assert trajectory.result is not None
+        assert trajectory.result.status == "paused"
+        assert len(trajectory.result.trajectory_result.credited_rewards) == 2
+        assert "auto-workflow-learning-secret" not in json.dumps(trajectory.to_dict())
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
 def test_builtin_workflow_registry_drives_all_domains_with_valid_stage_dags():
     registry = AutonomousWorkflowRegistry.with_builtin_strategies()
     strategies = registry.catalogue()

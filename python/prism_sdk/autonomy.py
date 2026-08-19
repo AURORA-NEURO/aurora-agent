@@ -7135,6 +7135,11 @@ class AutonomousAgent:
         semantic_max_output_tokens: int = 1_024,
         semantic_temperature: float | None = None,
         workflow_execution: bool = False,
+        workflow_learning: bool = False,
+        workflow_trajectory_learning: bool = False,
+        workflow_stage_evidence: Mapping[str, Mapping[str, Any]] | None = None,
+        workflow_trajectory_discount: float = 0.90,
+        workflow_trajectory_terminal_reward: float | None = None,
         accepted_plan_refinement: AutonomousPlanRefinementResult | None = None,
         workflow_checkpoint: AutonomousWorkflowCheckpoint | Mapping[str, Any] | None = None,
         workflow_retry_blocked: bool = False,
@@ -7149,15 +7154,24 @@ class AutonomousAgent:
         explicit ``run``/``run_cross_domain`` calls.  ``workflow_execution=True`` opts a
         single-domain route into its checkpointable stage DAG. An accepted plan refinement is
         advisory until the caller passes it explicitly here; it can only reorder ready stages.
+        ``workflow_learning`` and ``workflow_trajectory_learning`` make the evaluator boundary
+        explicit and never infer reward from provider success.
         An abstained route never invokes a provider.
         """
 
         if not isinstance(workflow_execution, bool):
             raise BrainRunError("workflow_execution must be a boolean")
+        if not isinstance(workflow_learning, bool) or not isinstance(workflow_trajectory_learning, bool):
+            raise BrainRunError("workflow learning modes must be booleans")
+        if workflow_learning and workflow_trajectory_learning:
+            raise BrainRunError("workflow_learning and workflow_trajectory_learning are mutually exclusive")
         if not isinstance(workflow_retry_blocked, bool):
             raise BrainRunError("workflow_retry_blocked must be a boolean")
         if not workflow_execution and (
-            accepted_plan_refinement is not None
+            workflow_learning
+            or workflow_trajectory_learning
+            or workflow_stage_evidence is not None
+            or accepted_plan_refinement is not None
             or workflow_checkpoint is not None
             or workflow_retry_blocked
             or workflow_max_stage_calls is not None
@@ -7249,9 +7263,10 @@ class AutonomousAgent:
         if blueprint.blueprint is not None:
             if workflow_execution:
                 if execution_kwargs.pop("learn", False):
-                    raise BrainRunError(
-                        "workflow_execution does not accept learn=True; use run_workflow_learning with explicit evidence"
-                    )
+                    if not workflow_learning and not workflow_trajectory_learning:
+                        raise BrainRunError(
+                            "workflow_execution does not accept learn=True; select workflow_learning or workflow_trajectory_learning"
+                        )
                 if "checkpoint" in execution_kwargs:
                     raise BrainRunError("workflow checkpoint must be supplied as workflow_checkpoint")
                 if "retry_blocked" in execution_kwargs or "max_stage_calls" in execution_kwargs:
@@ -7263,16 +7278,42 @@ class AutonomousAgent:
                 workflow_options["accepted_plan_refinement"] = accepted_plan_refinement
                 workflow_options["checkpoint"] = workflow_checkpoint
                 workflow_options["retry_blocked"] = workflow_retry_blocked
+                bandit_state = workflow_options.pop("bandit_state", None)
+                if workflow_stage_evidence is not None:
+                    workflow_options["stage_evidence"] = workflow_stage_evidence
                 if workflow_max_stage_calls is not None:
                     workflow_options["max_stage_calls"] = workflow_max_stage_calls
-                result = self.run_workflow(
-                    blueprint=blueprint.blueprint,
-                    credentials=credentials,
-                    model_candidates=model_candidates,
-                    execution_id=execution_id,
-                    resume_execution=resume_execution,
-                    **workflow_options,
-                )
+                if workflow_learning:
+                    result = self.run_workflow_learning(
+                        blueprint=blueprint.blueprint,
+                        credentials=credentials,
+                        model_candidates=model_candidates,
+                        bandit_state=bandit_state,
+                        execution_id=execution_id,
+                        resume_execution=resume_execution,
+                        **workflow_options,
+                    )
+                elif workflow_trajectory_learning:
+                    workflow_options["trajectory_discount"] = workflow_trajectory_discount
+                    workflow_options["trajectory_terminal_reward"] = workflow_trajectory_terminal_reward
+                    result = self.run_workflow_trajectory_learning(
+                        blueprint=blueprint.blueprint,
+                        credentials=credentials,
+                        model_candidates=model_candidates,
+                        bandit_state=bandit_state,
+                        execution_id=execution_id,
+                        resume_execution=resume_execution,
+                        **workflow_options,
+                    )
+                else:
+                    result = self.run_workflow(
+                        blueprint=blueprint.blueprint,
+                        credentials=credentials,
+                        model_candidates=model_candidates,
+                        execution_id=execution_id,
+                        resume_execution=resume_execution,
+                        **workflow_options,
+                    )
             else:
                 result = self.run(
                     task=task,
@@ -7284,7 +7325,7 @@ class AutonomousAgent:
                     **execution_kwargs,
                 )
         else:
-            if workflow_execution or accepted_plan_refinement is not None:
+            if workflow_execution or workflow_learning or workflow_trajectory_learning or accepted_plan_refinement is not None:
                 raise BrainRunError(
                     "workflow_execution and accepted_plan_refinement currently require a single-domain route"
                 )

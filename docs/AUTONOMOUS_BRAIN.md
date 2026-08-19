@@ -412,6 +412,31 @@ The runner verifies its task, base-plan, workflow, and dependency digests, uses 
 among currently-ready stages, and binds its digest into every checkpoint so a different plan
 cannot be substituted during resume.
 
+The same intake path exposes explicit online-learning choices. Use
+`workflow_learning=True` with caller-supplied stage evidence to update the value-only bandit
+after each completed stage; use `workflow_trajectory_learning=True` with a discount and optional
+terminal reward when credit should wait for the assembled trajectory:
+
+```python
+result = agent.run_auto(
+    task="fix the Rust tests in the repository",
+    credentials=session,
+    workflow_execution=True,
+    workflow_learning=True,
+    workflow_stage_evidence={
+        "scope": {"signals": {"schema_valid": 1.0}},
+        "inspect": {"signals": {"evidence_complete": 1.0}},
+    },
+    bandit_state=caller_owned_bandit_state,
+    approve_provider_call=True,
+)
+```
+
+Missing evidence is a conservative evaluator failure, never an inferred success. The two modes
+are mutually exclusive, and `learn=True` is rejected for staged intake unless one of these
+explicit modes is selected. This keeps provider transport success, task quality, and delayed
+credit assignment separate while still allowing automatic intake to drive the full online loop.
+
 Provider output never becomes authorization. Invalid JSON, missing domains, out-of-range scores,
 provider disagreement, abstention, insufficient confidence, or insufficient margin all produce a
 non-executable review result. A semantic route cannot add a domain, capability, tool, effect,
