@@ -1734,6 +1734,42 @@ mission dispatch, hub locking, and adaptive acquisition execution remain in
 runtime/mission approval callback. Applying a safe plan row only composes provider-visible
 metadata—it does not execute a tool, grant the provider a credential, or authorize an effect.
 
+For a UI or service that must survive a process restart, attach the redacted activation state to
+the agent. The activation snapshot tracks provider readiness, catalogue/profile/plan digests,
+approved exact tool names, pending review, and coverage for every built-in domain. It deliberately
+does not track a `CredentialHandle`, credential id, key, secret-manager reference, task, prompt,
+or provider payload. The store writes an atomic, digest-verified JSON snapshot:
+
+```python
+from prism_sdk import (
+    AutonomousCapabilityActivation,
+    AutonomousCapabilityActivationStore,
+)
+
+activation_store = AutonomousCapabilityActivationStore("state/aurora-activation.json")
+previous = activation_store.load()
+agent = AutonomousAgent(
+    workspace,
+    runtime,
+    model_catalogue=model_catalogue,
+    activation=AutonomousCapabilityActivation(state=previous),
+)
+
+binding_plan = agent.plan_workspace_tool_bindings()
+agent.register_workspace_bindings_from_plan(
+    binding_plan,
+    approved_tools=["repository_catalog", "developer_platform_status"],
+)
+agent.save_activation(activation_store)
+```
+
+After a restart, the application recreates a protected `CredentialSession` and collects or
+resolves keys again; it never attempts to restore credentials from the activation file. A changed
+live catalogue moves the activation to `stale` and clears its prior approvals until the new plan
+is reviewed. `ready` means that provider readiness and the approved metadata path are present; it
+does not mean that an external effect is approved. `agent.activation_state()` and the
+`activation` member of `agent.readiness()` are UI-safe status projections only.
+
 The registry is metadata and schema composition; it does not grant authority. A provider-generated
 tool call is still an intent. `AutonomousDomainToolRuntime` validates the call against the exact
 registered schema, rejects credential-shaped fields, applies the read-only/effect approval policy,

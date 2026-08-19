@@ -51,6 +51,11 @@ from .domain_tools import (
     DOMAIN_TOOL_BINDING_PLAN_SCHEMA,
     plan_mcp_catalogue_bindings,
 )
+from .autonomy_onboarding import (
+    AutonomousActivationError,
+    AutonomousCapabilityActivation,
+    AutonomousCapabilityActivationStore,
+)
 from .autonomy_persistence import (
     AutonomousExecutionController,
     AutonomousExecutionJournal,
@@ -7573,6 +7578,7 @@ class AutonomousAgent:
         health_ledger: ProviderHealthLedger | None = None,
         tool_registry: AutonomousDomainToolRegistry | None = None,
         tool_runtime: AutonomousDomainToolRuntime | None = None,
+        activation: AutonomousCapabilityActivation | None = None,
         execution_journal: AutonomousExecutionJournal | None = None,
         execution_policy: AutonomousExecutionPolicy | Mapping[str, Any] | None = None,
     ) -> None:
@@ -7596,6 +7602,8 @@ class AutonomousAgent:
             raise BrainRunError("tool_runtime must be an AutonomousDomainToolRuntime or None")
         if tool_runtime is not None and tool_registry is not None and tool_runtime.registry is not tool_registry:
             raise BrainRunError("tool_runtime registry must be the same registry supplied to the agent")
+        if activation is not None and not isinstance(activation, AutonomousCapabilityActivation):
+            raise BrainRunError("activation must be an AutonomousCapabilityActivation or None")
         if pack_registry is not None and not isinstance(pack_registry, AutonomousDomainPackRegistry):
             raise BrainRunError("pack_registry must be an AutonomousDomainPackRegistry or None")
         if execution_journal is not None and not isinstance(execution_journal, AutonomousExecutionJournal):
@@ -7619,6 +7627,7 @@ class AutonomousAgent:
         self.memory = memory
         self.health_ledger = health_ledger
         self.tool_registry = tool_registry
+        self.activation = activation or AutonomousCapabilityActivation()
         self.execution_journal = execution_journal
         self.execution_policy = resolved_execution_policy
         if tool_runtime is not None:
@@ -7685,6 +7694,32 @@ class AutonomousAgent:
         """Start a short-lived BYOK session for protected UI or request-scoped collection."""
 
         return self.onboarding.start_session(ttl_seconds=ttl_seconds, session_id=session_id)
+
+    def activation_state(self) -> dict[str, Any]:
+        """Return the redacted durable provider/domain activation snapshot."""
+
+        return self.activation.to_dict()
+
+    def save_activation(
+        self,
+        store: AutonomousCapabilityActivationStore,
+    ) -> dict[str, Any]:
+        """Persist activation metadata atomically without persisting keys or handles."""
+
+        if not isinstance(store, AutonomousCapabilityActivationStore):
+            raise BrainRunError("save_activation requires an AutonomousCapabilityActivationStore")
+        try:
+            return store.save(self.activation)
+        except AutonomousActivationError as error:
+            raise BrainRunError("activation state could not be persisted") from error
+
+    def revoke_activation(self, *, reason: str = "activation_revoked") -> dict[str, Any]:
+        """Revoke the activation snapshot without pretending to revoke provider credentials."""
+
+        try:
+            return self.activation.revoke(reason=reason).to_dict()
+        except AutonomousActivationError as error:
+            raise BrainRunError("activation could not be revoked") from error
 
     def models(self, *, enabled_only: bool = False) -> list[dict[str, Any]]:
         """Return deterministic model metadata suitable for a configuration UI."""
@@ -7770,9 +7805,15 @@ class AutonomousAgent:
                 raise BrainRunError("plan_workspace_tool_bindings requires a catalogue or workspace.tool_catalogue()")
             catalogue = catalogue_reader()
         try:
-            return plan_mcp_catalogue_bindings(catalogue, domains=domains)
+            plan = plan_mcp_catalogue_bindings(catalogue, domains=domains)
+            if self.activation.state.status != "revoked":
+                self.activation.record_provider_statuses(self.onboarding.statuses())
+                self.activation.record_binding_plan(plan)
+            return plan
         except (ArgumentError, TypeError, ValueError) as error:
             raise BrainRunError("workspace tool binding plan failed") from error
+        except AutonomousActivationError as error:
+            raise BrainRunError("workspace tool binding activation plan could not be recorded") from error
 
     def register_workspace_bindings_from_plan(
         self,
@@ -7835,12 +7876,21 @@ class AutonomousAgent:
             if row.get("read_only") is not True or row.get("risk_class") != "read_only" or row.get("approval_required") is not False:
                 raise BrainRunError(f"approved tool {name!r} is not a safe proposed binding")
             bindings[name] = row
-        return self.register_workspace_tools(
+        registered = self.register_workspace_tools(
             bindings,
             catalogue=snapshot,
             require_all=False,
             replace_existing=replace_existing,
         )
+        try:
+            self.activation.approve_bindings(
+                plan,
+                approved,
+                registered_tool_count=0 if self.tool_registry is None else len(self.tool_registry.catalogue()),
+            )
+        except AutonomousActivationError as error:
+            raise BrainRunError("approved workspace bindings could not be recorded") from error
+        return registered
 
     def register_workspace_tools(
         self,
@@ -7880,6 +7930,11 @@ class AutonomousAgent:
                 self.tool_registry,
                 executor=lambda resolved, arguments: self.brain.workspace.tool(resolved.name, dict(arguments)),
             )
+        if self.activation.state.status != "revoked":
+            try:
+                self.activation.record_registered_tools(len(self.tool_registry.catalogue()))
+            except AutonomousActivationError as error:
+                raise BrainRunError("registered workspace tools could not be reflected in activation state") from error
         return [tool.to_dict() for tool in registered]
 
     def tools(self, domain: str | None = None) -> list[dict[str, Any]]:
@@ -7980,6 +8035,11 @@ class AutonomousAgent:
                 if isinstance(row, Mapping) and row.get("next_action") not in (None, "ready")
             }
         )
+        if self.activation.state.status != "revoked":
+            try:
+                self.activation.record_provider_statuses(providers)
+            except AutonomousActivationError as error:
+                raise BrainRunError("activation provider readiness projection failed") from error
         return {
             "schema": "bioprism-autonomous-agent-readiness/0.1",
             "providers": providers,
@@ -8005,6 +8065,7 @@ class AutonomousAgent:
             },
             "domain_tools": [] if self.tool_registry is None else self.tool_registry.catalogue(),
             "domain_tool_registry_digest": None if self.tool_registry is None else self.tool_registry.digest,
+            "activation": self.activation.to_dict(),
             "next_actions": next_actions,
             "secret_material": "never_returned",
             "credential_posture": "caller_supplied_opaque_handles",
@@ -9099,6 +9160,8 @@ __all__ = [
     "AutonomousDomainToolBinding",
     "AutonomousDomainToolRegistry",
     "AutonomousDomainToolRuntime",
+    "AutonomousCapabilityActivation",
+    "AutonomousCapabilityActivationStore",
     "AutonomousCrossDomainBlueprint",
     "AutonomousCrossDomainResult",
     "AutonomousCrossDomainPlanRefinementResult",

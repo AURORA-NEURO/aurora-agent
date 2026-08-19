@@ -412,6 +412,10 @@ def test_agent_revalidates_a_binding_plan_before_explicit_application():
         )
         assert [tool["name"] for tool in registered] == ["repository_catalog"]
         assert agent.tools() == registered
+        activation = agent.activation_state()
+        assert activation["approved_tools"] == ["repository_catalog"]
+        assert activation["catalogue_digest"] == plan["catalogue_digest"]
+        assert activation["domain_statuses"]
 
         tampered_plan = dict(plan)
         tampered_bindings = dict(plan["proposed_bindings"])
