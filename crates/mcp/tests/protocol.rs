@@ -326,7 +326,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 237);
+    assert_eq!(tools.len(), 238);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -1473,6 +1473,14 @@ fn control_plane_readiness_compare_reports_structural_regression_and_recovery() 
         }),
     );
     assert_eq!(before["audit"]["subject_id"], after["audit"]["subject_id"]);
+    let before_content_digest = before["artifact_registry"]["content_digest"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let after_content_digest = after["artifact_registry"]["content_digest"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let comparison = call(
         &mut server,
         "control_plane_readiness_compare",
@@ -1496,6 +1504,30 @@ fn control_plane_readiness_compare_reports_structural_regression_and_recovery() 
         .is_empty());
     assert_eq!(comparison["readiness_claimed"], json!(false));
     assert_eq!(comparison["execution"], json!("not_started"));
+
+    let retained_comparison = call(
+        &mut server,
+        "control_plane_readiness_compare_retained",
+        json!({
+            "before_content_digest": before_content_digest,
+            "after_content_digest": after_content_digest,
+            "subject_id": "control-plane-compare-subject"
+        }),
+    );
+    assert_eq!(
+        retained_comparison["workflow"],
+        json!("control_plane_readiness_compare_retained")
+    );
+    assert_eq!(
+        retained_comparison["comparison"]["state_direction"],
+        json!("improved")
+    );
+    assert_eq!(
+        retained_comparison["source"],
+        json!("content_addressed_artifact_registry")
+    );
+    assert_eq!(retained_comparison["readiness_claimed"], json!(false));
+    assert_eq!(retained_comparison["execution"], json!("not_started"));
 }
 
 #[test]
@@ -8610,12 +8642,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(237));
-    assert_eq!(result["advertised_tool_count"], json!(237));
+    assert_eq!(result["unique_catalog_tools"], json!(238));
+    assert_eq!(result["advertised_tool_count"], json!(238));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(237));
-    assert_eq!(result["schema_quality"]["valid"], json!(237));
+    assert_eq!(result["schema_quality"]["checked"], json!(238));
+    assert_eq!(result["schema_quality"]["valid"], json!(238));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

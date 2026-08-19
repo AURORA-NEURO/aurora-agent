@@ -25,6 +25,7 @@ CONTROL_PLANE_READINESS_STATES = (
 )
 CONTROL_PLANE_READINESS_QUERY_SCHEMA = "bioprism-devplat-artifact-control-plane-readiness-query/0.1"
 CONTROL_PLANE_READINESS_COMPARE_SCHEMA = "bioprism-control-plane-readiness-compare/0.1"
+CONTROL_PLANE_READINESS_RETAINED_COMPARE_SCHEMA = "bioprism-control-plane-readiness-compare-retained/0.1"
 
 
 @dataclass(frozen=True)
@@ -214,6 +215,81 @@ class ControlPlaneReadinessCompareReport:
 
 
 @dataclass(frozen=True)
+class ControlPlaneReadinessRetainedCompareRequest:
+    """Two retained readiness artifacts addressed by exact content digest."""
+
+    before_content_digest: str
+    after_content_digest: str
+    subject_id: str | None = None
+
+    def __post_init__(self) -> None:
+        _digest("retained control-plane comparison before content digest", self.before_content_digest)
+        _digest("retained control-plane comparison after content digest", self.after_content_digest)
+        if self.subject_id is not None:
+            _text("retained control-plane comparison subject_id", self.subject_id)
+
+    def to_arguments(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "before_content_digest": self.before_content_digest,
+            "after_content_digest": self.after_content_digest,
+        }
+        if self.subject_id is not None:
+            result["subject_id"] = self.subject_id
+        return result
+
+
+@dataclass(frozen=True)
+class ControlPlaneReadinessRetainedCompareReport:
+    """Typed structural diff resolved from the retained artifact registry."""
+
+    raw: dict[str, Any]
+    comparison: Mapping[str, Any]
+    subject_id: str
+    before_content_digest: str
+    after_content_digest: str
+    state_direction: str
+    evidence_direction: str
+    comparison_digest: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "ControlPlaneReadinessRetainedCompareReport":
+        raw = _tool_payload(value, "control_plane_readiness_compare_retained")
+        if raw.get("schema") != CONTROL_PLANE_READINESS_RETAINED_COMPARE_SCHEMA:
+            raise ArgumentError("retained control-plane comparison schema is invalid")
+        if raw.get("readiness_claimed") is not False or raw.get("execution") != "not_started":
+            raise ArgumentError("retained control-plane comparison must remain non-executing")
+        comparison = _mapping("retained control-plane comparison", raw.get("comparison"))
+        state_direction = _text("retained control-plane comparison state_direction", comparison.get("state_direction"))
+        if state_direction not in {"improved", "regressed", "unchanged"}:
+            raise ArgumentError("retained control-plane comparison state_direction is invalid")
+        evidence_direction = _text("retained control-plane comparison evidence_direction", comparison.get("evidence_direction"))
+        if evidence_direction not in {"improved", "regressed", "mixed", "unchanged"}:
+            raise ArgumentError("retained control-plane comparison evidence_direction is invalid")
+        return cls(
+            raw=raw,
+            comparison=comparison,
+            subject_id=_text("retained control-plane comparison subject_id", raw.get("subject_id")),
+            before_content_digest=_digest(
+                "retained control-plane comparison before content digest",
+                raw.get("before_content_digest"),
+            ),
+            after_content_digest=_digest(
+                "retained control-plane comparison after content digest",
+                raw.get("after_content_digest"),
+            ),
+            state_direction=state_direction,
+            evidence_direction=evidence_direction,
+            comparison_digest=_digest(
+                "retained control-plane comparison digest",
+                comparison.get("comparison_digest"),
+            ),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
 class ControlPlaneReadinessQueryRequest:
     """Bounded lookup over retained control-plane projections."""
 
@@ -303,6 +379,9 @@ __all__ = [
     "ControlPlaneReadinessReport",
     "ControlPlaneReadinessCompareRequest",
     "ControlPlaneReadinessCompareReport",
+    "CONTROL_PLANE_READINESS_RETAINED_COMPARE_SCHEMA",
+    "ControlPlaneReadinessRetainedCompareRequest",
+    "ControlPlaneReadinessRetainedCompareReport",
     "ControlPlaneReadinessQueryRequest",
     "ControlPlaneReadinessQueryReport",
     "control_plane_readiness_report",

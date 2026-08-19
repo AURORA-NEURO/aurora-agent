@@ -139,6 +139,10 @@ structural state; it never widens `ready_for_human_review` into execution or rel
 `controlPlaneReadinessCompare` and `controlPlaneReadinessCompareRest` compare two
 successful, digest-verified snapshots and preserve component transitions, policy changes,
 blocker/domain/parent deltas, directional evidence, and the next structural review action.
+controlPlaneReadinessCompareRetained and controlPlaneReadinessCompareRetainedRest resolve two
+exact content-addressed readiness artifacts from the verified registry and apply the same
+subject-bound structural diff without wrapper reconstruction; retention is not freshness or
+authority.
 `controlPlaneReadinessQuery` and `controlPlaneReadinessQueryTool` expose cursor-bounded retained
 projections with exact subject/state/policy filters and opt-in full bodies.
 `domainEvidenceHarmonizationCoverage` and

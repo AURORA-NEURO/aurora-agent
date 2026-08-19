@@ -361,6 +361,10 @@ wrappers and returns a deterministic structural diff: state direction, component
 policy changes, blocker additions/removals, domain and parent-digest deltas, and a next review
 action. It is a replay/inspection boundary only; it does not rerun nested evidence or grant
 execution, scientific, clinical, deployment, or release authority.
+POST /v1/control-plane-readiness/compare-retained accepts exact before/after content digests,
+resolves both records from the verified artifact registry, enforces the retained kind and shared
+subject, and returns the same structural diff without requiring callers to reconstruct wrappers.
+Retention is not freshness, external completeness, or authority.
 `POST /v1/domain-evidence/intake` is the raw-envelope boundary for all 29 capability groups. It
 requires a declared group, source tool, domain label, response JSON, explicit outcome, and claim
 posture; an original request is optional and its absence is distinguished from a supplied JSON

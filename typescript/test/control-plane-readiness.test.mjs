@@ -58,6 +58,21 @@ const comparison = {
   execution: "not_started",
 };
 
+const retainedComparison = {
+  ok: true,
+  schema: "bioprism-control-plane-readiness-compare-retained/0.1",
+  workflow: "control_plane_readiness_compare_retained",
+  subject_id: "subject-control-plane",
+  before_content_digest: "b".repeat(64),
+  after_content_digest: "d".repeat(64),
+  source: "content_addressed_artifact_registry",
+  comparison: comparison.comparison,
+  readiness_claimed: false,
+  execution: "not_started",
+  guarantees: [],
+  does_not_claim: [],
+};
+
 function response(value) {
   return new Response(JSON.stringify(value), { status: 200, headers: { "content-type": "application/json" } });
 }
@@ -73,6 +88,8 @@ test("control-plane readiness preserves explicit packets through MCP and REST", 
       if (url.pathname === "/v1/control-plane-readiness" && init.method === "POST") return response(result);
       if (url.pathname === "/v1/tools/control_plane_readiness_compare") return response({ ok: true, tool: "control_plane_readiness_compare", mcp: { result: { structuredContent: comparison } } });
       if (url.pathname === "/v1/control-plane-readiness/compare") return response(comparison);
+      if (url.pathname === "/v1/tools/control_plane_readiness_compare_retained") return response({ ok: true, tool: "control_plane_readiness_compare_retained", mcp: { result: { structuredContent: retainedComparison } } });
+      if (url.pathname === "/v1/control-plane-readiness/compare-retained") return response(retainedComparison);
       if (url.pathname === "/v1/control-plane-readiness" && init.method === "GET") return response(query);
       throw new Error(`unexpected path ${url.pathname}`);
     },
@@ -85,6 +102,21 @@ test("control-plane readiness preserves explicit packets through MCP and REST", 
   assert.equal(compared.mcp.result.structuredContent.comparison.evidence_direction, "unchanged");
   const comparedRest = await client.controlPlaneReadinessCompareRest({ before: result, after: result });
   assert.equal(comparedRest.comparison.comparison_digest, "c".repeat(64));
+  const retained = await client.controlPlaneReadinessCompareRetained({
+    before_content_digest: "b".repeat(64),
+    after_content_digest: "d".repeat(64),
+  });
+  assert.equal(retained.mcp.result.structuredContent.workflow, "control_plane_readiness_compare_retained");
+  const retainedRest = await client.controlPlaneReadinessCompareRetainedRest({
+    before_content_digest: "b".repeat(64),
+    after_content_digest: "d".repeat(64),
+    subject_id: "subject-control-plane",
+  });
+  assert.equal(retainedRest.after_content_digest, "d".repeat(64));
+  await assert.rejects(client.controlPlaneReadinessCompareRetained({
+    before_content_digest: "not-a-digest",
+    after_content_digest: "d".repeat(64),
+  }), ArgumentError);
   assert.equal(seen[0].body.route_review.workflow, "capability_route_review");
   await assert.rejects(client.controlPlaneReadinessAudit({ ...args, subject_id: "" }), ArgumentError);
 });

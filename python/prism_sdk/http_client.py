@@ -71,6 +71,8 @@ from .control_plane_readiness import (
     ControlPlaneReadinessCompareRequest,
     ControlPlaneReadinessReport,
     ControlPlaneReadinessRequest,
+    ControlPlaneReadinessRetainedCompareReport,
+    ControlPlaneReadinessRetainedCompareRequest,
     ControlPlaneReadinessQueryReport,
     ControlPlaneReadinessQueryRequest,
 )
@@ -1164,6 +1166,39 @@ class ApiClient:
         )
         return ControlPlaneReadinessCompareReport.from_wire(
             self.call_tool("control_plane_readiness_compare", normalized.to_arguments())
+        )
+
+    def control_plane_readiness_compare_retained(
+        self,
+        request: ControlPlaneReadinessRetainedCompareRequest | Mapping[str, Any],
+    ) -> ControlPlaneReadinessRetainedCompareReport:
+        normalized = (
+            request
+            if isinstance(request, ControlPlaneReadinessRetainedCompareRequest)
+            else ControlPlaneReadinessRetainedCompareRequest(**dict(request))
+        )
+        return ControlPlaneReadinessRetainedCompareReport.from_wire(
+            self.request(
+                "POST",
+                "/v1/control-plane-readiness/compare-retained",
+                normalized.to_arguments(),
+            )
+        )
+
+    def control_plane_readiness_compare_retained_tool(
+        self,
+        request: ControlPlaneReadinessRetainedCompareRequest | Mapping[str, Any],
+    ) -> ControlPlaneReadinessRetainedCompareReport:
+        normalized = (
+            request
+            if isinstance(request, ControlPlaneReadinessRetainedCompareRequest)
+            else ControlPlaneReadinessRetainedCompareRequest(**dict(request))
+        )
+        return ControlPlaneReadinessRetainedCompareReport.from_wire(
+            self.call_tool(
+                "control_plane_readiness_compare_retained",
+                normalized.to_arguments(),
+            )
         )
 
     def control_plane_readiness_query(
@@ -6262,6 +6297,21 @@ class AsyncApiClient:
         request: ControlPlaneReadinessCompareRequest | Mapping[str, Any],
     ) -> ControlPlaneReadinessCompareReport:
         return await asyncio.to_thread(self.client.control_plane_readiness_compare_tool, request)
+
+    async def control_plane_readiness_compare_retained(
+        self,
+        request: ControlPlaneReadinessRetainedCompareRequest | Mapping[str, Any],
+    ) -> ControlPlaneReadinessRetainedCompareReport:
+        return await asyncio.to_thread(self.client.control_plane_readiness_compare_retained, request)
+
+    async def control_plane_readiness_compare_retained_tool(
+        self,
+        request: ControlPlaneReadinessRetainedCompareRequest | Mapping[str, Any],
+    ) -> ControlPlaneReadinessRetainedCompareReport:
+        return await asyncio.to_thread(
+            self.client.control_plane_readiness_compare_retained_tool,
+            request,
+        )
 
     async def control_plane_readiness_query(
         self,

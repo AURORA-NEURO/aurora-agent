@@ -74,6 +74,10 @@ before/after structural diff. The report preserves component transitions, policy
 blocker/domain/parent deltas, directional evidence, and a deterministic next action through
 Workspace, AsyncWorkspace, ApiClient, and AsyncApiClient; it never reruns nested tools or turns
 an improved state into authority.
+ControlPlaneReadinessRetainedCompareRequest / ControlPlaneReadinessRetainedCompareReport resolve
+two exact retained artifact digests and perform the same subject-bound structural diff through
+MCP, REST, Workspace, AsyncWorkspace, ApiClient, and AsyncApiClient. The registry lookup verifies
+the retained kind and bytes; retention is not freshness, external completeness, or authority.
 `DomainEvidenceHarmonizationCoverageRequest` and
 `DomainEvidenceHarmonizationCoverageReport` provide the bounded retained read model through
 `ApiClient.domain_evidence_harmonization_coverage()` and its tool counterpart, plus matching

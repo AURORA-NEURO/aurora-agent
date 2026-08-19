@@ -4,6 +4,8 @@ from prism_sdk import (
     ArgumentError,
     ControlPlaneReadinessCompareReport,
     ControlPlaneReadinessCompareRequest,
+    ControlPlaneReadinessRetainedCompareReport,
+    ControlPlaneReadinessRetainedCompareRequest,
     ControlPlaneReadinessReport,
     ControlPlaneReadinessRequest,
     ControlPlaneReadinessQueryReport,
@@ -110,6 +112,35 @@ class ControlPlaneReadinessTests(unittest.TestCase):
         self.assertEqual(report.comparison_digest, "c" * 64)
         with self.assertRaises(ArgumentError):
             ControlPlaneReadinessCompareRequest(before={}, after={}, subject_id="")
+
+    def test_retained_compare_request_and_report_preserve_registry_identity(self):
+        request = ControlPlaneReadinessRetainedCompareRequest(
+            before_content_digest="b" * 64,
+            after_content_digest="d" * 64,
+            subject_id="subject-control-plane",
+        )
+        self.assertEqual(request.to_arguments()["before_content_digest"], "b" * 64)
+        report = ControlPlaneReadinessRetainedCompareReport.from_wire(
+            {
+                "ok": True,
+                "schema": "bioprism-control-plane-readiness-compare-retained/0.1",
+                "workflow": "control_plane_readiness_compare_retained",
+                "subject_id": "subject-control-plane",
+                "before_content_digest": "b" * 64,
+                "after_content_digest": "d" * 64,
+                "comparison": {
+                    "subject_id": "subject-control-plane",
+                    "state_direction": "improved",
+                    "evidence_direction": "improved",
+                    "comparison_digest": "e" * 64,
+                },
+                "readiness_claimed": False,
+                "execution": "not_started",
+            }
+        )
+        self.assertEqual(report.after_content_digest, "d" * 64)
+        with self.assertRaises(ArgumentError):
+            ControlPlaneReadinessRetainedCompareRequest("not-a-digest", "d" * 64)
 
 
 if __name__ == "__main__":

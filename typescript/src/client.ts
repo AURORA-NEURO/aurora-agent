@@ -58,6 +58,8 @@ import type {
   ControlPlaneReadinessResult,
   ControlPlaneReadinessCompareArgs,
   ControlPlaneReadinessCompareResult,
+  ControlPlaneReadinessCompareRetainedArgs,
+  ControlPlaneReadinessCompareRetainedResult,
   ControlPlaneReadinessQueryOptions,
   ControlPlaneReadinessQueryResult,
   DomainEvidenceHarmonizationCoverageOptions,
@@ -910,6 +912,32 @@ export class ApiClient {
     }
     if (args.subject_id !== undefined && (typeof args.subject_id !== "string" || args.subject_id.trim().length === 0)) throw new ArgumentError("subject_id must be a non-empty string");
     return this.request<ControlPlaneReadinessCompareResult>("POST", "/v1/control-plane-readiness/compare", args, options);
+  }
+
+  /** Compare two retained readiness artifacts resolved by exact content digest through MCP. */
+  async controlPlaneReadinessCompareRetained(
+    args: ControlPlaneReadinessCompareRetainedArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<ControlPlaneReadinessCompareRetainedResult>> {
+    if (!isObject(args)) throw new ArgumentError("retained control-plane comparison arguments must be an object");
+    for (const [name, value] of [["before_content_digest", args.before_content_digest], ["after_content_digest", args.after_content_digest]] as const) {
+      if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new ArgumentError(name + " must be a lowercase SHA-256 digest");
+    }
+    if (args.subject_id !== undefined && (typeof args.subject_id !== "string" || args.subject_id.trim().length === 0)) throw new ArgumentError("subject_id must be a non-empty string");
+    return this.callTool<ControlPlaneReadinessCompareRetainedResult>("control_plane_readiness_compare_retained", args, options);
+  }
+
+  /** Compare two retained readiness artifacts resolved by exact content digest through REST. */
+  async controlPlaneReadinessCompareRetainedRest(
+    args: ControlPlaneReadinessCompareRetainedArgs,
+    options?: ClientRequestOptions,
+  ): Promise<ControlPlaneReadinessCompareRetainedResult> {
+    if (!isObject(args)) throw new ArgumentError("retained control-plane comparison arguments must be an object");
+    for (const [name, value] of [["before_content_digest", args.before_content_digest], ["after_content_digest", args.after_content_digest]] as const) {
+      if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new ArgumentError(name + " must be a lowercase SHA-256 digest");
+    }
+    if (args.subject_id !== undefined && (typeof args.subject_id !== "string" || args.subject_id.trim().length === 0)) throw new ArgumentError("subject_id must be a non-empty string");
+    return this.request<ControlPlaneReadinessCompareRetainedResult>("POST", "/v1/control-plane-readiness/compare-retained", args, options);
   }
 
   /** Compose the same control-plane projection through its dedicated REST endpoint. */

@@ -10,7 +10,7 @@ an implementation — so read the numbers as *"someone has read this and taken a
 never as *"this is done"*. The stronger criterion would be a conformance test per module. It does
 not exist and is not being claimed.
 
-The MCP integration layer currently exposes 237 callable tools. That count is intentionally
+The MCP integration layer currently exposes 238 callable tools. That count is intentionally
 separate from this citation denominator: `pack_health_assess`, `sdk_registry_check`, and
 `repository_impact` make existing typed contracts agent-callable, while `world_generate`,
 `hub_submission_review`, and `telemetry_project` add bounded in-tree generation, public-hub
@@ -296,6 +296,10 @@ tools, widen operator or release authority, or treat `ready_for_human_review` as
 projections. It reports component changes, policy changes, added and removed blockers, parent and
 domain deltas, directional evidence, and a deterministic next structural action without rerunning
 nested tools or treating improvement as scientific, clinical, deployment, or release authority.
+The retained comparison closes the registry handoff: callers can compare two content-addressed
+readiness artifacts by exact digest without loading or reconstructing wrapper bodies. Registry
+kind, subject identity, artifact integrity, and the same non-executing structural diff remain
+explicit; retention still does not imply freshness, external completeness, or authority.
 The Python SDK now covers the complete FIBER progressive-disclosure lifecycle through typed sync,
 async, and HTTP helpers: bounded world/query compilation at l0--l4, handle-or-source refinement,
 compile-plan explanation, certificate verification, and opt-in graph/hypergraph/timeline/table

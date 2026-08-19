@@ -6032,6 +6032,27 @@ export interface ControlPlaneReadinessCompareResult extends JsonObject {
   execution: "not_started";
 }
 
+export interface ControlPlaneReadinessCompareRetainedArgs extends JsonObject {
+  before_content_digest: string;
+  after_content_digest: string;
+  subject_id?: string;
+}
+
+export interface ControlPlaneReadinessCompareRetainedResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-control-plane-readiness-compare-retained/0.1";
+  workflow: "control_plane_readiness_compare_retained";
+  subject_id: string;
+  before_content_digest: string;
+  after_content_digest: string;
+  source: "content_addressed_artifact_registry";
+  comparison: ControlPlaneReadinessCompareResult["comparison"];
+  readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
 export interface DomainEvidenceHarmonizationCoverageOptions extends JsonObject {
   subject_id?: string;
   domain?: string;

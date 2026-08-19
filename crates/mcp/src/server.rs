@@ -1624,6 +1624,9 @@ impl Server {
             "domain_decision_readiness_query" => self.domain_decision_readiness_query(&arguments),
             "control_plane_readiness_audit" => self.control_plane_readiness_audit(&arguments),
             "control_plane_readiness_compare" => self.control_plane_readiness_compare(&arguments),
+            "control_plane_readiness_compare_retained" => {
+                self.control_plane_readiness_compare_retained(&arguments)
+            }
             "control_plane_readiness_query" => self.control_plane_readiness_query(&arguments),
             "domain_evidence_harmonization_coverage" => {
                 self.domain_evidence_harmonization_coverage(&arguments)
@@ -5009,6 +5012,123 @@ impl Server {
             "comparison": comparison,
             "readiness_claimed": false,
             "execution": "not_started"
+        }))
+    }
+
+    /// Compare two complete control-plane audits already retained by the content-addressed
+    /// artifact registry. The registry lookup is authoritative for identity and integrity; the
+    /// comparison remains the same structural, non-executing diff as the inline route.
+    fn control_plane_readiness_compare_retained(&self, arguments: &Value) -> Result<Value, String> {
+        let object = arguments
+            .as_object()
+            .ok_or("retained control-plane comparison input must be an object")?;
+        let digest_text = |name: &str| -> Result<String, String> {
+            let value = object
+                .get(name)
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| format!("{name} must be a non-empty content digest"))?;
+            bioprism_ids::ContentHash::parse(value.to_string())
+                .map(|digest| digest.to_string())
+                .map_err(|error| format!("{name} is not a valid content digest: {error}"))
+        };
+        let before_content_digest = digest_text("before_content_digest")?;
+        let after_content_digest = digest_text("after_content_digest")?;
+        let subject_id = object
+            .get("subject_id")
+            .map(|value| {
+                value
+                    .as_str()
+                    .filter(|value| !value.trim().is_empty())
+                    .ok_or_else(|| "subject_id must be a non-empty string".to_string())
+                    .map(str::to_string)
+            })
+            .transpose()?;
+
+        let load = |digest: &str, name: &str| -> Result<(String, Value), String> {
+            let response = self
+                .artifact_registry
+                .lock()
+                .map_err(|_| "artifact registry lock is poisoned".to_string())?
+                .get(digest)
+                .map_err(|error| format!("{name} retained readiness lookup refused: {error}"))?;
+            let record = response
+                .get("record")
+                .and_then(Value::as_object)
+                .ok_or_else(|| format!("{name} retained artifact record is malformed"))?;
+            if record.get("kind").and_then(Value::as_str) != Some("control_plane_readiness") {
+                return Err(format!(
+                    "{name} content digest is not a control_plane_readiness artifact"
+                ));
+            }
+            let record_subject = record
+                .get("subject_id")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| format!("{name} retained artifact subject_id is missing"))?;
+            let artifact = record
+                .get("artifact")
+                .cloned()
+                .ok_or_else(|| format!("{name} retained readiness artifact body is missing"))?;
+            if !artifact.is_object() {
+                return Err(format!(
+                    "{name} retained readiness artifact body must be an object"
+                ));
+            }
+            let wrapper = json!({
+                "ok": true,
+                "schema": "bioprism-control-plane-readiness/0.1",
+                "workflow": "control_plane_readiness_audit",
+                "audit": artifact,
+                "artifact_registry": {
+                    "indexed": true,
+                    "kind": "control_plane_readiness",
+                    "content_digest": record.get("content_digest"),
+                    "verification": record.get("verification")
+                },
+                "readiness_claimed": false,
+                "execution": "not_started"
+            });
+            Ok((record_subject.to_string(), wrapper))
+        };
+
+        let (before_subject, before) = load(&before_content_digest, "before_content_digest")?;
+        let (after_subject, after) = load(&after_content_digest, "after_content_digest")?;
+        if before_subject != after_subject {
+            return Err("retained before and after readiness subjects must match".into());
+        }
+        if subject_id
+            .as_deref()
+            .is_some_and(|value| value != before_subject)
+        {
+            return Err("subject_id must match both retained readiness artifacts".into());
+        }
+        let comparison = self.control_plane_readiness_compare(&json!({
+            "subject_id": before_subject,
+            "before": before,
+            "after": after
+        }))?;
+        Ok(json!({
+            "ok": true,
+            "schema": "bioprism-control-plane-readiness-compare-retained/0.1",
+            "workflow": "control_plane_readiness_compare_retained",
+            "subject_id": before_subject,
+            "before_content_digest": before_content_digest,
+            "after_content_digest": after_content_digest,
+            "comparison": comparison.get("comparison"),
+            "source": "content_addressed_artifact_registry",
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "guarantees": [
+                "both inputs were resolved by exact content digest from the verified artifact registry",
+                "the retained records were required to be control_plane_readiness artifacts for one subject",
+                "the structural comparison reused the digest-verified non-executing comparison contract"
+            ],
+            "does_not_claim": [
+                "registry retention proves that the readiness state was current or externally complete",
+                "an improved comparison is authorization or proof of execution",
+                "a retained artifact is a scientific, clinical, deployment, release, or regulatory authority"
+            ]
         }))
     }
 
@@ -35430,6 +35550,7 @@ pub fn workspace_capabilities() -> Value {
         "domain_decision_readiness_query",
         "control_plane_readiness_audit",
         "control_plane_readiness_compare",
+        "control_plane_readiness_compare_retained",
         "control_plane_readiness_query",
     ];
     if let Some(groups) = catalogue.as_array_mut() {
@@ -35791,6 +35912,19 @@ pub fn tool_definitions() -> Vec<Value> {
                     "after": { "type": "object", "description": "Successful non-executing control_plane_readiness_audit response wrapper used as the later structural snapshot." }
                 },
                 "required": ["before", "after"]
+            }
+        }),
+        json!({
+            "name": "control_plane_readiness_compare_retained",
+            "description": "Resolve two retained control_plane_readiness artifacts by exact content digest and compare their structural readiness state for one subject. The registry verifies the artifact bytes before comparison; the tool never reconstructs missing history, reruns nested evidence, or turns an improved state into scientific, clinical, deployment, release, or execution authority.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "before_content_digest": { "type": "string", "description": "Exact content digest of the earlier retained control_plane_readiness artifact." },
+                    "after_content_digest": { "type": "string", "description": "Exact content digest of the later retained control_plane_readiness artifact." },
+                    "subject_id": { "type": "string", "description": "Optional subject identity; when supplied it must match both retained artifacts." }
+                },
+                "required": ["before_content_digest", "after_content_digest"]
             }
         }),
         json!({
