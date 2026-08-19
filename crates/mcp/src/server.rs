@@ -1623,6 +1623,7 @@ impl Server {
             "domain_decision_readiness_audit" => self.domain_decision_readiness_audit(&arguments),
             "domain_decision_readiness_query" => self.domain_decision_readiness_query(&arguments),
             "control_plane_readiness_audit" => self.control_plane_readiness_audit(&arguments),
+            "control_plane_readiness_compare" => self.control_plane_readiness_compare(&arguments),
             "control_plane_readiness_query" => self.control_plane_readiness_query(&arguments),
             "domain_evidence_harmonization_coverage" => {
                 self.domain_evidence_harmonization_coverage(&arguments)
@@ -4676,6 +4677,338 @@ impl Server {
                 "optional evidence absence is a failed domain result",
                 "local retained evidence is complete external history"
             ]
+        }))
+    }
+
+    /// Compare two digest-verified control-plane projections without rerunning nested evidence.
+    ///
+    /// This is intentionally a structural diff: a stronger state is not a scientific or
+    /// deployment claim, and a weaker state is not a domain-result failure. Keeping the diff
+    /// beside the original content digests makes readiness regressions and recoveries inspectable
+    /// across every capability group without widening any component's authority.
+    fn control_plane_readiness_compare(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments).map_err(|error| {
+            format!("cannot encode control-plane readiness comparison: {error}")
+        })?;
+        if encoded.len() > 40_000_000 {
+            return Err(
+                "control-plane readiness comparison input exceeds the 40000000-byte safety bound"
+                    .into(),
+            );
+        }
+        let object = arguments
+            .as_object()
+            .ok_or("control-plane readiness comparison input must be an object")?;
+
+        let extract = |name: &str| -> Result<(String, Value), String> {
+            let wrapper = object
+                .get(name)
+                .ok_or_else(|| format!("{name} is required"))?;
+            if wrapper.get("ok").and_then(Value::as_bool) != Some(true)
+                || wrapper.get("schema").and_then(Value::as_str)
+                    != Some("bioprism-control-plane-readiness/0.1")
+                || wrapper.get("workflow").and_then(Value::as_str)
+                    != Some("control_plane_readiness_audit")
+                || wrapper.get("readiness_claimed").and_then(Value::as_bool) != Some(false)
+                || wrapper.get("execution").and_then(Value::as_str) != Some("not_started")
+            {
+                return Err(format!(
+                    "{name} must be a successful, non-executing control_plane_readiness_audit wrapper"
+                ));
+            }
+            if wrapper
+                .pointer("/artifact_registry/indexed")
+                .and_then(Value::as_bool)
+                != Some(true)
+            {
+                return Err(format!("{name}.artifact_registry must be indexed"));
+            }
+            let audit = wrapper
+                .get("audit")
+                .and_then(Value::as_object)
+                .ok_or_else(|| format!("{name}.audit must be an object"))?;
+            if audit.get("schema").and_then(Value::as_str)
+                != Some("bioprism-control-plane-readiness/0.1")
+                || audit.get("workflow").and_then(Value::as_str)
+                    != Some("control_plane_readiness_audit")
+                || audit.get("readiness_claimed").and_then(Value::as_bool) != Some(false)
+                || audit.get("execution").and_then(Value::as_str) != Some("not_started")
+            {
+                return Err(format!(
+                    "{name}.audit has an invalid workflow or authority posture"
+                ));
+            }
+            let subject_id = audit
+                .get("subject_id")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| format!("{name}.audit.subject_id must be non-empty"))?
+                .to_string();
+            let digest = audit
+                .get("digest")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("{name}.audit.digest is required"))?;
+            let parsed_digest = bioprism_ids::ContentHash::parse(digest.to_string())
+                .map_err(|error| format!("{name}.audit.digest is invalid: {error}"))?;
+            let mut unsigned = audit.clone();
+            unsigned.remove("digest");
+            let computed = bioprism_ids::ContentHash::of_value(&Value::Object(unsigned))
+                .map_err(|error| format!("{name}.audit could not be hashed: {error}"))?;
+            if parsed_digest != computed {
+                return Err(format!("{name}.audit.digest does not match its content"));
+            }
+            if !audit.get("components").and_then(Value::as_object).is_some() {
+                return Err(format!("{name}.audit.components must be an object"));
+            }
+            if !audit.get("blockers").map_or(true, Value::is_array)
+                || !audit.get("domains").map_or(true, Value::is_array)
+                || !audit.get("parent_digests").map_or(true, Value::is_array)
+            {
+                return Err(format!("{name}.audit arrays are malformed"));
+            }
+            Ok((subject_id, Value::Object(audit.clone())))
+        };
+
+        let (before_subject, before) = extract("before")?;
+        let (after_subject, after) = extract("after")?;
+        if before_subject != after_subject {
+            return Err("before and after control-plane subjects must match".into());
+        }
+        if let Some(subject_id) = object.get("subject_id") {
+            if subject_id.as_str() != Some(before_subject.as_str()) {
+                return Err("subject_id must match both compared control-plane projections".into());
+            }
+        }
+        let before = before
+            .as_object()
+            .expect("extracted control-plane audit is an object");
+        let after = after
+            .as_object()
+            .expect("extracted control-plane audit is an object");
+        let before_components = before
+            .get("components")
+            .and_then(Value::as_object)
+            .expect("validated before components");
+        let after_components = after
+            .get("components")
+            .and_then(Value::as_object)
+            .expect("validated after components");
+        let mut component_names = BTreeSet::new();
+        component_names.extend(before_components.keys().cloned());
+        component_names.extend(after_components.keys().cloned());
+        let state_rank = |state: Option<&str>| match state {
+            Some("ready_for_human_review") => 3,
+            Some("review_required") => 2,
+            Some("incomplete") => 1,
+            Some("blocked") => 0,
+            _ => -1,
+        };
+        let mut component_changes = Vec::new();
+        let mut improvements = Vec::new();
+        let mut regressions = Vec::new();
+        for name in component_names {
+            let before_component = before_components.get(&name);
+            let after_component = after_components.get(&name);
+            let before_state = before_component
+                .and_then(|value| value.get("state"))
+                .and_then(Value::as_str);
+            let after_state = after_component
+                .and_then(|value| value.get("state"))
+                .and_then(Value::as_str);
+            let fields = ["present", "valid", "satisfied", "state"];
+            let changed_fields = fields
+                .into_iter()
+                .filter(|field| {
+                    before_component.and_then(|value| value.get(*field))
+                        != after_component.and_then(|value| value.get(*field))
+                })
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            if changed_fields.is_empty() {
+                continue;
+            }
+            let row = json!({
+                "component": name,
+                "changed_fields": changed_fields,
+                "before": before_component.cloned().unwrap_or_else(|| json!({})),
+                "after": after_component.cloned().unwrap_or_else(|| json!({})),
+                "state_rank_delta": state_rank(after_state) - state_rank(before_state)
+            });
+            let rank_delta = state_rank(after_state) - state_rank(before_state);
+            let before_satisfied = before_component
+                .and_then(|value| value.get("satisfied"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let after_satisfied = after_component
+                .and_then(|value| value.get("satisfied"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            if rank_delta > 0 || (!before_satisfied && after_satisfied) {
+                improvements.push(json!({
+                    "kind": if rank_delta > 0 { "component_state_improved" } else { "component_satisfied" },
+                    "component": row["component"].clone(),
+                    "before_state": before_state,
+                    "after_state": after_state
+                }));
+            }
+            if rank_delta < 0 || (before_satisfied && !after_satisfied) {
+                regressions.push(json!({
+                    "kind": if rank_delta < 0 { "component_state_regressed" } else { "component_unsatisfied" },
+                    "component": row["component"].clone(),
+                    "before_state": before_state,
+                    "after_state": after_state
+                }));
+            }
+            component_changes.push(row);
+        }
+
+        let digest_rows = |field: &str| -> Result<(Vec<Value>, Vec<Value>), String> {
+            let digest = |value: &Value| -> Result<String, String> {
+                bioprism_ids::ContentHash::of_value(value)
+                    .map(|hash| hash.to_string())
+                    .map_err(|error| format!("{field} row could not be hashed: {error}"))
+            };
+            let before_rows = before
+                .get(field)
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let after_rows = after
+                .get(field)
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let before_map = before_rows
+                .iter()
+                .map(|row| digest(row).map(|hash| (hash, row.clone())))
+                .collect::<Result<BTreeMap<_, _>, _>>()?;
+            let after_map = after_rows
+                .iter()
+                .map(|row| digest(row).map(|hash| (hash, row.clone())))
+                .collect::<Result<BTreeMap<_, _>, _>>()?;
+            Ok((
+                after_map
+                    .iter()
+                    .filter(|(hash, _)| !before_map.contains_key(*hash))
+                    .map(|(_, row)| row.clone())
+                    .collect(),
+                before_map
+                    .iter()
+                    .filter(|(hash, _)| !after_map.contains_key(*hash))
+                    .map(|(_, row)| row.clone())
+                    .collect(),
+            ))
+        };
+        let (blockers_added, blockers_removed) = digest_rows("blockers")?;
+        if !blockers_added.is_empty() {
+            regressions.push(json!({
+                "kind": "blockers_added",
+                "count": blockers_added.len()
+            }));
+        }
+        if !blockers_removed.is_empty() {
+            improvements.push(json!({
+                "kind": "blockers_removed",
+                "count": blockers_removed.len()
+            }));
+        }
+        let (domains_added, domains_removed) = digest_rows("domains")?;
+        let (parents_added, parents_removed) = digest_rows("parent_digests")?;
+        let before_state = before
+            .get("control_plane_state")
+            .and_then(Value::as_str)
+            .unwrap_or("blocked");
+        let after_state = after
+            .get("control_plane_state")
+            .and_then(Value::as_str)
+            .unwrap_or("blocked");
+        let before_policy = before.get("policy").cloned().unwrap_or_else(|| json!({}));
+        let after_policy = after.get("policy").cloned().unwrap_or_else(|| json!({}));
+        if before_policy != after_policy {
+            improvements.push(json!({
+                "kind": "policy_changed",
+                "note": "policy changes alter the meaning of policy_satisfied and require human review"
+            }));
+        }
+        let state_delta = state_rank(Some(after_state)) - state_rank(Some(before_state));
+        let state_direction = if state_delta > 0 {
+            "improved"
+        } else if state_delta < 0 {
+            "regressed"
+        } else {
+            "unchanged"
+        };
+        let evidence_direction = if !regressions.is_empty() && !improvements.is_empty() {
+            "mixed"
+        } else if !regressions.is_empty() {
+            "regressed"
+        } else if !improvements.is_empty() {
+            "improved"
+        } else {
+            "unchanged"
+        };
+        let next_action = match after_state {
+            "ready_for_human_review" => "obtain the separate human or domain-authority review; this projection is not authorization",
+            "review_required" => "inspect optional evidence and obtain the required human review",
+            "incomplete" => "supply the missing required evidence components or revise the explicit policy",
+            "blocked" => "resolve structural integrity errors and re-run the non-executing audit",
+            _ => "inspect the invalid control-plane state",
+        };
+        let mut comparison = json!({
+            "schema": "bioprism-control-plane-readiness-compare/0.1",
+            "workflow": "control_plane_readiness_compare",
+            "subject_id": before_subject,
+            "before": {
+                "audit_digest": before.get("digest"),
+                "control_plane_state": before_state,
+                "policy_satisfied": before.get("policy_satisfied")
+            },
+            "after": {
+                "audit_digest": after.get("digest"),
+                "control_plane_state": after_state,
+                "policy_satisfied": after.get("policy_satisfied")
+            },
+            "state_delta": state_delta,
+            "state_direction": state_direction,
+            "evidence_direction": evidence_direction,
+            "policy_changed": before_policy != after_policy,
+            "component_changes": component_changes,
+            "blockers_added": blockers_added,
+            "blockers_removed": blockers_removed,
+            "domains_added": domains_added,
+            "domains_removed": domains_removed,
+            "parent_digests_added": parents_added,
+            "parent_digests_removed": parents_removed,
+            "improvements": improvements,
+            "regressions": regressions,
+            "next_action": next_action,
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "guarantees": [
+                "both inputs are content-digest verified control-plane audits",
+                "component states, policy changes, blocker changes, domains, and parent edges remain separately inspectable",
+                "the comparison never reruns nested tools or infers a scientific, clinical, deployment, or release result"
+            ],
+            "does_not_claim": [
+                "a state improvement is authorization or proof of external execution",
+                "a state regression is failure of the underlying scientific or domain result",
+                "unchanged structural state means unchanged external reality"
+            ]
+        });
+        comparison["comparison_digest"] = Value::String(
+            bioprism_ids::ContentHash::of_value(&comparison)
+                .map_err(|error| {
+                    format!("control-plane comparison could not be digested: {error}")
+                })?
+                .to_string(),
+        );
+        Ok(json!({
+            "ok": true,
+            "schema": "bioprism-control-plane-readiness-compare/0.1",
+            "workflow": "control_plane_readiness_compare",
+            "comparison": comparison,
+            "readiness_claimed": false,
+            "execution": "not_started"
         }))
     }
 
@@ -35096,6 +35429,7 @@ pub fn workspace_capabilities() -> Value {
         "domain_decision_readiness_audit",
         "domain_decision_readiness_query",
         "control_plane_readiness_audit",
+        "control_plane_readiness_compare",
         "control_plane_readiness_query",
     ];
     if let Some(groups) = catalogue.as_array_mut() {
@@ -35444,6 +35778,19 @@ pub fn tool_definitions() -> Vec<Value> {
                     "include_audits": { "type": "boolean", "description": "Include full retained projections; defaults false." }
                 },
                 "required": []
+            }
+        }),
+        json!({
+            "name": "control_plane_readiness_compare",
+            "description": "Compare two successful, digest-verified control-plane readiness projections and expose component state changes, policy changes, added or removed blockers, domain and parent-digest changes, directional evidence, and the next structural review action. The comparison never reruns nested tools and never turns improvement into scientific, clinical, deployment, or release authority.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "subject_id": { "type": "string", "description": "Optional subject identity; when supplied it must match both compared audits." },
+                    "before": { "type": "object", "description": "Successful non-executing control_plane_readiness_audit response wrapper used as the earlier structural snapshot." },
+                    "after": { "type": "object", "description": "Successful non-executing control_plane_readiness_audit response wrapper used as the later structural snapshot." }
+                },
+                "required": ["before", "after"]
             }
         }),
         json!({

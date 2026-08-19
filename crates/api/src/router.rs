@@ -1727,6 +1727,9 @@ impl ApiRouter {
             ("POST", "/v1/control-plane-readiness") => {
                 self.control_plane_readiness_audit(&request, &request_id)
             }
+            ("POST", "/v1/control-plane-readiness/compare") => {
+                self.control_plane_readiness_compare(&request, &request_id)
+            }
             ("GET", "/v1/control-plane-readiness") => {
                 self.query_control_plane_readiness(&request, &request_id)
             }
@@ -3801,6 +3804,7 @@ impl ApiRouter {
                     "domain_evidence_coverage": "/v1/domain-evidence/coverage",
                     "domain_decision_readiness": "/v1/domain-decision-readiness",
                     "control_plane_readiness": "/v1/control-plane-readiness",
+                    "control_plane_readiness_compare": "/v1/control-plane-readiness/compare",
                     "domain_workflow_scaffold": "/v1/domain-workflows/scaffold",
                     "domain_workflow_instantiate": "/v1/domain-workflows/instantiate",
                     "domain_workflow_portfolio": "/v1/domain-workflows/portfolio",
@@ -3895,6 +3899,7 @@ impl ApiRouter {
                     "domain_evidence_coverage": true,
                     "domain_decision_readiness_query": true,
                     "control_plane_readiness_audit": true,
+                    "control_plane_readiness_compare": true,
                     "control_plane_readiness_query": true,
                     "capability_dashboard": true,
                     "capability_route": true,
@@ -7161,6 +7166,22 @@ impl ApiRouter {
         )
     }
 
+    fn control_plane_readiness_compare(
+        &self,
+        request: &HttpRequest,
+        request_id: &str,
+    ) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        self.domain_workflow_tool(
+            request_id,
+            "control_plane_readiness_compare",
+            Value::Object(arguments),
+        )
+    }
+
     fn query_control_plane_readiness(
         &self,
         request: &HttpRequest,
@@ -8793,6 +8814,7 @@ impl ApiRouter {
                     "/v1/evidence-bundles/persistence/flush": { "post": { "responses": { "200": { "description": "force a bounded evidence registry checkpoint" }, "409": { "description": "persistence is disabled" } } } },
                     "/v1/domain-decision-readiness": { "get": { "parameters": [{ "name": "subject_id", "in": "query" }, { "name": "decision_state", "in": "query" }, { "name": "policy_satisfied", "in": "query" }, { "name": "after", "in": "query" }, { "name": "limit", "in": "query" }, { "name": "include_audits", "in": "query" }], "responses": { "200": { "description": "bounded digest-ordered retained decision-readiness posture query" } } } },
                     "/v1/control-plane-readiness": { "get": { "parameters": [{ "name": "subject_id", "in": "query" }, { "name": "control_plane_state", "in": "query" }, { "name": "policy_satisfied", "in": "query" }, { "name": "after", "in": "query" }, { "name": "limit", "in": "query" }, { "name": "include_audits", "in": "query" }], "responses": { "200": { "description": "bounded digest-ordered retained control-plane readiness query" } } }, "post": { "responses": { "200": { "description": "digest-bound structural control-plane readiness projection" }, "422": { "description": "invalid component evidence or policy" } } } },
+                    "/v1/control-plane-readiness/compare": { "post": { "responses": { "200": { "description": "digest-verified structural comparison of two control-plane readiness projections" }, "422": { "description": "invalid or mismatched readiness projections" } } } },
                     "/v1/artifacts": { "get": { "parameters": [{ "name": "kind", "in": "query" }, { "name": "domain", "in": "query" }, { "name": "subject_id", "in": "query" }, { "name": "after", "in": "query" }, { "name": "limit", "in": "query" }, { "name": "include_artifacts", "in": "query" }], "responses": { "200": { "description": "bounded cross-domain artifact index query" } } }, "post": { "responses": { "201": { "description": "registered content-addressed artifact" }, "200": { "description": "idempotent artifact registration" } } } },
                     "/v1/artifacts/cross-store": { "get": { "responses": { "200": { "description": "digest-only consistency audit across artifact, evidence, and workflow-reconciliation registries" } } } },
                     "/v1/artifacts/{content_digest}": { "get": { "parameters": [{ "name": "content_digest", "in": "path", "required": true }], "responses": { "200": { "description": "one artifact record with verification posture" }, "404": { "description": "artifact digest is not present" } } } },

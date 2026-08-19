@@ -136,6 +136,9 @@ and completion evidence.
 with optional route, operations, release, and workflow evidence packets. The typed result preserves
 component-level validity, satisfaction, digests, authority labels, and the separate top-level
 structural state; it never widens `ready_for_human_review` into execution or release authority.
+`controlPlaneReadinessCompare` and `controlPlaneReadinessCompareRest` compare two
+successful, digest-verified snapshots and preserve component transitions, policy changes,
+blocker/domain/parent deltas, directional evidence, and the next structural review action.
 `controlPlaneReadinessQuery` and `controlPlaneReadinessQueryTool` expose cursor-bounded retained
 projections with exact subject/state/policy filters and opt-in full bodies.
 `domainEvidenceHarmonizationCoverage` and

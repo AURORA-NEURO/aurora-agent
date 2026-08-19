@@ -69,6 +69,11 @@ deployment, scientific, clinical, or release authority. `ControlPlaneReadinessQu
 `ControlPlaneReadinessQueryReport` provide exact subject/state/policy filters and opt-in retained
 bodies. Sync/async HTTP clients expose dedicated REST and MCP variants; Workspace and
 AsyncWorkspace expose the same typed projection helpers.
+ControlPlaneReadinessCompareRequest / ControlPlaneReadinessCompareReport add a digest-verified
+before/after structural diff. The report preserves component transitions, policy changes,
+blocker/domain/parent deltas, directional evidence, and a deterministic next action through
+Workspace, AsyncWorkspace, ApiClient, and AsyncApiClient; it never reruns nested tools or turns
+an improved state into authority.
 `DomainEvidenceHarmonizationCoverageRequest` and
 `DomainEvidenceHarmonizationCoverageReport` provide the bounded retained read model through
 `ApiClient.domain_evidence_harmonization_coverage()` and its tool counterpart, plus matching

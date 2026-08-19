@@ -39,6 +39,25 @@ const query = {
   registry_size: 1,
 };
 
+const comparison = {
+  ok: true,
+  schema: "bioprism-control-plane-readiness-compare/0.1",
+  workflow: "control_plane_readiness_compare",
+  comparison: {
+    subject_id: "subject-control-plane",
+    state_direction: "unchanged",
+    evidence_direction: "unchanged",
+    component_changes: [],
+    blockers_added: [],
+    blockers_removed: [],
+    improvements: [],
+    regressions: [],
+    comparison_digest: "c".repeat(64),
+  },
+  readiness_claimed: false,
+  execution: "not_started",
+};
+
 function response(value) {
   return new Response(JSON.stringify(value), { status: 200, headers: { "content-type": "application/json" } });
 }
@@ -52,6 +71,8 @@ test("control-plane readiness preserves explicit packets through MCP and REST", 
       seen.push({ path: url.pathname, body: init?.body ? JSON.parse(init.body) : undefined });
       if (url.pathname === "/v1/tools/control_plane_readiness_audit") return response({ ok: true, tool: "control_plane_readiness_audit", mcp: { result: { structuredContent: result } } });
       if (url.pathname === "/v1/control-plane-readiness" && init.method === "POST") return response(result);
+      if (url.pathname === "/v1/tools/control_plane_readiness_compare") return response({ ok: true, tool: "control_plane_readiness_compare", mcp: { result: { structuredContent: comparison } } });
+      if (url.pathname === "/v1/control-plane-readiness/compare") return response(comparison);
       if (url.pathname === "/v1/control-plane-readiness" && init.method === "GET") return response(query);
       throw new Error(`unexpected path ${url.pathname}`);
     },
@@ -60,6 +81,10 @@ test("control-plane readiness preserves explicit packets through MCP and REST", 
   assert.equal(mcp.mcp.result.structuredContent.audit.control_plane_state, "ready_for_human_review");
   const rest = await client.controlPlaneReadinessAuditRest(args);
   assert.equal(rest.artifact_registry.content_digest, "b".repeat(64));
+  const compared = await client.controlPlaneReadinessCompare({ before: result, after: result });
+  assert.equal(compared.mcp.result.structuredContent.comparison.evidence_direction, "unchanged");
+  const comparedRest = await client.controlPlaneReadinessCompareRest({ before: result, after: result });
+  assert.equal(comparedRest.comparison.comparison_digest, "c".repeat(64));
   assert.equal(seen[0].body.route_review.workflow, "capability_route_review");
   await assert.rejects(client.controlPlaneReadinessAudit({ ...args, subject_id: "" }), ArgumentError);
 });

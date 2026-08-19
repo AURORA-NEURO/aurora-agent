@@ -356,6 +356,11 @@ and authority separately, then emits `ready_for_human_review`, `incomplete`, `bl
 promotes operator acceptance into deployment approval, or treats a release audit as proof of an
 external build. The exact projection is indexed as `control_plane_readiness`; the GET route is
 digest-ordered, cursor-bounded, and restart-safe when artifact persistence is configured.
+POST /v1/control-plane-readiness/compare accepts two successful, digest-verified projection
+wrappers and returns a deterministic structural diff: state direction, component transitions,
+policy changes, blocker additions/removals, domain and parent-digest deltas, and a next review
+action. It is a replay/inspection boundary only; it does not rerun nested evidence or grant
+execution, scientific, clinical, deployment, or release authority.
 `POST /v1/domain-evidence/intake` is the raw-envelope boundary for all 29 capability groups. It
 requires a declared group, source tool, domain label, response JSON, explicit outcome, and claim
 posture; an original request is optional and its absence is distinguished from a supplied JSON

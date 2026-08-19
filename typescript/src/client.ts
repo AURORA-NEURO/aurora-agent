@@ -56,6 +56,8 @@ import type {
   DomainDecisionReadinessQueryResult,
   ControlPlaneReadinessArgs,
   ControlPlaneReadinessResult,
+  ControlPlaneReadinessCompareArgs,
+  ControlPlaneReadinessCompareResult,
   ControlPlaneReadinessQueryOptions,
   ControlPlaneReadinessQueryResult,
   DomainEvidenceHarmonizationCoverageOptions,
@@ -882,6 +884,32 @@ export class ApiClient {
       }
     }
     return this.callTool<ControlPlaneReadinessResult>("control_plane_readiness_audit", args, options);
+  }
+
+  /** Compare two retained structural control-plane snapshots through MCP. */
+  async controlPlaneReadinessCompare(
+    args: ControlPlaneReadinessCompareArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<ControlPlaneReadinessCompareResult>> {
+    if (!isObject(args)) throw new ArgumentError("control-plane readiness comparison arguments must be an object");
+    for (const [name, value] of [["before", args.before], ["after", args.after]] as const) {
+      if (!isObject(value)) throw new ArgumentError(name + " must be a control-plane readiness response object");
+    }
+    if (args.subject_id !== undefined && (typeof args.subject_id !== "string" || args.subject_id.trim().length === 0)) throw new ArgumentError("subject_id must be a non-empty string");
+    return this.callTool<ControlPlaneReadinessCompareResult>("control_plane_readiness_compare", args, options);
+  }
+
+  /** Compare two digest-verified structural control-plane snapshots through REST. */
+  async controlPlaneReadinessCompareRest(
+    args: ControlPlaneReadinessCompareArgs,
+    options?: ClientRequestOptions,
+  ): Promise<ControlPlaneReadinessCompareResult> {
+    if (!isObject(args)) throw new ArgumentError("control-plane readiness comparison arguments must be an object");
+    for (const [name, value] of [["before", args.before], ["after", args.after]] as const) {
+      if (!isObject(value)) throw new ArgumentError(name + " must be a control-plane readiness response object");
+    }
+    if (args.subject_id !== undefined && (typeof args.subject_id !== "string" || args.subject_id.trim().length === 0)) throw new ArgumentError("subject_id must be a non-empty string");
+    return this.request<ControlPlaneReadinessCompareResult>("POST", "/v1/control-plane-readiness/compare", args, options);
   }
 
   /** Compose the same control-plane projection through its dedicated REST endpoint. */

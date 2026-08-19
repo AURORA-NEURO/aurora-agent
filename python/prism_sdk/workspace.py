@@ -52,6 +52,8 @@ from .domain_decision_readiness import (
     DomainDecisionReadinessQueryRequest,
 )
 from .control_plane_readiness import (
+    ControlPlaneReadinessCompareReport,
+    ControlPlaneReadinessCompareRequest,
     ControlPlaneReadinessReport,
     ControlPlaneReadinessRequest,
     ControlPlaneReadinessQueryReport,
@@ -2486,6 +2488,23 @@ class Workspace:
         request: ControlPlaneReadinessRequest | Mapping[str, Any],
     ) -> ControlPlaneReadinessReport:
         return ControlPlaneReadinessReport.from_wire(self.control_plane_readiness_audit(request))
+
+    def control_plane_readiness_compare(
+        self,
+        request: ControlPlaneReadinessCompareRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, ControlPlaneReadinessCompareRequest)
+            else ControlPlaneReadinessCompareRequest(**dict(request))
+        )
+        return self.tool("control_plane_readiness_compare", normalized.to_arguments())
+
+    def control_plane_readiness_compare_report(
+        self,
+        request: ControlPlaneReadinessCompareRequest | Mapping[str, Any],
+    ) -> ControlPlaneReadinessCompareReport:
+        return ControlPlaneReadinessCompareReport.from_wire(self.control_plane_readiness_compare(request))
 
     def control_plane_readiness_query(
         self,
@@ -6674,6 +6693,23 @@ class AsyncWorkspace:
         request: ControlPlaneReadinessRequest | Mapping[str, Any],
     ) -> ControlPlaneReadinessReport:
         return ControlPlaneReadinessReport.from_wire(await self.control_plane_readiness_audit(request))
+
+    async def control_plane_readiness_compare(
+        self,
+        request: ControlPlaneReadinessCompareRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, ControlPlaneReadinessCompareRequest)
+            else ControlPlaneReadinessCompareRequest(**dict(request))
+        )
+        return await self.tool("control_plane_readiness_compare", normalized.to_arguments())
+
+    async def control_plane_readiness_compare_report(
+        self,
+        request: ControlPlaneReadinessCompareRequest | Mapping[str, Any],
+    ) -> ControlPlaneReadinessCompareReport:
+        return ControlPlaneReadinessCompareReport.from_wire(await self.control_plane_readiness_compare(request))
 
     async def control_plane_readiness_query(
         self,

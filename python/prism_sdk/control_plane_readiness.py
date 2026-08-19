@@ -24,6 +24,7 @@ CONTROL_PLANE_READINESS_STATES = (
     "blocked",
 )
 CONTROL_PLANE_READINESS_QUERY_SCHEMA = "bioprism-devplat-artifact-control-plane-readiness-query/0.1"
+CONTROL_PLANE_READINESS_COMPARE_SCHEMA = "bioprism-control-plane-readiness-compare/0.1"
 
 
 @dataclass(frozen=True)
@@ -147,6 +148,72 @@ def control_plane_readiness_report(value: Mapping[str, Any]) -> ControlPlaneRead
 
 
 @dataclass(frozen=True)
+class ControlPlaneReadinessCompareRequest:
+    """Two complete control-plane snapshots for a digest-verified structural diff."""
+
+    before: Mapping[str, Any]
+    after: Mapping[str, Any]
+    subject_id: str | None = None
+
+    def __post_init__(self) -> None:
+        for name, value in (("before", self.before), ("after", self.after)):
+            if not isinstance(value, Mapping):
+                raise ArgumentError(f"control-plane readiness comparison {name} must be an object")
+        if self.subject_id is not None:
+            _text("control-plane readiness comparison subject_id", self.subject_id)
+
+    def to_arguments(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "before": dict(self.before),
+            "after": dict(self.after),
+        }
+        if self.subject_id is not None:
+            result["subject_id"] = self.subject_id
+        return result
+
+
+@dataclass(frozen=True)
+class ControlPlaneReadinessCompareReport:
+    """Typed structural change report; no external authority is inferred."""
+
+    raw: dict[str, Any]
+    comparison: Mapping[str, Any]
+    subject_id: str
+    state_direction: str
+    evidence_direction: str
+    comparison_digest: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "ControlPlaneReadinessCompareReport":
+        raw = _tool_payload(value, "control_plane_readiness_compare")
+        if raw.get("schema") != CONTROL_PLANE_READINESS_COMPARE_SCHEMA:
+            raise ArgumentError("control-plane readiness comparison schema is invalid")
+        if raw.get("readiness_claimed") is not False or raw.get("execution") != "not_started":
+            raise ArgumentError("control-plane readiness comparison must remain non-executing")
+        comparison = _mapping("control-plane readiness comparison", raw.get("comparison"))
+        state_direction = _text("control-plane readiness comparison state_direction", comparison.get("state_direction"))
+        if state_direction not in {"improved", "regressed", "unchanged"}:
+            raise ArgumentError("control-plane readiness comparison state_direction is invalid")
+        evidence_direction = _text("control-plane readiness comparison evidence_direction", comparison.get("evidence_direction"))
+        if evidence_direction not in {"improved", "regressed", "mixed", "unchanged"}:
+            raise ArgumentError("control-plane readiness comparison evidence_direction is invalid")
+        for name in ("component_changes", "blockers_added", "blockers_removed", "improvements", "regressions"):
+            if not isinstance(comparison.get(name), (list, tuple)):
+                raise ArgumentError(f"control-plane readiness comparison {name} must be an array")
+        return cls(
+            raw=raw,
+            comparison=comparison,
+            subject_id=_text("control-plane readiness comparison subject_id", comparison.get("subject_id")),
+            state_direction=state_direction,
+            evidence_direction=evidence_direction,
+            comparison_digest=_digest("control-plane readiness comparison digest", comparison.get("comparison_digest")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
 class ControlPlaneReadinessQueryRequest:
     """Bounded lookup over retained control-plane projections."""
 
@@ -231,8 +298,11 @@ __all__ = [
     "CONTROL_PLANE_READINESS_WORKFLOW",
     "CONTROL_PLANE_READINESS_STATES",
     "CONTROL_PLANE_READINESS_QUERY_SCHEMA",
+    "CONTROL_PLANE_READINESS_COMPARE_SCHEMA",
     "ControlPlaneReadinessRequest",
     "ControlPlaneReadinessReport",
+    "ControlPlaneReadinessCompareRequest",
+    "ControlPlaneReadinessCompareReport",
     "ControlPlaneReadinessQueryRequest",
     "ControlPlaneReadinessQueryReport",
     "control_plane_readiness_report",

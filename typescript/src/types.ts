@@ -6007,6 +6007,31 @@ export interface ControlPlaneReadinessQueryResult extends JsonObject {
   does_not_claim: string[];
 }
 
+export interface ControlPlaneReadinessCompareArgs extends JsonObject {
+  subject_id?: string;
+  before: ControlPlaneReadinessResult;
+  after: ControlPlaneReadinessResult;
+}
+
+export interface ControlPlaneReadinessCompareResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-control-plane-readiness-compare/0.1";
+  workflow: "control_plane_readiness_compare";
+  comparison: JsonObject & {
+    subject_id: string;
+    state_direction: "improved" | "regressed" | "unchanged";
+    evidence_direction: "improved" | "regressed" | "mixed" | "unchanged";
+    component_changes: JsonObject[];
+    blockers_added: JsonObject[];
+    blockers_removed: JsonObject[];
+    improvements: JsonObject[];
+    regressions: JsonObject[];
+    comparison_digest: string;
+  };
+  readiness_claimed: false;
+  execution: "not_started";
+}
+
 export interface DomainEvidenceHarmonizationCoverageOptions extends JsonObject {
   subject_id?: string;
   domain?: string;
