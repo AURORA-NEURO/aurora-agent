@@ -161,6 +161,30 @@ learning path; it does not turn a provider response into a reward automatically.
 can still call `AutonomousTaskOrchestrator` directly when it needs to provide every candidate
 mapping or policy field itself.
 
+For restart-safe provider adaptation, give the agent a caller-owned `ProviderHealthLedger`:
+
+```python
+from prism_sdk import AutonomousAgent, ProviderHealthLedger
+
+health = ProviderHealthLedger("state/provider-health.jsonl")
+agent = AutonomousAgent(
+    workspace,
+    runtime,
+    model_catalogue=catalogue,
+    health_ledger=health,
+)
+```
+
+The agent registers a value-only runtime observer that appends provider/model, success or
+failure, latency, status code, circuit state, and bounded usage metadata. On every subsequent
+`run()` it merges the latest historical `provider_health` overlay into model selection, while
+preserving explicit caller overrides. Open circuits remain a hard gate until their recorded
+expiry; expired historical circuits become closed and can be probed again. `health.to_dict()` and
+`agent.readiness()` expose only this redacted operational summary. The ledger rejects secret-shaped
+fields and never stores API keys, request messages, response text, headers, credential handles, or
+model prompts. This is complementary to `BrainLearningLedger`: provider health describes
+transport reliability, while evaluator rewards describe task quality and drive bandit adaptation.
+
 The OpenAI adapter targets the Responses API (`POST /v1/responses`) and Bearer authentication, as
 described in the [OpenAI API reference](https://platform.openai.com/docs/api-reference/introduction)
 and [quickstart](https://platform.openai.com/docs/quickstart/make-your-first-api-request). The

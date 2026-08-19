@@ -45,6 +45,7 @@ from .llm_runtime import (
     LLMRuntime,
     ModelCandidate,
     ModelCatalogue,
+    ProviderHealthLedger,
     ProviderOnboarding,
     ProviderTool,
 )
@@ -3415,6 +3416,7 @@ class AutonomousAgent:
         workflow_registry: AutonomousWorkflowRegistry | None = None,
         ledger: BrainLearningLedger | None = None,
         memory: BrainEpisodicMemory | None = None,
+        health_ledger: ProviderHealthLedger | None = None,
     ) -> None:
         if not isinstance(runtime, LLMRuntime):
             raise BrainRunError("runtime must be an LLMRuntime")
@@ -3428,12 +3430,17 @@ class AutonomousAgent:
             raise BrainRunError("ledger must be a BrainLearningLedger or None")
         if memory is not None and not isinstance(memory, BrainEpisodicMemory):
             raise BrainRunError("memory must be a BrainEpisodicMemory or None")
+        if health_ledger is not None and not isinstance(health_ledger, ProviderHealthLedger):
+            raise BrainRunError("health_ledger must be a ProviderHealthLedger or None")
         self.runtime = runtime
         self.onboarding = ProviderOnboarding(runtime)
         self.catalogue = model_catalogue or ModelCatalogue()
         self.brain = brain or AutonomousBrain(workspace, runtime)
         self.ledger = ledger
         self.memory = memory
+        self.health_ledger = health_ledger
+        if health_ledger is not None:
+            runtime.add_observation_callback(health_ledger.record)
         self.orchestrator = AutonomousTaskOrchestrator(
             self.brain,
             registry=registry,
@@ -3491,6 +3498,11 @@ class AutonomousAgent:
                     and bool(provider_status.get("ready", False)),
                 }
             )
+        health = {} if self.health_ledger is None else self.health_ledger.health_snapshot()
+        for row in providers:
+            provider = row.get("provider") if isinstance(row, Mapping) else None
+            if isinstance(provider, str):
+                row["health"] = dict(health.get(provider, {}))
         next_actions = sorted(
             {
                 str(row.get("next_action"))
@@ -3502,6 +3514,7 @@ class AutonomousAgent:
             "schema": "bioprism-autonomous-agent-readiness/0.1",
             "providers": providers,
             "models": models,
+            "provider_health": health,
             "next_actions": next_actions,
             "secret_material": "never_returned",
             "credential_posture": "caller_supplied_opaque_handles",
@@ -3570,6 +3583,19 @@ class AutonomousAgent:
         options = dict(kwargs)
         options.setdefault("ledger", self.ledger)
         options.setdefault("memory", self.memory)
+        if self.health_ledger is not None:
+            historical = self.health_ledger.selection_overrides()
+            supplied = options.get("selection_overrides")
+            if supplied is None:
+                options["selection_overrides"] = historical or None
+            elif isinstance(supplied, Mapping):
+                merged = dict(historical)
+                merged.update(dict(supplied))
+                historical_health = historical.get("provider_health")
+                supplied_health = supplied.get("provider_health")
+                if isinstance(historical_health, Mapping) and isinstance(supplied_health, Mapping):
+                    merged["provider_health"] = {**dict(historical_health), **dict(supplied_health)}
+                options["selection_overrides"] = merged
         if options.get("learn") and options.get("bandit_state") is None:
             options["bandit_state"] = self.learning_state()
         return self.orchestrator.run(

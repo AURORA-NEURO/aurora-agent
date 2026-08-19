@@ -23,10 +23,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 import getpass
+import hashlib
 import http.client
 import json
 import math
 import os
+from pathlib import Path
 import secrets
 import threading
 import time
@@ -50,8 +52,11 @@ SUPPORTED_PROTOCOLS = {
 }
 PROVIDER_OBSERVATION_SCHEMA = "bioprism-llm-provider-observation/0.1"
 MODEL_CATALOGUE_SCHEMA = "bioprism-llm-model-catalogue/0.1"
+PROVIDER_HEALTH_LEDGER_SCHEMA = "bioprism-llm-provider-health-ledger/0.1"
 MAX_MODEL_CANDIDATES = 512
 MAX_MODEL_METADATA_BYTES = 256_000
+MAX_PROVIDER_HEALTH_RECORDS = 16_384
+MAX_PROVIDER_HEALTH_BYTES = 32_000_000
 _MODEL_CANDIDATE_FIELDS = frozenset(
     {
         "provider",
@@ -676,6 +681,299 @@ class ModelCatalogue:
             return len(self._candidates)
 
 
+class ProviderHealthLedger:
+    """Durable, value-only provider observations for restart-safe routing.
+
+    The runtime circuit is intentionally process-local because it owns the live transport. This
+    ledger persists only bounded outcome metadata, allowing an embedding application to restore
+    a conservative historical provider gate after a restart. It never accepts request messages,
+    response text, headers, credential handles, or arbitrary metadata fields.
+    """
+
+    _FORBIDDEN_FIELDS = frozenset(
+        {
+            "api_key",
+            "apikey",
+            "authorization",
+            "bearer",
+            "credential",
+            "password",
+            "secret",
+            "access_token",
+            "refresh_token",
+            "token",
+        }
+    )
+    _FORBIDDEN_NORMALIZED_FIELDS = frozenset(
+        "".join(character for character in field if character.isalnum())
+        for field in _FORBIDDEN_FIELDS
+    )
+    _ALLOWED_FIELDS = frozenset(
+        {
+            "schema",
+            "provider",
+            "model",
+            "status",
+            "outcome",
+            "latency_ms",
+            "observed_at",
+            "status_code",
+            "failure_class",
+            "circuit",
+            "consecutive_failures",
+            "opened_until",
+            "input_tokens",
+            "output_tokens",
+            "retention",
+        }
+    )
+
+    def __init__(
+        self,
+        path: str | os.PathLike[str],
+        *,
+        max_records: int = MAX_PROVIDER_HEALTH_RECORDS,
+        max_bytes: int = MAX_PROVIDER_HEALTH_BYTES,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        if not isinstance(max_records, int) or isinstance(max_records, bool) or max_records <= 0:
+            raise ProviderError("provider health ledger max_records must be positive")
+        if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or max_bytes <= 0:
+            raise ProviderError("provider health ledger max_bytes must be positive")
+        if not callable(clock):
+            raise ProviderError("provider health ledger clock must be callable")
+        self.path = Path(path)
+        self.max_records = max_records
+        self.max_bytes = max_bytes
+        self._clock = clock
+        self._lock = threading.RLock()
+
+    def record(self, observation: Mapping[str, Any]) -> dict[str, Any]:
+        """Append one runtime observation and return a metadata-only receipt.
+
+        This method is suitable as ``LLMRuntime(observation_callback=ledger.record)``. Runtime
+        callbacks are best-effort, so a full or temporarily unreadable ledger cannot alter the
+        provider invocation that produced the observation.
+        """
+
+        normalized = self._normalize_observation(observation)
+        line = json.dumps(
+            {"schema": PROVIDER_HEALTH_LEDGER_SCHEMA, "observation": normalized},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8") + b"\n"
+        with self._lock:
+            existing_size = self.path.stat().st_size if self.path.exists() else 0
+            if existing_size + len(line) > self.max_bytes:
+                raise ProviderError("provider health ledger capacity is exhausted")
+            rows = self._read_records_locked()
+            if len(rows) >= self.max_records:
+                raise ProviderError("provider health ledger record capacity is exhausted")
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with self.path.open("ab") as handle:
+                handle.write(line)
+                handle.flush()
+                os.fsync(handle.fileno())
+            digest = hashlib.sha256(line.rstrip(b"\n")).hexdigest()
+            return {
+                "schema": PROVIDER_HEALTH_LEDGER_SCHEMA,
+                "record_index": len(rows),
+                "record_digest": digest,
+                "provider": normalized["provider"],
+                "outcome": normalized["outcome"],
+            }
+
+    def records(self, *, provider: str | None = None, limit: int | None = None) -> list[dict[str, Any]]:
+        """Read bounded observations in append order, optionally filtered by provider."""
+
+        if provider is not None:
+            self._validate_provider(provider)
+        if limit is not None and (
+            not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= self.max_records
+        ):
+            raise ProviderError("provider health ledger limit is outside its bounds")
+        with self._lock:
+            rows = self._read_records_locked()
+        observations = [
+            dict(row["observation"])
+            for row in rows
+            if provider is None or row["observation"].get("provider") == provider
+        ]
+        if limit is not None:
+            observations = observations[-limit:]
+        return observations
+
+    def health_snapshot(self, *, now: float | None = None) -> dict[str, dict[str, Any]]:
+        """Aggregate the latest safe health state for each observed provider.
+
+        An expired historical circuit is projected as closed. This prevents a transient outage
+        from permanently disabling a provider while preserving the latest success/failure and
+        latency evidence for diagnostics and future routing policies.
+        """
+
+        current_time = self._clock() if now is None else now
+        if not isinstance(current_time, (int, float)) or isinstance(current_time, bool) or not math.isfinite(float(current_time)):
+            raise ProviderError("provider health snapshot time must be finite")
+        aggregate: dict[str, dict[str, Any]] = {}
+        for observation in self.records():
+            provider = observation["provider"]
+            state = aggregate.setdefault(
+                provider,
+                {
+                    "attempts": 0,
+                    "successes": 0,
+                    "failures": 0,
+                    "total_input_tokens": 0,
+                    "total_output_tokens": 0,
+                },
+            )
+            state["attempts"] += 1
+            state["successes"] += int(observation["outcome"] == "success")
+            state["failures"] += int(observation["outcome"] == "failure")
+            state["total_input_tokens"] += int(observation.get("input_tokens", 0))
+            state["total_output_tokens"] += int(observation.get("output_tokens", 0))
+            state.update(
+                {
+                    "last_model": observation["model"],
+                    "circuit": observation.get("circuit", "closed"),
+                    "consecutive_failures": observation.get("consecutive_failures", 0),
+                    "opened_until": observation.get("opened_until"),
+                    "last_outcome": observation["outcome"],
+                    "last_status": observation["status"],
+                    "last_latency_ms": observation["latency_ms"],
+                    "observed_at": observation["observed_at"],
+                }
+            )
+            if "status_code" in observation:
+                state["last_status_code"] = observation["status_code"]
+        for state in aggregate.values():
+            attempts = state["attempts"]
+            state["success_rate"] = state["successes"] / attempts if attempts else 0.0
+            opened_until = state.get("opened_until")
+            if state.get("circuit") == "open" and (
+                opened_until is None or float(opened_until) > float(current_time)
+            ):
+                state["circuit"] = "open"
+            else:
+                state["circuit"] = "closed"
+                state["opened_until"] = None
+        return {provider: aggregate[provider] for provider in sorted(aggregate)}
+
+    def selection_overrides(self, *, now: float | None = None) -> dict[str, Any]:
+        """Return the brain selector's safe historical provider-health overlay."""
+
+        snapshot = self.health_snapshot(now=now)
+        return {} if not snapshot else {"provider_health": snapshot}
+
+    def to_dict(self, *, now: float | None = None) -> dict[str, Any]:
+        snapshot = self.health_snapshot(now=now)
+        return {
+            "schema": PROVIDER_HEALTH_LEDGER_SCHEMA,
+            "provider_count": len(snapshot),
+            "providers": snapshot,
+            "record_count": len(self.records()),
+            "retention": "value_only_provider_outcomes_no_payloads_or_credentials",
+        }
+
+    def _normalize_observation(self, observation: Mapping[str, Any]) -> dict[str, Any]:
+        if not isinstance(observation, Mapping):
+            raise ProviderError("provider health observation must be an object")
+        self._assert_value_only(observation)
+        unknown = [key for key in observation if not isinstance(key, str) or key not in self._ALLOWED_FIELDS]
+        if unknown:
+            raise ProviderError("provider health observation contains unsupported fields")
+        if observation.get("schema") != PROVIDER_OBSERVATION_SCHEMA:
+            raise ProviderError("provider health observation schema is invalid")
+        provider = observation.get("provider")
+        self._validate_provider(provider)
+        model = observation.get("model")
+        if not isinstance(model, str) or not model.strip() or len(model.encode("utf-8")) > 512:
+            raise ProviderError("provider health observation model is invalid")
+        status = observation.get("status")
+        outcome = observation.get("outcome")
+        if status not in {"completed", "provider_refused"} or outcome not in {"success", "failure"}:
+            raise ProviderError("provider health observation status or outcome is invalid")
+        latency = observation.get("latency_ms")
+        if not isinstance(latency, (int, float)) or isinstance(latency, bool) or not math.isfinite(float(latency)) or latency < 0:
+            raise ProviderError("provider health observation latency is invalid")
+        observed_at = observation.get("observed_at", self._clock())
+        if not isinstance(observed_at, (int, float)) or isinstance(observed_at, bool) or not math.isfinite(float(observed_at)):
+            raise ProviderError("provider health observation timestamp is invalid")
+        result: dict[str, Any] = {
+            "schema": PROVIDER_OBSERVATION_SCHEMA,
+            "provider": provider,
+            "model": model,
+            "status": status,
+            "outcome": outcome,
+            "latency_ms": float(latency),
+            "observed_at": float(observed_at),
+        }
+        for field_name in ("status_code", "consecutive_failures", "input_tokens", "output_tokens"):
+            value = observation.get(field_name)
+            if value is not None:
+                if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                    raise ProviderError(f"provider health observation {field_name} is invalid")
+                result[field_name] = value
+        failure_class = observation.get("failure_class")
+        if failure_class is not None:
+            if failure_class not in {"provider_error", "circuit_open"}:
+                raise ProviderError("provider health observation failure_class is invalid")
+            result["failure_class"] = failure_class
+        circuit = observation.get("circuit", "closed")
+        if circuit not in {"open", "closed"}:
+            raise ProviderError("provider health observation circuit is invalid")
+        result["circuit"] = circuit
+        opened_until = observation.get("opened_until")
+        if opened_until is not None:
+            if not isinstance(opened_until, (int, float)) or isinstance(opened_until, bool) or not math.isfinite(float(opened_until)):
+                raise ProviderError("provider health observation opened_until is invalid")
+            result["opened_until"] = float(opened_until)
+        return result
+
+    def _read_records_locked(self) -> list[dict[str, Any]]:
+        if not self.path.exists():
+            return []
+        if self.path.stat().st_size > self.max_bytes:
+            raise ProviderError("provider health ledger exceeds max_bytes")
+        rows: list[dict[str, Any]] = []
+        with self.path.open("rb") as handle:
+            for raw_line in handle:
+                if len(rows) >= self.max_records:
+                    raise ProviderError("provider health ledger exceeds max_records")
+                try:
+                    row = json.loads(raw_line.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                    raise ProviderError("provider health ledger contains invalid JSON") from error
+                if not isinstance(row, Mapping) or row.get("schema") != PROVIDER_HEALTH_LEDGER_SCHEMA:
+                    raise ProviderError("provider health ledger contains an invalid schema")
+                observation = row.get("observation")
+                rows.append({"schema": row["schema"], "observation": self._normalize_observation(observation)})
+        return rows
+
+    @classmethod
+    def _assert_value_only(cls, value: Any, *, depth: int = 0) -> None:
+        if depth > 16:
+            raise ProviderError("provider health observation is too deeply nested")
+        if isinstance(value, Mapping):
+            for key, child in value.items():
+                normalized = "".join(character for character in key.lower() if character.isalnum()) if isinstance(key, str) else ""
+                if normalized in cls._FORBIDDEN_NORMALIZED_FIELDS:
+                    raise ProviderError("provider health observation contains forbidden secret fields")
+                cls._assert_value_only(child, depth=depth + 1)
+        elif isinstance(value, (list, tuple)):
+            for child in value:
+                cls._assert_value_only(child, depth=depth + 1)
+        elif isinstance(value, float) and not math.isfinite(value):
+            raise ProviderError("provider health observation contains a non-finite number")
+
+    @staticmethod
+    def _validate_provider(provider: Any) -> None:
+        if not isinstance(provider, str) or not provider.strip() or "/" in provider or " " in provider:
+            raise ProviderError("provider health provider must be a path-safe identifier")
+
+
 @dataclass(frozen=True, slots=True)
 class ProviderTool:
     """Provider-neutral function schema; it describes a tool but never grants execution."""
@@ -1119,8 +1417,17 @@ class LLMRuntime:
             "status": status,
             "outcome": outcome,
             "latency_ms": max(0.0, float(latency_ms)),
+            "observed_at": float(self._clock()),
             "retention": "metadata_only_no_provider_payloads",
         }
+        circuit_state = self._circuits.get(config.provider)
+        if circuit_state is not None:
+            now = self._clock()
+            circuit_open = circuit_state.opened_until is not None and now < circuit_state.opened_until
+            payload["circuit"] = "open" if circuit_open else "closed"
+            payload["consecutive_failures"] = circuit_state.consecutive_failures
+            if circuit_state.opened_until is not None:
+                payload["opened_until"] = circuit_state.opened_until
         if response is not None:
             for key in ("input_tokens", "output_tokens"):
                 value = response.usage.get(key)

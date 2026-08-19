@@ -24,6 +24,7 @@ from prism_sdk import (
     LLMRuntime,
     ModelCandidate,
     ModelCatalogue,
+    ProviderHealthLedger,
     ProviderError,
     ProviderToolResult,
     openai_provider,
@@ -324,6 +325,57 @@ def test_model_candidate_catalogue_is_typed_and_deterministic():
     assert catalogue.get("openai", "test-model").quality == 0.95  # type: ignore[union-attr]
     with pytest.raises(ProviderError):
         ModelCandidate.from_mapping({**_model()[0], "api_key": "must-not-enter-catalogue"})
+
+
+def test_autonomous_agent_replays_provider_health_into_selection_and_readiness(tmp_path: Path):
+    runtime, store, server, thread = _runtime()
+    try:
+        handle = store.register("openai", "health-agent-secret")
+        health_ledger = ProviderHealthLedger(tmp_path / "provider-health.jsonl")
+        health_ledger.record(
+            {
+                "schema": "bioprism-llm-provider-observation/0.1",
+                "provider": "openai",
+                "model": "test-model",
+                "status": "provider_refused",
+                "outcome": "failure",
+                "latency_ms": 99,
+                "observed_at": 100,
+                "failure_class": "circuit_open",
+                "circuit": "open",
+                "consecutive_failures": 3,
+                "opened_until": 9_000_000_000,
+            }
+        )
+        agent = AutonomousAgent(
+            _Workspace(),
+            runtime,
+            model_catalogue=ModelCatalogue(_model()),
+            health_ledger=health_ledger,
+        )
+        readiness = agent.readiness()
+        assert readiness["provider_health"]["openai"]["circuit"] == "open"
+        assert readiness["providers"][0]["health"]["consecutive_failures"] == 3
+        captured: dict[str, object] = {}
+
+        def capture(**kwargs: object) -> str:
+            captured.update(kwargs)
+            return "captured"
+
+        agent.orchestrator.run = capture  # type: ignore[method-assign]
+        assert agent.run(
+            task="inspect a bounded implementation",
+            domain="coding",
+            credentials={"openai": handle},
+        ) == "captured"
+        overrides = captured["selection_overrides"]
+        assert isinstance(overrides, dict)
+        assert overrides["provider_health"]["openai"]["circuit"] == "open"
+        assert "health-agent-secret" not in json.dumps(readiness)
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
 
 
 def test_builtin_domain_registry_covers_every_autonomous_domain_and_blueprint_redacts_task():

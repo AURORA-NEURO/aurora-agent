@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import hashlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 from tempfile import TemporaryDirectory
 import threading
 import unittest
@@ -11,6 +12,7 @@ from prism_sdk.llm_runtime import (
     CredentialError,
     CredentialStore,
     LLMRuntime,
+    ProviderHealthLedger,
     ProviderError,
     ProviderOnboarding,
     ProviderConfig,
@@ -381,6 +383,60 @@ class LlmRuntimeTests(unittest.TestCase):
         serialized = json.dumps(observations)
         self.assertNotIn("super-secret", serialized)
         self.assertNotIn("hello", serialized)
+
+    def test_provider_health_ledger_persists_restart_safe_circuit_and_latency_metadata(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "provider-health.jsonl"
+            ledger = ProviderHealthLedger(path)
+            store = CredentialStore()
+            runtime = LLMRuntime(store, observation_callback=ledger.record)
+            runtime.register_provider(
+                openai_provider(base_url=self.base_url, allow_insecure_http=True)
+            )
+            handle = store.register("openai", "health-secret")
+            runtime.invoke(
+                "openai",
+                ProviderRequest(model="test-model", messages=({"role": "user", "content": "hello"},)),
+                credential=handle,
+            )
+            # The callback path above is live telemetry; this explicit failure models the
+            # circuit-opening observation that a thresholded runtime would emit.
+            ledger.record(
+                {
+                    "schema": "bioprism-llm-provider-observation/0.1",
+                    "provider": "openai",
+                    "model": "test-model",
+                    "status": "provider_refused",
+                    "outcome": "failure",
+                    "latency_ms": 42.5,
+                    "observed_at": 100.0,
+                    "failure_class": "circuit_open",
+                    "circuit": "open",
+                    "consecutive_failures": 3,
+                    "opened_until": 200.0,
+                }
+            )
+            restored = ProviderHealthLedger(path)
+            snapshot = restored.health_snapshot(now=150.0)
+            self.assertEqual(snapshot["openai"]["circuit"], "open")
+            self.assertEqual(snapshot["openai"]["consecutive_failures"], 3)
+            self.assertGreaterEqual(snapshot["openai"]["attempts"], 2)
+            self.assertEqual(restored.health_snapshot(now=250.0)["openai"]["circuit"], "closed")
+            serialized = json.dumps(restored.to_dict())
+            self.assertNotIn("health-secret", serialized)
+            self.assertNotIn("hello", serialized)
+            with self.assertRaises(ProviderError):
+                restored.record(
+                    {
+                        "schema": "bioprism-llm-provider-observation/0.1",
+                        "provider": "openai",
+                        "model": "test-model",
+                        "status": "completed",
+                        "outcome": "success",
+                        "latency_ms": 1,
+                        "api_key": "must-never-be-accepted",
+                    }
+                )
 
     def test_provider_native_tool_calls_are_typed_and_never_executed(self) -> None:
         store = CredentialStore()
