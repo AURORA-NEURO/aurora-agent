@@ -12,6 +12,7 @@ name = "bioprism-mcp"
 path = "src/main.rs"
 
 [dependencies]
+bioprism-brain = { workspace = true }
 bioprism-backends = { workspace = true }
 bioprism-adaptive = { workspace = true }
 bioprism-adapter = { workspace = true }

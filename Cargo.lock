@@ -206,6 +206,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bioprism-brain"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+]
+
+[[package]]
 name = "bioprism-bundle"
 version = "0.1.0"
 dependencies = [
@@ -565,6 +575,7 @@ dependencies = [
  "bioprism-bioevalx",
  "bioprism-biolang",
  "bioprism-bioworlds",
+ "bioprism-brain",
  "bioprism-bundle",
  "bioprism-choreography",
  "bioprism-conformance",

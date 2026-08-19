@@ -78,6 +78,7 @@ members = [
     "crates/megafactory",
     "crates/interweave",
     "crates/residue",
+    "crates/brain",
     "crates/cli",
 ]
 
@@ -172,6 +173,7 @@ bioprism-foundation = { path = "crates/foundation" }
 bioprism-examples = { path = "crates/examples" }
 bioprism-hub = { path = "crates/hub" }
 bioprism-evalengine = { path = "crates/evalengine" }
+bioprism-brain = { path = "crates/brain" }
 
 [profile.release]
 lto = "thin"

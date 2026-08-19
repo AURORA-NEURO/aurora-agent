@@ -6,6 +6,21 @@ JSON without recreating domain semantics or silently converting refusals into or
 """
 
 from .async_client import AsyncClient
+from .brain import AutonomousBrain, BrainRunError, BrainRunResult
+from .llm_runtime import (
+    CredentialError,
+    CredentialHandle,
+    CredentialStore,
+    LLMRuntime,
+    ProviderConfig,
+    ProviderError,
+    ProviderRequest,
+    ProviderResponse,
+    SecretValue,
+    anthropic_provider,
+    openai_compatible_provider,
+    openai_provider,
+)
 from .anndata import AnnDataAdapter, AnnDataAuditResult, AnnDataFinding, audit_anndata
 from .alignment import AlignmentAdapter, AlignmentAuditResult, AlignmentFinding, audit_alignments
 from .adapter_runtime import (
@@ -2291,6 +2306,9 @@ __all__ = [
     "PublicationTargetReport",
     "BioQlCompileRequest",
     "ApiClient",
+    "AutonomousBrain",
+    "BrainRunError",
+    "BrainRunResult",
     "ApiError",
     "AcceptanceResult",
     "AdapterDescriptor",
@@ -4242,4 +4260,16 @@ __all__ = [
     "ModalityComparabilityCheckReport",
     "modality_comparability_check_report",
     "__version__",
+    "CredentialError",
+    "CredentialHandle",
+    "CredentialStore",
+    "LLMRuntime",
+    "ProviderConfig",
+    "ProviderError",
+    "ProviderRequest",
+    "ProviderResponse",
+    "SecretValue",
+    "anthropic_provider",
+    "openai_compatible_provider",
+    "openai_provider",
 ]

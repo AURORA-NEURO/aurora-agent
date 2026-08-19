@@ -83,6 +83,170 @@ export interface ToolCallPlan {
   schemaDigest: string;
 }
 
+export interface BrainModelDescriptor extends JsonObject {
+  provider: string;
+  model: string;
+  capabilities?: string[];
+  context_window_tokens: number;
+  max_output_tokens: number;
+  quality: number;
+  latency_ms: number;
+  cost_per_million_tokens: number;
+  reliability: number;
+  requires_credential?: boolean;
+  enabled?: boolean;
+}
+
+export interface BrainModelObservation extends JsonObject {
+  arm_id: string;
+  pulls?: number;
+  reward_sum?: number;
+  failures?: number;
+  disabled?: boolean;
+}
+
+export interface BrainModelSelectionArgs extends JsonObject {
+  task: string;
+  required_capabilities?: string[];
+  input_tokens: number;
+  requested_output_tokens: number;
+  max_cost_per_million_tokens?: number | null;
+  max_latency_ms?: number | null;
+  min_quality?: number | null;
+  models: BrainModelDescriptor[];
+  observations?: BrainModelObservation[];
+  weights?: JsonObject;
+}
+
+export interface BrainModelCandidateScore extends JsonObject {
+  model_id: string;
+  eligible: boolean;
+  reasons: string[];
+  base_score: number;
+  exploration_bonus: number;
+  score: number;
+  observed_pulls: number;
+}
+
+export interface BrainModelSelectionResult extends JsonObject {
+  schema: string;
+  task: string;
+  selected_model: BrainModelDescriptor | null;
+  selected_model_id: string | null;
+  ranking: BrainModelCandidateScore[];
+  selection_status: string;
+  decision_digest: string;
+  does_not_claim: string[];
+}
+
+export interface BrainPromptChunk extends JsonObject {
+  id: string;
+  role?: string;
+  content: string;
+  required?: boolean;
+  priority?: number;
+}
+
+export interface BrainPromptArgs extends JsonObject {
+  system?: string | null;
+  developer?: string | null;
+  task: string;
+  context?: BrainPromptChunk[];
+  output_contract?: string | null;
+  max_input_tokens: number;
+}
+
+export interface BrainPromptMessage extends JsonObject {
+  role: string;
+  content: string;
+  source_id: string;
+}
+
+export interface BrainPromptResult extends JsonObject {
+  schema: string;
+  messages: BrainPromptMessage[];
+  included_context_ids: string[];
+  omitted_context_ids: string[];
+  estimated_input_tokens: number;
+  complete: boolean;
+  prompt_digest: string;
+  warnings: string[];
+}
+
+export interface BrainPlanStep extends JsonObject {
+  id: string;
+  objective: string;
+  tool: string;
+  arguments?: JsonValue;
+  depends_on?: string[];
+  effect?: "read_only" | "provider_call" | "external_write" | "irreversible";
+  estimated_cost?: number;
+}
+
+export interface BrainPlanArgs extends JsonObject {
+  objective: string;
+  steps: BrainPlanStep[];
+  allowed_tools: string[];
+  max_cost: number;
+  require_approval_for_effects?: boolean;
+}
+
+export interface BrainPlan extends JsonObject {
+  schema: string;
+  objective: string;
+  ordered_step_ids: string[];
+  steps: BrainPlanStep[];
+  estimated_cost: number;
+  requires_approval: boolean;
+  execution: "not_started";
+  plan_digest: string;
+  does_not_claim: string[];
+}
+
+export interface BrainPlanResult extends JsonObject {
+  ok: boolean;
+  status: string;
+  plan: BrainPlan | null;
+  errors: string[];
+}
+
+export interface BrainBanditPolicy extends JsonObject {
+  exploration?: number;
+  min_reward?: number;
+  max_reward?: number;
+  failure_penalty?: number;
+}
+
+export interface BrainBanditArm extends JsonObject {
+  arm_id: string;
+  pulls?: number;
+  reward_sum?: number;
+  failures?: number;
+  disabled?: boolean;
+}
+
+export interface BrainBanditState extends JsonObject {
+  schema: string;
+  generation?: number;
+  policy?: BrainBanditPolicy;
+  arms: BrainBanditArm[];
+}
+
+export interface BrainBanditSelectionResult extends JsonObject {
+  schema: string;
+  selected_arm_id: string | null;
+  ranking: JsonObject[];
+  selection_status: string;
+  state_generation: number;
+}
+
+export interface BrainBanditUpdate extends JsonObject {
+  arm_id: string;
+  reward: number;
+  failed?: boolean;
+  outcome_digest?: string | null;
+}
+
 export interface ToolsResponse extends JsonObject {
   api_version: string;
   tools: ToolDefinition[];

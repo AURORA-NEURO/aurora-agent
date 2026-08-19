@@ -110,6 +110,10 @@ use bioprism_bioevalx::waiver::{
 use bioprism_bioevalx::{OutputVerdict, Reexecution, Trajectory, Worldline as EvaluationWorldline};
 use bioprism_biolang::{compile as compile_bioql, QuerySchema};
 use bioprism_bioworlds::SliceCatalog;
+use bioprism_brain::{
+    assemble_prompt, plan_autonomous, select_bandit_arm, select_model, update_bandit,
+    AutonomousPlanRequest, BanditState, BanditUpdate, ModelSelectionRequest, PromptAssemblyRequest,
+};
 use bioprism_bundle::{
     KeyRegistry, PubliclyAttestedBundle, ResultBundle, TrustPolicy, VerificationKey,
 };
@@ -1628,6 +1632,11 @@ impl Server {
                 self.control_plane_readiness_compare_retained(&arguments)
             }
             "control_plane_readiness_query" => self.control_plane_readiness_query(&arguments),
+            "brain_model_select" => self.brain_model_select(&arguments),
+            "brain_prompt_assemble" => self.brain_prompt_assemble(&arguments),
+            "brain_plan" => self.brain_plan(&arguments),
+            "brain_bandit_select" => self.brain_bandit_select(&arguments),
+            "brain_bandit_update" => self.brain_bandit_update(&arguments),
             "domain_evidence_harmonization_coverage" => {
                 self.domain_evidence_harmonization_coverage(&arguments)
             }
@@ -1923,6 +1932,78 @@ impl Server {
                 tool_content(&json!({ "ok": false, "error": message }), true),
             ),
         }
+    }
+
+    /// Select a provider/model from caller-supplied metadata. No credential is accepted here:
+    /// applications invoke the provider through their own secret boundary and pass only the
+    /// selected model id and value-free outcome metadata back to this server.
+    fn brain_model_select(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ModelSelectionRequest = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid brain model-selection request: {error}"))?;
+        let report = select_model(&request)
+            .map_err(|error| format!("brain model selection refused: {error}"))?;
+        serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode brain model-selection report: {error}"))
+    }
+
+    /// Assemble a bounded prompt with explicit omission accounting. The server does not invoke a
+    /// model; the returned digest is the stable input identity a provider runtime can record.
+    fn brain_prompt_assemble(&self, arguments: &Value) -> Result<Value, String> {
+        let request: PromptAssemblyRequest = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid brain prompt request: {error}"))?;
+        let report = assemble_prompt(&request)
+            .map_err(|error| format!("brain prompt assembly refused: {error}"))?;
+        serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode brain prompt report: {error}"))
+    }
+
+    /// Validate and order a bounded autonomous plan. Plans are returned as not-started artifacts;
+    /// effectful steps remain approval-gated and no tool is executed by this handler.
+    fn brain_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let request: AutonomousPlanRequest = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid brain plan request: {error}"))?;
+        let report =
+            plan_autonomous(&request).map_err(|error| format!("brain plan refused: {error}"))?;
+        serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode brain plan report: {error}"))
+    }
+
+    /// Select a model/tool arm from caller-persisted online-learning state. State is supplied and
+    /// returned by value so the MCP server has no hidden mutable learning memory.
+    fn brain_bandit_select(&self, arguments: &Value) -> Result<Value, String> {
+        let state_value = arguments
+            .get("state")
+            .cloned()
+            .unwrap_or_else(|| arguments.clone());
+        let state: BanditState = serde_json::from_value(state_value)
+            .map_err(|error| format!("invalid brain bandit state: {error}"))?;
+        let report = select_bandit_arm(&state)
+            .map_err(|error| format!("brain bandit selection refused: {error}"))?;
+        serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode brain bandit selection: {error}"))
+    }
+
+    /// Apply one bounded evaluator reward to caller-owned bandit state and return the next state.
+    /// Reward updates are explicit; no provider response is treated as a reward implicitly.
+    fn brain_bandit_update(&self, arguments: &Value) -> Result<Value, String> {
+        let state: BanditState = serde_json::from_value(
+            arguments
+                .get("state")
+                .cloned()
+                .ok_or_else(|| "brain_bandit_update requires state".to_string())?,
+        )
+        .map_err(|error| format!("invalid brain bandit state: {error}"))?;
+        let update: BanditUpdate = serde_json::from_value(
+            arguments
+                .get("update")
+                .cloned()
+                .ok_or_else(|| "brain_bandit_update requires update".to_string())?,
+        )
+        .map_err(|error| format!("invalid brain bandit update: {error}"))?;
+        let next = update_bandit(&state, &update)
+            .map_err(|error| format!("brain bandit update refused: {error}"))?;
+        serde_json::to_value(next)
+            .map_err(|error| format!("cannot encode brain bandit state: {error}"))
     }
 
     fn compiled(
@@ -35445,6 +35526,15 @@ pub fn workspace_capabilities() -> Value {
             "status": "available"
         },
         {
+            "id": "autonomous_brain",
+            "domains": ["model selection", "prompt assembly", "bounded autonomous planning", "online bandit adaptation", "provider-neutral invocation contracts"],
+            "crates": ["bioprism-brain", "bioprism-runtime", "bioprism-routing", "bioprism-adaptive"],
+            "python_artifacts": ["python/prism_sdk/llm_runtime.py"],
+            "mcp_tools": ["brain_model_select", "brain_prompt_assemble", "brain_plan", "brain_bandit_select", "brain_bandit_update"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
             "id": "registry_operations_and_infrastructure",
             "domains": ["registry", "deployment", "storage", "cache", "leases", "observability"],
             "crates": ["bioprism-registry", "bioprism-hubapi", "bioprism-infra", "bioprism-ledger", "bioprism-factory", "bioprism-ops", "bioprism-services"],
@@ -35591,6 +35681,75 @@ pub fn tool_definitions() -> Vec<Value> {
     });
 
     vec![
+        json!({
+            "name": "brain_model_select",
+            "description": "Select an available provider/model from explicit capability, context-window, quality, latency, cost, reliability, and caller-owned online-learning observations. Every rejected candidate remains visible. This tool accepts no API key, opens no network connection, and does not claim that a future model response will be correct.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "task": { "type": "string" },
+                    "required_capabilities": { "type": "array", "maxItems": 64, "items": { "type": "string" } },
+                    "input_tokens": { "type": "integer", "minimum": 0 },
+                    "requested_output_tokens": { "type": "integer", "minimum": 0 },
+                    "max_cost_per_million_tokens": { "type": ["integer", "null"] },
+                    "max_latency_ms": { "type": ["integer", "null"] },
+                    "min_quality": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+                    "models": { "type": "array", "minItems": 1, "maxItems": 256 },
+                    "observations": { "type": "array", "maxItems": 256 },
+                    "weights": { "type": "object" }
+                },
+                "required": ["task", "input_tokens", "requested_output_tokens", "models"]
+            }
+        }),
+        json!({
+            "name": "brain_prompt_assemble",
+            "description": "Assemble a deterministic, bounded prompt from system/developer instructions, a task, and prioritized context chunks. Required content fails closed; optional omissions are listed and digest-bound. No provider is contacted and no credential is accepted.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "system": { "type": ["string", "null"] },
+                    "developer": { "type": ["string", "null"] },
+                    "task": { "type": "string" },
+                    "context": { "type": "array", "maxItems": 512 },
+                    "output_contract": { "type": ["string", "null"] },
+                    "max_input_tokens": { "type": "integer", "minimum": 1 }
+                },
+                "required": ["task", "max_input_tokens"]
+            }
+        }),
+        json!({
+            "name": "brain_plan",
+            "description": "Validate and topologically order a bounded autonomous plan against an explicit tool allow-list and cost budget. The plan is always not_started; provider calls, external writes, irreversible effects, and approvals remain outside this planning tool.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "objective": { "type": "string" },
+                    "steps": { "type": "array", "minItems": 1, "maxItems": 256 },
+                    "allowed_tools": { "type": "array", "maxItems": 256, "items": { "type": "string" } },
+                    "max_cost": { "type": "integer", "minimum": 0 },
+                    "require_approval_for_effects": { "type": "boolean" }
+                },
+                "required": ["objective", "steps", "allowed_tools", "max_cost"]
+            }
+        }),
+        json!({
+            "name": "brain_bandit_select",
+            "description": "Select an arm from caller-persisted UCB-style online-learning state. Untested arms receive an explicit exploration bonus; disabled arms are excluded; the server keeps no hidden state.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "state": { "type": "object" } },
+                "required": ["state"]
+            }
+        }),
+        json!({
+            "name": "brain_bandit_update",
+            "description": "Apply one explicit bounded evaluator reward to caller-owned bandit state. Rewards outside policy bounds, disabled arms, and unknown arms are refused; provider responses never become rewards implicitly.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "state": { "type": "object" }, "update": { "type": "object" } },
+                "required": ["state", "update"]
+            }
+        }),
         json!({
             "name": "fiber_compile",
             "description": "Compile a typed decision query into the smallest decision-sufficient \

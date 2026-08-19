@@ -474,6 +474,17 @@ import type {
   TraceOtelIngestArgs,
   TraceOtelIngestResult,
 } from "./types.js";
+import type {
+  BrainBanditSelectionResult,
+  BrainBanditState,
+  BrainBanditUpdate,
+  BrainModelSelectionArgs,
+  BrainModelSelectionResult,
+  BrainPlanArgs,
+  BrainPlanResult,
+  BrainPromptArgs,
+  BrainPromptResult,
+} from "./types.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 20_000_000;
@@ -1612,6 +1623,57 @@ export class ApiClient {
     const tool = pathSegment(name, "tool name");
     if (!isObject(arguments_)) throw new ArgumentError("tool arguments must be a JSON object");
     return this.request<RestToolResponse<T>>("POST", `/v1/tools/${encodeURIComponent(tool)}`, arguments_, options);
+  }
+
+  /** Select a model through the value-only autonomous brain kernel; credentials never cross this call. */
+  async brainModelSelect(
+    args: BrainModelSelectionArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainModelSelectionResult>> {
+    if (!isObject(args) || typeof args.task !== "string" || !args.task.trim()) throw new ArgumentError("brain model-selection task must be a non-empty string");
+    if (!Array.isArray(args.models) || args.models.length === 0) throw new ArgumentError("brain model-selection models must be non-empty");
+    return this.callTool<BrainModelSelectionResult>("brain_model_select", args, options);
+  }
+
+  /** Assemble a digest-bound prompt under a hard input budget. */
+  async brainPromptAssemble(
+    args: BrainPromptArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainPromptResult>> {
+    if (!isObject(args) || typeof args.task !== "string" || !args.task.trim()) throw new ArgumentError("brain prompt task must be a non-empty string");
+    if (!Number.isSafeInteger(args.max_input_tokens) || args.max_input_tokens <= 0) throw new ArgumentError("brain prompt max_input_tokens must be a positive safe integer");
+    return this.callTool<BrainPromptResult>("brain_prompt_assemble", args, options);
+  }
+
+  /** Validate and order a bounded autonomous plan; this does not execute any step. */
+  async brainPlan(
+    args: BrainPlanArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainPlanResult>> {
+    if (!isObject(args) || typeof args.objective !== "string" || !args.objective.trim()) throw new ArgumentError("brain plan objective must be a non-empty string");
+    if (!Array.isArray(args.steps) || args.steps.length === 0) throw new ArgumentError("brain plan steps must be non-empty");
+    if (!Array.isArray(args.allowed_tools)) throw new ArgumentError("brain plan allowed_tools must be an array");
+    return this.callTool<BrainPlanResult>("brain_plan", args, options);
+  }
+
+  /** Select a caller-persisted UCB-style learning arm without hidden server state. */
+  async brainBanditSelect(
+    state: BrainBanditState,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainBanditSelectionResult>> {
+    if (!isObject(state) || !Array.isArray(state.arms)) throw new ArgumentError("brain bandit state must contain arms");
+    return this.callTool<BrainBanditSelectionResult>("brain_bandit_select", { state }, options);
+  }
+
+  /** Apply one explicit evaluator reward to caller-owned learning state. */
+  async brainBanditUpdate(
+    state: BrainBanditState,
+    update: BrainBanditUpdate,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainBanditState>> {
+    if (!isObject(state) || !Array.isArray(state.arms)) throw new ArgumentError("brain bandit state must contain arms");
+    if (!isObject(update) || typeof update.arm_id !== "string" || typeof update.reward !== "number") throw new ArgumentError("brain bandit update must contain arm_id and reward");
+    return this.callTool<BrainBanditState>("brain_bandit_update", { state, update }, options);
   }
 
   /** Snapshot the authoritative live tool catalogue and bind it to a SHA-256 digest. */
