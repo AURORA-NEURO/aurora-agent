@@ -45,6 +45,28 @@ class _ProviderHandler(BaseHTTPRequestHandler):
         self.server.request_body = self.rfile.read(length)  # type: ignore[attr-defined]
         request = json.loads(self.server.request_body.decode("utf-8"))  # type: ignore[attr-defined]
         request_text = json.dumps(request)
+        if "Propose a bounded planning refinement for the reviewed workflow" in request_text:
+            response = {
+                "id": "autonomy-plan-refinement",
+                "model": "test-model",
+                "output_text": json.dumps(
+                    {
+                        "priority_order": ["scope", "inspect", "implement", "verify", "handoff"],
+                        "focus_stage_ids": ["inspect", "verify"],
+                        "review_required": False,
+                        "confidence": 0.85,
+                        "abstain": False,
+                    }
+                ),
+                "usage": {"total_tokens": 10},
+            }
+            payload = json.dumps(response).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
         if "Classify the following user request against the reviewed AURORA autonomous domain" in request_text:
             scores = {
                 domain: (0.91 if domain == "neuroscience" else 0.08)
@@ -815,6 +837,35 @@ def test_provider_semantic_router_requires_approval_and_never_builds_executable_
             assert blueprint.blueprint is None
             assert blueprint.cross_domain_blueprint is None
             assert not hasattr(server, "request_body")
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_provider_plan_refinement_is_dependency_closed_and_approval_gated():
+    runtime, store, server, thread = _runtime()
+    try:
+        agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+        blueprint = agent.prepare(task="fix the Rust tests in the repository", domain="coding")
+        with agent.onboarding.start_session(session_id="plan-refinement-session") as session:
+            session.register_value("openai", "plan-refinement-secret")
+            waiting = agent.plan_with_provider(blueprint=blueprint, credentials=session)
+            assert waiting.status == "approval_required"
+            assert waiting.priority_stage_ids == ()
+            refined = agent.plan_with_provider(
+                blueprint=blueprint,
+                credentials=session,
+                approve_provider_call=True,
+            )
+            assert refined.status == "completed"
+            assert refined.priority_stage_ids == ("scope", "inspect", "implement", "verify", "handoff")
+            assert refined.focus_stage_ids == ("inspect", "verify")
+            assert refined.review_required is False
+            assert refined.to_dict()["authorization"].startswith("plan_proposal_only")
+            public = json.dumps(refined.to_dict())
+            assert "plan-refinement-secret" not in public
+            assert blueprint.spec.task not in public
     finally:
         server.shutdown()
         thread.join(timeout=2)

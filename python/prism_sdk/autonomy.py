@@ -118,6 +118,7 @@ MAX_AUTONOMOUS_ROUTE_CANDIDATES = len(AUTONOMOUS_DOMAINS)
 MAX_AUTONOMOUS_ROUTE_DOMAINS = 4
 MAX_AUTONOMOUS_DOMAIN_PACK_ITEMS = 64
 AUTONOMOUS_SEMANTIC_ROUTE_SCHEMA = "bioprism-python-autonomous-semantic-route/0.1"
+AUTONOMOUS_PLAN_REFINEMENT_SCHEMA = "bioprism-python-autonomous-plan-refinement/0.1"
 AUTONOMOUS_ROUTE_EVIDENCE = {
     "fixed_catalogue_term_matches_only",
     "hybrid_deterministic_and_provider_semantic_scores",
@@ -570,6 +571,87 @@ class AutonomousSemanticRouteResult:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class AutonomousPlanRefinementResult:
+    """A dependency-closed provider planning proposal that never authorizes execution."""
+
+    status: str
+    task_digest: str
+    base_plan_digest: str
+    workflow_digest: str
+    priority_stage_ids: tuple[str, ...] = ()
+    focus_stage_ids: tuple[str, ...] = ()
+    review_required: bool = True
+    confidence: float = 0.0
+    selected_model: Mapping[str, str] | None = None
+    selection_digest: str | None = None
+    planner_prompt_digest: str | None = None
+    planner_plan_digest: str | None = None
+    outcome_digest: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.status not in {
+            "completed",
+            "approval_required",
+            "plan_refused",
+            "provider_invalid",
+            "provider_disagreement",
+        }:
+            raise BrainRunError("plan refinement result has an invalid status")
+        _route_digest(self.task_digest, "plan refinement task_digest")
+        _route_digest(self.base_plan_digest, "plan refinement base_plan_digest")
+        _route_digest(self.workflow_digest, "plan refinement workflow_digest")
+        priority = _sequence("plan refinement priority_stage_ids", self.priority_stage_ids, maximum=128)
+        focus = _sequence("plan refinement focus_stage_ids", self.focus_stage_ids, maximum=128)
+        if any(stage_id not in priority for stage_id in focus):
+            raise BrainRunError("plan refinement focus stages must be in priority_stage_ids")
+        if not isinstance(self.review_required, bool):
+            raise BrainRunError("plan refinement review_required must be a boolean")
+        if isinstance(self.confidence, bool) or not isinstance(self.confidence, (int, float)):
+            raise BrainRunError("plan refinement confidence must be finite")
+        if not math.isfinite(float(self.confidence)) or not 0.0 <= float(self.confidence) <= 1.0:
+            raise BrainRunError("plan refinement confidence must be within [0, 1]")
+        if self.selected_model is not None:
+            if not isinstance(self.selected_model, Mapping):
+                raise BrainRunError("plan refinement selected_model must be a mapping or None")
+            if set(self.selected_model) != {"provider", "model"} or any(
+                not isinstance(value, str) or not value.strip() for value in self.selected_model.values()
+            ):
+                raise BrainRunError("plan refinement selected_model must contain provider and model")
+            object.__setattr__(self, "selected_model", dict(self.selected_model))
+        for name, value in (
+            ("selection_digest", self.selection_digest),
+            ("planner_prompt_digest", self.planner_prompt_digest),
+            ("planner_plan_digest", self.planner_plan_digest),
+            ("outcome_digest", self.outcome_digest),
+        ):
+            if value is not None:
+                _route_digest(value, f"plan refinement {name}")
+        object.__setattr__(self, "priority_stage_ids", priority)
+        object.__setattr__(self, "focus_stage_ids", focus)
+        object.__setattr__(self, "confidence", float(self.confidence))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_PLAN_REFINEMENT_SCHEMA,
+            "status": self.status,
+            "task_digest": self.task_digest,
+            "base_plan_digest": self.base_plan_digest,
+            "workflow_digest": self.workflow_digest,
+            "priority_stage_ids": list(self.priority_stage_ids),
+            "focus_stage_ids": list(self.focus_stage_ids),
+            "review_required": self.review_required,
+            "confidence": self.confidence,
+            "selected_model": None if self.selected_model is None else dict(self.selected_model),
+            "selection_digest": self.selection_digest,
+            "planner_prompt_digest": self.planner_prompt_digest,
+            "planner_plan_digest": self.planner_plan_digest,
+            "outcome_digest": self.outcome_digest,
+            "retention": "stage_ids_and_digests_only; planner_transcript_not_retained",
+            "authorization": "plan_proposal_only; no_tools_or_effects_authorized",
+        }
+
+
 class AutonomousTaskRouter:
     """Provider-free, deterministic domain router with explicit abstention.
 
@@ -771,6 +853,42 @@ def _semantic_route_response_schema() -> dict[str, Any]:
             "abstain": {"type": "boolean"},
         },
         "required": ["candidates", "selected_domains", "confidence", "abstain"],
+        "additionalProperties": False,
+    }
+
+
+def _plan_refinement_response_schema(stage_ids: Sequence[str]) -> dict[str, Any]:
+    """Return a strict schema that can only reorder and focus existing workflow stages."""
+
+    stages = list(stage_ids)
+    if not 1 <= len(stages) <= 128 or len(set(stages)) != len(stages):
+        raise BrainRunError("plan refinement requires a unique bounded stage catalogue")
+    stage_enum = {"type": "string", "enum": stages}
+    return {
+        "type": "object",
+        "properties": {
+            "priority_order": {
+                "type": "array",
+                "minItems": len(stages),
+                "maxItems": len(stages),
+                "items": stage_enum,
+            },
+            "focus_stage_ids": {
+                "type": "array",
+                "maxItems": len(stages),
+                "items": stage_enum,
+            },
+            "review_required": {"type": "boolean"},
+            "confidence": {"type": "number"},
+            "abstain": {"type": "boolean"},
+        },
+        "required": [
+            "priority_order",
+            "focus_stage_ids",
+            "review_required",
+            "confidence",
+            "abstain",
+        ],
         "additionalProperties": False,
     }
 
@@ -3260,6 +3378,214 @@ class AutonomousTaskOrchestrator:
             semantic_candidates=ranked,
             semantic_selected_domains=semantic_selected,
             semantic_confidence=confidence,
+            **metadata,
+        )
+
+    def plan_with_provider(
+        self,
+        *,
+        blueprint: AutonomousTaskBlueprint,
+        model_candidates: Sequence[Mapping[str, Any]],
+        credentials: Mapping[str, CredentialHandle],
+        context: Mapping[str, Any] | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        contextual_observations: Sequence[Mapping[str, Any]] = (),
+        selection_overrides: Mapping[str, Any] | None = None,
+        input_tokens: int = 4_096,
+        requested_output_tokens: int = 1_024,
+        max_cost_per_million_tokens: int | None = None,
+        max_latency_ms: int | None = None,
+        min_quality: float | None = None,
+        approve_provider_call: bool = False,
+        run_id: str | None = None,
+        max_output_tokens: int = 1_024,
+        temperature: float | None = None,
+    ) -> AutonomousPlanRefinementResult:
+        """Ask a provider to prioritize existing stages under a dependency-closed contract."""
+
+        if not isinstance(blueprint, AutonomousTaskBlueprint):
+            raise BrainRunError("plan refinement requires an AutonomousTaskBlueprint")
+        if not isinstance(model_candidates, Sequence) or isinstance(model_candidates, (str, bytes)):
+            raise BrainRunError("plan refinement model_candidates must be a sequence")
+        if not isinstance(credentials, Mapping):
+            raise BrainRunError("plan refinement credentials must be a mapping")
+        if any(
+            not isinstance(provider, str)
+            or not isinstance(handle, CredentialHandle)
+            or provider != handle.provider
+            for provider, handle in credentials.items()
+        ):
+            raise BrainRunError("plan refinement credentials must map providers to matching handles")
+        if not isinstance(contextual_observations, Sequence) or isinstance(
+            contextual_observations, (str, bytes)
+        ):
+            raise BrainRunError("plan refinement contextual_observations must be a sequence")
+        stages = tuple(blueprint.workflow.stages)
+        stage_ids = tuple(stage.id for stage in stages)
+        dependencies = {stage.id: set(stage.depends_on) for stage in stages}
+        base_plan_digest = content_digest(blueprint.plan)
+        planner_task = (
+            "Propose a bounded planning refinement for the reviewed workflow. Return only the "
+            "required JSON object. Reorder and focus existing stages only; preserve every stage "
+            "and every dependency. Do not add tools, credentials, effects, permissions, factual "
+            "claims, or completed evidence. Mark review_required when a human should inspect the "
+            "proposal. Original task:\n\n"
+            + blueprint.spec.task
+        )
+        _text("plan refinement task", planner_task, maximum=MAX_AUTONOMY_TEXT_BYTES)
+        planner_context: dict[str, Any] = {
+            "planning_contract": {
+                "schema": AUTONOMOUS_PLAN_REFINEMENT_SCHEMA,
+                "task_digest": blueprint.spec.task_digest,
+                "base_plan_digest": base_plan_digest,
+                "workflow_digest": blueprint.workflow.workflow_digest,
+                "stage_catalogue": [
+                    {
+                        "id": stage.id,
+                        "depends_on": list(stage.depends_on),
+                        "required_capabilities": list(stage.required_capabilities),
+                        "evidence_outputs": list(stage.evidence_outputs),
+                        "approval_required": stage.approval_required,
+                    }
+                    for stage in stages
+                ],
+                "reconciliation": "priority_order_must_contain_each_existing_stage_exactly_once",
+                "does_not_authorize": ["tools", "provider effects", "external writes", "credentials"],
+            },
+            "base_plan_metadata": {
+                "workflow_id": blueprint.workflow.workflow_id,
+                "workflow_digest": blueprint.workflow.workflow_digest,
+                "domain": blueprint.profile.domain,
+                "domain_pack_digest": blueprint.domain_pack.pack_digest,
+                "stage_count": len(stages),
+            },
+        }
+        if context is not None:
+            BrainLearningLedger._assert_safe(context)
+            planner_context["caller_context"] = dict(context)
+        response_schema = _plan_refinement_response_schema(stage_ids)
+        planner_blueprint = self.prepare(
+            task=planner_task,
+            domain=blueprint.profile.domain,
+            capability="planning",
+            context=planner_context,
+            desired_outputs=("dependency-closed stage priority", "focus stages", "review decision"),
+            max_steps=blueprint.spec.max_steps,
+            require_json=True,
+            response_schema=response_schema,
+            execution_mode="provider",
+            max_input_tokens=input_tokens,
+            required_model_capabilities=blueprint.required_capabilities,
+        )
+        selection_request = self.brain.build_adaptive_model_selection(
+            task=planner_task,
+            model_candidates=model_candidates,
+            credentials=credentials,
+            bandit_state=bandit_state,
+            context=planner_blueprint.selection_context,
+            contextual_observations=contextual_observations,
+            required_capabilities=blueprint.required_capabilities,
+            input_tokens=input_tokens,
+            requested_output_tokens=requested_output_tokens,
+            max_cost_per_million_tokens=max_cost_per_million_tokens,
+            max_latency_ms=max_latency_ms,
+            min_quality=min_quality,
+            selection_overrides=selection_overrides,
+        )
+        run = self.brain.run(
+            task=planner_task,
+            model_selection=selection_request,
+            prompt=planner_blueprint.prompt,
+            plan=planner_blueprint.plan,
+            credentials=credentials,
+            approve_provider_call=approve_provider_call,
+            run_id=run_id,
+            max_output_tokens=max_output_tokens,
+            temperature=temperature,
+            require_json=True,
+            response_schema=response_schema,
+            context=planner_blueprint.selection_context,
+            contextual_observations=contextual_observations,
+        )
+        selection = run.selection
+        selected_model = selection.get("selected_model")
+        safe_model = None
+        if isinstance(selected_model, Mapping) and isinstance(
+            selected_model.get("provider"), str
+        ) and isinstance(selected_model.get("model"), str):
+            safe_model = {
+                "provider": selected_model["provider"],
+                "model": selected_model["model"],
+            }
+        planner_plan_value = run.plan.get("plan")
+        planner_plan_digest = (
+            planner_plan_value.get("plan_digest")
+            if isinstance(planner_plan_value, Mapping)
+            else None
+        )
+        metadata = {
+            "task_digest": blueprint.spec.task_digest,
+            "base_plan_digest": base_plan_digest,
+            "workflow_digest": blueprint.workflow.workflow_digest,
+            "selected_model": safe_model,
+            "selection_digest": selection.get("decision_digest"),
+            "planner_prompt_digest": run.prompt.get("prompt_digest"),
+            "planner_plan_digest": planner_plan_digest,
+            "outcome_digest": run.outcome_digest,
+        }
+        if run.status != "completed_provider_call" or run.response is None:
+            return AutonomousPlanRefinementResult(
+                status=run.status if run.status in {"approval_required", "plan_refused"} else "provider_invalid",
+                **metadata,
+            )
+        raw = run.response.structured
+        if not isinstance(raw, Mapping):
+            return AutonomousPlanRefinementResult(status="provider_invalid", **metadata)
+        priority = raw.get("priority_order")
+        focus = raw.get("focus_stage_ids")
+        review_required = raw.get("review_required")
+        confidence = raw.get("confidence")
+        abstain = raw.get("abstain")
+        if (
+            not isinstance(priority, list)
+            or not isinstance(focus, list)
+            or not isinstance(review_required, bool)
+            or not isinstance(confidence, (int, float))
+            or isinstance(confidence, bool)
+            or not math.isfinite(float(confidence))
+            or not 0.0 <= float(confidence) <= 1.0
+            or not isinstance(abstain, bool)
+            or any(not isinstance(stage_id, str) for stage_id in [*priority, *focus])
+            or len(priority) != len(stage_ids)
+            or tuple(priority) != tuple(dict.fromkeys(priority))
+            or set(priority) != set(stage_ids)
+            or len(focus) != len(set(focus))
+            or any(stage_id not in stage_ids for stage_id in focus)
+        ):
+            return AutonomousPlanRefinementResult(status="provider_invalid", **metadata)
+        priority_position = {stage_id: index for index, stage_id in enumerate(priority)}
+        if any(
+            priority_position[dependency] > priority_position[stage_id]
+            for stage_id, required in dependencies.items()
+            for dependency in required
+            if dependency in priority_position
+        ):
+            return AutonomousPlanRefinementResult(status="provider_disagreement", **metadata)
+        if abstain:
+            return AutonomousPlanRefinementResult(
+                status="provider_disagreement",
+                priority_stage_ids=tuple(priority),
+                focus_stage_ids=tuple(focus),
+                review_required=True,
+                confidence=confidence,
+                **metadata,
+            )
+        return AutonomousPlanRefinementResult(
+            status="completed",
+            priority_stage_ids=tuple(priority),
+            focus_stage_ids=tuple(focus),
+            review_required=review_required,
+            confidence=confidence,
             **metadata,
         )
 
@@ -6283,6 +6609,7 @@ class AutonomousAgent:
             "route_catalogue": self.orchestrator.router.catalogue(),
             "semantic_routing": {
                 "schema": AUTONOMOUS_SEMANTIC_ROUTE_SCHEMA,
+                "plan_refinement_schema": AUTONOMOUS_PLAN_REFINEMENT_SCHEMA,
                 "enabled": True,
                 "domain_count": len(AUTONOMOUS_DOMAINS),
                 "requires_caller_provider_approval": True,
@@ -6423,6 +6750,39 @@ class AutonomousAgent:
                 selection_overrides = merged
         return self.orchestrator.prepare_auto_with_provider(
             task=task,
+            model_candidates=candidates,
+            credentials=resolved_credentials,
+            selection_overrides=selection_overrides,
+            **kwargs,
+        )
+
+    def plan_with_provider(
+        self,
+        *,
+        blueprint: AutonomousTaskBlueprint,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> AutonomousPlanRefinementResult:
+        """Ask a BYOK provider to prioritize an existing blueprint's reviewed workflow stages."""
+
+        candidates = self._resolve_candidates(model_candidates)
+        resolved_credentials = self._credential_mapping(credentials)
+        selection_overrides = kwargs.pop("selection_overrides", None)
+        if self.health_ledger is not None:
+            historical = self.health_ledger.selection_overrides()
+            if selection_overrides is None:
+                selection_overrides = historical or None
+            elif isinstance(selection_overrides, Mapping):
+                merged = dict(historical)
+                merged.update(selection_overrides)
+                historical_health = historical.get("provider_health")
+                supplied_health = selection_overrides.get("provider_health")
+                if isinstance(historical_health, Mapping) and isinstance(supplied_health, Mapping):
+                    merged["provider_health"] = {**dict(historical_health), **dict(supplied_health)}
+                selection_overrides = merged
+        return self.orchestrator.plan_with_provider(
+            blueprint=blueprint,
             model_candidates=candidates,
             credentials=resolved_credentials,
             selection_overrides=selection_overrides,

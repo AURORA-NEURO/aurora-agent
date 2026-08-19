@@ -320,6 +320,25 @@ export interface AutonomousSemanticRouteResult extends JsonObject {
   authorization: string;
 }
 
+export interface AutonomousPlanRefinementResult extends JsonObject {
+  schema: "bioprism-python-autonomous-plan-refinement/0.1" | string;
+  status: "completed" | "approval_required" | "plan_refused" | "provider_invalid" | "provider_disagreement" | string;
+  task_digest: string;
+  base_plan_digest: string;
+  workflow_digest: string;
+  priority_stage_ids: string[];
+  focus_stage_ids: string[];
+  review_required: boolean;
+  confidence: number;
+  selected_model: { provider: string; model: string } | null;
+  selection_digest: string | null;
+  planner_prompt_digest: string | null;
+  planner_plan_digest: string | null;
+  outcome_digest: string | null;
+  retention: string;
+  authorization: string;
+}
+
 /** Versioned planning/evidence contract shared with the Python autonomous façade. */
 export interface AutonomousDomainPack extends JsonObject {
   schema: "bioprism-python-autonomous-domain-pack/0.1" | string;

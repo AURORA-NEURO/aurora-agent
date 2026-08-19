@@ -399,6 +399,30 @@ the classifier transcript and task text. A caller can use `semantic_weight`, `ma
 to control how exploration and reliability affect the classifier invocation without allowing
 learning to bypass safety gates.
 
+Planning can be improved under the same BYOK boundary after a deterministic blueprint exists:
+
+```python
+blueprint = agent.prepare(
+    task="fix the Rust tests in the repository",
+    domain="coding",
+)
+refinement = agent.plan_with_provider(
+    blueprint=blueprint,
+    credentials=session,
+    approve_provider_call=True,
+)
+if refinement.status != "completed" or refinement.review_required:
+    send_to_review(refinement.to_dict())
+```
+
+The planning contract requires the model to return every existing workflow stage exactly once in
+dependency-safe priority order, plus an optional focus subset. It cannot add or remove stages,
+alter workflow or domain-pack identity, invent capabilities, or authorize any tool or effect.
+`AutonomousPlanRefinementResult` retains only stage identifiers, confidence, model identity, and
+digests; accepting the proposal remains an application decision. This keeps model-generated
+planning useful for novel tasks while preserving deterministic workflow and caller approval as
+the execution authority.
+
 ### Restart-safe autonomous execution and tool outcome learning
 
 Long-horizon autonomy has a second persistence layer in addition to provider health, episodic
