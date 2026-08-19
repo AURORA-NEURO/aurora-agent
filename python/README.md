@@ -47,6 +47,13 @@ failures raise `ApiError` with the status and structured payload;
 the client does not retry domain refusals or treat a transport `2xx` as scientific acceptance.
 See [`docs/HTTP_API.md`](../docs/HTTP_API.md) for the route and delivery contract.
 
+The provider runtime and [`AutonomousBrain`](../docs/AUTONOMOUS_BRAIN.md) add the caller-approved
+LLM boundary: BYOK credentials become short-lived opaque handles, model selection is health- and
+capability-gated, prompts and mission plans are bounded, and external effects require explicit
+approval. `BrainEpisodicMemory` provides optional restart-safe, hash-chained metadata memory;
+`run_adaptive_mission_learning_cycle()` combines recall, evaluator reward, bandit state updates,
+and bounded pre-dispatch replanning without retaining provider text, tool arguments, or secrets.
+
 The package also includes dependency-free authoring builders for digest-bound benchmark packs,
 set-valued decision cells, deterministic metamorphic mutations, versioned oracle manifests,
 evidence judgements, reference panels, evidence-conditioned BioCapability audit requests, evaluation requests, and typed metrics observations,

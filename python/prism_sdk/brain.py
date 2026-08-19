@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import threading
 import uuid
 from typing import Any, Callable, Mapping, Protocol, Sequence
@@ -32,6 +33,7 @@ from .llm_runtime import (
 )
 from .errors import ArgumentError
 from .mission import MissionPolicy, MissionRequest
+from .memory import BrainEpisodicMemory, BrainMemoryError, MemoryQuery
 from .tooling import ToolCatalogue, ToolSchemaError
 
 
@@ -91,7 +93,15 @@ MAX_BRAIN_EVALUATOR_ID_BYTES = 128
 MAX_BRAIN_EVALUATOR_EVIDENCE_BYTES = 350_000
 MAX_BRAIN_EVALUATOR_INPUT_BYTES = 500_000
 MAX_BRAIN_REPLAY_BYTES = 16_000
+MAX_BRAIN_REPLAN_INSTRUCTION_BYTES = 4_096
 BRAIN_EVALUATOR_REPLAY_SCHEMA = "bioprism-brain-evaluator-replay/0.1"
+_REPLAN_SECRET_PATTERNS = (
+    re.compile(
+        r"(?i)\b(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|password|authorization|secret)\b\s*[:=]\s*\S+"
+    ),
+    re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{16,}"),
+    re.compile(r"\b(?:sk|rk|pk)-[A-Za-z0-9_-]{16,}\b"),
+)
 
 
 def _bounded_route_prompt_context(route: Mapping[str, Any]) -> dict[str, Any]:
@@ -582,6 +592,41 @@ class BrainMissionResult:
                 "mission_dispatch": "caller_approved_only",
             },
             "tool_execution": "bounded_agent_mission_executor",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class BrainLearningCycleResult:
+    """A bounded mission/evaluation/memory/replan cycle.
+
+    Each attempt is evaluated independently and contributes a separate append-only memory
+    episode.  Replanning is proposal-only after a failed attempt unless the caller explicitly
+    supplied a mission option that dispatches it; the cycle refuses to replay after a dispatched
+    mission because a transport failure is not proof that an external effect did not happen.
+    """
+
+    status: str
+    final_result: BrainMissionResult
+    attempts: tuple[BrainMissionResult, ...]
+    evaluations: tuple[Mapping[str, Any], ...]
+    memory_receipts: tuple[Mapping[str, Any], ...]
+    recalled_memory: tuple[Mapping[str, Any], ...]
+    replan_count: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": "bioprism-brain-learning-cycle/0.1",
+            "status": self.status,
+            "final_result": self.final_result.to_dict(),
+            "attempts": [attempt.to_dict() for attempt in self.attempts],
+            "evaluations": [dict(evaluation) for evaluation in self.evaluations],
+            "memory_receipts": [dict(receipt) for receipt in self.memory_receipts],
+            "recalled_memory": [dict(episode) for episode in self.recalled_memory],
+            "replan_count": self.replan_count,
+            "authorization": {
+                "memory": "value_only_hash_chained",
+                "mission_dispatch": "caller_approved_only",
+            },
         }
 
 
@@ -1076,9 +1121,218 @@ class MissionToolAuthorizer:
 class AutonomousBrain:
     """Coordinate the value-only Rust kernel with a real caller-approved provider invocation."""
 
-    def __init__(self, workspace: BrainWorkspace, runtime: LLMRuntime) -> None:
+    def __init__(
+        self,
+        workspace: BrainWorkspace,
+        runtime: LLMRuntime,
+        memory: BrainEpisodicMemory | None = None,
+    ) -> None:
         self.workspace = workspace
         self.runtime = runtime
+        if memory is not None and not isinstance(memory, BrainEpisodicMemory):
+            raise BrainRunError("memory must be a BrainEpisodicMemory or None")
+        self.memory = memory
+
+    def recall_memory(
+        self,
+        query: MemoryQuery | Mapping[str, Any] | None = None,
+        *,
+        limit: int | None = None,
+        memory: BrainEpisodicMemory | None = None,
+    ) -> list[dict[str, Any]]:
+        """Recall bounded metadata/lessons from the configured episodic memory."""
+
+        store = memory or self.memory
+        if store is None:
+            raise BrainRunError("episodic memory is not configured")
+        if not isinstance(store, BrainEpisodicMemory):
+            raise BrainRunError("memory must be a BrainEpisodicMemory")
+        try:
+            return store.retrieve(query, limit=limit)
+        except BrainMemoryError as error:
+            raise BrainRunError("episodic memory retrieval failed") from error
+
+    @staticmethod
+    def _result_memory_kind(
+        result: BrainRunResult | BrainToolLoopResult | BrainMissionResult,
+    ) -> tuple[BrainRunResult, str, str]:
+        if isinstance(result, BrainRunResult):
+            return result, "run", result.status
+        if isinstance(result, BrainToolLoopResult):
+            return result.brain_run, "tool_loop", result.status
+        if isinstance(result, BrainMissionResult):
+            return result.brain_run, "mission", result.status
+        raise BrainRunError("result must be a BrainRunResult, BrainToolLoopResult, or BrainMissionResult")
+
+    def remember_result(
+        self,
+        result: BrainRunResult | BrainToolLoopResult | BrainMissionResult,
+        *,
+        task: str,
+        episode_id: str | None = None,
+        context: Mapping[str, Any] | None = None,
+        tags: Sequence[str] = (),
+        lesson: str | None = None,
+        provenance: Mapping[str, Any] | None = None,
+        memory: BrainEpisodicMemory | None = None,
+    ) -> dict[str, Any]:
+        """Persist one run as metadata-only episodic memory.
+
+        The task is immediately reduced to a digest.  The provider response, prompt, tool
+        arguments, and credentials are never passed to the memory store.
+        """
+
+        if not isinstance(task, str) or not task.strip():
+            raise BrainRunError("task must be a non-empty string")
+        if context is not None and not isinstance(context, Mapping):
+            raise BrainRunError("memory context must be a mapping or None")
+        if not isinstance(tags, Sequence) or isinstance(tags, (str, bytes)):
+            raise BrainRunError("memory tags must be a string sequence")
+        if any(not isinstance(tag, str) or not tag.strip() for tag in tags):
+            raise BrainRunError("memory tags must contain non-empty strings")
+        if provenance is not None and not isinstance(provenance, Mapping):
+            raise BrainRunError("memory provenance must be a mapping or None")
+        store = memory or self.memory
+        if store is None:
+            raise BrainRunError("episodic memory is not configured")
+        if not isinstance(store, BrainEpisodicMemory):
+            raise BrainRunError("memory must be a BrainEpisodicMemory")
+        brain_result, result_kind, status = self._result_memory_kind(result)
+        selected = brain_result.selection.get("selected_model")
+        if not isinstance(selected, Mapping):
+            raise BrainRunError("cannot remember a result without selected model metadata")
+        selected_model = {
+            "provider": selected.get("provider"),
+            "model": selected.get("model"),
+        }
+        if not isinstance(selected_model["provider"], str) or not isinstance(selected_model["model"], str):
+            raise BrainRunError("selected model metadata is malformed")
+        evaluator_input = build_brain_evaluation_input(result)
+        context_copy = {} if context is None else dict(context)
+        route = None
+        if isinstance(result, (BrainToolLoopResult, BrainMissionResult)) and result.route is not None:
+            route = {"route_digest": _json_digest(dict(result.route))}
+        plan = brain_result.plan.get("plan")
+        digests = {
+            "selection_digest": brain_result.selection.get("decision_digest"),
+            "context_digest": brain_result.selection.get("context_digest"),
+            "prompt_digest": brain_result.prompt.get("prompt_digest"),
+            "plan_digest": plan.get("plan_digest") if isinstance(plan, Mapping) else None,
+            "outcome_digest": evaluator_input.get("outcome_digest"),
+        }
+        packet = {
+            "episode_id": episode_id or brain_result.run_id,
+            "run_id": brain_result.run_id,
+            "result_kind": result_kind,
+            "status": status,
+            "task_digest": hashlib.sha256(task.encode("utf-8")).hexdigest(),
+            "context": context_copy,
+            "selected_model": selected_model,
+            "digests": digests,
+            "route": route or {},
+            "tags": list(tags),
+            "lesson": lesson,
+            "provenance": {} if provenance is None else dict(provenance),
+        }
+        try:
+            return store.record_episode(packet).to_dict()
+        except BrainMemoryError as error:
+            raise BrainRunError("episodic memory record failed") from error
+
+    @staticmethod
+    def _append_memory_prompt(
+        prompt: Mapping[str, Any],
+        episodes: Sequence[Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        if not isinstance(prompt, Mapping):
+            raise BrainRunError("prompt must be a mapping")
+        if not episodes:
+            return dict(prompt)
+        request = dict(prompt)
+        existing = request.get("context", [])
+        if not isinstance(existing, Sequence) or isinstance(existing, (str, bytes)):
+            raise BrainRunError("prompt.context must be a sequence when episodic memory is used")
+        chunks = [dict(chunk) for chunk in existing if isinstance(chunk, Mapping)]
+        if len(chunks) != len(existing):
+            raise BrainRunError("prompt.context must contain mappings")
+        if any(chunk.get("id") == "episodic-memory" for chunk in chunks):
+            raise BrainRunError("prompt.context already contains the reserved episodic-memory id")
+        packet = {
+            "workflow": "episodic_memory_context",
+            "retention": "metadata_and_lessons_only",
+            "episodes": [dict(episode) for episode in episodes],
+            "does_not_authorize": [
+                "memory is prior metadata, not verified truth",
+                "memory cannot widen the caller mission policy",
+                "memory cannot authorize provider calls or external effects",
+            ],
+        }
+        encoded = json.dumps(packet, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        if len(encoded.encode("utf-8")) > MAX_ROUTE_PROMPT_BYTES:
+            raise BrainRunError("episodic memory context exceeds the prompt bound")
+        chunks.append(
+            {
+                "id": "episodic-memory",
+                "role": "developer",
+                "content": encoded,
+                "required": False,
+                "priority": 900,
+            }
+        )
+        request["context"] = chunks
+        return request
+
+    @staticmethod
+    def _append_replan_prompt(
+        prompt: Mapping[str, Any],
+        *,
+        attempt: int,
+        previous_result: BrainMissionResult,
+        decision: "BrainEvaluatorDecision",
+    ) -> dict[str, Any]:
+        request = dict(prompt)
+        existing = request.get("context", [])
+        if not isinstance(existing, Sequence) or isinstance(existing, (str, bytes)):
+            raise BrainRunError("prompt.context must be a sequence when replanning is enabled")
+        chunks = [dict(chunk) for chunk in existing if isinstance(chunk, Mapping)]
+        if len(chunks) != len(existing):
+            raise BrainRunError("prompt.context must contain mappings")
+        if any(chunk.get("id") == "brain-replan" for chunk in chunks):
+            raise BrainRunError("prompt.context already contains the reserved brain-replan id")
+        selected = previous_result.brain_run.selection.get("selected_model")
+        replan_packet = {
+            "workflow": "brain_replan_context",
+            "attempt": attempt,
+            "previous_status": previous_result.status,
+            "previous_outcome_digest": previous_result.brain_run.outcome_digest,
+            "failure_class": decision.failure_class,
+            "instruction": decision.replan_instruction,
+            "bounded_replan": True,
+            "does_not_authorize": [
+                "the prior attempt is not proof of external truth",
+                "the caller mission policy remains unchanged",
+                "this proposal cannot dispatch itself",
+            ],
+        }
+        if isinstance(selected, Mapping):
+            replan_packet["previous_model"] = {
+                "provider": selected.get("provider"),
+                "model": selected.get("model"),
+            }
+        encoded = json.dumps(replan_packet, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        if len(encoded.encode("utf-8")) > MAX_ROUTE_PROMPT_BYTES:
+            raise BrainRunError("replan context exceeds the prompt bound")
+        chunks.append(
+            {
+                "id": "brain-replan",
+                "role": "developer",
+                "content": encoded,
+                "required": True,
+                "priority": 950,
+            }
+        )
+        request["context"] = chunks
+        return request
 
     def build_adaptive_model_selection(
         self,
@@ -1859,6 +2113,210 @@ class AutonomousBrain:
                 if attempt >= max_provider_failovers:
                     raise
         raise BrainRunError("adaptive mission provider failover exhausted")
+
+    def run_adaptive_mission_learning_cycle(
+        self,
+        *,
+        task: str,
+        model_candidates: Sequence[Mapping[str, Any]],
+        prompt: Mapping[str, Any],
+        plan: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle],
+        mission_policy: MissionPolicy | Mapping[str, Any],
+        evaluator: "BrainOutcomeEvaluator",
+        bandit_state: Mapping[str, Any],
+        ledger: BrainLearningLedger | None = None,
+        memory: BrainEpisodicMemory | None = None,
+        memory_query: MemoryQuery | Mapping[str, Any] | None = None,
+        memory_limit: int = 8,
+        memory_tags: Sequence[str] = (),
+        evidence: Mapping[str, Any] | None = None,
+        max_replans: int = 1,
+        mission_options: Mapping[str, Any] | None = None,
+    ) -> BrainLearningCycleResult:
+        """Run, evaluate, remember, and boundedly replan a cross-domain mission.
+
+        This is the high-level learning seam for applications that want the agent to improve
+        across calls.  Recalled episodes are inserted as non-authorizing developer context.  Each
+        outcome is sent through the explicit evaluator and Rust bandit recorder, then persisted as
+        a separate memory evaluation event.  A replan can happen only when the evaluator requests
+        one and the prior mission has not crossed the external-effect dispatch boundary.
+
+        ``mission_options`` contains the optional keyword arguments accepted by
+        :meth:`run_adaptive_mission`; keeping them in one mapping makes this orchestration API
+        forward-compatible while rejecting accidental task/credential/policy overrides.
+        """
+
+        if not isinstance(evaluator, BrainOutcomeEvaluator):
+            raise BrainRunError("evaluator must be a BrainOutcomeEvaluator")
+        if not isinstance(bandit_state, Mapping):
+            raise BrainRunError("bandit_state must be a mapping")
+        BrainLearningLedger._assert_safe(bandit_state)
+        if not isinstance(max_replans, int) or isinstance(max_replans, bool) or not 0 <= max_replans <= 3:
+            raise BrainRunError("max_replans must be within [0, 3]")
+        if not isinstance(memory_limit, int) or isinstance(memory_limit, bool) or not 1 <= memory_limit <= 32:
+            raise BrainRunError("memory_limit must be within [1, 32]")
+        if not isinstance(memory_tags, Sequence) or isinstance(memory_tags, (str, bytes)):
+            raise BrainRunError("memory_tags must be a string sequence")
+        if any(not isinstance(tag, str) or not tag.strip() for tag in memory_tags):
+            raise BrainRunError("memory_tags must contain non-empty strings")
+        if evidence is not None:
+            if not isinstance(evidence, Mapping):
+                raise BrainRunError("evidence must be a mapping or None")
+            BrainLearningLedger._assert_safe(evidence)
+        store = memory or self.memory
+        if store is None:
+            raise BrainRunError("episodic memory is required for a learning cycle")
+        if not isinstance(store, BrainEpisodicMemory):
+            raise BrainRunError("memory must be a BrainEpisodicMemory")
+        if mission_options is not None and not isinstance(mission_options, Mapping):
+            raise BrainRunError("mission_options must be a mapping or None")
+        options = {} if mission_options is None else dict(mission_options)
+        allowed_options = {
+            "context",
+            "contextual_observations",
+            "required_capabilities",
+            "input_tokens",
+            "requested_output_tokens",
+            "max_cost_per_million_tokens",
+            "max_latency_ms",
+            "min_quality",
+            "selection_overrides",
+            "approve_provider_call",
+            "approve_mission_dispatch",
+            "run_id",
+            "max_output_tokens",
+            "temperature",
+            "response_schema",
+            "idempotency_key",
+            "claim_requests",
+            "evaluator_review",
+            "workflow_binding",
+            "route_review",
+            "operations_gate_acceptance",
+            "route_request",
+            "enforce_route_tools",
+            "require_resolved_route",
+            "provider_tools",
+            "tool_choice",
+            "max_provider_failovers",
+        }
+        unknown = sorted(set(options).difference(allowed_options))
+        if unknown:
+            raise BrainRunError("mission_options contains unsupported fields: " + ", ".join(unknown))
+        context = options.get("context")
+        if context is not None and not isinstance(context, Mapping):
+            raise BrainRunError("mission_options.context must be a mapping")
+        if memory_query is None and isinstance(context, Mapping):
+            derived_query = {
+                field: context[field]
+                for field in ("domain", "capability", "risk_class")
+                if isinstance(context.get(field), str) and context[field].strip()
+            }
+            resolved_query: MemoryQuery | Mapping[str, Any] | None = derived_query
+        else:
+            resolved_query = memory_query
+        try:
+            recalled = tuple(store.retrieve(resolved_query, limit=memory_limit))
+        except BrainMemoryError as error:
+            raise BrainRunError("episodic memory retrieval failed") from error
+        base_prompt = self._append_memory_prompt(prompt, recalled)
+        current_prompt = base_prompt
+        current_bandit_state: Mapping[str, Any] = dict(bandit_state)
+        attempts: list[BrainMissionResult] = []
+        evaluations: list[dict[str, Any]] = []
+        memory_receipts: list[dict[str, Any]] = []
+        final_status = "completed"
+        replan_count = 0
+
+        for attempt in range(max_replans + 1):
+            result = self.run_adaptive_mission(
+                task=task,
+                model_candidates=model_candidates,
+                prompt=current_prompt,
+                plan=plan,
+                credentials=credentials,
+                mission_policy=mission_policy,
+                **options,
+            )
+            attempts.append(result)
+            decision, report = evaluator.evaluate_and_record_with_decision(
+                self,
+                result,
+                bandit_state=current_bandit_state,
+                evidence=evidence,
+                ledger=ledger,
+            )
+            next_state = report.get("next_state")
+            if isinstance(next_state, Mapping):
+                current_bandit_state = dict(next_state)
+            BrainLearningLedger._assert_safe(report)
+            episode_id = f"{result.brain_run.run_id}-attempt-{attempt}"
+            if len(episode_id.encode("utf-8")) > 256:
+                episode_id = "episode-" + hashlib.sha256(episode_id.encode("utf-8")).hexdigest()
+            episode_receipt = self.remember_result(
+                result,
+                task=task,
+                episode_id=episode_id,
+                context=context,
+                tags=[*memory_tags, f"attempt:{attempt}"],
+                lesson=decision.replan_instruction if decision.replan_requested else None,
+                provenance={
+                    "evaluator_id": decision.evaluator_id,
+                    "evaluator_version": decision.evaluator_version,
+                    "replan_requested": decision.replan_requested,
+                },
+                memory=store,
+            )
+            try:
+                evaluation_receipt = store.record_evaluation(
+                    episode_id,
+                    {
+                        **decision.to_dict(),
+                        "decision_digest": _json_digest(decision.to_dict()),
+                    },
+                ).to_dict()
+            except BrainMemoryError as error:
+                raise BrainRunError("episodic evaluation record failed") from error
+            memory_receipts.extend((episode_receipt, evaluation_receipt))
+            evaluations.append(
+                {
+                    "decision": decision.to_dict(),
+                    "recording": {
+                        "status": report.get("status"),
+                        "next_state": report.get("next_state"),
+                        "learning_evidence": report.get("learning_evidence"),
+                    },
+                }
+            )
+            if not decision.failed or not decision.replan_requested:
+                final_status = "completed" if decision.passed else "completed_without_replan"
+                break
+            if result.status == "mission_dispatched" or result.execution is not None:
+                final_status = "replan_blocked_after_dispatch"
+                break
+            if attempt >= max_replans:
+                final_status = "replan_limit_reached"
+                break
+            replan_count += 1
+            current_prompt = self._append_replan_prompt(
+                base_prompt,
+                attempt=attempt + 1,
+                previous_result=result,
+                decision=decision,
+            )
+        else:
+            final_status = "replan_limit_reached"
+
+        return BrainLearningCycleResult(
+            status=final_status,
+            final_result=attempts[-1],
+            attempts=tuple(attempts),
+            evaluations=tuple(evaluations),
+            memory_receipts=tuple(memory_receipts),
+            recalled_memory=recalled,
+            replan_count=replan_count,
+        )
 
     def run(
         self,
@@ -2720,6 +3178,8 @@ class BrainEvaluatorDecision:
     feedback_digest: str | None = None
     failure_class: str | None = None
     evidence_digest: str | None = None
+    replan_requested: bool = False
+    replan_instruction: str | None = None
 
     def __post_init__(self) -> None:
         for field_name, value in (
@@ -2757,6 +3217,20 @@ class BrainEvaluatorDecision:
             or len(self.failure_class.encode("utf-8")) > MAX_BRAIN_EVALUATOR_ID_BYTES
         ):
             raise BrainRunError("failure_class must be a bounded non-empty string")
+        if not isinstance(self.replan_requested, bool):
+            raise BrainRunError("replan_requested must be boolean")
+        if self.replan_instruction is not None and (
+            not isinstance(self.replan_instruction, str)
+            or not self.replan_instruction.strip()
+            or len(self.replan_instruction.encode("utf-8")) > MAX_BRAIN_REPLAN_INSTRUCTION_BYTES
+        ):
+            raise BrainRunError("replan_instruction must be a bounded non-empty string")
+        if self.replan_instruction is not None and any(
+            pattern.search(self.replan_instruction) for pattern in _REPLAN_SECRET_PATTERNS
+        ):
+            raise BrainRunError("replan_instruction resembles secret material")
+        if self.replan_requested and self.failed and self.replan_instruction is None and self.failure_class is None:
+            raise BrainRunError("a requested replan must include an instruction or failure_class")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -2768,6 +3242,8 @@ class BrainEvaluatorDecision:
             "feedback_digest": self.feedback_digest,
             "failure_class": self.failure_class,
             "evidence_digest": self.evidence_digest,
+            "replan_requested": self.replan_requested,
+            "replan_instruction": self.replan_instruction,
         }
 
 
@@ -2960,6 +3436,8 @@ class BrainOutcomeEvaluator:
         "feedback_digest",
         "failure_class",
         "evidence_digest",
+        "replan_requested",
+        "replan_instruction",
     }
 
     def __init__(
@@ -3026,6 +3504,8 @@ class BrainOutcomeEvaluator:
                 feedback_digest=raw_decision.get("feedback_digest"),
                 failure_class=raw_decision.get("failure_class"),
                 evidence_digest=raw_decision.get("evidence_digest"),
+                replan_requested=raw_decision.get("replan_requested", False),
+                replan_instruction=raw_decision.get("replan_instruction"),
             )
         expected_evidence_digest = evaluation_input.get("evidence_digest")
         if decision.evidence_digest is not None and decision.evidence_digest != expected_evidence_digest:
@@ -3044,6 +3524,30 @@ class BrainOutcomeEvaluator:
         arm_id: str | None = None,
         ledger: BrainLearningLedger | None = None,
     ) -> dict[str, Any]:
+        """Evaluate and persist an outcome, preserving the historical report-only API."""
+
+        _decision, report = self.evaluate_and_record_with_decision(
+            brain,
+            result,
+            bandit_state=bandit_state,
+            evidence=evidence,
+            arm_id=arm_id,
+            ledger=ledger,
+        )
+        return report
+
+    def evaluate_and_record_with_decision(
+        self,
+        brain: AutonomousBrain,
+        result: BrainRunResult | BrainToolLoopResult | BrainMissionResult,
+        *,
+        bandit_state: Mapping[str, Any],
+        evidence: Mapping[str, Any] | None = None,
+        arm_id: str | None = None,
+        ledger: BrainLearningLedger | None = None,
+    ) -> tuple[BrainEvaluatorDecision, dict[str, Any]]:
+        """Return the compact evaluator decision alongside the persisted Rust report."""
+
         if not isinstance(brain, AutonomousBrain):
             raise BrainRunError("brain must be an AutonomousBrain")
         evaluation_input = build_brain_evaluation_input(result, evidence=evidence)
@@ -3060,7 +3564,7 @@ class BrainOutcomeEvaluator:
             "decision_digest": _json_digest(decision.to_dict()),
             "retention": "metadata_and_digests_only",
         }
-        return brain.record_evaluator_outcome(
+        report = brain.record_evaluator_outcome(
             result,
             bandit_state=bandit_state,
             evaluator_id=decision.evaluator_id,
@@ -3075,3 +3579,4 @@ class BrainOutcomeEvaluator:
             ledger=ledger,
             replay_metadata=replay,
         )
+        return decision, report

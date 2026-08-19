@@ -231,6 +231,71 @@ next eligible candidate. Once `agent_mission` dispatch starts, a later transport
 surfaced without replaying the proposal against another provider. This keeps cross-domain
 failover useful while preventing duplicate external effects.
 
+## Durable episodic memory and bounded learning cycles
+
+`BrainEpisodicMemory` provides a restart-safe memory boundary for applications that want the
+agent to improve across jobs. It stores only a caller-authored packet of run identity, context
+labels, model identity, digests, bounded tags, safe lessons, and provenance. It never accepts raw
+tasks, prompts, provider responses, tool arguments, credentials, headers, or secret-shaped fields.
+Episode records and evaluator updates are separate append-only SQLite events linked by a SHA-256
+previous-digest chain:
+
+```python
+from prism_sdk import BrainEpisodicMemory, BrainOutcomeEvaluator
+
+memory = BrainEpisodicMemory("state/brain-episodes.sqlite3", max_episodes=10_000)
+evaluator = BrainOutcomeEvaluator(
+    evaluate_release_result,
+    evaluator_id="release-quality",
+    evaluator_version="2026-08-19",
+)
+cycle = brain.run_adaptive_mission_learning_cycle(
+    task="inspect the platform and prepare release evidence",
+    model_candidates=model_catalogue,
+    prompt={"max_input_tokens": 12_000},
+    plan={"allowed_tools": ["provider.invoke"], "max_cost": 10},
+    credentials={"openai": handle},
+    mission_policy=mission_policy,
+    evaluator=evaluator,
+    bandit_state=bandit_state,
+    ledger=ledger,
+    memory=memory,
+    memory_query={
+        "domain": "engineering",
+        "capability": "release_audit",
+        "risk_class": "release_review",
+        "limit": 8,
+    },
+    max_replans=1,
+    mission_options={
+        "context": {
+            "domain": "engineering",
+            "capability": "release_audit",
+            "risk_class": "release_review",
+        },
+        "route_request": {"needs": [{"id": "release", "query": "release evidence"}]},
+        "approve_provider_call": True,
+        "approve_mission_dispatch": False,
+    },
+)
+```
+
+The cycle recalls prior episodes as non-authorizing developer context, runs the normal route and
+health-gated model decision, passes the result to the held-out evaluator, records the explicit
+reward through `brain_outcome_record`, appends the episode and evaluation to durable memory, and
+uses the returned next bandit state for the next attempt. An evaluator may request a bounded
+replan with a failure class and safe instruction. Replanning is allowed only before mission
+dispatch; after `execute=true` has been sent, the cycle returns
+`replan_blocked_after_dispatch` and never guesses whether an external effect happened. The
+`max_replans` bound is capped by the SDK, and memory retrieval cannot widen tools, budgets,
+claims, route candidates, credentials, or approval gates.
+
+Memory can be independently inspected with `memory.retrieve(...)`, `memory.get(episode_id)`,
+`memory.stats()`, and `memory.verify_integrity()`. A deployment that needs stronger durability or
+multi-tenant isolation should place the database behind its own encrypted storage, authorization,
+backup, and retention controls; the SDK supplies bounded append/retrieval and provenance, not a
+distributed database or an identity authority.
+
 ## Provider-neutral boundary
 
 The current Python runtime supports:

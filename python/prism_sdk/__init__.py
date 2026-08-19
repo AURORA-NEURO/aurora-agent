@@ -9,6 +9,7 @@ from .async_client import AsyncClient
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,
+    BrainLearningCycleResult,
     BrainLearningLedger,
     BrainOutcomeEvaluator,
     BrainMissionResult,
@@ -23,6 +24,14 @@ from .brain import (
     MAX_BRAIN_REPLAY_BYTES,
     MissionAuthorizationReceipt,
     MissionToolAuthorizer,
+)
+from .memory import (
+    BrainEpisodicMemory,
+    BrainMemoryError,
+    MEMORY_EVENT_SCHEMA,
+    MEMORY_SCHEMA,
+    MemoryQuery,
+    MemoryReceipt,
 )
 from .llm_runtime import (
     CredentialError,
