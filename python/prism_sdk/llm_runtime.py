@@ -848,6 +848,14 @@ class LLMRuntime:
             "credential_posture": "caller_supplied_in_memory_handle",
         }
 
+    def provider_requires_credential(self, provider: str) -> bool:
+        """Return whether this registered transport requires a caller-owned credential handle."""
+
+        config = self._providers.get(provider)
+        if config is None:
+            raise ProviderError(f"provider {provider!r} is not configured")
+        return config.requires_credential
+
     def reset_provider(self, provider: str) -> None:
         """Explicitly close a circuit after an operator or health check has reviewed it."""
 
@@ -1466,10 +1474,252 @@ class ProviderOnboarding:
         providers.update(status.provider for status in self.runtime.credentials.statuses())
         return [self.status(provider) for provider in sorted(providers)]
 
+    def start_session(
+        self,
+        *,
+        ttl_seconds: float | None = None,
+        session_id: str | None = None,
+        clock: Callable[[], float] = time.time,
+    ) -> "CredentialSession":
+        """Create a short-lived collection session for one UI/request lifecycle."""
+
+        return CredentialSession(
+            self,
+            ttl_seconds=ttl_seconds,
+            session_id=session_id,
+            clock=clock,
+        )
+
     def _require_provider(self, provider: str) -> None:
         CredentialStore._validate_provider(provider)
         if not any(row.get("provider") == provider for row in self.runtime.provider_metadata()):
             raise CredentialError(f"provider {provider!r} is not registered with the runtime")
+
+
+@dataclass(frozen=True, slots=True)
+class CredentialSessionStatus:
+    """Redacted status for one caller-owned credential collection session."""
+
+    session_id: str
+    active: bool
+    created_at: float
+    expires_at: float | None
+    providers: tuple[str, ...]
+    secret_persistence: str = "in_memory_only"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "session_id": self.session_id,
+            "active": self.active,
+            "created_at": self.created_at,
+            "expires_at": self.expires_at,
+            "providers": list(self.providers),
+            "secret_persistence": self.secret_persistence,
+            "secret_material": "never_returned",
+        }
+
+
+class CredentialSession:
+    """Short-lived BYOK session that groups opaque handles for revocation and readiness.
+
+    The session retains only handles, never a key or external secret-manager reference. Closing
+    or expiring it revokes every handle it created. Applications may keep the redacted status in
+    UI state, but should recreate the session and resolve the secret again after a process restart.
+    """
+
+    def __init__(
+        self,
+        onboarding: ProviderOnboarding,
+        *,
+        ttl_seconds: float | None = None,
+        session_id: str | None = None,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        if not isinstance(onboarding, ProviderOnboarding):
+            raise CredentialError("CredentialSession requires ProviderOnboarding")
+        if ttl_seconds is not None and (
+            not isinstance(ttl_seconds, (int, float))
+            or isinstance(ttl_seconds, bool)
+            or ttl_seconds <= 0
+        ):
+            raise CredentialError("session ttl_seconds must be positive or None")
+        if not callable(clock):
+            raise CredentialError("session clock must be callable")
+        resolved_id = session_id or secrets.token_urlsafe(18)
+        if (
+            not isinstance(resolved_id, str)
+            or not resolved_id.strip()
+            or len(resolved_id) > 256
+            or any(ord(character) < 32 for character in resolved_id)
+        ):
+            raise CredentialError("session_id must be a bounded non-empty string")
+        self.onboarding = onboarding
+        self.session_id = resolved_id
+        self._clock = clock
+        self.created_at = float(clock())
+        self.expires_at = None if ttl_seconds is None else self.created_at + float(ttl_seconds)
+        self._handles: dict[str, CredentialHandle] = {}
+        self._closed = False
+        self._lock = threading.RLock()
+
+    def register_value(
+        self,
+        provider: str,
+        value: str,
+        *,
+        ttl_seconds: float | None = None,
+    ) -> CredentialHandle:
+        handle = self._onboarded_call(
+            self.onboarding.register_value,
+            provider,
+            value,
+            ttl_seconds=ttl_seconds,
+        )
+        return self._attach(handle)
+
+    def configure_from_prompt(
+        self,
+        provider: str,
+        *,
+        prompt: str | None = None,
+        ttl_seconds: float | None = None,
+        reader: Callable[[str], str] | None = None,
+    ) -> CredentialHandle:
+        handle = self._onboarded_call(
+            self.onboarding.configure_from_prompt,
+            provider,
+            prompt=prompt,
+            ttl_seconds=ttl_seconds,
+            reader=reader,
+        )
+        return self._attach(handle)
+
+    def configure_from_environment(
+        self,
+        provider: str,
+        *,
+        variable: str | None = None,
+        ttl_seconds: float | None = None,
+        environ: Mapping[str, str] | None = None,
+    ) -> CredentialHandle:
+        handle = self._onboarded_call(
+            self.onboarding.configure_from_environment,
+            provider,
+            variable=variable,
+            ttl_seconds=ttl_seconds,
+            environ=environ,
+        )
+        return self._attach(handle)
+
+    def configure_from_resolver(
+        self,
+        provider: str,
+        reference: str,
+        resolver: Callable[[str], str],
+        *,
+        ttl_seconds: float | None = None,
+    ) -> CredentialHandle:
+        handle = self._onboarded_call(
+            self.onboarding.configure_from_resolver,
+            provider,
+            reference,
+            resolver,
+            ttl_seconds=ttl_seconds,
+        )
+        return self._attach(handle)
+
+    def handle(self, provider: str) -> CredentialHandle:
+        self._assert_active()
+        CredentialStore._validate_provider(provider)
+        with self._lock:
+            handle = self._handles.get(provider)
+        if handle is None:
+            raise CredentialError(f"provider {provider!r} is not configured in this session")
+        self.onboarding.runtime.credentials.metadata(handle)
+        return handle
+
+    def status(self) -> CredentialSessionStatus:
+        active = self._is_active()
+        with self._lock:
+            providers = tuple(sorted(self._handles))
+        return CredentialSessionStatus(
+            session_id=self.session_id,
+            active=active,
+            created_at=self.created_at,
+            expires_at=self.expires_at,
+            providers=providers,
+        )
+
+    def provider_statuses(self) -> list[dict[str, Any]]:
+        self._assert_active()
+        with self._lock:
+            providers = tuple(sorted(self._handles))
+        return [self.onboarding.status(provider) for provider in providers]
+
+    def revoke(self, provider: str) -> None:
+        self._assert_active()
+        CredentialStore._validate_provider(provider)
+        with self._lock:
+            handle = self._handles.pop(provider, None)
+        if handle is not None:
+            self.onboarding.revoke(handle)
+
+    def close(self) -> None:
+        with self._lock:
+            if self._closed:
+                return
+            handles = tuple(self._handles.values())
+            self._handles.clear()
+            self._closed = True
+        for handle in handles:
+            self.onboarding.revoke(handle)
+
+    def __enter__(self) -> "CredentialSession":
+        self._assert_active()
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.close()
+
+    def __repr__(self) -> str:
+        return f"CredentialSession(session_id={self.session_id!r}, active={self._is_active()!r})"
+
+    def _attach(self, handle: CredentialHandle) -> CredentialHandle:
+        if not isinstance(handle, CredentialHandle):
+            raise CredentialError("onboarding did not return a credential handle")
+        try:
+            self._assert_active()
+        except CredentialError:
+            self.onboarding.revoke(handle)
+            raise
+        with self._lock:
+            previous = self._handles.get(handle.provider)
+            self._handles[handle.provider] = handle
+        if previous is not None and previous is not handle:
+            self.onboarding.revoke(previous)
+        return handle
+
+    def _onboarded_call(self, callback: Callable[..., CredentialHandle], *args: Any, **kwargs: Any) -> CredentialHandle:
+        self._assert_active()
+        return callback(*args, **kwargs)
+
+    def _is_active(self) -> bool:
+        with self._lock:
+            if self._closed:
+                return False
+            if self.expires_at is not None and self._clock() >= self.expires_at:
+                self._closed = True
+                handles = tuple(self._handles.values())
+                self._handles.clear()
+            else:
+                handles = ()
+        for handle in handles:
+            self.onboarding.revoke(handle)
+        return not self._closed
+
+    def _assert_active(self) -> None:
+        if not self._is_active():
+            raise CredentialError("credential session is closed or expired")
 
 
 def _bounded_json_bytes(value: Any, limit: int, label: str) -> int:

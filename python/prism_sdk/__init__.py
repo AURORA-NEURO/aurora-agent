@@ -19,6 +19,8 @@ from .brain import (
 from .llm_runtime import (
     CredentialError,
     CredentialHandle,
+    CredentialSession,
+    CredentialSessionStatus,
     CredentialStatus,
     CredentialStore,
     LLMRuntime,
@@ -4283,6 +4285,8 @@ __all__ = [
     "__version__",
     "CredentialError",
     "CredentialHandle",
+    "CredentialSession",
+    "CredentialSessionStatus",
     "CredentialStatus",
     "CredentialStore",
     "LLMRuntime",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from tempfile import TemporaryDirectory
 import threading
@@ -237,6 +238,30 @@ class LlmRuntimeTests(unittest.TestCase):
         self.assertEqual(references, ["secret-manager://workspace/openai"])
         self.assertEqual(store.metadata(resolver_handle)["source"], "external_resolver")
         self.assertNotIn("resolver-secret", json.dumps(onboarding.status("openai")))
+
+    def test_credential_session_groups_handles_and_revokes_on_expiry(self) -> None:
+        store = CredentialStore()
+        runtime = LLMRuntime(store)
+        onboarding = ProviderOnboarding(runtime)
+        onboarding.register_provider(openai_provider(base_url=self.base_url, allow_insecure_http=True))
+        now = [100.0]
+        session = onboarding.start_session(ttl_seconds=10, session_id="ui-session", clock=lambda: now[0])
+        handle = session.configure_from_prompt(
+            "openai",
+            reader=lambda _prompt: "session-secret",
+        )
+        self.assertIs(session.handle("openai"), handle)
+        self.assertTrue(session.status().active)
+        self.assertEqual(session.status().providers, ("openai",))
+        self.assertNotIn("session-secret", json.dumps(session.status().to_dict()))
+        self.assertNotIn("session-secret", repr(session))
+        self.assertEqual(session.provider_statuses()[0]["next_action"], "ready")
+
+        now[0] = 111.0
+        self.assertFalse(session.status().active)
+        with self.assertRaises(CredentialError):
+            session.handle("openai")
+        self.assertEqual(store.status("openai").credential_count, 0)
 
     def test_openai_responses_call_resolves_secret_only_into_auth_header(self) -> None:
         store = CredentialStore()
@@ -631,6 +656,7 @@ class LlmRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(result.status, "completed_provider_tool_loop")
         self.assertEqual(result.provider_loop.final_response.text, "continued")  # type: ignore[union-attr]
+
         self.assertEqual(len(workspace.missions), 2)
         self.assertFalse(workspace.missions[0]["policy"]["execute"])  # type: ignore[index]
         self.assertTrue(workspace.missions[1]["policy"]["execute"])  # type: ignore[index]
@@ -1262,6 +1288,245 @@ class LlmRuntimeTests(unittest.TestCase):
         self.assertEqual(result.status, "completed_provider_call")
         self.assertEqual(result.selection["context_digest"], "c" * 64)
         self.assertEqual(workspace.contextual_arguments["context"]["domain"], "engineering")  # type: ignore[index]
+
+    def test_adaptive_brain_builds_selection_from_registered_providers_and_ledger(self) -> None:
+        class Workspace:
+            def __init__(self) -> None:
+                self.selection: dict[str, object] | None = None
+
+            def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+                if name == "brain_model_select":
+                    assert arguments is not None
+                    self.selection = arguments
+                    models = arguments["models"]
+                    self.assert_model_disabled(models, "unregistered")  # type: ignore[arg-type]
+                    return {
+                        "selected_model": {"provider": "openai", "model": "test-model"},
+                        "decision_digest": "a" * 64,
+                    }
+                if name == "brain_prompt_assemble":
+                    return {"messages": [{"role": "user", "content": "hello"}], "prompt_digest": "b" * 64}
+                if name == "brain_plan":
+                    return {
+                        "ok": True,
+                        "plan": {
+                            "requires_approval": True,
+                            "steps": [{"effect": "provider_call"}],
+                            "plan_digest": "c" * 64,
+                        },
+                    }
+                raise AssertionError(f"unexpected tool {name}")
+
+            @staticmethod
+            def assert_model_disabled(models: object, model_name: str) -> None:
+                assert isinstance(models, list)
+                candidate = next(model for model in models if model["model"] == model_name)
+                assert candidate["enabled"] is False
+
+        store = CredentialStore()
+        runtime = LLMRuntime(store)
+        runtime.register_provider(openai_provider(base_url=self.base_url, allow_insecure_http=True, path="/json"))
+        handle = store.register("openai", "super-secret")
+        workspace = Workspace()
+        with TemporaryDirectory() as directory:
+            ledger = BrainLearningLedger(f"{directory}/adaptive.jsonl")
+            ledger.append(
+                {
+                    "learning_evidence": {"evidence_digest": "e" * 64},
+                    "next_state": {
+                        "schema": "bioprism-brain-bandit/0.1",
+                        "generation": 3,
+                        "arms": [
+                            {
+                                "arm_id": "openai/test-model",
+                                "pulls": 3,
+                                "reward_sum": 2.7,
+                                "failures": 0,
+                                "disabled": False,
+                            }
+                        ],
+                    },
+                }
+            )
+            result = AutonomousBrain(workspace, runtime).run_adaptive(
+                task="hello",
+                model_candidates=[
+                    {
+                        "provider": "openai",
+                        "model": "test-model",
+                        "capabilities": ["reasoning"],
+                        "context_window_tokens": 16_000,
+                        "max_output_tokens": 2_048,
+                        "quality": 0.9,
+                        "latency_ms": 100,
+                        "cost_per_million_tokens": 10,
+                        "reliability": 0.95,
+                    },
+                    {
+                        "provider": "unregistered",
+                        "model": "unregistered",
+                        "capabilities": ["reasoning"],
+                        "context_window_tokens": 16_000,
+                        "max_output_tokens": 2_048,
+                        "quality": 1.0,
+                        "latency_ms": 1,
+                        "cost_per_million_tokens": 1,
+                        "reliability": 1.0,
+                    },
+                ],
+                prompt={"max_input_tokens": 100},
+                plan={"allowed_tools": ["provider.invoke"], "max_cost": 10},
+                credentials={"openai": handle},
+                ledger=ledger,
+                approve_provider_call=True,
+            )
+            self.assertEqual(result.status, "completed_provider_call")
+            self.assertEqual(result.selection["selected_model"]["provider"], "openai")  # type: ignore[index]
+            self.assertEqual(workspace.selection["observations"][0]["pulls"], 3)  # type: ignore[index]
+            self.assertNotIn("super-secret", json.dumps(workspace.selection))
+
+    def test_adaptive_context_digest_matches_rust_context_identity(self) -> None:
+        class Workspace:
+            def __init__(self) -> None:
+                self.arguments: dict[str, object] | None = None
+
+            def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+                if name == "brain_model_select_contextual":
+                    assert arguments is not None
+                    self.arguments = arguments
+                    return {
+                        "schema": "bioprism-brain-contextual-model-selection/0.1",
+                        "context_digest": hashlib.sha256(
+                            b'{"domain":"engineering","capability":"platform_status","risk_class":"low","task_family":null}'
+                        ).hexdigest(),
+                        "selection_status": "contextual_selection_exact_history",
+                        "selection": {
+                            "selected_model": {"provider": "openai", "model": "test-model"},
+                            "decision_digest": "a" * 64,
+                        },
+                    }
+                if name == "brain_prompt_assemble":
+                    return {"messages": [{"role": "user", "content": "hello"}], "prompt_digest": "b" * 64}
+                if name == "brain_plan":
+                    return {"ok": True, "plan": {"requires_approval": True, "steps": [{"effect": "provider_call"}], "plan_digest": "c" * 64}}
+                raise AssertionError(f"unexpected tool {name}")
+
+        store = CredentialStore()
+        runtime = LLMRuntime(store)
+        runtime.register_provider(openai_provider(base_url=self.base_url, allow_insecure_http=True, path="/json"))
+        handle = store.register("openai", "super-secret")
+        context = {"domain": "engineering", "capability": "platform_status", "risk_class": "low"}
+        workspace = Workspace()
+        result = AutonomousBrain(workspace, runtime).run_adaptive(
+            task="hello",
+            model_candidates=[
+                {
+                    "provider": "openai",
+                    "model": "test-model",
+                    "context_window_tokens": 16_000,
+                    "max_output_tokens": 2_048,
+                    "quality": 0.9,
+                    "latency_ms": 100,
+                    "cost_per_million_tokens": 10,
+                    "reliability": 0.95,
+                }
+            ],
+            prompt={"max_input_tokens": 100},
+            plan={"allowed_tools": ["provider.invoke"], "max_cost": 10},
+            credentials={"openai": handle},
+            context=context,
+            contextual_observations=[{"arm_id": "openai/test-model", "pulls": 2, "reward_sum": 1.8}],
+            approve_provider_call=True,
+        )
+        self.assertEqual(result.status, "completed_provider_call")
+        expected = hashlib.sha256(
+            b'{"domain":"engineering","capability":"platform_status","risk_class":"low","task_family":null}'
+        ).hexdigest()
+        self.assertEqual(result.selection["context_digest"], expected)
+        self.assertEqual(workspace.arguments["observations"][0]["context_digest"], expected)  # type: ignore[index]
+
+    def test_adaptive_tool_loop_selects_before_continuing_with_caller_callback(self) -> None:
+        class Workspace:
+            def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+                if name == "brain_model_select":
+                    return {
+                        "selected_model": {"provider": "openai", "model": "test-model"},
+                        "decision_digest": "a" * 64,
+                    }
+                if name == "brain_prompt_assemble":
+                    return {"messages": [{"role": "user", "content": "inspect"}], "prompt_digest": "b" * 64}
+                if name == "brain_plan":
+                    return {
+                        "ok": True,
+                        "plan": {
+                            "requires_approval": True,
+                            "steps": [{"effect": "provider_call"}],
+                            "plan_digest": "c" * 64,
+                        },
+                    }
+                raise AssertionError(f"unexpected tool {name}")
+
+        store = CredentialStore()
+        runtime = LLMRuntime(store)
+        runtime.register_provider(openai_provider(base_url=self.base_url, allow_insecure_http=True, path="/continue"))
+        handle = store.register("openai", "super-secret")
+        tool = ProviderTool("developer_platform_status", parameters={"type": "object"})
+        result = AutonomousBrain(Workspace(), runtime).run_adaptive_tool_loop(
+            task="inspect",
+            model_candidates=[
+                {
+                    "provider": "openai",
+                    "model": "test-model",
+                    "capabilities": ["reasoning"],
+                    "context_window_tokens": 16_000,
+                    "max_output_tokens": 2_048,
+                    "quality": 0.9,
+                    "latency_ms": 100,
+                    "cost_per_million_tokens": 10,
+                    "reliability": 0.95,
+                }
+            ],
+            prompt={"max_input_tokens": 100},
+            plan={"allowed_tools": ["provider.invoke"], "max_cost": 10},
+            credentials={"openai": handle},
+            tool_loop_options={
+                "provider_tools": (tool,),
+                "authorize_and_execute": lambda calls: tuple(
+                    ProviderToolResult(call.call_id, {"status": "ready"}, approved=True)
+                    for call in calls
+                ),
+                "approve_provider_call": True,
+                "max_turns": 3,
+            },
+        )
+        self.assertEqual(result.status, "completed_provider_tool_loop")
+        self.assertEqual(result.provider_loop.final_response.text, "continued")  # type: ignore[union-attr]
+
+        class OutcomeWorkspace:
+            def __init__(self) -> None:
+                self.arguments: dict[str, object] | None = None
+
+            def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+                assert name == "brain_outcome_record"
+                self.arguments = arguments
+                return {
+                    "ok": True,
+                    "status": "recorded_evaluator_reward",
+                    "next_state": {"schema": "bioprism-brain-bandit/0.1", "generation": 1, "arms": []},
+                    "learning_evidence": {"schema": "bioprism-brain-learning-evidence/0.1", "evidence_digest": "e" * 64},
+                }
+
+        outcome_workspace = OutcomeWorkspace()
+        report = AutonomousBrain(outcome_workspace, runtime).record_evaluator_outcome(
+            result,
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "arms": []},
+            evaluator_id="tool-loop-quality-v1",
+            evaluator_version="1",
+            reward=0.7,
+            passed=True,
+        )
+        self.assertEqual(report["status"], "recorded_evaluator_reward")
+        self.assertNotIn("continued", json.dumps(outcome_workspace.arguments))
 
     def test_evaluator_outcome_is_persisted_without_provider_text_or_credentials(self) -> None:
         class Workspace:

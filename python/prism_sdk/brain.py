@@ -296,6 +296,81 @@ def _valid_digest(value: Any) -> bool:
     )
 
 
+def _context_identity_digest(context: Mapping[str, Any]) -> str:
+    """Match the Rust contextual-selection digest without retaining arbitrary task text."""
+
+    required = ("domain", "capability", "risk_class")
+    for name in required:
+        value = context.get(name)
+        if not isinstance(value, str) or not value.strip():
+            raise BrainRunError(f"context.{name} must be a non-empty string")
+    task_family = context.get("task_family")
+    if task_family is not None and (not isinstance(task_family, str) or not task_family.strip()):
+        raise BrainRunError("context.task_family must be a non-empty string when supplied")
+    normalized = {
+        "domain": context["domain"],
+        "capability": context["capability"],
+        "risk_class": context["risk_class"],
+        "task_family": task_family,
+    }
+    encoded = json.dumps(
+        normalized,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _bandit_observations(state: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+    """Project caller-persisted bandit state into the model selector's observation contract."""
+
+    if state is None:
+        return []
+    if not isinstance(state, Mapping):
+        raise BrainRunError("bandit state must be a mapping")
+    BrainLearningLedger._assert_safe(state)
+    arms = state.get("arms", [])
+    if not isinstance(arms, list):
+        raise BrainRunError("bandit state arms must be a list")
+    observations: list[dict[str, Any]] = []
+    for arm in arms:
+        if not isinstance(arm, Mapping):
+            raise BrainRunError("bandit state arms must contain mappings")
+        arm_id = arm.get("arm_id")
+        pulls = arm.get("pulls", 0)
+        reward_sum = arm.get("reward_sum", 0.0)
+        failures = arm.get("failures", 0)
+        disabled = arm.get("disabled", False)
+        if (
+            not isinstance(arm_id, str)
+            or not arm_id.strip()
+            or not isinstance(pulls, int)
+            or isinstance(pulls, bool)
+            or pulls < 0
+            or not isinstance(reward_sum, (int, float))
+            or isinstance(reward_sum, bool)
+            or not isinstance(failures, int)
+            or isinstance(failures, bool)
+            or failures < 0
+            or not isinstance(disabled, bool)
+        ):
+            raise BrainRunError("bandit state contains malformed arm statistics")
+        observation = {
+            "arm_id": arm_id,
+            "pulls": pulls,
+            "reward_sum": reward_sum,
+            "failures": failures,
+            "disabled": disabled,
+        }
+        try:
+            json.dumps(observation, ensure_ascii=False, allow_nan=False)
+        except (TypeError, ValueError) as error:
+            raise BrainRunError("bandit state contains non-finite arm statistics") from error
+        observations.append(observation)
+    return observations
+
+
 @dataclass(frozen=True, slots=True)
 class BrainRunResult:
     run_id: str
@@ -877,6 +952,327 @@ class AutonomousBrain:
         self.workspace = workspace
         self.runtime = runtime
 
+    def build_adaptive_model_selection(
+        self,
+        *,
+        task: str,
+        model_candidates: Sequence[Mapping[str, Any]],
+        credentials: Mapping[str, CredentialHandle],
+        ledger: BrainLearningLedger | None = None,
+        context: Mapping[str, Any] | None = None,
+        contextual_observations: Sequence[Mapping[str, Any]] = (),
+        required_capabilities: Sequence[str] = (),
+        input_tokens: int = 4_096,
+        requested_output_tokens: int = 2_048,
+        max_cost_per_million_tokens: int | None = None,
+        max_latency_ms: int | None = None,
+        min_quality: float | None = None,
+        selection_overrides: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Build a live model-selection request from registered transports and learned state.
+
+        Applications own the model catalogue because provider model availability and pricing are
+        deployment-specific. The brain owns the decision: it removes candidates whose transport
+        is not registered or whose required user credential handle is absent, projects persisted
+        bandit state into the Rust selector, and scopes observations to an optional domain /
+        capability / risk context. No provider secret enters this request.
+        """
+
+        if not isinstance(task, str) or not task.strip():
+            raise BrainRunError("task must be a non-empty string")
+        if not isinstance(model_candidates, Sequence) or isinstance(model_candidates, (str, bytes)):
+            raise BrainRunError("model_candidates must be a sequence")
+        if not model_candidates:
+            raise BrainRunError("model_candidates must not be empty")
+        if not isinstance(credentials, Mapping):
+            raise BrainRunError("credentials must be a mapping")
+        if not isinstance(required_capabilities, Sequence) or isinstance(
+            required_capabilities, (str, bytes)
+        ):
+            raise BrainRunError("required_capabilities must be a sequence")
+        if any(not isinstance(capability, str) or not capability.strip() for capability in required_capabilities):
+            raise BrainRunError("required_capabilities must contain non-empty strings")
+        if not isinstance(input_tokens, int) or isinstance(input_tokens, bool) or input_tokens < 1:
+            raise BrainRunError("input_tokens must be a positive integer")
+        if not isinstance(requested_output_tokens, int) or isinstance(requested_output_tokens, bool) or requested_output_tokens < 1:
+            raise BrainRunError("requested_output_tokens must be a positive integer")
+        for name, value in (("max_cost_per_million_tokens", max_cost_per_million_tokens), ("max_latency_ms", max_latency_ms)):
+            if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value < 0):
+                raise BrainRunError(f"{name} must be a non-negative integer or None")
+        if min_quality is not None and (
+            not isinstance(min_quality, (int, float))
+            or isinstance(min_quality, bool)
+            or not 0 <= min_quality <= 1
+        ):
+            raise BrainRunError("min_quality must be within [0, 1] or None")
+        if ledger is not None and not isinstance(ledger, BrainLearningLedger):
+            raise BrainRunError("ledger must be a BrainLearningLedger or None")
+        if context is not None and not isinstance(context, Mapping):
+            raise BrainRunError("context must be a mapping or None")
+        if not isinstance(contextual_observations, Sequence) or isinstance(
+            contextual_observations, (str, bytes)
+        ):
+            raise BrainRunError("contextual_observations must be a sequence")
+        if any(not isinstance(observation, Mapping) for observation in contextual_observations):
+            raise BrainRunError("contextual_observations must contain mappings")
+        if selection_overrides is not None and not isinstance(selection_overrides, Mapping):
+            raise BrainRunError("selection_overrides must be a mapping or None")
+        if selection_overrides is not None:
+            BrainLearningLedger._assert_safe(selection_overrides)
+
+        provider_metadata = {
+            row.get("provider"): row
+            for row in self.runtime.provider_metadata()
+            if isinstance(row, Mapping) and isinstance(row.get("provider"), str)
+        }
+        normalized_models: list[dict[str, Any]] = []
+        for candidate in model_candidates:
+            if not isinstance(candidate, Mapping):
+                raise BrainRunError("model_candidates must contain mappings")
+            BrainLearningLedger._assert_safe(candidate)
+            model = dict(candidate)
+            for field in (
+                "provider",
+                "model",
+                "context_window_tokens",
+                "max_output_tokens",
+                "quality",
+                "latency_ms",
+                "cost_per_million_tokens",
+            ):
+                if field not in model:
+                    raise BrainRunError(f"model candidate is missing {field}")
+            provider = model.get("provider")
+            model_name = model.get("model")
+            if not isinstance(provider, str) or not provider.strip() or not isinstance(model_name, str) or not model_name.strip():
+                raise BrainRunError("model candidate provider and model must be non-empty strings")
+            capabilities = model.get("capabilities", [])
+            if not isinstance(capabilities, Sequence) or isinstance(capabilities, (str, bytes)) or any(
+                not isinstance(capability, str) for capability in capabilities
+            ):
+                raise BrainRunError("model candidate capabilities must be a string sequence")
+            model["capabilities"] = list(capabilities)
+            model.setdefault("requires_credential", True)
+            model.setdefault("enabled", True)
+            if not isinstance(model["requires_credential"], bool) or not isinstance(model["enabled"], bool):
+                raise BrainRunError("model candidate requires_credential and enabled must be booleans")
+            registered = provider_metadata.get(provider)
+            runtime_requires_credential = True if registered is None else bool(
+                registered.get("requires_credential", True)
+            )
+            requires_credential = bool(model["requires_credential"]) or runtime_requires_credential
+            model["requires_credential"] = requires_credential
+            if registered is None:
+                model["enabled"] = False
+            elif requires_credential:
+                handle = credentials.get(provider)
+                if handle is None or not isinstance(handle, CredentialHandle) or handle.provider != provider:
+                    model["enabled"] = False
+            normalized_models.append(model)
+
+        global_state = None if ledger is None else ledger.latest_state()
+        observations = _bandit_observations(global_state)
+        scoped_observations: list[dict[str, Any]] = []
+        if context is not None:
+            context_digest = _context_identity_digest(context)
+            scoped_state = None if ledger is None else ledger.latest_state(context_digest)
+            scoped_by_arm = {
+                observation["arm_id"]: observation
+                for observation in _bandit_observations(scoped_state)
+            }
+            supplied = _bandit_observations({"arms": list(contextual_observations)})
+            scoped_by_arm.update({observation["arm_id"]: observation for observation in supplied})
+            scoped_observations = [
+                {**observation, "context_digest": context_digest}
+                for observation in scoped_by_arm.values()
+            ]
+        elif contextual_observations:
+            raise BrainRunError("contextual_observations require context")
+
+        request: dict[str, Any] = dict(selection_overrides or {})
+        request.update(
+            {
+                "task": task,
+                "required_capabilities": list(required_capabilities),
+                "input_tokens": input_tokens,
+                "requested_output_tokens": requested_output_tokens,
+                "models": normalized_models,
+                "observations": observations,
+            }
+        )
+        if max_cost_per_million_tokens is not None:
+            request["max_cost_per_million_tokens"] = max_cost_per_million_tokens
+        if max_latency_ms is not None:
+            request["max_latency_ms"] = max_latency_ms
+        if min_quality is not None:
+            request["min_quality"] = min_quality
+        if context is not None:
+            request["context"] = dict(context)
+            request["contextual_observations"] = scoped_observations
+        BrainLearningLedger._assert_safe(request)
+        try:
+            json.dumps(request, ensure_ascii=False, allow_nan=False)
+        except (TypeError, ValueError) as error:
+            raise BrainRunError("adaptive model-selection request must be JSON-safe") from error
+        return request
+
+    def run_adaptive(
+        self,
+        *,
+        task: str,
+        model_candidates: Sequence[Mapping[str, Any]],
+        prompt: Mapping[str, Any],
+        plan: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle],
+        ledger: BrainLearningLedger | None = None,
+        context: Mapping[str, Any] | None = None,
+        contextual_observations: Sequence[Mapping[str, Any]] = (),
+        required_capabilities: Sequence[str] = (),
+        input_tokens: int = 4_096,
+        requested_output_tokens: int = 2_048,
+        max_cost_per_million_tokens: int | None = None,
+        max_latency_ms: int | None = None,
+        min_quality: float | None = None,
+        selection_overrides: Mapping[str, Any] | None = None,
+        approve_provider_call: bool = False,
+        run_id: str | None = None,
+        max_output_tokens: int = 2_048,
+        temperature: float | None = None,
+        require_json: bool = False,
+        response_schema: Mapping[str, Any] | None = None,
+        idempotency_key: str | None = None,
+        tools: Sequence[ProviderTool] = (),
+        tool_choice: str | None = None,
+    ) -> BrainRunResult:
+        """Select, plan, and invoke from live providers using caller-persisted learning state."""
+
+        selection = self.build_adaptive_model_selection(
+            task=task,
+            model_candidates=model_candidates,
+            credentials=credentials,
+            ledger=ledger,
+            context=context,
+            contextual_observations=contextual_observations,
+            required_capabilities=required_capabilities,
+            input_tokens=input_tokens,
+            requested_output_tokens=requested_output_tokens,
+            max_cost_per_million_tokens=max_cost_per_million_tokens,
+            max_latency_ms=max_latency_ms,
+            min_quality=min_quality,
+            selection_overrides=selection_overrides,
+        )
+        return self.run(
+            task=task,
+            model_selection=selection,
+            prompt=prompt,
+            plan=plan,
+            credentials=credentials,
+            approve_provider_call=approve_provider_call,
+            run_id=run_id,
+            max_output_tokens=max_output_tokens,
+            temperature=temperature,
+            require_json=require_json,
+            response_schema=response_schema,
+            idempotency_key=idempotency_key,
+            context=context,
+            contextual_observations=(
+                selection.get("contextual_observations", contextual_observations)
+                if context is not None
+                else contextual_observations
+            ),
+            tools=tools,
+            tool_choice=tool_choice,
+        )
+
+    def run_adaptive_tool_loop(
+        self,
+        *,
+        task: str,
+        model_candidates: Sequence[Mapping[str, Any]],
+        prompt: Mapping[str, Any],
+        plan: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle],
+        ledger: BrainLearningLedger | None = None,
+        context: Mapping[str, Any] | None = None,
+        contextual_observations: Sequence[Mapping[str, Any]] = (),
+        required_capabilities: Sequence[str] = (),
+        input_tokens: int = 4_096,
+        requested_output_tokens: int = 2_048,
+        max_cost_per_million_tokens: int | None = None,
+        max_latency_ms: int | None = None,
+        min_quality: float | None = None,
+        selection_overrides: Mapping[str, Any] | None = None,
+        tool_loop_options: Mapping[str, Any] | None = None,
+    ) -> BrainToolLoopResult:
+        """Select adaptively, then enter the bounded route-aware native tool loop.
+
+        ``tool_loop_options`` carries the explicit continuation/authorization options accepted by
+        :meth:`run_tool_loop` (for example ``mission_policy``, ``route_request``,
+        ``approve_mission_dispatch``, and ``provider_tools``). It intentionally cannot override
+        the task, credentials, context, or learned selection assembled by this method.
+        """
+
+        selection = self.build_adaptive_model_selection(
+            task=task,
+            model_candidates=model_candidates,
+            credentials=credentials,
+            ledger=ledger,
+            context=context,
+            contextual_observations=contextual_observations,
+            required_capabilities=required_capabilities,
+            input_tokens=input_tokens,
+            requested_output_tokens=requested_output_tokens,
+            max_cost_per_million_tokens=max_cost_per_million_tokens,
+            max_latency_ms=max_latency_ms,
+            min_quality=min_quality,
+            selection_overrides=selection_overrides,
+        )
+        if not isinstance(tool_loop_options, (Mapping, type(None))):
+            raise BrainRunError("tool_loop_options must be a mapping or None")
+        options = {} if tool_loop_options is None else dict(tool_loop_options)
+        allowed_options = {
+            "authorize_and_execute",
+            "approve_provider_call",
+            "run_id",
+            "max_output_tokens",
+            "temperature",
+            "require_json",
+            "response_schema",
+            "idempotency_key",
+            "provider_tools",
+            "tool_choice",
+            "max_turns",
+            "max_tool_calls",
+            "stream",
+            "mission_policy",
+            "approve_mission_dispatch",
+            "route_request",
+            "enforce_route_tools",
+            "require_resolved_route",
+            "claim_requests",
+            "evaluator_review",
+            "workflow_binding",
+            "operations_gate_acceptance",
+        }
+        unknown = sorted(set(options).difference(allowed_options))
+        if unknown:
+            raise BrainRunError(f"tool_loop_options contains unsupported fields: {', '.join(unknown)}")
+        effective_contextual_observations = (
+            selection.get("contextual_observations", contextual_observations)
+            if context is not None
+            else contextual_observations
+        )
+        return self.run_tool_loop(
+            task=task,
+            model_selection=selection,
+            prompt=prompt,
+            plan=plan,
+            credentials=credentials,
+            context=context,
+            contextual_observations=effective_contextual_observations,
+            **options,
+        )
+
     def run(
         self,
         *,
@@ -972,8 +1368,10 @@ class AutonomousBrain:
             return self._result(resolved_run_id, "approval_required", selection, prompt_report, plan_report, None)
 
         handle = credentials.get(provider)
-        if handle is None:
+        if self.runtime.provider_requires_credential(provider) and handle is None:
             raise BrainRunError(f"no user credential handle was supplied for provider {provider!r}")
+        if handle is not None and handle.provider != provider:
+            raise BrainRunError(f"credential handle does not belong to provider {provider!r}")
         provider_messages = tuple(
             {"role": message["role"], "content": message["content"]}
             for message in messages
@@ -1198,8 +1596,10 @@ class AutonomousBrain:
         if len(provider_messages) != len(prompt_messages):
             raise BrainRunError("brain prompt returned malformed continuation messages")
         handle = credentials.get(provider)
-        if handle is None:
+        if self.runtime.provider_requires_credential(provider) and handle is None:
             raise BrainRunError(f"no user credential handle was supplied for provider {provider!r}")
+        if handle is not None and handle.provider != provider:
+            raise BrainRunError(f"credential handle does not belong to provider {provider!r}")
         request = ProviderRequest(
             model=model,
             messages=provider_messages,
@@ -1237,7 +1637,7 @@ class AutonomousBrain:
 
     def record_evaluator_outcome(
         self,
-        result: BrainRunResult,
+        result: BrainRunResult | BrainToolLoopResult | BrainMissionResult,
         *,
         bandit_state: Mapping[str, Any],
         evaluator_id: str,
@@ -1251,18 +1651,63 @@ class AutonomousBrain:
         evidence_digest: str | None = None,
         ledger: BrainLearningLedger | None = None,
     ) -> dict[str, Any]:
-        """Submit one explicit evaluator judgment and optionally persist its value-only report."""
+        """Submit one explicit evaluator judgment for a run, loop, or mission.
 
-        selected = result.selection.get("selected_model")
+        The evaluator remains the only reward authority. For continuation results, the identity
+        digest is extended with bounded response metadata without retaining provider text or tool
+        wire envelopes in the learning ledger.
+        """
+
+        if isinstance(result, BrainRunResult):
+            brain_result = result
+            outcome_digest = result.outcome_digest
+            outcome_request_id = result.response.request_id if result.response is not None else None
+        elif isinstance(result, BrainToolLoopResult):
+            brain_result = result.brain_run
+            final_response = None if result.provider_loop is None else result.provider_loop.final_response
+            outcome_digest = _json_digest(
+                {
+                    "brain_outcome_digest": brain_result.outcome_digest,
+                    "status": result.status,
+                    "provider_loop_status": None
+                    if result.provider_loop is None
+                    else result.provider_loop.status,
+                    "turns": None if result.provider_loop is None else result.provider_loop.turns,
+                    "tool_calls": None
+                    if result.provider_loop is None
+                    else result.provider_loop.tool_calls,
+                    "final_provider": None if final_response is None else final_response.provider,
+                    "final_model": None if final_response is None else final_response.model,
+                    "final_request_id": None if final_response is None else final_response.request_id,
+                }
+            )
+            outcome_request_id = None if final_response is None else final_response.request_id
+        elif isinstance(result, BrainMissionResult):
+            brain_result = result.brain_run
+            execution = result.execution or {}
+            outcome_digest = _json_digest(
+                {
+                    "brain_outcome_digest": brain_result.outcome_digest,
+                    "status": result.status,
+                    "mission_status": execution.get("mission_status"),
+                    "execution": execution.get("execution"),
+                    "result_digest": execution.get("result_digest"),
+                }
+            )
+            outcome_request_id = brain_result.response.request_id if brain_result.response is not None else None
+        else:
+            raise BrainRunError("result must be a BrainRunResult, BrainToolLoopResult, or BrainMissionResult")
+
+        selected = brain_result.selection.get("selected_model")
         if not isinstance(selected, Mapping):
             raise BrainRunError("cannot record an outcome without selected model metadata")
         provider = selected.get("provider")
         model = selected.get("model")
         if not isinstance(provider, str) or not isinstance(model, str):
             raise BrainRunError("selected model metadata is malformed")
-        selection_digest = result.selection.get("decision_digest")
-        prompt_digest = result.prompt.get("prompt_digest")
-        plan_digest = (result.plan.get("plan") or {}).get("plan_digest") if isinstance(result.plan.get("plan"), Mapping) else None
+        selection_digest = brain_result.selection.get("decision_digest")
+        prompt_digest = brain_result.prompt.get("prompt_digest")
+        plan_digest = (brain_result.plan.get("plan") or {}).get("plan_digest") if isinstance(brain_result.plan.get("plan"), Mapping) else None
         for name, value in (("selection_digest", selection_digest), ("prompt_digest", prompt_digest), ("plan_digest", plan_digest)):
             if not isinstance(value, str) or len(value) != 64:
                 raise BrainRunError(f"{name} is missing or is not a SHA-256 digest")
@@ -1270,14 +1715,14 @@ class AutonomousBrain:
             "brain_outcome_record",
             {
                 "run": {
-                    "run_id": result.run_id,
+                    "run_id": brain_result.run_id,
                     "selection_digest": selection_digest,
                     "prompt_digest": prompt_digest,
                     "plan_digest": plan_digest,
                     "provider": provider,
                     "model": model,
-                    "outcome_digest": result.outcome_digest,
-                    "request_id": result.response.request_id if result.response is not None else None,
+                    "outcome_digest": outcome_digest,
+                    "request_id": outcome_request_id,
                 },
                 "assessment": {
                     "evaluator_id": evaluator_id,
@@ -1296,7 +1741,7 @@ class AutonomousBrain:
         if not isinstance(report, Mapping) or not report.get("ok"):
             raise BrainRunError("brain outcome recording returned a refusal")
         if ledger is not None:
-            context_digest = result.selection.get("context_digest")
+            context_digest = brain_result.selection.get("context_digest")
             ledger.append(
                 report,
                 context_digest=context_digest if isinstance(context_digest, str) else None,
