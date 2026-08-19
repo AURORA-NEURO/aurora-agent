@@ -150,6 +150,33 @@ class BrainJobStoreTests(unittest.TestCase):
                 claimed = store.claim("job-1", "worker-b")
                 self.assertEqual(claimed.state, "leased")
 
+    def test_cooperative_release_preserves_checkpoint_and_requires_owner(self) -> None:
+        with TemporaryDirectory() as directory:
+            with BrainJobStore(f"{directory}/jobs.sqlite3") as store:
+                store.submit(_job_packet())
+                store.claim("job-1", "worker-a")
+                store.checkpoint(
+                    "job-1",
+                    "worker-a",
+                    phase="workflow_stage_checkpointed",
+                    checkpoint={
+                        "job_kind": "autonomous_workflow",
+                        "completed_stage_ids": ["scope"],
+                        "workflow_checkpoint_digest": "a" * 64,
+                    },
+                    side_effect_boundary="preflight",
+                )
+                with self.assertRaises(BrainJobError):
+                    store.release("job-1", "worker-b")
+                released = store.release("job-1", "worker-a", reason="stage handed to next worker")
+                self.assertEqual(released.state, "queued")
+                self.assertIsNone(released.lease_owner)
+                self.assertEqual(released.checkpoint["completed_stage_ids"], ["scope"])
+                self.assertEqual(released.checkpoint["phase"], "released")
+                self.assertEqual(store.events(job_id="job-1")[-1].event_type, "job_released")
+                claimed = store.claim("job-1", "worker-c")
+                self.assertEqual(claimed.checkpoint["workflow_checkpoint_digest"], "a" * 64)
+
 
 class DomainEvaluatorTests(unittest.TestCase):
     def _result(self) -> BrainRunResult:

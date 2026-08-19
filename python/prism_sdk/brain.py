@@ -638,6 +638,7 @@ class BrainJobRunResult:
     job: Mapping[str, Any]
     cycle: BrainLearningCycleResult | None
     error_class: str | None = None
+    workflow: Any | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -645,8 +646,9 @@ class BrainJobRunResult:
             "status": self.status,
             "job": dict(self.job),
             "cycle": None if self.cycle is None else self.cycle.to_dict(),
+            "workflow": None if self.workflow is None else self.workflow.to_dict(),
             "error_class": self.error_class,
-            "retention": "job_metadata_and_learning_digests_only",
+            "retention": "job_metadata_and_learning_digests_only; workflow_checkpoint_caller_owned",
         }
 
 
@@ -2677,6 +2679,369 @@ class AutonomousBrain:
                 cycle=None,
                 error_class=error_class,
             )
+
+    def run_resumable_workflow_job(
+        self,
+        store: "BrainJobStore",
+        *,
+        job_id: str,
+        worker_id: str,
+        resolver: Callable[[Mapping[str, Any]], Mapping[str, Any]],
+        evaluator: "BrainOutcomeEvaluator | None" = None,
+        bandit_state: Mapping[str, Any],
+        provider_health: Mapping[str, Any] | None = None,
+        lease_seconds: float = 60.0,
+        ledger: BrainLearningLedger | None = None,
+        memory: BrainEpisodicMemory | None = None,
+        approval_router: Any | None = None,
+        approval_scope: str | None = None,
+        required_approval_role: str = "operator",
+        checkpoint_sink: Callable[[str, Any], Any] | None = None,
+    ) -> BrainJobRunResult:
+        """Execute exactly one bounded workflow continuation under a durable job lease.
+
+        The resolver is the BYOK/process-restart boundary. It receives only the public job
+        record and must rehydrate a prepared ``AutonomousTaskBlueprint``, model candidates, and
+        live credential handles in memory. The job journal stores workflow identifiers, digests,
+        completed stage ids, value-only bandit state, and either a bounded inline checkpoint or
+        a reference posture for a caller-owned checkpoint sink. It never stores the raw task,
+        prompt, provider response, credential handle, or evaluator evidence.
+
+        One worker invocation runs at most one provider-backed stage. A successful non-terminal
+        stage is checkpointed and cooperatively requeued, which makes process restart and worker
+        hand-off ordinary control-plane events rather than implicit replay. Provider approval is
+        parked in ``waiting_approval`` and the approval release is enforced on the rehydrated
+        options before the next stage can run.
+        """
+
+        from .autonomy import AutonomousTaskBlueprint, AutonomousWorkflowCheckpoint
+        from .control_plane import BrainApprovalRouter
+        from .jobs import BrainJobError, BrainJobStore, MAX_JOB_CHECKPOINT_BYTES
+
+        if not isinstance(store, BrainJobStore):
+            raise BrainRunError("store must be a BrainJobStore")
+        if not callable(resolver):
+            raise BrainRunError("resolver must be callable")
+        if evaluator is not None and not isinstance(evaluator, BrainOutcomeEvaluator):
+            raise BrainRunError("evaluator must be a BrainOutcomeEvaluator or None")
+        if not isinstance(bandit_state, Mapping):
+            raise BrainRunError("bandit_state must be a mapping")
+        BrainLearningLedger._assert_safe(bandit_state)
+        if provider_health is not None:
+            if not isinstance(provider_health, Mapping):
+                raise BrainRunError("provider_health must be a mapping or None")
+            BrainLearningLedger._assert_safe(provider_health)
+        if not isinstance(lease_seconds, (int, float)) or isinstance(lease_seconds, bool) or not 1 <= lease_seconds <= 86_400:
+            raise BrainRunError("lease_seconds must be within [1, 86400]")
+        if approval_router is None:
+            approval_router = BrainApprovalRouter(store)
+        elif not isinstance(approval_router, BrainApprovalRouter):
+            raise BrainRunError("approval_router must be a BrainApprovalRouter or None")
+        if approval_scope is not None and (
+            not isinstance(approval_scope, str)
+            or not approval_scope.strip()
+            or len(approval_scope.encode("utf-8")) > 512
+        ):
+            raise BrainRunError("approval_scope must be a bounded non-empty string or None")
+        if (
+            not isinstance(required_approval_role, str)
+            or not required_approval_role.strip()
+            or len(required_approval_role.encode("utf-8")) > 128
+        ):
+            raise BrainRunError("required_approval_role must be a bounded non-empty string")
+        if checkpoint_sink is not None and not callable(checkpoint_sink):
+            raise BrainRunError("checkpoint_sink must be callable or None")
+
+        try:
+            job = store.claim(job_id, worker_id, lease_seconds=lease_seconds)
+        except BrainJobError as error:
+            raise BrainRunError("brain workflow job claim failed") from error
+        if job.terminal:
+            return BrainJobRunResult(status="already_terminal", job=job.to_dict(), cycle=None, workflow=None)
+
+        execution_started = False
+        workflow_result: Any | None = None
+        current_boundary = job.side_effect_boundary
+
+        def _checkpoint_digest(value: Mapping[str, Any]) -> str:
+            return _json_digest(value)
+
+        def _persist_workflow_state(
+            current_job: Any,
+            result: Any,
+            *,
+            phase: str,
+            side_effect_boundary: str = "preflight",
+        ) -> Any:
+            workflow_run = result.workflow
+            checkpoint = workflow_run.checkpoint
+            checkpoint_dict = checkpoint.to_dict()
+            checkpoint_digest = checkpoint.checkpoint_digest
+            state = result.bandit_state
+            if not isinstance(state, Mapping):
+                raise BrainRunError("workflow learning returned a non-mapping bandit state")
+            BrainLearningLedger._assert_safe(state)
+            metadata: dict[str, Any] = {
+                "job_kind": "autonomous_workflow",
+                "workflow_id": workflow_run.blueprint.workflow.workflow_id,
+                "workflow_digest": workflow_run.blueprint.workflow.workflow_digest,
+                "workflow_run_id": workflow_run.run_id,
+                "workflow_checkpoint_digest": checkpoint_digest,
+                "completed_stage_ids": list(checkpoint.completed_stage_ids),
+                "next_stage_ids": list(workflow_run.next_stage_ids),
+                "workflow_status": result.status,
+                "bandit_state": dict(state),
+                "stage_evaluation_count": len(result.evaluations),
+            }
+            inline_candidate = {**metadata, "checkpoint_storage": "inline", "workflow_checkpoint": checkpoint_dict}
+            encoded_size = len(
+                json.dumps(inline_candidate, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+            )
+            # Approval and cooperative-release transitions append a small amount of metadata to
+            # the same job record. Keep headroom so a valid inline checkpoint cannot become
+            # unpersistable merely because an operator approves it or a worker releases it.
+            inline_limit = MAX_JOB_CHECKPOINT_BYTES - 8_192
+            if encoded_size <= inline_limit:
+                persisted = inline_candidate
+            else:
+                if checkpoint_sink is None:
+                    raise BrainRunError(
+                        "workflow checkpoint exceeds the job journal bound; configure checkpoint_sink for caller-owned persistence"
+                    )
+                checkpoint_sink(current_job.job_id, checkpoint)
+                persisted = {**metadata, "checkpoint_storage": "caller_owned"}
+            return store.checkpoint(
+                current_job.job_id,
+                worker_id,
+                phase=phase,
+                checkpoint=persisted,
+                side_effect_boundary=side_effect_boundary,
+            )
+
+        try:
+            previous_checkpoint = job.checkpoint
+            previous_kind = previous_checkpoint.get("job_kind")
+            if previous_kind is not None and previous_kind != "autonomous_workflow":
+                raise BrainRunError("job checkpoint belongs to a different execution kind")
+            approval_released = previous_checkpoint.get("phase") == "approval_released"
+            resolving = store.checkpoint(
+                job.job_id,
+                worker_id,
+                phase="resolving_workflow",
+                checkpoint={
+                    **dict(previous_checkpoint),
+                    "job_kind": "autonomous_workflow",
+                    "spec_digest": job.spec_digest,
+                    "attempt": job.attempts,
+                },
+                side_effect_boundary=current_boundary,
+            )
+            resolved = resolver(resolving.to_dict())
+            if not isinstance(resolved, Mapping):
+                raise BrainRunError("workflow job resolver must return a mapping")
+            allowed = {"blueprint", "model_candidates", "credentials", "checkpoint", "workflow_options"}
+            unknown = sorted(set(resolved).difference(allowed))
+            if unknown:
+                raise BrainRunError("workflow job resolver returned unsupported fields: " + ", ".join(unknown))
+            required = {"blueprint", "model_candidates", "credentials"}
+            missing = sorted(required.difference(resolved))
+            if missing:
+                raise BrainRunError("workflow job resolver omitted required fields: " + ", ".join(missing))
+            blueprint = resolved["blueprint"]
+            if not isinstance(blueprint, AutonomousTaskBlueprint):
+                raise BrainRunError("workflow job blueprint must be an AutonomousTaskBlueprint")
+            options = resolved.get("workflow_options", {})
+            if not isinstance(options, Mapping):
+                raise BrainRunError("workflow_options must be a mapping")
+            options = dict(options)
+            allowed_options = {
+                "retry_blocked", "stage_execution_mode", "memory_query", "memory_limit",
+                "contextual_observations", "input_tokens", "requested_output_tokens", "max_cost_per_million_tokens",
+                "max_latency_ms", "min_quality", "selection_overrides", "approve_provider_call",
+                "approve_mission_dispatch", "run_id", "max_output_tokens", "temperature", "idempotency_key",
+                "mission_policy", "mission_options", "route_request", "auto_route", "enforce_route_tools",
+                "require_resolved_route", "provider_tools", "tool_choice", "max_provider_failovers",
+                "tool_loop_options", "stage_evidence", "memory_tags", "resume_after_replan", "max_stage_calls",
+            }
+            unknown_options = sorted(set(options).difference(allowed_options))
+            if unknown_options:
+                raise BrainRunError("workflow_options contains unsupported fields: " + ", ".join(unknown_options))
+            resume_after_replan = bool(options.pop("resume_after_replan", False))
+            if previous_checkpoint.get("workflow_status") == "learning_replan_requested" and not resume_after_replan:
+                raise BrainRunError(
+                    "workflow learning requested a replan; resolver must explicitly set resume_after_replan"
+                )
+            checkpoint_value = resolved.get("checkpoint")
+            if checkpoint_value is None:
+                checkpoint_value = previous_checkpoint.get("workflow_checkpoint")
+            if checkpoint_value is None and previous_checkpoint.get("checkpoint_storage") == "caller_owned":
+                raise BrainRunError("resolver did not rehydrate the caller-owned workflow checkpoint")
+            if checkpoint_value is not None and not isinstance(checkpoint_value, AutonomousWorkflowCheckpoint):
+                if not isinstance(checkpoint_value, Mapping):
+                    raise BrainRunError("workflow resolver checkpoint must be a checkpoint or mapping")
+                checkpoint_value = AutonomousWorkflowCheckpoint.from_dict(checkpoint_value)
+            expected_checkpoint_digest = previous_checkpoint.get("workflow_checkpoint_digest")
+            if checkpoint_value is not None and expected_checkpoint_digest is not None:
+                if checkpoint_value.checkpoint_digest != expected_checkpoint_digest:
+                    raise BrainRunError("rehydrated workflow checkpoint digest does not match the job journal")
+            if checkpoint_value is not None:
+                options["checkpoint"] = checkpoint_value
+            else:
+                options.setdefault("run_id", f"job-{job.job_id}")
+            if options.get("max_stage_calls") not in (None, 1):
+                raise BrainRunError("durable workflow jobs execute at most one stage per lease")
+            options["max_stage_calls"] = 1
+            if approval_released:
+                options["approve_provider_call"] = True
+                if str(previous_checkpoint.get("approval_scope", "")).endswith(":mission_dispatch"):
+                    options["approve_mission_dispatch"] = True
+            if provider_health is not None:
+                overrides = options.get("selection_overrides", {})
+                if not isinstance(overrides, Mapping):
+                    raise BrainRunError("workflow_options.selection_overrides must be a mapping")
+                merged_overrides = dict(overrides)
+                prior_health = merged_overrides.get("provider_health", {})
+                if not isinstance(prior_health, Mapping):
+                    raise BrainRunError("workflow_options.provider_health must be a mapping")
+                merged_health = dict(prior_health)
+                for provider, snapshot in provider_health.items():
+                    if not isinstance(provider, str) or not isinstance(snapshot, Mapping):
+                        raise BrainRunError("provider_health must map provider names to objects")
+                    merged_health[provider] = dict(snapshot)
+                merged_overrides["provider_health"] = merged_health
+                options["selection_overrides"] = merged_overrides
+            store.checkpoint(
+                job.job_id,
+                worker_id,
+                phase="workflow_stage_started",
+                checkpoint={
+                    **dict(resolving.checkpoint),
+                    "workflow_id": blueprint.workflow.workflow_id,
+                    "workflow_digest": blueprint.workflow.workflow_digest,
+                    "workflow_run_id": options.get("run_id") or (
+                        checkpoint_value.run_id if checkpoint_value is not None else f"job-{job.job_id}"
+                    ),
+                },
+                side_effect_boundary="preflight",
+            )
+            execution_started = True
+            workflow_result = self.run_workflow_learning(
+                blueprint=blueprint,
+                model_candidates=resolved["model_candidates"],
+                credentials=resolved["credentials"],
+                bandit_state=previous_checkpoint.get("bandit_state", bandit_state),
+                evaluator=evaluator,
+                ledger=ledger,
+                memory=memory or self.memory,
+                **options,
+            )
+            persisted = _persist_workflow_state(
+                job,
+                workflow_result,
+                phase="workflow_stage_checkpointed",
+                side_effect_boundary="preflight",
+            )
+            workflow_run = workflow_result.workflow
+            if workflow_run.status == "approval_required":
+                request_digest = _checkpoint_digest(
+                    {
+                        "workflow_id": workflow_run.blueprint.workflow.workflow_id,
+                        "run_id": workflow_run.run_id,
+                        "checkpoint_digest": workflow_run.checkpoint.checkpoint_digest,
+                        "next_stage_ids": list(workflow_run.next_stage_ids),
+                    }
+                )
+                stage_result = workflow_run.stage_results[-1] if workflow_run.stage_results else None
+                raw_status = None if stage_result is None or stage_result.result is None else stage_result.result.status
+                scope_suffix = "mission_dispatch" if raw_status == "mission_approval_required" else "provider_call"
+                effective_scope = approval_scope or f"{job.domain}:{job.capability}:{job.risk_class}:{scope_suffix}"
+                approval_router.request(
+                    job.job_id,
+                    worker_id,
+                    approval_scope=effective_scope,
+                    request_digest=request_digest,
+                    required_role=required_approval_role,
+                )
+                waiting = store.get(job.job_id)
+                if waiting is None:
+                    raise BrainRunError("workflow approval-waiting job disappeared from the durable store")
+                return BrainJobRunResult(
+                    status="waiting_approval",
+                    job=waiting.to_dict(),
+                    cycle=None,
+                    workflow=workflow_result,
+                )
+            if workflow_result.status == "completed" and workflow_run.status == "completed":
+                completed = store.complete(
+                    job.job_id,
+                    worker_id,
+                    result_metadata={
+                        "job_kind": "autonomous_workflow",
+                        "workflow_id": workflow_run.blueprint.workflow.workflow_id,
+                        "workflow_run_id": workflow_run.run_id,
+                        "workflow_status": workflow_result.status,
+                        "workflow_checkpoint_digest": workflow_run.checkpoint.checkpoint_digest,
+                        "completed_stage_ids": list(workflow_run.checkpoint.completed_stage_ids),
+                        "stage_evaluation_count": len(workflow_result.evaluations),
+                    },
+                )
+                return BrainJobRunResult(
+                    status=completed.state,
+                    job=completed.to_dict(),
+                    cycle=None,
+                    workflow=workflow_result,
+                )
+            released = store.release(
+                job.job_id,
+                worker_id,
+                reason=(
+                    "workflow learning requested explicit replan"
+                    if workflow_result.status == "learning_replan_requested"
+                    else "workflow stage checkpoint persisted"
+                ),
+            )
+            return BrainJobRunResult(
+                status=workflow_result.status if workflow_result.status == "learning_replan_requested" else "queued",
+                job=released.to_dict(),
+                cycle=None,
+                workflow=workflow_result,
+            )
+        except Exception as error:
+            error_class = type(error).__name__
+            try:
+                boundary = "unknown" if execution_started else current_boundary
+                current = store.get(job.job_id)
+                if current is not None and current.lease_owner == worker_id and current.state in {"leased", "running"}:
+                    store.checkpoint(
+                        job.job_id,
+                        worker_id,
+                        phase="workflow_execution_error",
+                        checkpoint={
+                            **dict(current.checkpoint),
+                            "error_class": error_class,
+                        },
+                        side_effect_boundary=boundary,
+                    )
+                    failed = store.fail(
+                        job.job_id,
+                        worker_id,
+                        reason=(
+                            "workflow execution failed before provider dispatch"
+                            if not execution_started
+                            else "workflow execution outcome is uncertain; reconciliation required"
+                        ),
+                        retryable=False,
+                    )
+                    return BrainJobRunResult(
+                        status=failed.state,
+                        job=failed.to_dict(),
+                        cycle=None,
+                        error_class=error_class,
+                        workflow=workflow_result,
+                    )
+            except (BrainJobError, BrainRunError) as persistence_error:
+                raise BrainRunError("workflow job failure could not be durably recorded") from persistence_error
+            raise BrainRunError("workflow job execution failed") from error
 
     def run(
         self,

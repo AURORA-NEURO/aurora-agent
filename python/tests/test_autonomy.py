@@ -16,6 +16,9 @@ from prism_sdk import (
     BrainEpisodicMemory,
     BrainLearningLedger,
     BrainOutcomeEvaluator,
+    BrainApprovalRouter,
+    BrainJobStore,
+    BrainWorker,
     CredentialStore,
     LLMRuntime,
     ProviderToolResult,
@@ -83,6 +86,12 @@ class _StructuredWorkflowProviderHandler(BaseHTTPRequestHandler):
                 stage_id = content.split("Execute workflow stage ", 1)[1].split(":", 1)[0]
                 break
         blocked = getattr(self.server, "block_stage", None) == stage_id
+        large_checkpoint = getattr(self.server, "large_checkpoint", False)
+        evidence = (
+            [f"evidence for {stage_id} {index} " + ("x" * 480) for index in range(32)]
+            if large_checkpoint and not blocked
+            else [] if blocked else [f"evidence for {stage_id}"]
+        )
         response = {
             "id": f"workflow-{stage_id}",
             "model": "test-model",
@@ -90,9 +99,9 @@ class _StructuredWorkflowProviderHandler(BaseHTTPRequestHandler):
                 {
                     "stage_id": stage_id,
                     "status": "blocked" if blocked else "completed",
-                    "evidence": [] if blocked else [f"evidence for {stage_id}"],
+                    "evidence": evidence,
                     "uncertainty": [],
-                    "notes": "bounded stage result",
+                    "notes": "x" * 16_000 if large_checkpoint and not blocked else "bounded stage result",
                     "next_actions": [],
                 }
             ),
@@ -243,6 +252,7 @@ def _runtime() -> tuple[LLMRuntime, CredentialStore, HTTPServer, threading.Threa
 def _structured_runtime() -> tuple[LLMRuntime, CredentialStore, HTTPServer, threading.Thread]:
     server = HTTPServer(("127.0.0.1", 0), _StructuredWorkflowProviderHandler)
     server.block_stage = None  # type: ignore[attr-defined]
+    server.large_checkpoint = False  # type: ignore[attr-defined]
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     store = CredentialStore()
@@ -794,6 +804,243 @@ def test_run_workflow_learning_missing_evidence_never_defaults_to_reward(tmp_pat
         assert b"workflow-missing-evidence-secret" not in (tmp_path / "workflow-learning.jsonl").read_bytes()
     finally:
         memory.close()
+        server.shutdown()
+        thread.join(timeout=2)
+
+
+def test_durable_workflow_worker_releases_one_stage_and_resumes_after_store_restart(tmp_path: Path):
+    runtime, credentials, server, thread = _structured_runtime()
+    handle = credentials.register("openai", "durable-workflow-secret")
+    brain = AutonomousBrain(_Workspace(), runtime)
+    job_path = tmp_path / "durable-workflow.sqlite3"
+    try:
+        blueprint = brain.prepare_autonomous(
+            task="Execute a restart-safe staged implementation review.",
+            domain="coding",
+        )
+        stage_evidence = {
+            stage.id: {"signals": {signal: True for signal in stage.evaluator_signals}}
+            for stage in blueprint.workflow.stages
+        }
+        packet = {
+            "idempotency_key": "durable-workflow-review",
+            "spec_digest": "a" * 64,
+            "domain": "coding",
+            "capability": "implementation_review",
+            "risk_class": "review",
+            "max_attempts": 8,
+        }
+
+        def resolve(metadata: dict[str, object]) -> dict[str, object]:
+            assert "Execute a restart-safe" not in json.dumps(metadata)
+            return {
+                "blueprint": blueprint,
+                "model_candidates": _model(),
+                "credentials": {"openai": handle},
+                "workflow_options": {
+                    "approve_provider_call": True,
+                    "stage_evidence": stage_evidence,
+                },
+            }
+
+        with BrainJobStore(job_path) as store:
+            job, _ = store.submit(packet)
+            worker = BrainWorker(
+                brain,
+                store,
+                worker_id="workflow-worker-a",
+                resolver=resolve,
+                evaluator=None,
+                bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+                execution_kind="workflow_learning",
+                lease_seconds=10,
+                heartbeat_seconds=0.1,
+            )
+            first = worker.run_once(job.job_id)
+            assert first is not None
+            assert first.status == "queued"
+            assert first.workflow is not None
+            assert first.workflow.workflow.status == "paused"
+            first_record = store.get(job.job_id)
+            assert first_record is not None
+            assert first_record.state == "queued"
+            assert first_record.checkpoint["checkpoint_storage"] == "inline"
+            assert first_record.checkpoint["completed_stage_ids"] == [blueprint.workflow.stages[0].id]
+            serialized = json.dumps(first_record.to_dict())
+            assert "restart-safe staged implementation review" not in serialized
+            assert "durable-workflow-secret" not in serialized
+            assert worker.bandit_state["generation"] == 1
+
+        with BrainJobStore(job_path) as reopened:
+            restarted = BrainWorker(
+                brain,
+                reopened,
+                worker_id="workflow-worker-b",
+                resolver=resolve,
+                evaluator=None,
+                bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+                execution_kind="workflow_learning",
+                lease_seconds=10,
+                heartbeat_seconds=0.1,
+            )
+            results = [restarted.run_once(job.job_id) for _ in range(len(blueprint.workflow.stages) - 1)]
+            assert all(result is not None for result in results)
+            assert results[-1] is not None
+            assert results[-1].status == "succeeded"
+            final = reopened.get(job.job_id)
+            assert final is not None
+            assert final.state == "succeeded"
+            assert final.checkpoint["phase"] == "completed"
+            assert reopened.verify_integrity()["ok"] is True
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_durable_workflow_job_parks_provider_approval_without_losing_checkpoint(tmp_path: Path):
+    runtime, credentials, server, thread = _structured_runtime()
+    handle = credentials.register("openai", "approval-workflow-secret")
+    brain = AutonomousBrain(_Workspace(), runtime)
+    try:
+        blueprint = brain.prepare_autonomous(
+            task="Prepare a staged change that requires an operator gate.",
+            domain="coding",
+        )
+        evidence = {
+            stage.id: {"signals": {signal: True for signal in stage.evaluator_signals}}
+            for stage in blueprint.workflow.stages
+        }
+
+        def resolve(_metadata: dict[str, object]) -> dict[str, object]:
+            return {
+                "blueprint": blueprint,
+                "model_candidates": _model(),
+                "credentials": {"openai": handle},
+                "workflow_options": {
+                    "approve_provider_call": False,
+                    "stage_evidence": evidence,
+                },
+            }
+
+        with BrainJobStore(tmp_path / "approval-workflow.sqlite3") as store:
+            job, _ = store.submit(
+                {
+                    "idempotency_key": "approval-workflow",
+                    "spec_digest": "b" * 64,
+                    "domain": "coding",
+                    "capability": "implementation_review",
+                    "risk_class": "review",
+                    "max_attempts": 4,
+                }
+            )
+            worker = BrainWorker(
+                brain,
+                store,
+                worker_id="approval-worker",
+                resolver=resolve,
+                evaluator=None,
+                bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+                execution_kind="workflow_learning",
+                lease_seconds=10,
+                heartbeat_seconds=0.1,
+            )
+            waiting = worker.run_once(job.job_id)
+            assert waiting is not None
+            assert waiting.status == "waiting_approval"
+            record = store.get(job.job_id)
+            assert record is not None
+            assert record.state == "waiting_approval"
+            assert record.checkpoint["job_kind"] == "autonomous_workflow"
+            assert "workflow_checkpoint" in record.checkpoint
+            request = BrainApprovalRouter(store).get(job.job_id)
+            assert request is not None
+            assert request.state == "pending"
+            BrainApprovalRouter(store).approve(job.job_id, approver="operator-1")
+            resumed = worker.run_once(job.job_id)
+            assert resumed is not None
+            assert resumed.status == "queued"
+            assert resumed.workflow.workflow.checkpoint.completed_stage_ids == (blueprint.workflow.stages[0].id,)  # type: ignore[union-attr]
+            serialized = json.dumps(store.get(job.job_id).to_dict())  # type: ignore[union-attr]
+            assert "approval-workflow-secret" not in serialized
+            assert "Prepare a staged change" not in serialized
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_durable_workflow_job_switches_to_caller_owned_checkpoint_storage_when_needed(tmp_path: Path):
+    runtime, credentials, server, thread = _structured_runtime()
+    server.large_checkpoint = True  # type: ignore[attr-defined]
+    handle = credentials.register("openai", "large-checkpoint-secret")
+    brain = AutonomousBrain(_Workspace(), runtime)
+    stored_checkpoints: list[object] = []
+    try:
+        blueprint = brain.prepare_autonomous(
+            task="Persist a large but bounded staged evidence continuation.",
+            domain="coding",
+        )
+        evidence = {
+            stage.id: {"signals": {signal: True for signal in stage.evaluator_signals}}
+            for stage in blueprint.workflow.stages
+        }
+
+        def sink(_job_id: str, checkpoint: object) -> None:
+            stored_checkpoints.append(checkpoint)
+
+        def resolve(metadata: dict[str, object]) -> dict[str, object]:
+            job_checkpoint = metadata.get("checkpoint", {})
+            resolved: dict[str, object] = {
+                "blueprint": blueprint,
+                "model_candidates": _model(),
+                "credentials": {"openai": handle},
+                "workflow_options": {
+                    "approve_provider_call": True,
+                    "stage_evidence": evidence,
+                },
+            }
+            if isinstance(job_checkpoint, dict) and job_checkpoint.get("checkpoint_storage") == "caller_owned":
+                resolved["checkpoint"] = stored_checkpoints[-1]
+            return resolved
+
+        with BrainJobStore(tmp_path / "large-checkpoint.sqlite3") as store:
+            job, _ = store.submit(
+                {
+                    "idempotency_key": "large-checkpoint-workflow",
+                    "spec_digest": "c" * 64,
+                    "domain": "coding",
+                    "capability": "implementation_review",
+                    "risk_class": "review",
+                    "max_attempts": 4,
+                }
+            )
+            worker = BrainWorker(
+                brain,
+                store,
+                worker_id="large-checkpoint-worker",
+                resolver=resolve,
+                evaluator=None,
+                bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+                execution_kind="workflow_learning",
+                workflow_checkpoint_sink=sink,
+                lease_seconds=10,
+                heartbeat_seconds=0.1,
+            )
+            first = worker.run_once(job.job_id)
+            assert first is not None and first.status == "queued"
+            second = worker.run_once(job.job_id)
+            assert second is not None and second.status == "queued"
+            third = worker.run_once(job.job_id)
+            assert third is not None and third.status == "queued"
+            record = store.get(job.job_id)
+            assert record is not None
+            assert record.checkpoint["checkpoint_storage"] == "caller_owned"
+            assert record.checkpoint["completed_stage_ids"] == ["scope", "inspect", "implement"]
+            assert len(stored_checkpoints) == 2
+            assert "large-checkpoint-secret" not in json.dumps(record.to_dict())
+            assert "Persist a large but bounded" not in json.dumps(record.to_dict())
+    finally:
         server.shutdown()
         thread.join(timeout=2)
         server.server_close()

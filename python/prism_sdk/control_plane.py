@@ -185,6 +185,7 @@ class BrainApprovalRouter:
                 worker_id,
                 phase="approval_requested",
                 checkpoint={
+                    **dict(current.checkpoint),
                     "approval_id": approval_id,
                     "approval_scope": approval_scope,
                     "request_digest": request_digest,
@@ -876,7 +877,7 @@ class BrainWorker:
         *,
         worker_id: str,
         resolver: Callable[[Mapping[str, Any]], Mapping[str, Any]],
-        evaluator: BrainOutcomeEvaluator,
+        evaluator: BrainOutcomeEvaluator | None,
         bandit_state: Mapping[str, Any],
         ledger: BrainLearningLedger | None = None,
         memory: Any | None = None,
@@ -886,9 +887,18 @@ class BrainWorker:
         required_approval_role: str = "operator",
         lease_seconds: float = 300.0,
         heartbeat_seconds: float = 30.0,
+        execution_kind: str = "mission_learning",
+        workflow_checkpoint_sink: Callable[[str, Any], Any] | None = None,
     ) -> None:
-        if not hasattr(brain, "run_resumable_learning_job"):
-            raise BrainRunError("worker brain must expose run_resumable_learning_job")
+        if execution_kind not in {"mission_learning", "workflow_learning"}:
+            raise BrainRunError("worker execution_kind must be mission_learning or workflow_learning")
+        required_method = (
+            "run_resumable_learning_job"
+            if execution_kind == "mission_learning"
+            else "run_resumable_workflow_job"
+        )
+        if not hasattr(brain, required_method):
+            raise BrainRunError(f"worker brain must expose {required_method}")
         if not isinstance(store, BrainJobStore):
             raise BrainRunError("worker requires a BrainJobStore")
         self.brain = brain
@@ -896,8 +906,10 @@ class BrainWorker:
         self.worker_id = _text("worker_id", worker_id)
         if not callable(resolver):
             raise BrainRunError("worker resolver must be callable")
-        if not isinstance(evaluator, BrainOutcomeEvaluator):
+        if execution_kind == "mission_learning" and not isinstance(evaluator, BrainOutcomeEvaluator):
             raise BrainRunError("worker evaluator must be a BrainOutcomeEvaluator")
+        if execution_kind == "workflow_learning" and evaluator is not None and not isinstance(evaluator, BrainOutcomeEvaluator):
+            raise BrainRunError("workflow worker evaluator must be a BrainOutcomeEvaluator or None")
         if not isinstance(bandit_state, Mapping):
             raise BrainRunError("worker bandit_state must be a mapping")
         BrainLearningLedger._assert_safe(bandit_state)
@@ -916,6 +928,8 @@ class BrainWorker:
             raise BrainRunError("worker lease_seconds must be within [1, 86400]")
         if not isinstance(heartbeat_seconds, (int, float)) or isinstance(heartbeat_seconds, bool) or not 0.1 <= heartbeat_seconds < lease_seconds:
             raise BrainRunError("worker heartbeat_seconds must be within [0.1, lease_seconds)")
+        if workflow_checkpoint_sink is not None and not callable(workflow_checkpoint_sink):
+            raise BrainRunError("workflow_checkpoint_sink must be callable or None")
         self.resolver = resolver
         self.evaluator = evaluator
         self.bandit_state = dict(bandit_state)
@@ -927,6 +941,8 @@ class BrainWorker:
         self.required_approval_role = required_approval_role
         self.lease_seconds = float(lease_seconds)
         self.heartbeat_seconds = float(heartbeat_seconds)
+        self.execution_kind = execution_kind
+        self.workflow_checkpoint_sink = workflow_checkpoint_sink
 
     def run_once(self, job_id: str | None = None) -> BrainJobRunResult | None:
         if job_id is None:
@@ -936,7 +952,7 @@ class BrainWorker:
             job_id = queued[0].job_id
         claimed = self.store.claim(job_id, self.worker_id, lease_seconds=self.lease_seconds)
         if claimed.terminal:
-            return BrainJobRunResult(status="already_terminal", job=claimed.to_dict(), cycle=None)
+            return BrainJobRunResult(status="already_terminal", job=claimed.to_dict(), cycle=None, workflow=None)
         stop = threading.Event()
         heartbeat_errors: list[Exception] = []
 
@@ -983,21 +999,25 @@ class BrainWorker:
             runtime.add_observation_callback(observation_callback)
         operation_error: Exception | None = None
         try:
-            result = self.brain.run_resumable_learning_job(
-                self.store,
-                job_id=job_id,
-                worker_id=self.worker_id,
-                resolver=self.resolver,
-                evaluator=self.evaluator,
-                bandit_state=self.bandit_state,
-                provider_health=None if self.health is None else self.health.provider_health(),
-                ledger=self.ledger,
-                memory=self.memory,
-                approval_router=self.approvals,
-                approval_scope=self.approval_scope,
-                required_approval_role=self.required_approval_role,
-                lease_seconds=self.lease_seconds,
-            )
+            common = {
+                "job_id": job_id,
+                "worker_id": self.worker_id,
+                "resolver": self.resolver,
+                "evaluator": self.evaluator,
+                "bandit_state": self.bandit_state,
+                "provider_health": None if self.health is None else self.health.provider_health(),
+                "ledger": self.ledger,
+                "memory": self.memory,
+                "approval_router": self.approvals,
+                "approval_scope": self.approval_scope,
+                "required_approval_role": self.required_approval_role,
+                "lease_seconds": self.lease_seconds,
+            }
+            if self.execution_kind == "workflow_learning":
+                common["checkpoint_sink"] = self.workflow_checkpoint_sink
+                result = self.brain.run_resumable_workflow_job(self.store, **common)
+            else:
+                result = self.brain.run_resumable_learning_job(self.store, **common)
         except Exception as error:
             operation_error = error
         finally:
@@ -1033,6 +1053,53 @@ class BrainWorker:
             raise operation_error
         if result is None:
             raise BrainRunError("worker execution returned no result")
+        if result.workflow is not None:
+            next_state = getattr(result.workflow, "bandit_state", None)
+            if isinstance(next_state, Mapping):
+                self.bandit_state = dict(next_state)
+            if self.health is not None:
+                for stage in result.workflow.workflow.stage_results:
+                    if stage.result is None:
+                        continue
+                    brain_result = getattr(stage.result, "brain_run", stage.result)
+                    selection = getattr(brain_result, "selection", {})
+                    selected = selection.get("selected_model") if isinstance(selection, Mapping) else None
+                    if not isinstance(selected, Mapping):
+                        continue
+                    provider = selected.get("provider")
+                    model = selected.get("model")
+                    if not isinstance(provider, str) or not isinstance(model, str):
+                        continue
+                    response = getattr(brain_result, "response", None)
+                    usage = getattr(response, "usage", {}) if response is not None else {}
+                    decision = next(
+                        (
+                            evaluation.decision.to_dict()
+                            for evaluation in result.workflow.evaluations
+                            if evaluation.stage_id == stage.stage.id
+                        ),
+                        {},
+                    )
+                    stage_outcome = "success" if stage.execution_status == "completed" else (
+                        "unknown" if stage.execution_status == "approval_required" else "failure"
+                    )
+                    self.health.record(
+                        BrainModelObservation(
+                            provider=provider,
+                            model=model,
+                            domain=claimed.domain,
+                            capability=claimed.capability,
+                            risk_class=claimed.risk_class,
+                            status=stage.execution_status,
+                            outcome=stage_outcome,
+                            latency_ms=(time.perf_counter() - started) * 1000.0,
+                            input_tokens=usage.get("input_tokens") if isinstance(usage, Mapping) else None,
+                            output_tokens=usage.get("output_tokens") if isinstance(usage, Mapping) else None,
+                            quality_reward=decision.get("reward") if isinstance(decision, Mapping) else None,
+                            quality_passed=decision.get("passed") if isinstance(decision, Mapping) else None,
+                            outcome_digest=getattr(brain_result, "outcome_digest", None),
+                        )
+                    )
         if self.health is not None and result.cycle is not None:
             final = result.cycle.final_result
             outcome = (
@@ -1094,6 +1161,7 @@ class BrainWorker:
                 job=result.job,
                 cycle=result.cycle,
                 error_class=type(heartbeat_errors[0]).__name__,
+                workflow=result.workflow,
             )
         return result
 

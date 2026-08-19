@@ -635,6 +635,70 @@ approval decision as an authorization to set `approve_mission_dispatch=True`. An
 an active cycle is conservatively recorded as reconciliation-required because the process cannot
 infer whether a remote effect began.
 
+### Durable workflow jobs
+
+Mission learning jobs and staged workflow jobs use the same journal, but they have different
+continuation contracts. A workflow job runs at most one provider-backed stage per lease. After a
+successful stage, it writes the workflow checkpoint and bandit state, emits a `job_released` event,
+and returns to `queued`; the next worker claims the job and continues from the completed-stage
+set. This makes the stage DAG a real restart boundary rather than a caller convention.
+
+```python
+from prism_sdk import BrainJobStore, BrainWorker
+
+def resolve_workflow(job):
+    # Resolve the private task/blueprint and a fresh opaque handle from the application's
+    # secret manager. The job argument contains only public metadata and checkpoint digests.
+    blueprint = application_prepare_blueprint(job)
+    return {
+        "blueprint": blueprint,
+        "model_candidates": application_model_catalogue(),
+        "credentials": {"openai": application_resolve_handle("openai")},
+        "workflow_options": {
+            "approve_provider_call": application_provider_approval(job),
+            "stage_evidence": application_stage_evidence(blueprint, job),
+        },
+    }
+
+with BrainJobStore("state/brain-jobs.sqlite3") as jobs:
+    worker = BrainWorker(
+        brain,
+        jobs,
+        worker_id="workflow-worker-1",
+        resolver=resolve_workflow,
+        evaluator=None,                 # built-in workflow evaluator by default
+        bandit_state=bandit_state,
+        execution_kind="workflow_learning",
+    )
+    result = worker.run_once(job_id)
+```
+
+The resolver may return a previously persisted `checkpoint` as an
+`AutonomousWorkflowCheckpoint` or its dictionary form. If the checkpoint fits the bounded job
+record, the journal retains it under `workflow_checkpoint`; otherwise the caller must configure
+`workflow_checkpoint_sink` on `BrainWorker` (or `checkpoint_sink` on
+`run_resumable_workflow_job`). The sink receives the validated checkpoint and the job retains
+only `checkpoint_storage="caller_owned"`, its content digest, completed/next stage ids, and the
+value-only bandit state. The resolver is responsible for loading that external checkpoint after a
+restart and returning it with the same digest. Structured stage output is never silently
+truncated to satisfy the SQLite journal limit.
+
+Provider approval is a durable state transition. A stage that cannot invoke its provider returns
+`waiting_approval`; `BrainApprovalRouter.approve(...)` releases the job to `queued`, while the
+workflow checkpoint remains attached. On the next claim, the runner forces the approved provider
+approval into the rehydrated options so a resolver cannot accidentally discard it. Mission-style
+dispatch approval remains a separate scope and is only forwarded when that exact approval scope
+was released. A workflow learning failure that requests a replan returns
+`learning_replan_requested` and is not replayed implicitly; the resolver must explicitly set
+`resume_after_replan=True` after revising its evidence or continuation policy.
+
+All durable workflow job records remain metadata-only: no raw task, prompt, provider message,
+credential handle, key, or evaluator payload is written to the job journal. A worker can therefore
+be restarted with a new process and new short-lived BYOK handles while preserving the exact
+workflow identity, checkpoint digest, stage-level outcome updates, approval history, and lease
+recovery posture. If a lease expires after a possible external dispatch, the existing
+`reconciliation_required` quarantine still wins over replay.
+
 ## Reusable domain evaluators
 
 `DomainEvaluatorRegistry.with_builtin_profiles()` supplies one evidence-only contract for five

@@ -3,8 +3,10 @@
 This store is intentionally not an execution engine and not a credential store. It persists only
 the metadata needed to coordinate a caller-owned resolver: digests, domain labels, leases,
 attempt counters, checkpoints, and recovery decisions. A resolver rehydrates the actual task,
-prompt, plan, evaluator, and BYOK handles after a process restart. If a lease expires after the
-external-effect boundary, the job is quarantined for reconciliation instead of being replayed.
+prompt, plan, evaluator, workflow blueprint, and BYOK handles after a process restart. Workflow
+workers can cooperatively release a bounded stage continuation back to the queue; if a lease
+expires after the external-effect boundary, the job is quarantined for reconciliation instead of
+being replayed.
 """
 
 from __future__ import annotations
@@ -506,6 +508,43 @@ class BrainJobStore:
                 self._connection.execute("COMMIT")
                 return self._row_to_record(
                     self._connection.execute("SELECT * FROM brain_jobs WHERE job_id = ?", (job_id,)).fetchone()
+                )
+            except Exception:
+                self._connection.execute("ROLLBACK")
+                raise
+
+    def release(self, job_id: str, worker_id: str, *, reason: str = "checkpoint persisted; worker released lease") -> BrainJobRecord:
+        """Return an active job to the queue after a durable cooperative checkpoint.
+
+        This is the hand-off primitive for multi-step work. A worker may finish one bounded
+        stage, persist the continuation, and release its lease so another process can claim the
+        next stage. The operation refuses to requeue work after an external-effect boundary;
+        that work must remain quarantined for reconciliation instead of being replayed.
+        """
+
+        reason = _job_text("job release reason", reason, MAX_JOB_REASON_BYTES)
+        with self._lock:
+            self._begin_locked()
+            try:
+                record = self._require_owned_locked(job_id, worker_id)
+                if record.side_effect_boundary in {"dispatched", "unknown"}:
+                    raise BrainJobError("job cannot be cooperatively released after external dispatch")
+                self._transition_locked(
+                    record,
+                    event_type="job_released",
+                    state="queued",
+                    reason=reason,
+                    lease_owner=None,
+                    lease_expires_ns=None,
+                    checkpoint={
+                        **dict(record.checkpoint),
+                        "phase": "released",
+                        "release_reason": reason,
+                    },
+                )
+                self._connection.execute("COMMIT")
+                return self._row_to_record(
+                    self._connection.execute("SELECT * FROM brain_jobs WHERE job_id = ?", (record.job_id,)).fetchone()
                 )
             except Exception:
                 self._connection.execute("ROLLBACK")
