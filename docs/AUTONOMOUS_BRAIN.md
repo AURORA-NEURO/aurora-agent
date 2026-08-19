@@ -296,6 +296,71 @@ multi-tenant isolation should place the database behind its own encrypted storag
 backup, and retention controls; the SDK supplies bounded append/retrieval and provenance, not a
 distributed database or an identity authority.
 
+## Resumable learning jobs
+
+For work that must survive a worker restart, `BrainJobStore` adds a separate orchestration journal.
+It persists an idempotency key, spec digest, domain labels, lease, attempt count, checkpoint,
+approval state, and side-effect boundary. It deliberately does not persist the job specification:
+the caller supplies a resolver that rehydrates the task, prompt, plan, evaluator evidence, and fresh
+credential handles in process memory.
+
+```python
+from hashlib import sha256
+from prism_sdk import BrainJobStore
+
+spec_digest = sha256(b"release-evidence-v1").hexdigest()
+with BrainJobStore("state/brain-jobs.sqlite3") as jobs:
+    job, receipt = jobs.submit({
+        "idempotency_key": "release-evidence-request-42",
+        "spec_digest": spec_digest,
+        "domain": "engineering",
+        "capability": "release_audit",
+        "risk_class": "release_review",
+        "max_attempts": 3,
+    })
+```
+
+`brain.run_resumable_learning_job(...)` claims the job, invokes the caller resolver with only the
+spec-free job view, runs the normal adaptive mission/evaluator cycle, and checkpoints only cycle
+status, attempt counts, replans, and outcome digests. An expired lease before dispatch is safely
+requeued; an expired lease at or after dispatch becomes `reconciliation_required` and cannot be
+claimed until an operator handles the uncertain external state. A waiting approval is released
+only through `resume_waiting(...)`, which records the approver before another worker can claim it.
+Any exception during an active cycle is conservatively recorded as reconciliation-required because
+the process cannot infer whether a remote effect began.
+
+## Reusable domain evaluators
+
+`DomainEvaluatorRegistry.with_builtin_profiles()` supplies one evidence-only contract for five
+common domain families: `engineering`, `research`, `operations`, `data`, and `biomedical`. Each
+profile has required normalized signal names, positive weights, a pass threshold, and an evaluator
+identity/version. Applications provide boolean or `[0, 1]` signal values plus digest references;
+the adapter returns a reward, pass/fail gate, failure class, evidence digest, and bounded replan
+instruction. These profiles are policy scaffolds, not truth or clinical authorities—domain
+applications remain responsible for producing and validating the signals.
+
+```python
+from prism_sdk import DomainEvaluatorRegistry
+
+evaluators = DomainEvaluatorRegistry.with_builtin_profiles()
+evaluator = evaluators.resolve("research")
+evidence = evaluator.normalize_evidence({
+    "domain": "research",
+    "capability": "literature_review",
+    "risk_class": "high_review",
+    "signals": {
+        "evidence_traceable": 1.0,
+        "uncertainty_reported": 1.0,
+        "claim_scope_respected": 1.0,
+    },
+    "references": ["a" * 64],
+})
+```
+
+The adapter is a `BrainOutcomeEvaluator`, so it plugs directly into
+`run_adaptive_mission_learning_cycle(...)` and retains the same secret-safe replay and explicit
+bandit-update boundary across all five domains.
+
 ## Provider-neutral boundary
 
 The current Python runtime supports:

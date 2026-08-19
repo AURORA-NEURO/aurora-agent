@@ -630,6 +630,26 @@ class BrainLearningCycleResult:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class BrainJobRunResult:
+    """Result envelope for one claimed, resolver-backed durable brain job."""
+
+    status: str
+    job: Mapping[str, Any]
+    cycle: BrainLearningCycleResult | None
+    error_class: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": "bioprism-brain-job-run/0.1",
+            "status": self.status,
+            "job": dict(self.job),
+            "cycle": None if self.cycle is None else self.cycle.to_dict(),
+            "error_class": self.error_class,
+            "retention": "job_metadata_and_learning_digests_only",
+        }
+
+
 def _mission_tool_identifier(value: Any) -> bool:
     return isinstance(value, str) and bool(value) and all(
         character.isalnum() or character == "_" for character in value
@@ -2317,6 +2337,153 @@ class AutonomousBrain:
             recalled_memory=recalled,
             replan_count=replan_count,
         )
+
+    def run_resumable_learning_job(
+        self,
+        store: "BrainJobStore",
+        *,
+        job_id: str,
+        worker_id: str,
+        resolver: Callable[[Mapping[str, Any]], Mapping[str, Any]],
+        evaluator: "BrainOutcomeEvaluator",
+        bandit_state: Mapping[str, Any],
+        ledger: BrainLearningLedger | None = None,
+        memory: BrainEpisodicMemory | None = None,
+    ) -> BrainJobRunResult:
+        """Claim and execute one restart-safe learning job through a caller resolver.
+
+        The persisted job never contains the task, prompt, plan, provider response, evaluator
+        evidence, or credential handle. ``resolver`` receives only the public job metadata and
+        rehydrates those values in-process (typically by resolving a secret-manager reference and
+        collecting a fresh BYOK handle). Any exception during the cycle is conservatively marked
+        as reconciliation-required because the process cannot prove whether a side effect began.
+        """
+
+        from .jobs import BrainJobError, BrainJobStore
+
+        if not isinstance(store, BrainJobStore):
+            raise BrainRunError("store must be a BrainJobStore")
+        if not callable(resolver):
+            raise BrainRunError("resolver must be callable")
+        if not isinstance(evaluator, BrainOutcomeEvaluator):
+            raise BrainRunError("evaluator must be a BrainOutcomeEvaluator")
+        if not isinstance(bandit_state, Mapping):
+            raise BrainRunError("bandit_state must be a mapping")
+        try:
+            job = store.claim(job_id, worker_id)
+        except BrainJobError as error:
+            raise BrainRunError("brain job claim failed") from error
+        if job.terminal:
+            return BrainJobRunResult(
+                status="already_terminal",
+                job=job.to_dict(),
+                cycle=None,
+                error_class=None,
+            )
+        execution_started = False
+        try:
+            job = store.checkpoint(
+                job.job_id,
+                worker_id,
+                phase="resolving_spec",
+                checkpoint={"spec_digest": job.spec_digest, "attempt": job.attempts},
+                side_effect_boundary="not_started",
+            )
+            resolved = resolver(job.to_dict())
+            if not isinstance(resolved, Mapping):
+                raise BrainRunError("job resolver must return a mapping")
+            allowed = {
+                "task",
+                "model_candidates",
+                "prompt",
+                "plan",
+                "credentials",
+                "mission_policy",
+                "memory_query",
+                "memory_limit",
+                "memory_tags",
+                "evidence",
+                "max_replans",
+                "mission_options",
+            }
+            unknown = sorted(set(resolved).difference(allowed))
+            if unknown:
+                raise BrainRunError("job resolver returned unsupported fields: " + ", ".join(unknown))
+            required = {"task", "model_candidates", "prompt", "plan", "credentials", "mission_policy"}
+            missing = sorted(required.difference(resolved))
+            if missing:
+                raise BrainRunError("job resolver omitted required fields: " + ", ".join(missing))
+            store.checkpoint(
+                job.job_id,
+                worker_id,
+                phase="learning_cycle_started",
+                checkpoint={"spec_digest": job.spec_digest, "attempt": job.attempts},
+                side_effect_boundary="not_started",
+            )
+            execution_started = True
+            cycle = self.run_adaptive_mission_learning_cycle(
+                **dict(resolved),
+                evaluator=evaluator,
+                bandit_state=bandit_state,
+                ledger=ledger,
+                memory=memory or self.memory,
+            )
+            boundary = "dispatched" if (
+                cycle.final_result.status == "mission_dispatched"
+                or cycle.final_result.execution is not None
+            ) else "preflight"
+            store.checkpoint(
+                job.job_id,
+                worker_id,
+                phase="learning_cycle_completed",
+                checkpoint={
+                    "cycle_status": cycle.status,
+                    "attempt_count": len(cycle.attempts),
+                    "replan_count": cycle.replan_count,
+                    "final_outcome_digest": cycle.final_result.brain_run.outcome_digest,
+                },
+                side_effect_boundary=boundary,
+            )
+            completed = store.complete(
+                job.job_id,
+                worker_id,
+                result_metadata={
+                    "cycle_status": cycle.status,
+                    "attempt_count": len(cycle.attempts),
+                    "replan_count": cycle.replan_count,
+                    "final_outcome_digest": cycle.final_result.brain_run.outcome_digest,
+                },
+            )
+            return BrainJobRunResult(status=completed.state, job=completed.to_dict(), cycle=cycle)
+        except Exception as error:
+            error_class = type(error).__name__
+            try:
+                boundary = "unknown" if execution_started else "not_started"
+                store.checkpoint(
+                    job.job_id,
+                    worker_id,
+                    phase="execution_error",
+                    checkpoint={"error_class": error_class},
+                    side_effect_boundary=boundary,
+                )
+                failed = store.fail(
+                    job.job_id,
+                    worker_id,
+                    reason=(
+                        "execution failed before the cycle started"
+                        if not execution_started
+                        else "execution outcome is uncertain; reconciliation required"
+                    ),
+                    retryable=False,
+                )
+            except (BrainJobError, BrainRunError) as persistence_error:
+                raise BrainRunError("brain job failure could not be durably recorded") from persistence_error
+            return BrainJobRunResult(
+                status=failed.state,
+                job=failed.to_dict(),
+                cycle=None,
+                error_class=error_class,
+            )
 
     def run(
         self,

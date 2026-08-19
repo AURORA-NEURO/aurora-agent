@@ -53,6 +53,9 @@ capability-gated, prompts and mission plans are bounded, and external effects re
 approval. `BrainEpisodicMemory` provides optional restart-safe, hash-chained metadata memory;
 `run_adaptive_mission_learning_cycle()` combines recall, evaluator reward, bandit state updates,
 and bounded pre-dispatch replanning without retaining provider text, tool arguments, or secrets.
+`BrainJobStore` adds resolver-backed leases and checkpoints for restart-safe learning jobs, while
+`DomainEvaluatorRegistry` supplies reusable evidence-only evaluator profiles for engineering,
+research, operations, data, and biomedical workflows.
 
 The package also includes dependency-free authoring builders for digest-bound benchmark packs,
 set-valued decision cells, deterministic metamorphic mutations, versioned oracle manifests,

@@ -9,6 +9,7 @@ from .async_client import AsyncClient
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,
+    BrainJobRunResult,
     BrainLearningCycleResult,
     BrainLearningLedger,
     BrainOutcomeEvaluator,
@@ -32,6 +33,21 @@ from .memory import (
     MEMORY_SCHEMA,
     MemoryQuery,
     MemoryReceipt,
+)
+from .jobs import (
+    JOB_SCHEMA,
+    BrainJobError,
+    BrainJobEventReceipt,
+    BrainJobRecord,
+    BrainJobStore,
+)
+from .evaluators import (
+    DOMAIN_EVALUATOR_SCHEMA,
+    DomainEvaluationEvidence,
+    DomainEvaluatorAdapter,
+    DomainEvaluatorProfile,
+    DomainEvaluatorRegistry,
+    builtin_domain_profiles,
 )
 from .llm_runtime import (
     CredentialError,
