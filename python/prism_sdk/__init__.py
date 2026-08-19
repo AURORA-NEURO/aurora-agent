@@ -129,6 +129,7 @@ from .autonomy_persistence import (
     AUTONOMY_JOURNAL_SCHEMA,
     AUTONOMY_POLICY_SCHEMA,
     AUTONOMY_STATE_SCHEMA,
+    MAX_AUTONOMY_PROVIDER_FAILOVERS,
     AutonomousExecutionController,
     AutonomousExecutionJournal,
     AutonomousExecutionPolicy,
@@ -147,6 +148,12 @@ from .autonomy_evaluation import (
     AutonomousToolReplayEngine,
     AutonomousToolReplayReport,
 )
+from .autonomy_provider import (
+    AUTONOMOUS_PROVIDER_INVOCATION_SCHEMA,
+    AutonomousProviderInvocationError,
+    AutonomousProviderInvocationReceipt,
+    AutonomousProviderInvocationSession,
+)
 from .llm_runtime import (
     CredentialError,
     CredentialHandle,
@@ -164,6 +171,8 @@ from .llm_runtime import (
     ProviderToolCall,
     ProviderConfig,
     ProviderError,
+    ProviderInvocationMetadata,
+    ProviderInvocationObserver,
     ProviderRequest,
     ProviderResponse,
     ProviderStreamEvent,

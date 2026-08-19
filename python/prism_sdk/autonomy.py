@@ -1992,6 +1992,7 @@ class AutonomousTaskOrchestrator:
         max_provider_failovers: int,
         execution_mode: str,
         tool_loop_options: Mapping[str, Any] | None,
+        execution_controller: AutonomousExecutionController | None = None,
     ) -> BrainRunResult | BrainToolLoopResult | BrainMissionResult:
         # Keep the legacy ``mission_policy`` shorthand while making the execution route
         # explicit for new callers.
@@ -2026,6 +2027,7 @@ class AutonomousTaskOrchestrator:
                 tools=provider_tools,
                 tool_choice=tool_choice,
                 max_provider_failovers=max_provider_failovers,
+                execution_controller=execution_controller,
             )
         if effective_mode == "tool_loop":
             if tool_loop_options is not None and not isinstance(tool_loop_options, Mapping):
@@ -2081,6 +2083,7 @@ class AutonomousTaskOrchestrator:
                 selection_overrides=selection_overrides,
                 tool_loop_options=loop_options,
                 max_provider_failovers=max_provider_failovers,
+                execution_controller=execution_controller,
             )
         if effective_mode != "mission":
             raise BrainRunError(f"unsupported autonomous execution mode: {effective_mode!r}")
@@ -2120,6 +2123,7 @@ class AutonomousTaskOrchestrator:
             mission_policy=mission_policy,
             ledger=ledger,
             bandit_state=bandit_state,
+            execution_controller=execution_controller,
             **options,
         )
 
@@ -2229,6 +2233,7 @@ class AutonomousTaskOrchestrator:
             "mission_options", "route_request", "enforce_route_tools", "require_resolved_route",
             "provider_tools", "tool_choice", "max_provider_failovers", "prompt", "execution_mode",
             "tool_loop_options", "bandit_state",
+            "execution_controller",
         }
         unknown = sorted(set(kwargs).difference(allowed))
         if unknown:
@@ -2294,6 +2299,7 @@ class AutonomousTaskOrchestrator:
         tool_choice: str | None = None,
         max_provider_failovers: int = 2,
         tool_loop_options: Mapping[str, Any] | None = None,
+        execution_controller: AutonomousExecutionController | None = None,
         learn: bool = False,
         evaluator: BrainOutcomeEvaluator | None = None,
         evaluator_registry: DomainEvaluatorRegistry | None = None,
@@ -2395,6 +2401,7 @@ class AutonomousTaskOrchestrator:
                     evidence=evidence,
                     max_replans=max_replans,
                     mission_options=options,
+                    execution_controller=execution_controller,
                 )
             if bandit_state is None:
                 raise BrainRunError("bandit_state is required when learn=True")
@@ -2436,6 +2443,7 @@ class AutonomousTaskOrchestrator:
                     "execution_mode": execution_mode,
                     "tool_loop_options": tool_loop_options,
                     "bandit_state": bandit_state,
+                    "execution_controller": execution_controller,
                 },
             )
         return self._execute(
@@ -2468,6 +2476,7 @@ class AutonomousTaskOrchestrator:
             execution_mode=execution_mode,
             tool_loop_options=tool_loop_options,
             bandit_state=bandit_state,
+            execution_controller=execution_controller,
         )
 
     @staticmethod
@@ -2616,6 +2625,7 @@ class AutonomousTaskOrchestrator:
         tool_choice: str | None = None,
         max_provider_failovers: int = 2,
         tool_loop_options: Mapping[str, Any] | None = None,
+        execution_controller: AutonomousExecutionController | None = None,
     ) -> AutonomousWorkflowRun:
         """Execute a prepared domain workflow as a resumable, dependency-checked stage DAG.
 
@@ -2779,6 +2789,7 @@ class AutonomousTaskOrchestrator:
                 tool_choice=tool_choice,
                 max_provider_failovers=max_provider_failovers,
                 tool_loop_options=tool_loop_options,
+                execution_controller=execution_controller,
             )
             if not isinstance(stage_result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
                 raise BrainRunError("workflow stage returned an unsupported result")
@@ -3150,6 +3161,7 @@ class AutonomousTaskOrchestrator:
         synthesize: bool = True,
         allow_partial: bool = False,
         bandit_state: Mapping[str, Any] | None = None,
+        execution_controller: AutonomousExecutionController | None = None,
     ) -> AutonomousCrossDomainResult:
         """Execute bounded domain specialists, then optionally synthesize their outputs.
 
@@ -3226,6 +3238,7 @@ class AutonomousTaskOrchestrator:
                 tool_choice=tool_choice,
                 max_provider_failovers=max_provider_failovers,
                 tool_loop_options=tool_loop_options,
+                execution_controller=execution_controller,
             )
             if not isinstance(result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
                 raise BrainRunError("cross-domain child returned an unsupported result")
@@ -3299,6 +3312,7 @@ class AutonomousTaskOrchestrator:
             tool_choice=tool_choice,
             max_provider_failovers=max_provider_failovers,
             tool_loop_options=tool_loop_options,
+            execution_controller=execution_controller,
         )
         if not isinstance(synthesis_result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
             raise BrainRunError("cross-domain synthesis returned an unsupported result")
@@ -3752,6 +3766,11 @@ class AutonomousAgent:
                     )
             except AutonomyPersistenceError as error:
                 raise BrainRunError("autonomous execution persistence could not start") from error
+        if execution_controller is not None:
+            # This is an internal capability, never a caller/model option.  The orchestrator
+            # forwards it only to adaptive provider boundaries so every provider turn shares the
+            # same count, cost, journal, and resume state as domain tools.
+            resolved_options["execution_controller"] = execution_controller
         if self.tool_runtime is not None or session_runtime is not None:
             loop_options = resolved_options.get("tool_loop_options")
             if loop_options is None:

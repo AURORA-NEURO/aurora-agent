@@ -215,6 +215,7 @@ journal = AutonomousExecutionJournal("state/autonomous-executions.jsonl")
 policy = AutonomousExecutionPolicy(
     max_steps=64,
     max_provider_calls=16,
+    max_provider_failovers=2,
     max_tool_calls=128,
     max_effectful_calls=0,       # read-only by default
     allow_side_effects=False,    # caller must opt in separately
@@ -264,6 +265,21 @@ tools can run when the policy allows; effectful tools require all three independ
 the tool is declared effectful and approval-required, the execution policy explicitly enables a
 positive effect budget, and the caller approval callback returns true. A model-generated tool call
 never satisfies any of those conditions.
+
+Provider calls use the same controller rather than a separate transport-only counter. Before a
+request is sent, the selected provider/model, failover attempt, estimated token cost, and
+invocation kind are admitted against `max_provider_calls`, `max_provider_failovers`, and
+`max_cost_units`. After the runtime returns, the journal records only bounded usage counts,
+latency, status/failure class, selection digest, request-id digest, and an outcome digest. Native
+streaming and every continuation turn in a tool loop are accounted separately. A provider error
+therefore becomes durable failover evidence without retaining the prompt, response, tool
+arguments, credential handle, or upstream error body.
+
+`BrainRunResult.to_dict()` and `build_brain_evaluation_input()` expose these redacted provider
+receipts to an explicit evaluator. Transport health continues to flow through
+`ProviderHealthLedger`; task quality still requires the caller-owned evaluator and bandit update.
+This separation prevents a fast HTTP success from being mistaken for a useful answer while still
+letting selection adapt to reliability, cost, latency, and bounded observed usage.
 
 Tool outcomes can be scored by an evaluator independent of the provider:
 

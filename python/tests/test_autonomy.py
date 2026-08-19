@@ -24,6 +24,7 @@ from prism_sdk import (
     BrainApprovalRouter,
     BrainJobStore,
     BrainWorker,
+    build_brain_evaluation_input,
     CredentialStore,
     LLMRuntime,
     ModelCandidate,
@@ -567,7 +568,17 @@ def test_autonomous_agent_persists_native_tool_execution_and_terminal_state(tmp_
         assert state is not None
         assert state["status"] == "completed"
         kinds = {event["event"]["kind"] for event in agent.execution_events("persisted-agent-run")}
-        assert {"started", "tool_intent", "tool_outcome", "completed"}.issubset(kinds)
+        assert {"started", "provider_call", "tool_intent", "tool_outcome", "completed"}.issubset(kinds)
+        provider_events = [
+            row["event"]
+            for row in agent.execution_events("persisted-agent-run")
+            if row["event"]["kind"] == "provider_call"
+        ]
+        assert any(event.get("provider") == "openai" for event in provider_events)
+        assert len(result.brain_run.provider_invocations) == 2
+        assert all("content" not in receipt for receipt in result.brain_run.provider_invocations)
+        evaluation_input = build_brain_evaluation_input(result)
+        assert len(evaluation_input["provider_invocations"]) == 2
         assert journal.verify_integrity()["verified"] is True
         assert "agent-domain-tool-persistence-secret" not in json.dumps(agent.execution_events("persisted-agent-run"))
         with pytest.raises(BrainRunError):

@@ -22,11 +22,13 @@ def test_policy_bounds_and_effects_are_explicit() -> None:
     policy = AutonomousExecutionPolicy(
         max_steps=3,
         max_provider_calls=2,
+        max_provider_failovers=1,
         max_tool_calls=2,
         max_effectful_calls=1,
         allow_side_effects=True,
     )
     assert policy.to_dict()["authorization"] == "caller_owned_policy"
+    assert policy.to_dict()["max_provider_failovers"] == 1
     assert len(policy.digest) == 64
 
 

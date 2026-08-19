@@ -53,6 +53,7 @@ MAX_AUTONOMY_JOURNAL_EVENTS = 32_768
 MAX_AUTONOMY_METADATA_DEPTH = 32
 MAX_AUTONOMY_STEPS = 4_096
 MAX_AUTONOMY_PROVIDER_CALLS = 1_024
+MAX_AUTONOMY_PROVIDER_FAILOVERS = 8
 MAX_AUTONOMY_TOOL_CALLS = 8_192
 MAX_AUTONOMY_EFFECTFUL_CALLS = 512
 MAX_AUTONOMY_REPLANS = 64
@@ -154,6 +155,7 @@ class AutonomousExecutionPolicy:
 
     max_steps: int = 32
     max_provider_calls: int = 16
+    max_provider_failovers: int = 2
     max_tool_calls: int = 128
     max_effectful_calls: int = 0
     max_replans: int = 2
@@ -166,6 +168,7 @@ class AutonomousExecutionPolicy:
         for name, value, maximum in (
             ("max_steps", self.max_steps, MAX_AUTONOMY_STEPS),
             ("max_provider_calls", self.max_provider_calls, MAX_AUTONOMY_PROVIDER_CALLS),
+            ("max_provider_failovers", self.max_provider_failovers, MAX_AUTONOMY_PROVIDER_FAILOVERS),
             ("max_tool_calls", self.max_tool_calls, MAX_AUTONOMY_TOOL_CALLS),
             ("max_effectful_calls", self.max_effectful_calls, MAX_AUTONOMY_EFFECTFUL_CALLS),
             ("max_replans", self.max_replans, MAX_AUTONOMY_REPLANS),
@@ -191,7 +194,7 @@ class AutonomousExecutionPolicy:
         if value.get("schema") not in (None, AUTONOMY_POLICY_SCHEMA):
             raise AutonomyPersistenceError("execution policy schema is unsupported")
         allowed = {
-            "schema", "max_steps", "max_provider_calls", "max_tool_calls", "max_effectful_calls",
+            "schema", "max_steps", "max_provider_calls", "max_provider_failovers", "max_tool_calls", "max_effectful_calls",
             "max_replans", "max_cost_units", "allow_side_effects", "stop_on_error", "pause_on_approval",
         }
         unknown = set(value).difference(allowed)
@@ -200,6 +203,7 @@ class AutonomousExecutionPolicy:
         return cls(
             max_steps=value.get("max_steps", 32),
             max_provider_calls=value.get("max_provider_calls", 16),
+            max_provider_failovers=value.get("max_provider_failovers", 2),
             max_tool_calls=value.get("max_tool_calls", 128),
             max_effectful_calls=value.get("max_effectful_calls", 0),
             max_replans=value.get("max_replans", 2),
@@ -214,6 +218,7 @@ class AutonomousExecutionPolicy:
             "schema": AUTONOMY_POLICY_SCHEMA,
             "max_steps": self.max_steps,
             "max_provider_calls": self.max_provider_calls,
+            "max_provider_failovers": self.max_provider_failovers,
             "max_tool_calls": self.max_tool_calls,
             "max_effectful_calls": self.max_effectful_calls,
             "max_replans": self.max_replans,
@@ -548,7 +553,10 @@ class AutonomousExecutionJournal:
             "step_index", "provider_calls", "tool_calls", "effectful_calls", "cost_units", "replans",
             "tool", "call_id", "read_only", "approval_required", "schema_digest", "arguments_digest",
             "output_digest", "outcome_digest", "evaluation_digest", "evaluator_id", "evaluator_version",
-            "reward", "passed", "failure_class", "reason", "metadata",
+            "reward", "passed", "failure_class", "reason", "metadata", "provider", "model",
+            "invocation_kind", "attempt", "turn", "selection_digest", "provider_outcome",
+            "latency_ms", "input_tokens", "output_tokens", "estimated_cost_units", "actual_cost_units",
+            "request_id_digest", "status_code",
         }
         if set(event).difference(allowed):
             raise AutonomyPersistenceError("execution event contains unsupported fields")
@@ -582,6 +590,24 @@ class AutonomousExecutionJournal:
         for name in ("schema_digest", "arguments_digest", "output_digest", "outcome_digest", "evaluation_digest"):
             if name in event and event[name] is not None:
                 normalized[name] = _digest(f"event {name}", event[name])
+        for name in ("selection_digest", "request_id_digest"):
+            if name in event and event[name] is not None:
+                normalized[name] = _digest(f"event {name}", event[name])
+        for name in ("provider", "model", "invocation_kind", "provider_outcome"):
+            if name in event and event[name] is not None:
+                normalized[name] = _text(f"event {name}", event[name], maximum=512)
+        for name, maximum in (("attempt", 8), ("turn", 32), ("input_tokens", 100_000_000), ("output_tokens", 100_000_000), ("status_code", 999)):
+            if name in event and event[name] is not None:
+                value = event[name]
+                if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= maximum:
+                    raise AutonomyPersistenceError(f"event {name} is outside its bound")
+                normalized[name] = value
+        for name in ("latency_ms", "estimated_cost_units", "actual_cost_units"):
+            if name in event and event[name] is not None:
+                value = event[name]
+                if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(float(value)) or value < 0:
+                    raise AutonomyPersistenceError(f"event {name} is outside its bound")
+                normalized[name] = float(value)
         for name in ("read_only", "approval_required", "passed"):
             if name in event and event[name] is not None:
                 if not isinstance(event[name], bool):
@@ -646,14 +672,92 @@ class AutonomousExecutionController:
         )
         self._terminal = False
 
-    def admit_provider_call(self, *, cost_units: float = 0.0) -> AutonomousExecutionState:
+    def admit_provider_call(
+        self,
+        *,
+        cost_units: float = 0.0,
+        provider: str | None = None,
+        model: str | None = None,
+        invocation_kind: str | None = None,
+        attempt: int | None = None,
+        turn: int | None = None,
+        selection_digest: str | None = None,
+        estimated_cost_units: float | None = None,
+    ) -> AutonomousExecutionState:
         self._ensure_active()
         self._ensure_step()
         if self.state.provider_calls >= self.policy.max_provider_calls:
             raise AutonomyPolicyError("max_provider_calls exceeded")
         self._ensure_cost(cost_units)
         self.state = replace(self.state, step_index=self.state.step_index + 1, provider_calls=self.state.provider_calls + 1, cost_units=self.state.cost_units + float(cost_units), last_event_kind="provider_call", status="running")
-        return self._persist("provider_call", "running", cost_units=cost_units)
+        fields: dict[str, Any] = {"cost_units": cost_units}
+        for name, value in (
+            ("provider", provider),
+            ("model", model),
+            ("invocation_kind", invocation_kind),
+            ("attempt", attempt),
+            ("turn", turn),
+            ("selection_digest", selection_digest),
+            ("estimated_cost_units", estimated_cost_units),
+        ):
+            if value is not None:
+                fields[name] = value
+        return self._persist("provider_call", "running", **fields)
+
+    def record_provider_outcome(
+        self,
+        *,
+        provider: str,
+        model: str,
+        invocation_kind: str,
+        attempt: int,
+        turn: int,
+        status: str,
+        outcome: str,
+        latency_ms: float,
+        input_tokens: int,
+        output_tokens: int,
+        estimated_cost_units: float,
+        actual_cost_units: float,
+        selection_digest: str | None,
+        outcome_digest: str,
+        request_id_digest: str | None = None,
+        failure_class: str | None = None,
+        status_code: int | None = None,
+    ) -> AutonomousExecutionState:
+        """Persist one bounded provider result without changing call-count admission."""
+
+        self._ensure_active()
+        if outcome not in {"success", "failure"}:
+            raise AutonomyPersistenceError("provider outcome must be success or failure")
+        if status not in {"completed", "provider_refused"}:
+            raise AutonomyPersistenceError("provider outcome status is unsupported")
+        self.state = replace(
+            self.state,
+            last_event_kind="provider_call",
+            last_outcome_digest=_digest("outcome_digest", outcome_digest),
+            status="running",
+        )
+        return self._persist(
+            "provider_call",
+            status,
+            provider=_text("provider", provider),
+            model=_text("model", model),
+            invocation_kind=_text("invocation_kind", invocation_kind, maximum=128),
+            attempt=attempt,
+            turn=turn,
+            provider_outcome=outcome,
+            latency_ms=latency_ms,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            estimated_cost_units=estimated_cost_units,
+            actual_cost_units=actual_cost_units,
+            selection_digest=selection_digest,
+            outcome_digest=outcome_digest,
+            request_id_digest=request_id_digest,
+            failure_class=failure_class,
+            status_code=status_code,
+        )
 
     def admit_tool_call(
         self,
@@ -795,6 +899,7 @@ __all__ = [
     "AUTONOMY_JOURNAL_SCHEMA",
     "AUTONOMY_POLICY_SCHEMA",
     "AUTONOMY_STATE_SCHEMA",
+    "MAX_AUTONOMY_PROVIDER_FAILOVERS",
     "AutonomousExecutionController",
     "AutonomousExecutionJournal",
     "AutonomousExecutionPolicy",

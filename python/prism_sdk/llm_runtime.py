@@ -32,7 +32,7 @@ from pathlib import Path
 import secrets
 import threading
 import time
-from typing import Any, Callable, Iterator, Mapping, Sequence
+from typing import Any, Callable, Iterator, Mapping, Protocol, Sequence
 from urllib.parse import urlsplit
 
 
@@ -106,6 +106,51 @@ class ProviderError(RuntimeError):
         self.retryable = retryable
         self.status_code = status_code
         self.circuit_open = circuit_open
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderInvocationMetadata:
+    """Value-only metadata for one provider request boundary.
+
+    Observers receive token estimates and request shape, never the messages, headers, credential
+    handle, response text, or provider wire payload.  The estimate is deliberately conservative
+    and is useful for admission budgets; authoritative usage, when returned by a provider, is
+    supplied separately to :class:`ProviderInvocationObserver`.
+    """
+
+    provider: str
+    model: str
+    kind: str
+    input_tokens: int
+    requested_output_tokens: int
+    tool_count: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "provider": self.provider,
+            "model": self.model,
+            "kind": self.kind,
+            "input_tokens": self.input_tokens,
+            "requested_output_tokens": self.requested_output_tokens,
+            "tool_count": self.tool_count,
+            "retention": "metadata_only_no_provider_payloads",
+        }
+
+
+class ProviderInvocationObserver(Protocol):
+    """Optional per-request admission/outcome hook for autonomous execution accounting."""
+
+    def before(self, metadata: ProviderInvocationMetadata) -> None:
+        ...
+
+    def after(
+        self,
+        metadata: ProviderInvocationMetadata,
+        response: "ProviderResponse | None",
+        error: BaseException | None,
+        latency_ms: float,
+    ) -> None:
+        ...
 
 
 class SecretValue:
@@ -1480,6 +1525,53 @@ class LLMRuntime:
             raise ProviderError(f"provider {provider!r} is not configured")
         return config.requires_credential
 
+    @staticmethod
+    def _invocation_metadata(
+        provider: str,
+        request: ProviderRequest,
+        kind: str,
+    ) -> ProviderInvocationMetadata:
+        if not isinstance(kind, str) or not kind.strip() or len(kind) > 128:
+            raise ProviderError("provider invocation kind must be a bounded non-empty string")
+        # This is an admission estimate only.  Provider-reported usage is used for the final
+        # receipt when available.  Counting bytes rather than retaining content keeps the hook
+        # useful for policy without giving telemetry access to prompt data.
+        input_bytes = 0
+        for message in request.messages:
+            content = message.get("content")
+            if isinstance(content, str):
+                input_bytes += len(content.encode("utf-8"))
+            else:
+                input_bytes += len(json.dumps(content, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+        input_tokens = max(1, (input_bytes + 3) // 4)
+        return ProviderInvocationMetadata(
+            provider=provider,
+            model=request.model,
+            kind=kind,
+            input_tokens=input_tokens,
+            requested_output_tokens=request.max_output_tokens,
+            tool_count=len(request.tools),
+        )
+
+    @staticmethod
+    def _notify_invocation_before(
+        observer: ProviderInvocationObserver | None,
+        metadata: ProviderInvocationMetadata,
+    ) -> None:
+        if observer is not None:
+            observer.before(metadata)
+
+    @staticmethod
+    def _notify_invocation_after(
+        observer: ProviderInvocationObserver | None,
+        metadata: ProviderInvocationMetadata,
+        response: ProviderResponse | None,
+        error: BaseException | None,
+        started: float,
+    ) -> None:
+        if observer is not None:
+            observer.after(metadata, response, error, max(0.0, (time.perf_counter() - started) * 1000.0))
+
     def reset_provider(self, provider: str) -> None:
         """Explicitly close a circuit after an operator or health check has reviewed it."""
 
@@ -1493,6 +1585,8 @@ class LLMRuntime:
         request: ProviderRequest,
         *,
         credential: CredentialHandle | None = None,
+        invocation_observer: ProviderInvocationObserver | None = None,
+        invocation_kind: str = "provider_call",
     ) -> ProviderResponse:
         config = self._providers.get(provider)
         if config is None:
@@ -1517,7 +1611,16 @@ class LLMRuntime:
                 headers[config.api_key_header or "Authorization"] = "Bearer " + secret.expose()
         if request.idempotency_key is not None:
             headers["Idempotency-Key"] = request.idempotency_key
-        return self._post(config, body, headers, request)
+        metadata = self._invocation_metadata(provider, request, invocation_kind)
+        self._notify_invocation_before(invocation_observer, metadata)
+        started = time.perf_counter()
+        try:
+            response = self._post(config, body, headers, request)
+        except BaseException as error:
+            self._notify_invocation_after(invocation_observer, metadata, None, error, started)
+            raise
+        self._notify_invocation_after(invocation_observer, metadata, response, None, started)
+        return response
 
     def invoke_stream(
         self,
@@ -1525,6 +1628,8 @@ class LLMRuntime:
         request: ProviderRequest,
         *,
         credential: CredentialHandle | None = None,
+        invocation_observer: ProviderInvocationObserver | None = None,
+        invocation_kind: str = "provider_stream",
     ) -> Iterator[ProviderStreamEvent]:
         """Open one bounded SSE provider invocation.
 
@@ -1558,7 +1663,22 @@ class LLMRuntime:
                 headers[config.api_key_header or "Authorization"] = "Bearer " + secret.expose()
         if request.idempotency_key is not None:
             headers["Idempotency-Key"] = request.idempotency_key
-        return self._stream(config, body, headers, request)
+        metadata = self._invocation_metadata(provider, request, invocation_kind)
+        stream = self._stream(config, body, headers, request)
+        if invocation_observer is None:
+            return stream
+
+        def observed_stream() -> Iterator[ProviderStreamEvent]:
+            self._notify_invocation_before(invocation_observer, metadata)
+            started = time.perf_counter()
+            try:
+                yield from stream
+            except BaseException as error:
+                self._notify_invocation_after(invocation_observer, metadata, None, error, started)
+                raise
+            self._notify_invocation_after(invocation_observer, metadata, None, None, started)
+
+        return observed_stream()
 
     def collect_stream(
         self,
@@ -1566,9 +1686,14 @@ class LLMRuntime:
         request: ProviderRequest,
         *,
         credential: CredentialHandle | None = None,
+        invocation_observer: ProviderInvocationObserver | None = None,
+        invocation_kind: str = "provider_stream",
     ) -> ProviderResponse:
         """Collect a stream into the same bounded response contract as ``invoke``."""
 
+        metadata = self._invocation_metadata(provider, request, invocation_kind)
+        self._notify_invocation_before(invocation_observer, metadata)
+        started = time.perf_counter()
         text_parts: list[str] = []
         text_bytes = 0
         tool_calls: list[ProviderToolCall] = []
@@ -1577,42 +1702,48 @@ class LLMRuntime:
         model = request.model
         event_count = 0
         terminal_type: str | None = None
-        for event in self.invoke_stream(provider, request, credential=credential):
-            event_count += 1
-            if event_count > MAX_STREAM_EVENTS:
-                raise ProviderError("provider stream exceeded max event count")
-            if event.text_delta:
-                text_parts.append(event.text_delta)
-                text_bytes += len(event.text_delta.encode("utf-8"))
-                if text_bytes > MAX_STREAM_TEXT_BYTES:
-                    raise ProviderError("provider stream text exceeded the bounded size")
-            if event.tool_call is not None:
-                tool_calls.append(event.tool_call)
-            if event.usage:
-                usage = event.usage
-            request_id = event.request_id or request_id
-            model = event.model or model
-            if event.done:
-                terminal_type = event.event_type
-        if not text_parts and not tool_calls:
-            raise ProviderError("provider stream contained no assistant text or tool call")
-        text = "".join(text_parts)
-        structured = None if tool_calls else _validate_structured_response(text, request)
-        return ProviderResponse(
-            provider=provider,
-            model=model,
-            text=text,
-            status_code=200,
-            request_id=request_id,
-            usage=dict(usage),
-            raw={
-                "stream": True,
-                "event_count": event_count,
-                "terminal_event": terminal_type,
-            },
-            structured=structured,
-            tool_calls=tuple(tool_calls),
-        )
+        try:
+            for event in self.invoke_stream(provider, request, credential=credential):
+                event_count += 1
+                if event_count > MAX_STREAM_EVENTS:
+                    raise ProviderError("provider stream exceeded max event count")
+                if event.text_delta:
+                    text_parts.append(event.text_delta)
+                    text_bytes += len(event.text_delta.encode("utf-8"))
+                    if text_bytes > MAX_STREAM_TEXT_BYTES:
+                        raise ProviderError("provider stream text exceeded the bounded size")
+                if event.tool_call is not None:
+                    tool_calls.append(event.tool_call)
+                if event.usage:
+                    usage = event.usage
+                request_id = event.request_id or request_id
+                model = event.model or model
+                if event.done:
+                    terminal_type = event.event_type
+            if not text_parts and not tool_calls:
+                raise ProviderError("provider stream contained no assistant text or tool call")
+            text = "".join(text_parts)
+            structured = None if tool_calls else _validate_structured_response(text, request)
+            response = ProviderResponse(
+                provider=provider,
+                model=model,
+                text=text,
+                status_code=200,
+                request_id=request_id,
+                usage=dict(usage),
+                raw={
+                    "stream": True,
+                    "event_count": event_count,
+                    "terminal_event": terminal_type,
+                },
+                structured=structured,
+                tool_calls=tuple(tool_calls),
+            )
+        except BaseException as error:
+            self._notify_invocation_after(invocation_observer, metadata, None, error, started)
+            raise
+        self._notify_invocation_after(invocation_observer, metadata, response, None, started)
+        return response
 
     def invoke_tool_loop(
         self,
@@ -1625,6 +1756,8 @@ class LLMRuntime:
         max_tool_calls: int = MAX_PROVIDER_TOOLS,
         stream: bool = False,
         initial_response: ProviderResponse | None = None,
+        invocation_observer: ProviderInvocationObserver | None = None,
+        invocation_kind: str = "tool_loop_turn",
     ) -> ProviderToolLoopResult:
         """Run bounded native tool continuation with a caller-owned authorization callback.
 
@@ -1652,9 +1785,21 @@ class LLMRuntime:
         for _turn in range(max_turns):
             if response is None:
                 response = (
-                    self.collect_stream(provider, current, credential=credential)
+                    self.collect_stream(
+                        provider,
+                        current,
+                        credential=credential,
+                        invocation_observer=invocation_observer,
+                        invocation_kind=invocation_kind,
+                    )
                     if stream
-                    else self.invoke(provider, current, credential=credential)
+                    else self.invoke(
+                        provider,
+                        current,
+                        credential=credential,
+                        invocation_observer=invocation_observer,
+                        invocation_kind=invocation_kind,
+                    )
                 )
             responses.append(response)
             if not response.tool_calls:
