@@ -1153,6 +1153,30 @@ class AutonomousBrain:
             raise BrainRunError("memory must be a BrainEpisodicMemory or None")
         self.memory = memory
 
+    def prepare_autonomous(self, **kwargs: Any) -> Any:
+        """Build a domain-aware task blueprint without contacting a provider.
+
+        The import is local to keep the low-level brain kernel independent from the convenience
+        orchestration layer. The returned blueprint contains only transient task material and
+        value-only public metadata; credentials are never accepted by this preparation method.
+        """
+
+        from .autonomy import AutonomousTaskOrchestrator
+
+        return AutonomousTaskOrchestrator(self).prepare(**kwargs)
+
+    def run_autonomous(self, **kwargs: Any) -> Any:
+        """Run a domain-aware task through adaptive selection and bounded provider execution.
+
+        Use ``learn=True`` to require explicit evaluator evidence, update caller-owned bandit
+        state, and append a metadata-only episodic record. Provider and mission approval flags are
+        deliberately forwarded unchanged; this convenience method does not widen authority.
+        """
+
+        from .autonomy import AutonomousTaskOrchestrator
+
+        return AutonomousTaskOrchestrator(self).run(**kwargs)
+
     def recall_memory(
         self,
         query: MemoryQuery | Mapping[str, Any] | None = None,
