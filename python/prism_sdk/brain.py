@@ -28,7 +28,9 @@ from .llm_runtime import (
     ProviderToolLoopResult,
     ProviderToolResult,
 )
+from .errors import ArgumentError
 from .mission import MissionPolicy, MissionRequest
+from .tooling import ToolCatalogue, ToolSchemaError
 
 
 class BrainRunError(RuntimeError):
@@ -79,6 +81,9 @@ DEFAULT_MISSION_RESPONSE_SCHEMA: dict[str, Any] = {
 MAX_ROUTE_REQUEST_BYTES = 2_000_000
 MAX_ROUTE_PROMPT_BYTES = 750_000
 MAX_ROUTE_PROMPT_SCHEMAS = 128
+MAX_MISSION_AUTHORIZATION_CALLS = 128
+MAX_MISSION_AUTHORIZATION_RESULT_BYTES = 750_000
+MAX_MISSION_AUTHORIZATION_STEP_OUTPUT_BYTES = 350_000
 
 
 def _bounded_route_prompt_context(route: Mapping[str, Any]) -> dict[str, Any]:
@@ -328,12 +333,16 @@ class BrainToolLoopResult:
     brain_run: BrainRunResult
     status: str
     provider_loop: ProviderToolLoopResult | None
+    route: Mapping[str, Any] | None = None
+    authorization_receipts: tuple[Mapping[str, Any], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "status": self.status,
             "brain_run": self.brain_run.to_dict(),
             "provider_loop": None if self.provider_loop is None else self.provider_loop.to_dict(),
+            "route": None if self.route is None else dict(self.route),
+            "authorization_receipts": [dict(receipt) for receipt in self.authorization_receipts],
             "authorization": {
                 "provider_call": "caller_approved_brain_plan",
                 "tool_execution": "caller_callback_only",
@@ -371,6 +380,494 @@ class BrainMissionResult:
             },
             "tool_execution": "bounded_agent_mission_executor",
         }
+
+
+def _mission_tool_identifier(value: Any) -> bool:
+    return isinstance(value, str) and bool(value) and all(
+        character.isalnum() or character == "_" for character in value
+    )
+
+
+def _json_digest(value: Any) -> str:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _mission_wire_output(value: Any) -> Any:
+    """Extract structured tool output while dropping opaque wire envelopes."""
+
+    if not isinstance(value, Mapping):
+        return None
+    result = value.get("result")
+    if not isinstance(result, Mapping):
+        return None
+    structured = result.get("structuredContent")
+    if structured is not None:
+        return structured
+    content = result.get("content")
+    if isinstance(content, list) and content:
+        first = content[0]
+        if isinstance(first, Mapping) and isinstance(first.get("text"), str):
+            try:
+                return json.loads(first["text"])
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
+def _bounded_mission_report_projection(
+    report: Mapping[str, Any],
+    *,
+    include_outputs: bool,
+) -> dict[str, Any]:
+    """Project an agent_mission report for continuation without replaying opaque envelopes."""
+
+    if not isinstance(report, Mapping):
+        raise BrainRunError("agent_mission returned a non-object report")
+    if report.get("workflow") not in (None, "agent_mission"):
+        raise BrainRunError("agent_mission returned the wrong workflow")
+    projection: dict[str, Any] = {
+        "workflow": "agent_mission",
+        "ok": report.get("ok", True),
+        "execution": report.get("execution", "unknown"),
+        "mission_status": report.get("mission_status", "unknown"),
+        "dispatch": report.get("dispatch", "unknown"),
+        "preflight": report.get("preflight", False),
+        "plan_digest": None,
+        "succeeded": report.get("succeeded", 0),
+        "refused": report.get("refused", 0),
+        "blocked": report.get("blocked", 0),
+        "cancelled": report.get("cancelled", 0),
+        "required_failures": report.get("required_failures", 0),
+        "returned_bytes": report.get("returned_bytes", 0),
+        "results": [],
+        "result_digest": _json_digest(dict(report)),
+        "retention": "structured_step_outputs_only",
+    }
+    plan = report.get("plan")
+    if isinstance(plan, Mapping):
+        projection["plan_digest"] = plan.get("digest") or plan.get("plan_digest")
+        projection["mission_id"] = plan.get("mission_id")
+    raw_results = report.get("results", [])
+    if isinstance(raw_results, list):
+        for raw in raw_results[:MAX_MISSION_AUTHORIZATION_CALLS]:
+            if not isinstance(raw, Mapping):
+                continue
+            row: dict[str, Any] = {
+                "id": raw.get("id"),
+                "tool": raw.get("tool"),
+                "status": raw.get("status"),
+                "required": raw.get("required"),
+                "arguments_digest": raw.get("arguments_digest"),
+                "bytes": raw.get("bytes", 0),
+            }
+            if raw.get("error") is not None:
+                row["error_digest"] = _json_digest({"error": raw.get("error")})
+            if include_outputs:
+                output = _mission_wire_output(raw.get("wire"))
+                if output is not None:
+                    encoded_output = json.dumps(
+                        output,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        allow_nan=False,
+                    ).encode("utf-8")
+                    if len(encoded_output) <= MAX_MISSION_AUTHORIZATION_STEP_OUTPUT_BYTES:
+                        row["output"] = output
+                    else:
+                        row["output_digest"] = hashlib.sha256(encoded_output).hexdigest()
+                elif raw.get("wire") is not None:
+                    row["output_digest"] = _json_digest(raw.get("wire"))
+            projection["results"].append(row)
+    BrainLearningLedger._assert_safe(projection)
+    encoded = json.dumps(
+        projection,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    if len(encoded) > MAX_MISSION_AUTHORIZATION_RESULT_BYTES:
+        raise BrainRunError("agent_mission continuation result exceeds the bounded size")
+    return projection
+
+
+@dataclass(frozen=True, slots=True)
+class MissionAuthorizationReceipt:
+    """One caller-owned tool-intent authorization attempt and its bounded evidence."""
+
+    mission_id: str
+    call_ids: tuple[str, ...]
+    status: str
+    preflight: Mapping[str, Any]
+    execution: Mapping[str, Any] | None
+    result: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        if self.status not in {
+            "preflight_refused",
+            "approval_required",
+            "executed",
+            "execution_refused",
+            "execution_failed",
+        }:
+            raise BrainRunError("mission authorization receipt has an invalid status")
+        if not self.mission_id or not self.call_ids:
+            raise BrainRunError("mission authorization receipt is missing identity")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "mission_id": self.mission_id,
+            "call_ids": list(self.call_ids),
+            "status": self.status,
+            "preflight": dict(self.preflight),
+            "execution": None if self.execution is None else dict(self.execution),
+            "result": dict(self.result),
+            "authorization": "caller_owned",
+        }
+
+
+class MissionToolAuthorizer:
+    """Route, preflight, and optionally dispatch native provider tool intents.
+
+    The object is intentionally a callable so it can be passed directly to
+    :meth:`LLMRuntime.invoke_tool_loop` or :meth:`AutonomousBrain.run_tool_loop`. It never treats
+    a route recommendation as permission: every call must pass the caller policy, the route
+    candidate set, the local route schema when available, and the authoritative ``agent_mission``
+    preflight. Dispatch remains disabled unless ``approve_mission_dispatch`` is true.
+    """
+
+    def __init__(
+        self,
+        workspace: BrainWorkspace,
+        *,
+        task: str,
+        mission_policy: MissionPolicy | Mapping[str, Any],
+        route: Mapping[str, Any] | None = None,
+        approve_mission_dispatch: bool = False,
+        mission_id_prefix: str = "brain-tool",
+        claim_requests: Sequence[Mapping[str, Any]] = (),
+        evaluator_review: Mapping[str, Any] | None = None,
+        workflow_binding: Mapping[str, Any] | None = None,
+        operations_gate_acceptance: Mapping[str, Any] | None = None,
+    ) -> None:
+        if not isinstance(task, str) or not task.strip():
+            raise BrainRunError("mission authorizer task must be non-empty")
+        if not hasattr(workspace, "tool") or not callable(getattr(workspace, "tool")):
+            raise BrainRunError("mission authorizer requires a workspace tool boundary")
+        if not isinstance(mission_policy, (MissionPolicy, Mapping)):
+            raise BrainRunError("mission authorizer policy must be a MissionPolicy or mapping")
+        normalized_policy = (
+            mission_policy.to_dict()
+            if isinstance(mission_policy, MissionPolicy)
+            else dict(mission_policy)
+        )
+        allowed = normalized_policy.get("allowed_tools")
+        if not isinstance(allowed, Sequence) or isinstance(allowed, (str, bytes)) or not allowed:
+            raise BrainRunError("mission authorizer requires an explicit allowed_tools policy")
+        if any(not _mission_tool_identifier(tool) for tool in allowed):
+            raise BrainRunError("mission authorizer policy contains an unsafe tool name")
+        BrainLearningLedger._assert_safe(normalized_policy)
+        if not isinstance(approve_mission_dispatch, bool):
+            raise BrainRunError("approve_mission_dispatch must be a boolean")
+        if not isinstance(claim_requests, Sequence) or isinstance(claim_requests, (str, bytes)):
+            raise BrainRunError("mission authorizer claim_requests must be a sequence")
+        if any(not isinstance(value, Mapping) for value in claim_requests):
+            raise BrainRunError("mission authorizer claim_requests must contain mappings")
+        if evaluator_review is not None and not isinstance(evaluator_review, Mapping):
+            raise BrainRunError("mission authorizer evaluator_review must be a mapping")
+        if workflow_binding is not None and not isinstance(workflow_binding, Mapping):
+            raise BrainRunError("mission authorizer workflow_binding must be a mapping")
+        if operations_gate_acceptance is not None and not isinstance(operations_gate_acceptance, Mapping):
+            raise BrainRunError("mission authorizer operations_gate_acceptance must be a mapping")
+        BrainLearningLedger._assert_safe(
+            {
+                "claim_requests": list(claim_requests),
+                "evaluator_review": evaluator_review,
+                "workflow_binding": workflow_binding,
+                "operations_gate_acceptance": operations_gate_acceptance,
+            }
+        )
+        self.workspace = workspace
+        self.task = task
+        self.policy = normalized_policy
+        self.policy["execute"] = False
+        self.route = None if route is None else dict(route)
+        self.approve_mission_dispatch = approve_mission_dispatch
+        self.mission_id_prefix = mission_id_prefix
+        self.claim_requests = tuple(dict(value) for value in claim_requests)
+        self.evaluator_review = None if evaluator_review is None else dict(evaluator_review)
+        self.workflow_binding = None if workflow_binding is None else dict(workflow_binding)
+        self.operations_gate_acceptance = (
+            None if operations_gate_acceptance is None else dict(operations_gate_acceptance)
+        )
+        self._receipts: list[MissionAuthorizationReceipt] = []
+        self._invocation = 0
+        self._route_recommended: set[str] | None = None
+        self._route_candidates: dict[str, tuple[str, ...]] = {}
+        self._route_metadata: dict[str, tuple[str, str, str]] = {}
+        self._schema_catalogue: ToolCatalogue | None = None
+        if self.route is not None:
+            self._configure_route(self.route)
+
+    @property
+    def receipts(self) -> tuple[MissionAuthorizationReceipt, ...]:
+        return tuple(self._receipts)
+
+    def __call__(
+        self,
+        calls: tuple[ProviderToolCall, ...],
+    ) -> tuple[ProviderToolResult, ...]:
+        if not isinstance(calls, tuple) or not calls or len(calls) > MAX_MISSION_AUTHORIZATION_CALLS:
+            raise BrainRunError("mission authorizer received an invalid tool-call batch")
+        if any(not isinstance(call, ProviderToolCall) for call in calls):
+            raise BrainRunError("mission authorizer received malformed tool calls")
+        self._invocation += 1
+        call_ids = tuple(call.call_id for call in calls)
+        if len(set(call_ids)) != len(call_ids):
+            return self._refuse(calls, "duplicate provider tool call ids")
+        validation_error = self._validate_calls(calls)
+        if validation_error is not None:
+            return self._refuse(calls, validation_error)
+        mission_id = self._mission_id(calls)
+        steps = []
+        for index, call in enumerate(calls):
+            domain, capability, objective = self._route_metadata.get(
+                call.name,
+                ("cross_domain", call.name, f"Execute caller-authorized tool intent {call.name}"),
+            )
+            steps.append(
+                {
+                    "id": f"provider-tool-{self._invocation}-{index}",
+                    "domain": domain,
+                    "capability": capability,
+                    "objective": objective,
+                    "tool": call.name,
+                    "arguments": dict(call.arguments),
+                    "required": True,
+                    "depends_on": [],
+                    "bindings": [],
+                }
+            )
+        request = MissionRequest(
+            mission_id=mission_id,
+            goal=self.task,
+            steps=steps,
+            policy=dict(self.policy),
+            claim_requests=self.claim_requests,
+            evaluator_review=self.evaluator_review,
+            workflow_binding=self.workflow_binding,
+            operations_gate_acceptance=self.operations_gate_acceptance,
+        )
+        try:
+            preflight_raw = self.workspace.tool("agent_mission", request.to_mcp_arguments())
+            preflight = _bounded_mission_report_projection(preflight_raw, include_outputs=False)
+        except Exception as error:
+            return self._refuse(calls, "mission preflight transport or validation failed", mission_id=mission_id)
+        if not self._preflight_ready(preflight_raw):
+            self._record_receipt(
+                mission_id,
+                calls,
+                "preflight_refused",
+                preflight,
+                None,
+                preflight,
+            )
+            return tuple(
+                ProviderToolResult(call.call_id, preflight, approved=False, is_error=True)
+                for call in calls
+            )
+        if not self.approve_mission_dispatch:
+            self._record_receipt(
+                mission_id,
+                calls,
+                "approval_required",
+                preflight,
+                None,
+                preflight,
+            )
+            return tuple(
+                ProviderToolResult(call.call_id, preflight, approved=False, is_error=True)
+                for call in calls
+            )
+        execute_policy = dict(self.policy)
+        execute_policy["execute"] = True
+        execute_request = MissionRequest(
+            mission_id=mission_id,
+            goal=self.task,
+            steps=steps,
+            policy=execute_policy,
+            claim_requests=self.claim_requests,
+            evaluator_review=self.evaluator_review,
+            workflow_binding=self.workflow_binding,
+            operations_gate_acceptance=self.operations_gate_acceptance,
+        )
+        try:
+            execution_raw = self.workspace.tool("agent_mission", execute_request.to_mcp_arguments())
+            execution = _bounded_mission_report_projection(execution_raw, include_outputs=True)
+        except Exception:
+            execution = {
+                "workflow": "agent_mission",
+                "ok": False,
+                "execution": "refused",
+                "mission_status": "failed",
+                "result_digest": _json_digest({"mission_id": mission_id, "status": "transport_failed"}),
+                "retention": "structured_step_outputs_only",
+            }
+            self._record_receipt(
+                mission_id,
+                calls,
+                "execution_failed",
+                preflight,
+                execution,
+                execution,
+            )
+            return tuple(
+                ProviderToolResult(call.call_id, execution, approved=False, is_error=True)
+                for call in calls
+            )
+        mission_status = execution.get("mission_status")
+        status = "executed" if mission_status == "succeeded" else (
+            "execution_refused" if mission_status in {"refused", "blocked", "cancelled"} else "execution_failed"
+        )
+        self._record_receipt(mission_id, calls, status, preflight, execution, execution)
+        return tuple(
+            ProviderToolResult(
+                call.call_id,
+                execution,
+                approved=True,
+                is_error=status != "executed",
+            )
+            for call in calls
+        )
+
+    def _configure_route(self, route: Mapping[str, Any]) -> None:
+        if route.get("workflow") != "capability_route":
+            raise BrainRunError("mission authorizer route must be a capability_route report")
+        if route.get("goal") != self.task:
+            raise BrainRunError("mission authorizer route goal must match the task")
+        unresolved = route.get("unresolved_needs", [])
+        if not isinstance(unresolved, list) or unresolved:
+            raise BrainRunError("mission authorizer route contains unresolved needs")
+        recommended = route.get("recommended_tools")
+        needs = route.get("needs")
+        if not isinstance(recommended, list) or any(not isinstance(tool, str) for tool in recommended):
+            raise BrainRunError("mission authorizer route has malformed recommended_tools")
+        if not isinstance(needs, list) or any(not isinstance(need, Mapping) for need in needs):
+            raise BrainRunError("mission authorizer route has malformed needs")
+        self._route_recommended = set(recommended)
+        for need in needs:
+            need_id = need.get("id")
+            candidate_tools = need.get("candidate_tools", [])
+            if not isinstance(need_id, str) or not isinstance(candidate_tools, list):
+                raise BrainRunError("mission authorizer route need is malformed")
+            domains = need.get("candidate_domains", [])
+            groups = need.get("candidate_groups", [])
+            domain = domains[0] if isinstance(domains, list) and domains and isinstance(domains[0], str) else "cross_domain"
+            capability = groups[0] if isinstance(groups, list) and groups and isinstance(groups[0], str) else need_id
+            objective = need.get("query") if isinstance(need.get("query"), str) else f"Resolve routed need {need_id}"
+            self._route_metadata.update(
+                {tool: (domain, capability, objective) for tool in candidate_tools if isinstance(tool, str)}
+            )
+        raw_schemas = route.get("tool_schemas", [])
+        omitted = route.get("tool_schemas_omitted", 0)
+        if isinstance(raw_schemas, list) and raw_schemas and omitted == 0:
+            try:
+                self._schema_catalogue = ToolCatalogue.from_definitions(raw_schemas)
+            except (ArgumentError, ToolSchemaError, TypeError, ValueError) as error:
+                raise BrainRunError("mission authorizer route schemas are invalid") from error
+
+    def _validate_calls(self, calls: Sequence[ProviderToolCall]) -> str | None:
+        allowed = set(self.policy["allowed_tools"])
+        for call in calls:
+            if not _mission_tool_identifier(call.name):
+                return f"tool {call.name!r} is not an executable mission tool identifier"
+            if call.name not in allowed:
+                return f"tool {call.name!r} is not in the caller mission policy"
+            if self._route_recommended is not None and call.name not in self._route_recommended:
+                return f"tool {call.name!r} is not recommended by the live route"
+            if self._route_recommended is not None and call.name not in self._route_metadata:
+                return f"tool {call.name!r} is not attached to a resolved route need"
+            if self._schema_catalogue is not None:
+                try:
+                    report = self._schema_catalogue.validate(call.name, call.arguments)
+                except ToolSchemaError:
+                    return f"tool {call.name!r} is absent from the retained route schema set"
+                if not report.ok:
+                    return f"tool {call.name!r} failed route schema preflight"
+        return None
+
+    def _mission_id(self, calls: Sequence[ProviderToolCall]) -> str:
+        digest = _json_digest([call.to_dict() for call in calls])[:32]
+        prefix = self.mission_id_prefix if _mission_tool_identifier(self.mission_id_prefix) else "brain_tool"
+        return f"{prefix}-{self._invocation}-{digest}"
+
+    def _preflight_ready(self, report: Mapping[str, Any]) -> bool:
+        if not isinstance(report, Mapping) or report.get("ok") is False:
+            return False
+        if report.get("workflow") not in (None, "agent_mission"):
+            return False
+        if report.get("dispatch") in {"executed", "started"}:
+            return False
+        return report.get("mission_status") in {None, "planned", "succeeded"} or report.get("execution") == "planned"
+
+    def _record_receipt(
+        self,
+        mission_id: str,
+        calls: Sequence[ProviderToolCall],
+        status: str,
+        preflight: Mapping[str, Any],
+        execution: Mapping[str, Any] | None,
+        result: Mapping[str, Any],
+    ) -> None:
+        self._receipts.append(
+            MissionAuthorizationReceipt(
+                mission_id=mission_id,
+                call_ids=tuple(call.call_id for call in calls),
+                status=status,
+                preflight=preflight,
+                execution=execution,
+                result=result,
+            )
+        )
+
+    def _refuse(
+        self,
+        calls: Sequence[ProviderToolCall],
+        reason: str,
+        *,
+        mission_id: str | None = None,
+    ) -> tuple[ProviderToolResult, ...]:
+        projection = {
+            "workflow": "agent_mission",
+            "ok": False,
+            "execution": "not_started",
+            "mission_status": "refused",
+            "refusal": reason,
+            "result_digest": _json_digest({"reason": reason}),
+            "retention": "structured_step_outputs_only",
+        }
+        self._receipts.append(
+            MissionAuthorizationReceipt(
+                mission_id=mission_id or f"{self.mission_id_prefix}-refused-{self._invocation}",
+                call_ids=tuple(call.call_id for call in calls),
+                status="preflight_refused",
+                preflight=projection,
+                execution=None,
+                result=projection,
+            )
+        )
+        return tuple(
+            ProviderToolResult(call.call_id, projection, approved=False, is_error=True)
+            for call in calls
+        )
 
 
 class AutonomousBrain:
@@ -508,7 +1005,7 @@ class AutonomousBrain:
         prompt: Mapping[str, Any],
         plan: Mapping[str, Any],
         credentials: Mapping[str, CredentialHandle],
-        authorize_and_execute: Callable[[tuple[ProviderToolCall, ...]], Sequence[ProviderToolResult]],
+        authorize_and_execute: Callable[[tuple[ProviderToolCall, ...]], Sequence[ProviderToolResult]] | None = None,
         approve_provider_call: bool = False,
         run_id: str | None = None,
         max_output_tokens: int = 2048,
@@ -523,6 +1020,15 @@ class AutonomousBrain:
         max_turns: int = 4,
         max_tool_calls: int = 128,
         stream: bool = False,
+        mission_policy: MissionPolicy | Mapping[str, Any] | None = None,
+        approve_mission_dispatch: bool = False,
+        route_request: Mapping[str, Any] | None = None,
+        enforce_route_tools: bool = True,
+        require_resolved_route: bool = True,
+        claim_requests: Sequence[Mapping[str, Any]] = (),
+        evaluator_review: Mapping[str, Any] | None = None,
+        workflow_binding: Mapping[str, Any] | None = None,
+        operations_gate_acceptance: Mapping[str, Any] | None = None,
     ) -> BrainToolLoopResult:
         """Run the planned provider call and continue only through caller-approved tool results.
 
@@ -533,7 +1039,7 @@ class AutonomousBrain:
         runtime never do so implicitly.
         """
 
-        if not callable(authorize_and_execute):
+        if authorize_and_execute is not None and not callable(authorize_and_execute):
             raise BrainRunError("authorize_and_execute must be callable")
         if not isinstance(provider_tools, Sequence) or isinstance(provider_tools, (str, bytes)):
             raise BrainRunError("provider_tools must be a sequence")
@@ -541,10 +1047,121 @@ class AutonomousBrain:
             raise BrainRunError("provider_tools must contain ProviderTool values")
         if not isinstance(stream, bool):
             raise BrainRunError("stream must be a boolean")
+        if not isinstance(enforce_route_tools, bool) or not isinstance(require_resolved_route, bool):
+            raise BrainRunError("route enforcement flags must be booleans")
+        prompt_request = dict(prompt)
+        route: dict[str, Any] | None = None
+        raw_route: dict[str, Any] | None = None
+        if route_request is not None:
+            if not isinstance(route_request, Mapping):
+                raise BrainRunError("route_request must be a mapping")
+            BrainLearningLedger._assert_safe(route_request)
+            route_arguments = dict(route_request)
+            supplied_goal = route_arguments.get("goal")
+            if supplied_goal is not None and supplied_goal != task:
+                raise BrainRunError("route_request.goal must match the tool-loop task")
+            route_arguments["goal"] = task
+            route_arguments.setdefault("needs", [{"id": "task", "query": task}])
+            route_arguments.setdefault("include_tools", True)
+            route_arguments.setdefault("max_tools", 128)
+            try:
+                encoded_route_request = json.dumps(
+                    route_arguments,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode("utf-8")
+            except (TypeError, ValueError) as error:
+                raise BrainRunError("route_request must be JSON-safe") from error
+            if len(encoded_route_request) > MAX_ROUTE_REQUEST_BYTES:
+                raise BrainRunError("route_request exceeds the bounded size")
+            route_response = self.workspace.tool("capability_route", route_arguments)
+            if not isinstance(route_response, Mapping):
+                raise BrainRunError("capability route returned a non-object")
+            if route_response.get("ok") is False or route_response.get("workflow") != "capability_route":
+                raise BrainRunError("capability route was refused")
+            raw_route = dict(route_response)
+            BrainLearningLedger._assert_safe(raw_route)
+            unresolved = raw_route.get("unresolved_needs", [])
+            if not isinstance(unresolved, list) or any(not isinstance(item, str) for item in unresolved):
+                raise BrainRunError("capability route returned malformed unresolved_needs")
+            if unresolved and require_resolved_route:
+                raise BrainRunError("capability route contains unresolved needs: " + ", ".join(unresolved))
+            route_context = _bounded_route_prompt_context(raw_route)
+            route = dict(route_context)
+            route.update(
+                {
+                    "ok": True,
+                    "workflow": "capability_route",
+                    "evidence_digest": raw_route.get("evidence_digest"),
+                    "unresolved_needs": list(unresolved),
+                    "route_coverage": raw_route.get("route_coverage", {}),
+                    "execution": raw_route.get("execution", "not_started"),
+                }
+            )
+            existing_context = prompt_request.get("context", [])
+            if not isinstance(existing_context, Sequence) or isinstance(existing_context, (str, bytes)):
+                raise BrainRunError("prompt.context must be a sequence when routing is enabled")
+            context_chunks = [dict(chunk) for chunk in existing_context if isinstance(chunk, Mapping)]
+            if len(context_chunks) != len(existing_context):
+                raise BrainRunError("prompt.context must contain mappings")
+            if any(chunk.get("id") == "capability-route" for chunk in context_chunks):
+                raise BrainRunError("prompt.context already contains the reserved capability-route id")
+            context_chunks.append(
+                {
+                    "id": "capability-route",
+                    "role": "developer",
+                    "content": json.dumps(route_context, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+                    "required": True,
+                    "priority": 1_000,
+                }
+            )
+            prompt_request["context"] = context_chunks
+            if not provider_tools and route_context["tool_schemas"] and not route_context["tool_schemas_omitted"]:
+                provider_tools = tuple(
+                    ProviderTool.from_mcp_schema(schema) for schema in route_context["tool_schemas"]
+                )
+            if enforce_route_tools:
+                if mission_policy is None:
+                    raise BrainRunError("enforce_route_tools requires mission_policy")
+                policy_for_route = (
+                    mission_policy.to_dict() if isinstance(mission_policy, MissionPolicy) else dict(mission_policy)
+                )
+                allowed_tools = policy_for_route.get("allowed_tools")
+                recommended_tools = route.get("recommended_tools")
+                if not isinstance(allowed_tools, Sequence) or isinstance(allowed_tools, (str, bytes)):
+                    raise BrainRunError("enforce_route_tools requires an explicit mission policy allowed_tools list")
+                if not isinstance(recommended_tools, list) or any(not isinstance(tool, str) for tool in recommended_tools):
+                    raise BrainRunError("capability route returned malformed recommended_tools")
+                narrowed = [tool for tool in allowed_tools if tool in set(recommended_tools)]
+                if not narrowed:
+                    raise BrainRunError("route has no overlap with the caller mission policy allowed_tools")
+                policy_for_route["allowed_tools"] = narrowed
+                mission_policy = policy_for_route
+        if authorize_and_execute is None:
+            if mission_policy is None:
+                raise BrainRunError("provide authorize_and_execute or mission_policy for the built-in mission authorizer")
+            if not provider_tools:
+                raise BrainRunError("the built-in mission authorizer requires provider_tools")
+            authorizer = MissionToolAuthorizer(
+                self.workspace,
+                task=task,
+                mission_policy=mission_policy,
+                route=raw_route,
+                approve_mission_dispatch=approve_mission_dispatch,
+                claim_requests=claim_requests,
+                evaluator_review=evaluator_review,
+                workflow_binding=workflow_binding,
+                operations_gate_acceptance=operations_gate_acceptance,
+            )
+            authorize_and_execute = authorizer
+        else:
+            authorizer = None
         first = self.run(
             task=task,
             model_selection=model_selection,
-            prompt=prompt,
+            prompt=prompt_request,
             plan=plan,
             credentials=credentials,
             approve_provider_call=approve_provider_call,
@@ -560,7 +1177,7 @@ class AutonomousBrain:
             tool_choice=tool_choice,
         )
         if first.status != "completed_provider_call" or first.response is None:
-            return BrainToolLoopResult(brain_run=first, status=first.status, provider_loop=None)
+            return BrainToolLoopResult(brain_run=first, status=first.status, provider_loop=None, route=route)
         selected = first.selection.get("selected_model")
         if not isinstance(selected, Mapping):
             raise BrainRunError("model selection did not produce a continuation model")
@@ -609,7 +1226,14 @@ class AutonomousBrain:
             "authorization_required": "tool_authorization_required",
             "turn_limit_reached": "tool_turn_limit_reached",
         }[loop.status]
-        return BrainToolLoopResult(brain_run=first, status=status, provider_loop=loop)
+        receipts = () if authorizer is None else tuple(receipt.to_dict() for receipt in authorizer.receipts)
+        return BrainToolLoopResult(
+            brain_run=first,
+            status=status,
+            provider_loop=loop,
+            route=route,
+            authorization_receipts=receipts,
+        )
 
     def record_evaluator_outcome(
         self,

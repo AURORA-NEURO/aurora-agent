@@ -13,6 +13,8 @@ from .brain import (
     BrainRunError,
     BrainRunResult,
     BrainToolLoopResult,
+    MissionAuthorizationReceipt,
+    MissionToolAuthorizer,
 )
 from .llm_runtime import (
     CredentialError,
@@ -2326,6 +2328,8 @@ __all__ = [
     "BrainRunResult",
     "BrainMissionResult",
     "BrainToolLoopResult",
+    "MissionAuthorizationReceipt",
+    "MissionToolAuthorizer",
     "ApiError",
     "AcceptanceResult",
     "AdapterDescriptor",

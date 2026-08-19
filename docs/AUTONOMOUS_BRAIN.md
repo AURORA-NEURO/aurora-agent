@@ -165,9 +165,39 @@ loop = brain.run_tool_loop(
 ```
 
 The callback is application-owned: it should apply the same mission policy, schema validation,
-approval, budgets, and audit/evaluator rules as `agent_mission`. The runtime only transports the
+approval, budgets, and audit/evaluator rules as `agent_mission`. For the standard path,
+`authorize_and_execute` may be omitted when `mission_policy` is supplied; the brain then constructs
+`MissionToolAuthorizer`. It requires each provider tool to be in the caller allow-list, in the
+resolved route candidate set, and valid against any retained route schema before sending one
+multi-step batch to `agent_mission`. It always previews with `execute=false`; only
+`approve_mission_dispatch=True` permits the second `execute=true` request. The returned
+`BrainToolLoopResult.authorization_receipts` retains bounded preflight/execution evidence and
+structured step outputs, not opaque MCP envelopes or credentials. The runtime only transports the
 approved result back to the model. A tool loop is therefore bounded continuation, not unrestricted
 agent self-execution.
+
+```python
+loop = brain.run_tool_loop(
+    task="audit the selected workspace capability",
+    model_selection=selection_request,
+    prompt={"max_input_tokens": 12_000},
+    plan=provider_plan,
+    credentials={"openai": handle},
+    mission_policy=MissionPolicy(
+        allowed_tools=("developer_platform_status",),
+        max_steps=4,
+        max_step_output_bytes=200_000,
+        max_total_output_bytes=800_000,
+    ),
+    route_request={"needs": [{"id": "task", "query": "workspace capability audit"}]},
+    approve_provider_call=True,
+    approve_mission_dispatch=True,
+)
+```
+
+The same route/authorizer path works for every tool returned by the live cross-domain catalogue;
+domain-specific readiness, operations gates, and evidence contracts remain authoritative in the
+Rust mission executor rather than being guessed by the model.
 
 ## Run, evaluate, and learn
 

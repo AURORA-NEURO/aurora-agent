@@ -21,7 +21,13 @@ from prism_sdk.llm_runtime import (
     openai_compatible_provider,
     openai_provider,
 )
-from prism_sdk.brain import AutonomousBrain, BrainLearningLedger, BrainRunError, BrainRunResult
+from prism_sdk.brain import (
+    AutonomousBrain,
+    BrainLearningLedger,
+    BrainRunError,
+    BrainRunResult,
+    MissionToolAuthorizer,
+)
 
 
 class _ProviderHandler(BaseHTTPRequestHandler):
@@ -450,6 +456,187 @@ class LlmRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(refused.status, "authorization_required")
         self.assertEqual(refused.turns, 1)
+
+    def test_mission_tool_authorizer_fails_closed_before_dispatch(self) -> None:
+        class Workspace:
+            def __init__(self) -> None:
+                self.calls: list[str] = []
+
+            def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+                self.calls.append(name)
+                raise AssertionError("invalid route tool must not reach agent_mission")
+
+        authorizer = MissionToolAuthorizer(
+            Workspace(),
+            task="inspect",
+            mission_policy={"allowed_tools": ["developer_platform_status"]},
+            route={
+                "workflow": "capability_route",
+                "goal": "inspect",
+                "unresolved_needs": [],
+                "recommended_tools": ["other_tool"],
+                "needs": [
+                    {
+                        "id": "task",
+                        "candidate_domains": ["engineering"],
+                        "candidate_groups": ["developer_platform"],
+                        "candidate_tools": ["other_tool"],
+                    }
+                ],
+            },
+        )
+        result = authorizer(
+            (
+                ProviderToolCall(
+                    "call-1",
+                    "developer_platform_status",
+                    {},
+                ),
+            )
+        )
+        self.assertFalse(result[0].approved)
+        self.assertEqual(authorizer.receipts[0].status, "preflight_refused")
+
+    def test_mission_tool_authorizer_requires_dispatch_approval_after_preflight(self) -> None:
+        class Workspace:
+            def __init__(self) -> None:
+                self.missions: list[dict[str, object]] = []
+
+            def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+                assert name == "agent_mission"
+                assert arguments is not None
+                self.missions.append(arguments)
+                return {
+                    "ok": True,
+                    "workflow": "agent_mission",
+                    "execution": "planned",
+                    "mission_status": "planned",
+                    "plan": {"digest": "m" * 64, "mission_id": arguments["mission_id"]},
+                }
+
+        workspace = Workspace()
+        authorizer = MissionToolAuthorizer(
+            workspace,
+            task="inspect",
+            mission_policy={"allowed_tools": ["developer_platform_status"]},
+        )
+        result = authorizer(
+            (ProviderToolCall("call-approval", "developer_platform_status", {}),)
+        )
+        self.assertFalse(result[0].approved)
+        self.assertTrue(result[0].is_error)
+        self.assertEqual(len(workspace.missions), 1)
+        self.assertFalse(workspace.missions[0]["policy"]["execute"])  # type: ignore[index]
+        self.assertEqual(authorizer.receipts[0].status, "approval_required")
+
+    def test_autonomous_brain_uses_route_aware_mission_authorizer_for_all_tool_turns(self) -> None:
+        class Workspace:
+            def __init__(self) -> None:
+                self.missions: list[dict[str, object]] = []
+
+            def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+                if name == "capability_route":
+                    return {
+                        "ok": True,
+                        "workflow": "capability_route",
+                        "route_id": "r" * 64,
+                        "catalog_digest": "c" * 64,
+                        "goal": "inspect",
+                        "unresolved_needs": [],
+                        "recommended_tools": ["developer_platform_status"],
+                        "needs": [
+                            {
+                                "id": "task",
+                                "resolution": "explicit",
+                                "candidate_groups": ["developer_platform"],
+                                "candidate_domains": ["engineering"],
+                                "candidate_tools": ["developer_platform_status"],
+                            }
+                        ],
+                        "tool_schemas": [
+                            {
+                                "name": "developer_platform_status",
+                                "description": "Read bounded platform state.",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {"scope": {"type": "string"}},
+                                    "additionalProperties": False,
+                                },
+                            }
+                        ],
+                        "schema_attachment": {"requested": True, "returned": 1, "missing": []},
+                    }
+                if name == "brain_model_select":
+                    return {"selected_model": {"provider": "openai", "model": "test-model"}}
+                if name == "brain_prompt_assemble":
+                    assert arguments is not None
+                    context = arguments.get("context", [])
+                    assert any(chunk.get("id") == "capability-route" for chunk in context)  # type: ignore[union-attr]
+                    return {"messages": [{"role": "user", "content": "inspect"}], "prompt_digest": "p"}
+                if name == "brain_plan":
+                    return {
+                        "ok": True,
+                        "plan": {
+                            "requires_approval": True,
+                            "steps": [{"effect": "provider_call"}],
+                            "plan_digest": "plan",
+                        },
+                    }
+                if name == "agent_mission":
+                    assert arguments is not None
+                    self.missions.append(arguments)
+                    execute = arguments.get("policy", {}).get("execute", False)  # type: ignore[union-attr]
+                    return {
+                        "ok": True,
+                        "workflow": "agent_mission",
+                        "execution": "executed" if execute else "planned",
+                        "mission_status": "succeeded" if execute else "planned",
+                        "plan": {"digest": "m" * 64, "mission_id": arguments["mission_id"]},
+                        "results": [
+                            {
+                                "id": arguments["steps"][0]["id"],  # type: ignore[index]
+                                "tool": "developer_platform_status",
+                                "status": "succeeded",
+                                "required": True,
+                                "bytes": 24,
+                                "wire": {"result": {"structuredContent": {"status": "ready"}}},
+                            }
+                        ],
+                    }
+                raise AssertionError(f"unexpected tool {name}")
+
+        store = CredentialStore()
+        runtime = LLMRuntime(store)
+        runtime.register_provider(
+            openai_provider(base_url=self.base_url, allow_insecure_http=True, path="/continue")
+        )
+        handle = store.register("openai", "super-secret")
+        workspace = Workspace()
+        result = AutonomousBrain(workspace, runtime).run_tool_loop(
+            task="inspect",
+            model_selection={"models": [{"provider": "openai", "model": "test-model"}]},
+            prompt={"max_input_tokens": 2_000},
+            plan={"allowed_tools": ["provider.invoke"], "max_cost": 10},
+            credentials={"openai": handle},
+            mission_policy={
+                "allowed_tools": ["developer_platform_status"],
+                "max_steps": 2,
+                "max_step_output_bytes": 100_000,
+                "max_total_output_bytes": 100_000,
+            },
+            route_request={"needs": [{"id": "task", "query": "inspect"}]},
+            approve_provider_call=True,
+            approve_mission_dispatch=True,
+            max_turns=3,
+        )
+        self.assertEqual(result.status, "completed_provider_tool_loop")
+        self.assertEqual(result.provider_loop.final_response.text, "continued")  # type: ignore[union-attr]
+        self.assertEqual(len(workspace.missions), 2)
+        self.assertFalse(workspace.missions[0]["policy"]["execute"])  # type: ignore[index]
+        self.assertTrue(workspace.missions[1]["policy"]["execute"])  # type: ignore[index]
+        self.assertEqual(result.authorization_receipts[0]["status"], "executed")
+        self.assertEqual(result.authorization_receipts[0]["execution"]["results"][0]["output"], {"status": "ready"})  # type: ignore[index]
+        self.assertNotIn("super-secret", json.dumps(result.to_dict()))
 
     def test_autonomous_brain_exposes_authorized_native_tool_loop(self) -> None:
         class Workspace:
