@@ -1510,6 +1510,10 @@ def test_run_autonomous_tool_loop_executes_only_through_caller_callback():
             credentials={"openai": handle},
             approve_provider_call=True,
             auto_route=True,
+            provider_tools=(
+                ProviderTool("developer_platform_status"),
+                ProviderTool("release_apply"),
+            ),
             tool_loop_options={"authorize_and_execute": authorize, "max_turns": 3},
         )
         assert completed.status == "completed_provider_tool_loop"
@@ -1517,6 +1521,8 @@ def test_run_autonomous_tool_loop_executes_only_through_caller_callback():
         assert completed.provider_loop is not None
         assert completed.provider_loop.final_response is not None
         assert completed.provider_loop.final_response.text == "continued bounded answer"
+        request = json.loads(server.request_body.decode("utf-8"))  # type: ignore[attr-defined]
+        assert [tool["name"] for tool in request["tools"]] == ["developer_platform_status"]
         assert any(name == "capability_route" for name, _ in workspace.calls)
         assert "tool-loop-secret" not in json.dumps(completed.to_dict())
     finally:

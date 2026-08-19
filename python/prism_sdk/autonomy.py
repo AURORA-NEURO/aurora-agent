@@ -4925,10 +4925,10 @@ class AutonomousTaskOrchestrator:
                 loop_options["provider_tools"] = tuple(provider_tools)
             if route_request is not None:
                 loop_options["route_request"] = dict(route_request)
-                # A callback-authorized native loop has no mission policy to narrow. The route
-                # still supplies bounded schemas and evidence; mission-policy intersection is
-                # only meaningful when the built-in mission authorizer is active.
-                loop_options["enforce_route_tools"] = enforce_route_tools if mission_policy is not None else False
+                # Route enforcement narrows the provider-visible surface even for a native
+                # callback-authorized loop. Mission-policy intersection remains conditional on
+                # the built-in mission authorizer, but route evidence must constrain every facade.
+                loop_options["enforce_route_tools"] = enforce_route_tools
                 loop_options["require_resolved_route"] = require_resolved_route
             return self.brain.run_adaptive_tool_loop(
                 task=blueprint.spec.task,
