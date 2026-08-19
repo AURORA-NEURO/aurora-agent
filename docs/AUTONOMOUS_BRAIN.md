@@ -346,6 +346,34 @@ envelopes. Passing the checkpoint back verifies the task/workflow/run identity a
 stages. A blocked or proposed stage is not retried implicitly; the caller must pass
 `retry_blocked=True` to make that decision explicit.
 
+Stage execution can be paired with explicit online learning:
+
+```python
+learning = brain.run_workflow_learning(
+    blueprint=blueprint,
+    model_candidates=model_catalogue,
+    credentials={"openai": openai_handle},
+    approve_provider_call=True,
+    bandit_state=bandit_state,
+    ledger=ledger,
+    memory=memory,
+    stage_evidence={
+        "scope": {"signals": {"schema_valid": 1.0}},
+        "inspect": {"signals": {"evidence_complete": 1.0}},
+    },
+)
+```
+
+The built-in workflow evaluator scores only the signal names declared by the scheduled stage.
+Every declared signal must reach the pass threshold; missing evidence yields a zero reward and a
+replan request. Each completed stage gets its own evaluator decision and `brain_outcome_record`
+update, so the selector can learn from stage-level outcomes rather than treating an entire
+multi-stage run as one opaque reward. A caller may provide a custom `BrainOutcomeEvaluator` or a
+domain evaluator registry, but the evaluator remains the only reward authority. Stage learning
+does not automatically replay or mutate a completed stage: `learning_replan_requested` is an
+explicit caller decision point, and the ledger/memory paths retain only value-only metadata and
+digests.
+
 For work that genuinely spans domains, `prepare_cross_domain` and `run_cross_domain` provide a
 bounded fan-out/fan-in path. Child tasks are prepared with their own domain workflow contracts,
 run sequentially in declared order, and are synthesized by the `cross_domain` workflow only after

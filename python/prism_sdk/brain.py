@@ -1195,6 +1195,13 @@ class AutonomousBrain:
 
         return AutonomousTaskOrchestrator(self).run_workflow(**kwargs)
 
+    def run_workflow_learning(self, **kwargs: Any) -> Any:
+        """Execute workflow stages and apply explicit per-stage evaluator updates."""
+
+        from .autonomy import AutonomousTaskOrchestrator
+
+        return AutonomousTaskOrchestrator(self).run_workflow_learning(**kwargs)
+
     def run_cross_domain(self, **kwargs: Any) -> Any:
         """Run bounded domain specialists and an optional cross-domain synthesis."""
 

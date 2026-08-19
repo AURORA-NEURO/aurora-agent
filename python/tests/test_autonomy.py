@@ -713,3 +713,119 @@ def test_run_workflow_stage_contract_is_executable_for_every_builtin_domain():
         server.shutdown()
         thread.join(timeout=2)
         server.server_close()
+
+
+def test_run_workflow_learning_updates_each_completed_stage_with_explicit_signals():
+    runtime, store, server, thread = _structured_runtime()
+    workspace = _Workspace()
+    handle = store.register("openai", "workflow-learning-secret")
+    brain = AutonomousBrain(workspace, runtime)
+    try:
+        blueprint = brain.prepare_autonomous(
+            task="Produce a staged implementation review with evidence.",
+            domain="coding",
+        )
+        result = brain.run_workflow_learning(
+            blueprint=blueprint,
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            approve_provider_call=True,
+            run_id="workflow-learning",
+            max_stage_calls=2,
+            stage_evidence={
+                "scope": {"signals": {"schema_valid": True}},
+                "inspect": {"signals": {"evidence_complete": True}},
+            },
+            bandit_state={
+                "schema": "bioprism-brain-bandit/0.1",
+                "generation": 0,
+                "arms": [
+                    {
+                        "arm_id": "openai/test-model",
+                        "pulls": 0,
+                        "reward_sum": 0.0,
+                        "failures": 0,
+                        "disabled": False,
+                    }
+                ],
+            },
+        )
+        assert result.status == "paused"
+        assert [item.stage_id for item in result.evaluations] == ["scope", "inspect"]
+        assert all(item.decision.passed for item in result.evaluations)
+        assert result.replan_requested is False
+        assert result.bandit_state["generation"] == 1  # type: ignore[index]
+        assert all(item.evidence_digest for item in result.evaluations)
+        assert "workflow-learning-secret" not in json.dumps(result.to_dict())
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+
+def test_run_workflow_learning_missing_evidence_never_defaults_to_reward(tmp_path: Path):
+    runtime, store, server, thread = _structured_runtime()
+    workspace = _Workspace()
+    handle = store.register("openai", "workflow-missing-evidence-secret")
+    brain = AutonomousBrain(workspace, runtime)
+    ledger = BrainLearningLedger(tmp_path / "workflow-learning.jsonl")
+    memory = BrainEpisodicMemory(tmp_path / "workflow-memory.sqlite3")
+    try:
+        blueprint = brain.prepare_autonomous(
+            task="Evaluate a staged coding result without supplied evaluator evidence.",
+            domain="coding",
+        )
+        result = brain.run_workflow_learning(
+            blueprint=blueprint,
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            approve_provider_call=True,
+            run_id="workflow-missing-evidence",
+            max_stage_calls=1,
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+            memory=memory,
+            ledger=ledger,
+        )
+        assert result.status == "learning_replan_requested"
+        assert len(result.evaluations) == 1
+        assert result.evaluations[0].decision.failed is True
+        assert result.evaluations[0].decision.reward == 0.0
+        assert result.replan_requested is True
+        assert b"Evaluate a staged coding result" not in (tmp_path / "workflow-memory.sqlite3").read_bytes()
+        assert b"workflow-missing-evidence-secret" not in (tmp_path / "workflow-learning.jsonl").read_bytes()
+    finally:
+        memory.close()
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_builtin_workflow_learning_signal_contract_covers_every_domain():
+    runtime, store, server, thread = _structured_runtime()
+    handle = store.register("openai", "all-domain-learning-secret")
+    brain = AutonomousBrain(_Workspace(), runtime)
+    try:
+        for domain in AUTONOMOUS_DOMAINS:
+            blueprint = brain.prepare_autonomous(
+                task=f"Evaluate a bounded {domain} stage.",
+                domain=domain,
+            )
+            stage = blueprint.workflow.stages[0]
+            result = brain.run_workflow_learning(
+                blueprint=blueprint,
+                model_candidates=_model(),
+                credentials={"openai": handle},
+                approve_provider_call=True,
+                run_id=f"learning-{domain}",
+                max_stage_calls=1,
+                stage_evidence={
+                    stage.id: {"signals": {signal: True for signal in stage.evaluator_signals}}
+                },
+                bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+            )
+            assert result.status == "paused"
+            assert len(result.evaluations) == 1
+            assert result.evaluations[0].decision.passed is True
+            assert result.replan_requested is False
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)

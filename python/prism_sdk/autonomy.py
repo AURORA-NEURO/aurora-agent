@@ -77,6 +77,8 @@ AUTONOMOUS_WORKFLOW_EXECUTION_STATUSES = (
     "paused",
 )
 AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA = "bioprism-python-autonomous-workflow-checkpoint/0.1"
+AUTONOMOUS_WORKFLOW_EVALUATOR_SCHEMA = "bioprism-python-autonomous-workflow-evaluator/0.1"
+AUTONOMOUS_WORKFLOW_LEARNING_SCHEMA = "bioprism-python-autonomous-workflow-learning/0.1"
 _SAFE_IDENTIFIER_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-")
 
 
@@ -1201,6 +1203,192 @@ class AutonomousWorkflowRun:
             "checkpoint": self.checkpoint.to_dict(),
             "next_stage_ids": list(self.next_stage_ids),
             "authorization": "caller_approval_per_provider_and_effect_boundary",
+        }
+
+
+class AutonomousWorkflowEvaluator(BrainOutcomeEvaluator):
+    """Explicit value-only evaluator for the declared signals of one workflow stage.
+
+    The evaluator never inspects provider text. The caller supplies normalized signal values for
+    a completed stage; every signal declared by that stage is required to reach ``1.0`` for a
+    pass. Partial signal coverage produces a bounded reward but never a clean pass, so a missing
+    evaluator packet cannot accidentally train the selector as a success.
+    """
+
+    def __init__(self, workflow: AutonomousWorkflowStrategy, *, pass_threshold: float = 1.0) -> None:
+        if not isinstance(workflow, AutonomousWorkflowStrategy):
+            raise BrainRunError("workflow evaluator requires an AutonomousWorkflowStrategy")
+        if (
+            not isinstance(pass_threshold, (int, float))
+            or isinstance(pass_threshold, bool)
+            or pass_threshold < 0
+            or pass_threshold > 1
+        ):
+            raise BrainRunError("workflow evaluator pass_threshold must be within [0, 1]")
+        self.workflow = workflow
+        self.pass_threshold = float(pass_threshold)
+        super().__init__(
+            self._evaluate,
+            evaluator_id=f"workflow-{workflow.workflow_id}",
+            evaluator_version=workflow.workflow_digest[:16],
+        )
+
+    def _evaluate(self, evaluation_input: Mapping[str, Any]) -> dict[str, Any]:
+        raw_evidence = evaluation_input.get("evidence")
+        if not isinstance(raw_evidence, Mapping):
+            return {
+                "reward": 0.0,
+                "passed": False,
+                "failed": True,
+                "failure_class": "missing_workflow_stage_evidence",
+                "replan_requested": True,
+                "replan_instruction": "Collect bounded evaluator signals for the completed workflow stage.",
+            }
+        stage_id = raw_evidence.get("stage_id")
+        stage = next((item for item in self.workflow.stages if item.id == stage_id), None)
+        if stage is None:
+            return {
+                "reward": 0.0,
+                "passed": False,
+                "failed": True,
+                "failure_class": "unknown_workflow_stage",
+                "replan_requested": True,
+                "replan_instruction": "Provide evaluator evidence for the scheduled workflow stage.",
+            }
+        raw_signals = raw_evidence.get("signals")
+        if not isinstance(raw_signals, Mapping):
+            return {
+                "reward": 0.0,
+                "passed": False,
+                "failed": True,
+                "failure_class": "missing_workflow_stage_signals",
+                "replan_requested": True,
+                "replan_instruction": f"Provide signals for workflow stage {stage.id}.",
+            }
+        values: list[float] = []
+        missing: list[str] = []
+        below_threshold: list[str] = []
+        for signal in stage.evaluator_signals:
+            raw_value = raw_signals.get(signal)
+            if isinstance(raw_value, bool):
+                value = 1.0 if raw_value else 0.0
+            elif isinstance(raw_value, (int, float)) and not isinstance(raw_value, bool):
+                value = float(raw_value)
+            else:
+                missing.append(signal)
+                continue
+            if not 0.0 <= value <= 1.0:
+                missing.append(signal)
+                continue
+            values.append(value)
+            if value < self.pass_threshold:
+                below_threshold.append(signal)
+        reward = 0.0 if not values else sum(values) / len(stage.evaluator_signals)
+        failed = bool(missing or below_threshold or not values)
+        gaps = [*missing, *below_threshold]
+        detail = ", ".join(dict.fromkeys(gaps)) or "the declared workflow stage signals"
+        return {
+            "reward": reward,
+            "passed": not failed,
+            "failed": failed,
+            "failure_class": None if not failed else "workflow_stage_signal_gate",
+            "feedback_digest": content_digest(
+                {
+                    "workflow_id": self.workflow.workflow_id,
+                    "stage_id": stage.id,
+                    "signals": dict(raw_signals),
+                }
+            ),
+            "replan_requested": failed,
+            "replan_instruction": None if not failed else f"Address workflow stage evaluator gaps: {detail}.",
+        }
+
+    def catalogue_entry(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_WORKFLOW_EVALUATOR_SCHEMA,
+            "workflow_id": self.workflow.workflow_id,
+            "workflow_digest": self.workflow.workflow_digest,
+            "evaluator_id": self.evaluator_id,
+            "evaluator_version": self.evaluator_version,
+            "pass_threshold": self.pass_threshold,
+            "stage_signals": {
+                stage.id: list(stage.evaluator_signals) for stage in self.workflow.stages
+            },
+            "execution": "caller_declared_signal_scoring_only",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousWorkflowStageEvaluation:
+    """Metadata-only evaluator and bandit receipt for one completed workflow stage."""
+
+    stage_id: str
+    stage_status: str
+    decision: BrainEvaluatorDecision
+    recording: Mapping[str, Any]
+    evidence_digest: str | None = None
+
+    def __post_init__(self) -> None:
+        _identifier("workflow stage evaluation stage_id", self.stage_id)
+        if self.stage_status not in AUTONOMOUS_WORKFLOW_STAGE_STATUSES:
+            raise BrainRunError("workflow stage evaluation has an invalid stage status")
+        if not isinstance(self.decision, BrainEvaluatorDecision):
+            raise BrainRunError("workflow stage evaluation decision is malformed")
+        if not isinstance(self.recording, Mapping):
+            raise BrainRunError("workflow stage evaluation recording must be a mapping")
+        _safe_json("workflow stage evaluation recording", self.recording, maximum=250_000)
+        if self.evidence_digest is not None:
+            _workflow_digest(self.evidence_digest, "workflow stage evaluation evidence_digest")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "stage_id": self.stage_id,
+            "stage_status": self.stage_status,
+            "decision": self.decision.to_dict(),
+            "recording": dict(self.recording),
+            "evidence_digest": self.evidence_digest,
+            "retention": "value_only_evaluator_and_bandit_metadata",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousWorkflowLearningResult:
+    """Workflow execution plus explicit per-stage online-learning receipts."""
+
+    status: str
+    workflow: AutonomousWorkflowRun
+    evaluations: tuple[AutonomousWorkflowStageEvaluation, ...]
+    bandit_state: Mapping[str, Any]
+    memory_receipts: tuple[Mapping[str, Any], ...] = ()
+    replan_requested: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.workflow, AutonomousWorkflowRun):
+            raise BrainRunError("workflow learning result contains an invalid workflow run")
+        if not isinstance(self.evaluations, Sequence) or isinstance(self.evaluations, (str, bytes)):
+            raise BrainRunError("workflow learning evaluations must be a sequence")
+        if any(not isinstance(item, AutonomousWorkflowStageEvaluation) for item in self.evaluations):
+            raise BrainRunError("workflow learning evaluations are malformed")
+        if not isinstance(self.bandit_state, Mapping):
+            raise BrainRunError("workflow learning bandit_state must be a mapping")
+        BrainLearningLedger._assert_safe(self.bandit_state)
+        if not isinstance(self.memory_receipts, Sequence) or isinstance(self.memory_receipts, (str, bytes)):
+            raise BrainRunError("workflow learning memory_receipts must be a sequence")
+        if any(not isinstance(item, Mapping) for item in self.memory_receipts):
+            raise BrainRunError("workflow learning memory_receipts are malformed")
+        if not isinstance(self.replan_requested, bool):
+            raise BrainRunError("workflow learning replan_requested must be boolean")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_WORKFLOW_LEARNING_SCHEMA,
+            "status": self.status,
+            "workflow": self.workflow.to_dict(),
+            "evaluations": [item.to_dict() for item in self.evaluations],
+            "bandit_state": dict(self.bandit_state),
+            "memory_receipts": [dict(item) for item in self.memory_receipts],
+            "replan_requested": self.replan_requested,
+            "retention": "provider_results_caller_owned; learning_value_only",
         }
 
 
@@ -2638,6 +2826,194 @@ class AutonomousTaskOrchestrator:
         )
 
     @staticmethod
+    def _workflow_stage_evidence(
+        blueprint: AutonomousTaskBlueprint,
+        stage: AutonomousWorkflowStage,
+        raw: Mapping[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if raw is None:
+            return None
+        if not isinstance(raw, Mapping):
+            raise BrainRunError(f"workflow stage evidence for {stage.id} must be a mapping")
+        unknown = sorted(set(raw).difference({"signals", "references", "limitations"}))
+        if unknown:
+            raise BrainRunError(
+                f"workflow stage evidence for {stage.id} contains unsupported fields: {', '.join(unknown)}"
+            )
+        signals = raw.get("signals", {})
+        if not isinstance(signals, Mapping):
+            raise BrainRunError(f"workflow stage evidence signals for {stage.id} must be a mapping")
+        normalized_signals: dict[str, float | bool] = {}
+        for signal, value in signals.items():
+            _identifier("workflow stage evidence signal", signal)
+            if isinstance(value, bool):
+                normalized_signals[signal] = value
+            elif isinstance(value, (int, float)) and not isinstance(value, bool):
+                if value < 0 or value > 1:
+                    raise BrainRunError("workflow stage evidence signal values must be within [0, 1]")
+                normalized_signals[signal] = float(value)
+            else:
+                raise BrainRunError("workflow stage evidence signal values must be booleans or numbers")
+        references = raw.get("references", ())
+        limitations = raw.get("limitations", ())
+        references = _sequence(f"workflow stage {stage.id} references", references, maximum=32)
+        for reference in references:
+            _workflow_digest(reference, f"workflow stage {stage.id} reference")
+        limitations = _sequence(f"workflow stage {stage.id} limitations", limitations, maximum=32)
+        return _safe_json(
+            f"workflow stage {stage.id} evidence",
+            {
+                "schema": AUTONOMOUS_WORKFLOW_EVALUATOR_SCHEMA,
+                "workflow_id": blueprint.workflow.workflow_id,
+                "workflow_digest": blueprint.workflow.workflow_digest,
+                "stage_id": stage.id,
+                "required_signals": list(stage.evaluator_signals),
+                "domain": blueprint.profile.evaluator_domain,
+                "capability": stage.required_capabilities[0] if stage.required_capabilities else blueprint.spec.capability,
+                "risk_class": blueprint.spec.risk_class,
+                "signals": normalized_signals,
+                "references": list(references),
+                "limitations": list(limitations),
+            },
+            maximum=250_000,
+        )
+
+    def run_workflow_learning(
+        self,
+        *,
+        bandit_state: Mapping[str, Any],
+        evaluator: BrainOutcomeEvaluator | None = None,
+        evaluator_registry: DomainEvaluatorRegistry | None = None,
+        stage_evidence: Mapping[str, Mapping[str, Any]] | None = None,
+        memory_tags: Sequence[str] = (),
+        memory: BrainEpisodicMemory | None = None,
+        **workflow_kwargs: Any,
+    ) -> AutonomousWorkflowLearningResult:
+        """Execute a workflow and record one explicit bandit update per completed stage.
+
+        Learning is intentionally separate from execution. A stage is evaluated only after its
+        structured result is complete; missing evidence produces a failed reward rather than a
+        default success. Replanning is reported to the caller and never silently replays a stage
+        that may have crossed an external boundary.
+        """
+
+        if not isinstance(bandit_state, Mapping):
+            raise BrainRunError("workflow learning bandit_state must be a mapping")
+        BrainLearningLedger._assert_safe(bandit_state)
+        if stage_evidence is not None:
+            if not isinstance(stage_evidence, Mapping):
+                raise BrainRunError("workflow stage_evidence must be a mapping or None")
+            if any(not isinstance(stage_id, str) or not isinstance(value, Mapping) for stage_id, value in stage_evidence.items()):
+                raise BrainRunError("workflow stage_evidence must map stage ids to mappings")
+            _safe_json("workflow stage_evidence", stage_evidence, maximum=1_000_000)
+        memory_store = memory or self.brain.memory
+        if memory_store is not None and not isinstance(memory_store, BrainEpisodicMemory):
+            raise BrainRunError("workflow learning memory must be a BrainEpisodicMemory or None")
+        normalized_tags = _sequence("workflow learning memory_tags", memory_tags, maximum=32)
+        blueprint = workflow_kwargs.get("blueprint")
+        if not isinstance(blueprint, AutonomousTaskBlueprint):
+            raise BrainRunError("workflow learning requires a prepared AutonomousTaskBlueprint")
+        if evaluator is not None and not isinstance(evaluator, BrainOutcomeEvaluator):
+            raise BrainRunError("workflow learning evaluator must be a BrainOutcomeEvaluator or None")
+        if evaluator_registry is not None and not isinstance(evaluator_registry, DomainEvaluatorRegistry):
+            raise BrainRunError("workflow evaluator_registry must be a DomainEvaluatorRegistry or None")
+        resolved_evaluator = evaluator
+        if resolved_evaluator is None and evaluator_registry is not None:
+            resolved_evaluator = evaluator_registry.resolve(blueprint.profile.evaluator_domain)
+        if resolved_evaluator is None:
+            resolved_evaluator = AutonomousWorkflowEvaluator(blueprint.workflow)
+        workflow_run = self.run_workflow(memory=memory_store, **workflow_kwargs)
+        state: Mapping[str, Any] = dict(bandit_state)
+        evaluations: list[AutonomousWorkflowStageEvaluation] = []
+        receipts: list[Mapping[str, Any]] = []
+        should_replan = False
+        for stage_result in workflow_run.stage_results:
+            if (
+                stage_result.result is None
+                or stage_result.execution_status != "completed"
+                or stage_result.declared_status != "completed"
+            ):
+                continue
+            evidence = self._workflow_stage_evidence(
+                blueprint,
+                stage_result.stage,
+                None if stage_evidence is None else stage_evidence.get(stage_result.stage.id),
+            )
+            decision, report = resolved_evaluator.evaluate_and_record_with_decision(
+                self.brain,
+                stage_result.result,
+                bandit_state=state,
+                evidence=evidence,
+                ledger=workflow_kwargs.get("ledger"),
+            )
+            next_state = report.get("next_state")
+            if isinstance(next_state, Mapping):
+                state = dict(next_state)
+            should_replan = should_replan or decision.replan_requested
+            evaluation = AutonomousWorkflowStageEvaluation(
+                stage_id=stage_result.stage.id,
+                stage_status=stage_result.declared_status,
+                decision=decision,
+                recording={
+                    "status": report.get("status"),
+                    "next_state": report.get("next_state"),
+                    "learning_evidence": report.get("learning_evidence"),
+                },
+                evidence_digest=decision.evidence_digest,
+            )
+            evaluations.append(evaluation)
+            if memory_store is not None:
+                episode_id = f"{workflow_run.run_id}-{stage_result.stage.id}"
+                if len(episode_id.encode("utf-8")) > 256:
+                    episode_id = "episode-" + content_digest({"run_id": workflow_run.run_id, "stage_id": stage_result.stage.id})
+                receipt = self.brain.remember_result(
+                    stage_result.result,
+                    task=blueprint.spec.task,
+                    episode_id=episode_id,
+                    context=blueprint.selection_context,
+                    tags=[
+                        *normalized_tags,
+                        f"domain:{blueprint.spec.domain}",
+                        f"workflow:{blueprint.workflow.workflow_id}",
+                        f"stage:{stage_result.stage.id}",
+                    ],
+                    lesson=decision.replan_instruction if decision.replan_requested else None,
+                    provenance={
+                        "workflow_id": blueprint.workflow.workflow_id,
+                        "workflow_digest": blueprint.workflow.workflow_digest,
+                        "stage_id": stage_result.stage.id,
+                        "evaluator_id": decision.evaluator_id,
+                        "evaluator_version": decision.evaluator_version,
+                    },
+                    memory=memory_store,
+                )
+                try:
+                    evaluation_receipt = memory_store.record_evaluation(
+                        episode_id,
+                        {
+                            **decision.to_dict(),
+                            "decision_digest": content_digest(decision.to_dict()),
+                        },
+                    ).to_dict()
+                except BrainMemoryError as error:
+                    raise BrainRunError("workflow stage evaluation memory record failed") from error
+                receipts.extend((receipt, evaluation_receipt))
+        if should_replan:
+            learning_status = "learning_replan_requested"
+        elif workflow_run.status == "completed":
+            learning_status = "completed"
+        else:
+            learning_status = workflow_run.status
+        return AutonomousWorkflowLearningResult(
+            status=learning_status,
+            workflow=workflow_run,
+            evaluations=tuple(evaluations),
+            bandit_state=state,
+            memory_receipts=tuple(receipts),
+            replan_requested=should_replan,
+        )
+
+    @staticmethod
     def _cross_domain_output(result: BrainRunResult | BrainToolLoopResult | BrainMissionResult) -> str:
         response = None
         if isinstance(result, BrainRunResult):
@@ -2963,6 +3339,8 @@ __all__ = [
     "AUTONOMOUS_EXECUTION_MODES",
     "AUTONOMOUS_WORKFLOW_SCHEMA",
     "AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA",
+    "AUTONOMOUS_WORKFLOW_EVALUATOR_SCHEMA",
+    "AUTONOMOUS_WORKFLOW_LEARNING_SCHEMA",
     "AUTONOMOUS_WORKFLOW_STAGE_STATUSES",
     "AutonomousDomainProfile",
     "AutonomousDomainRegistry",
@@ -2970,7 +3348,10 @@ __all__ = [
     "AutonomousCrossDomainResult",
     "AutonomousLearningResult",
     "AutonomousWorkflowCheckpoint",
+    "AutonomousWorkflowEvaluator",
+    "AutonomousWorkflowLearningResult",
     "AutonomousWorkflowRun",
+    "AutonomousWorkflowStageEvaluation",
     "AutonomousWorkflowStageResult",
     "AutonomousPlanBuilder",
     "AutonomousPromptBuilder",
