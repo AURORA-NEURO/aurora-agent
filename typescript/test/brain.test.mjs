@@ -48,6 +48,9 @@ test("client exposes the autonomous brain value-only kernel", async () => {
     input_tokens: 100,
     requested_output_tokens: 100,
     models: [model],
+    provider_health: {
+      openai: { registered: true, circuit: "closed", credential_ready: true, eligible: true },
+    },
   });
   const contextual = await client.brainModelSelectContextual({
     context: { domain: "engineering", capability: "platform_status", risk_class: "low" },
@@ -78,6 +81,9 @@ test("client exposes the autonomous brain value-only kernel", async () => {
   assert.equal(bandit.mcp.result.structuredContent.selected_arm_id, "openai/test-model");
   assert.equal(updated.mcp.result.structuredContent.generation, 1);
   assert.equal(outcome.mcp.result.structuredContent.status, "recorded_evaluator_reward");
+  assert.deepEqual(seen.find(({ path }) => path.endsWith("brain_model_select")).body.provider_health, {
+    openai: { registered: true, circuit: "closed", credential_ready: true, eligible: true },
+  });
   assert.equal(seen.length, 7);
   assert.ok(seen.every(({ body }) => !Object.prototype.hasOwnProperty.call(body, "api_key")));
 });
@@ -86,4 +92,18 @@ test("brain client methods fail before transport on malformed input", async () =
   const client = new ApiClient({ baseUrl: "http://127.0.0.1:18788", fetch: async () => { throw new Error("must not call transport"); } });
   await assert.rejects(() => client.brainPromptAssemble({ task: "", max_input_tokens: 10 }), ArgumentError);
   await assert.rejects(() => client.brainModelSelect({ task: "x", input_tokens: 1, requested_output_tokens: 1, models: [] }), ArgumentError);
+  await assert.rejects(() => client.brainModelSelect({
+    task: "x",
+    input_tokens: 1,
+    requested_output_tokens: 1,
+    models: [model],
+    provider_health: { openai: { circuit: "" } },
+  }), ArgumentError);
+  await assert.rejects(() => client.brainModelSelect({
+    task: "x",
+    input_tokens: 1,
+    requested_output_tokens: 1,
+    models: [model],
+    provider_health: { openai: { circuit: "unknown" } },
+  }), ArgumentError);
 });

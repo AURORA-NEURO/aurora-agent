@@ -32,6 +32,7 @@ pub const PROMPT_ASSEMBLY_SCHEMA: &str = "bioprism-brain-prompt-assembly/0.1";
 pub const PLAN_SCHEMA: &str = "bioprism-brain-plan/0.1";
 pub const BANDIT_SCHEMA: &str = "bioprism-brain-bandit/0.1";
 pub const LEARNING_EVIDENCE_SCHEMA: &str = "bioprism-brain-learning-evidence/0.1";
+pub const PROVIDER_HEALTH_SCHEMA: &str = "bioprism-brain-provider-health/0.1";
 
 const MAX_MODELS: usize = 256;
 const MAX_PROMPT_CHUNKS: usize = 512;
@@ -74,6 +75,8 @@ pub enum BrainError {
     InvalidReward,
     #[error("assessment cannot be both passed and failed")]
     ContradictoryAssessment,
+    #[error("invalid provider health posture for {0:?}")]
+    InvalidProviderHealth(String),
     #[error("{field} must be a lowercase SHA-256 digest")]
     InvalidDigest { field: &'static str },
     #[error("invalid JSON for digest: {0}")]
@@ -246,6 +249,56 @@ pub struct ModelSelectionRequest {
     pub observations: Vec<ModelObservation>,
     #[serde(default)]
     pub weights: SelectionWeights,
+    /// Runtime-supplied provider posture. Credentials remain outside this request; this map only
+    /// carries bounded readiness/circuit metadata so the kernel can refuse unhealthy providers.
+    #[serde(default)]
+    pub provider_health: BTreeMap<String, ProviderHealth>,
+}
+
+fn default_provider_registered() -> bool {
+    true
+}
+
+fn default_provider_circuit() -> String {
+    "closed".into()
+}
+
+fn default_provider_credential_ready() -> bool {
+    true
+}
+
+fn default_provider_eligible() -> bool {
+    true
+}
+
+/// Value-only runtime posture for one provider. It is deliberately not a credential record and
+/// never contains key material, endpoint secrets, or provider response content.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProviderHealth {
+    #[serde(default = "default_provider_registered")]
+    pub registered: bool,
+    #[serde(default = "default_provider_circuit")]
+    pub circuit: String,
+    #[serde(default)]
+    pub consecutive_failures: u64,
+    #[serde(default = "default_provider_credential_ready")]
+    pub credential_ready: bool,
+    #[serde(default = "default_provider_eligible")]
+    pub eligible: bool,
+}
+
+impl ProviderHealth {
+    fn validate(&self, provider: &str) -> Result<(), BrainError> {
+        non_empty(provider, "provider_health provider")?;
+        non_empty(&self.circuit, "provider_health.circuit")?;
+        if !matches!(
+            self.circuit.as_str(),
+            "closed" | "half_open" | "open" | "unconfigured"
+        ) {
+            return Err(BrainError::InvalidProviderHealth(provider.to_string()));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -284,6 +337,15 @@ pub fn select_model(request: &ModelSelectionRequest) -> Result<ModelSelectionRep
             field: "models",
             max: MAX_MODELS,
         });
+    }
+    if request.provider_health.len() > MAX_MODELS {
+        return Err(BrainError::TooMany {
+            field: "provider_health",
+            max: MAX_MODELS,
+        });
+    }
+    for (provider, health) in &request.provider_health {
+        health.validate(provider)?;
     }
     request.weights.validate()?;
     if let Some(min_quality) = request.min_quality {
@@ -364,6 +426,20 @@ pub fn select_model(request: &ModelSelectionRequest) -> Result<ModelSelectionRep
         for capability in &request.required_capabilities {
             if !model.capabilities.iter().any(|item| item == capability) {
                 reasons.push(format!("missing_capability:{capability}"));
+            }
+        }
+        if let Some(health) = request.provider_health.get(&model.provider) {
+            if !health.registered {
+                reasons.push("provider_unregistered".into());
+            }
+            if !health.credential_ready {
+                reasons.push("provider_credential_unready".into());
+            }
+            if health.circuit == "open" {
+                reasons.push("provider_circuit_open".into());
+            }
+            if !health.eligible {
+                reasons.push("provider_health_ineligible".into());
             }
         }
         if observation.is_some_and(|item| item.disabled) {
@@ -1415,6 +1491,7 @@ mod tests {
             ],
             observations: Vec::new(),
             weights: SelectionWeights::default(),
+            provider_health: BTreeMap::new(),
         })
         .unwrap();
         assert!(report.selected_model_id.is_none());
@@ -1460,6 +1537,7 @@ mod tests {
                 },
             ],
             weights: SelectionWeights::default(),
+            provider_health: BTreeMap::new(),
         };
         let report = select_model_contextual(&ContextualModelSelectionRequest {
             context,
@@ -1484,6 +1562,60 @@ mod tests {
             report.selection_status,
             "contextual_selection_mixed_history"
         );
+    }
+
+    #[test]
+    fn provider_health_is_a_kernel_gate_and_remains_visible_in_candidate_reasons() {
+        let mut provider_health = BTreeMap::new();
+        provider_health.insert(
+            "a".into(),
+            ProviderHealth {
+                registered: true,
+                circuit: "open".into(),
+                consecutive_failures: 3,
+                credential_ready: true,
+                eligible: false,
+            },
+        );
+        provider_health.insert(
+            "b".into(),
+            ProviderHealth {
+                registered: true,
+                circuit: "closed".into(),
+                consecutive_failures: 0,
+                credential_ready: true,
+                eligible: true,
+            },
+        );
+        let report = select_model(&ModelSelectionRequest {
+            task: "provider health test".into(),
+            required_capabilities: vec!["reasoning".into()],
+            input_tokens: 100,
+            requested_output_tokens: 100,
+            max_cost_per_million_tokens: None,
+            max_latency_ms: None,
+            min_quality: None,
+            models: vec![model("a", "open", 0.99, 1), model("b", "ready", 0.7, 2)],
+            observations: Vec::new(),
+            weights: SelectionWeights::default(),
+            provider_health,
+        })
+        .unwrap();
+        assert_eq!(report.selected_model_id.as_deref(), Some("b/ready"));
+        let refused = report
+            .ranking
+            .iter()
+            .find(|candidate| candidate.model_id == "a/open")
+            .unwrap();
+        assert!(!refused.eligible);
+        assert!(refused
+            .reasons
+            .iter()
+            .any(|reason| reason == "provider_circuit_open"));
+        assert!(refused
+            .reasons
+            .iter()
+            .any(|reason| reason == "provider_health_ineligible"));
     }
 
     #[test]

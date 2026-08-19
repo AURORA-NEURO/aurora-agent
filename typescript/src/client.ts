@@ -1636,6 +1636,17 @@ export class ApiClient {
   ): Promise<RestToolResponse<BrainModelSelectionResult>> {
     if (!isObject(args) || typeof args.task !== "string" || !args.task.trim()) throw new ArgumentError("brain model-selection task must be a non-empty string");
     if (!Array.isArray(args.models) || args.models.length === 0) throw new ArgumentError("brain model-selection models must be non-empty");
+    if (args.provider_health !== undefined) {
+      if (!isObject(args.provider_health)) throw new ArgumentError("brain provider_health must be an object");
+      for (const [provider, health] of Object.entries(args.provider_health)) {
+        if (!provider.trim() || !isObject(health)) throw new ArgumentError("brain provider_health entries must be named objects");
+        if (health.registered !== undefined && typeof health.registered !== "boolean") throw new ArgumentError("provider_health.registered must be boolean");
+        if (health.credential_ready !== undefined && typeof health.credential_ready !== "boolean") throw new ArgumentError("provider_health.credential_ready must be boolean");
+        if (health.eligible !== undefined && typeof health.eligible !== "boolean") throw new ArgumentError("provider_health.eligible must be boolean");
+        if (health.circuit !== undefined && (typeof health.circuit !== "string" || !["closed", "half_open", "open", "unconfigured"].includes(health.circuit))) throw new ArgumentError("provider_health.circuit must be closed, half_open, open, or unconfigured");
+        if (health.consecutive_failures !== undefined && (!Number.isSafeInteger(health.consecutive_failures) || health.consecutive_failures < 0)) throw new ArgumentError("provider_health.consecutive_failures must be a non-negative safe integer");
+      }
+    }
     return this.callTool<BrainModelSelectionResult>("brain_model_select", args, options);
   }
 

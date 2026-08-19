@@ -42,6 +42,7 @@ class _ProviderHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 - stdlib handler protocol
         length = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(length)
+        self.server.request_paths = getattr(self.server, "request_paths", []) + [self.path]  # type: ignore[attr-defined]
         self.server.seen_headers = {key.lower(): value for key, value in self.headers.items()}  # type: ignore[attr-defined]
         self.server.seen_body = body  # type: ignore[attr-defined]
         stream_frames: list[bytes] | None = None
@@ -156,6 +157,34 @@ class _ProviderHandler(BaseHTTPRequestHandler):
                     separators=(",", ":"),
                 ).encode()
             self.send_response(200)
+        elif self.path == "/continue_fail_after_result":
+            request_body = json.loads(body.decode("utf-8"))
+            input_items = request_body.get("input", [])
+            has_result = any(
+                isinstance(item, dict) and item.get("type") == "function_call_output"
+                for item in input_items
+            )
+            if has_result:
+                payload = b'{"error":"continuation failed after tool authorization"}'
+                self.send_response(503)
+            else:
+                payload = json.dumps(
+                    {
+                        "id": "resp_first_fail_after_result",
+                        "model": "test-model",
+                        "output": [
+                            {
+                                "type": "function_call",
+                                "call_id": "call-loop-fail-after-result",
+                                "name": "developer_platform_status",
+                                "arguments": "{}",
+                            }
+                        ],
+                        "usage": {"total_tokens": 5},
+                    },
+                    separators=(",", ":"),
+                ).encode()
+                self.send_response(200)
         else:
             payload = b'{"id":"resp_test","model":"test-model","output_text":"hello","usage":{"total_tokens":3}}'
             self.send_response(200)
@@ -245,6 +274,35 @@ class LlmRuntimeTests(unittest.TestCase):
         self.assertEqual(references, ["secret-manager://workspace/openai"])
         self.assertEqual(store.metadata(resolver_handle)["source"], "external_resolver")
         self.assertNotIn("resolver-secret", json.dumps(onboarding.status("openai")))
+
+    def test_adaptive_selection_rejects_revoked_handles_before_provider_invocation(self) -> None:
+        store = CredentialStore()
+        runtime = LLMRuntime(store)
+        runtime.register_provider(openai_provider(base_url=self.base_url, allow_insecure_http=True))
+        handle = store.register("openai", "revoked-secret")
+        store.revoke(handle)
+
+        selection = AutonomousBrain(object(), runtime).build_adaptive_model_selection(
+            task="verify readiness",
+            model_candidates=[
+                {
+                    "provider": "openai",
+                    "model": "test-model",
+                    "context_window_tokens": 16_000,
+                    "max_output_tokens": 2_048,
+                    "quality": 0.9,
+                    "latency_ms": 10,
+                    "cost_per_million_tokens": 1,
+                    "reliability": 0.9,
+                }
+            ],
+            credentials={"openai": handle},
+        )
+
+        self.assertFalse(selection["models"][0]["enabled"])  # type: ignore[index]
+        self.assertFalse(selection["provider_health"]["openai"]["credential_ready"])  # type: ignore[index]
+        self.assertFalse(selection["provider_health"]["openai"]["eligible"])  # type: ignore[index]
+        self.assertNotIn("revoked-secret", json.dumps(selection))
 
     def test_credential_session_groups_handles_and_revokes_on_expiry(self) -> None:
         store = CredentialStore()
@@ -1533,6 +1591,195 @@ class LlmRuntimeTests(unittest.TestCase):
         self.assertNotIn("openai-secret", json.dumps(result.to_dict()))
         self.assertNotIn("fallback-secret", json.dumps(result.to_dict()))
 
+    def test_adaptive_tool_loop_fails_over_only_before_tool_authorization(self) -> None:
+        class Workspace:
+            def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+                if name == "brain_model_select":
+                    assert arguments is not None
+                    selected = next(
+                        model for model in arguments["models"]  # type: ignore[index]
+                        if model.get("enabled", True)  # type: ignore[union-attr]
+                    )
+                    return {
+                        "selected_model": {
+                            "provider": selected["provider"],  # type: ignore[index]
+                            "model": selected["model"],  # type: ignore[index]
+                        },
+                        "decision_digest": "a" * 64,
+                    }
+                if name == "brain_prompt_assemble":
+                    return {"messages": [{"role": "user", "content": "inspect"}], "prompt_digest": "b" * 64}
+                if name == "brain_plan":
+                    return {
+                        "ok": True,
+                        "plan": {
+                            "requires_approval": True,
+                            "steps": [{"effect": "provider_call"}],
+                            "plan_digest": "c" * 64,
+                        },
+                    }
+                raise AssertionError(f"unexpected tool {name}")
+
+        store = CredentialStore()
+        runtime = LLMRuntime(store)
+        runtime.register_provider(
+            openai_provider(base_url=self.base_url, path="/failure", allow_insecure_http=True)
+        )
+        runtime.register_provider(
+            ProviderConfig(
+                provider="fallback",
+                base_url=self.base_url,
+                path="/continue",
+                allow_insecure_http=True,
+            )
+        )
+        primary_handle = store.register("openai", "primary-loop-secret")
+        fallback_handle = store.register("fallback", "fallback-loop-secret")
+        calls: list[str] = []
+        tool = ProviderTool("developer_platform_status", parameters={"type": "object"})
+        result = AutonomousBrain(Workspace(), runtime).run_adaptive_tool_loop(
+            task="inspect",
+            model_candidates=[
+                {
+                    "provider": "openai",
+                    "model": "test-model",
+                    "context_window_tokens": 16_000,
+                    "max_output_tokens": 2_048,
+                    "quality": 0.99,
+                    "latency_ms": 10,
+                    "cost_per_million_tokens": 1,
+                    "reliability": 0.99,
+                },
+                {
+                    "provider": "fallback",
+                    "model": "test-model",
+                    "context_window_tokens": 16_000,
+                    "max_output_tokens": 2_048,
+                    "quality": 0.8,
+                    "latency_ms": 20,
+                    "cost_per_million_tokens": 2,
+                    "reliability": 0.9,
+                },
+            ],
+            prompt={"max_input_tokens": 100},
+            plan={"allowed_tools": ["provider.invoke"], "max_cost": 10},
+            credentials={"openai": primary_handle, "fallback": fallback_handle},
+            tool_loop_options={
+                "provider_tools": (tool,),
+                "authorize_and_execute": lambda tool_calls: tuple(
+                    calls.append(call.call_id) or ProviderToolResult(
+                        call.call_id, {"status": "authorized"}, approved=True
+                    )
+                    for call in tool_calls
+                ),
+                "approve_provider_call": True,
+                "max_turns": 3,
+            },
+            max_provider_failovers=1,
+        )
+        self.assertEqual(result.status, "completed_provider_tool_loop")
+        self.assertEqual(result.brain_run.response.provider, "fallback")  # type: ignore[union-attr]
+        self.assertEqual(result.brain_run.provider_failover["fallback_count"], 1)  # type: ignore[index]
+        self.assertEqual(result.brain_run.provider_failover["attempts"][0]["status"], "provider_refused")  # type: ignore[index]
+        self.assertEqual(calls, ["call-loop-1"])
+        self.assertNotIn("primary-loop-secret", json.dumps(result.to_dict()))
+        self.assertNotIn("fallback-loop-secret", json.dumps(result.to_dict()))
+
+    def test_adaptive_tool_loop_never_retries_after_tool_authorization_started(self) -> None:
+        class Workspace:
+            def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+                if name == "brain_model_select":
+                    assert arguments is not None
+                    selected = next(
+                        model for model in arguments["models"]  # type: ignore[index]
+                        if model.get("enabled", True)  # type: ignore[union-attr]
+                    )
+                    return {
+                        "selected_model": {
+                            "provider": selected["provider"],  # type: ignore[index]
+                            "model": selected["model"],  # type: ignore[index]
+                        },
+                        "decision_digest": "a" * 64,
+                    }
+                if name == "brain_prompt_assemble":
+                    return {"messages": [{"role": "user", "content": "inspect"}], "prompt_digest": "b" * 64}
+                if name == "brain_plan":
+                    return {
+                        "ok": True,
+                        "plan": {
+                            "requires_approval": True,
+                            "steps": [{"effect": "provider_call"}],
+                            "plan_digest": "c" * 64,
+                        },
+                    }
+                raise AssertionError(f"unexpected tool {name}")
+
+        self.server.request_paths = []  # type: ignore[attr-defined]
+        store = CredentialStore()
+        runtime = LLMRuntime(store)
+        runtime.register_provider(
+            openai_provider(
+                base_url=self.base_url,
+                path="/continue_fail_after_result",
+                allow_insecure_http=True,
+            )
+        )
+        runtime.register_provider(
+            ProviderConfig(
+                provider="fallback",
+                base_url=self.base_url,
+                path="/continue",
+                allow_insecure_http=True,
+            )
+        )
+        primary_handle = store.register("openai", "primary-side-effect-secret")
+        fallback_handle = store.register("fallback", "fallback-side-effect-secret")
+        callback_calls: list[str] = []
+        tool = ProviderTool("developer_platform_status", parameters={"type": "object"})
+        with self.assertRaises(ProviderError):
+            AutonomousBrain(Workspace(), runtime).run_adaptive_tool_loop(
+                task="inspect",
+                model_candidates=[
+                    {
+                        "provider": "openai",
+                        "model": "test-model",
+                        "context_window_tokens": 16_000,
+                        "max_output_tokens": 2_048,
+                        "quality": 0.99,
+                        "latency_ms": 10,
+                        "cost_per_million_tokens": 1,
+                        "reliability": 0.99,
+                    },
+                    {
+                        "provider": "fallback",
+                        "model": "test-model",
+                        "context_window_tokens": 16_000,
+                        "max_output_tokens": 2_048,
+                        "quality": 0.8,
+                        "latency_ms": 20,
+                        "cost_per_million_tokens": 2,
+                        "reliability": 0.9,
+                    },
+                ],
+                prompt={"max_input_tokens": 100},
+                plan={"allowed_tools": ["provider.invoke"], "max_cost": 10},
+                credentials={"openai": primary_handle, "fallback": fallback_handle},
+                tool_loop_options={
+                    "provider_tools": (tool,),
+                    "authorize_and_execute": lambda tool_calls: tuple(
+                        callback_calls.append(call.call_id) or ProviderToolResult(
+                            call.call_id, {"status": "authorized"}, approved=True
+                        )
+                        for call in tool_calls
+                    ),
+                    "approve_provider_call": True,
+                    "max_turns": 3,
+                },
+                max_provider_failovers=1,
+            )
+        self.assertEqual(callback_calls, ["call-loop-fail-after-result"])
+        self.assertNotIn("/continue", self.server.request_paths[1:])  # type: ignore[attr-defined]
+
     def test_adaptive_tool_loop_selects_before_continuing_with_caller_callback(self) -> None:
         class Workspace:
             def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
@@ -1888,12 +2135,20 @@ class LlmRuntimeTests(unittest.TestCase):
             evaluator_id="quality-gate",
             evaluator_version="1",
         )
-        report = adapter.evaluate_and_record(
-            brain,
-            result,
-            bandit_state={"schema": "bioprism-brain-bandit/0.1", "arms": []},
-            evidence={"quality": 0.8, "provider_text": "caller-owned evidence is not persisted"},
-        )
+        with TemporaryDirectory() as directory:
+            ledger = BrainLearningLedger(f"{directory}/learning.jsonl")
+            report = adapter.evaluate_and_record(
+                brain,
+                result,
+                bandit_state={"schema": "bioprism-brain-bandit/0.1", "arms": []},
+                evidence={"quality": 0.8, "provider_text": "caller-owned evidence is not persisted"},
+                ledger=ledger,
+            )
+            replays = ledger.replays(run_id="run-adapter", evaluator_id="quality-gate")
+            self.assertEqual(len(replays), 1)
+            self.assertEqual(replays[0]["schema"], "bioprism-brain-evaluator-replay/0.1")
+            self.assertEqual(replays[0]["result_kind"], "run")
+            self.assertNotIn("caller-owned evidence", json.dumps(ledger.records()))
         self.assertEqual(report["status"], "recorded_evaluator_reward")
         assert workspace.arguments is not None
         encoded = json.dumps(workspace.arguments)

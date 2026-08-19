@@ -19,6 +19,7 @@ import uuid
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from .llm_runtime import (
+    CredentialError,
     CredentialHandle,
     LLMRuntime,
     ProviderRequest,
@@ -89,6 +90,8 @@ MAX_ADAPTIVE_ROUTE_LABEL_BYTES = 256
 MAX_BRAIN_EVALUATOR_ID_BYTES = 128
 MAX_BRAIN_EVALUATOR_EVIDENCE_BYTES = 350_000
 MAX_BRAIN_EVALUATOR_INPUT_BYTES = 500_000
+MAX_BRAIN_REPLAY_BYTES = 16_000
+BRAIN_EVALUATOR_REPLAY_SCHEMA = "bioprism-brain-evaluator-replay/0.1"
 
 
 def _bounded_route_prompt_context(route: Mapping[str, Any]) -> dict[str, Any]:
@@ -250,6 +253,7 @@ class BrainLearningLedger:
         report: Mapping[str, Any],
         *,
         context_digest: str | None = None,
+        replay: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         if not isinstance(report, Mapping):
             raise BrainRunError("learning ledger report must be an object")
@@ -260,6 +264,22 @@ class BrainLearningLedger:
         if context_digest is not None and not _valid_digest(context_digest):
             raise BrainRunError("context_digest must be a lowercase SHA-256 digest")
         self._assert_safe(report)
+        if replay is not None:
+            if not isinstance(replay, Mapping):
+                raise BrainRunError("learning ledger replay must be an object")
+            self._assert_safe(replay)
+            try:
+                encoded_replay = json.dumps(
+                    dict(replay),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode("utf-8")
+            except (TypeError, ValueError) as error:
+                raise BrainRunError("learning ledger replay must be JSON-safe") from error
+            if len(encoded_replay) > MAX_BRAIN_REPLAY_BYTES:
+                raise BrainRunError("learning ledger replay exceeds the bounded size")
         try:
             encoded_report = json.dumps(
                 {"learning_evidence": evidence, "next_state": next_state},
@@ -278,6 +298,8 @@ class BrainLearningLedger:
         }
         if context_digest is not None:
             record["context_digest"] = context_digest
+        if replay is not None:
+            record["replay"] = dict(replay)
         line = json.dumps(
             {"schema": self._SCHEMA, "record": record},
             ensure_ascii=False,
@@ -303,6 +325,7 @@ class BrainLearningLedger:
                 "record_index": len(existing_records),
                 "record_digest": record_digest,
                 "evidence_digest": evidence.get("evidence_digest"),
+                "replay_digest": None if replay is None else _json_digest(dict(replay)),
             }
 
     def records(self) -> list[dict[str, Any]]:
@@ -322,6 +345,36 @@ class BrainLearningLedger:
             if isinstance(state, Mapping):
                 return dict(state)
         return None
+
+    def replays(
+        self,
+        *,
+        run_id: str | None = None,
+        evaluator_id: str | None = None,
+        limit: int = 128,
+    ) -> list[dict[str, Any]]:
+        """Return bounded evaluator replay metadata without loading provider/evidence content."""
+
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= self.max_records:
+            raise BrainRunError("replay limit must be within the ledger record bound")
+        for name, value in (("run_id", run_id), ("evaluator_id", evaluator_id)):
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                raise BrainRunError(f"{name} must be a non-empty string when supplied")
+        matches: list[dict[str, Any]] = []
+        for row in reversed(self.records()):
+            record = row.get("record")
+            replay = record.get("replay") if isinstance(record, Mapping) else None
+            if not isinstance(replay, Mapping):
+                continue
+            if run_id is not None and replay.get("run_id") != run_id:
+                continue
+            if evaluator_id is not None and replay.get("evaluator_id") != evaluator_id:
+                continue
+            matches.append(dict(replay))
+            if len(matches) >= limit:
+                break
+        matches.reverse()
+        return matches
 
     def _read_records_locked(self) -> list[dict[str, Any]]:
         if not self.path.exists():
@@ -1165,12 +1218,25 @@ class AutonomousBrain:
                 model["enabled"] = False
             elif requires_credential:
                 handle = credentials.get(provider)
-                if handle is None or not isinstance(handle, CredentialHandle) or handle.provider != provider:
+                credential_ready = (
+                    isinstance(handle, CredentialHandle)
+                    and handle.provider == provider
+                )
+                if credential_ready:
+                    try:
+                        # Resolve only metadata here. This verifies that the handle belongs to
+                        # this runtime and has not expired or been revoked without exposing the
+                        # underlying value to the selector or Rust kernel.
+                        self.runtime.credentials.metadata(handle)  # type: ignore[arg-type]
+                    except CredentialError:
+                        credential_ready = False
+                health["credential_ready"] = credential_ready
+                if not credential_ready:
                     model["enabled"] = False
             health = provider_health[provider]
             if health["circuit"] == "open":
                 model["enabled"] = False
-            health["eligible"] = bool(model["enabled"])
+            health["eligible"] = bool(model["enabled"]) and bool(health["credential_ready"])
             normalized_models.append(model)
 
         global_state = None if ledger is None else ledger.latest_state()
@@ -1396,8 +1462,10 @@ class AutonomousBrain:
                     return result
                 failover_attempts.append(
                     {
+                        "attempt": attempt,
                         "provider": provider,
                         "model": model,
+                        "arm_id": selected_id,
                         "status": "completed",
                     }
                 )
@@ -1414,8 +1482,10 @@ class AutonomousBrain:
                 failed_ids.add(selected_id)
                 failover_attempts.append(
                     {
+                        "attempt": attempt,
                         "provider": provider,
                         "model": model,
+                        "arm_id": selected_id,
                         "status": "provider_refused",
                         "reason": "circuit_open" if error.circuit_open else "provider_error",
                         "status_code": error.status_code,
@@ -1444,6 +1514,7 @@ class AutonomousBrain:
         min_quality: float | None = None,
         selection_overrides: Mapping[str, Any] | None = None,
         tool_loop_options: Mapping[str, Any] | None = None,
+        max_provider_failovers: int = 2,
     ) -> BrainToolLoopResult:
         """Select adaptively, then enter the bounded route-aware native tool loop.
 
@@ -1453,6 +1524,12 @@ class AutonomousBrain:
         the task, credentials, context, or learned selection assembled by this method.
         """
 
+        if (
+            not isinstance(max_provider_failovers, int)
+            or isinstance(max_provider_failovers, bool)
+            or not 0 <= max_provider_failovers <= 8
+        ):
+            raise BrainRunError("max_provider_failovers must be within [0, 8]")
         if not isinstance(tool_loop_options, (Mapping, type(None))):
             raise BrainRunError("tool_loop_options must be a mapping or None")
         options = {} if tool_loop_options is None else dict(tool_loop_options)
@@ -1513,16 +1590,89 @@ class AutonomousBrain:
             if effective_context is not None
             else contextual_observations
         )
-        return self.run_tool_loop(
-            task=task,
-            model_selection=selection,
-            prompt=prompt,
-            plan=plan,
-            credentials=credentials,
-            context=effective_context,
-            contextual_observations=effective_contextual_observations,
-            **options,
-        )
+        attempt_selection = dict(selection)
+        failed_ids: set[str] = set()
+        failover_attempts: list[dict[str, Any]] = []
+        for attempt in range(max_provider_failovers + 1):
+            if attempt:
+                attempt_selection["models"] = [
+                    {
+                        **dict(candidate),
+                        "enabled": False
+                        if f"{candidate.get('provider')}/{candidate.get('model')}" in failed_ids
+                        else candidate.get("enabled", True),
+                    }
+                    for candidate in selection.get("models", [])
+                    if isinstance(candidate, Mapping)
+                ]
+            preview = self._preview_adaptive_selection(
+                task=task,
+                selection=attempt_selection,
+                context=effective_context,
+            )
+            selected = preview.get("selected_model")
+            if not isinstance(selected, Mapping):
+                raise BrainRunError("adaptive tool-loop selection has no eligible provider after failover")
+            provider = selected.get("provider")
+            model = selected.get("model")
+            if not isinstance(provider, str) or not isinstance(model, str):
+                raise BrainRunError("adaptive tool-loop selection returned malformed provider metadata")
+            selected_id = f"{provider}/{model}"
+            attempt_state: dict[str, Any] = {}
+            attempt_options = dict(options)
+            attempt_options["attempt_state"] = attempt_state
+            try:
+                result = self.run_tool_loop(
+                    task=task,
+                    model_selection=attempt_selection,
+                    prompt=prompt,
+                    plan=plan,
+                    credentials=credentials,
+                    context=effective_context,
+                    contextual_observations=effective_contextual_observations,
+                    **attempt_options,
+                )
+                if not failover_attempts:
+                    return result
+                failover_attempts.append(
+                    {
+                        "attempt": attempt,
+                        "provider": provider,
+                        "model": model,
+                        "arm_id": selected_id,
+                        "status": "completed",
+                    }
+                )
+                return replace(
+                    result,
+                    brain_run=replace(
+                        result.brain_run,
+                        provider_failover={
+                            "strategy": "deterministic_tool_loop_selector_before_side_effects",
+                            "attempts": list(failover_attempts),
+                            "fallback_count": len(failover_attempts) - 1,
+                            "retention": "metadata_only",
+                        },
+                    ),
+                )
+            except ProviderError as error:
+                if attempt_state.get("tool_authorization_started"):
+                    raise
+                failed_ids.add(selected_id)
+                failover_attempts.append(
+                    {
+                        "attempt": attempt,
+                        "provider": provider,
+                        "model": model,
+                        "arm_id": selected_id,
+                        "status": "provider_refused",
+                        "reason": "circuit_open" if error.circuit_open else "provider_error",
+                        "status_code": error.status_code,
+                    }
+                )
+                if attempt >= max_provider_failovers:
+                    raise
+        raise BrainRunError("adaptive tool-loop provider failover exhausted")
 
     def run(
         self,
@@ -1681,6 +1831,7 @@ class AutonomousBrain:
         workflow_binding: Mapping[str, Any] | None = None,
         operations_gate_acceptance: Mapping[str, Any] | None = None,
         route_report: Mapping[str, Any] | None = None,
+        attempt_state: dict[str, Any] | None = None,
     ) -> BrainToolLoopResult:
         """Run the planned provider call and continue only through caller-approved tool results.
 
@@ -1693,6 +1844,10 @@ class AutonomousBrain:
 
         if authorize_and_execute is not None and not callable(authorize_and_execute):
             raise BrainRunError("authorize_and_execute must be callable")
+        if attempt_state is not None and not isinstance(attempt_state, dict):
+            raise BrainRunError("attempt_state must be a mutable mapping")
+        if attempt_state is not None:
+            attempt_state["tool_authorization_started"] = False
         if not isinstance(provider_tools, Sequence) or isinstance(provider_tools, (str, bytes)):
             raise BrainRunError("provider_tools must be a sequence")
         if any(not isinstance(tool, ProviderTool) for tool in provider_tools):
@@ -1820,6 +1975,19 @@ class AutonomousBrain:
             authorize_and_execute = authorizer
         else:
             authorizer = None
+        if attempt_state is not None:
+            original_authorizer = authorize_and_execute
+            if original_authorizer is None:
+                raise BrainRunError("tool authorization callback was not initialized")
+
+            def tracked_authorizer(
+                calls: tuple[ProviderToolCall, ...],
+            ) -> Sequence[ProviderToolResult]:
+                if calls:
+                    attempt_state["tool_authorization_started"] = True
+                return original_authorizer(calls)
+
+            authorize_and_execute = tracked_authorizer
         first = self.run(
             task=task,
             model_selection=model_selection,
@@ -1914,6 +2082,7 @@ class AutonomousBrain:
         failure_class: str | None = None,
         evidence_digest: str | None = None,
         ledger: BrainLearningLedger | None = None,
+        replay_metadata: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Submit one explicit evaluator judgment for a run, loop, or mission.
 
@@ -2009,6 +2178,7 @@ class AutonomousBrain:
             ledger.append(
                 report,
                 context_digest=context_digest if isinstance(context_digest, str) else None,
+                replay=replay_metadata,
             )
         return dict(report)
 
@@ -2614,6 +2784,9 @@ class BrainOutcomeEvaluator:
         evidence: Mapping[str, Any] | None = None,
     ) -> BrainEvaluatorDecision:
         evaluation_input = build_brain_evaluation_input(result, evidence=evidence)
+        return self._assess_input(evaluation_input)
+
+    def _assess_input(self, evaluation_input: Mapping[str, Any]) -> BrainEvaluatorDecision:
         try:
             raw_decision = self.evaluator(evaluation_input)
         except Exception as error:
@@ -2669,7 +2842,20 @@ class BrainOutcomeEvaluator:
     ) -> dict[str, Any]:
         if not isinstance(brain, AutonomousBrain):
             raise BrainRunError("brain must be an AutonomousBrain")
-        decision = self.assess(result, evidence=evidence)
+        evaluation_input = build_brain_evaluation_input(result, evidence=evidence)
+        decision = self._assess_input(evaluation_input)
+        replay = {
+            "schema": BRAIN_EVALUATOR_REPLAY_SCHEMA,
+            "result_kind": evaluation_input["result_kind"],
+            "run_id": evaluation_input["run_id"],
+            "outcome_digest": evaluation_input["outcome_digest"],
+            "evaluation_input_digest": _json_digest(evaluation_input),
+            "evidence_digest": evaluation_input.get("evidence_digest"),
+            "evaluator_id": decision.evaluator_id,
+            "evaluator_version": decision.evaluator_version,
+            "decision_digest": _json_digest(decision.to_dict()),
+            "retention": "metadata_and_digests_only",
+        }
         return brain.record_evaluator_outcome(
             result,
             bandit_state=bandit_state,
@@ -2683,4 +2869,5 @@ class BrainOutcomeEvaluator:
             failure_class=decision.failure_class,
             evidence_digest=decision.evidence_digest,
             ledger=ledger,
+            replay_metadata=replay,
         )

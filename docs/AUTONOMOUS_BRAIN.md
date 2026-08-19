@@ -88,6 +88,26 @@ identifier, source, expiry, and `secret_persistence: in_memory_only`; they do no
 serialization path. Provider failures do not return upstream response bodies because a proxy or
 upstream error can echo request headers.
 
+The application-level key intake process is therefore:
+
+1. Register the provider's non-secret transport configuration during service startup.
+2. Ask `onboarding.status(provider)` which action is required; a UI should show only that
+   redacted state.
+3. Collect the key over the application's protected input path, or resolve it from the deployment's
+   secret manager. The raw value goes directly into `configure_from_prompt`, `register_value`,
+   `configure_from_environment`, or `configure_from_resolver`; it never goes into an LLM prompt,
+   MCP argument, model catalogue, plan, learning ledger, or browser-visible JSON response.
+4. Keep the returned handle server-side inside a short-lived `CredentialSession`, pass that handle
+   only to `LLMRuntime`/`AutonomousBrain`, and expose `session.status()` or `onboarding.status()`
+   to the UI as the readiness view.
+5. Revoke the session after the request/job, or let its TTL expire. After a process restart, resolve
+   the external reference again instead of attempting to serialize or restore the handle.
+
+This means the SDK deliberately does not create a universal key-upload HTTP endpoint: the embedding
+application owns authentication, TLS, CSRF protection, tenancy, rate limits, and secret-manager
+permissions. The SDK owns the sensitive part after intake—non-echo collection helpers, bounded
+in-memory lifetime, opaque handles, provider matching, expiry/revocation, and redacted readiness.
+
 The core brain and MCP tools never accept `api_key`, `secret`, `Authorization`, or an environment
 variable value. They accept model metadata and opaque outcome references only. Do not put a handle
 or a key into a plan's arbitrary `arguments` object; pass the handle to `LLMRuntime.invoke` at the
@@ -120,6 +140,13 @@ The `bioprism-brain` crate exposes seven value-only operations through MCP:
 - `brain_outcome_record` binds a completed run, selected arm, and explicit evaluator assessment to
   the next bandit state. It emits a tamper-evident, value-only learning evidence record and never
   accepts provider response text, API keys, or credentials.
+
+`provider_health` is a value-only map generated from the live runtime. For each registered provider
+it carries circuit state, consecutive failure count, and whether the caller supplied a live
+credential handle. The Rust selector treats an open circuit, missing/revoked/expired credential,
+unregistered provider, or caller-ineligible provider as a hard gate and keeps the refusal reason in
+the candidate ranking. Health is not a credential transport and cannot be used to smuggle a key into
+the kernel.
 
 The state is caller-owned so a restart, replay, or audit can identify the exact model observations,
 prompt digest, plan digest, response metadata, and reward that produced a decision. The current
@@ -156,9 +183,10 @@ result = brain.run_adaptive(
 ```
 
 The facade disables candidates whose provider transport is not registered or whose required
-caller credential handle is absent, so the selector returns an explainable no-eligible-model
-refusal instead of failing after selection. `run_adaptive_tool_loop(...)` uses the same selection
-and learning path before entering the route-aware authorization bridge; its
+caller credential handle is absent, expired, revoked, or owned by another runtime, so the selector
+returns an explainable no-eligible-model refusal instead of failing after selection.
+`run_adaptive_tool_loop(...)` uses the same selection and learning path before entering the
+route-aware authorization bridge; its
 `tool_loop_options` can carry `mission_policy`, `route_request`, `provider_tools`, and explicit
 dispatch approval. The model catalogue remains caller-supplied because model availability,
 pricing, and quality priors are deployment-specific; provider keys never belong in that catalogue.
@@ -227,6 +255,14 @@ loop = brain.run_tool_loop(
     ],
 )
 ```
+
+`run_adaptive_tool_loop(...)` may fail over between model candidates only while no tool
+authorization has started. A provider refusal before authorization records metadata-only attempt
+evidence, disables that provider/model for the next deterministic selection, and can continue with
+the next eligible candidate. Once the authorization callback has been entered, any later provider
+failure is surfaced without replaying the task against another provider. This is the important
+side-effect boundary: a retry must never cause a second model to request or execute the same
+caller-visible action.
 
 The callback is application-owned: it should apply the same mission policy, schema validation,
 approval, budgets, and audit/evaluator rules as `agent_mission`. For the standard path,
@@ -361,6 +397,15 @@ rejected. The Rust kernel remains the final validator for the configured reward 
 advances the caller-owned bandit state only after the explicit assessment is accepted. This
 keeps domain-specific grading pluggable while preserving one replayable learning contract across
 all catalogued domains.
+
+`evaluate_and_record(...)` also writes a bounded replay envelope to the append-only ledger. The
+envelope contains the result kind, run identity, evaluation-input/outcome/evidence digests, and
+evaluator version—not the prompt, provider output, tool arguments, raw evidence, credential, or
+secret-manager reference. `ledger.replays(run_id=..., evaluator_id=...)` returns those bounded
+metadata records for audit, offline evaluator comparison, and subsequent contextual/bandit updates.
+Replay metadata is rejected if it contains secret-shaped fields or exceeds the ledger's hard
+16-KiB bound, so online learning has a durable join key without turning the learning store into a
+transcript archive.
 
 The caller may feed `ledger.latest_state()` into the next `brain_bandit_select` request after
 reviewing the evaluator provenance. The ledger is append-only, bounded, fsynced per record, and

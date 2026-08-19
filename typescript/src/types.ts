@@ -105,6 +105,15 @@ export interface BrainModelObservation extends JsonObject {
   disabled?: boolean;
 }
 
+/** Runtime provider posture; this contains readiness metadata, never credential material. */
+export interface BrainProviderHealth extends JsonObject {
+  registered?: boolean;
+  circuit?: "closed" | "half_open" | "open" | "unconfigured";
+  consecutive_failures?: number;
+  credential_ready?: boolean;
+  eligible?: boolean;
+}
+
 export interface BrainModelSelectionArgs extends JsonObject {
   task: string;
   required_capabilities?: string[];
@@ -116,6 +125,7 @@ export interface BrainModelSelectionArgs extends JsonObject {
   models: BrainModelDescriptor[];
   observations?: BrainModelObservation[];
   weights?: JsonObject;
+  provider_health?: Record<string, BrainProviderHealth>;
 }
 
 export interface BrainModelCandidateScore extends JsonObject {

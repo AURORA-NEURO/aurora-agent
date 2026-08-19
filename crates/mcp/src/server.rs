@@ -35725,7 +35725,8 @@ pub fn tool_definitions() -> Vec<Value> {
                     "min_quality": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
                     "models": { "type": "array", "minItems": 1, "maxItems": 256 },
                     "observations": { "type": "array", "maxItems": 256 },
-                    "weights": { "type": "object" }
+                    "weights": { "type": "object" },
+                    "provider_health": { "type": "object", "description": "Provider readiness and circuit metadata only; credentials and provider responses are never accepted." }
                 },
                 "required": ["task", "input_tokens", "requested_output_tokens", "models"]
             }
