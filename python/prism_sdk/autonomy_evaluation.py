@@ -18,6 +18,7 @@ from .brain import BrainLearningLedger
 from .domain_tools import (
     AutonomousDomainToolReceipt,
     DOMAIN_TOOL_EXECUTION_STATUSES,
+    MAX_DOMAIN_TOOL_CALLS,
 )
 from .errors import ArgumentError
 from .autonomy_persistence import (
@@ -29,6 +30,7 @@ from .autonomy_persistence import (
 AUTONOMOUS_TOOL_EVALUATION_SCHEMA = "bioprism-python-autonomous-tool-evaluation/0.1"
 AUTONOMOUS_TOOL_REPLAY_CASE_SCHEMA = "bioprism-python-autonomous-tool-replay-case/0.1"
 AUTONOMOUS_TOOL_REPLAY_REPORT_SCHEMA = "bioprism-python-autonomous-tool-replay-report/0.1"
+AUTONOMOUS_TOOL_LEARNING_SCHEMA = "bioprism-python-autonomous-tool-learning/0.1"
 MAX_TOOL_EVALUATION_EVIDENCE_BYTES = 256_000
 MAX_TOOL_REPLAY_CASES = 4_096
 MAX_TOOL_REPLAY_EVIDENCE_BYTES = 256_000
@@ -384,6 +386,144 @@ class AutonomousToolOutcomeEvaluator:
             "retention": "metadata_only",
         }
 
+    def evaluate_receipts(
+        self,
+        receipts: Sequence[AutonomousDomainToolReceipt],
+        *,
+        evidence: Mapping[str, Mapping[str, Any]] | None = None,
+        controller: AutonomousExecutionController | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        bandit_updater: Callable[[Mapping[str, Any], Mapping[str, Any], Mapping[str, Any]], Mapping[str, Any]] | None = None,
+        ledger: BrainLearningLedger | None = None,
+    ) -> "AutonomousToolLearningReport":
+        """Evaluate a bounded live receipt batch and advance caller-owned online state.
+
+        Transport status is intentionally not a reward. The caller supplies optional, safe
+        per-call evidence (keyed by ``call_id``), and this method sends only the receipt
+        projection plus that evidence to the independent evaluator. Evaluations are applied in
+        receipt order, so a bandit updater sees a deterministic stream and the returned state is
+        immediately usable by the next autonomous run.
+        """
+
+        if (
+            not isinstance(receipts, Sequence)
+            or isinstance(receipts, (str, bytes))
+            or len(receipts) > MAX_DOMAIN_TOOL_CALLS
+        ):
+            raise ArgumentError(f"tool receipt batches must contain at most {MAX_DOMAIN_TOOL_CALLS} entries")
+        if any(not isinstance(receipt, AutonomousDomainToolReceipt) for receipt in receipts):
+            raise ArgumentError("tool receipt batches must contain AutonomousDomainToolReceipt values")
+        call_ids = [receipt.call_id for receipt in receipts]
+        if len(set(call_ids)) != len(call_ids):
+            raise ArgumentError("tool receipt batches cannot contain duplicate call_id values")
+        if evidence is not None and not isinstance(evidence, Mapping):
+            raise ArgumentError("tool receipt evidence must be a mapping or None")
+        evidence_by_call = {} if evidence is None else dict(evidence)
+        if any(not isinstance(call_id, str) for call_id in evidence_by_call):
+            raise ArgumentError("tool receipt evidence keys must be call_id strings")
+        unknown_evidence = sorted(set(evidence_by_call).difference(call_ids))
+        if unknown_evidence:
+            raise ArgumentError("tool receipt evidence contains an unknown call_id")
+        for call_id, packet in evidence_by_call.items():
+            if not isinstance(call_id, str) or not isinstance(packet, Mapping):
+                raise ArgumentError("tool receipt evidence must map call_id strings to mappings")
+            _safe_json(f"tool receipt evidence for {call_id}", dict(packet), maximum=MAX_TOOL_EVALUATION_EVIDENCE_BYTES)
+        if bandit_state is not None and not isinstance(bandit_state, Mapping):
+            raise ArgumentError("bandit_state must be a mapping or None")
+        state: Mapping[str, Any] = {} if bandit_state is None else _safe_json(
+            "bandit_state", dict(bandit_state), maximum=MAX_TOOL_EVALUATION_EVIDENCE_BYTES
+        )
+        evaluations: list[Mapping[str, Any]] = []
+        by_domain: dict[str, int] = {}
+        by_status: dict[str, int] = {}
+        for receipt in receipts:
+            outcome = AutonomousToolOutcomeEvidence.from_receipt(
+                receipt,
+                evidence=evidence_by_call.get(receipt.call_id),
+            )
+            report = self.evaluate_and_record(
+                outcome,
+                controller=controller,
+                bandit_state=state,
+                bandit_updater=bandit_updater,
+                ledger=ledger,
+            )
+            decision = report["decision"]
+            evaluations.append(
+                {
+                    "execution_id": outcome.execution_id,
+                    "domain": outcome.domain,
+                    "capability": outcome.capability,
+                    "risk_class": outcome.risk_class,
+                    "call_id": outcome.call_id,
+                    "tool": outcome.tool,
+                    "status": outcome.status,
+                    "evidence_digest": outcome.evidence_digest,
+                    "decision_digest": decision.get("decision_digest"),
+                    "evaluator_id": decision.get("evaluator_id"),
+                    "evaluator_version": decision.get("evaluator_version"),
+                    "reward": decision.get("reward"),
+                    "passed": decision.get("passed"),
+                    "failed": decision.get("failed"),
+                    "failure_class": decision.get("failure_class"),
+                    "recording": report.get("recording"),
+                }
+            )
+            next_state = report.get("next_state")
+            if not isinstance(next_state, Mapping):
+                raise ArgumentError("tool evaluator returned a malformed next bandit state")
+            state = dict(next_state)
+            by_domain[outcome.domain] = by_domain.get(outcome.domain, 0) + 1
+            by_status[outcome.status] = by_status.get(outcome.status, 0) + 1
+        return AutonomousToolLearningReport(
+            status="completed" if receipts else "no_receipts",
+            receipts=len(receipts),
+            evaluations=tuple(evaluations),
+            by_domain=dict(sorted(by_domain.items())),
+            by_status=dict(sorted(by_status.items())),
+            next_bandit_state=dict(state),
+            learning_digest=content_digest(evaluations),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousToolLearningReport:
+    """Metadata-only result of live domain-tool evaluator and bandit settlement."""
+
+    status: str
+    receipts: int
+    evaluations: tuple[Mapping[str, Any], ...]
+    by_domain: Mapping[str, int]
+    by_status: Mapping[str, int]
+    next_bandit_state: Mapping[str, Any]
+    learning_digest: str
+
+    def __post_init__(self) -> None:
+        if self.status not in {"completed", "no_receipts"}:
+            raise ArgumentError("tool learning report status is invalid")
+        if not isinstance(self.receipts, int) or isinstance(self.receipts, bool) or self.receipts < 0:
+            raise ArgumentError("tool learning report receipts must be a non-negative integer")
+        if self.receipts != len(self.evaluations):
+            raise ArgumentError("tool learning report receipt count does not match evaluations")
+        if self.status == "no_receipts" and self.receipts != 0:
+            raise ArgumentError("empty tool learning reports must have no receipts")
+        _digest("tool learning digest", self.learning_digest)
+        _safe_json("tool learning report evaluations", [dict(item) for item in self.evaluations], maximum=MAX_TOOL_EVALUATION_EVIDENCE_BYTES)
+        _safe_json("tool learning report bandit state", dict(self.next_bandit_state), maximum=MAX_TOOL_EVALUATION_EVIDENCE_BYTES)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_TOOL_LEARNING_SCHEMA,
+            "status": self.status,
+            "receipts": self.receipts,
+            "evaluations": [dict(item) for item in self.evaluations],
+            "by_domain": dict(self.by_domain),
+            "by_status": dict(self.by_status),
+            "next_bandit_state": dict(self.next_bandit_state),
+            "learning_digest": self.learning_digest,
+            "retention": "metadata_and_digests_only",
+        }
+
 
 @dataclass(frozen=True, slots=True)
 class AutonomousToolReplayCase:
@@ -514,11 +654,13 @@ class AutonomousToolReplayEngine:
 
 __all__ = [
     "AUTONOMOUS_TOOL_EVALUATION_SCHEMA",
+    "AUTONOMOUS_TOOL_LEARNING_SCHEMA",
     "AUTONOMOUS_TOOL_REPLAY_CASE_SCHEMA",
     "AUTONOMOUS_TOOL_REPLAY_REPORT_SCHEMA",
     "AutonomousToolOutcomeEvidence",
     "AutonomousToolEvaluation",
     "AutonomousToolOutcomeEvaluator",
+    "AutonomousToolLearningReport",
     "AutonomousToolReplayCase",
     "AutonomousToolReplayEngine",
     "AutonomousToolReplayReport",

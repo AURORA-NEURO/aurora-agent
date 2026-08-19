@@ -20,6 +20,7 @@ from prism_sdk import (
     AutonomousPlanHoldoutCase,
     AutonomousPlanHoldoutEvaluator,
     AutonomousPlanRefinementResult,
+    AutonomousToolOutcomeEvaluator,
     AutonomousCrossDomainPlanRefinementResult,
     AutonomousCrossDomainCheckpoint,
     AutonomousCrossDomainResult,
@@ -604,6 +605,20 @@ def test_autonomous_agent_composes_domain_tools_into_native_tool_loop():
         assert agent.tool_receipts()[0]["status"] == "executed"
         assert "workspace" not in json.dumps(agent.tool_receipts())
         assert "agent-domain-tool-secret" not in json.dumps(result.to_dict())
+        call_id = agent.tool_receipts()[0]["call_id"]
+        learning = agent.evaluate_tool_receipts(
+            evaluator=AutonomousToolOutcomeEvaluator(
+                lambda value: {"reward": 0.75 if value["status"] == "executed" else -0.5, "passed": value["status"] == "executed"},
+                evaluator_id="operations-tool-quality",
+                evaluator_version="v1",
+            ),
+            evidence={call_id: {"quality_gate": "passed"}},
+            bandit_state={"generation": 0},
+            bandit_updater=lambda state, _decision, _outcome: {**state, "generation": state["generation"] + 1},
+        )
+        assert learning.status == "completed"
+        assert learning.next_bandit_state["generation"] == 1
+        assert learning.by_domain == {"operations": 1}
     finally:
         server.shutdown()
         thread.join(timeout=2)

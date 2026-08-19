@@ -7,6 +7,7 @@ import pytest
 
 from prism_sdk import (
     AUTONOMOUS_DOMAINS,
+    AutonomousDomainToolReceipt,
     AutonomousExecutionController,
     AutonomousExecutionJournal,
     AutonomousExecutionPolicy,
@@ -15,7 +16,6 @@ from prism_sdk import (
     AutonomousToolReplayCase,
     AutonomousToolReplayEngine,
     BrainLearningLedger,
-    AutonomyPersistenceError,
 )
 from prism_sdk.errors import ArgumentError
 
@@ -69,6 +69,62 @@ def test_tool_evaluator_records_value_only_learning_and_journal_state(tmp_path) 
     assert "quality_gate" not in text
     assert '"arguments":' not in text.lower()
     assert journal.state("evaluation-run").last_evaluation_digest is not None
+
+
+def test_live_receipt_batch_evaluation_advances_bandit_without_transport_reward_inference(tmp_path) -> None:
+    receipts = [
+        AutonomousDomainToolReceipt(
+            call_id="call-operations-1",
+            tool="operations_observe",
+            status="executed",
+            schema_digest="a" * 64,
+            arguments_digest="b" * 64,
+            output_digest="c" * 64,
+            execution_id="live-run",
+            domain="operations",
+            capability="observation",
+            risk_class="read_only",
+        ),
+        AutonomousDomainToolReceipt(
+            call_id="call-operations-2",
+            tool="operations_observe",
+            status="execution_failed",
+            schema_digest="a" * 64,
+            arguments_digest="d" * 64,
+            execution_id="live-run",
+            domain="operations",
+            capability="observation",
+            risk_class="read_only",
+        ),
+    ]
+    evaluator = AutonomousToolOutcomeEvaluator(
+        lambda value: {
+            "reward": 1.0 if value["evidence"].get("quality_gate") == "passed" else -1.0,
+            "passed": value["evidence"].get("quality_gate") == "passed",
+        },
+        evaluator_id="live-tool-quality",
+        evaluator_version="v1",
+    )
+    ledger = BrainLearningLedger(tmp_path / "live-tool-learning.jsonl")
+    report = evaluator.evaluate_receipts(
+        receipts,
+        evidence={
+            "call-operations-1": {"quality_gate": "passed"},
+            "call-operations-2": {"quality_gate": "failed"},
+        },
+        bandit_state={"generation": 0},
+        bandit_updater=lambda state, _decision, _outcome: {**state, "generation": state["generation"] + 1},
+        ledger=ledger,
+    )
+    assert report.status == "completed"
+    assert report.receipts == 2
+    assert report.by_domain == {"operations": 2}
+    assert report.by_status == {"executed": 1, "execution_failed": 1}
+    assert report.next_bandit_state["generation"] == 2
+    assert len(report.evaluations) == 2
+    assert report.learning_digest
+    assert "quality_gate" not in json.dumps(ledger.records())
+    assert "arguments" not in json.dumps(report.to_dict()).lower()
 
 
 def test_replay_covers_every_autonomous_domain_and_reports_disagreement() -> None:

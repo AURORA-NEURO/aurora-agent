@@ -743,6 +743,26 @@ invoking a provider or tool, report evaluator disagreement, and return only deci
 domain counts, and the next bandit state. This gives model/tool routing an auditable online
 learning loop while keeping reward authority outside the model and outside the action executor.
 
+After a native tool loop, the façade can settle a selected live receipt batch in deterministic
+order. This does not infer reward from `status="executed"`; the caller supplies independent,
+safe evidence and receives the updated state for the next run:
+
+```python
+learning = agent.evaluate_tool_receipts(
+    evaluator=tool_quality_evaluator,
+    evidence={call_id: {"quality_gate": "passed"}},
+    bandit_state=caller_owned_bandit_state,
+    bandit_updater=update_tool_arm,
+)
+caller_owned_bandit_state = learning.next_bandit_state
+```
+
+The returned `AutonomousToolLearningReport` includes per-domain/status counts, evaluator and
+decision digests, optional ledger recording metadata, and a batch digest. It never includes tool
+arguments, output bodies, provider messages, credentials, or raw evaluator evidence. Receipts
+from non-durable runs still carry an ephemeral execution id and the selected domain, so online
+credit cannot silently fall into `cross_domain`; durable runs retain their journal-backed scope.
+
 The OpenAI adapter targets the Responses API (`POST /v1/responses`) and Bearer authentication, as
 described in the [OpenAI API reference](https://platform.openai.com/docs/api-reference/introduction)
 and [quickstart](https://platform.openai.com/docs/quickstart/make-your-first-api-request). The

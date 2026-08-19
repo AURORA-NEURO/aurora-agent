@@ -26,9 +26,10 @@ from dataclasses import dataclass, field
 import json
 import math
 import uuid
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from .authoring import content_digest
+from .errors import ArgumentError
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,
@@ -42,6 +43,7 @@ from .brain import (
 )
 from .domain_tools import (
     AutonomousDomainTool,
+    AutonomousDomainToolReceipt,
     AutonomousDomainToolRegistry,
     AutonomousDomainToolRuntime,
 )
@@ -52,6 +54,10 @@ from .autonomy_persistence import (
     AutonomyPersistenceError,
 )
 from .evaluators import DomainEvaluatorRegistry, builtin_autonomous_domain_evaluator_profiles
+from .autonomy_evaluation import (
+    AutonomousToolLearningReport,
+    AutonomousToolOutcomeEvaluator,
+)
 from .llm_runtime import (
     CredentialHandle,
     CredentialSession,
@@ -7730,6 +7736,42 @@ class AutonomousAgent:
             return []
         return [receipt.to_dict() for receipt in self.tool_runtime.receipts]
 
+    def evaluate_tool_receipts(
+        self,
+        *,
+        evaluator: AutonomousToolOutcomeEvaluator,
+        receipts: Sequence[AutonomousDomainToolReceipt] | None = None,
+        evidence: Mapping[str, Mapping[str, Any]] | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        bandit_updater: Callable[[Mapping[str, Any], Mapping[str, Any], Mapping[str, Any]], Mapping[str, Any]] | None = None,
+        ledger: BrainLearningLedger | None = None,
+    ) -> AutonomousToolLearningReport:
+        """Score selected live tool receipts and return the next online-learning state.
+
+        This is intentionally explicit: an executed tool call is transport evidence, not a
+        quality reward.  The caller supplies an independent evaluator and optional safe evidence
+        keyed by receipt ``call_id``.  The evaluator sees only domain/capability/risk metadata,
+        digests, status, and that bounded evidence; it never receives tool arguments or outputs.
+        """
+
+        if self.tool_runtime is None:
+            raise BrainRunError("evaluate_tool_receipts requires a configured domain tool runtime")
+        if not isinstance(evaluator, AutonomousToolOutcomeEvaluator):
+            raise BrainRunError("evaluator must be an AutonomousToolOutcomeEvaluator")
+        selected = self.tool_runtime.receipts if receipts is None else tuple(receipts)
+        if any(not isinstance(receipt, AutonomousDomainToolReceipt) for receipt in selected):
+            raise BrainRunError("receipts must contain AutonomousDomainToolReceipt values")
+        try:
+            return evaluator.evaluate_receipts(
+                selected,
+                evidence=evidence,
+                bandit_state=bandit_state,
+                bandit_updater=bandit_updater,
+                ledger=self.ledger if ledger is None else ledger,
+            )
+        except (ArgumentError, ValueError) as error:
+            raise BrainRunError("domain tool receipt evaluation failed") from error
+
     def readiness(self) -> dict[str, Any]:
         """Project provider/model readiness without exposing credentials or prompt material."""
 
@@ -8143,6 +8185,16 @@ class AutonomousAgent:
                     )
             except AutonomyPersistenceError as error:
                 raise BrainRunError("autonomous execution persistence could not start") from error
+        if self.tool_runtime is not None and session_runtime is None and self.tool_runtime.controller is None:
+            # Even a non-durable run needs a domain identity on its tool receipts.  Without this
+            # ephemeral scope, the later evaluator would have to guess ``cross_domain`` and could
+            # credit the wrong domain arm.  No journal or checkpoint is created here.
+            selected_domain = next((value for value in tool_domains if value in AUTONOMOUS_DOMAINS), "cross_domain")
+            resolved_execution_id = execution_id or resolved_options.get("run_id") or f"execution-{uuid.uuid4().hex}"
+            session_runtime = self.tool_runtime.scoped(
+                execution_id=resolved_execution_id,
+                domain=selected_domain,
+            )
         if execution_controller is not None:
             # This is an internal capability, never a caller/model option.  The orchestrator
             # forwards it only to adaptive provider boundaries so every provider turn shares the

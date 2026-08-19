@@ -401,6 +401,7 @@ class AutonomousDomainToolRuntime:
         auto_execute_read_only: bool = True,
         controller: AutonomousExecutionController | None = None,
         _receipt_store: list[AutonomousDomainToolReceipt] | None = None,
+        _scope: tuple[str, str] | None = None,
     ) -> None:
         if not isinstance(registry, AutonomousDomainToolRegistry):
             raise ArgumentError("domain tool runtime requires an AutonomousDomainToolRegistry")
@@ -414,12 +415,41 @@ class AutonomousDomainToolRuntime:
             raise ArgumentError("domain tool runtime controller must be an AutonomousExecutionController or None")
         if _receipt_store is not None and not isinstance(_receipt_store, list):
             raise ArgumentError("domain tool runtime receipt store must be a list or None")
+        if _scope is not None:
+            if (
+                not isinstance(_scope, tuple)
+                or len(_scope) != 2
+                or not all(isinstance(value, str) for value in _scope)
+            ):
+                raise ArgumentError("domain tool runtime scope must contain execution_id and domain")
+            _text("domain tool runtime scope execution_id", _scope[0], maximum=256)
+            _identifier("domain tool runtime scope domain", _scope[1])
+        if controller is not None and _scope is not None:
+            raise ArgumentError("domain tool runtime cannot combine a controller and an ephemeral scope")
         self.registry = registry
         self.executor = executor
         self.approve = approve
         self.auto_execute_read_only = auto_execute_read_only
         self.controller = controller
         self._receipts = _receipt_store if _receipt_store is not None else []
+        self._scope = _scope
+
+    def scoped(self, *, execution_id: str, domain: str) -> "AutonomousDomainToolRuntime":
+        """Create a non-persistent run scope that still binds receipt identity to a domain."""
+
+        if self.controller is not None:
+            raise ArgumentError("a controller-backed tool runtime cannot create an ephemeral scope")
+        return AutonomousDomainToolRuntime(
+            self.registry,
+            executor=self.executor,
+            approve=self.approve,
+            auto_execute_read_only=self.auto_execute_read_only,
+            _receipt_store=self._receipts,
+            _scope=(
+                _text("domain tool scope execution_id", execution_id, maximum=256),
+                _identifier("domain tool scope domain", domain),
+            ),
+        )
 
     def session(
         self,
@@ -474,6 +504,15 @@ class AutonomousDomainToolRuntime:
             raise ArgumentError("domain tool runtime received an invalid call batch")
         if any(not isinstance(call, ProviderToolCall) for call in calls):
             raise ArgumentError("domain tool runtime received malformed provider calls")
+
+        scoped_execution_id = None if self._scope is None else self._scope[0]
+        scoped_domain = None if self._scope is None else self._scope[1]
+        execution_id = (
+            self.controller.state.execution_id
+            if self.controller is not None
+            else scoped_execution_id
+        )
+        domain = self.controller.state.domain if self.controller is not None else scoped_domain
         if len({call.call_id for call in calls}) != len(calls):
             return tuple(
                 self._result(
@@ -481,7 +520,13 @@ class AutonomousDomainToolRuntime:
                     status="schema_refused",
                     content={"status": "refused", "reason": "duplicate_call_ids", "authorization": "approval_required"},
                     approved=False,
-                    receipt=AutonomousDomainToolReceipt(call.call_id, call.name, "schema_refused"),
+                    receipt=AutonomousDomainToolReceipt(
+                        call.call_id,
+                        call.name,
+                        "schema_refused",
+                        execution_id=execution_id,
+                        domain=domain,
+                    ),
                 )
                 for call in calls
             )
@@ -504,6 +549,8 @@ class AutonomousDomainToolRuntime:
                             call.name,
                             "schema_refused",
                             arguments_digest=arguments_digest,
+                            execution_id=execution_id,
+                            domain=domain,
                         ),
                     )
                 )
@@ -527,8 +574,8 @@ class AutonomousDomainToolRuntime:
                                 "policy_refused",
                                 schema_digest=plan.schema_digest,
                                 arguments_digest=arguments_digest,
-                                execution_id=self.controller.state.execution_id,
-                                domain=self.controller.state.domain,
+                                execution_id=execution_id,
+                                domain=domain,
                                 capability=tool.capability,
                                 risk_class=tool.risk_class,
                             ),
@@ -552,8 +599,8 @@ class AutonomousDomainToolRuntime:
                             "approval_required",
                             schema_digest=plan.schema_digest,
                             arguments_digest=arguments_digest,
-                            execution_id=None if self.controller is None else self.controller.state.execution_id,
-                            domain=None if self.controller is None else self.controller.state.domain,
+                            execution_id=execution_id,
+                            domain=domain,
                             capability=tool.capability,
                             risk_class=tool.risk_class,
                         ),
@@ -599,8 +646,8 @@ class AutonomousDomainToolRuntime:
                                 "approval_required",
                                 schema_digest=tool.schema_digest,
                                 arguments_digest=content_digest(dict(call.arguments)),
-                                execution_id=None if self.controller is None else self.controller.state.execution_id,
-                                domain=None if self.controller is None else self.controller.state.domain,
+                                execution_id=execution_id,
+                                domain=domain,
                                 capability=tool.capability,
                                 risk_class=tool.risk_class,
                             ),
@@ -635,8 +682,8 @@ class AutonomousDomainToolRuntime:
                             schema_digest=tool.schema_digest,
                             arguments_digest=arguments_digest,
                             output_digest=content_digest(output if isinstance(output, Mapping) else {"result": output}),
-                            execution_id=None if self.controller is None else self.controller.state.execution_id,
-                            domain=None if self.controller is None else self.controller.state.domain,
+                            execution_id=execution_id,
+                            domain=domain,
                             capability=tool.capability,
                             risk_class=tool.risk_class,
                         ),
@@ -662,8 +709,8 @@ class AutonomousDomainToolRuntime:
                             "execution_failed",
                             schema_digest=tool.schema_digest,
                             arguments_digest=arguments_digest,
-                            execution_id=None if self.controller is None else self.controller.state.execution_id,
-                            domain=None if self.controller is None else self.controller.state.domain,
+                            execution_id=execution_id,
+                            domain=domain,
                             capability=tool.capability,
                             risk_class=tool.risk_class,
                         ),
