@@ -1116,7 +1116,9 @@ loop = brain.run_autonomous(
 
 The route is evidence and schema discovery, not permission. With a callback-authorized loop, the
 facade uses the route to derive provider tool schemas but does not require a mission-policy
-intersection; the callback remains the only effect authority. If `learn=True` is added with a
+intersection; when `enforce_route_tools=True`, it also narrows an already-registered provider tool
+surface to the route's recommended tools in deterministic route order. The callback remains the
+only effect authority. If `learn=True` is added with a
 bandit state, tool-loop results enter the same evaluator, metadata-only episodic memory, explicit
 `brain_outcome_record`, and bounded replan path as ordinary provider responses. Replanning can
 change the prompt proposal only; it cannot add tools, credentials, permissions, or effects.
@@ -1908,8 +1910,9 @@ result = brain.run_mission(
 )
 ```
 
-`enforce_route_tools=True` intersects the caller's explicit allow-list with the route's recommended
-tools; it never widens that list. Unresolved route needs fail closed by default, and the returned
+`enforce_route_tools=True` narrows the provider-visible tool schemas to the route's recommended
+tools and intersects the caller's explicit allow-list with those tools; it never widens either
+surface. Unresolved route needs fail closed by default, and the returned
 `BrainMissionResult.route` preserves the route identity for review. The model response must still
 contain JSON with a bounded `mission.steps` array, after which the proposal is sent to
 `agent_mission` with `execute=false`. The caller owns the mission policy and allow-list; the model

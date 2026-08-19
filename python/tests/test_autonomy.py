@@ -43,6 +43,7 @@ from prism_sdk import (
     ModelCatalogue,
     ProviderHealthLedger,
     ProviderError,
+    ProviderTool,
     ProviderToolResult,
     builtin_autonomous_domain_evaluator_profiles,
     openai_provider,
@@ -1518,6 +1519,51 @@ def test_run_autonomous_tool_loop_executes_only_through_caller_callback():
         assert completed.provider_loop.final_response.text == "continued bounded answer"
         assert any(name == "capability_route" for name, _ in workspace.calls)
         assert "tool-loop-secret" not in json.dumps(completed.to_dict())
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_route_enforcement_narrows_provider_tool_surface_without_mission_policy():
+    runtime, store, server, thread = _runtime()
+    workspace = _Workspace()
+    handle = store.register("openai", "route-surface-secret")
+    brain = AutonomousBrain(workspace, runtime)
+    callback_calls: list[str] = []
+
+    def authorize(calls: tuple[object, ...]) -> tuple[ProviderToolResult, ...]:
+        callback_calls.extend(getattr(call, "name", "") for call in calls)
+        return tuple(
+            ProviderToolResult(
+                call_id=getattr(call, "call_id"),
+                content={"status": "ready"},
+                approved=True,
+            )
+            for call in calls
+        )
+
+    try:
+        result = brain.run_tool_loop(
+            task="inspect the workspace status",
+            model_selection={"models": [{"provider": "openai", "model": "test-model"}]},
+            prompt={"max_input_tokens": 1_000, "context": []},
+            plan={"allowed_tools": ["provider.invoke"], "max_cost": 10},
+            credentials={"openai": handle},
+            provider_tools=(
+                ProviderTool("developer_platform_status"),
+                ProviderTool("release_apply"),
+            ),
+            authorize_and_execute=authorize,
+            route_request={"needs": [{"id": "workspace-status", "query": "workspace status"}]},
+            enforce_route_tools=True,
+            approve_provider_call=True,
+            max_turns=3,
+        )
+        assert result.status == "completed_provider_tool_loop"
+        assert callback_calls == ["developer_platform_status"]
+        request = json.loads(server.request_body.decode("utf-8"))  # type: ignore[attr-defined]
+        assert [tool["name"] for tool in request["tools"]] == ["developer_platform_status"]
     finally:
         server.shutdown()
         thread.join(timeout=2)

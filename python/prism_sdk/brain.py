@@ -177,6 +177,29 @@ def _bounded_route_prompt_context(route: Mapping[str, Any]) -> dict[str, Any]:
     return packet
 
 
+def _route_provider_tool_surface(
+    provider_tools: Sequence[ProviderTool],
+    recommended_tools: Sequence[str],
+) -> tuple[ProviderTool, ...]:
+    """Narrow provider-visible schemas to the live route recommendation.
+
+    Routing is still not authorization: this only controls what the provider sees in the next
+    turn. The caller-owned callback, mission policy, or domain runtime remains the only execution
+    authority. Route order is preserved so deterministic ranking remains visible to the model.
+    """
+
+    if not isinstance(provider_tools, Sequence) or isinstance(provider_tools, (str, bytes)):
+        raise BrainRunError("provider tool surface must be a sequence")
+    if not isinstance(recommended_tools, Sequence) or isinstance(recommended_tools, (str, bytes)):
+        raise BrainRunError("route recommended_tools must be a sequence")
+    recommended = tuple(tool for tool in recommended_tools if isinstance(tool, str) and tool.strip())
+    by_name = {tool.name: tool for tool in provider_tools}
+    narrowed = tuple(by_name[name] for name in recommended if name in by_name)
+    if provider_tools and not narrowed:
+        raise BrainRunError("route has no overlap with the caller provider tool surface")
+    return narrowed
+
+
 def _adaptive_route_context(
     route: Mapping[str, Any],
     *,
@@ -4595,22 +4618,26 @@ class AutonomousBrain:
                     ProviderTool.from_mcp_schema(schema) for schema in route_context["tool_schemas"]
                 )
             if enforce_route_tools:
-                if mission_policy is None:
-                    raise BrainRunError("enforce_route_tools requires mission_policy")
-                policy_for_route = (
-                    mission_policy.to_dict() if isinstance(mission_policy, MissionPolicy) else dict(mission_policy)
-                )
-                allowed_tools = policy_for_route.get("allowed_tools")
                 recommended_tools = route.get("recommended_tools")
-                if not isinstance(allowed_tools, Sequence) or isinstance(allowed_tools, (str, bytes)):
-                    raise BrainRunError("enforce_route_tools requires an explicit mission policy allowed_tools list")
                 if not isinstance(recommended_tools, list) or any(not isinstance(tool, str) for tool in recommended_tools):
                     raise BrainRunError("capability route returned malformed recommended_tools")
-                narrowed = [tool for tool in allowed_tools if tool in set(recommended_tools)]
-                if not narrowed:
-                    raise BrainRunError("route has no overlap with the caller mission policy allowed_tools")
-                policy_for_route["allowed_tools"] = narrowed
-                mission_policy = policy_for_route
+                provider_tools = _route_provider_tool_surface(provider_tools, recommended_tools)
+                if mission_policy is not None:
+                    policy_for_route = (
+                        mission_policy.to_dict()
+                        if isinstance(mission_policy, MissionPolicy)
+                        else dict(mission_policy)
+                    )
+                    allowed_tools = policy_for_route.get("allowed_tools")
+                    if not isinstance(allowed_tools, Sequence) or isinstance(allowed_tools, (str, bytes)):
+                        raise BrainRunError(
+                            "enforce_route_tools requires an explicit mission policy allowed_tools list"
+                        )
+                    narrowed = [tool for tool in allowed_tools if tool in set(recommended_tools)]
+                    if not narrowed:
+                        raise BrainRunError("route has no overlap with the caller mission policy allowed_tools")
+                    policy_for_route["allowed_tools"] = narrowed
+                    mission_policy = policy_for_route
         if authorize_and_execute is None:
             if mission_policy is None:
                 raise BrainRunError("provide authorize_and_execute or mission_policy for the built-in mission authorizer")
@@ -5252,6 +5279,7 @@ class AutonomousBrain:
                     not isinstance(tool, str) for tool in recommended_tools
                 ):
                     raise BrainRunError("capability route returned malformed recommended_tools")
+                provider_tools = _route_provider_tool_surface(provider_tools, recommended_tools)
                 recommended_set = set(recommended_tools)
                 allowed_tools = policy.get("allowed_tools")
                 if not isinstance(allowed_tools, Sequence) or isinstance(allowed_tools, (str, bytes)):
