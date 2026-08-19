@@ -4,12 +4,15 @@ import pytest
 
 from prism_sdk import (
     AUTONOMOUS_DOMAINS,
+    DOMAIN_TOOL_BINDING_PLAN_SCHEMA,
     AutonomousDomainTool,
     AutonomousDomainToolBinding,
     AutonomousDomainToolRegistry,
     AutonomousDomainToolRuntime,
     ProviderToolCall,
     ToolCatalogue,
+    builtin_autonomous_domain_tool_profiles,
+    plan_mcp_catalogue_bindings,
 )
 from prism_sdk.errors import ArgumentError
 
@@ -202,3 +205,64 @@ def test_registry_rejects_binding_for_a_tool_not_in_the_live_catalogue() -> None
             },
             require_all=False,
         )
+
+
+def test_binding_planner_covers_every_domain_without_mutating_or_authorizing() -> None:
+    catalogue = ToolCatalogue.from_definitions(
+        [
+            {
+                "name": "repository_catalog",
+                "description": "Read a bounded repository catalogue.",
+                "inputSchema": {"type": "object"},
+            },
+            {
+                "name": "tabular_ingest",
+                "description": "Ingest a bounded tabular source.",
+                "inputSchema": {"type": "object"},
+            },
+            {
+                "name": "mystery_workspace_tool",
+                "description": "Not present in any reviewed profile.",
+                "inputSchema": {"type": "object"},
+            },
+        ]
+    )
+    registry = AutonomousDomainToolRegistry()
+
+    plan = registry.plan_mcp_catalogue_bindings(catalogue)
+
+    assert plan["schema"] == DOMAIN_TOOL_BINDING_PLAN_SCHEMA
+    assert plan["catalogue_digest"] == catalogue.digest
+    assert plan["domains"] == list(AUTONOMOUS_DOMAINS)
+    assert set(plan["coverage"]) == set(AUTONOMOUS_DOMAINS)
+    assert len(builtin_autonomous_domain_tool_profiles()) == len(AUTONOMOUS_DOMAINS)
+    assert "repository_catalog" in plan["proposed_bindings"]
+    assert plan["proposed_bindings"]["repository_catalog"]["read_only"] is True
+    assert plan["proposed_bindings"]["repository_catalog"]["domains"] == ["browser", "coding"]
+    assert "tabular_ingest" in plan["review_required_bindings"]
+    assert plan["review_required_bindings"]["tabular_ingest"]["approval_required"] is True
+    assert "tabular_ingest" not in plan["proposed_bindings"]
+    assert plan["unclassified_tools"] == ["mystery_workspace_tool"]
+    assert plan["execution"] == "planning_only; no_registry_mutation; no_tool_execution"
+    assert registry.catalogue() == []
+
+
+def test_binding_planner_can_scope_domains_and_reports_missing_exact_capabilities() -> None:
+    plan = plan_mcp_catalogue_bindings(
+        ToolCatalogue.from_definitions(
+            [
+                {
+                    "name": "world_validate",
+                    "inputSchema": {"type": "object"},
+                }
+            ]
+        ),
+        domains=("data", "evaluation"),
+    )
+
+    assert plan["domains"] == ["data", "evaluation"]
+    assert set(plan["coverage"]) == {"data", "evaluation"}
+    assert plan["coverage"]["data"]["available_tools"] == ["world_validate"]
+    assert plan["coverage"]["evaluation"]["available_tools"] == []
+    assert "token_context_plan" in plan["coverage"]["data"]["missing_tools"]
+    assert plan["coverage"]["data"]["coverage_ratio"] > 0

@@ -1701,6 +1701,39 @@ application intentionally wants a partial allow-list. Unknown binding names and 
 conflicts still fail closed. The resulting registry is provider-visible metadata; it does not
 authorize a call, grant credentials, or bypass the read-only/effect approval boundary.
 
+For an application that does not want to hand-author a 29-tool (or larger) mapping, the façade
+also provides a reviewable onboarding plan. `plan_workspace_tool_bindings()` intersects the
+current live catalogue with exact curated rows across all twelve built-in domains. It reports
+per-domain coverage, missing capabilities, unclassified live tools, schema digests, and known
+effectful rows. It never uses keyword matching, never assumes an unknown tool is safe, and never
+mutates the registry:
+
+```python
+binding_plan = agent.plan_workspace_tool_bindings()
+
+print(binding_plan["coverage"]["coding"])
+print(binding_plan["unclassified_tools"])
+print(binding_plan["review_required_bindings"])
+```
+
+Only read-only exact-profile rows appear in `proposed_bindings`. A human or application policy
+layer chooses the names to accept, and the façade re-fetches/revalidates the catalogue digest,
+profile digest, live schema digest, and curated posture before applying them:
+
+```python
+agent.register_workspace_bindings_from_plan(
+    binding_plan,
+    approved_tools=["repository_catalog", "developer_platform_status"],
+)
+```
+
+This approval handoff is intentionally narrow: a changed live schema, edited plan row, stale
+curated profile, unknown tool, or effectful row is rejected. Effectful rows such as ingestion,
+mission dispatch, hub locking, and adaptive acquisition execution remain in
+`review_required_bindings`; they require an explicit application binding plus the normal
+runtime/mission approval callback. Applying a safe plan row only composes provider-visible
+metadata—it does not execute a tool, grant the provider a credential, or authorize an effect.
+
 The registry is metadata and schema composition; it does not grant authority. A provider-generated
 tool call is still an intent. `AutonomousDomainToolRuntime` validates the call against the exact
 registered schema, rejects credential-shaped fields, applies the read-only/effect approval policy,

@@ -374,6 +374,69 @@ def test_agent_bootstraps_a_live_workspace_catalogue_with_explicit_bindings():
         server.server_close()
 
 
+def test_agent_revalidates_a_binding_plan_before_explicit_application():
+    runtime, _store, server, thread = _runtime()
+
+    class CatalogueWorkspace(_Workspace):
+        definitions = [
+            {
+                "name": "repository_catalog",
+                "description": "Read bounded repository metadata.",
+                "inputSchema": {"type": "object"},
+            },
+            {
+                "name": "tabular_ingest",
+                "description": "Ingest a bounded table.",
+                "inputSchema": {"type": "object"},
+            },
+        ]
+
+        def tool_catalogue(self) -> list[dict[str, object]]:
+            return self.definitions
+
+    workspace = CatalogueWorkspace()
+    agent = AutonomousAgent(
+        workspace,
+        runtime,
+        model_catalogue=ModelCatalogue(_model()),
+    )
+    try:
+        plan = agent.plan_workspace_tool_bindings()
+        assert agent.tool_registry is None
+        assert plan["proposed_bindings"]["repository_catalog"]["read_only"] is True
+        assert "tabular_ingest" in plan["review_required_bindings"]
+
+        registered = agent.register_workspace_bindings_from_plan(
+            plan,
+            approved_tools=["repository_catalog"],
+        )
+        assert [tool["name"] for tool in registered] == ["repository_catalog"]
+        assert agent.tools() == registered
+
+        tampered_plan = dict(plan)
+        tampered_bindings = dict(plan["proposed_bindings"])
+        tampered_row = dict(tampered_bindings["repository_catalog"])
+        tampered_row["domains"] = ["enterprise"]
+        tampered_bindings["repository_catalog"] = tampered_row
+        tampered_plan["proposed_bindings"] = tampered_bindings
+        with pytest.raises(BrainRunError, match="does not match curated policy"):
+            agent.register_workspace_bindings_from_plan(
+                tampered_plan,
+                approved_tools=["repository_catalog"],
+            )
+
+        workspace.definitions[0]["description"] = "The live schema changed after planning."
+        with pytest.raises(BrainRunError, match="stale"):
+            agent.register_workspace_bindings_from_plan(
+                plan,
+                approved_tools=["repository_catalog"],
+            )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
 def _runtime() -> tuple[LLMRuntime, CredentialStore, HTTPServer, threading.Thread]:
     server = HTTPServer(("127.0.0.1", 0), _ProviderHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)

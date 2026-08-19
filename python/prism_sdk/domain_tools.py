@@ -37,6 +37,22 @@ from .tooling import ToolCatalogue, ToolDefinition, ToolSchemaError
 DOMAIN_TOOL_SCHEMA = "bioprism-python-autonomous-domain-tool/0.1"
 DOMAIN_TOOL_REGISTRY_SCHEMA = "bioprism-python-autonomous-domain-tool-registry/0.1"
 DOMAIN_TOOL_BINDING_SCHEMA = "bioprism-python-autonomous-domain-tool-binding/0.1"
+DOMAIN_TOOL_BINDING_PLAN_SCHEMA = "bioprism-python-autonomous-domain-tool-binding-plan/0.1"
+DOMAIN_TOOL_PROFILE_SCHEMA = "bioprism-python-autonomous-domain-tool-profile/0.1"
+AUTONOMOUS_DOMAIN_NAMES = (
+    "coding",
+    "browser",
+    "data",
+    "science",
+    "biomedical",
+    "neuroscience",
+    "operations",
+    "enterprise",
+    "multi_agent",
+    "multimodal",
+    "cross_domain",
+    "evaluation",
+)
 DOMAIN_TOOL_RISK_CLASSES = (
     "read_only",
     "reversible_effect",
@@ -56,6 +72,7 @@ MAX_DOMAIN_TOOL_DOMAINS = 32
 MAX_DOMAIN_TOOL_DESCRIPTION_BYTES = 16_000
 MAX_DOMAIN_TOOL_RESULT_BYTES = 1_000_000
 MAX_DOMAIN_TOOL_CALLS = 128
+MAX_DOMAIN_TOOL_BINDING_PLAN_BYTES = 512_000
 _SAFE_IDENTIFIER_CHARS = frozenset(
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
 )
@@ -315,6 +332,503 @@ class AutonomousDomainToolBinding:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class AutonomousDomainToolProfile:
+    """Reviewed exact-name recommendations for one autonomous domain.
+
+    Profiles are intentionally metadata-only.  They do not claim that a live MCP tool is
+    present, and they never infer safety from a name or description.  The planner below
+    intersects these exact names with the live ``tools/list`` snapshot before it proposes
+    anything for explicit caller approval.
+    """
+
+    domain: str
+    description: str
+    bindings: tuple[AutonomousDomainToolBinding, ...]
+
+    def __post_init__(self) -> None:
+        domain = _identifier("domain tool profile domain", self.domain)
+        if domain not in AUTONOMOUS_DOMAIN_NAMES:
+            raise ArgumentError(f"unsupported domain tool profile domain: {domain!r}")
+        description = _text("domain tool profile description", self.description, maximum=2_000)
+        if not isinstance(self.bindings, Sequence) or isinstance(self.bindings, (str, bytes)):
+            raise ArgumentError("domain tool profile bindings must be a sequence")
+        if not self.bindings or len(self.bindings) > MAX_DOMAIN_TOOLS:
+            raise ArgumentError("domain tool profile must contain between 1 and the domain tool limit entries")
+        names: set[str] = set()
+        normalized: list[AutonomousDomainToolBinding] = []
+        for binding in self.bindings:
+            if not isinstance(binding, AutonomousDomainToolBinding):
+                raise ArgumentError("domain tool profile bindings must be AutonomousDomainToolBinding values")
+            if binding.name in names:
+                raise ArgumentError(f"domain tool profile contains a duplicate tool: {binding.name}")
+            if domain not in binding.domains:
+                raise ArgumentError(f"domain tool profile binding {binding.name!r} does not include its profile domain")
+            names.add(binding.name)
+            normalized.append(binding)
+        object.__setattr__(self, "domain", domain)
+        object.__setattr__(self, "description", description)
+        object.__setattr__(self, "bindings", tuple(normalized))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": DOMAIN_TOOL_PROFILE_SCHEMA,
+            "domain": self.domain,
+            "description": self.description,
+            "bindings": [binding.to_dict() for binding in self.bindings],
+            "execution": "metadata_only; no_live_catalogue_assumption",
+        }
+
+
+def _profile(
+    domain: str,
+    description: str,
+    specs: Sequence[tuple[Any, ...]],
+) -> AutonomousDomainToolProfile:
+    bindings: list[AutonomousDomainToolBinding] = []
+    for spec in specs:
+        if len(spec) == 2:
+            name, capability = spec
+            risk_class, read_only, approval_required = "read_only", True, False
+        elif len(spec) == 5:
+            name, capability, risk_class, read_only, approval_required = spec
+        else:
+            raise ArgumentError("domain tool profile specs must contain two or five values")
+        bindings.append(
+            AutonomousDomainToolBinding(
+                name=name,
+                domains=(domain,),
+                capability=capability,
+                risk_class=risk_class,
+                read_only=read_only,
+                approval_required=approval_required,
+            )
+        )
+    return AutonomousDomainToolProfile(domain, description, tuple(bindings))
+
+
+def builtin_autonomous_domain_tool_profiles() -> tuple[AutonomousDomainToolProfile, ...]:
+    """Return the reviewed exact-name tool recommendations for all built-in domains.
+
+    The profiles are rebuilt from immutable literals so callers cannot mutate shared policy.
+    A profile is a recommendation catalogue, not a permission list.  Effectful entries are
+    retained as review-only rows and are never emitted in ``proposed_bindings``.
+    """
+
+    def review(name: str, capability: str) -> tuple[Any, ...]:
+        return name, capability, "external_effect", False, True
+
+    def reversible(name: str, capability: str) -> tuple[Any, ...]:
+        return name, capability, "reversible_effect", False, True
+    return (
+        _profile(
+            "coding",
+            "Repository inspection, engineering planning, delivery evidence, and release readiness.",
+            (
+                ("repository_catalog", "repository_inspection"),
+                ("repository_bundle", "repository_inspection"),
+                ("repository_impact", "repository_impact_analysis"),
+                ("developer_platform_status", "platform_observability"),
+                ("engineering_manifest_audit", "engineering_contract_audit"),
+                ("engineering_execution_plan", "engineering_planning"),
+                ("release_pipeline_audit", "release_readiness"),
+                ("operational_readiness_audit", "operational_readiness"),
+                ("developer_workbench", "developer_workbench"),
+                ("developer_workbench_verify", "developer_workbench_verification"),
+                ("ci_provider_normalize", "ci_evidence_normalization"),
+                ("ci_provider_evidence_audit", "ci_evidence_audit"),
+                ("ci_execution_evidence_audit", "ci_execution_audit"),
+                ("execution_provenance_audit", "execution_provenance"),
+                ("developer_delivery_audit", "delivery_audit"),
+                ("developer_delivery_receipt", "delivery_receipt"),
+                ("developer_delivery_receipt_verify", "delivery_receipt_verification"),
+                ("release_audit", "release_audit"),
+                ("sdk_registry_check", "sdk_registry_audit"),
+                ("conformance_run", "conformance_verification"),
+                ("provider_capability_gate", "provider_capability_verification"),
+                ("stewardship_review_check", "stewardship_review"),
+                review("agent_mission", "mission_execution"),
+            ),
+        ),
+        _profile(
+            "browser",
+            "Capability discovery, route inspection, hub lookup, and evidence-source planning.",
+            (
+                ("workspace_capabilities", "workspace_capability_discovery"),
+                ("capability_discover", "capability_discovery"),
+                ("capability_route", "capability_routing"),
+                ("capability_route_review", "route_review"),
+                ("capability_route_plan", "route_planning"),
+                ("capability_route_plan_verify", "route_plan_verification"),
+                ("hub_search", "hub_discovery"),
+                ("hub_resolve", "hub_resolution"),
+                ("lens_catalogue", "lens_discovery"),
+                ("domain_acquisition_catalogue", "evidence_acquisition_discovery"),
+                ("repository_catalog", "repository_inspection"),
+                ("domain_evidence_source_plan", "evidence_source_planning"),
+                ("domain_evidence_coverage", "evidence_coverage"),
+            ),
+        ),
+        _profile(
+            "data",
+            "World validation, lineage, structured context compilation, and decision-gated data work.",
+            (
+                ("world_validate", "world_validation"),
+                ("adapter_plan", "data_adapter_planning"),
+                ("world_claim_check", "world_claim_validation"),
+                ("lineage_audit", "lineage_audit"),
+                ("token_context_plan", "context_budget_planning"),
+                ("fiber_compile", "context_compilation"),
+                ("fiber_refine", "context_refinement"),
+                ("fiber_explain", "context_explanation"),
+                ("fiber_verify", "context_verification"),
+                ("projection_bundle", "projection_bundling"),
+                ("obligation_gate_check", "obligation_gate"),
+                ("domain_evidence_coverage", "evidence_coverage"),
+                ("context_compare", "context_comparison"),
+                reversible("tabular_ingest", "tabular_ingestion"),
+            ),
+        ),
+        _profile(
+            "science",
+            "Literature binding, measurement comparison, inference bounds, laboratory planning, and reproduction.",
+            (
+                ("literature_bind_check", "literature_binding"),
+                ("measurement_compare", "measurement_comparison"),
+                ("contradiction_review", "contradiction_review"),
+                ("influence_analyze", "influence_analysis"),
+                ("lab_plan", "laboratory_planning"),
+                ("lab_space_audit", "laboratory_space_audit"),
+                ("lab_pareto_audit", "laboratory_pareto_audit"),
+                ("lab_branch_audit", "laboratory_branch_audit"),
+                ("lab_holdout_audit", "laboratory_holdout_audit"),
+                ("lab_evolution_audit", "laboratory_evolution_audit"),
+                ("routing_decide", "research_routing"),
+                ("routing_lab_run", "research_routing_replay"),
+                ("foundation_contract_check", "foundation_contract_validation"),
+                ("evaluation_reproduction_check", "reproduction_check"),
+                ("epistemic_voi", "value_of_information"),
+                ("epistemic_decision_quotient", "decision_quotient"),
+                ("epistemic_context_audit", "epistemic_context_audit"),
+                ("epistemic_selection_audit", "epistemic_selection_audit"),
+                review("epistemic_adaptive_execute", "adaptive_acquisition_execution"),
+            ),
+        ),
+        _profile(
+            "biomedical",
+            "Biomedical world, modality, safety, ethics, oncology, and evidence-quality boundaries.",
+            (
+                ("bioworlds_catalog", "biological_world_catalogue"),
+                ("world_validate", "world_validation"),
+                ("modality_catalog", "modality_catalogue"),
+                ("modality_support_check", "modality_support"),
+                ("modality_transport_check", "modality_transport"),
+                ("modality_comparability_check", "modality_comparability"),
+                ("literature_bind_check", "literature_binding"),
+                ("measurement_compare", "measurement_comparison"),
+                ("contradiction_review", "contradiction_review"),
+                ("bioql_compile", "biomedical_query_compilation"),
+                ("medical_boundary_check", "medical_boundary"),
+                ("bioethics_action_review", "bioethics_action_review"),
+                ("bioethics_human_subject_screen", "human_subject_screening"),
+                ("bioethics_dual_use_review", "dual_use_review"),
+                ("bioethics_validation_check", "bioethics_validation"),
+                ("bioethics_representation_audit", "representation_audit"),
+                ("bioeval_reference_audit", "biomedical_reference_audit"),
+                ("bioeval_grounding_audit", "biomedical_grounding_audit"),
+                ("bioeval_estimand_audit", "biomedical_estimand_audit"),
+                ("onco_boundary_check", "oncology_boundary"),
+                ("onco_response_assess", "oncology_response_assessment"),
+                ("onco_worldline_view", "oncology_worldline"),
+                ("onco_classification_check", "oncology_classification"),
+                ("onco_outcome_analyze", "oncology_outcome_analysis"),
+                reversible("world_generate", "biological_world_generation"),
+            ),
+        ),
+        _profile(
+            "neuroscience",
+            "Neuroimaging modality compatibility, traces, influence bounds, and holdout evaluation.",
+            (
+                ("modality_catalog", "modality_catalogue"),
+                ("modality_support_check", "modality_support"),
+                ("modality_transport_check", "modality_transport"),
+                ("modality_comparability_check", "modality_comparability"),
+                ("measurement_compare", "measurement_comparison"),
+                ("trace_analyze", "trajectory_trace_analysis"),
+                ("benchmark_trace_analyze", "benchmark_trace_analysis"),
+                ("influence_analyze", "influence_analysis"),
+                ("lab_holdout_audit", "laboratory_holdout_audit"),
+                ("evaluation_trajectory_check", "trajectory_evaluation"),
+                ("epistemic_voi", "value_of_information"),
+            ),
+        ),
+        _profile(
+            "operations",
+            "Operational catalogue, capacity, quality gates, registry posture, release, and runtime evidence.",
+            (
+                ("operations_catalog", "operations_catalogue"),
+                ("ops_acceptance", "operations_acceptance"),
+                ("ops_capacity", "capacity_assessment"),
+                ("quality_gate_run", "quality_gate"),
+                ("telemetry_project", "telemetry_projection"),
+                ("registry_gate", "registry_gate"),
+                ("registry_lifecycle_simulate", "registry_lifecycle_simulation"),
+                ("cache_invalidation_simulate", "cache_invalidation_simulation"),
+                ("storage_lifecycle_simulate", "storage_lifecycle_simulation"),
+                ("release_audit", "release_audit"),
+                ("artifact_registry_audit", "artifact_registry_audit"),
+                ("runtime_effect_check", "runtime_effect_check"),
+                ("runtime_tape_verify", "runtime_tape_verification"),
+                ("operational_readiness_audit", "operational_readiness"),
+                ("factory_lifecycle_simulate", "factory_lifecycle_simulation"),
+                ("factory_authority_verify", "factory_authority_verification"),
+                reversible("ledger_ingest", "ledger_ingestion"),
+            ),
+        ),
+        _profile(
+            "enterprise",
+            "Governance, security, safety, provider controls, stewardship, and public-hub review.",
+            (
+                ("policy_screen", "policy_screening"),
+                ("safety_posture", "safety_posture"),
+                ("security_redteam_simulate", "security_redteam_simulation"),
+                ("safety_release_gate", "safety_release_gate"),
+                ("medical_boundary_check", "medical_boundary"),
+                ("bioethics_dual_use_review", "dual_use_review"),
+                ("governance_schema_check", "governance_schema"),
+                ("security_privacy_audit", "security_privacy_audit"),
+                ("sandbox_admission_audit", "sandbox_admission"),
+                ("sandbox_runtime_simulate", "sandbox_runtime_simulation"),
+                ("security_program_audit", "security_program_audit"),
+                ("provider_capability_gate", "provider_capability_verification"),
+                ("stewardship_review_check", "stewardship_review"),
+                ("release_audit", "release_audit"),
+                ("hub_submission_review", "hub_submission_review"),
+                ("hub_disclosure_review", "hub_disclosure_review"),
+                review("hub_lock", "hub_lock"),
+            ),
+        ),
+        _profile(
+            "multi_agent",
+            "Protocol, choreography, workflow, evaluator, and retained mission-evidence coordination.",
+            (
+                ("weave_protocol_catalog", "protocol_catalogue"),
+                ("weavelang_compile", "protocol_compilation"),
+                ("choreography_check", "choreography_validation"),
+                ("fabric_synthesize", "multi_agent_synthesis"),
+                ("interweave_workflow_catalogue", "workflow_catalogue"),
+                ("mission_evaluator_discover", "mission_evaluator_discovery"),
+                ("mission_evaluator_review", "mission_evaluator_review"),
+                ("mission_evaluator_replay", "mission_evaluator_replay"),
+                ("mission_evaluator_replay_compare", "mission_evaluator_replay_comparison"),
+                ("mission_evidence_bundle_verify", "mission_evidence_verification"),
+                ("mission_evidence_bundle_import", "mission_evidence_import"),
+                ("mission_evidence_bundle_query", "mission_evidence_query"),
+                ("mission_evidence_bundle_get", "mission_evidence_lookup"),
+                review("interweave_workflow_execute", "workflow_execution"),
+                review("agent_mission", "mission_execution"),
+            ),
+        ),
+        _profile(
+            "multimodal",
+            "Modality support, transport, comparability, measurement, projection, and presentation surfaces.",
+            (
+                ("modality_catalog", "modality_catalogue"),
+                ("modality_support_check", "modality_support"),
+                ("modality_transport_check", "modality_transport"),
+                ("modality_comparability_check", "modality_comparability"),
+                ("literature_bind_check", "literature_binding"),
+                ("measurement_compare", "measurement_comparison"),
+                ("projection_bundle", "projection_bundling"),
+                ("lens_catalogue", "lens_discovery"),
+                ("hub_card_render", "hub_card_rendering"),
+                ("context_compare", "context_comparison"),
+            ),
+        ),
+        _profile(
+            "cross_domain",
+            "Non-executing routing, workflow composition, evidence coverage, and control-plane readiness.",
+            (
+                ("workspace_capabilities", "workspace_capability_discovery"),
+                ("capability_discover", "capability_discovery"),
+                ("capability_route", "capability_routing"),
+                ("capability_route_review", "route_review"),
+                ("capability_route_plan", "route_planning"),
+                ("capability_route_plan_verify", "route_plan_verification"),
+                ("domain_workflow_catalogue", "workflow_catalogue"),
+                ("domain_workflow_scaffold", "workflow_scaffolding"),
+                ("domain_workflow_instantiate", "workflow_instantiation"),
+                ("domain_workflow_portfolio", "workflow_portfolio"),
+                ("domain_workflow_portfolio_verify", "workflow_portfolio_verification"),
+                ("domain_workflow_verify", "workflow_verification"),
+                ("domain_evidence_intake", "evidence_intake"),
+                ("domain_evidence_coverage", "evidence_coverage"),
+                ("domain_evidence_source_plan", "evidence_source_planning"),
+                ("control_plane_readiness_audit", "control_plane_readiness"),
+                ("provider_normalize", "provider_normalization"),
+                ("provider_replay", "provider_replay"),
+                review("domain_evidence_source_execute", "evidence_source_execution"),
+            ),
+        ),
+        _profile(
+            "evaluation",
+            "Benchmark, oracle, adaptive-panel, reproduction, integrity, and research-CI evaluation.",
+            (
+                ("context_compare", "context_comparison"),
+                ("prism_minimize", "evaluation_minimization"),
+                ("adaptive_panel", "adaptive_evaluation_panel"),
+                ("posterior_gate", "posterior_gate"),
+                ("evaluation_worldline_audit", "worldline_evaluation"),
+                ("evaluation_reproduction_check", "reproduction_check"),
+                ("evaluation_trajectory_check", "trajectory_evaluation"),
+                ("benchmark_trace_analyze", "benchmark_trace_analysis"),
+                ("benchmark_decision_audit", "benchmark_decision_audit"),
+                ("benchmark_integrity_audit", "benchmark_integrity_audit"),
+                ("benchmark_counterfactual_check", "benchmark_counterfactual"),
+                ("benchmark_oracle_review", "benchmark_oracle_review"),
+                ("benchmark_compile", "benchmark_compilation"),
+                ("benchmark_compile_review", "benchmark_compilation_review"),
+                ("oracle_combine", "oracle_combination"),
+                ("oracle_reference_panel", "oracle_reference_panel"),
+                ("oracle_missingness", "oracle_missingness"),
+                ("research_ci_check", "research_ci"),
+                ("metrics_profile_audit", "metrics_profile_audit"),
+                ("metrics_analytics_audit", "metrics_analytics_audit"),
+                ("bioeval_reference_audit", "biomedical_reference_audit"),
+                ("bioeval_grounding_audit", "biomedical_grounding_audit"),
+                review("epistemic_adaptive_execute", "adaptive_acquisition_execution"),
+            ),
+        ),
+    )
+
+
+def _profile_binding_index(
+    profiles: Sequence[AutonomousDomainToolProfile],
+) -> dict[str, AutonomousDomainToolBinding]:
+    """Merge shared exact-name profile rows while rejecting policy disagreement."""
+
+    merged: dict[str, AutonomousDomainToolBinding] = {}
+    for profile in profiles:
+        for binding in profile.bindings:
+            previous = merged.get(binding.name)
+            if previous is None:
+                merged[binding.name] = binding
+                continue
+            if (
+                previous.capability != binding.capability
+                or previous.risk_class != binding.risk_class
+                or previous.read_only != binding.read_only
+                or previous.approval_required != binding.approval_required
+            ):
+                raise ArgumentError(f"built-in domain tool profiles disagree about {binding.name!r}")
+            merged[binding.name] = AutonomousDomainToolBinding(
+                name=binding.name,
+                domains=tuple(sorted(set(previous.domains).union(binding.domains))),
+                capability=binding.capability,
+                risk_class=binding.risk_class,
+                read_only=binding.read_only,
+                approval_required=binding.approval_required,
+            )
+    return merged
+
+
+def plan_mcp_catalogue_bindings(
+    catalogue: ToolCatalogue | Sequence[Mapping[str, Any] | ToolDefinition],
+    *,
+    domains: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Create a deterministic, non-mutating binding plan from a live MCP catalogue.
+
+    Only exact names in the reviewed profiles can become proposals.  A live tool absent from
+    those profiles is reported as unclassified, while a known effectful row is reported for
+    review and excluded from the automatically applicable ``proposed_bindings`` mapping.
+    """
+
+    snapshot = catalogue if isinstance(catalogue, ToolCatalogue) else ToolCatalogue.from_definitions(catalogue)
+    selected_domains = tuple(AUTONOMOUS_DOMAIN_NAMES) if domains is None else _sequence(
+        "domain tool binding plan domains", domains, maximum=len(AUTONOMOUS_DOMAIN_NAMES)
+    )
+    unknown_domains = sorted(set(selected_domains).difference(AUTONOMOUS_DOMAIN_NAMES))
+    if unknown_domains:
+        raise ArgumentError("domain tool binding plan contains unknown domains: " + ", ".join(unknown_domains))
+    all_profiles = builtin_autonomous_domain_tool_profiles()
+    profile_map = {profile.domain: profile for profile in all_profiles}
+    selected_profiles = tuple(profile_map[domain] for domain in selected_domains)
+    index = _profile_binding_index(selected_profiles)
+    global_index = _profile_binding_index(all_profiles)
+    definitions = {definition.name: definition for definition in snapshot.definitions}
+
+    def binding_row(binding: AutonomousDomainToolBinding) -> dict[str, Any]:
+        row = binding.to_dict()
+        row["live_schema_digest"] = definitions[binding.name].schema_digest
+        row["catalogue_digest"] = snapshot.digest
+        return row
+
+    proposed = {
+        name: binding_row(binding)
+        for name, binding in sorted(index.items())
+        if name in definitions and binding.read_only
+    }
+    review_required = {
+        name: binding_row(binding)
+        for name, binding in sorted(index.items())
+        if name in definitions and not binding.read_only
+    }
+    live_names = set(definitions)
+    selected_names = set(index)
+    coverage: dict[str, dict[str, Any]] = {}
+    for profile in selected_profiles:
+        required = {binding.name: binding for binding in profile.bindings}
+        available_names = sorted(set(required).intersection(definitions))
+        proposed_names = sorted(set(available_names).intersection(proposed))
+        required_capabilities = sorted({binding.capability for binding in required.values()})
+        available_capabilities = sorted({required[name].capability for name in available_names})
+        proposed_capabilities = sorted({required[name].capability for name in proposed_names})
+        coverage[profile.domain] = {
+            "profile_schema": DOMAIN_TOOL_PROFILE_SCHEMA,
+            "required_tool_count": len(required),
+            "available_tool_count": len(available_names),
+            "proposed_tool_count": len(proposed_names),
+            "available_tools": available_names,
+            "proposed_tools": proposed_names,
+            "missing_tools": sorted(set(required).difference(available_names)),
+            "required_capabilities": required_capabilities,
+            "available_capabilities": available_capabilities,
+            "proposed_capabilities": proposed_capabilities,
+            "missing_capabilities": sorted(set(required_capabilities).difference(available_capabilities)),
+            "coverage_ratio": round(len(available_names) / len(required), 6) if required else 1.0,
+            "approved_coverage_ratio": round(len(proposed_names) / len(required), 6) if required else 1.0,
+        }
+
+    plan = {
+        "schema": DOMAIN_TOOL_BINDING_PLAN_SCHEMA,
+        "catalogue_digest": snapshot.digest,
+        "catalogue_tool_count": len(snapshot.definitions),
+        "profile_digest": content_digest([profile.to_dict() for profile in selected_profiles]),
+        "profile_catalogue_digest": content_digest([profile.to_dict() for profile in all_profiles]),
+        "domains": list(selected_domains),
+        "domain_count": len(selected_domains),
+        "available_curated_tools": sorted(live_names.intersection(selected_names)),
+        "missing_curated_tools": sorted(selected_names.difference(live_names)),
+        "unclassified_tools": sorted(live_names.difference(set(global_index))),
+        "review_required_tools": sorted(review_required),
+        "proposed_bindings": proposed,
+        "review_required_bindings": review_required,
+        "coverage": coverage,
+        "review_required": True,
+        "authorization": "metadata_only; planning_does_not_register_or_authorize_tools",
+        "execution": "planning_only; no_registry_mutation; no_tool_execution",
+        "policy": {
+            "matching": "exact_curated_tool_name_only",
+            "schemas": "live_catalogue_is_authoritative",
+            "unknown_tools": "never_inferred_as_safe",
+            "effectful_tools": "manual_review_and_separate_approval_required",
+            "credentials": "never_included",
+        },
+    }
+    return _json_safe("domain tool binding plan", plan, maximum=MAX_DOMAIN_TOOL_BINDING_PLAN_BYTES)
+
+
 class AutonomousDomainToolRegistry:
     """Bounded, duplicate-free registry of tools available to the autonomous brain."""
 
@@ -424,6 +938,16 @@ class AutonomousDomainToolRegistry:
         for tool in selected:
             self._tools[tool.name] = tool
         return tuple(selected)
+
+    def plan_mcp_catalogue_bindings(
+        self,
+        catalogue: ToolCatalogue | Sequence[Mapping[str, Any] | ToolDefinition],
+        *,
+        domains: Sequence[str] | None = None,
+    ) -> dict[str, Any]:
+        """Plan exact curated bindings without reading or mutating this registry."""
+
+        return plan_mcp_catalogue_bindings(catalogue, domains=domains)
 
     def resolve(self, name: str) -> AutonomousDomainTool:
         _identifier("domain tool name", name)
@@ -864,16 +1388,23 @@ class AutonomousDomainToolRuntime:
 
 
 __all__ = [
+    "AUTONOMOUS_DOMAIN_NAMES",
     "DOMAIN_TOOL_BINDING_SCHEMA",
+    "DOMAIN_TOOL_BINDING_PLAN_SCHEMA",
     "DOMAIN_TOOL_EXECUTION_STATUSES",
+    "DOMAIN_TOOL_PROFILE_SCHEMA",
     "DOMAIN_TOOL_REGISTRY_SCHEMA",
     "DOMAIN_TOOL_RISK_CLASSES",
     "DOMAIN_TOOL_SCHEMA",
+    "MAX_DOMAIN_TOOL_BINDING_PLAN_BYTES",
     "MAX_DOMAIN_TOOL_CALLS",
     "MAX_DOMAIN_TOOLS",
     "AutonomousDomainTool",
     "AutonomousDomainToolBinding",
+    "AutonomousDomainToolProfile",
     "AutonomousDomainToolReceipt",
     "AutonomousDomainToolRegistry",
     "AutonomousDomainToolRuntime",
+    "builtin_autonomous_domain_tool_profiles",
+    "plan_mcp_catalogue_bindings",
 ]

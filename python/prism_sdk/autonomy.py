@@ -42,11 +42,14 @@ from .brain import (
     BrainToolLoopResult,
 )
 from .domain_tools import (
+    AUTONOMOUS_DOMAIN_NAMES,
     AutonomousDomainTool,
     AutonomousDomainToolBinding,
     AutonomousDomainToolReceipt,
     AutonomousDomainToolRegistry,
     AutonomousDomainToolRuntime,
+    DOMAIN_TOOL_BINDING_PLAN_SCHEMA,
+    plan_mcp_catalogue_bindings,
 )
 from .autonomy_persistence import (
     AutonomousExecutionController,
@@ -77,20 +80,7 @@ from .tooling import ToolCatalogue, ToolDefinition
 
 AUTONOMY_SCHEMA = "bioprism-python-autonomous-task/0.1"
 AUTONOMOUS_EXECUTION_MODES = ("provider", "tool_loop", "mission")
-AUTONOMOUS_DOMAINS = (
-    "coding",
-    "browser",
-    "data",
-    "science",
-    "biomedical",
-    "neuroscience",
-    "operations",
-    "enterprise",
-    "multi_agent",
-    "multimodal",
-    "cross_domain",
-    "evaluation",
-)
+AUTONOMOUS_DOMAINS = AUTONOMOUS_DOMAIN_NAMES
 MAX_AUTONOMY_TEXT_BYTES = 16_000
 MAX_AUTONOMY_CONTEXT_BYTES = 2_000_000
 MAX_AUTONOMY_LIST_ITEMS = 64
@@ -7760,6 +7750,97 @@ class AutonomousAgent:
                 executor=lambda resolved, arguments: self.brain.workspace.tool(resolved.name, dict(arguments)),
             )
         return registered
+
+    def plan_workspace_tool_bindings(
+        self,
+        catalogue: ToolCatalogue | Sequence[Mapping[str, Any] | ToolDefinition] | None = None,
+        *,
+        domains: Sequence[str] | None = None,
+    ) -> dict[str, Any]:
+        """Plan reviewed live-tool bindings without registering or executing anything.
+
+        The plan intersects the workspace's authoritative ``tools/list`` snapshot with exact
+        curated profiles for the selected domains.  Unknown tools remain unclassified and
+        effectful tools remain review-only; a plan is never an authorization artifact.
+        """
+
+        if catalogue is None:
+            catalogue_reader = getattr(self.brain.workspace, "tool_catalogue", None)
+            if not callable(catalogue_reader):
+                raise BrainRunError("plan_workspace_tool_bindings requires a catalogue or workspace.tool_catalogue()")
+            catalogue = catalogue_reader()
+        try:
+            return plan_mcp_catalogue_bindings(catalogue, domains=domains)
+        except (ArgumentError, TypeError, ValueError) as error:
+            raise BrainRunError("workspace tool binding plan failed") from error
+
+    def register_workspace_bindings_from_plan(
+        self,
+        plan: Mapping[str, Any],
+        approved_tools: Sequence[str],
+        *,
+        catalogue: ToolCatalogue | Sequence[Mapping[str, Any] | ToolDefinition] | None = None,
+        replace_existing: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Apply only caller-approved safe proposals from a fresh binding plan.
+
+        The catalogue digest, profile digest, and selected binding rows are recomputed before
+        registration.  This prevents a stale or hand-edited plan from changing the curated
+        posture.  Applying a safe binding still only exposes a schema to the brain; the runtime
+        callback, mission policy, and effect approval boundary remain authoritative.
+        """
+
+        if not isinstance(plan, Mapping) or plan.get("schema") != DOMAIN_TOOL_BINDING_PLAN_SCHEMA:
+            raise BrainRunError("register_workspace_bindings_from_plan requires a valid binding plan")
+        if not isinstance(approved_tools, Sequence) or isinstance(approved_tools, (str, bytes)):
+            raise BrainRunError("approved_tools must be a non-empty sequence")
+        if not approved_tools:
+            raise BrainRunError("approved_tools must contain at least one tool")
+        approved: list[str] = []
+        seen: set[str] = set()
+        for name in approved_tools:
+            if not isinstance(name, str) or not name.strip():
+                raise BrainRunError("approved tool names must be non-empty strings")
+            if name in seen:
+                raise BrainRunError(f"approved_tools contains a duplicate tool: {name}")
+            seen.add(name)
+            approved.append(name)
+        raw_domains = plan.get("domains")
+        if not isinstance(raw_domains, Sequence) or isinstance(raw_domains, (str, bytes)):
+            raise BrainRunError("binding plan domains are missing or malformed")
+        if catalogue is None:
+            catalogue_reader = getattr(self.brain.workspace, "tool_catalogue", None)
+            if not callable(catalogue_reader):
+                raise BrainRunError("register_workspace_bindings_from_plan requires a catalogue or workspace.tool_catalogue()")
+            catalogue = catalogue_reader()
+        try:
+            snapshot = catalogue if isinstance(catalogue, ToolCatalogue) else ToolCatalogue.from_definitions(catalogue)
+            fresh_plan = plan_mcp_catalogue_bindings(snapshot, domains=tuple(raw_domains))
+        except (ArgumentError, TypeError, ValueError) as error:
+            raise BrainRunError("workspace tool binding plan could not be revalidated") from error
+        if plan.get("catalogue_digest") != snapshot.digest:
+            raise BrainRunError("workspace tool binding plan is stale: catalogue digest changed")
+        if plan.get("profile_digest") != fresh_plan.get("profile_digest"):
+            raise BrainRunError("workspace tool binding plan is stale: profile digest changed")
+        proposed = plan.get("proposed_bindings")
+        fresh_proposed = fresh_plan.get("proposed_bindings")
+        if not isinstance(proposed, Mapping) or not isinstance(fresh_proposed, Mapping):
+            raise BrainRunError("workspace tool binding plan has no proposed bindings")
+        bindings: dict[str, Mapping[str, Any]] = {}
+        for name in approved:
+            row = proposed.get(name)
+            fresh_row = fresh_proposed.get(name)
+            if not isinstance(row, Mapping) or not isinstance(fresh_row, Mapping) or dict(row) != dict(fresh_row):
+                raise BrainRunError(f"approved tool {name!r} is absent or does not match curated policy")
+            if row.get("read_only") is not True or row.get("risk_class") != "read_only" or row.get("approval_required") is not False:
+                raise BrainRunError(f"approved tool {name!r} is not a safe proposed binding")
+            bindings[name] = row
+        return self.register_workspace_tools(
+            bindings,
+            catalogue=snapshot,
+            require_all=False,
+            replace_existing=replace_existing,
+        )
 
     def register_workspace_tools(
         self,
