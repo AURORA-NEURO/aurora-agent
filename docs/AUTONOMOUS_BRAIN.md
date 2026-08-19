@@ -10,7 +10,8 @@ flowchart LR
     H --> RT[LLMRuntime]
     RT --> P[Provider API]
     Q[Task and evidence metadata] --> MS[Model selection]
-    MS --> PA[Prompt assembly]
+    MS --> CR[Cross-domain capability route]
+    CR --> PA[Prompt assembly with bounded tool schemas]
     PA --> PL[Bounded plan DAG]
     PL --> RT
     RT --> O[Value response]
@@ -29,14 +30,14 @@ flowchart LR
 Applications collect provider keys themselves. The SDK supports three caller-owned entry points:
 
 ```python
-from prism_sdk import CredentialStore, LLMRuntime, ProviderRequest, openai_provider
+from prism_sdk import CredentialStore, LLMRuntime, ProviderOnboarding, ProviderRequest, openai_provider
 from prism_sdk.brain import AutonomousBrain, BrainLearningLedger
 
 credentials = CredentialStore()
-handle = credentials.prompt("openai")  # getpass: terminal input is not echoed
-
 runtime = LLMRuntime(credentials)
-runtime.register_provider(openai_provider())
+onboarding = ProviderOnboarding(runtime)
+onboarding.register_provider(openai_provider())
+handle = onboarding.configure_from_prompt("openai")  # or configure_from_environment(...)
 response = runtime.invoke(
     "openai",
     ProviderRequest(
@@ -45,15 +46,18 @@ response = runtime.invoke(
     ),
     credential=handle,
 )
-credentials.revoke(handle)
+onboarding.revoke(handle)
 ```
 
-The same `register(provider, value)` method is intended for a UI password field, and
-`register_environment(provider, "OPENAI_API_KEY")` is intended for server deployments that use an
-environment or secret-manager injection. The value is held only in process memory. Handles expose
-only provider, opaque identifier, and `secret_persistence: in_memory_only`; they do not implement a
-secret serialization path. Provider failures do not return upstream response bodies because a
-proxy or upstream error can echo request headers.
+`ProviderOnboarding` is the standard BYOK process. It requires non-secret provider transport
+metadata first, then supports no-echo prompt entry, environment injection, direct UI registration,
+or an external resolver callback for a secret-manager reference. `status()` and `statuses()` return
+redacted readiness (`register_provider`, `collect_user_credential`, or `ready`) without returning
+keys or handles. `revoke()` removes the in-memory entry, and TTL expiry is purged before resolution
+or status reporting. The value is held only in process memory. Handles expose only provider, opaque
+identifier, source, expiry, and `secret_persistence: in_memory_only`; they do not implement a secret
+serialization path. Provider failures do not return upstream response bodies because a proxy or
+upstream error can echo request headers.
 
 The core brain and MCP tools never accept `api_key`, `secret`, `Authorization`, or an environment
 variable value. They accept model metadata and opaque outcome references only. Do not put a handle
@@ -111,6 +115,15 @@ keys without exposing credential material. Streaming and provider-native tool ca
 separate runtime layers; they must preserve the same credential, approval, and value-only learning
 boundaries.
 
+`ProviderTool` and `ProviderToolCall` now implement the provider-native tool boundary for the
+non-streaming path. MCP `tools/list` schemas can be converted into OpenAI Responses, OpenAI-
+compatible Chat Completions, or Anthropic Messages wire shapes. Returned calls are parsed into
+typed intents, and an unrequested call is refused. A call is never dispatched by `LLMRuntime`:
+`AutonomousBrain.run_mission` converts routed calls into ordinary mission steps and sends them
+through `agent_mission` preflight, caller-owned allow-lists, schema validation, budgets, and the
+separate dispatch approval. Provider tool calls therefore improve model/tool selection without
+creating a hidden execution channel.
+
 ## Run, evaluate, and learn
 
 The model response is not self-rewarding. A caller owns the evaluator and persists only the
@@ -152,13 +165,44 @@ unbounded self-modifying policy and not a claim of general intelligence.
 ## Structured decisions and multi-step work
 
 `AutonomousBrain.run_mission(...)` is the bridge from a model response to the existing mission
-executor. It requires JSON output containing a bounded `mission.steps` array, then sends that
-proposal to `agent_mission` with `execute=false`. The caller owns the mission policy and allow-list;
-the model cannot add tools, widen budgets, enable side effects, or provide evaluator claims. Only
-after inspecting the preflight result may the caller request the second dispatch with
+executor. Supplying `route_request` makes the loop call the live cross-domain `capability_route`
+catalogue before provider invocation. The route contributes a bounded, digest-bound packet of
+candidate groups, domains, tools, and authoritative input schemas to the developer prompt, so the
+model can plan against the actual workspace rather than an invented tool list. The packet reports
+schema truncation explicitly and remains routing evidence, not permission.
+
+```python
+result = brain.run_mission(
+    task="inspect the current developer platform and release evidence",
+    model_selection=selection_request,
+    prompt={"max_input_tokens": 12_000},
+    plan=provider_plan,
+    credentials={"openai": handle},
+    mission_policy=MissionPolicy(
+        allowed_tools=("developer_platform_status", "release_audit"),
+        max_steps=8,
+        max_step_output_bytes=200_000,
+        max_total_output_bytes=1_000_000,
+    ),
+    route_request={
+        "needs": [{"id": "task", "query": "developer platform release evidence"}],
+        "max_tools": 32,
+    },
+    enforce_route_tools=True,
+    approve_provider_call=True,
+)
+```
+
+`enforce_route_tools=True` intersects the caller's explicit allow-list with the route's recommended
+tools; it never widens that list. Unresolved route needs fail closed by default, and the returned
+`BrainMissionResult.route` preserves the route identity for review. The model response must still
+contain JSON with a bounded `mission.steps` array, after which the proposal is sent to
+`agent_mission` with `execute=false`. The caller owns the mission policy and allow-list; the model
+cannot add tools, widen budgets, enable side effects, or provide evaluator claims. Only after
+inspecting the preflight result may the caller request the second dispatch with
 `approve_mission_dispatch=True`. The Rust executor then applies dependency ordering, schema checks,
 bindings, output budgets, refusal propagation, cancellation, execution traces, and retained
-workflow/evaluator lineage across domain tools.
+workflow/evaluator lineage across every catalogued domain tool.
 
 ## Safety boundary
 

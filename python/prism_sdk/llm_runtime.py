@@ -21,7 +21,7 @@ the same explicit provider contract.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import getpass
 import http.client
 import json
@@ -36,6 +36,9 @@ from urllib.parse import urlsplit
 MAX_MESSAGES = 512
 MAX_MESSAGE_CHARS = 2_000_000
 MAX_RESPONSE_BYTES = 20_000_000
+MAX_PROVIDER_TOOLS = 128
+MAX_TOOL_NAME_BYTES = 256
+MAX_TOOL_ARGUMENT_BYTES = 1_000_000
 SUPPORTED_PROTOCOLS = {
     "openai_responses",
     "openai_chat_completions",
@@ -91,6 +94,28 @@ class _CredentialEntry:
     provider: str
     secret: SecretValue
     expires_at: float | None
+    source: str
+
+
+@dataclass(frozen=True, slots=True)
+class CredentialStatus:
+    """Redacted readiness projection for one user-owned provider credential set."""
+
+    provider: str
+    configured: bool
+    credential_count: int
+    credentials: tuple[Mapping[str, Any], ...]
+    secret_persistence: str = "in_memory_only"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "provider": self.provider,
+            "configured": self.configured,
+            "credential_count": self.credential_count,
+            "credentials": [dict(item) for item in self.credentials],
+            "secret_persistence": self.secret_persistence,
+            "secret_material": "never_returned",
+        }
 
 
 class CredentialHandle:
@@ -107,12 +132,19 @@ class CredentialHandle:
         self.credential_id = credential_id
         self._store = store
 
-    def to_metadata(self) -> dict[str, Any]:
+    def to_metadata(
+        self,
+        *,
+        source: str = "unknown",
+        expires_at: float | None = None,
+    ) -> dict[str, Any]:
         return {
             "provider": self.provider,
             "credential_id": self.credential_id,
             "credential_present": True,
             "secret_persistence": "in_memory_only",
+            "source": source,
+            "expires_at": expires_at,
         }
 
     def __repr__(self) -> str:
@@ -138,12 +170,23 @@ class CredentialStore:
         self._entries: dict[str, _CredentialEntry] = {}
         self._lock = threading.RLock()
 
-    def register(self, provider: str, secret: str, *, ttl_seconds: float | None = None) -> CredentialHandle:
+    _SOURCES = frozenset({"direct", "prompt", "environment", "external_resolver"})
+
+    def register(
+        self,
+        provider: str,
+        secret: str,
+        *,
+        ttl_seconds: float | None = None,
+        source: str = "direct",
+    ) -> CredentialHandle:
         self._validate_provider(provider)
         if not isinstance(secret, str) or not secret.strip():
             raise CredentialError("credential value must be a non-empty string")
         if ttl_seconds is not None and (not isinstance(ttl_seconds, (int, float)) or ttl_seconds <= 0):
             raise CredentialError("ttl_seconds must be positive or None")
+        if not isinstance(source, str) or source not in self._SOURCES:
+            raise CredentialError("credential source is not supported")
         with self._lock:
             self._purge_expired_locked()
             if len(self._entries) >= self._max_credentials:
@@ -156,6 +199,7 @@ class CredentialStore:
                 provider=provider,
                 secret=SecretValue(secret),
                 expires_at=expires_at,
+                source=source,
             )
             return CredentialHandle(provider, credential_id, self)
 
@@ -175,7 +219,7 @@ class CredentialStore:
         value = source.get(variable)
         if value is None:
             raise CredentialError(f"environment variable {variable!r} is not set")
-        return self.register(provider, value, ttl_seconds=ttl_seconds)
+        return self.register(provider, value, ttl_seconds=ttl_seconds, source="environment")
 
     def prompt(
         self,
@@ -188,7 +232,40 @@ class CredentialStore:
         """Collect a key without echo by default; ``reader`` makes UI/tests injectable."""
 
         value = (getpass.getpass(prompt) if reader is None else reader(prompt))
-        return self.register(provider, value, ttl_seconds=ttl_seconds)
+        return self.register(provider, value, ttl_seconds=ttl_seconds, source="prompt")
+
+    def register_resolver(
+        self,
+        provider: str,
+        reference: str,
+        resolver: Callable[[str], str],
+        *,
+        ttl_seconds: float | None = None,
+    ) -> CredentialHandle:
+        """Resolve one external secret-manager reference for this short-lived process.
+
+        Only the resolver sees the reference and value. The store retains the resulting secret in
+        memory for the handle lifetime and deliberately does not retain the reference, so a ledger,
+        route, prompt, or provider response cannot accidentally become a secret-manager index.
+        """
+
+        self._validate_provider(provider)
+        if not isinstance(reference, str) or not reference.strip() or len(reference) > 512:
+            raise CredentialError("external credential reference must be a bounded non-empty string")
+        if any(ord(character) < 32 for character in reference):
+            raise CredentialError("external credential reference contains a control character")
+        if not callable(resolver):
+            raise CredentialError("external credential resolver must be callable")
+        try:
+            value = resolver(reference)
+        except Exception as error:  # pragma: no cover - defensive boundary for foreign resolvers
+            raise CredentialError("external credential resolver failed") from error
+        return self.register(
+            provider,
+            value,
+            ttl_seconds=ttl_seconds,
+            source="external_resolver",
+        )
 
     def revoke(self, handle: CredentialHandle) -> None:
         self._assert_handle(handle)
@@ -200,14 +277,52 @@ class CredentialStore:
             self._entries.clear()
 
     def metadata(self, handle: CredentialHandle) -> dict[str, Any]:
-        self._resolve(handle)
-        return handle.to_metadata()
+        entry = self._resolve_entry(handle)
+        return handle.to_metadata(source=entry.source, expires_at=entry.expires_at)
+
+    def status(self, provider: str) -> CredentialStatus:
+        """Return readiness metadata without returning handles or secret material."""
+
+        self._validate_provider(provider)
+        with self._lock:
+            self._purge_expired_locked()
+            entries = [
+                (credential_id, entry)
+                for credential_id, entry in self._entries.items()
+                if entry.provider == provider
+            ]
+        credentials = tuple(
+            {
+                "credential_id": credential_id,
+                "source": entry.source,
+                "expires_at": entry.expires_at,
+                "secret_persistence": "in_memory_only",
+            }
+            for credential_id, entry in sorted(entries)
+        )
+        return CredentialStatus(
+            provider=provider,
+            configured=bool(credentials),
+            credential_count=len(credentials),
+            credentials=credentials,
+        )
+
+    def statuses(self) -> list[CredentialStatus]:
+        """Return deterministic redacted status for every provider currently in the store."""
+
+        with self._lock:
+            self._purge_expired_locked()
+            providers = sorted({entry.provider for entry in self._entries.values()})
+        return [self.status(provider) for provider in providers]
 
     def _assert_handle(self, handle: CredentialHandle) -> None:
         if not isinstance(handle, CredentialHandle) or handle._store is not self:
             raise CredentialError("credential handle belongs to a different store")
 
     def _resolve(self, handle: CredentialHandle) -> SecretValue:
+        return self._resolve_entry(handle).secret
+
+    def _resolve_entry(self, handle: CredentialHandle) -> _CredentialEntry:
         self._assert_handle(handle)
         with self._lock:
             self._purge_expired_locked()
@@ -216,7 +331,7 @@ class CredentialStore:
                 raise CredentialError("credential handle is unknown, revoked, or expired")
             if entry.provider != handle.provider:
                 raise CredentialError("credential handle provider mismatch")
-            return entry.secret
+            return entry
 
     def _purge_expired_locked(self) -> None:
         now = self._clock()
@@ -306,6 +421,102 @@ class ProviderConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class ProviderTool:
+    """Provider-neutral function schema; it describes a tool but never grants execution."""
+
+    name: str
+    description: str = ""
+    parameters: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.name, str)
+            or not self.name.strip()
+            or len(self.name.encode("utf-8")) > MAX_TOOL_NAME_BYTES
+            or any(not (character.isalnum() or character in "_-.") for character in self.name)
+        ):
+            raise ProviderError("provider tool name is not a bounded safe identifier")
+        if not isinstance(self.description, str) or len(self.description) > MAX_MESSAGE_CHARS:
+            raise ProviderError("provider tool description is not bounded")
+        if not isinstance(self.parameters, Mapping):
+            raise ProviderError("provider tool parameters must be a JSON object")
+        try:
+            encoded = json.dumps(self.parameters, ensure_ascii=False, allow_nan=False)
+        except (TypeError, ValueError) as error:
+            raise ProviderError("provider tool parameters must be JSON-safe") from error
+        if len(encoded.encode("utf-8")) > 256_000:
+            raise ProviderError("provider tool parameters exceed the bounded size")
+
+    @classmethod
+    def from_mcp_schema(cls, schema: Mapping[str, Any]) -> "ProviderTool":
+        if not isinstance(schema, Mapping):
+            raise ProviderError("MCP tool schema must be an object")
+        parameters = schema.get("inputSchema", schema.get("parameters", {}))
+        if not isinstance(parameters, Mapping):
+            raise ProviderError("MCP tool schema inputSchema must be an object")
+        return cls(
+            name=schema.get("name", ""),
+            description=schema.get("description", ""),
+            parameters=dict(parameters),
+        )
+
+    def to_wire(self, protocol: str) -> dict[str, Any]:
+        if protocol == "anthropic_messages":
+            return {
+                "name": self.name,
+                "description": self.description,
+                "input_schema": dict(self.parameters),
+            }
+        if protocol == "openai_chat_completions":
+            return {
+                "type": "function",
+                "function": {
+                    "name": self.name,
+                    "description": self.description,
+                    "parameters": dict(self.parameters),
+                },
+            }
+        return {
+            "type": "function",
+            "name": self.name,
+            "description": self.description,
+            "parameters": dict(self.parameters),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderToolCall:
+    """A parsed provider intent; callers must validate and authorize it before execution."""
+
+    call_id: str
+    name: str
+    arguments: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.call_id, str) or not self.call_id.strip() or len(self.call_id) > 256:
+            raise ProviderError("provider tool call id is not bounded")
+        if not isinstance(self.name, str) or not self.name.strip() or len(self.name) > MAX_TOOL_NAME_BYTES:
+            raise ProviderError("provider tool call name is not bounded")
+        if not isinstance(self.arguments, Mapping):
+            raise ProviderError("provider tool call arguments must be an object")
+        try:
+            encoded = json.dumps(self.arguments, ensure_ascii=False, allow_nan=False)
+        except (TypeError, ValueError) as error:
+            raise ProviderError("provider tool call arguments must be JSON-safe") from error
+        if len(encoded.encode("utf-8")) > MAX_TOOL_ARGUMENT_BYTES:
+            raise ProviderError("provider tool call arguments exceed the bounded size")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "call_id": self.call_id,
+            "name": self.name,
+            "arguments": dict(self.arguments),
+            "execution": "not_started",
+            "authorization": "caller_owned",
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class ProviderRequest:
     model: str
     messages: tuple[Mapping[str, Any], ...]
@@ -314,6 +525,8 @@ class ProviderRequest:
     require_json: bool = False
     response_schema: Mapping[str, Any] | None = None
     idempotency_key: str | None = None
+    tools: tuple[ProviderTool, ...] = ()
+    tool_choice: str | None = None
 
     def __post_init__(self) -> None:
         if not self.model or len(self.messages) > MAX_MESSAGES:
@@ -339,6 +552,19 @@ class ProviderRequest:
             or len(self.idempotency_key) > 256
         ):
             raise ProviderError("idempotency_key must be a bounded non-empty string")
+        if not isinstance(self.tools, Sequence) or isinstance(self.tools, (str, bytes)):
+            raise ProviderError("tools must be a sequence of ProviderTool values")
+        if len(self.tools) > MAX_PROVIDER_TOOLS:
+            raise ProviderError("tools exceed the bounded provider limit")
+        names: set[str] = set()
+        for tool in self.tools:
+            if not isinstance(tool, ProviderTool):
+                raise ProviderError("tools must contain only ProviderTool values")
+            if tool.name in names:
+                raise ProviderError("provider tool names must be unique")
+            names.add(tool.name)
+        if self.tool_choice not in {None, "auto", "none", "required"}:
+            raise ProviderError("tool_choice must be auto, none, required, or None")
         for message in self.messages:
             if not isinstance(message, Mapping) or not isinstance(message.get("role"), str):
                 raise ProviderError("each message must contain a string role")
@@ -357,6 +583,7 @@ class ProviderResponse:
     usage: Mapping[str, Any]
     raw: Mapping[str, Any]
     structured: Any = None
+    tool_calls: tuple[ProviderToolCall, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -368,6 +595,7 @@ class ProviderResponse:
             "usage": dict(self.usage),
             "raw": dict(self.raw),
             "structured": self.structured,
+            "tool_calls": [call.to_dict() for call in self.tool_calls],
             "credential_posture": "not_in_response",
         }
 
@@ -490,9 +718,18 @@ class LLMRuntime:
             }
         if request.temperature is not None:
             body["temperature"] = request.temperature
+        if request.tools:
+            body["tools"] = [tool.to_wire(config.protocol) for tool in request.tools]
+            if request.tool_choice is not None:
+                body["tool_choice"] = (
+                    {"type": request.tool_choice}
+                    if config.protocol == "anthropic_messages"
+                    else request.tool_choice
+                )
         if (
             (request.require_json or request.response_schema is not None)
             and config.protocol in {"openai_responses", "openai_chat_completions"}
+            and (not request.tools or request.tool_choice == "none")
         ):
             # OpenAI-compatible protocols accept this hint. Anthropic has a different structured
             # output surface, so it is validated locally without receiving an unsupported field.
@@ -586,8 +823,16 @@ class LLMRuntime:
                 retryable=status == 408 or status == 429 or status >= 500,
                 status_code=status,
             )
-        text = _extract_text(config.protocol, decoded)
-        structured = _validate_structured_response(text, request)
+        tool_calls = _extract_tool_calls(config.protocol, decoded)
+        if tool_calls:
+            allowed_tool_names = {tool.name for tool in request.tools}
+            if not allowed_tool_names or any(call.name not in allowed_tool_names for call in tool_calls):
+                raise ProviderError("provider returned an unrequested tool call")
+            text = ""
+            structured = None
+        else:
+            text = _extract_text(config.protocol, decoded)
+            structured = _validate_structured_response(text, request)
         usage = decoded.get("usage")
         return ProviderResponse(
             provider=config.provider,
@@ -598,7 +843,143 @@ class LLMRuntime:
             usage=dict(usage) if isinstance(usage, Mapping) else {},
             raw=dict(decoded),
             structured=structured,
+            tool_calls=tool_calls,
         )
+
+
+class ProviderOnboarding:
+    """Explicit BYOK lifecycle for applications embedding the provider runtime.
+
+    The onboarding object owns no additional secret state. It coordinates provider transport
+    registration with one of the supported user-entry paths and returns only an opaque handle or
+    redacted readiness metadata. A UI can use ``configure_from_prompt``'s injected reader, a
+    server can use ``configure_from_environment``, and a deployment with a secret manager can use
+    ``configure_from_resolver`` without placing a credential in MCP arguments or brain state.
+    """
+
+    _DEFAULT_ENVIRONMENT_VARIABLES = {
+        "openai": "OPENAI_API_KEY",
+        "anthropic": "ANTHROPIC_API_KEY",
+    }
+
+    def __init__(
+        self,
+        runtime: LLMRuntime,
+        *,
+        environment_variables: Mapping[str, str] | None = None,
+    ) -> None:
+        if not isinstance(runtime, LLMRuntime):
+            raise CredentialError("ProviderOnboarding requires an LLMRuntime")
+        self.runtime = runtime
+        self._environment_variables = dict(self._DEFAULT_ENVIRONMENT_VARIABLES)
+        if environment_variables is not None:
+            for provider, variable in environment_variables.items():
+                CredentialStore._validate_provider(provider)
+                if not isinstance(variable, str) or not variable or not variable.replace("_", "").isalnum():
+                    raise CredentialError("environment variable name must be alphanumeric with underscores")
+                self._environment_variables[provider] = variable
+
+    def register_provider(self, config: ProviderConfig) -> None:
+        """Register non-secret provider transport metadata before collecting a key."""
+
+        self.runtime.register_provider(config)
+
+    def register_value(
+        self,
+        provider: str,
+        value: str,
+        *,
+        ttl_seconds: float | None = None,
+    ) -> CredentialHandle:
+        self._require_provider(provider)
+        return self.runtime.credentials.register(provider, value, ttl_seconds=ttl_seconds)
+
+    def configure_from_prompt(
+        self,
+        provider: str,
+        *,
+        prompt: str | None = None,
+        ttl_seconds: float | None = None,
+        reader: Callable[[str], str] | None = None,
+    ) -> CredentialHandle:
+        self._require_provider(provider)
+        return self.runtime.credentials.prompt(
+            provider,
+            prompt=prompt or f"{provider} API key: ",
+            ttl_seconds=ttl_seconds,
+            reader=reader,
+        )
+
+    def configure_from_environment(
+        self,
+        provider: str,
+        *,
+        variable: str | None = None,
+        ttl_seconds: float | None = None,
+        environ: Mapping[str, str] | None = None,
+    ) -> CredentialHandle:
+        self._require_provider(provider)
+        selected_variable = variable or self._environment_variables.get(provider)
+        if selected_variable is None:
+            raise CredentialError(
+                f"no default environment variable is registered for provider {provider!r}"
+            )
+        return self.runtime.credentials.register_environment(
+            provider,
+            selected_variable,
+            ttl_seconds=ttl_seconds,
+            environ=environ,
+        )
+
+    def configure_from_resolver(
+        self,
+        provider: str,
+        reference: str,
+        resolver: Callable[[str], str],
+        *,
+        ttl_seconds: float | None = None,
+    ) -> CredentialHandle:
+        self._require_provider(provider)
+        return self.runtime.credentials.register_resolver(
+            provider,
+            reference,
+            resolver,
+            ttl_seconds=ttl_seconds,
+        )
+
+    def revoke(self, handle: CredentialHandle) -> None:
+        self.runtime.credentials.revoke(handle)
+
+    def status(self, provider: str) -> dict[str, Any]:
+        CredentialStore._validate_provider(provider)
+        registered = any(
+            row.get("provider") == provider for row in self.runtime.provider_metadata()
+        )
+        credential = self.runtime.credentials.status(provider)
+        return {
+            "provider": provider,
+            "provider_registered": registered,
+            "credential": credential.to_dict(),
+            "ready": registered and credential.configured,
+            "next_action": "ready" if registered and credential.configured else (
+                "register_provider" if not registered else "collect_user_credential"
+            ),
+            "secret_material": "never_returned",
+        }
+
+    def statuses(self) -> list[dict[str, Any]]:
+        providers = {
+            row.get("provider")
+            for row in self.runtime.provider_metadata()
+            if isinstance(row.get("provider"), str)
+        }
+        providers.update(status.provider for status in self.runtime.credentials.statuses())
+        return [self.status(provider) for provider in sorted(providers)]
+
+    def _require_provider(self, provider: str) -> None:
+        CredentialStore._validate_provider(provider)
+        if not any(row.get("provider") == provider for row in self.runtime.provider_metadata()):
+            raise CredentialError(f"provider {provider!r} is not registered with the runtime")
 
 
 def _header(headers: Mapping[str, str], name: str) -> str | None:
@@ -653,6 +1034,77 @@ def _extract_text(protocol: str, payload: Mapping[str, Any]) -> str:
                         if isinstance(block, Mapping) and isinstance(block.get("text"), str)
                     )
     raise ProviderError("provider response contained no assistant text")
+
+
+def _extract_tool_calls(
+    protocol: str,
+    payload: Mapping[str, Any],
+) -> tuple[ProviderToolCall, ...]:
+    """Parse provider-native function calls without ever dispatching them."""
+
+    candidates: list[Mapping[str, Any]] = []
+    if protocol == "openai_responses":
+        output = payload.get("output")
+        if isinstance(output, list):
+            candidates = [
+                item
+                for item in output
+                if isinstance(item, Mapping) and item.get("type") == "function_call"
+            ]
+    elif protocol == "anthropic_messages":
+        content = payload.get("content")
+        if isinstance(content, list):
+            candidates = [
+                item
+                for item in content
+                if isinstance(item, Mapping) and item.get("type") == "tool_use"
+            ]
+    else:
+        choices = payload.get("choices")
+        if isinstance(choices, list) and choices and isinstance(choices[0], Mapping):
+            message = choices[0].get("message")
+            calls = message.get("tool_calls") if isinstance(message, Mapping) else None
+            if isinstance(calls, list):
+                candidates = [item for item in calls if isinstance(item, Mapping)]
+    if len(candidates) > MAX_PROVIDER_TOOLS:
+        raise ProviderError("provider returned too many tool calls")
+
+    parsed: list[ProviderToolCall] = []
+    for index, candidate in enumerate(candidates):
+        if protocol == "openai_chat_completions":
+            function = candidate.get("function")
+            if not isinstance(function, Mapping):
+                raise ProviderError("provider returned a malformed tool call")
+            name = function.get("name")
+            arguments = function.get("arguments")
+            call_id = candidate.get("id") or f"tool-call-{index}"
+        elif protocol == "anthropic_messages":
+            name = candidate.get("name")
+            arguments = candidate.get("input")
+            call_id = candidate.get("id") or f"tool-call-{index}"
+        else:
+            name = candidate.get("name")
+            arguments = candidate.get("arguments")
+            call_id = candidate.get("call_id") or candidate.get("id") or f"tool-call-{index}"
+        if not isinstance(name, str) or not name.strip():
+            raise ProviderError("provider returned a tool call without a name")
+        if isinstance(arguments, str):
+            if len(arguments.encode("utf-8")) > MAX_TOOL_ARGUMENT_BYTES:
+                raise ProviderError("provider tool call arguments exceed the bounded size")
+            try:
+                arguments = json.loads(arguments)
+            except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                raise ProviderError("provider returned invalid JSON tool arguments") from error
+        if not isinstance(arguments, Mapping):
+            raise ProviderError("provider tool call arguments must be a JSON object")
+        parsed.append(
+            ProviderToolCall(
+                call_id=str(call_id),
+                name=name,
+                arguments=dict(arguments),
+            )
+        )
+    return tuple(parsed)
 
 
 def _validate_structured_response(

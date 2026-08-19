@@ -18,7 +18,7 @@ import threading
 import uuid
 from typing import Any, Mapping, Protocol, Sequence
 
-from .llm_runtime import CredentialHandle, LLMRuntime, ProviderRequest, ProviderResponse
+from .llm_runtime import CredentialHandle, LLMRuntime, ProviderRequest, ProviderResponse, ProviderTool
 from .mission import MissionPolicy, MissionRequest
 
 
@@ -66,6 +66,67 @@ DEFAULT_MISSION_RESPONSE_SCHEMA: dict[str, Any] = {
     },
     "additionalProperties": False,
 }
+
+MAX_ROUTE_REQUEST_BYTES = 2_000_000
+MAX_ROUTE_PROMPT_BYTES = 750_000
+MAX_ROUTE_PROMPT_SCHEMAS = 128
+
+
+def _bounded_route_prompt_context(route: Mapping[str, Any]) -> dict[str, Any]:
+    """Project route evidence into a bounded, model-readable context packet.
+
+    The capability route is authoritative evidence about the live catalogue, but it can contain
+    many schemas. The model needs the candidate contract, not an unbounded registry dump. Schemas
+    are admitted in deterministic order until the packet bound is reached; omitted schemas remain
+    explicit so a model cannot mistake a truncated route for a complete catalogue.
+    """
+
+    recommended = route.get("recommended_tools", [])
+    if not isinstance(recommended, list) or any(not isinstance(tool, str) for tool in recommended):
+        raise BrainRunError("capability route returned malformed recommended_tools")
+    needs = route.get("needs", [])
+    if not isinstance(needs, list) or any(not isinstance(need, Mapping) for need in needs):
+        raise BrainRunError("capability route returned malformed needs")
+    raw_schemas = route.get("tool_schemas", [])
+    if not isinstance(raw_schemas, list) or any(not isinstance(schema, Mapping) for schema in raw_schemas):
+        raise BrainRunError("capability route returned malformed tool_schemas")
+
+    compact_needs: list[dict[str, Any]] = []
+    for need in needs:
+        compact_needs.append(
+            {
+                "id": need.get("id"),
+                "resolution": need.get("resolution"),
+                "candidate_groups": need.get("candidate_groups", []),
+                "candidate_domains": need.get("candidate_domains", []),
+                "candidate_tools": need.get("candidate_tools", []),
+            }
+        )
+    packet: dict[str, Any] = {
+        "workflow": "capability_route_context",
+        "route_id": route.get("route_id"),
+        "catalog_digest": route.get("catalog_digest"),
+        "goal": route.get("goal"),
+        "needs": compact_needs,
+        "recommended_tools": recommended,
+        "schema_attachment": route.get("schema_attachment", {}),
+        "tool_schemas": [],
+        "tool_schemas_omitted": 0,
+        "does_not_authorize": [
+            "candidate ranking is routing evidence, not permission",
+            "the caller mission policy remains the only tool allow-list",
+            "tool schemas describe inputs but do not establish domain validity or readiness",
+        ],
+    }
+    for schema in raw_schemas[:MAX_ROUTE_PROMPT_SCHEMAS]:
+        candidate = dict(packet)
+        candidate["tool_schemas"] = [*packet["tool_schemas"], dict(schema)]
+        encoded = json.dumps(candidate, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        if len(encoded.encode("utf-8")) > MAX_ROUTE_PROMPT_BYTES:
+            break
+        packet["tool_schemas"] = candidate["tool_schemas"]
+    packet["tool_schemas_omitted"] = len(raw_schemas) - len(packet["tool_schemas"])
+    return packet
 
 
 class BrainLearningLedger:
@@ -260,6 +321,7 @@ class BrainMissionResult:
     mission: Mapping[str, Any] | None
     preflight: Mapping[str, Any] | None
     execution: Mapping[str, Any] | None
+    route: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -268,6 +330,7 @@ class BrainMissionResult:
             "mission": None if self.mission is None else dict(self.mission),
             "preflight": None if self.preflight is None else dict(self.preflight),
             "execution": None if self.execution is None else dict(self.execution),
+            "route": None if self.route is None else dict(self.route),
             "authorization": {
                 "provider_call": "recorded_in_brain_run",
                 "mission_dispatch": "caller_approved_only",
@@ -300,9 +363,15 @@ class AutonomousBrain:
         idempotency_key: str | None = None,
         context: Mapping[str, Any] | None = None,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
+        tools: Sequence[ProviderTool] = (),
+        tool_choice: str | None = None,
     ) -> BrainRunResult:
         if not isinstance(task, str) or not task.strip():
             raise BrainRunError("task must be a non-empty string")
+        if not isinstance(tools, Sequence) or isinstance(tools, (str, bytes)):
+            raise BrainRunError("tools must be a sequence")
+        if any(not isinstance(tool, ProviderTool) for tool in tools):
+            raise BrainRunError("tools must contain ProviderTool values")
         resolved_run_id = run_id or f"brain-{uuid.uuid4().hex}"
         if not isinstance(resolved_run_id, str) or not resolved_run_id.strip() or len(resolved_run_id) > 256:
             raise BrainRunError("run_id must be a bounded non-empty string")
@@ -391,6 +460,8 @@ class AutonomousBrain:
             require_json=require_json,
             response_schema=response_schema,
             idempotency_key=idempotency_key,
+            tools=tuple(tools),
+            tool_choice=tool_choice,
         )
         response = self.runtime.invoke(provider, request, credential=handle)
         return self._result(resolved_run_id, "completed_provider_call", selection, prompt_report, plan_report, response)
@@ -486,6 +557,11 @@ class AutonomousBrain:
         workflow_binding: Mapping[str, Any] | None = None,
         route_review: Mapping[str, Any] | None = None,
         operations_gate_acceptance: Mapping[str, Any] | None = None,
+        route_request: Mapping[str, Any] | None = None,
+        enforce_route_tools: bool = False,
+        require_resolved_route: bool = True,
+        provider_tools: Sequence[ProviderTool] = (),
+        tool_choice: str | None = None,
     ) -> BrainMissionResult:
         """Run a model decision through the existing bounded mission executor.
 
@@ -505,11 +581,122 @@ class AutonomousBrain:
         )
         if not isinstance(claim_requests, Sequence) or isinstance(claim_requests, (str, bytes)):
             raise BrainRunError("claim_requests must be a sequence")
+        if not isinstance(enforce_route_tools, bool) or not isinstance(require_resolved_route, bool):
+            raise BrainRunError("route enforcement flags must be booleans")
+        if not isinstance(provider_tools, Sequence) or isinstance(provider_tools, (str, bytes)):
+            raise BrainRunError("provider_tools must be a sequence")
+        if any(not isinstance(tool, ProviderTool) for tool in provider_tools):
+            raise BrainRunError("provider_tools must contain ProviderTool values")
+
+        route: dict[str, Any] | None = None
+        prompt_request = dict(prompt)
+        if route_request is not None:
+            if not isinstance(route_request, Mapping):
+                raise BrainRunError("route_request must be a mapping")
+            BrainLearningLedger._assert_safe(route_request)
+            route_arguments = dict(route_request)
+            supplied_goal = route_arguments.get("goal")
+            if supplied_goal is not None and supplied_goal != task:
+                raise BrainRunError("route_request.goal must match the mission task")
+            route_arguments["goal"] = task
+            route_arguments.setdefault(
+                "needs",
+                [{"id": "task", "query": task}],
+            )
+            route_arguments.setdefault("include_tools", True)
+            route_arguments.setdefault("max_tools", 128)
+            try:
+                encoded_route_request = json.dumps(
+                    route_arguments,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode("utf-8")
+            except (TypeError, ValueError) as error:
+                raise BrainRunError("route_request must be JSON-safe") from error
+            if len(encoded_route_request) > MAX_ROUTE_REQUEST_BYTES:
+                raise BrainRunError("route_request exceeds the bounded size")
+            route_response = self.workspace.tool("capability_route", route_arguments)
+            if not isinstance(route_response, Mapping):
+                raise BrainRunError("capability route returned a non-object")
+            if route_response.get("ok") is False or route_response.get("workflow") != "capability_route":
+                raise BrainRunError("capability route was refused")
+            raw_route = dict(route_response)
+            BrainLearningLedger._assert_safe(raw_route)
+            unresolved = raw_route.get("unresolved_needs", [])
+            if not isinstance(unresolved, list) or any(not isinstance(item, str) for item in unresolved):
+                raise BrainRunError("capability route returned malformed unresolved_needs")
+            if unresolved and require_resolved_route:
+                raise BrainRunError(
+                    "capability route contains unresolved needs: " + ", ".join(unresolved)
+                )
+            route_context = _bounded_route_prompt_context(raw_route)
+            route = dict(route_context)
+            route.update(
+                {
+                    "ok": True,
+                    "workflow": "capability_route",
+                    "evidence_digest": raw_route.get("evidence_digest"),
+                    "unresolved_needs": list(unresolved),
+                    "route_coverage": raw_route.get("route_coverage", {}),
+                    "execution": raw_route.get("execution", "not_started"),
+                }
+            )
+            existing_context = prompt_request.get("context", [])
+            if not isinstance(existing_context, Sequence) or isinstance(existing_context, (str, bytes)):
+                raise BrainRunError("prompt.context must be a sequence when routing is enabled")
+            context_chunks = [dict(chunk) for chunk in existing_context if isinstance(chunk, Mapping)]
+            if len(context_chunks) != len(existing_context):
+                raise BrainRunError("prompt.context must contain mappings")
+            route_chunk_id = "capability-route"
+            if any(chunk.get("id") == route_chunk_id for chunk in context_chunks):
+                raise BrainRunError("prompt.context already contains the reserved capability-route id")
+            context_chunks.append(
+                {
+                    "id": route_chunk_id,
+                    "role": "developer",
+                    "content": json.dumps(
+                        route_context,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                    "required": True,
+                    "priority": 1_000,
+                }
+            )
+            prompt_request["context"] = context_chunks
+
+            if not provider_tools and route_context["tool_schemas"] and not route_context["tool_schemas_omitted"]:
+                provider_tools = tuple(
+                    ProviderTool.from_mcp_schema(schema)
+                    for schema in route_context["tool_schemas"]
+                )
+
+            if enforce_route_tools:
+                recommended_tools = route.get("recommended_tools")
+                if not isinstance(recommended_tools, list) or any(
+                    not isinstance(tool, str) for tool in recommended_tools
+                ):
+                    raise BrainRunError("capability route returned malformed recommended_tools")
+                recommended_set = set(recommended_tools)
+                allowed_tools = policy.get("allowed_tools")
+                if not isinstance(allowed_tools, Sequence) or isinstance(allowed_tools, (str, bytes)):
+                    raise BrainRunError(
+                        "enforce_route_tools requires an explicit mission policy allowed_tools list"
+                    )
+                narrowed = [tool for tool in allowed_tools if tool in recommended_set]
+                if not narrowed:
+                    raise BrainRunError(
+                        "route has no overlap with the caller mission policy allowed_tools"
+                    )
+                policy["allowed_tools"] = narrowed
         policy["execute"] = False
         brain_run = self.run(
             task=task,
             model_selection=model_selection,
-            prompt=prompt,
+            prompt=prompt_request,
             plan=plan,
             credentials=credentials,
             approve_provider_call=approve_provider_call,
@@ -521,6 +708,8 @@ class AutonomousBrain:
             idempotency_key=idempotency_key,
             context=context,
             contextual_observations=contextual_observations,
+            tools=provider_tools,
+            tool_choice=tool_choice,
         )
         if brain_run.status != "completed_provider_call" or brain_run.response is None:
             return BrainMissionResult(
@@ -529,16 +718,45 @@ class AutonomousBrain:
                 mission=None,
                 preflight=None,
                 execution=None,
+                route=route,
             )
-        structured = brain_run.response.structured
-        if not isinstance(structured, Mapping):
-            raise BrainRunError("structured brain response did not contain a JSON object")
-        proposed = structured.get("mission")
-        if not isinstance(proposed, Mapping):
-            raise BrainRunError("structured brain response did not contain a mission object")
-        raw_steps = proposed.get("steps")
-        if not isinstance(raw_steps, list) or not raw_steps:
-            raise BrainRunError("model mission must contain a non-empty steps array")
+        if brain_run.response.tool_calls:
+            raw_steps = []
+            for index, call in enumerate(brain_run.response.tool_calls):
+                domain = "cross_domain"
+                if route is not None:
+                    for need in route.get("needs", []):
+                        if not isinstance(need, Mapping):
+                            continue
+                        candidate_tools = need.get("candidate_tools", [])
+                        if call.name in candidate_tools:
+                            domains = need.get("candidate_domains", [])
+                            if isinstance(domains, list) and domains and isinstance(domains[0], str):
+                                domain = domains[0]
+                            break
+                raw_steps.append(
+                    {
+                        "id": f"provider-tool-{index}",
+                        "domain": domain,
+                        "capability": call.name,
+                        "objective": f"Execute the caller-authorized provider tool intent {call.name}",
+                        "tool": call.name,
+                        "arguments": dict(call.arguments),
+                        "required": True,
+                        "depends_on": [],
+                        "bindings": [],
+                    }
+                )
+        else:
+            structured = brain_run.response.structured
+            if not isinstance(structured, Mapping):
+                raise BrainRunError("structured brain response did not contain a JSON object")
+            proposed = structured.get("mission")
+            if not isinstance(proposed, Mapping):
+                raise BrainRunError("structured brain response did not contain a mission object")
+            raw_steps = proposed.get("steps")
+            if not isinstance(raw_steps, list) or not raw_steps:
+                raise BrainRunError("model mission must contain a non-empty steps array")
 
         mission_id = f"{brain_run.run_id}-mission"
         preview_request = MissionRequest(
@@ -566,6 +784,7 @@ class AutonomousBrain:
                 mission=mission,
                 preflight=dict(preflight),
                 execution=None,
+                route=route,
             )
 
         execute_policy = dict(policy)
@@ -590,6 +809,7 @@ class AutonomousBrain:
             mission=mission,
             preflight=dict(preflight),
             execution=dict(execution),
+            route=route,
         )
 
     @staticmethod
