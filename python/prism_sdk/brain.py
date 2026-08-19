@@ -1674,6 +1674,192 @@ class AutonomousBrain:
                     raise
         raise BrainRunError("adaptive tool-loop provider failover exhausted")
 
+    def run_adaptive_mission(
+        self,
+        *,
+        task: str,
+        model_candidates: Sequence[Mapping[str, Any]],
+        prompt: Mapping[str, Any],
+        plan: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle],
+        mission_policy: MissionPolicy | Mapping[str, Any],
+        ledger: BrainLearningLedger | None = None,
+        context: Mapping[str, Any] | None = None,
+        contextual_observations: Sequence[Mapping[str, Any]] = (),
+        required_capabilities: Sequence[str] = (),
+        input_tokens: int = 4_096,
+        requested_output_tokens: int = 2_048,
+        max_cost_per_million_tokens: int | None = None,
+        max_latency_ms: int | None = None,
+        min_quality: float | None = None,
+        selection_overrides: Mapping[str, Any] | None = None,
+        approve_provider_call: bool = False,
+        approve_mission_dispatch: bool = False,
+        run_id: str | None = None,
+        max_output_tokens: int = 2_048,
+        temperature: float | None = None,
+        response_schema: Mapping[str, Any] | None = None,
+        idempotency_key: str | None = None,
+        claim_requests: Sequence[Mapping[str, Any]] = (),
+        evaluator_review: Mapping[str, Any] | None = None,
+        workflow_binding: Mapping[str, Any] | None = None,
+        route_review: Mapping[str, Any] | None = None,
+        operations_gate_acceptance: Mapping[str, Any] | None = None,
+        route_request: Mapping[str, Any] | None = None,
+        enforce_route_tools: bool = True,
+        require_resolved_route: bool = True,
+        provider_tools: Sequence[ProviderTool] = (),
+        tool_choice: str | None = None,
+        max_provider_failovers: int = 2,
+    ) -> BrainMissionResult:
+        """Select, route, plan, and execute one bounded cross-domain mission.
+
+        The route is resolved once and reused for contextual model selection, prompt assembly,
+        tool narrowing, and mission authorization. Provider failover is allowed only while the
+        model is still producing the mission proposal; once the proposal reaches ``agent_mission``
+        this method never replays it against another provider.
+        """
+
+        if (
+            not isinstance(max_provider_failovers, int)
+            or isinstance(max_provider_failovers, bool)
+            or not 0 <= max_provider_failovers <= 8
+        ):
+            raise BrainRunError("max_provider_failovers must be within [0, 8]")
+        if route_request is not None and not isinstance(route_request, Mapping):
+            raise BrainRunError("route_request must be a mapping or None")
+
+        effective_context = context
+        route_report: dict[str, Any] | None = None
+        if route_request is not None:
+            route_report, route_context = self._prepare_adaptive_route(
+                task=task,
+                route_request=route_request,
+            )
+            if effective_context is None:
+                effective_context = route_context
+
+        selection = self.build_adaptive_model_selection(
+            task=task,
+            model_candidates=model_candidates,
+            credentials=credentials,
+            ledger=ledger,
+            context=effective_context,
+            contextual_observations=contextual_observations,
+            required_capabilities=required_capabilities,
+            input_tokens=input_tokens,
+            requested_output_tokens=requested_output_tokens,
+            max_cost_per_million_tokens=max_cost_per_million_tokens,
+            max_latency_ms=max_latency_ms,
+            min_quality=min_quality,
+            selection_overrides=selection_overrides,
+        )
+        effective_contextual_observations = (
+            selection.get("contextual_observations", contextual_observations)
+            if effective_context is not None
+            else contextual_observations
+        )
+        attempt_selection = dict(selection)
+        failed_ids: set[str] = set()
+        failover_attempts: list[dict[str, Any]] = []
+        for attempt in range(max_provider_failovers + 1):
+            if attempt:
+                attempt_selection["models"] = [
+                    {
+                        **dict(candidate),
+                        "enabled": False
+                        if f"{candidate.get('provider')}/{candidate.get('model')}" in failed_ids
+                        else candidate.get("enabled", True),
+                    }
+                    for candidate in selection.get("models", [])
+                    if isinstance(candidate, Mapping)
+                ]
+            preview = self._preview_adaptive_selection(
+                task=task,
+                selection=attempt_selection,
+                context=effective_context,
+            )
+            selected = preview.get("selected_model")
+            if not isinstance(selected, Mapping):
+                raise BrainRunError("adaptive mission selection has no eligible provider after failover")
+            provider = selected.get("provider")
+            model = selected.get("model")
+            if not isinstance(provider, str) or not isinstance(model, str):
+                raise BrainRunError("adaptive mission selection returned malformed provider metadata")
+            selected_id = f"{provider}/{model}"
+            attempt_state: dict[str, Any] = {}
+            try:
+                result = self.run_mission(
+                    task=task,
+                    model_selection=attempt_selection,
+                    prompt=prompt,
+                    plan=plan,
+                    credentials=credentials,
+                    mission_policy=mission_policy,
+                    approve_provider_call=approve_provider_call,
+                    approve_mission_dispatch=approve_mission_dispatch,
+                    run_id=run_id,
+                    max_output_tokens=max_output_tokens,
+                    temperature=temperature,
+                    response_schema=response_schema,
+                    idempotency_key=idempotency_key,
+                    claim_requests=claim_requests,
+                    context=effective_context,
+                    contextual_observations=effective_contextual_observations,
+                    evaluator_review=evaluator_review,
+                    workflow_binding=workflow_binding,
+                    route_review=route_review,
+                    operations_gate_acceptance=operations_gate_acceptance,
+                    route_request=route_request,
+                    route_report=route_report,
+                    enforce_route_tools=enforce_route_tools,
+                    require_resolved_route=require_resolved_route,
+                    provider_tools=provider_tools,
+                    tool_choice=tool_choice,
+                    attempt_state=attempt_state,
+                )
+                if not failover_attempts:
+                    return result
+                failover_attempts.append(
+                    {
+                        "attempt": attempt,
+                        "provider": provider,
+                        "model": model,
+                        "arm_id": selected_id,
+                        "status": "completed",
+                    }
+                )
+                return replace(
+                    result,
+                    brain_run=replace(
+                        result.brain_run,
+                        provider_failover={
+                            "strategy": "deterministic_mission_selector_before_dispatch",
+                            "attempts": list(failover_attempts),
+                            "fallback_count": len(failover_attempts) - 1,
+                            "retention": "metadata_only",
+                        },
+                    ),
+                )
+            except ProviderError as error:
+                if attempt_state.get("mission_dispatch_started"):
+                    raise
+                failed_ids.add(selected_id)
+                failover_attempts.append(
+                    {
+                        "attempt": attempt,
+                        "provider": provider,
+                        "model": model,
+                        "arm_id": selected_id,
+                        "status": "provider_refused",
+                        "reason": "circuit_open" if error.circuit_open else "provider_error",
+                        "status_code": error.status_code,
+                    }
+                )
+                if attempt >= max_provider_failovers:
+                    raise
+        raise BrainRunError("adaptive mission provider failover exhausted")
+
     def run(
         self,
         *,
@@ -2206,6 +2392,8 @@ class AutonomousBrain:
         route_review: Mapping[str, Any] | None = None,
         operations_gate_acceptance: Mapping[str, Any] | None = None,
         route_request: Mapping[str, Any] | None = None,
+        route_report: Mapping[str, Any] | None = None,
+        attempt_state: dict[str, Any] | None = None,
         enforce_route_tools: bool = False,
         require_resolved_route: bool = True,
         provider_tools: Sequence[ProviderTool] = (),
@@ -2235,6 +2423,16 @@ class AutonomousBrain:
             raise BrainRunError("provider_tools must be a sequence")
         if any(not isinstance(tool, ProviderTool) for tool in provider_tools):
             raise BrainRunError("provider_tools must contain ProviderTool values")
+        if attempt_state is not None and not isinstance(attempt_state, dict):
+            raise BrainRunError("attempt_state must be a mutable mapping")
+        if attempt_state is not None:
+            attempt_state["mission_dispatch_started"] = False
+        if route_report is not None:
+            if route_request is None:
+                raise BrainRunError("route_report requires route_request")
+            if not isinstance(route_report, Mapping):
+                raise BrainRunError("route_report must be a mapping")
+            BrainLearningLedger._assert_safe(route_report)
 
         route: dict[str, Any] | None = None
         prompt_request = dict(prompt)
@@ -2265,7 +2463,11 @@ class AutonomousBrain:
                 raise BrainRunError("route_request must be JSON-safe") from error
             if len(encoded_route_request) > MAX_ROUTE_REQUEST_BYTES:
                 raise BrainRunError("route_request exceeds the bounded size")
-            route_response = self.workspace.tool("capability_route", route_arguments)
+            route_response = (
+                dict(route_report)
+                if route_report is not None
+                else self.workspace.tool("capability_route", route_arguments)
+            )
             if not isinstance(route_response, Mapping):
                 raise BrainRunError("capability route returned a non-object")
             if route_response.get("ok") is False or route_response.get("workflow") != "capability_route":
@@ -2448,6 +2650,8 @@ class AutonomousBrain:
             route_review=route_review,
             operations_gate_acceptance=operations_gate_acceptance,
         )
+        if attempt_state is not None:
+            attempt_state["mission_dispatch_started"] = True
         execution = self.workspace.tool("agent_mission", execute_request.to_mcp_arguments())
         if not isinstance(execution, Mapping):
             raise BrainRunError("agent mission execution returned a non-object")

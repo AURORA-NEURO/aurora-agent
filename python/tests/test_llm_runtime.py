@@ -1985,6 +1985,346 @@ class LlmRuntimeTests(unittest.TestCase):
         self.assertTrue(workspace.missions[1]["policy"]["execute"])  # type: ignore[index]
         self.assertNotIn("super-secret", json.dumps(result.to_dict()))
 
+    def test_adaptive_mission_reuses_one_route_across_selection_prompt_and_dispatch(self) -> None:
+        class Workspace:
+            def __init__(self) -> None:
+                self.route_calls = 0
+                self.selection_contexts: list[dict[str, object]] = []
+                self.missions: list[dict[str, object]] = []
+
+            def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+                if name == "capability_route":
+                    self.route_calls += 1
+                    return {
+                        "ok": True,
+                        "workflow": "capability_route",
+                        "route_id": "r" * 64,
+                        "catalog_digest": "c" * 64,
+                        "goal": "inspect platform",
+                        "unresolved_needs": [],
+                        "recommended_tools": ["developer_platform_status"],
+                        "needs": [
+                            {
+                                "id": "task",
+                                "resolution": "explicit",
+                                "candidate_groups": ["developer_platform"],
+                                "candidate_domains": ["engineering"],
+                                "candidate_tools": ["developer_platform_status"],
+                            }
+                        ],
+                        "route_coverage": {
+                            "candidate_domains": ["engineering"],
+                            "candidate_groups": ["developer_platform"],
+                        },
+                        "tool_schemas": [
+                            {
+                                "name": "developer_platform_status",
+                                "description": "Read bounded platform status.",
+                                "inputSchema": {"type": "object", "properties": {}},
+                            }
+                        ],
+                        "tool_schemas_omitted": 0,
+                        "schema_attachment": {"requested": True, "returned": 1, "missing": []},
+                    }
+                if name == "brain_model_select_contextual":
+                    assert arguments is not None
+                    self.selection_contexts.append(dict(arguments["context"]))  # type: ignore[arg-type]
+                    return {
+                        "context_digest": "d" * 64,
+                        "selection_status": "contextual_selection_global_history_only",
+                        "selection": {
+                            "selected_model": {"provider": "openai", "model": "test-model"},
+                            "decision_digest": "a" * 64,
+                        },
+                    }
+                if name == "brain_prompt_assemble":
+                    assert arguments is not None
+                    assert any(
+                        chunk["id"] == "capability-route"  # type: ignore[index]
+                        for chunk in arguments["context"]  # type: ignore[index]
+                    )
+                    return {
+                        "messages": [{"role": "user", "content": "inspect"}],
+                        "prompt_digest": "b" * 64,
+                    }
+                if name == "brain_plan":
+                    return {
+                        "ok": True,
+                        "plan": {
+                            "requires_approval": True,
+                            "steps": [{"effect": "provider_call"}],
+                            "plan_digest": "c" * 64,
+                        },
+                    }
+                if name == "agent_mission":
+                    assert arguments is not None
+                    self.missions.append(arguments)
+                    execute = arguments["policy"]["execute"]  # type: ignore[index]
+                    return {
+                        "ok": True,
+                        "workflow": "agent_mission",
+                        "execution": "executed" if execute else "planned",
+                        "mission_status": "succeeded" if execute else "planned",
+                        "results": [],
+                    }
+                raise AssertionError(f"unexpected tool {name}")
+
+        store = CredentialStore()
+        runtime = LLMRuntime(store)
+        runtime.register_provider(
+            openai_provider(base_url=self.base_url, allow_insecure_http=True, path="/mission")
+        )
+        handle = store.register("openai", "adaptive-mission-secret")
+        workspace = Workspace()
+        result = AutonomousBrain(workspace, runtime).run_adaptive_mission(
+            task="inspect platform",
+            model_candidates=[
+                {
+                    "provider": "openai",
+                    "model": "test-model",
+                    "capabilities": ["reasoning"],
+                    "context_window_tokens": 16_000,
+                    "max_output_tokens": 2_048,
+                    "quality": 0.9,
+                    "latency_ms": 100,
+                    "cost_per_million_tokens": 10,
+                    "reliability": 0.95,
+                }
+            ],
+            prompt={"max_input_tokens": 100},
+            plan={"allowed_tools": ["provider.invoke"], "max_cost": 10},
+            credentials={"openai": handle},
+            mission_policy={
+                "allowed_tools": ["developer_platform_status"],
+                "max_steps": 2,
+                "max_step_output_bytes": 100_000,
+                "max_total_output_bytes": 100_000,
+            },
+            route_request={"needs": [{"id": "task", "query": "platform"}]},
+            approve_provider_call=True,
+            approve_mission_dispatch=True,
+        )
+
+        self.assertEqual(result.status, "mission_dispatched")
+        self.assertEqual(workspace.route_calls, 1)
+        self.assertEqual(len(workspace.selection_contexts), 2)
+        self.assertEqual(workspace.selection_contexts[0]["domain"], "cross_domain:engineering")
+        self.assertEqual(len(workspace.missions), 2)
+        self.assertFalse(workspace.missions[0]["policy"]["execute"])  # type: ignore[index]
+        self.assertTrue(workspace.missions[1]["policy"]["execute"])  # type: ignore[index]
+        self.assertNotIn("adaptive-mission-secret", json.dumps(result.to_dict()))
+
+    def test_adaptive_mission_fails_over_before_mission_preflight(self) -> None:
+        class Workspace:
+            def __init__(self) -> None:
+                self.mission_calls = 0
+
+            def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+                if name == "brain_model_select":
+                    assert arguments is not None
+                    selected = next(
+                        model for model in arguments["models"]  # type: ignore[index]
+                        if model.get("enabled", True)  # type: ignore[union-attr]
+                    )
+                    return {
+                        "selected_model": {
+                            "provider": selected["provider"],  # type: ignore[index]
+                            "model": selected["model"],  # type: ignore[index]
+                        },
+                        "decision_digest": "a" * 64,
+                    }
+                if name == "brain_prompt_assemble":
+                    return {
+                        "messages": [{"role": "user", "content": "inspect"}],
+                        "prompt_digest": "b" * 64,
+                    }
+                if name == "brain_plan":
+                    return {
+                        "ok": True,
+                        "plan": {
+                            "requires_approval": True,
+                            "steps": [{"effect": "provider_call"}],
+                            "plan_digest": "c" * 64,
+                        },
+                    }
+                if name == "agent_mission":
+                    self.mission_calls += 1
+                    return {
+                        "ok": True,
+                        "workflow": "agent_mission",
+                        "execution": "planned",
+                        "mission_status": "planned",
+                        "results": [],
+                    }
+                raise AssertionError(f"unexpected tool {name}")
+
+        store = CredentialStore()
+        runtime = LLMRuntime(store)
+        runtime.register_provider(
+            openai_provider(base_url=self.base_url, allow_insecure_http=True, path="/failure")
+        )
+        runtime.register_provider(
+            ProviderConfig(
+                provider="fallback",
+                base_url=self.base_url,
+                path="/mission",
+                allow_insecure_http=True,
+            )
+        )
+        primary_handle = store.register("openai", "primary-mission-secret")
+        fallback_handle = store.register("fallback", "fallback-mission-secret")
+        workspace = Workspace()
+        result = AutonomousBrain(workspace, runtime).run_adaptive_mission(
+            task="inspect",
+            model_candidates=[
+                {
+                    "provider": "openai",
+                    "model": "test-model",
+                    "context_window_tokens": 16_000,
+                    "max_output_tokens": 2_048,
+                    "quality": 0.99,
+                    "latency_ms": 10,
+                    "cost_per_million_tokens": 1,
+                    "reliability": 0.99,
+                },
+                {
+                    "provider": "fallback",
+                    "model": "test-model",
+                    "context_window_tokens": 16_000,
+                    "max_output_tokens": 2_048,
+                    "quality": 0.8,
+                    "latency_ms": 20,
+                    "cost_per_million_tokens": 2,
+                    "reliability": 0.9,
+                },
+            ],
+            prompt={"max_input_tokens": 100},
+            plan={"allowed_tools": ["provider.invoke"], "max_cost": 10},
+            credentials={"openai": primary_handle, "fallback": fallback_handle},
+            mission_policy={
+                "allowed_tools": ["developer_platform_status"],
+                "max_steps": 2,
+                "max_step_output_bytes": 100_000,
+                "max_total_output_bytes": 100_000,
+            },
+            approve_provider_call=True,
+            max_provider_failovers=1,
+        )
+
+        self.assertEqual(result.status, "mission_approval_required")
+        self.assertEqual(result.brain_run.response.provider, "fallback")  # type: ignore[union-attr]
+        self.assertEqual(result.brain_run.provider_failover["fallback_count"], 1)  # type: ignore[index]
+        self.assertEqual(result.brain_run.provider_failover["attempts"][0]["status"], "provider_refused")  # type: ignore[index]
+        self.assertEqual(workspace.mission_calls, 1)
+        self.assertNotIn("primary-mission-secret", json.dumps(result.to_dict()))
+        self.assertNotIn("fallback-mission-secret", json.dumps(result.to_dict()))
+
+    def test_adaptive_mission_never_retries_after_dispatch_starts(self) -> None:
+        class Workspace:
+            def __init__(self) -> None:
+                self.dispatch_calls = 0
+
+            def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+                if name == "brain_model_select":
+                    assert arguments is not None
+                    selected = next(
+                        model for model in arguments["models"]  # type: ignore[index]
+                        if model.get("enabled", True)  # type: ignore[union-attr]
+                    )
+                    return {
+                        "selected_model": {
+                            "provider": selected["provider"],  # type: ignore[index]
+                            "model": selected["model"],  # type: ignore[index]
+                        },
+                        "decision_digest": "a" * 64,
+                    }
+                if name == "brain_prompt_assemble":
+                    return {
+                        "messages": [{"role": "user", "content": "inspect"}],
+                        "prompt_digest": "b" * 64,
+                    }
+                if name == "brain_plan":
+                    return {
+                        "ok": True,
+                        "plan": {
+                            "requires_approval": True,
+                            "steps": [{"effect": "provider_call"}],
+                            "plan_digest": "c" * 64,
+                        },
+                    }
+                if name == "agent_mission":
+                    assert arguments is not None
+                    if arguments["policy"]["execute"]:  # type: ignore[index]
+                        self.dispatch_calls += 1
+                        raise ProviderError("mission dispatch failed after authorization")
+                    return {
+                        "ok": True,
+                        "workflow": "agent_mission",
+                        "execution": "planned",
+                        "mission_status": "planned",
+                        "results": [],
+                    }
+                raise AssertionError(f"unexpected tool {name}")
+
+        self.server.request_paths = []  # type: ignore[attr-defined]
+        store = CredentialStore()
+        runtime = LLMRuntime(store)
+        runtime.register_provider(
+            openai_provider(base_url=self.base_url, allow_insecure_http=True, path="/mission")
+        )
+        runtime.register_provider(
+            ProviderConfig(
+                provider="fallback",
+                base_url=self.base_url,
+                path="/mission",
+                allow_insecure_http=True,
+            )
+        )
+        primary_handle = store.register("openai", "primary-dispatch-secret")
+        fallback_handle = store.register("fallback", "fallback-dispatch-secret")
+        workspace = Workspace()
+        models = [
+            {
+                "provider": "openai",
+                "model": "test-model",
+                "context_window_tokens": 16_000,
+                "max_output_tokens": 2_048,
+                "quality": 0.99,
+                "latency_ms": 10,
+                "cost_per_million_tokens": 1,
+                "reliability": 0.99,
+            },
+            {
+                "provider": "fallback",
+                "model": "test-model",
+                "context_window_tokens": 16_000,
+                "max_output_tokens": 2_048,
+                "quality": 0.8,
+                "latency_ms": 20,
+                "cost_per_million_tokens": 2,
+                "reliability": 0.9,
+            },
+        ]
+        with self.assertRaises(ProviderError):
+            AutonomousBrain(workspace, runtime).run_adaptive_mission(
+                task="inspect",
+                model_candidates=models,
+                prompt={"max_input_tokens": 100},
+                plan={"allowed_tools": ["provider.invoke"], "max_cost": 10},
+                credentials={"openai": primary_handle, "fallback": fallback_handle},
+                mission_policy={
+                    "allowed_tools": ["developer_platform_status"],
+                    "max_steps": 2,
+                    "max_step_output_bytes": 100_000,
+                    "max_total_output_bytes": 100_000,
+                },
+                approve_provider_call=True,
+                approve_mission_dispatch=True,
+                max_provider_failovers=1,
+            )
+        self.assertEqual(workspace.dispatch_calls, 1)
+        self.assertEqual(self.server.request_paths.count("/mission"), 1)  # type: ignore[attr-defined]
+
     def test_evaluator_outcome_is_persisted_without_provider_text_or_credentials(self) -> None:
         class Workspace:
             def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:

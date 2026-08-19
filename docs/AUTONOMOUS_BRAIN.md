@@ -191,6 +191,46 @@ route-aware authorization bridge; its
 dispatch approval. The model catalogue remains caller-supplied because model availability,
 pricing, and quality priors are deployment-specific; provider keys never belong in that catalogue.
 
+For the complete cross-domain path, `AutonomousBrain.run_adaptive_mission(...)` composes the
+same contracts into one bounded operation:
+
+```python
+mission = brain.run_adaptive_mission(
+    task="inspect the current platform and prepare a release evidence report",
+    model_candidates=model_catalogue,
+    prompt={"max_input_tokens": 12_000},
+    plan={"allowed_tools": ["provider.invoke"], "max_cost": 10},
+    credentials={"openai": handle},
+    mission_policy=MissionPolicy(
+        allowed_tools=("developer_platform_status", "release_audit"),
+        max_steps=8,
+        max_step_output_bytes=200_000,
+        max_total_output_bytes=1_000_000,
+    ),
+    route_request={
+        "needs": [{"id": "release", "query": "platform release evidence"}],
+        "risk_class": "release_review",
+    },
+    ledger=ledger,
+    approve_provider_call=True,
+    approve_mission_dispatch=False,  # inspect preflight before enabling effects
+)
+```
+
+The operation resolves the live capability route once, derives contextual selection labels from
+that route, selects an eligible provider through the health-gated kernel, assembles the route into
+the bounded prompt, validates the provider plan, parses the structured mission proposal, and sends
+that proposal to `agent_mission` with `execute=false`. A caller can review `mission.preflight` and
+then issue a deliberate second call with dispatch approval. Route candidates, mission allow-lists,
+schemas, budgets, claims, evaluator bindings, and operations gates remain caller/server-owned; the
+model cannot widen any of them.
+
+If the selected provider refuses before the mission reaches preflight, the method records
+metadata-only attempt evidence, disables that provider/model, and deterministically selects the
+next eligible candidate. Once `agent_mission` dispatch starts, a later transport failure is
+surfaced without replaying the proposal against another provider. This keeps cross-domain
+failover useful while preventing duplicate external effects.
+
 ## Provider-neutral boundary
 
 The current Python runtime supports:
