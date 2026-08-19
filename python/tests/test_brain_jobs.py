@@ -21,7 +21,7 @@ from prism_sdk.evaluators import (
     builtin_autonomous_domain_evaluator_profiles,
 )
 from prism_sdk.jobs import BrainJobError, BrainJobStore
-from prism_sdk.control_plane import BrainApprovalRouter
+from prism_sdk.control_plane import BrainApprovalRouter, BrainReconciliationRouter
 from prism_sdk.llm_runtime import LLMRuntime
 
 
@@ -149,6 +149,114 @@ class BrainJobStoreTests(unittest.TestCase):
                 self.assertEqual(released.state, "queued")
                 claimed = store.claim("job-1", "worker-b")
                 self.assertEqual(claimed.state, "leased")
+
+    def test_reconciliation_closes_uncertain_effects_and_is_idempotent(self) -> None:
+        with TemporaryDirectory() as directory:
+            with BrainJobStore(f"{directory}/jobs.sqlite3") as store:
+                store.submit(_job_packet())
+                store.claim("job-1", "worker-a")
+                store.checkpoint(
+                    "job-1",
+                    "worker-a",
+                    phase="dispatch_started",
+                    checkpoint={"private_task_digest": "a" * 64},
+                    side_effect_boundary="dispatched",
+                )
+                quarantined = store.fail("job-1", "worker-a", reason="transport outcome uncertain")
+                self.assertEqual(quarantined.state, "reconciliation_required")
+                self.assertEqual(quarantined.checkpoint["private_task_digest"], "a" * 64)
+
+                router = BrainReconciliationRouter(store)
+                receipt = router.resolve(
+                    "job-1",
+                    outcome="succeeded",
+                    evidence_digest="b" * 64,
+                    evidence_kind="provider_status_receipt",
+                    operator="operator-1",
+                    reason="provider status confirmed completion",
+                    metadata={"status_code": 200, "verification": "caller-owned"},
+                )
+                self.assertEqual(receipt.state, "succeeded")
+                self.assertFalse(receipt.idempotent)
+                self.assertEqual(router.get("job-1").outcome, "succeeded")  # type: ignore[union-attr]
+                repeated = router.resolve(
+                    "job-1",
+                    outcome="succeeded",
+                    evidence_digest="b" * 64,
+                    evidence_kind="provider_status_receipt",
+                    operator="operator-1",
+                    reason="provider status confirmed completion",
+                    metadata={"status_code": 200, "verification": "caller-owned"},
+                )
+                self.assertTrue(repeated.idempotent)
+                with self.assertRaises(BrainRunError):
+                    router.resolve(
+                        "job-1",
+                        outcome="failed",
+                        evidence_digest="c" * 64,
+                        operator="operator-2",
+                        reason="conflicting observation",
+                    )
+                serialized = str(store.get("job-1").to_dict())  # type: ignore[union-attr]
+                self.assertNotIn("private task", serialized)
+                self.assertTrue(store.verify_integrity()["ok"])
+
+    def test_reconciliation_requires_proven_no_effect_before_retry(self) -> None:
+        with TemporaryDirectory() as directory:
+            with BrainJobStore(f"{directory}/jobs.sqlite3") as store:
+                store.submit(_job_packet())
+                store.claim("job-1", "worker-a")
+                store.checkpoint(
+                    "job-1",
+                    "worker-a",
+                    phase="dispatch_started",
+                    checkpoint={"dispatch": "uncertain"},
+                    side_effect_boundary="dispatched",
+                )
+                store.fail("job-1", "worker-a", reason="worker stopped after dispatch")
+                router = BrainReconciliationRouter(store)
+                pending = router.pending()[0]
+                self.assertEqual(pending.job_id, "job-1")
+                self.assertEqual(pending.state, "reconciliation_required")
+                deferred = router.resolve(
+                    "job-1",
+                    outcome="unknown",
+                    evidence_digest="d" * 64,
+                    operator="operator-1",
+                    reason="provider status is still unavailable",
+                )
+                self.assertEqual(deferred.state, "reconciliation_required")
+                self.assertEqual(router.pending()[0].outcome, "unknown")
+                with self.assertRaises(BrainRunError):
+                    router.resolve(
+                        "job-1",
+                        outcome="not_executed",
+                        evidence_digest="e" * 64,
+                        operator="operator-1",
+                        reason="missing explicit no-effect proof",
+                    )
+                retried = router.resolve(
+                    "job-1",
+                    outcome="not_executed",
+                    evidence_digest="f" * 64,
+                    evidence_kind="idempotency_probe",
+                    operator="operator-1",
+                    reason="caller verified no external effect was committed",
+                    metadata={"effect_absent": True},
+                )
+                self.assertEqual(retried.state, "queued")
+                self.assertEqual(store.get("job-1").side_effect_boundary, "not_started")  # type: ignore[union-attr]
+                claimed = store.claim("job-1", "worker-b")
+                self.assertEqual(claimed.state, "leased")
+                self.assertIn("reconciliation", claimed.checkpoint)
+                with self.assertRaises(BrainJobError):
+                    store.reconcile(
+                        "job-1",
+                        outcome="failed",
+                        evidence_digest="0" * 64,
+                        operator="operator-2",
+                        reason="reconcile again",
+                    )
 
     def test_cooperative_release_preserves_checkpoint_and_requires_owner(self) -> None:
         with TemporaryDirectory() as directory:

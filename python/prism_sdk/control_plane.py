@@ -28,11 +28,20 @@ from .brain import (
     BrainOutcomeEvaluator,
 )
 from .evaluators import DomainEvaluatorRegistry
-from .jobs import BrainJobError, BrainJobEvent, BrainJobRecord, BrainJobStore
+from .jobs import (
+    JOB_RECONCILIATION_OUTCOMES,
+    JOB_RECONCILIATION_SCHEMA,
+    BrainJobError,
+    BrainJobEvent,
+    BrainJobRecord,
+    BrainJobStore,
+    _reconciliation_payload,
+)
 from .memory import _canonical, _safe_value, _valid_digest
 
 
 CONTROL_PLANE_SCHEMA = "bioprism-brain-control-plane/0.1"
+RECONCILIATION_SCHEMA = JOB_RECONCILIATION_SCHEMA
 MODEL_OBSERVATION_SCHEMA = "bioprism-brain-model-observation/0.1"
 MODEL_HEALTH_SCHEMA = "bioprism-brain-model-health/0.1"
 REPLAY_CASE_SCHEMA = "bioprism-brain-replay-case/0.1"
@@ -282,6 +291,186 @@ class BrainApprovalRouter:
         return int(value * 1_000_000_000)
 
 
+@dataclass(frozen=True, slots=True)
+class BrainReconciliationReceipt:
+    """Metadata-only receipt for a caller-verified external-effect decision."""
+
+    job_id: str
+    outcome: str
+    evidence_digest: str
+    evidence_kind: str
+    operator: str
+    reason: str
+    decision_digest: str
+    state: str
+    idempotent: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": RECONCILIATION_SCHEMA,
+            "job_id": self.job_id,
+            "outcome": self.outcome,
+            "evidence_digest": self.evidence_digest,
+            "evidence_kind": self.evidence_kind,
+            "operator": self.operator,
+            "reason": self.reason,
+            "decision_digest": self.decision_digest,
+            "state": self.state,
+            "idempotent": self.idempotent,
+            "retention": "decision_metadata_and_evidence_digest_only",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class BrainReconciliationPending:
+    """Compact projection for a quarantined job that has no decision yet."""
+
+    job_id: str
+    domain: str
+    capability: str
+    risk_class: str
+    state: str
+    side_effect_boundary: str
+    attempts: int
+    reason: str | None
+    record_digest: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": RECONCILIATION_SCHEMA,
+            "job_id": self.job_id,
+            "domain": self.domain,
+            "capability": self.capability,
+            "risk_class": self.risk_class,
+            "state": self.state,
+            "side_effect_boundary": self.side_effect_boundary,
+            "attempts": self.attempts,
+            "reason": self.reason,
+            "record_digest": self.record_digest,
+            "retention": "quarantine_metadata_only; evidence_not_yet_submitted",
+        }
+
+
+class BrainReconciliationRouter:
+    """Resolve quarantined jobs through an explicit, idempotent caller decision."""
+
+    def __init__(self, store: BrainJobStore) -> None:
+        if not isinstance(store, BrainJobStore):
+            raise BrainRunError("reconciliation router requires a BrainJobStore")
+        self.store = store
+
+    def resolve(
+        self,
+        job_id: str,
+        *,
+        outcome: str,
+        evidence_digest: str,
+        evidence_kind: str = "caller_observation",
+        operator: str = "caller",
+        reason: str = "caller reconciled uncertain external state",
+        metadata: Mapping[str, Any] | None = None,
+    ) -> BrainReconciliationReceipt:
+        if not isinstance(outcome, str) or outcome not in JOB_RECONCILIATION_OUTCOMES:
+            raise BrainRunError(f"unknown reconciliation outcome: {outcome}")
+        try:
+            decision = _reconciliation_payload(
+                outcome=outcome,
+                evidence_digest=evidence_digest,
+                evidence_kind=evidence_kind,
+                operator=operator,
+                reason=reason,
+                metadata=metadata,
+            )
+        except BrainJobError as error:
+            raise BrainRunError("reconciliation decision is malformed") from error
+        before = self.store.get(job_id)
+        try:
+            record = self.store.reconcile(
+                job_id,
+                outcome=outcome,
+                evidence_digest=evidence_digest,
+                evidence_kind=evidence_kind,
+                operator=operator,
+                reason=reason,
+                metadata=metadata,
+            )
+        except BrainJobError as error:
+            raise BrainRunError("job reconciliation was refused") from error
+        retained = record.checkpoint.get("reconciliation")
+        if not isinstance(retained, Mapping) or retained.get("schema") != RECONCILIATION_SCHEMA:
+            raise BrainRunError("reconciliation decision was not retained in the job checkpoint")
+        return BrainReconciliationReceipt(
+            job_id=record.job_id,
+            outcome=retained["outcome"],
+            evidence_digest=retained["evidence_digest"],
+            evidence_kind=retained["evidence_kind"],
+            operator=retained["operator"],
+            reason=retained["reason"],
+            decision_digest=retained["decision_digest"],
+            state=record.state,
+            idempotent=bool(
+                before is not None
+                and isinstance(before.checkpoint.get("reconciliation"), Mapping)
+                and before.checkpoint["reconciliation"].get("decision_digest") == decision["decision_digest"]
+            ),
+        )
+
+    def get(self, job_id: str) -> BrainReconciliationPending | BrainReconciliationReceipt | None:
+        record = self.store.get(job_id)
+        if record is None:
+            return None
+        retained = record.checkpoint.get("reconciliation")
+        if not isinstance(retained, Mapping) or retained.get("schema") != RECONCILIATION_SCHEMA:
+            return None if record.state != "reconciliation_required" else self._pending_record(record)
+        return BrainReconciliationReceipt(
+            job_id=record.job_id,
+            outcome=retained["outcome"],
+            evidence_digest=retained["evidence_digest"],
+            evidence_kind=retained["evidence_kind"],
+            operator=retained["operator"],
+            reason=retained["reason"],
+            decision_digest=retained["decision_digest"],
+            state=record.state,
+        )
+
+    def pending(self, *, limit: int = 100) -> tuple[BrainReconciliationPending | BrainReconciliationReceipt, ...]:
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= MAX_CONTROL_PAGE:
+            raise BrainRunError(f"reconciliation limit must be within [1, {MAX_CONTROL_PAGE}]")
+        receipts: list[BrainReconciliationPending | BrainReconciliationReceipt] = []
+        for record in self.store.inventory(limit=limit, state="reconciliation_required"):
+            retained = record.checkpoint.get("reconciliation")
+            if isinstance(retained, Mapping) and retained.get("schema") == RECONCILIATION_SCHEMA:
+                receipts.append(
+                    BrainReconciliationReceipt(
+                        job_id=record.job_id,
+                        outcome=retained["outcome"],
+                        evidence_digest=retained["evidence_digest"],
+                        evidence_kind=retained["evidence_kind"],
+                        operator=retained["operator"],
+                        reason=retained["reason"],
+                        decision_digest=retained["decision_digest"],
+                        state=record.state,
+                    )
+                )
+            else:
+                receipts.append(self._pending_record(record))
+        return tuple(receipts)
+
+    @staticmethod
+    def _pending_record(record: BrainJobRecord) -> BrainReconciliationPending:
+        return BrainReconciliationPending(
+            job_id=record.job_id,
+            domain=record.domain,
+            capability=record.capability,
+            risk_class=record.risk_class,
+            state=record.state,
+            side_effect_boundary=record.side_effect_boundary,
+            attempts=record.attempts,
+            reason=record.reason,
+            record_digest=record.record_digest,
+        )
+
+
 class BrainControlPlane:
     """Operator/worker facade over jobs, cursor events, and approval decisions."""
 
@@ -290,6 +479,7 @@ class BrainControlPlane:
             raise BrainRunError("control plane requires a BrainJobStore")
         self.store = store
         self.approvals = BrainApprovalRouter(store)
+        self.reconciliations = BrainReconciliationRouter(store)
 
     def submit(self, packet: Mapping[str, Any]) -> tuple[BrainJobRecord, Mapping[str, Any]]:
         record, receipt = self.store.submit(packet)
@@ -1215,6 +1405,9 @@ __all__ = [
     "BrainApprovalRouter",
     "BrainControlEventPage",
     "BrainControlPlane",
+    "BrainReconciliationPending",
+    "BrainReconciliationReceipt",
+    "BrainReconciliationRouter",
     "BrainModelHealth",
     "BrainModelHealthStore",
     "BrainModelObservation",
@@ -1223,6 +1416,7 @@ __all__ = [
     "BrainReplayReport",
     "BrainWorker",
     "CONTROL_PLANE_SCHEMA",
+    "RECONCILIATION_SCHEMA",
     "MODEL_HEALTH_SCHEMA",
     "MODEL_OBSERVATION_SCHEMA",
     "REPLAY_CASE_SCHEMA",

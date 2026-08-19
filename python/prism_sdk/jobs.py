@@ -18,7 +18,7 @@ from pathlib import Path
 import sqlite3
 import threading
 import time
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Mapping
 import uuid
 
 from .memory import (
@@ -52,6 +52,8 @@ JOB_STATES = frozenset(
     }
 )
 JOB_BOUNDARIES = ("not_started", "preflight", "dispatched", "unknown")
+JOB_RECONCILIATION_OUTCOMES = frozenset({"succeeded", "failed", "not_executed", "unknown"})
+JOB_RECONCILIATION_SCHEMA = "bioprism-brain-job-reconciliation/0.1"
 _BOUNDARY_ORDER = {value: index for index, value in enumerate(JOB_BOUNDARIES)}
 
 
@@ -71,6 +73,42 @@ def _job_text(name: str, value: Any, maximum: int = MAX_JOB_LABEL_BYTES) -> str:
         return _bounded_string(value, name=name, maximum=maximum)
     except BrainMemoryError as error:
         raise BrainJobError(str(error)) from error
+
+
+def _reconciliation_payload(
+    *,
+    outcome: str,
+    evidence_digest: str,
+    evidence_kind: str,
+    operator: str,
+    reason: str,
+    metadata: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if not isinstance(outcome, str) or outcome not in JOB_RECONCILIATION_OUTCOMES:
+        raise BrainJobError(f"unknown reconciliation outcome: {outcome}")
+    if not _valid_digest(evidence_digest):
+        raise BrainJobError("reconciliation evidence_digest must be a lowercase SHA-256 digest")
+    evidence_kind = _job_text("reconciliation evidence_kind", evidence_kind, 128)
+    operator = _job_text("reconciliation operator", operator, MAX_JOB_ID_BYTES)
+    reason = _job_text("reconciliation reason", reason, MAX_JOB_REASON_BYTES)
+    safe_metadata = _safe_job_value({} if metadata is None else metadata)
+    if not isinstance(safe_metadata, Mapping):
+        raise BrainJobError("reconciliation metadata must be a mapping")
+    if outcome == "not_executed" and safe_metadata.get("effect_absent") is not True:
+        raise BrainJobError("not_executed reconciliation requires metadata.effect_absent=True")
+    payload = {
+        "schema": JOB_RECONCILIATION_SCHEMA,
+        "outcome": outcome,
+        "evidence_digest": evidence_digest,
+        "evidence_kind": evidence_kind,
+        "operator": operator,
+        "reason": reason,
+        "metadata": dict(safe_metadata),
+    }
+    if len(_canonical(payload).encode("utf-8")) > MAX_JOB_CHECKPOINT_BYTES:
+        raise BrainJobError("reconciliation metadata exceeds the bounded size")
+    payload["decision_digest"] = _digest(payload)
+    return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -406,7 +444,7 @@ class BrainJobStore:
                     "UPDATE brain_jobs SET lease_expires_ns = ?, updated_ns = ? WHERE job_id = ?",
                     (expires, self._now_ns(), record.job_id),
                 )
-                event = self._append_event_locked(
+                self._append_event_locked(
                     event_type="job_lease_renewed",
                     job_id=record.job_id,
                     details={"lease_owner": worker_id, "lease_expires_ns": expires},
@@ -567,6 +605,11 @@ class BrainJobStore:
                 else:
                     state = "dead_lettered" if record.attempts >= record.max_attempts else "failed"
                     event_type = "job_dead_lettered" if state == "dead_lettered" else "job_failed"
+                checkpoint = {
+                    **dict(record.checkpoint),
+                    "phase": "failed",
+                    "reason": reason,
+                }
                 self._transition_locked(
                     record,
                     event_type=event_type,
@@ -574,11 +617,110 @@ class BrainJobStore:
                     reason=reason,
                     lease_owner=None,
                     lease_expires_ns=None,
-                    checkpoint={"phase": "failed", "reason": reason},
+                    checkpoint=checkpoint,
                 )
                 self._connection.execute("COMMIT")
                 return self._row_to_record(
                     self._connection.execute("SELECT * FROM brain_jobs WHERE job_id = ?", (record.job_id,)).fetchone()
+                )
+            except Exception:
+                self._connection.execute("ROLLBACK")
+                raise
+
+    def reconcile(
+        self,
+        job_id: str,
+        *,
+        outcome: str,
+        evidence_digest: str,
+        evidence_kind: str = "caller_observation",
+        operator: str = "caller",
+        reason: str = "caller reconciled uncertain external state",
+        metadata: Mapping[str, Any] | None = None,
+    ) -> BrainJobRecord:
+        """Resolve an uncertain external effect without replaying it implicitly.
+
+        ``succeeded`` and ``failed`` close the job with the caller's verified outcome.
+        ``not_executed`` is the only outcome that can safely return the job to the queue; it
+        resets the side-effect boundary only because the caller has explicitly supplied evidence
+        that no external effect occurred. ``unknown`` records a bounded review decision while
+        keeping the job quarantined. Raw evidence remains caller-owned and only its digest and
+        value-only metadata are retained.
+        """
+
+        job_id = _job_text("job_id", job_id, MAX_JOB_ID_BYTES)
+        decision = _reconciliation_payload(
+            outcome=outcome,
+            evidence_digest=evidence_digest,
+            evidence_kind=evidence_kind,
+            operator=operator,
+            reason=reason,
+            metadata=metadata,
+        )
+        with self._lock:
+            self._begin_locked()
+            try:
+                row = self._connection.execute("SELECT * FROM brain_jobs WHERE job_id = ?", (job_id,)).fetchone()
+                if row is None:
+                    raise BrainJobError("unknown brain job")
+                record = self._row_to_record(row)
+                existing = record.checkpoint.get("reconciliation")
+                if isinstance(existing, Mapping):
+                    retained_phase = record.checkpoint.get("phase")
+                    if retained_phase not in {
+                        "reconciliation_deferred",
+                        "reconciliation_retry_queued",
+                        "reconciliation_completed",
+                    }:
+                        raise BrainJobError("job checkpoint contains untrusted reconciliation metadata")
+                    if existing.get("decision_digest") == decision["decision_digest"]:
+                        self._connection.execute("COMMIT")
+                        return record
+                    if record.state != "reconciliation_required" or existing.get("outcome") != "unknown":
+                        raise BrainJobError("job already has a different reconciliation decision")
+                if record.state != "reconciliation_required":
+                    raise BrainJobError("job is not awaiting reconciliation")
+                if outcome == "not_executed" and record.attempts >= record.max_attempts:
+                    raise BrainJobError("reconciliation retry is unavailable after maximum attempts")
+                if outcome == "succeeded":
+                    state = "succeeded"
+                    event_type = "job_reconciled_succeeded"
+                    phase = "reconciliation_completed"
+                    boundary = record.side_effect_boundary
+                elif outcome == "failed":
+                    state = "failed"
+                    event_type = "job_reconciled_failed"
+                    phase = "reconciliation_completed"
+                    boundary = record.side_effect_boundary
+                elif outcome == "not_executed":
+                    state = "queued"
+                    event_type = "job_reconciliation_retry_queued"
+                    phase = "reconciliation_retry_queued"
+                    boundary = "not_started"
+                else:
+                    state = "reconciliation_required"
+                    event_type = "job_reconciliation_deferred"
+                    phase = "reconciliation_deferred"
+                    boundary = record.side_effect_boundary
+                checkpoint = {
+                    **dict(record.checkpoint),
+                    "phase": phase,
+                    "reconciliation": decision,
+                }
+                self._transition_locked(
+                    record,
+                    event_type=event_type,
+                    state=state,
+                    reason=reason,
+                    lease_owner=None,
+                    lease_expires_ns=None,
+                    checkpoint=checkpoint,
+                    side_effect_boundary=boundary,
+                    allow_reconciliation_reset=outcome == "not_executed",
+                )
+                self._connection.execute("COMMIT")
+                return self._row_to_record(
+                    self._connection.execute("SELECT * FROM brain_jobs WHERE job_id = ?", (job_id,)).fetchone()
                 )
             except Exception:
                 self._connection.execute("ROLLBACK")
@@ -870,13 +1012,23 @@ class BrainJobStore:
         checkpoint: Mapping[str, Any] | None = None,
         side_effect_boundary: str | None = None,
         attempts: int | None = None,
+        allow_reconciliation_reset: bool = False,
     ) -> BrainJobEventReceipt:
         if state not in JOB_STATES:
             raise BrainJobError(f"unknown job state: {state}")
         if reason is not None:
             reason = _job_text("job reason", reason, MAX_JOB_REASON_BYTES)
         next_boundary = record.side_effect_boundary if side_effect_boundary is None else side_effect_boundary
-        if next_boundary not in JOB_BOUNDARIES or _BOUNDARY_ORDER[next_boundary] < _BOUNDARY_ORDER[record.side_effect_boundary]:
+        if next_boundary not in JOB_BOUNDARIES:
+            raise BrainJobError("job side_effect_boundary cannot move backwards")
+        if (
+            _BOUNDARY_ORDER[next_boundary] < _BOUNDARY_ORDER[record.side_effect_boundary]
+            and not (
+                allow_reconciliation_reset
+                and record.state == "reconciliation_required"
+                and next_boundary == "not_started"
+            )
+        ):
             raise BrainJobError("job side_effect_boundary cannot move backwards")
         next_checkpoint = dict(record.checkpoint) if checkpoint is None else dict(_safe_job_value(checkpoint))
         if len(_canonical(next_checkpoint).encode("utf-8")) > MAX_JOB_CHECKPOINT_BYTES:
@@ -1081,6 +1233,8 @@ __all__ = [
     "BrainJobEventReceipt",
     "BrainJobRecord",
     "BrainJobStore",
+    "JOB_RECONCILIATION_OUTCOMES",
+    "JOB_RECONCILIATION_SCHEMA",
     "JOB_EVENT_SCHEMA",
     "JOB_SCHEMA",
 ]

@@ -1278,6 +1278,35 @@ approval decision as an authorization to set `approve_mission_dispatch=True`. An
 an active cycle is conservatively recorded as reconciliation-required because the process cannot
 infer whether a remote effect began.
 
+### Resolving an uncertain external effect
+
+`reconciliation_required` is a quarantine, not a retry policy. A caller or operator must inspect
+provider status, an idempotency receipt, a mission trace, or another authoritative external record
+and submit only the evidence digest plus bounded value-only metadata. `BrainReconciliationRouter`
+is explicit and idempotent:
+
+```python
+from prism_sdk import BrainControlPlane, BrainJobStore
+
+with BrainJobStore("state/brain-jobs.sqlite3") as jobs:
+    control = BrainControlPlane(jobs)
+    receipt = control.reconciliations.resolve(
+        job_id,
+        outcome="succeeded",  # or "failed", "not_executed", "unknown"
+        evidence_digest=provider_receipt_digest,
+        evidence_kind="provider_status_receipt",
+        operator="release-operator",
+        reason="provider receipt confirms the request completed",
+        metadata={"status_code": 200, "effect_absent": False},
+    )
+```
+
+`succeeded` and `failed` close the job without replaying it. `unknown` records the review while
+keeping the quarantine. Only `not_executed` may return the job to `queued`, and that decision
+explicitly resets the side-effect boundary because the caller has verified that no external effect
+was committed. Repeating the same decision is idempotent; a conflicting decision is refused. Raw
+provider responses, prompts, task text, credentials, and trace bodies never enter the job journal.
+
 ### Durable workflow jobs
 
 Mission learning jobs and staged workflow jobs use the same journal, but they have different

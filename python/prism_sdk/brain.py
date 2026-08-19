@@ -3357,7 +3357,11 @@ class AutonomousBrain:
                 job.job_id,
                 worker_id,
                 phase="resolving_spec",
-                checkpoint={"spec_digest": job.spec_digest, "attempt": job.attempts},
+                checkpoint={
+                    **dict(job.checkpoint),
+                    "spec_digest": job.spec_digest,
+                    "attempt": job.attempts,
+                },
                 side_effect_boundary="not_started",
             )
             resolved = resolver(job.to_dict())
@@ -3388,7 +3392,11 @@ class AutonomousBrain:
                 job.job_id,
                 worker_id,
                 phase="learning_cycle_started",
-                checkpoint={"spec_digest": job.spec_digest, "attempt": job.attempts},
+                checkpoint={
+                    **dict(job.checkpoint),
+                    "spec_digest": job.spec_digest,
+                    "attempt": job.attempts,
+                },
                 side_effect_boundary="not_started",
             )
             execution_started = True
@@ -3490,7 +3498,10 @@ class AutonomousBrain:
                     job.job_id,
                     worker_id,
                     phase="execution_error",
-                    checkpoint={"error_class": error_class},
+                    checkpoint={
+                        **dict(job.checkpoint),
+                        "error_class": error_class,
+                    },
                     side_effect_boundary=boundary,
                 )
                 failed = store.fail(
