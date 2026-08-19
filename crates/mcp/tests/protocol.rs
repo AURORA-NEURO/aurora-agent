@@ -8642,12 +8642,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(30));
-    assert_eq!(result["unique_catalog_tools"], json!(245));
-    assert_eq!(result["advertised_tool_count"], json!(245));
+    assert_eq!(result["unique_catalog_tools"], json!(251));
+    assert_eq!(result["advertised_tool_count"], json!(251));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(245));
-    assert_eq!(result["schema_quality"]["valid"], json!(245));
+    assert_eq!(result["schema_quality"]["checked"], json!(251));
+    assert_eq!(result["schema_quality"]["valid"], json!(251));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
