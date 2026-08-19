@@ -757,6 +757,10 @@ learning = agent.evaluate_tool_receipts(
 caller_owned_bandit_state = learning.next_bandit_state
 ```
 
+Evidence keys may use the short `call_id` while IDs are unique within the selected batch. If a
+provider reuses a call ID in a later execution, use the namespaced `execution_id:call_id` key;
+the learning identity is always the execution/call pair, never the provider's local call ID alone.
+
 The returned `AutonomousToolLearningReport` includes per-domain/status counts, evaluator and
 decision digests, optional ledger recording metadata, and a batch digest. It never includes tool
 arguments, output bodies, provider messages, credentials, or raw evaluator evidence. Receipts

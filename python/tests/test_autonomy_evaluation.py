@@ -127,6 +127,49 @@ def test_live_receipt_batch_evaluation_advances_bandit_without_transport_reward_
     assert "arguments" not in json.dumps(report.to_dict()).lower()
 
 
+def test_live_receipt_batch_namespaces_reused_provider_call_ids_by_execution() -> None:
+    receipts = (
+        AutonomousDomainToolReceipt(
+            call_id="reused-call-id",
+            tool="workspace_lookup",
+            status="executed",
+            execution_id="execution-a",
+            domain="coding",
+            capability="discovery",
+            risk_class="read_only",
+        ),
+        AutonomousDomainToolReceipt(
+            call_id="reused-call-id",
+            tool="workspace_lookup",
+            status="executed",
+            execution_id="execution-b",
+            domain="operations",
+            capability="discovery",
+            risk_class="read_only",
+        ),
+    )
+    evaluator = AutonomousToolOutcomeEvaluator(
+        lambda value: {
+            "reward": 1.0 if value["evidence"].get("accepted") else -1.0,
+            "passed": bool(value["evidence"].get("accepted")),
+        },
+        evaluator_id="namespaced-tool-quality",
+        evaluator_version="v1",
+    )
+    report = evaluator.evaluate_receipts(
+        receipts,
+        evidence={
+            "execution-a:reused-call-id": {"accepted": True},
+            "execution-b:reused-call-id": {"accepted": False},
+        },
+    )
+    assert report.receipts == 2
+    assert [item["reward"] for item in report.evaluations] == [1.0, -1.0]
+
+    with pytest.raises(ArgumentError, match="duplicate execution_id/call_id"):
+        evaluator.evaluate_receipts((receipts[0], replace(receipts[0])))
+
+
 def test_replay_covers_every_autonomous_domain_and_reports_disagreement() -> None:
     evaluator = AutonomousToolOutcomeEvaluator(
         lambda input_value: {"reward": 1.0 if input_value["status"] == "executed" else -1.0, "passed": input_value["status"] == "executed"},

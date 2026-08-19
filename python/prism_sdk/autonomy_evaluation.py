@@ -85,6 +85,13 @@ def _safe_json(name: str, value: Any, *, maximum: int) -> Any:
     return json.loads(encoded.decode("utf-8"))
 
 
+def _receipt_identity(receipt: AutonomousDomainToolReceipt) -> str:
+    """Return the stable batch identity without changing the public receipt schema."""
+
+    execution_id = receipt.execution_id or "unjournaled"
+    return f"{execution_id}:{receipt.call_id}"
+
+
 @dataclass(frozen=True, slots=True)
 class AutonomousToolOutcomeEvidence:
     """Safe evaluator input projection for one tool outcome."""
@@ -399,10 +406,11 @@ class AutonomousToolOutcomeEvaluator:
         """Evaluate a bounded live receipt batch and advance caller-owned online state.
 
         Transport status is intentionally not a reward. The caller supplies optional, safe
-        per-call evidence (keyed by ``call_id``), and this method sends only the receipt
-        projection plus that evidence to the independent evaluator. Evaluations are applied in
-        receipt order, so a bandit updater sees a deterministic stream and the returned state is
-        immediately usable by the next autonomous run.
+        per-call evidence (keyed by ``call_id``) when those IDs are unique, or by the namespaced
+        ``execution_id:call_id`` identity when a provider reuses an ID in another execution. The
+        evaluator receives only the receipt projection plus that evidence. Evaluations are
+        applied in receipt order, so a bandit updater sees a deterministic stream and the
+        returned state is immediately usable by the next autonomous run.
         """
 
         if (
@@ -414,19 +422,22 @@ class AutonomousToolOutcomeEvaluator:
         if any(not isinstance(receipt, AutonomousDomainToolReceipt) for receipt in receipts):
             raise ArgumentError("tool receipt batches must contain AutonomousDomainToolReceipt values")
         call_ids = [receipt.call_id for receipt in receipts]
-        if len(set(call_ids)) != len(call_ids):
-            raise ArgumentError("tool receipt batches cannot contain duplicate call_id values")
+        identities = [_receipt_identity(receipt) for receipt in receipts]
+        if len(set(identities)) != len(identities):
+            raise ArgumentError("tool receipt batches cannot contain duplicate execution_id/call_id identities")
         if evidence is not None and not isinstance(evidence, Mapping):
             raise ArgumentError("tool receipt evidence must be a mapping or None")
         evidence_by_call = {} if evidence is None else dict(evidence)
         if any(not isinstance(call_id, str) for call_id in evidence_by_call):
-            raise ArgumentError("tool receipt evidence keys must be call_id strings")
-        unknown_evidence = sorted(set(evidence_by_call).difference(call_ids))
+            raise ArgumentError("tool receipt evidence keys must be call_id or execution_id:call_id strings")
+        unique_call_ids = {call_id for call_id in call_ids if call_ids.count(call_id) == 1}
+        valid_evidence_keys = set(identities).union(unique_call_ids)
+        unknown_evidence = sorted(set(evidence_by_call).difference(valid_evidence_keys))
         if unknown_evidence:
-            raise ArgumentError("tool receipt evidence contains an unknown call_id")
+            raise ArgumentError("tool receipt evidence contains an unknown receipt identity")
         for call_id, packet in evidence_by_call.items():
             if not isinstance(call_id, str) or not isinstance(packet, Mapping):
-                raise ArgumentError("tool receipt evidence must map call_id strings to mappings")
+                raise ArgumentError("tool receipt evidence must map receipt identity strings to mappings")
             _safe_json(f"tool receipt evidence for {call_id}", dict(packet), maximum=MAX_TOOL_EVALUATION_EVIDENCE_BYTES)
         if bandit_state is not None and not isinstance(bandit_state, Mapping):
             raise ArgumentError("bandit_state must be a mapping or None")
@@ -437,9 +448,12 @@ class AutonomousToolOutcomeEvaluator:
         by_domain: dict[str, int] = {}
         by_status: dict[str, int] = {}
         for receipt in receipts:
+            receipt_evidence = evidence_by_call.get(_receipt_identity(receipt))
+            if receipt_evidence is None and receipt.call_id in unique_call_ids:
+                receipt_evidence = evidence_by_call.get(receipt.call_id)
             outcome = AutonomousToolOutcomeEvidence.from_receipt(
                 receipt,
-                evidence=evidence_by_call.get(receipt.call_id),
+                evidence=receipt_evidence,
             )
             report = self.evaluate_and_record(
                 outcome,
