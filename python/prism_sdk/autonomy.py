@@ -3413,6 +3413,8 @@ class AutonomousAgent:
         brain: AutonomousBrain | None = None,
         registry: AutonomousDomainRegistry | None = None,
         workflow_registry: AutonomousWorkflowRegistry | None = None,
+        ledger: BrainLearningLedger | None = None,
+        memory: BrainEpisodicMemory | None = None,
     ) -> None:
         if not isinstance(runtime, LLMRuntime):
             raise BrainRunError("runtime must be an LLMRuntime")
@@ -3422,10 +3424,16 @@ class AutonomousAgent:
             raise BrainRunError("brain runtime must be the same runtime supplied to the agent")
         if model_catalogue is not None and not isinstance(model_catalogue, ModelCatalogue):
             raise BrainRunError("model_catalogue must be a ModelCatalogue or None")
+        if ledger is not None and not isinstance(ledger, BrainLearningLedger):
+            raise BrainRunError("ledger must be a BrainLearningLedger or None")
+        if memory is not None and not isinstance(memory, BrainEpisodicMemory):
+            raise BrainRunError("memory must be a BrainEpisodicMemory or None")
         self.runtime = runtime
         self.onboarding = ProviderOnboarding(runtime)
         self.catalogue = model_catalogue or ModelCatalogue()
         self.brain = brain or AutonomousBrain(workspace, runtime)
+        self.ledger = ledger
+        self.memory = memory
         self.orchestrator = AutonomousTaskOrchestrator(
             self.brain,
             registry=registry,
@@ -3521,6 +3529,19 @@ class AutonomousAgent:
 
         return self.orchestrator.prepare(**kwargs)
 
+    def learning_state(self) -> dict[str, Any]:
+        """Return the latest caller-persisted bandit state or a first-run exploration state."""
+
+        if self.ledger is not None:
+            state = self.ledger.latest_state()
+            if state is not None:
+                return state
+        return {
+            "schema": "bioprism-brain-bandit/0.1",
+            "generation": 0,
+            "arms": [],
+        }
+
     def run(
         self,
         *,
@@ -3546,12 +3567,17 @@ class AutonomousAgent:
         if not candidates:
             raise BrainRunError("the autonomous agent has no model candidates")
         resolved_credentials = self._credential_mapping(credentials)
+        options = dict(kwargs)
+        options.setdefault("ledger", self.ledger)
+        options.setdefault("memory", self.memory)
+        if options.get("learn") and options.get("bandit_state") is None:
+            options["bandit_state"] = self.learning_state()
         return self.orchestrator.run(
             task=task,
             domain=domain,
             model_candidates=candidates,
             credentials=resolved_credentials,
-            **kwargs,
+            **options,
         )
 
 

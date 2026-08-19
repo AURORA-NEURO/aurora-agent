@@ -279,6 +279,11 @@ def test_model_catalogue_and_agent_facade_connect_readiness_session_and_executio
         model_catalogue=ModelCatalogue([_model()[0]]),
     ).readiness()
     assert unconfigured["providers"][0]["next_action"] == "register_provider"
+    assert AutonomousAgent(_Workspace(), LLMRuntime()).learning_state() == {
+        "schema": "bioprism-brain-bandit/0.1",
+        "generation": 0,
+        "arms": [],
+    }
 
     runtime, _store, server, thread = _runtime()
     try:

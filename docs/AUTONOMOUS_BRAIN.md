@@ -146,6 +146,12 @@ with agent.onboarding.start_session(ttl_seconds=3_600) as session:
     )
 ```
 
+`AutonomousAgent` may also be constructed with caller-owned `BrainLearningLedger` and
+`BrainEpisodicMemory` instances. `agent.learning_state()` resumes the latest value-only bandit
+state or returns the explicit empty state used for first-run exploration; `run(..., learn=True)`
+uses that state automatically unless the caller supplies another state. The ledger and memory
+remain append-only/value-only persistence owned by the embedding application.
+
 `ModelCatalogue` stores only deterministic model metadata and rejects credential-shaped metadata
 fields; it is safe to populate before a user has supplied any key. `agent.readiness()` projects
 provider registration, credential readiness, and model eligibility without exposing secret material.
