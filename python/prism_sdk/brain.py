@@ -99,12 +99,15 @@ MAX_BRAIN_EVALUATOR_INPUT_BYTES = 500_000
 MAX_BRAIN_REPLAY_BYTES = 16_000
 MAX_BRAIN_REPLAN_INSTRUCTION_BYTES = 4_096
 MAX_BRAIN_LEARNING_EPISODE_BYTES = 64_000
+MAX_BRAIN_LEARNING_TRAJECTORY_STEPS = 32
+MAX_BRAIN_LEARNING_TRAJECTORY_BYTES = 256_000
 MAX_MODEL_SELECTION_AUDIT_RANKING = 64
 MAX_MODEL_SELECTION_AUDIT_INPUT_RANKING = 512
 MAX_MODEL_SELECTION_AUDIT_REASON_BYTES = 512
 MODEL_SELECTION_AUDIT_SCHEMA = "bioprism-brain-selection-audit/0.1"
 BRAIN_EVALUATOR_REPLAY_SCHEMA = "bioprism-brain-evaluator-replay/0.1"
 BRAIN_LEARNING_EPISODE_SCHEMA = "bioprism-brain-learning-episode/0.1"
+BRAIN_LEARNING_TRAJECTORY_SCHEMA = "bioprism-brain-learning-trajectory/0.1"
 _REPLAN_SECRET_PATTERNS = (
     re.compile(
         r"(?i)\b(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|password|authorization|secret)\b\s*[:=]\s*\S+"
@@ -795,6 +798,7 @@ class BrainLearningCycleResult:
     memory_receipts: tuple[Mapping[str, Any], ...]
     recalled_memory: tuple[Mapping[str, Any], ...]
     replan_count: int
+    trajectory_result: "BrainLearningTrajectoryResult" | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -806,6 +810,7 @@ class BrainLearningCycleResult:
             "memory_receipts": [dict(receipt) for receipt in self.memory_receipts],
             "recalled_memory": [dict(episode) for episode in self.recalled_memory],
             "replan_count": self.replan_count,
+            "trajectory_result": None if self.trajectory_result is None else self.trajectory_result.to_dict(),
             "authorization": {
                 "memory": "value_only_hash_chained",
                 "mission_dispatch": "caller_approved_only",
@@ -925,6 +930,153 @@ class BrainLearningEpisode:
             "evidence_digest": self.evidence_digest,
             "status": self.status,
             "retention": "value_only_evaluator_projection_and_digests",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class BrainLearningTrajectory:
+    """An ordered, delayed-feedback group of value-only episodes.
+
+    A trajectory is the smallest durable unit that lets the brain assign credit across a
+    multi-step workflow, mission attempt sequence, or cross-domain fan-out. It contains only
+    episode projections and a bounded discount factor; the provider transcript, prompt, task
+    text, tool arguments, credentials, and evaluator evidence remain outside this object.
+    """
+
+    trajectory_id: str
+    episodes: tuple[BrainLearningEpisode, ...]
+    discount: float = 0.90
+    terminal_reward: float | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.trajectory_id, str)
+            or not self.trajectory_id.strip()
+            or len(self.trajectory_id.encode("utf-8")) > 512
+        ):
+            raise BrainRunError("learning trajectory_id must be a bounded non-empty string")
+        if not isinstance(self.episodes, Sequence) or isinstance(self.episodes, (str, bytes)):
+            raise BrainRunError("learning trajectory episodes must be a sequence")
+        if not 1 <= len(self.episodes) <= MAX_BRAIN_LEARNING_TRAJECTORY_STEPS:
+            raise BrainRunError(
+                "learning trajectory must contain between 1 and "
+                f"{MAX_BRAIN_LEARNING_TRAJECTORY_STEPS} episodes"
+            )
+        if any(not isinstance(episode, BrainLearningEpisode) for episode in self.episodes):
+            raise BrainRunError("learning trajectory episodes are malformed")
+        if any(episode.status != "pending" for episode in self.episodes):
+            raise BrainRunError("learning trajectory can contain only pending episodes")
+        episode_ids = [episode.episode_id for episode in self.episodes]
+        run_ids = [episode.run_id for episode in self.episodes]
+        if len(set(episode_ids)) != len(episode_ids):
+            raise BrainRunError("learning trajectory contains duplicate episode ids")
+        if len(set(run_ids)) != len(run_ids):
+            raise BrainRunError("learning trajectory contains duplicate run ids")
+        if (
+            isinstance(self.discount, bool)
+            or not isinstance(self.discount, (int, float))
+            or not math.isfinite(float(self.discount))
+            or not 0.0 < float(self.discount) <= 1.0
+        ):
+            raise BrainRunError("learning trajectory discount must be within (0, 1]")
+        if self.terminal_reward is not None and (
+            isinstance(self.terminal_reward, bool)
+            or not isinstance(self.terminal_reward, (int, float))
+            or not math.isfinite(float(self.terminal_reward))
+            or not -1.0 <= float(self.terminal_reward) <= 1.0
+        ):
+            raise BrainRunError("learning trajectory terminal_reward must be within [-1, 1]")
+        object.__setattr__(self, "episodes", tuple(self.episodes))
+        object.__setattr__(self, "discount", float(self.discount))
+        if self.terminal_reward is not None:
+            object.__setattr__(self, "terminal_reward", float(self.terminal_reward))
+        try:
+            encoded = json.dumps(
+                self.to_dict(),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        except (TypeError, ValueError) as error:
+            raise BrainRunError("learning trajectory must be JSON-safe") from error
+        if len(encoded) > MAX_BRAIN_LEARNING_TRAJECTORY_BYTES:
+            raise BrainRunError("learning trajectory exceeds the bounded size")
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "BrainLearningTrajectory":
+        if not isinstance(value, Mapping) or value.get("schema") != BRAIN_LEARNING_TRAJECTORY_SCHEMA:
+            raise BrainRunError("learning trajectory has an invalid schema")
+        raw_episodes = value.get("episodes")
+        if not isinstance(raw_episodes, Sequence) or isinstance(raw_episodes, (str, bytes)):
+            raise BrainRunError("learning trajectory episodes must be a sequence")
+        return cls(
+            trajectory_id=value.get("trajectory_id"),
+            episodes=tuple(
+                item if isinstance(item, BrainLearningEpisode) else BrainLearningEpisode.from_mapping(item)
+                for item in raw_episodes
+            ),
+            discount=value.get("discount", 0.90),
+            terminal_reward=value.get("terminal_reward"),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": BRAIN_LEARNING_TRAJECTORY_SCHEMA,
+            "trajectory_id": self.trajectory_id,
+            "episodes": [episode.to_dict() for episode in self.episodes],
+            "discount": self.discount,
+            "terminal_reward": self.terminal_reward,
+            "retention": "ordered_value_only_episode_projections_and_digests",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class BrainLearningTrajectoryResult:
+    """Settled trajectory credit and the caller-owned next bandit state."""
+
+    status: str
+    trajectory: BrainLearningTrajectory
+    decisions: tuple["BrainEvaluatorDecision", ...]
+    recordings: tuple[Mapping[str, Any], ...]
+    credited_rewards: tuple[float, ...]
+    bandit_state: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        if self.status not in {"settled", "partially_settled"}:
+            raise BrainRunError("learning trajectory result has an invalid status")
+        if not isinstance(self.trajectory, BrainLearningTrajectory):
+            raise BrainRunError("learning trajectory result trajectory is malformed")
+        count = len(self.trajectory.episodes)
+        if len(self.decisions) != count or len(self.recordings) != count or len(self.credited_rewards) != count:
+            raise BrainRunError("learning trajectory result lengths do not match the trajectory")
+        if any(not isinstance(decision, BrainEvaluatorDecision) for decision in self.decisions):
+            raise BrainRunError("learning trajectory result decisions are malformed")
+        if any(
+            isinstance(reward, bool)
+            or not isinstance(reward, (int, float))
+            or not math.isfinite(float(reward))
+            or not -1.0 <= float(reward) <= 1.0
+            for reward in self.credited_rewards
+        ):
+            raise BrainRunError("learning trajectory credited rewards are malformed")
+        if any(not isinstance(recording, Mapping) for recording in self.recordings):
+            raise BrainRunError("learning trajectory recordings are malformed")
+        if not isinstance(self.bandit_state, Mapping):
+            raise BrainRunError("learning trajectory bandit_state must be a mapping")
+        BrainLearningLedger._assert_safe(self.bandit_state)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": "bioprism-brain-learning-trajectory-result/0.1",
+            "status": self.status,
+            "trajectory": self.trajectory.to_dict(),
+            "decisions": [decision.to_dict() for decision in self.decisions],
+            "recordings": [dict(recording) for recording in self.recordings],
+            "credited_rewards": list(self.credited_rewards),
+            "bandit_state": dict(self.bandit_state),
+            "credit_assignment": "discounted_return_to_go_with_optional_terminal_reward",
+            "retention": "value_only_evaluator_and_bandit_metadata",
         }
 
 
@@ -1669,6 +1821,13 @@ class AutonomousBrain:
 
         return AutonomousTaskOrchestrator(self).run_workflow_learning(**kwargs)
 
+    def run_workflow_trajectory_learning(self, **kwargs: Any) -> Any:
+        """Execute workflow stages and assign delayed discounted credit across the trajectory."""
+
+        from .autonomy import AutonomousTaskOrchestrator
+
+        return AutonomousTaskOrchestrator(self).run_workflow_trajectory_learning(**kwargs)
+
     def run_cross_domain(self, **kwargs: Any) -> Any:
         """Run bounded domain specialists and an optional cross-domain synthesis."""
 
@@ -1682,6 +1841,13 @@ class AutonomousBrain:
         from .autonomy import AutonomousTaskOrchestrator
 
         return AutonomousTaskOrchestrator(self).run_cross_domain_learning(**kwargs)
+
+    def run_cross_domain_trajectory_learning(self, **kwargs: Any) -> Any:
+        """Run cross-domain specialists and synthesis with delayed trajectory credit."""
+
+        from .autonomy import AutonomousTaskOrchestrator
+
+        return AutonomousTaskOrchestrator(self).run_cross_domain_trajectory_learning(**kwargs)
 
     def recall_memory(
         self,
@@ -2813,6 +2979,8 @@ class AutonomousBrain:
         memory_tags: Sequence[str] = (),
         evidence: Mapping[str, Any] | None = None,
         max_replans: int = 1,
+        trajectory_discount: float | None = None,
+        trajectory_terminal_reward: float | None = None,
         mission_options: Mapping[str, Any] | None = None,
         execution_controller: AutonomousExecutionController | None = None,
     ) -> BrainLearningCycleResult:
@@ -2840,6 +3008,21 @@ class AutonomousBrain:
         BrainLearningLedger._assert_safe(bandit_state)
         if not isinstance(max_replans, int) or isinstance(max_replans, bool) or not 0 <= max_replans <= 3:
             raise BrainRunError("max_replans must be within [0, 3]")
+        trajectory_mode = trajectory_discount is not None
+        if trajectory_mode and (
+            isinstance(trajectory_discount, bool)
+            or not isinstance(trajectory_discount, (int, float))
+            or not math.isfinite(float(trajectory_discount))
+            or not 0.0 < float(trajectory_discount) <= 1.0
+        ):
+            raise BrainRunError("trajectory_discount must be within (0, 1] or None")
+        if trajectory_terminal_reward is not None and (
+            isinstance(trajectory_terminal_reward, bool)
+            or not isinstance(trajectory_terminal_reward, (int, float))
+            or not math.isfinite(float(trajectory_terminal_reward))
+            or not -1.0 <= float(trajectory_terminal_reward) <= 1.0
+        ):
+            raise BrainRunError("trajectory_terminal_reward must be within [-1, 1] or None")
         if not isinstance(memory_limit, int) or isinstance(memory_limit, bool) or not 1 <= memory_limit <= 32:
             raise BrainRunError("memory_limit must be within [1, 32]")
         if not isinstance(memory_tags, Sequence) or isinstance(memory_tags, (str, bytes)):
@@ -2927,6 +3110,9 @@ class AutonomousBrain:
         attempts: list[BrainMissionResult] = []
         evaluations: list[dict[str, Any]] = []
         memory_receipts: list[dict[str, Any]] = []
+        trajectory_episodes: list[BrainLearningEpisode] = []
+        trajectory_decisions: list[BrainEvaluatorDecision] = []
+        trajectory_evidence: list[Mapping[str, Any] | None] = []
         final_status = "completed"
         replan_count = 0
 
@@ -2943,16 +3129,36 @@ class AutonomousBrain:
                 **options,
             )
             attempts.append(result)
-            decision, report = evaluator.evaluate_and_record_with_decision(
-                self,
-                result,
-                bandit_state=current_bandit_state,
-                evidence=evidence,
-                ledger=ledger,
-            )
-            next_state = report.get("next_state")
-            if isinstance(next_state, Mapping):
-                current_bandit_state = dict(next_state)
+            if trajectory_mode:
+                episode_id = f"{result.brain_run.run_id}-attempt-{attempt}"
+                if len(episode_id.encode("utf-8")) > 256:
+                    episode_id = "episode-" + hashlib.sha256(episode_id.encode("utf-8")).hexdigest()
+                episode = self.prepare_learning_episode(
+                    result,
+                    evidence=evidence,
+                    episode_id=episode_id,
+                    ledger=ledger,
+                )
+                decision = evaluator.assess(result, evidence=evidence)
+                trajectory_episodes.append(episode)
+                trajectory_decisions.append(decision)
+                trajectory_evidence.append(evidence)
+                report = {
+                    "status": "deferred_trajectory_reward",
+                    "next_state": current_bandit_state,
+                    "learning_evidence": None,
+                }
+            else:
+                decision, report = evaluator.evaluate_and_record_with_decision(
+                    self,
+                    result,
+                    bandit_state=current_bandit_state,
+                    evidence=evidence,
+                    ledger=ledger,
+                )
+                next_state = report.get("next_state")
+                if isinstance(next_state, Mapping):
+                    current_bandit_state = dict(next_state)
             BrainLearningLedger._assert_safe(report)
             episode_id = f"{result.brain_run.run_id}-attempt-{attempt}"
             if len(episode_id.encode("utf-8")) > 256:
@@ -2971,17 +3177,20 @@ class AutonomousBrain:
                 },
                 memory=store,
             )
-            try:
-                evaluation_receipt = store.record_evaluation(
-                    episode_id,
-                    {
-                        **decision.to_dict(),
-                        "decision_digest": _json_digest(decision.to_dict()),
-                    },
-                ).to_dict()
-            except BrainMemoryError as error:
-                raise BrainRunError("episodic evaluation record failed") from error
-            memory_receipts.extend((episode_receipt, evaluation_receipt))
+            if trajectory_mode:
+                memory_receipts.append(episode_receipt)
+            else:
+                try:
+                    evaluation_receipt = store.record_evaluation(
+                        episode_id,
+                        {
+                            **decision.to_dict(),
+                            "decision_digest": _json_digest(decision.to_dict()),
+                        },
+                    ).to_dict()
+                except BrainMemoryError as error:
+                    raise BrainRunError("episodic evaluation record failed") from error
+                memory_receipts.extend((episode_receipt, evaluation_receipt))
             evaluations.append(
                 {
                     "decision": decision.to_dict(),
@@ -3011,6 +3220,50 @@ class AutonomousBrain:
         else:
             final_status = "replan_limit_reached"
 
+        trajectory_result: BrainLearningTrajectoryResult | None = None
+        if trajectory_mode and trajectory_episodes:
+            trajectory = BrainLearningTrajectory(
+                trajectory_id="mission-trajectory-" + _json_digest(
+                    {"runs": [episode.run_id for episode in trajectory_episodes]}
+                ),
+                episodes=tuple(trajectory_episodes),
+                discount=float(trajectory_discount),
+                terminal_reward=trajectory_terminal_reward,
+            )
+            trajectory_result = evaluator.settle_trajectory(
+                self,
+                trajectory,
+                decisions=trajectory_decisions,
+                bandit_state=bandit_state,
+                evidence_by_step=trajectory_evidence,
+                ledger=ledger,
+            )
+            current_bandit_state = dict(trajectory_result.bandit_state)
+            for index, decision in enumerate(trajectory_result.decisions):
+                recording = trajectory_result.recordings[index]
+                evaluations[index] = {
+                    "decision": decision.to_dict(),
+                    "recording": {
+                        "status": recording.get("status"),
+                        "next_state": recording.get("next_state"),
+                        "learning_evidence": recording.get("learning_evidence"),
+                        "trajectory_id": trajectory.trajectory_id,
+                        "trajectory_step": index,
+                        "credited_reward": trajectory_result.credited_rewards[index],
+                    },
+                }
+                try:
+                    evaluation_receipt = store.record_evaluation(
+                        trajectory.episodes[index].episode_id,
+                        {
+                            **decision.to_dict(),
+                            "decision_digest": _json_digest(decision.to_dict()),
+                        },
+                    ).to_dict()
+                except BrainMemoryError as error:
+                    raise BrainRunError("trajectory evaluation memory record failed") from error
+                memory_receipts.append(evaluation_receipt)
+
         return BrainLearningCycleResult(
             status=final_status,
             final_result=attempts[-1],
@@ -3019,6 +3272,7 @@ class AutonomousBrain:
             memory_receipts=tuple(memory_receipts),
             recalled_memory=recalled,
             replan_count=replan_count,
+            trajectory_result=trajectory_result,
         )
 
     def run_resumable_learning_job(
@@ -4208,6 +4462,81 @@ class AutonomousBrain:
             ledger.begin_episode(episode)
         return episode
 
+    def prepare_learning_trajectory(
+        self,
+        results: Sequence[BrainRunResult | BrainToolLoopResult | BrainMissionResult],
+        *,
+        evidence_by_step: Sequence[Mapping[str, Any] | None] | None = None,
+        arm_ids: Sequence[str | None] | None = None,
+        trajectory_id: str | None = None,
+        discount: float = 0.90,
+        terminal_reward: float | None = None,
+        ledger: BrainLearningLedger | None = None,
+    ) -> BrainLearningTrajectory:
+        """Prepare an ordered delayed-feedback trajectory for workflow or mission learning.
+
+        Episodes are built before any ledger write, then registered in order. This makes the
+        trajectory identity deterministic while allowing a caller to persist it before a human,
+        benchmark, or downstream synthesis evaluator supplies the eventual reward packet.
+        """
+
+        if not isinstance(results, Sequence) or isinstance(results, (str, bytes)):
+            raise BrainRunError("learning trajectory results must be a sequence")
+        if not 1 <= len(results) <= MAX_BRAIN_LEARNING_TRAJECTORY_STEPS:
+            raise BrainRunError(
+                "learning trajectory results must contain between 1 and "
+                f"{MAX_BRAIN_LEARNING_TRAJECTORY_STEPS} items"
+            )
+        if any(not isinstance(result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)) for result in results):
+            raise BrainRunError("learning trajectory results contain an unsupported brain result")
+        if evidence_by_step is not None:
+            if not isinstance(evidence_by_step, Sequence) or isinstance(evidence_by_step, (str, bytes)):
+                raise BrainRunError("learning trajectory evidence_by_step must be a sequence or None")
+            if len(evidence_by_step) != len(results) or any(
+                item is not None and not isinstance(item, Mapping) for item in evidence_by_step
+            ):
+                raise BrainRunError("learning trajectory evidence_by_step must match results")
+        if arm_ids is not None:
+            if not isinstance(arm_ids, Sequence) or isinstance(arm_ids, (str, bytes)):
+                raise BrainRunError("learning trajectory arm_ids must be a sequence or None")
+            if len(arm_ids) != len(results) or any(item is not None and (not isinstance(item, str) or not item.strip()) for item in arm_ids):
+                raise BrainRunError("learning trajectory arm_ids must match results")
+        if trajectory_id is None:
+            trajectory_id = "trajectory-" + _json_digest(
+                {
+                    "runs": [_learning_outcome_digest(result) for result in results],
+                    "discount": discount,
+                    "terminal_reward": terminal_reward,
+                }
+            )
+        if not isinstance(trajectory_id, str) or not trajectory_id.strip():
+            raise BrainRunError("learning trajectory_id must be a non-empty string or None")
+        episodes: list[BrainLearningEpisode] = []
+        for index, result in enumerate(results):
+            episode_id = f"{trajectory_id}-step-{index}"
+            if len(episode_id.encode("utf-8")) > 512:
+                episode_id = "trajectory-episode-" + _json_digest(
+                    {"trajectory_id": trajectory_id, "index": index}
+                )
+            episodes.append(
+                self.prepare_learning_episode(
+                    result,
+                    evidence=None if evidence_by_step is None else evidence_by_step[index],
+                    arm_id=None if arm_ids is None else arm_ids[index],
+                    episode_id=episode_id,
+                )
+            )
+        trajectory = BrainLearningTrajectory(
+            trajectory_id=trajectory_id,
+            episodes=tuple(episodes),
+            discount=discount,
+            terminal_reward=terminal_reward,
+        )
+        if ledger is not None:
+            for episode in trajectory.episodes:
+                ledger.begin_episode(episode)
+        return trajectory
+
     def record_value_only_evaluator_outcome(
         self,
         episode: BrainLearningEpisode | Mapping[str, Any],
@@ -5173,6 +5502,187 @@ class BrainOutcomeEvaluator:
             replay_metadata=replay,
         )
         return decision, report
+
+    def evaluate_trajectory(
+        self,
+        brain: AutonomousBrain,
+        trajectory: BrainLearningTrajectory | Mapping[str, Any],
+        *,
+        bandit_state: Mapping[str, Any],
+        evidence_by_step: Sequence[Mapping[str, Any] | None] | None = None,
+        ledger: BrainLearningLedger | None = None,
+    ) -> BrainLearningTrajectoryResult:
+        """Evaluate and settle an ordered trajectory with bounded discounted return-to-go credit.
+
+        Every step is assessed through the same value-only evaluator contract. The resulting
+        credit for step ``i`` is ``reward_i + discount * return_(i+1)`` (clamped to ``[-1, 1]``),
+        optionally seeded by ``terminal_reward``. This lets a late synthesis or human judgment
+        influence earlier model choices while preserving per-step evaluator identity and ledger
+        idempotency. It is deliberately not a claim that transport success or a provider text is
+        intrinsically rewarding.
+        """
+
+        if not isinstance(brain, AutonomousBrain):
+            raise BrainRunError("brain must be an AutonomousBrain")
+        normalized = trajectory if isinstance(trajectory, BrainLearningTrajectory) else BrainLearningTrajectory.from_mapping(trajectory)
+        if evidence_by_step is not None:
+            if not isinstance(evidence_by_step, Sequence) or isinstance(evidence_by_step, (str, bytes)):
+                raise BrainRunError("trajectory evidence_by_step must be a sequence or None")
+            if len(evidence_by_step) != len(normalized.episodes) or any(
+                item is not None and not isinstance(item, Mapping) for item in evidence_by_step
+            ):
+                raise BrainRunError("trajectory evidence_by_step must match the trajectory")
+        if not isinstance(bandit_state, Mapping):
+            raise BrainRunError("trajectory bandit_state must be a mapping")
+        BrainLearningLedger._assert_safe(bandit_state)
+        if ledger is not None:
+            pending_ids = {item.episode_id for item in ledger.pending_episodes(limit=ledger.max_records)}
+            missing = [episode.episode_id for episode in normalized.episodes if episode.episode_id not in pending_ids]
+            if missing:
+                raise BrainRunError("trajectory contains an episode that is already settled or was not registered")
+
+        decisions: list[BrainEvaluatorDecision] = []
+        evaluation_inputs: list[Mapping[str, Any]] = []
+        for index, episode in enumerate(normalized.episodes):
+            evaluation_input = build_brain_evaluation_input_from_metadata(
+                episode.evaluation_input,
+                evidence=None if evidence_by_step is None else evidence_by_step[index],
+            )
+            decision = self._assess_input(evaluation_input)
+            if not -1.0 <= float(decision.reward) <= 1.0:
+                raise BrainRunError("trajectory evaluator rewards must be within [-1, 1]")
+            decisions.append(decision)
+            evaluation_inputs.append(evaluation_input)
+
+        return self.settle_trajectory(
+            brain,
+            normalized,
+            decisions=decisions,
+            bandit_state=bandit_state,
+            evidence_by_step=evidence_by_step,
+            ledger=ledger,
+        )
+
+    def settle_trajectory(
+        self,
+        brain: AutonomousBrain,
+        trajectory: BrainLearningTrajectory | Mapping[str, Any],
+        *,
+        decisions: Sequence[BrainEvaluatorDecision],
+        bandit_state: Mapping[str, Any],
+        evidence_by_step: Sequence[Mapping[str, Any] | None] | None = None,
+        ledger: BrainLearningLedger | None = None,
+    ) -> BrainLearningTrajectoryResult:
+        """Settle precomputed decisions without invoking the evaluator callback again.
+
+        Online re-planning can inspect a decision immediately while deferring its bandit write
+        until the attempt sequence is complete. This seam makes that safe: the callback runs
+        once, but the eventual discounted credit is still the only value written to the ledger.
+        """
+
+        if not isinstance(brain, AutonomousBrain):
+            raise BrainRunError("brain must be an AutonomousBrain")
+        normalized = trajectory if isinstance(trajectory, BrainLearningTrajectory) else BrainLearningTrajectory.from_mapping(trajectory)
+        if not isinstance(decisions, Sequence) or isinstance(decisions, (str, bytes)):
+            raise BrainRunError("trajectory decisions must be a sequence")
+        if len(decisions) != len(normalized.episodes) or any(
+            not isinstance(decision, BrainEvaluatorDecision) for decision in decisions
+        ):
+            raise BrainRunError("trajectory decisions must match the trajectory")
+        if any(
+            decision.evaluator_id != self.evaluator_id or decision.evaluator_version != self.evaluator_version
+            for decision in decisions
+        ):
+            raise BrainRunError("trajectory decision identity does not match the adapter")
+        if evidence_by_step is not None:
+            if not isinstance(evidence_by_step, Sequence) or isinstance(evidence_by_step, (str, bytes)):
+                raise BrainRunError("trajectory evidence_by_step must be a sequence or None")
+            if len(evidence_by_step) != len(normalized.episodes) or any(
+                item is not None and not isinstance(item, Mapping) for item in evidence_by_step
+            ):
+                raise BrainRunError("trajectory evidence_by_step must match the trajectory")
+        if not isinstance(bandit_state, Mapping):
+            raise BrainRunError("trajectory bandit_state must be a mapping")
+        BrainLearningLedger._assert_safe(bandit_state)
+        if ledger is not None:
+            pending_ids = {item.episode_id for item in ledger.pending_episodes(limit=ledger.max_records)}
+            missing = [episode.episode_id for episode in normalized.episodes if episode.episode_id not in pending_ids]
+            if missing:
+                raise BrainRunError("trajectory contains an episode that is already settled or was not registered")
+        evaluation_inputs: list[Mapping[str, Any]] = []
+        for index, (episode, decision) in enumerate(zip(normalized.episodes, decisions)):
+            evaluation_input = build_brain_evaluation_input_from_metadata(
+                episode.evaluation_input,
+                evidence=None if evidence_by_step is None else evidence_by_step[index],
+            )
+            expected_evidence_digest = evaluation_input.get("evidence_digest")
+            if decision.evidence_digest != expected_evidence_digest and not (
+                decision.evidence_digest is None and expected_evidence_digest is None
+            ):
+                raise BrainRunError("trajectory decision evidence_digest does not match evidence")
+            if not -1.0 <= float(decision.reward) <= 1.0:
+                raise BrainRunError("trajectory evaluator rewards must be within [-1, 1]")
+            evaluation_inputs.append(evaluation_input)
+
+        credited_rewards = [0.0] * len(decisions)
+        running = 0.0 if normalized.terminal_reward is None else normalized.terminal_reward
+        for index in range(len(decisions) - 1, -1, -1):
+            running = max(-1.0, min(1.0, float(decisions[index].reward) + normalized.discount * running))
+            credited_rewards[index] = running
+
+        state: Mapping[str, Any] = dict(bandit_state)
+        recordings: list[Mapping[str, Any]] = []
+        for index, (episode, decision, evaluation_input, credited_reward) in enumerate(
+            zip(normalized.episodes, decisions, evaluation_inputs, credited_rewards)
+        ):
+            replay = {
+                "schema": BRAIN_EVALUATOR_REPLAY_SCHEMA,
+                "episode_id": episode.episode_id,
+                "trajectory_id": normalized.trajectory_id,
+                "trajectory_step": index,
+                "trajectory_length": len(normalized.episodes),
+                "discount": normalized.discount,
+                "terminal_reward": normalized.terminal_reward,
+                "raw_reward": decision.reward,
+                "credited_reward": credited_reward,
+                "result_kind": evaluation_input.get("result_kind"),
+                "run_id": evaluation_input.get("run_id"),
+                "outcome_digest": evaluation_input.get(
+                    "learning_outcome_digest", evaluation_input.get("outcome_digest")
+                ),
+                "evaluation_input_digest": _json_digest(evaluation_input),
+                "evidence_digest": evaluation_input.get("evidence_digest"),
+                "evaluator_id": decision.evaluator_id,
+                "evaluator_version": decision.evaluator_version,
+                "decision_digest": _json_digest(decision.to_dict()),
+                "retention": "metadata_and_digests_only",
+            }
+            report = brain.record_value_only_evaluator_outcome(
+                episode,
+                bandit_state=state,
+                evaluator_id=decision.evaluator_id,
+                evaluator_version=decision.evaluator_version,
+                reward=credited_reward,
+                passed=decision.passed,
+                failed=decision.failed,
+                feedback_digest=decision.feedback_digest,
+                failure_class=decision.failure_class,
+                evidence=None if evidence_by_step is None else evidence_by_step[index],
+                ledger=ledger,
+                replay_metadata=replay,
+            )
+            next_state = report.get("next_state")
+            if isinstance(next_state, Mapping):
+                state = dict(next_state)
+            recordings.append(dict(report))
+        return BrainLearningTrajectoryResult(
+            status="settled",
+            trajectory=normalized,
+            decisions=tuple(decisions),
+            recordings=tuple(recordings),
+            credited_rewards=tuple(credited_rewards),
+            bandit_state=state,
+        )
 
     def evaluate_and_record(
         self,

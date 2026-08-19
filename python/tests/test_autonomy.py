@@ -1045,6 +1045,44 @@ def test_cross_domain_learning_updates_state_between_children_and_synthesis(tmp_
         server.server_close()
 
 
+def test_cross_domain_trajectory_learning_credits_children_and_synthesis(tmp_path: Path):
+    runtime, store, server, thread = _runtime()
+    workspace = _Workspace()
+    memory = BrainEpisodicMemory(tmp_path / "cross-domain-trajectory.sqlite3")
+    handle = store.register("openai", "cross-domain-trajectory-secret")
+    evaluator = BrainOutcomeEvaluator(
+        lambda _input: {"reward": 0.6, "passed": True, "failed": False},
+        evaluator_id="cross-domain-trajectory-quality",
+        evaluator_version="1",
+    )
+    try:
+        agent = AutonomousAgent(workspace, runtime, memory=memory)
+        result = agent.run_cross_domain_trajectory_learning(
+            task="coordinate a delayed-credit engineering and data review",
+            subtasks=[
+                {"id": "engineering", "task": "review implementation risks", "domain": "coding"},
+                {"id": "data", "task": "review lineage risks", "domain": "data"},
+            ],
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            approve_provider_call=True,
+            evaluator=evaluator,
+            trajectory_discount=0.5,
+            trajectory_terminal_reward=0.25,
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+        )
+        assert result.status == "completed"
+        assert len(result.evaluations) == 3
+        assert len(result.trajectory_result.credited_rewards) == 3
+        assert result.trajectory_result.credited_rewards[0] >= result.trajectory_result.credited_rewards[-1]
+        assert "cross-domain-trajectory-secret" not in json.dumps(result.to_dict())
+    finally:
+        memory.close()
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
 def test_run_workflow_executes_stage_dag_and_resumes_only_unfinished_stages():
     runtime, store, server, thread = _structured_runtime()
     workspace = _Workspace()
@@ -1254,6 +1292,45 @@ def test_run_workflow_learning_missing_evidence_never_defaults_to_reward(tmp_pat
         assert b"workflow-missing-evidence-secret" not in (tmp_path / "workflow-learning.jsonl").read_bytes()
     finally:
         memory.close()
+        server.shutdown()
+        thread.join(timeout=2)
+
+
+def test_run_workflow_trajectory_learning_assigns_terminal_credit_after_stages():
+    runtime, store, server, thread = _structured_runtime()
+    workspace = _Workspace()
+    handle = store.register("openai", "workflow-trajectory-secret")
+    brain = AutonomousBrain(workspace, runtime)
+    try:
+        blueprint = brain.prepare_autonomous(
+            task="Produce a staged trajectory-learning implementation review.",
+            domain="coding",
+        )
+        result = brain.run_workflow_trajectory_learning(
+            blueprint=blueprint,
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            approve_provider_call=True,
+            run_id="workflow-trajectory",
+            max_stage_calls=2,
+            trajectory_discount=0.5,
+            trajectory_terminal_reward=0.25,
+            stage_evidence={
+                "scope": {"signals": {"schema_valid": True}},
+                "inspect": {"signals": {"evidence_complete": True}},
+            },
+            bandit_state={
+                "schema": "bioprism-brain-bandit/0.1",
+                "generation": 0,
+                "arms": [],
+            },
+        )
+        assert result.status == "paused"
+        assert result.trajectory_result is not None
+        assert len(result.trajectory_result.credited_rewards) == 2
+        assert [item.recording["trajectory_step"] for item in result.evaluations] == [0, 1]
+        assert "workflow-trajectory-secret" not in json.dumps(result.to_dict())
+    finally:
         server.shutdown()
         thread.join(timeout=2)
 

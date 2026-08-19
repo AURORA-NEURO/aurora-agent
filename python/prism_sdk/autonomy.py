@@ -32,6 +32,7 @@ from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,
     BrainLearningLedger,
+    BrainLearningTrajectoryResult,
     BrainMissionResult,
     BrainOutcomeEvaluator,
     BrainRunError,
@@ -99,7 +100,9 @@ AUTONOMOUS_WORKFLOW_EXECUTION_STATUSES = (
 AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA = "bioprism-python-autonomous-workflow-checkpoint/0.1"
 AUTONOMOUS_WORKFLOW_EVALUATOR_SCHEMA = "bioprism-python-autonomous-workflow-evaluator/0.1"
 AUTONOMOUS_CROSS_DOMAIN_LEARNING_SCHEMA = "bioprism-python-autonomous-cross-domain-learning/0.1"
+AUTONOMOUS_CROSS_DOMAIN_TRAJECTORY_LEARNING_SCHEMA = "bioprism-python-autonomous-cross-domain-trajectory-learning/0.1"
 AUTONOMOUS_WORKFLOW_LEARNING_SCHEMA = "bioprism-python-autonomous-workflow-learning/0.1"
+AUTONOMOUS_WORKFLOW_TRAJECTORY_LEARNING_SCHEMA = "bioprism-python-autonomous-workflow-trajectory-learning/0.1"
 _SAFE_IDENTIFIER_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-")
 
 
@@ -1036,6 +1039,47 @@ class AutonomousCrossDomainLearningResult:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class AutonomousCrossDomainTrajectoryLearningResult:
+    """Cross-domain fan-out and synthesis with delayed trajectory credit."""
+
+    status: str
+    cross_domain: AutonomousCrossDomainResult
+    trajectory_result: BrainLearningTrajectoryResult
+    evaluations: tuple[Mapping[str, Any], ...]
+    bandit_state: Mapping[str, Any]
+    memory_receipts: tuple[Mapping[str, Any], ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.cross_domain, AutonomousCrossDomainResult):
+            raise BrainRunError("cross-domain trajectory result contains an invalid execution result")
+        if not isinstance(self.trajectory_result, BrainLearningTrajectoryResult):
+            raise BrainRunError("cross-domain trajectory result contains an invalid trajectory")
+        if not isinstance(self.evaluations, Sequence) or isinstance(self.evaluations, (str, bytes)):
+            raise BrainRunError("cross-domain trajectory evaluations must be a sequence")
+        if any(not isinstance(item, Mapping) for item in self.evaluations):
+            raise BrainRunError("cross-domain trajectory evaluations must contain mappings")
+        if not isinstance(self.bandit_state, Mapping):
+            raise BrainRunError("cross-domain trajectory bandit_state must be a mapping")
+        BrainLearningLedger._assert_safe(self.bandit_state)
+        if not isinstance(self.memory_receipts, Sequence) or isinstance(self.memory_receipts, (str, bytes)):
+            raise BrainRunError("cross-domain trajectory memory_receipts must be a sequence")
+        if any(not isinstance(item, Mapping) for item in self.memory_receipts):
+            raise BrainRunError("cross-domain trajectory memory_receipts must contain mappings")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_CROSS_DOMAIN_TRAJECTORY_LEARNING_SCHEMA,
+            "status": self.status,
+            "cross_domain": self.cross_domain.to_dict(),
+            "trajectory_result": self.trajectory_result.to_dict(),
+            "evaluations": [dict(item) for item in self.evaluations],
+            "bandit_state": dict(self.bandit_state),
+            "memory_receipts": [dict(item) for item in self.memory_receipts],
+            "retention": "provider_results_caller_owned; trajectory_learning_value_only",
+        }
+
+
 def _workflow_digest(value: Any, name: str) -> str:
     if not isinstance(value, str) or len(value) != 64 or any(
         character not in "0123456789abcdef" for character in value
@@ -1453,6 +1497,56 @@ class AutonomousWorkflowLearningResult:
             "memory_receipts": [dict(item) for item in self.memory_receipts],
             "replan_requested": self.replan_requested,
             "retention": "provider_results_caller_owned; learning_value_only",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousWorkflowTrajectoryLearningResult:
+    """Workflow execution with one delayed, discounted trajectory update.
+
+    This mode intentionally settles only after the completed stage sequence is available. It is
+    useful when a final review, synthesis, benchmark, or operator judgment should assign credit
+    backward across the workflow instead of treating every stage as an independent success.
+    """
+
+    status: str
+    workflow: AutonomousWorkflowRun
+    trajectory_result: BrainLearningTrajectoryResult | None
+    evaluations: tuple[AutonomousWorkflowStageEvaluation, ...]
+    bandit_state: Mapping[str, Any]
+    memory_receipts: tuple[Mapping[str, Any], ...] = ()
+    replan_requested: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.workflow, AutonomousWorkflowRun):
+            raise BrainRunError("workflow trajectory result contains an invalid workflow run")
+        if self.trajectory_result is not None and not isinstance(self.trajectory_result, BrainLearningTrajectoryResult):
+            raise BrainRunError("workflow trajectory result contains an invalid trajectory result")
+        if not isinstance(self.evaluations, Sequence) or isinstance(self.evaluations, (str, bytes)):
+            raise BrainRunError("workflow trajectory evaluations must be a sequence")
+        if any(not isinstance(item, AutonomousWorkflowStageEvaluation) for item in self.evaluations):
+            raise BrainRunError("workflow trajectory evaluations are malformed")
+        if not isinstance(self.bandit_state, Mapping):
+            raise BrainRunError("workflow trajectory bandit_state must be a mapping")
+        BrainLearningLedger._assert_safe(self.bandit_state)
+        if not isinstance(self.memory_receipts, Sequence) or isinstance(self.memory_receipts, (str, bytes)):
+            raise BrainRunError("workflow trajectory memory_receipts must be a sequence")
+        if any(not isinstance(item, Mapping) for item in self.memory_receipts):
+            raise BrainRunError("workflow trajectory memory_receipts are malformed")
+        if not isinstance(self.replan_requested, bool):
+            raise BrainRunError("workflow trajectory replan_requested must be boolean")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_WORKFLOW_TRAJECTORY_LEARNING_SCHEMA,
+            "status": self.status,
+            "workflow": self.workflow.to_dict(),
+            "trajectory_result": None if self.trajectory_result is None else self.trajectory_result.to_dict(),
+            "evaluations": [item.to_dict() for item in self.evaluations],
+            "bandit_state": dict(self.bandit_state),
+            "memory_receipts": [dict(item) for item in self.memory_receipts],
+            "replan_requested": self.replan_requested,
+            "retention": "provider_results_caller_owned; trajectory_learning_value_only",
         }
 
 
@@ -3135,6 +3229,209 @@ class AutonomousTaskOrchestrator:
             replan_requested=should_replan,
         )
 
+    def run_workflow_trajectory_learning(
+        self,
+        *,
+        bandit_state: Mapping[str, Any],
+        evaluator: BrainOutcomeEvaluator | None = None,
+        evaluator_registry: DomainEvaluatorRegistry | None = None,
+        stage_evidence: Mapping[str, Mapping[str, Any]] | None = None,
+        trajectory_id: str | None = None,
+        trajectory_discount: float = 0.90,
+        trajectory_terminal_reward: float | None = None,
+        memory_tags: Sequence[str] = (),
+        memory: BrainEpisodicMemory | None = None,
+        **workflow_kwargs: Any,
+    ) -> AutonomousWorkflowTrajectoryLearningResult:
+        """Execute a workflow, then assign delayed return-to-go credit across its stages.
+
+        Unlike :meth:`run_workflow_learning`, this mode deliberately postpones all bandit writes
+        until the completed stage sequence has been assembled. Model routing therefore reflects
+        the supplied starting state during this run, while a final evaluator or terminal review
+        can teach earlier stages what downstream success required without double-counting an
+        immediate reward.
+        """
+
+        if not isinstance(bandit_state, Mapping):
+            raise BrainRunError("workflow trajectory bandit_state must be a mapping")
+        BrainLearningLedger._assert_safe(bandit_state)
+        if stage_evidence is not None:
+            if not isinstance(stage_evidence, Mapping) or any(
+                not isinstance(stage_id, str) or not isinstance(value, Mapping)
+                for stage_id, value in stage_evidence.items()
+            ):
+                raise BrainRunError("workflow trajectory stage_evidence must map stage ids to mappings")
+            _safe_json("workflow trajectory stage_evidence", stage_evidence, maximum=1_000_000)
+        memory_store = memory or self.brain.memory
+        if memory_store is not None and not isinstance(memory_store, BrainEpisodicMemory):
+            raise BrainRunError("workflow trajectory memory must be a BrainEpisodicMemory or None")
+        normalized_tags = _sequence("workflow trajectory memory_tags", memory_tags, maximum=32)
+        blueprint = workflow_kwargs.get("blueprint")
+        if not isinstance(blueprint, AutonomousTaskBlueprint):
+            raise BrainRunError("workflow trajectory learning requires a prepared AutonomousTaskBlueprint")
+        if evaluator is not None and not isinstance(evaluator, BrainOutcomeEvaluator):
+            raise BrainRunError("workflow trajectory evaluator must be a BrainOutcomeEvaluator or None")
+        if evaluator_registry is not None and not isinstance(evaluator_registry, DomainEvaluatorRegistry):
+            raise BrainRunError("workflow trajectory evaluator_registry must be a DomainEvaluatorRegistry or None")
+        resolved_evaluator = evaluator
+        if resolved_evaluator is None and evaluator_registry is not None:
+            resolved_evaluator = evaluator_registry.resolve(blueprint.profile.evaluator_domain)
+        if resolved_evaluator is None:
+            resolved_evaluator = AutonomousWorkflowEvaluator(blueprint.workflow)
+        if not isinstance(resolved_evaluator, BrainOutcomeEvaluator):
+            raise BrainRunError("workflow trajectory evaluator must resolve to a BrainOutcomeEvaluator")
+
+        requested_calls = workflow_kwargs.get("max_stage_calls")
+        if requested_calls is None:
+            requested_calls = len(blueprint.workflow.stages)
+        if not isinstance(requested_calls, int) or isinstance(requested_calls, bool) or not 1 <= requested_calls <= 16:
+            raise BrainRunError("workflow trajectory max_stage_calls must be between 1 and 16")
+        continuation_kwargs = dict(workflow_kwargs)
+        continuation_kwargs.pop("bandit_state", None)
+        continuation_kwargs.pop("memory", None)
+        checkpoint = continuation_kwargs.get("checkpoint")
+        workflow_run: AutonomousWorkflowRun | None = None
+        all_stage_results: list[AutonomousWorkflowStageResult] = []
+        for _ in range(requested_calls):
+            call_kwargs = dict(continuation_kwargs)
+            call_kwargs["max_stage_calls"] = 1
+            call_kwargs["bandit_state"] = dict(bandit_state)
+            if checkpoint is not None:
+                call_kwargs["checkpoint"] = checkpoint
+            workflow_run = self.run_workflow(memory=memory_store, **call_kwargs)
+            all_stage_results.extend(workflow_run.stage_results)
+            checkpoint = workflow_run.checkpoint
+            if workflow_run.status != "paused" or not workflow_run.next_stage_ids:
+                break
+        if workflow_run is None:
+            raise BrainRunError("workflow trajectory learning did not produce a workflow run")
+        if len(all_stage_results) != len(workflow_run.stage_results):
+            workflow_run = AutonomousWorkflowRun(
+                workflow_run.run_id,
+                workflow_run.status,
+                workflow_run.blueprint,
+                tuple(all_stage_results),
+                workflow_run.checkpoint,
+                workflow_run.next_stage_ids,
+            )
+
+        completed: list[AutonomousWorkflowStageResult] = []
+        evidence_packets: list[Mapping[str, Any]] = []
+        for stage_result in all_stage_results:
+            if (
+                stage_result.result is None
+                or stage_result.execution_status != "completed"
+                or stage_result.declared_status != "completed"
+            ):
+                continue
+            completed.append(stage_result)
+            evidence_packets.append(
+                self._workflow_stage_evidence(
+                    blueprint,
+                    stage_result.stage,
+                    None if stage_evidence is None else stage_evidence.get(stage_result.stage.id),
+                )
+            )
+
+        state: Mapping[str, Any] = dict(bandit_state)
+        trajectory_result: BrainLearningTrajectoryResult | None = None
+        evaluations: list[AutonomousWorkflowStageEvaluation] = []
+        receipts: list[Mapping[str, Any]] = []
+        should_replan = False
+        if completed:
+            ledger = continuation_kwargs.get("ledger")
+            if ledger is not None and not isinstance(ledger, BrainLearningLedger):
+                raise BrainRunError("workflow trajectory ledger must be a BrainLearningLedger or None")
+            trajectory = self.brain.prepare_learning_trajectory(
+                [stage.result for stage in completed if stage.result is not None],
+                evidence_by_step=evidence_packets,
+                trajectory_id=trajectory_id or f"workflow-{workflow_run.run_id}",
+                discount=trajectory_discount,
+                terminal_reward=trajectory_terminal_reward,
+                ledger=ledger,
+            )
+            trajectory_result = resolved_evaluator.evaluate_trajectory(
+                self.brain,
+                trajectory,
+                bandit_state=state,
+                evidence_by_step=evidence_packets,
+                ledger=ledger,
+            )
+            state = dict(trajectory_result.bandit_state)
+            for index, stage_result in enumerate(completed):
+                decision = trajectory_result.decisions[index]
+                should_replan = should_replan or decision.replan_requested
+                recording = trajectory_result.recordings[index]
+                evaluation = AutonomousWorkflowStageEvaluation(
+                    stage_id=stage_result.stage.id,
+                    stage_status=stage_result.declared_status or "completed",
+                    decision=decision,
+                    recording={
+                        "status": recording.get("status"),
+                        "next_state": recording.get("next_state"),
+                        "learning_evidence": recording.get("learning_evidence"),
+                        "trajectory_id": trajectory_result.trajectory.trajectory_id,
+                        "trajectory_step": index,
+                        "credited_reward": trajectory_result.credited_rewards[index],
+                    },
+                    evidence_digest=decision.evidence_digest,
+                )
+                evaluations.append(evaluation)
+                if memory_store is not None:
+                    episode_id = trajectory_result.trajectory.episodes[index].episode_id
+                    receipt = self.brain.remember_result(
+                        stage_result.result,
+                        task=blueprint.spec.task,
+                        episode_id=episode_id,
+                        context=blueprint.selection_context,
+                        tags=[
+                            *normalized_tags,
+                            f"domain:{blueprint.spec.domain}",
+                            f"workflow:{blueprint.workflow.workflow_id}",
+                            f"stage:{stage_result.stage.id}",
+                            "learning:trajectory",
+                        ],
+                        lesson=decision.replan_instruction if decision.replan_requested else None,
+                        provenance={
+                            "workflow_id": blueprint.workflow.workflow_id,
+                            "workflow_digest": blueprint.workflow.workflow_digest,
+                            "stage_id": stage_result.stage.id,
+                            "trajectory_id": trajectory_result.trajectory.trajectory_id,
+                            "trajectory_step": index,
+                            "credited_reward": trajectory_result.credited_rewards[index],
+                            "evaluator_id": decision.evaluator_id,
+                            "evaluator_version": decision.evaluator_version,
+                        },
+                        memory=memory_store,
+                    )
+                    try:
+                        evaluation_receipt = memory_store.record_evaluation(
+                            episode_id,
+                            {
+                                **decision.to_dict(),
+                                "decision_digest": content_digest(decision.to_dict()),
+                            },
+                        ).to_dict()
+                    except BrainMemoryError as error:
+                        raise BrainRunError("workflow trajectory evaluation memory record failed") from error
+                    receipts.extend((receipt, evaluation_receipt))
+
+        if should_replan:
+            status = "trajectory_learning_replan_requested"
+        elif workflow_run.status == "completed":
+            status = "completed"
+        else:
+            status = workflow_run.status
+        return AutonomousWorkflowTrajectoryLearningResult(
+            status=status,
+            workflow=workflow_run,
+            trajectory_result=trajectory_result,
+            evaluations=tuple(evaluations),
+            bandit_state=state,
+            memory_receipts=tuple(receipts),
+            replan_requested=should_replan,
+        )
+
     @staticmethod
     def _cross_domain_output(result: BrainRunResult | BrainToolLoopResult | BrainMissionResult) -> str:
         response = None
@@ -3692,6 +3989,153 @@ class AutonomousTaskOrchestrator:
         status = "completed" if synthesis_result.status.startswith("completed") else synthesis_result.status
         cross_domain = AutonomousCrossDomainResult(status, blueprint, tuple(child_results), synthesis_result)
         return AutonomousCrossDomainLearningResult(status, cross_domain, tuple(evaluations), state, tuple(memory_receipts))
+
+    def run_cross_domain_trajectory_learning(
+        self,
+        *,
+        task: str,
+        subtasks: Sequence[Mapping[str, Any]],
+        model_candidates: Sequence[Mapping[str, Any]],
+        credentials: Mapping[str, CredentialHandle],
+        bandit_state: Mapping[str, Any],
+        evaluator: BrainOutcomeEvaluator,
+        evidence: Mapping[str, Mapping[str, Any]] | None = None,
+        memory: BrainEpisodicMemory | None = None,
+        memory_tags: Sequence[str] = (),
+        trajectory_id: str | None = None,
+        trajectory_discount: float = 0.90,
+        trajectory_terminal_reward: float | None = None,
+        ledger: BrainLearningLedger | None = None,
+        **kwargs: Any,
+    ) -> AutonomousCrossDomainTrajectoryLearningResult:
+        """Run cross-domain specialists and synthesis, then settle one delayed trajectory.
+
+        This mode uses one explicit evaluator identity for the complete fan-out/synthesis
+        sequence. That requirement is intentional: a trajectory must have comparable reward
+        semantics, while domain-specific evaluators can still be composed by the caller into one
+        value-only cross-domain rubric.
+        """
+
+        if not isinstance(bandit_state, Mapping):
+            raise BrainRunError("cross-domain trajectory bandit_state must be a mapping")
+        BrainLearningLedger._assert_safe(bandit_state)
+        if not isinstance(evaluator, BrainOutcomeEvaluator):
+            raise BrainRunError("cross-domain trajectory evaluator must be a BrainOutcomeEvaluator")
+        if evidence is not None:
+            if not isinstance(evidence, Mapping) or any(
+                not isinstance(key, str) or not isinstance(value, Mapping)
+                for key, value in evidence.items()
+            ):
+                raise BrainRunError("cross-domain trajectory evidence must map ids to mappings")
+            _safe_json("cross-domain trajectory evidence", evidence, maximum=1_000_000)
+        memory_store = memory or self.brain.memory
+        if not isinstance(memory_store, BrainEpisodicMemory):
+            raise BrainRunError("cross-domain trajectory memory must be a BrainEpisodicMemory")
+        normalized_tags = _sequence("cross-domain trajectory memory_tags", memory_tags, maximum=32)
+        execution_options = dict(kwargs)
+        execution_options.pop("bandit_state", None)
+        execution_options["memory"] = memory_store
+        execution_options["ledger"] = ledger
+        cross_domain = self.run_cross_domain(
+            task=task,
+            subtasks=subtasks,
+            model_candidates=model_candidates,
+            credentials=credentials,
+            bandit_state=bandit_state,
+            **execution_options,
+        )
+        items: list[tuple[str, str, AutonomousTaskBlueprint, BrainRunResult | BrainToolLoopResult | BrainMissionResult]] = []
+        for child_id, child, result in zip(
+            cross_domain.blueprint.child_ids,
+            cross_domain.blueprint.child_blueprints,
+            cross_domain.child_results,
+        ):
+            items.append(("child", child_id, child, result))
+        if cross_domain.synthesis_result is not None:
+            items.append(("synthesis", "synthesis", cross_domain.blueprint.synthesis_blueprint, cross_domain.synthesis_result))
+        if not items:
+            raise BrainRunError("cross-domain trajectory contains no results to evaluate")
+        results = [item[3] for item in items]
+        evidence_packets = [None if evidence is None else evidence.get(item[1]) for item in items]
+        trajectory = self.brain.prepare_learning_trajectory(
+            results,
+            evidence_by_step=evidence_packets,
+            trajectory_id=trajectory_id or f"cross-domain-{content_digest({'task': task, 'runs': [result.brain_run.run_id if isinstance(result, (BrainToolLoopResult, BrainMissionResult)) else result.run_id for result in results]})}",
+            discount=trajectory_discount,
+            terminal_reward=trajectory_terminal_reward,
+            ledger=ledger,
+        )
+        trajectory_result = evaluator.evaluate_trajectory(
+            self.brain,
+            trajectory,
+            bandit_state=bandit_state,
+            evidence_by_step=evidence_packets,
+            ledger=ledger,
+        )
+        evaluations: list[Mapping[str, Any]] = []
+        memory_receipts: list[Mapping[str, Any]] = []
+        for index, ((scope, item_id, blueprint_item, result), decision, recording) in enumerate(
+            zip(items, trajectory_result.decisions, trajectory_result.recordings)
+        ):
+            episode_id = trajectory.episodes[index].episode_id
+            episode_receipt = self.brain.remember_result(
+                result,
+                task=blueprint_item.spec.task,
+                episode_id=episode_id,
+                context=blueprint_item.selection_context,
+                tags=[
+                    *normalized_tags,
+                    f"domain:{blueprint_item.spec.domain}",
+                    f"cross_domain:{scope}",
+                    f"item:{item_id}",
+                    "learning:trajectory",
+                ],
+                lesson=decision.replan_instruction if decision.replan_requested else None,
+                provenance={
+                    "scope": scope,
+                    "item_id": item_id,
+                    "trajectory_id": trajectory.trajectory_id,
+                    "trajectory_step": index,
+                    "credited_reward": trajectory_result.credited_rewards[index],
+                    "evaluator_id": decision.evaluator_id,
+                    "evaluator_version": decision.evaluator_version,
+                },
+                memory=memory_store,
+            )
+            try:
+                evaluation_receipt = memory_store.record_evaluation(
+                    episode_id,
+                    {
+                        **decision.to_dict(),
+                        "decision_digest": content_digest(decision.to_dict()),
+                    },
+                ).to_dict()
+            except BrainMemoryError as error:
+                raise BrainRunError("cross-domain trajectory evaluation memory record failed") from error
+            memory_receipts.extend((episode_receipt, evaluation_receipt))
+            evaluations.append(
+                {
+                    "scope": scope,
+                    "item_id": item_id,
+                    "decision": decision.to_dict(),
+                    "recording": {
+                        "status": recording.get("status"),
+                        "next_state": recording.get("next_state"),
+                        "learning_evidence": recording.get("learning_evidence"),
+                        "trajectory_id": trajectory.trajectory_id,
+                        "trajectory_step": index,
+                        "credited_reward": trajectory_result.credited_rewards[index],
+                    },
+                }
+            )
+        return AutonomousCrossDomainTrajectoryLearningResult(
+            status=cross_domain.status,
+            cross_domain=cross_domain,
+            trajectory_result=trajectory_result,
+            evaluations=tuple(evaluations),
+            bandit_state=trajectory_result.bandit_state,
+            memory_receipts=tuple(memory_receipts),
+        )
 
     def _run_learning_from_blueprint(
         self,
@@ -4283,6 +4727,54 @@ class AutonomousAgent:
         self._finish_execution(execution_controller, result=result)
         return result
 
+    def run_cross_domain_trajectory_learning(
+        self,
+        *,
+        task: str,
+        subtasks: Sequence[Mapping[str, Any]],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> AutonomousCrossDomainTrajectoryLearningResult:
+        """Run fan-out and synthesis with one delayed, discounted trajectory update."""
+
+        options = dict(kwargs)
+        options["bandit_state"] = self.learning_state() if bandit_state is None else bandit_state
+        candidates, resolved_credentials, options, execution_controller = self._execution_inputs(
+            credentials=credentials,
+            model_candidates=model_candidates,
+            options=options,
+            tool_domains=tuple(
+                dict.fromkeys(
+                    ["cross_domain"]
+                    + [
+                        value.get("domain")
+                        for value in subtasks
+                        if isinstance(value, Mapping) and isinstance(value.get("domain"), str)
+                    ]
+                )
+            ),
+            resume_learning=False,
+            execution_id=execution_id,
+            resume_execution=resume_execution,
+        )
+        try:
+            result = self.orchestrator.run_cross_domain_trajectory_learning(
+                task=task,
+                subtasks=subtasks,
+                model_candidates=candidates,
+                credentials=resolved_credentials,
+                **options,
+            )
+        except Exception as error:
+            self._finish_execution(execution_controller, error=error)
+            raise
+        self._finish_execution(execution_controller, result=result)
+        return result
+
     def run_workflow(
         self,
         *,
@@ -4354,6 +4846,43 @@ class AutonomousAgent:
         self._finish_execution(execution_controller, result=result)
         return result
 
+    def run_workflow_trajectory_learning(
+        self,
+        *,
+        blueprint: AutonomousTaskBlueprint,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> AutonomousWorkflowTrajectoryLearningResult:
+        """Run a staged workflow and apply one delayed, discounted trajectory update."""
+
+        options = dict(kwargs)
+        options["bandit_state"] = self.learning_state() if bandit_state is None else bandit_state
+        candidates, resolved_credentials, options, execution_controller = self._execution_inputs(
+            credentials=credentials,
+            model_candidates=model_candidates,
+            options=options,
+            tool_domains=(blueprint.spec.domain,),
+            resume_learning=False,
+            execution_id=execution_id,
+            resume_execution=resume_execution,
+        )
+        try:
+            result = self.orchestrator.run_workflow_trajectory_learning(
+                blueprint=blueprint,
+                model_candidates=candidates,
+                credentials=resolved_credentials,
+                **options,
+            )
+        except Exception as error:
+            self._finish_execution(execution_controller, error=error)
+            raise
+        self._finish_execution(execution_controller, result=result)
+        return result
+
     def run_cross_domain(
         self,
         *,
@@ -4405,10 +4934,12 @@ __all__ = [
     "AUTONOMOUS_DOMAINS",
     "AUTONOMOUS_EXECUTION_MODES",
     "AUTONOMOUS_CROSS_DOMAIN_LEARNING_SCHEMA",
+    "AUTONOMOUS_CROSS_DOMAIN_TRAJECTORY_LEARNING_SCHEMA",
     "AUTONOMOUS_WORKFLOW_SCHEMA",
     "AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA",
     "AUTONOMOUS_WORKFLOW_EVALUATOR_SCHEMA",
     "AUTONOMOUS_WORKFLOW_LEARNING_SCHEMA",
+    "AUTONOMOUS_WORKFLOW_TRAJECTORY_LEARNING_SCHEMA",
     "AUTONOMOUS_WORKFLOW_STAGE_STATUSES",
     "AutonomousDomainProfile",
     "AutonomousDomainRegistry",
@@ -4418,11 +4949,13 @@ __all__ = [
     "AutonomousCrossDomainBlueprint",
     "AutonomousCrossDomainResult",
     "AutonomousCrossDomainLearningResult",
+    "AutonomousCrossDomainTrajectoryLearningResult",
     "AutonomousLearningResult",
     "AutonomousAgent",
     "AutonomousWorkflowCheckpoint",
     "AutonomousWorkflowEvaluator",
     "AutonomousWorkflowLearningResult",
+    "AutonomousWorkflowTrajectoryLearningResult",
     "AutonomousWorkflowRun",
     "AutonomousWorkflowStageEvaluation",
     "AutonomousWorkflowStageResult",

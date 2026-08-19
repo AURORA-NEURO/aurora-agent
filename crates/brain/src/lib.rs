@@ -13,10 +13,11 @@
 //! the resulting value-free metadata back here. This separation makes a user-supplied key
 //! possible without making the key part of an MCP argument, plan, certificate, or learning state.
 //!
-//! The learning implementation is UCB-style rather than a claim of reinforcement learning in
-//! the statistical sense. It updates only from an explicit bounded reward supplied by an
-//! evaluator, records failures separately, and never mutates hidden global state. A future
-//! contextual policy can consume the same state schema without invalidating existing ledgers.
+//! The learning implementation is an explicit-reward policy layer rather than a claim of
+//! reinforcement learning in the statistical sense. It supports deterministic UCB and seeded
+//! epsilon-greedy exploration, updates only from a bounded reward supplied by an evaluator,
+//! records failures separately, and never mutates hidden global state. A future contextual policy
+//! can consume the same state schema without invalidating existing ledgers.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -73,6 +74,8 @@ pub enum BrainError {
     DuplicateArm(String),
     #[error("bandit reward is outside the configured range")]
     InvalidReward,
+    #[error("unsupported bandit strategy {0:?}")]
+    InvalidBanditStrategy(String),
     #[error("assessment cannot be both passed and failed")]
     ContradictoryAssessment,
     #[error("invalid provider health posture for {0:?}")]
@@ -1080,18 +1083,31 @@ pub fn plan_autonomous(
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BanditPolicy {
+    #[serde(default = "default_bandit_strategy")]
+    pub strategy: String,
     #[serde(default = "default_bandit_exploration")]
     pub exploration: f64,
+    #[serde(default = "default_bandit_epsilon")]
+    pub epsilon: f64,
     #[serde(default = "default_bandit_min_reward")]
     pub min_reward: f64,
     #[serde(default = "default_bandit_max_reward")]
     pub max_reward: f64,
     #[serde(default = "default_bandit_failure_penalty")]
     pub failure_penalty: f64,
+    /// A caller-selected seed makes exploration reproducible and replayable. It is not secret.
+    #[serde(default)]
+    pub seed: u64,
 }
 
+fn default_bandit_strategy() -> String {
+    "ucb1".into()
+}
 fn default_bandit_exploration() -> f64 {
     0.50
+}
+fn default_bandit_epsilon() -> f64 {
+    0.10
 }
 fn default_bandit_min_reward() -> f64 {
     -1.0
@@ -1106,17 +1122,24 @@ fn default_bandit_failure_penalty() -> f64 {
 impl Default for BanditPolicy {
     fn default() -> Self {
         Self {
+            strategy: default_bandit_strategy(),
             exploration: default_bandit_exploration(),
+            epsilon: default_bandit_epsilon(),
             min_reward: default_bandit_min_reward(),
             max_reward: default_bandit_max_reward(),
             failure_penalty: default_bandit_failure_penalty(),
+            seed: 0,
         }
     }
 }
 
 impl BanditPolicy {
     fn validate(&self) -> Result<(), BrainError> {
+        if !matches!(self.strategy.as_str(), "ucb1" | "epsilon_greedy") {
+            return Err(BrainError::InvalidBanditStrategy(self.strategy.clone()));
+        }
         finite_range(self.exploration, "bandit.exploration", 0.0, 100.0)?;
+        finite_range(self.epsilon, "bandit.epsilon", 0.0, 1.0)?;
         finite_range(self.min_reward, "bandit.min_reward", -100.0, 100.0)?;
         finite_range(self.max_reward, "bandit.max_reward", -100.0, 100.0)?;
         finite_range(self.failure_penalty, "bandit.failure_penalty", 0.0, 100.0)?;
@@ -1168,6 +1191,12 @@ pub struct BanditSelectionReport {
     pub ranking: Vec<BanditCandidateScore>,
     pub selection_status: String,
     pub state_generation: u64,
+    #[serde(default)]
+    pub strategy: String,
+    #[serde(default)]
+    pub exploration_draw: Option<f64>,
+    #[serde(default)]
+    pub exploration_taken: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1355,12 +1384,26 @@ fn validate_bandit_state(state: &BanditState) -> Result<(), BrainError> {
     Ok(())
 }
 
-/// Select an arm using a bounded UCB score. Arms with no observations receive the full
-/// exploration coefficient, so a good prior cannot permanently starve an untested model.
+fn deterministic_bandit_draw(seed: u64, generation: u64, label: &str) -> f64 {
+    let mut hasher = Sha256::new();
+    hasher.update(seed.to_be_bytes());
+    hasher.update(generation.to_be_bytes());
+    hasher.update(label.as_bytes());
+    let digest = hasher.finalize();
+    let mut bytes = [0_u8; 8];
+    bytes.copy_from_slice(&digest[..8]);
+    u64::from_be_bytes(bytes) as f64 / u64::MAX as f64
+}
+
+/// Select an arm using the configured bounded policy. UCB1 keeps the historical behaviour;
+/// epsilon-greedy adds deterministic seeded exploration so a selection can be replayed exactly.
+/// Arms with no observations receive the full UCB exploration coefficient, so a good prior cannot
+/// permanently starve an untested model.
 pub fn select_bandit_arm(state: &BanditState) -> Result<BanditSelectionReport, BrainError> {
     validate_bandit_state(state)?;
     let total_pulls = state.arms.iter().map(|arm| arm.pulls).sum::<u64>();
     let log_total = ((total_pulls + 1) as f64).ln();
+    let use_ucb = state.policy.strategy == "ucb1";
     let mut ranking = state
         .arms
         .iter()
@@ -1375,10 +1418,12 @@ pub fn select_bandit_arm(state: &BanditState) -> Result<BanditSelectionReport, B
             } else {
                 arm.failures as f64 / arm.pulls as f64
             };
-            let exploration_bonus = if arm.pulls == 0 {
+            let exploration_bonus = if use_ucb && arm.pulls == 0 {
                 state.policy.exploration
-            } else {
+            } else if use_ucb {
                 state.policy.exploration * (log_total / arm.pulls as f64).sqrt()
+            } else {
+                0.0
             };
             let score =
                 mean_reward + exploration_bonus - state.policy.failure_penalty * failure_rate;
@@ -1405,20 +1450,54 @@ pub fn select_bandit_arm(state: &BanditState) -> Result<BanditSelectionReport, B
             })
             .then_with(|| left.arm_id.cmp(&right.arm_id))
     });
-    let selected_arm_id = ranking
+    let exploitation_arm_id = ranking
         .iter()
         .find(|candidate| candidate.eligible)
         .map(|candidate| candidate.arm_id.clone());
+    let exploration_draw = if state.policy.strategy == "epsilon_greedy" {
+        Some(deterministic_bandit_draw(
+            state.policy.seed,
+            state.generation,
+            "epsilon",
+        ))
+    } else {
+        None
+    };
+    let exploration_taken = exploration_draw
+        .map(|draw| draw < state.policy.epsilon)
+        .unwrap_or(false);
+    let selected_arm_id = if exploration_taken {
+        let eligible = ranking
+            .iter()
+            .filter(|candidate| candidate.eligible)
+            .collect::<Vec<_>>();
+        if eligible.is_empty() {
+            None
+        } else {
+            let draw =
+                deterministic_bandit_draw(state.policy.seed, state.generation, "epsilon-arm");
+            let index = ((draw * eligible.len() as f64).floor() as usize)
+                .min(eligible.len().saturating_sub(1));
+            Some(eligible[index].arm_id.clone())
+        }
+    } else {
+        exploitation_arm_id.clone()
+    };
     Ok(BanditSelectionReport {
         schema: BANDIT_SCHEMA.into(),
         selected_arm_id: selected_arm_id.clone(),
         ranking,
-        selection_status: if selected_arm_id.is_some() {
-            "selected".into()
-        } else {
+        selection_status: if selected_arm_id.is_none() {
             "refused_no_eligible_arm".into()
+        } else if exploration_taken {
+            "selected_exploration".into()
+        } else {
+            "selected".into()
         },
         state_generation: state.generation,
+        strategy: state.policy.strategy.clone(),
+        exploration_draw,
+        exploration_taken,
     })
 }
 
@@ -1722,6 +1801,68 @@ mod tests {
         assert_eq!(next.generation, 1);
         assert_eq!(next.arms[1].pulls, 1);
         assert_eq!(next.arms[1].reward_sum, 0.8);
+    }
+
+    #[test]
+    fn bandit_policy_is_backward_compatible_and_seeded_exploration_replays() {
+        let legacy: BanditState = serde_json::from_value(json!({
+            "schema": BANDIT_SCHEMA,
+            "generation": 3,
+            "arms": [{
+                "arm_id": "legacy",
+                "pulls": 1,
+                "reward_sum": 0.2,
+                "failures": 0,
+                "disabled": false
+            }]
+        }))
+        .unwrap();
+        assert_eq!(legacy.policy.strategy, "ucb1");
+        assert_eq!(legacy.policy.epsilon, 0.10);
+
+        let mut state = legacy;
+        state.policy = BanditPolicy {
+            strategy: "epsilon_greedy".into(),
+            exploration: 0.5,
+            epsilon: 1.0,
+            min_reward: -1.0,
+            max_reward: 1.0,
+            failure_penalty: 0.25,
+            seed: 42,
+        };
+        state.arms.push(BanditArm {
+            arm_id: "second".into(),
+            pulls: 10,
+            reward_sum: 8.0,
+            failures: 0,
+            disabled: false,
+        });
+        let first = select_bandit_arm(&state).unwrap();
+        let replay = select_bandit_arm(&state).unwrap();
+        assert_eq!(first, replay);
+        assert_eq!(first.strategy, "epsilon_greedy");
+        assert!(first.exploration_taken);
+        assert_eq!(first.selection_status, "selected_exploration");
+        assert!(first.exploration_draw.is_some());
+    }
+
+    #[test]
+    fn bandit_rejects_unknown_policy_strategy() {
+        let mut state = BanditState {
+            schema: BANDIT_SCHEMA.into(),
+            generation: 0,
+            policy: BanditPolicy::default(),
+            arms: vec![BanditArm {
+                arm_id: "arm".into(),
+                pulls: 0,
+                reward_sum: 0.0,
+                failures: 0,
+                disabled: false,
+            }],
+        };
+        state.policy.strategy = "unbounded_random".into();
+        let error = select_bandit_arm(&state).unwrap_err();
+        assert!(matches!(error, BrainError::InvalidBanditStrategy(_)));
     }
 
     #[test]

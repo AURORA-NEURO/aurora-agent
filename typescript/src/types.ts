@@ -254,10 +254,13 @@ export interface BrainPlanResult extends JsonObject {
 }
 
 export interface BrainBanditPolicy extends JsonObject {
+  strategy?: "ucb1" | "epsilon_greedy" | string;
   exploration?: number;
+  epsilon?: number;
   min_reward?: number;
   max_reward?: number;
   failure_penalty?: number;
+  seed?: number;
 }
 
 export interface BrainBanditArm extends JsonObject {
@@ -281,6 +284,9 @@ export interface BrainBanditSelectionResult extends JsonObject {
   ranking: JsonObject[];
   selection_status: string;
   state_generation: number;
+  strategy?: string;
+  exploration_draw?: number | null;
+  exploration_taken?: boolean;
 }
 
 export interface BrainBanditUpdate extends JsonObject {

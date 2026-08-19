@@ -214,6 +214,31 @@ online-learning path for coding, browser, data, science, biomedical, neuroscienc
 enterprise, multi-agent, multimodal, evaluation, and cross-domain profiles; it does not infer a
 reward from HTTP success or from the model's own claims.
 
+For multi-step credit assignment, use `brain.prepare_learning_trajectory(...)` to group ordered
+provider, tool-loop, or mission results into a bounded value-only trajectory. A later evaluator can
+settle it with `BrainOutcomeEvaluator.evaluate_trajectory(...)`; step `i` receives a clamped
+discounted return-to-go (`reward_i + discount * return_(i+1)`) and an optional terminal reward. The
+trajectory ledger remains restart-safe: each episode is registered before settlement, each replay
+record binds `trajectory_id`, step index, raw reward, credited reward, and evidence digest, and a
+settled or unregistered episode is refused. The raw provider response, prompt, task text,
+credential handle, and evaluator evidence packet are never stored in the trajectory.
+
+Use `run_adaptive_mission_learning_cycle(..., trajectory_discount=0.9)` when re-planning decisions
+must happen between mission attempts but the bandit update should wait until the complete attempt
+sequence is known. Use `run_workflow_trajectory_learning(...)` for a staged DAG and
+`run_cross_domain_trajectory_learning(...)` for specialist fan-out plus synthesis. The latter
+requires one caller-supplied evaluator identity for the whole trajectory so coding, data, and
+synthesis rewards remain comparable; domain-specific rubrics should be composed into that
+value-only evaluator by the application. These modes intentionally trade within-run state updates
+for correct delayed credit and avoid double-counting immediate and terminal rewards.
+
+The Rust bandit state now supports two auditable policy modes. The backward-compatible default is
+`strategy: "ucb1"`; `strategy: "epsilon_greedy"` uses `epsilon` and a public `seed` to make every
+exploration draw deterministic from the caller-owned generation and replayable from the selection
+report. Unknown strategies, invalid epsilon values, non-finite rewards, disabled arms, and empty
+eligible sets are refused. A policy choice remains routing evidence—not permission, truth, or a
+claim of biological reinforcement learning.
+
 ### Restart-safe autonomous execution and tool outcome learning
 
 Long-horizon autonomy has a second persistence layer in addition to provider health, episodic

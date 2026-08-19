@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -8,6 +9,7 @@ from prism_sdk.brain import (
     AutonomousBrain,
     BrainLearningEpisode,
     BrainLearningLedger,
+    BrainLearningTrajectory,
     BrainOutcomeEvaluator,
     BrainRunError,
     BrainRunResult,
@@ -153,3 +155,46 @@ def test_immediate_learning_bootstraps_selected_arm_from_empty_state() -> None:
     sent_state = workspace.calls[-1][1]["bandit_state"]
     assert isinstance(sent_state, dict)
     assert sent_state["arms"][0]["arm_id"] == "openai/model-a"  # type: ignore[index]
+
+
+def test_trajectory_credit_assignment_is_discounted_and_restart_safe(tmp_path) -> None:
+    workspace = _Workspace()
+    brain = AutonomousBrain(workspace, LLMRuntime())
+    first = _result()
+    second = replace(first, run_id="episode-run-2", outcome_digest="f" * 64)
+    ledger = BrainLearningLedger(tmp_path / "trajectory.jsonl")
+    trajectory = brain.prepare_learning_trajectory(
+        [first, second],
+        evidence_by_step=[{"quality": 0.4}, {"quality": 0.2}],
+        trajectory_id="workflow-trajectory",
+        discount=0.5,
+        terminal_reward=0.25,
+        ledger=ledger,
+    )
+    assert isinstance(trajectory, BrainLearningTrajectory)
+    assert len(ledger.pending_episodes()) == 2
+
+    evaluator = BrainOutcomeEvaluator(
+        lambda value: {
+            "reward": value["evidence"]["quality"],  # type: ignore[index]
+            "passed": True,
+        },
+        evaluator_id="quality-evaluator",
+        evaluator_version="trajectory-1",
+    )
+    restored = BrainLearningLedger(ledger.path)
+    result = evaluator.evaluate_trajectory(
+        brain,
+        trajectory,
+        bandit_state=_empty_state(),
+        evidence_by_step=[{"quality": 0.4}, {"quality": 0.2}],
+        ledger=restored,
+    )
+
+    assert result.status == "settled"
+    assert result.credited_rewards == pytest.approx((0.5625, 0.325))
+    assert len(result.recordings) == 2
+    assert BrainLearningLedger(ledger.path).pending_episodes() == []
+    outcome_calls = [payload for name, payload in workspace.calls if name == "brain_outcome_record"]
+    assert [payload["assessment"]["reward"] for payload in outcome_calls] == pytest.approx([0.5625, 0.325])  # type: ignore[index]
+    assert all(payload["assessment"]["evaluator_version"] == "trajectory-1" for payload in outcome_calls)  # type: ignore[index]

@@ -219,6 +219,8 @@ class BrainMemoryTests(unittest.TestCase):
                 memory=memory,
                 memory_tags=("release",),
                 max_replans=1,
+                trajectory_discount=0.5,
+                trajectory_terminal_reward=0.2,
                 mission_options={
                     "context": {
                         "domain": "engineering",
@@ -232,6 +234,9 @@ class BrainMemoryTests(unittest.TestCase):
             self.assertEqual(len(result.attempts), 2)
             self.assertEqual(workspace.outcome_calls, 2)
             self.assertEqual(len(memory.retrieve({"domain": "engineering", "limit": 8})), 2)
+            self.assertIsNotNone(result.trajectory_result)
+            self.assertEqual(len(result.trajectory_result.credited_rewards), 2)  # type: ignore[union-attr]
+            self.assertIn("trajectory_id", result.evaluations[0]["recording"])
             self.assertTrue(memory.verify_integrity()["ok"])
             self.assertTrue(any(chunk["id"] == "brain-replan" for chunk in prompts[1]["context"]))  # type: ignore[index]
             self.assertNotIn("Authorization", json.dumps(result.to_dict()))
