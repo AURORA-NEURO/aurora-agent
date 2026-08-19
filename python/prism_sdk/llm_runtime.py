@@ -21,7 +21,7 @@ the same explicit provider contract.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import getpass
 import http.client
 import json
@@ -29,7 +29,7 @@ import os
 import secrets
 import threading
 import time
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Iterator, Mapping, Sequence
 from urllib.parse import urlsplit
 
 
@@ -39,6 +39,9 @@ MAX_RESPONSE_BYTES = 20_000_000
 MAX_PROVIDER_TOOLS = 128
 MAX_TOOL_NAME_BYTES = 256
 MAX_TOOL_ARGUMENT_BYTES = 1_000_000
+MAX_STREAM_EVENTS = 100_000
+MAX_STREAM_EVENT_BYTES = 2_000_000
+MAX_STREAM_TEXT_BYTES = MAX_MESSAGE_CHARS
 SUPPORTED_PROTOCOLS = {
     "openai_responses",
     "openai_chat_completions",
@@ -566,11 +569,68 @@ class ProviderRequest:
         if self.tool_choice not in {None, "auto", "none", "required"}:
             raise ProviderError("tool_choice must be auto, none, required, or None")
         for message in self.messages:
-            if not isinstance(message, Mapping) or not isinstance(message.get("role"), str):
-                raise ProviderError("each message must contain a string role")
-            content = message.get("content")
-            if not isinstance(content, str) or len(content) > MAX_MESSAGE_CHARS:
-                raise ProviderError("each message content must be a bounded string")
+            _validate_provider_message(message)
+
+    def with_tool_results(
+        self,
+        tool_calls: Sequence[ProviderToolCall],
+        results: Sequence[ProviderToolResult],
+    ) -> "ProviderRequest":
+        """Append a provider-neutral assistant/tool turn for an explicit continuation.
+
+        The internal ``tool_calls`` and ``tool`` message shapes are translated by ``_body`` for
+        Responses, Chat Completions, and Anthropic Messages. The method requires one caller-
+        approved result for every call, so a model cannot silently advance after an unapproved
+        intent or a missing execution result.
+        """
+
+        if not isinstance(tool_calls, Sequence) or isinstance(tool_calls, (str, bytes)):
+            raise ProviderError("tool_calls must be a sequence")
+        if not isinstance(results, Sequence) or isinstance(results, (str, bytes)):
+            raise ProviderError("tool results must be a sequence")
+        if any(not isinstance(call, ProviderToolCall) for call in tool_calls):
+            raise ProviderError("tool_calls must contain ProviderToolCall values")
+        if any(not isinstance(result, ProviderToolResult) for result in results):
+            raise ProviderError("tool results must contain ProviderToolResult values")
+        if len(tool_calls) != len(results):
+            raise ProviderError("every provider tool call requires exactly one result")
+        expected_ids = [call.call_id for call in tool_calls]
+        result_ids = [result.call_id for result in results]
+        if result_ids != expected_ids or any(not result.approved for result in results):
+            raise ProviderError("provider tool results require caller approval in call order")
+        assistant_tool_calls = tuple(
+            {
+                "id": call.call_id,
+                "name": call.name,
+                "arguments": json.dumps(
+                    call.arguments,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            }
+            for call in tool_calls
+        )
+        continuation_messages: list[Mapping[str, Any]] = [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": assistant_tool_calls,
+            }
+        ]
+        continuation_messages.extend(
+            {
+                "role": "tool",
+                "tool_call_id": result.call_id,
+                "content": result.serialized_content(),
+                "is_error": result.is_error,
+            }
+            for result in results
+        )
+        combined = self.messages + tuple(continuation_messages)
+        if len(combined) > MAX_MESSAGES:
+            raise ProviderError("provider continuation would exceed the message bound")
+        return replace(self, messages=combined)
 
 
 @dataclass(frozen=True, slots=True)
@@ -597,6 +657,147 @@ class ProviderResponse:
             "structured": self.structured,
             "tool_calls": [call.to_dict() for call in self.tool_calls],
             "credential_posture": "not_in_response",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderStreamEvent:
+    """A bounded provider-neutral projection of one SSE event.
+
+    The event deliberately exposes deltas and a finalized :class:`ProviderToolCall`, rather than
+    provider payloads. This keeps streaming useful to a UI while preventing raw event bodies from
+    becoming an accidental persistence or logging channel.
+    """
+
+    provider: str
+    model: str
+    sequence: int
+    event_type: str
+    request_id: str | None = None
+    text_delta: str = ""
+    tool_call_id: str | None = None
+    tool_name: str | None = None
+    arguments_delta: str = ""
+    tool_call: ProviderToolCall | None = None
+    usage: Mapping[str, Any] = field(default_factory=dict)
+    done: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.provider, str) or not self.provider:
+            raise ProviderError("stream event provider is required")
+        if not isinstance(self.model, str) or not self.model:
+            raise ProviderError("stream event model is required")
+        if not isinstance(self.sequence, int) or self.sequence < 0:
+            raise ProviderError("stream event sequence must be non-negative")
+        if (
+            not isinstance(self.event_type, str)
+            or not self.event_type
+            or len(self.event_type) > 256
+            or any(ord(character) < 32 for character in self.event_type)
+        ):
+            raise ProviderError("stream event type is not bounded")
+        for label, value, limit in (
+            ("text delta", self.text_delta, MAX_STREAM_TEXT_BYTES),
+            ("arguments delta", self.arguments_delta, MAX_TOOL_ARGUMENT_BYTES),
+        ):
+            if not isinstance(value, str) or len(value.encode("utf-8")) > limit:
+                raise ProviderError(f"stream {label} exceeds the bounded size")
+        for label, value in (("request id", self.request_id), ("tool call id", self.tool_call_id), ("tool name", self.tool_name)):
+            if value is not None and (
+                not isinstance(value, str)
+                or not value
+                or len(value.encode("utf-8")) > MAX_TOOL_NAME_BYTES
+            ):
+                raise ProviderError(f"stream {label} is not bounded")
+        if self.tool_call is not None and not isinstance(self.tool_call, ProviderToolCall):
+            raise ProviderError("stream tool_call must be a ProviderToolCall")
+        if not isinstance(self.usage, Mapping):
+            raise ProviderError("stream usage must be an object")
+        _bounded_json_bytes(self.usage, 256_000, "stream usage")
+        if not isinstance(self.done, bool):
+            raise ProviderError("stream done must be a boolean")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "provider": self.provider,
+            "model": self.model,
+            "sequence": self.sequence,
+            "event_type": self.event_type,
+            "request_id": self.request_id,
+            "text_delta": self.text_delta,
+            "tool_call_id": self.tool_call_id,
+            "tool_name": self.tool_name,
+            "arguments_delta": self.arguments_delta,
+            "tool_call": None if self.tool_call is None else self.tool_call.to_dict(),
+            "usage": dict(self.usage),
+            "done": self.done,
+            "credential_posture": "not_in_event",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderToolResult:
+    """Caller-approved output returned to a provider continuation turn."""
+
+    call_id: str
+    content: Any
+    approved: bool = False
+    is_error: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.call_id, str) or not self.call_id.strip() or len(self.call_id) > 256:
+            raise ProviderError("provider tool result call id is not bounded")
+        if not isinstance(self.approved, bool) or not isinstance(self.is_error, bool):
+            raise ProviderError("provider tool result flags must be booleans")
+        _bounded_json_bytes(self.content, MAX_TOOL_ARGUMENT_BYTES, "provider tool result")
+
+    def serialized_content(self) -> str:
+        if isinstance(self.content, str):
+            return self.content
+        return json.dumps(self.content, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "call_id": self.call_id,
+            "content": self.content,
+            "approved": self.approved,
+            "is_error": self.is_error,
+            "authorization": "caller_approved" if self.approved else "caller_approval_required",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderToolLoopResult:
+    """Bounded result of explicit caller-authorized multi-turn tool continuation."""
+
+    status: str
+    responses: tuple[ProviderResponse, ...]
+    final_response: ProviderResponse | None
+    turns: int
+    tool_calls: int
+
+    def __post_init__(self) -> None:
+        if self.status not in {"completed", "authorization_required", "turn_limit_reached"}:
+            raise ProviderError("provider tool loop returned an invalid status")
+        if not isinstance(self.responses, tuple) or any(
+            not isinstance(response, ProviderResponse) for response in self.responses
+        ):
+            raise ProviderError("provider tool loop responses are malformed")
+        if self.final_response is not None and not isinstance(self.final_response, ProviderResponse):
+            raise ProviderError("provider tool loop final response is malformed")
+        if not isinstance(self.turns, int) or self.turns < 0:
+            raise ProviderError("provider tool loop turns must be non-negative")
+        if not isinstance(self.tool_calls, int) or self.tool_calls < 0:
+            raise ProviderError("provider tool loop tool_calls must be non-negative")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "turns": self.turns,
+            "tool_calls": self.tool_calls,
+            "responses": [response.to_dict() for response in self.responses],
+            "final_response": None if self.final_response is None else self.final_response.to_dict(),
+            "tool_execution": "caller_authorized_only",
         }
 
 
@@ -686,9 +887,298 @@ class LLMRuntime:
             headers["Idempotency-Key"] = request.idempotency_key
         return self._post(config, body, headers, request)
 
+    def invoke_stream(
+        self,
+        provider: str,
+        request: ProviderRequest,
+        *,
+        credential: CredentialHandle | None = None,
+    ) -> Iterator[ProviderStreamEvent]:
+        """Open one bounded SSE provider invocation.
+
+        The returned iterator yields provider-neutral deltas and finalized tool intents. It never
+        dispatches a tool. Streaming retries are intentionally not attempted after a connection
+        has begun yielding events because replaying a partial assistant turn could duplicate a
+        caller-visible intent.
+        """
+
+        config = self._providers.get(provider)
+        if config is None:
+            raise ProviderError(f"provider {provider!r} is not configured")
+        secret: SecretValue | None = None
+        if config.requires_credential:
+            if credential is None:
+                raise CredentialError(f"provider {provider!r} requires a user credential handle")
+            if credential.provider != provider:
+                raise CredentialError("credential provider does not match invocation provider")
+            secret = self.credentials._resolve(credential)
+        body = dict(self._body(config, request))
+        body["stream"] = True
+        headers = {
+            "Accept": "text/event-stream",
+            "Content-Type": "application/json",
+        }
+        if secret is not None:
+            if config.protocol == "anthropic_messages":
+                headers[config.api_key_header or "x-api-key"] = secret.expose()
+                headers["anthropic-version"] = "2023-06-01"
+            else:
+                headers[config.api_key_header or "Authorization"] = "Bearer " + secret.expose()
+        if request.idempotency_key is not None:
+            headers["Idempotency-Key"] = request.idempotency_key
+        return self._stream(config, body, headers, request)
+
+    def collect_stream(
+        self,
+        provider: str,
+        request: ProviderRequest,
+        *,
+        credential: CredentialHandle | None = None,
+    ) -> ProviderResponse:
+        """Collect a stream into the same bounded response contract as ``invoke``."""
+
+        text_parts: list[str] = []
+        text_bytes = 0
+        tool_calls: list[ProviderToolCall] = []
+        usage: Mapping[str, Any] = {}
+        request_id: str | None = None
+        model = request.model
+        event_count = 0
+        terminal_type: str | None = None
+        for event in self.invoke_stream(provider, request, credential=credential):
+            event_count += 1
+            if event_count > MAX_STREAM_EVENTS:
+                raise ProviderError("provider stream exceeded max event count")
+            if event.text_delta:
+                text_parts.append(event.text_delta)
+                text_bytes += len(event.text_delta.encode("utf-8"))
+                if text_bytes > MAX_STREAM_TEXT_BYTES:
+                    raise ProviderError("provider stream text exceeded the bounded size")
+            if event.tool_call is not None:
+                tool_calls.append(event.tool_call)
+            if event.usage:
+                usage = event.usage
+            request_id = event.request_id or request_id
+            model = event.model or model
+            if event.done:
+                terminal_type = event.event_type
+        if not text_parts and not tool_calls:
+            raise ProviderError("provider stream contained no assistant text or tool call")
+        text = "".join(text_parts)
+        structured = None if tool_calls else _validate_structured_response(text, request)
+        return ProviderResponse(
+            provider=provider,
+            model=model,
+            text=text,
+            status_code=200,
+            request_id=request_id,
+            usage=dict(usage),
+            raw={
+                "stream": True,
+                "event_count": event_count,
+                "terminal_event": terminal_type,
+            },
+            structured=structured,
+            tool_calls=tuple(tool_calls),
+        )
+
+    def invoke_tool_loop(
+        self,
+        provider: str,
+        request: ProviderRequest,
+        *,
+        credential: CredentialHandle | None = None,
+        authorize_and_execute: Callable[[tuple[ProviderToolCall, ...]], Sequence[ProviderToolResult]],
+        max_turns: int = 4,
+        max_tool_calls: int = MAX_PROVIDER_TOOLS,
+        stream: bool = False,
+        initial_response: ProviderResponse | None = None,
+    ) -> ProviderToolLoopResult:
+        """Run bounded native tool continuation with a caller-owned authorization callback.
+
+        ``authorize_and_execute`` is the only place where an application may perform effects. It
+        must return one explicitly ``approved`` result per model intent. The runtime only carries
+        those results back to the provider and stops at either caller refusal or the turn budget.
+        """
+
+        if not callable(authorize_and_execute):
+            raise ProviderError("authorize_and_execute must be callable")
+        if not 1 <= max_turns <= 32:
+            raise ProviderError("max_turns must be within [1, 32]")
+        if not 1 <= max_tool_calls <= 1024:
+            raise ProviderError("max_tool_calls must be within [1, 1024]")
+        if initial_response is not None and (
+            not isinstance(initial_response, ProviderResponse)
+            or initial_response.provider != provider
+            or initial_response.model != request.model
+        ):
+            raise ProviderError("initial response does not match the continuation request")
+        current = request
+        responses: list[ProviderResponse] = []
+        total_tool_calls = 0
+        response = initial_response
+        for _turn in range(max_turns):
+            if response is None:
+                response = (
+                    self.collect_stream(provider, current, credential=credential)
+                    if stream
+                    else self.invoke(provider, current, credential=credential)
+                )
+            responses.append(response)
+            if not response.tool_calls:
+                return ProviderToolLoopResult(
+                    status="completed",
+                    responses=tuple(responses),
+                    final_response=response,
+                    turns=len(responses),
+                    tool_calls=total_tool_calls,
+                )
+            total_tool_calls += len(response.tool_calls)
+            if total_tool_calls > max_tool_calls:
+                return ProviderToolLoopResult(
+                    status="turn_limit_reached",
+                    responses=tuple(responses),
+                    final_response=response,
+                    turns=len(responses),
+                    tool_calls=total_tool_calls,
+                )
+            if _turn + 1 >= max_turns:
+                return ProviderToolLoopResult(
+                    status="turn_limit_reached",
+                    responses=tuple(responses),
+                    final_response=response,
+                    turns=len(responses),
+                    tool_calls=total_tool_calls,
+                )
+            returned = authorize_and_execute(response.tool_calls)
+            if not isinstance(returned, Sequence) or isinstance(returned, (str, bytes)):
+                raise ProviderError("authorization callback must return a sequence of tool results")
+            if any(not isinstance(result, ProviderToolResult) for result in returned):
+                raise ProviderError("authorization callback returned a malformed tool result")
+            if len(returned) != len(response.tool_calls) or any(not result.approved for result in returned):
+                return ProviderToolLoopResult(
+                    status="authorization_required",
+                    responses=tuple(responses),
+                    final_response=response,
+                    turns=len(responses),
+                    tool_calls=total_tool_calls,
+                )
+            current = current.with_tool_results(response.tool_calls, returned)
+            response = None
+        return ProviderToolLoopResult(
+            status="turn_limit_reached",
+            responses=tuple(responses),
+            final_response=responses[-1] if responses else None,
+            turns=len(responses),
+            tool_calls=total_tool_calls,
+        )
+
+    def _stream(
+        self,
+        config: ProviderConfig,
+        body: Mapping[str, Any],
+        headers: Mapping[str, str],
+        request: ProviderRequest,
+    ) -> Iterator[ProviderStreamEvent]:
+        state = self._circuits.setdefault(config.provider, _CircuitState())
+        now = self._clock()
+        if state.opened_until is not None:
+            if now < state.opened_until:
+                raise ProviderError(
+                    "provider circuit is open; invocation is temporarily refused",
+                    circuit_open=True,
+                )
+            state.opened_until = None
+            state.consecutive_failures = 0
+        try:
+            yield from self._stream_once(config, body, headers, request)
+        except ProviderError as error:
+            if error.retryable:
+                state.consecutive_failures += 1
+                if state.consecutive_failures >= config.circuit_breaker_failure_threshold:
+                    state.opened_until = self._clock() + config.circuit_breaker_reset_seconds
+            raise
+        else:
+            state.consecutive_failures = 0
+            state.opened_until = None
+
+    def _stream_once(
+        self,
+        config: ProviderConfig,
+        body: Mapping[str, Any],
+        headers: Mapping[str, str],
+        request: ProviderRequest,
+    ) -> Iterator[ProviderStreamEvent]:
+        host, port, path, scheme = config.endpoint
+        try:
+            encoded = json.dumps(body, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
+        except (TypeError, ValueError) as error:
+            raise ProviderError(f"provider request is not JSON-safe: {error}") from error
+        connection: http.client.HTTPConnection | http.client.HTTPSConnection = (
+            http.client.HTTPSConnection(host, port, timeout=config.timeout_seconds)
+            if scheme == "https"
+            else http.client.HTTPConnection(host, port, timeout=config.timeout_seconds)
+        )
+        try:
+            connection.request("POST", path, body=encoded, headers=dict(headers))
+            response = connection.getresponse()
+            response_headers = {name.lower(): value for name, value in response.getheaders()}
+            status = response.status
+            if status >= 400:
+                raise ProviderError(
+                    f"provider returned HTTP status {status}",
+                    retryable=status == 408 or status == 429 or status >= 500,
+                    status_code=status,
+                )
+            content_type = response_headers.get("content-type", "").split(";", 1)[0].strip().lower()
+            if content_type and content_type != "text/event-stream":
+                raise ProviderError("provider stream did not return text/event-stream")
+            state: dict[str, Any] = {
+                "model": request.model,
+                "request_id": None,
+                "calls": {},
+            }
+            sequence = 0
+            for event_name, data in _iter_sse_frames(response, config.max_response_bytes):
+                if data.strip() == "[DONE]":
+                    specs = _finalize_stream_tool_calls(config.protocol, state)
+                    specs.append({"event_type": "stream.done", "done": True})
+                else:
+                    try:
+                        payload = json.loads(data)
+                    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                        raise ProviderError("provider stream contained invalid JSON") from error
+                    if not isinstance(payload, Mapping):
+                        raise ProviderError("provider stream event must be a JSON object")
+                    specs = _project_stream_payload(config.protocol, event_name, payload, state)
+                for spec in specs:
+                    if sequence >= MAX_STREAM_EVENTS:
+                        raise ProviderError("provider stream exceeded max event count")
+                    sequence += 1
+                    event = ProviderStreamEvent(
+                        provider=config.provider,
+                        model=str(state.get("model") or request.model),
+                        sequence=sequence,
+                        request_id=_string_or_none(state.get("request_id")),
+                        **spec,
+                    )
+                    state["text_bytes"] = state.get("text_bytes", 0) + len(event.text_delta.encode("utf-8"))
+                    if state["text_bytes"] > MAX_STREAM_TEXT_BYTES:
+                        raise ProviderError("provider stream text exceeded the bounded size")
+                    if event.tool_name is not None and event.tool_name not in {tool.name for tool in request.tools}:
+                        raise ProviderError("provider returned an unrequested streamed tool call")
+                    yield event
+        except (OSError, http.client.HTTPException) as error:
+            raise ProviderError(
+                "provider stream transport failed; credential material was discarded",
+                retryable=True,
+            ) from error
+        finally:
+            connection.close()
+
     @staticmethod
     def _body(config: ProviderConfig, request: ProviderRequest) -> dict[str, Any]:
-        messages = [dict(message) for message in request.messages]
+        messages = _wire_messages(config.protocol, request.messages)
         if config.protocol == "openai_responses":
             body: dict[str, Any] = {
                 "model": request.model,
@@ -699,7 +1189,7 @@ class LLMRuntime:
             system = "\n\n".join(
                 str(message["content"])
                 for message in messages
-                if message.get("role") == "system"
+                if message.get("role") == "system" and isinstance(message.get("content"), str)
             )
             body = {
                 "model": request.model,
@@ -980,6 +1470,474 @@ class ProviderOnboarding:
         CredentialStore._validate_provider(provider)
         if not any(row.get("provider") == provider for row in self.runtime.provider_metadata()):
             raise CredentialError(f"provider {provider!r} is not registered with the runtime")
+
+
+def _bounded_json_bytes(value: Any, limit: int, label: str) -> int:
+    try:
+        encoded = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+    except (TypeError, ValueError) as error:
+        raise ProviderError(f"{label} must be JSON-safe") from error
+    size = len(encoded.encode("utf-8"))
+    if size > limit:
+        raise ProviderError(f"{label} exceeds the bounded size")
+    return size
+
+
+def _validate_provider_message(message: Mapping[str, Any]) -> None:
+    if not isinstance(message, Mapping) or not isinstance(message.get("role"), str):
+        raise ProviderError("each message must contain a string role")
+    content = message.get("content")
+    if not isinstance(content, (str, Mapping, list, tuple)):
+        raise ProviderError("each message content must be a bounded JSON value")
+    _bounded_json_bytes(content, MAX_MESSAGE_CHARS, "provider message content")
+    tool_call_id = message.get("tool_call_id")
+    if tool_call_id is not None and (
+        not isinstance(tool_call_id, str) or not tool_call_id.strip() or len(tool_call_id) > 256
+    ):
+        raise ProviderError("provider message tool_call_id is not bounded")
+    tool_calls = message.get("tool_calls")
+    if tool_calls is not None:
+        if not isinstance(tool_calls, Sequence) or isinstance(tool_calls, (str, bytes)):
+            raise ProviderError("provider message tool_calls must be a sequence")
+        if len(tool_calls) > MAX_PROVIDER_TOOLS:
+            raise ProviderError("provider message tool_calls exceed the bounded limit")
+        for call in tool_calls:
+            if not isinstance(call, Mapping):
+                raise ProviderError("provider message tool call must be an object")
+            name = call.get("name")
+            call_id = call.get("id")
+            arguments = call.get("arguments")
+            if not isinstance(name, str) or not name.strip() or len(name) > MAX_TOOL_NAME_BYTES:
+                raise ProviderError("provider message tool call name is not bounded")
+            if not isinstance(call_id, str) or not call_id.strip() or len(call_id) > 256:
+                raise ProviderError("provider message tool call id is not bounded")
+            if not isinstance(arguments, str):
+                raise ProviderError("provider message tool call arguments must be a string")
+            _bounded_json_bytes(arguments, MAX_TOOL_ARGUMENT_BYTES, "provider message tool arguments")
+
+
+def _wire_messages(
+    protocol: str,
+    source_messages: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Translate continuation markers into each provider's native conversation shape."""
+
+    messages: list[dict[str, Any]] = []
+    for source in source_messages:
+        message = dict(source)
+        role = message.get("role")
+        tool_calls = message.get("tool_calls")
+        if protocol == "openai_responses":
+            if role == "assistant" and tool_calls:
+                content = message.get("content")
+                if isinstance(content, str) and content:
+                    messages.append({"role": "assistant", "content": content})
+                for call in tool_calls:
+                    messages.append(
+                        {
+                            "type": "function_call",
+                            "call_id": call["id"],
+                            "name": call["name"],
+                            "arguments": call["arguments"],
+                        }
+                    )
+                continue
+            if role == "tool":
+                messages.append(
+                    {
+                        "type": "function_call_output",
+                        "call_id": message["tool_call_id"],
+                        "output": message["content"],
+                    }
+                )
+                continue
+            messages.append(message)
+            continue
+        if protocol == "anthropic_messages":
+            if role == "assistant" and tool_calls:
+                blocks: list[dict[str, Any]] = []
+                content = message.get("content")
+                if isinstance(content, str) and content:
+                    blocks.append({"type": "text", "text": content})
+                for call in tool_calls:
+                    try:
+                        arguments = json.loads(call["arguments"])
+                    except (TypeError, ValueError) as error:
+                        raise ProviderError("provider continuation tool arguments are invalid") from error
+                    if not isinstance(arguments, Mapping):
+                        raise ProviderError("provider continuation tool arguments must be an object")
+                    blocks.append(
+                        {
+                            "type": "tool_use",
+                            "id": call["id"],
+                            "name": call["name"],
+                            "input": dict(arguments),
+                        }
+                    )
+                messages.append({"role": "assistant", "content": blocks})
+                continue
+            if role == "tool":
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": message["tool_call_id"],
+                                "content": message["content"],
+                                "is_error": bool(message.get("is_error", False)),
+                            }
+                        ],
+                    }
+                )
+                continue
+            messages.append(message)
+            continue
+        if role == "assistant" and tool_calls:
+            wire_calls = [
+                {
+                    "id": call["id"],
+                    "type": "function",
+                    "function": {
+                        "name": call["name"],
+                        "arguments": call["arguments"],
+                    },
+                }
+                for call in tool_calls
+            ]
+            message["tool_calls"] = wire_calls
+        messages.append(message)
+    return messages
+
+
+def _iter_sse_frames(
+    response: http.client.HTTPResponse,
+    max_response_bytes: int,
+) -> Iterator[tuple[str | None, str]]:
+    """Parse SSE framing with total, line, and event data bounds."""
+
+    total_bytes = 0
+    event_bytes = 0
+    event_name: str | None = None
+    data_lines: list[str] = []
+
+    def flush() -> tuple[str | None, str] | None:
+        nonlocal event_bytes, event_name, data_lines
+        if not data_lines:
+            event_name = None
+            event_bytes = 0
+            return None
+        data = "\n".join(data_lines)
+        result = (event_name, data)
+        event_name = None
+        data_lines = []
+        event_bytes = 0
+        return result
+
+    while True:
+        line = response.readline()
+        if not line:
+            break
+        total_bytes += len(line)
+        if total_bytes > max_response_bytes:
+            raise ProviderError("provider stream exceeded max_response_bytes")
+        if len(line) > MAX_STREAM_EVENT_BYTES:
+            raise ProviderError("provider stream line exceeded the bounded size")
+        stripped = line.rstrip(b"\r\n")
+        if not stripped:
+            frame = flush()
+            if frame is not None:
+                yield frame
+            continue
+        if stripped.startswith(b":"):
+            continue
+        try:
+            decoded = stripped.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise ProviderError("provider stream contained invalid UTF-8") from error
+        field, separator, value = decoded.partition(":")
+        if not separator:
+            continue
+        if value.startswith(" "):
+            value = value[1:]
+        if field == "event":
+            if len(value) > 256:
+                raise ProviderError("provider stream event name exceeded the bounded size")
+            event_name = value
+        elif field == "data":
+            event_bytes += len(value.encode("utf-8"))
+            if event_bytes > MAX_STREAM_EVENT_BYTES:
+                raise ProviderError("provider stream event exceeded the bounded size")
+            data_lines.append(value)
+    frame = flush()
+    if frame is not None:
+        yield frame
+
+
+def _stream_meta(payload: Mapping[str, Any], state: dict[str, Any]) -> None:
+    response = payload.get("response")
+    if isinstance(response, Mapping):
+        if isinstance(response.get("id"), str):
+            state["request_id"] = response["id"]
+        if isinstance(response.get("model"), str):
+            state["model"] = response["model"]
+    for key in ("id", "model"):
+        if isinstance(payload.get(key), str):
+            state["request_id" if key == "id" else "model"] = payload[key]
+
+
+def _parse_stream_arguments(value: Any) -> Mapping[str, Any]:
+    if isinstance(value, Mapping):
+        arguments = value
+    elif isinstance(value, str):
+        if len(value.encode("utf-8")) > MAX_TOOL_ARGUMENT_BYTES:
+            raise ProviderError("provider streamed tool arguments exceed the bounded size")
+        try:
+            arguments = json.loads(value or "{}")
+        except (TypeError, ValueError) as error:
+            raise ProviderError("provider streamed tool arguments were not valid JSON") from error
+    else:
+        raise ProviderError("provider streamed tool arguments were malformed")
+    if not isinstance(arguments, Mapping):
+        raise ProviderError("provider streamed tool arguments must be an object")
+    _bounded_json_bytes(arguments, MAX_TOOL_ARGUMENT_BYTES, "provider streamed tool arguments")
+    return dict(arguments)
+
+
+def _append_stream_fragment(current: Any, fragment: Any, limit: int, label: str) -> str:
+    if not isinstance(current, str) or not isinstance(fragment, str):
+        raise ProviderError(f"{label} was malformed")
+    combined = current + fragment
+    if len(combined.encode("utf-8")) > limit:
+        raise ProviderError(f"{label} exceeded the bounded size")
+    return combined
+
+
+def _project_stream_payload(
+    protocol: str,
+    event_name: str | None,
+    payload: Mapping[str, Any],
+    state: dict[str, Any],
+) -> list[dict[str, Any]]:
+    event_type = event_name or _string_or_none(payload.get("type")) or "provider.event"
+    _stream_meta(payload, state)
+    specs: list[dict[str, Any]] = []
+    handled = False
+    if protocol == "openai_responses":
+        response = payload.get("response")
+        if isinstance(response, Mapping):
+            _stream_meta(response, state)
+        if event_type == "response.output_text.delta" and isinstance(payload.get("delta"), str):
+            specs.append({"event_type": event_type, "text_delta": payload["delta"]})
+            handled = True
+        elif event_type == "response.output_item.added":
+            item = payload.get("item")
+            if isinstance(item, Mapping) and item.get("type") == "function_call":
+                key = str(item.get("id") or payload.get("item_id") or len(state["calls"]))
+                state["calls"][key] = {
+                    "call_id": item.get("call_id") or item.get("id") or key,
+                    "name": item.get("name"),
+                    "arguments": "",
+                }
+            handled = True
+        elif event_type == "response.function_call_arguments.delta":
+            item_id = str(payload.get("item_id") or payload.get("id") or len(state["calls"]))
+            call = state["calls"].setdefault(
+                item_id,
+                {"call_id": payload.get("call_id") or item_id, "name": payload.get("name"), "arguments": ""},
+            )
+            delta = payload.get("delta", "")
+            if not isinstance(delta, str):
+                raise ProviderError("provider streamed function arguments delta was malformed")
+            call["arguments"] = _append_stream_fragment(
+                call.get("arguments", ""),
+                delta,
+                MAX_TOOL_ARGUMENT_BYTES,
+                "provider streamed function arguments",
+            )
+            specs.append(
+                {
+                    "event_type": event_type,
+                    "tool_call_id": str(call["call_id"]),
+                    "tool_name": _string_or_none(call.get("name")),
+                    "arguments_delta": delta,
+                }
+            )
+            handled = True
+        elif event_type == "response.function_call_arguments.done":
+            item_id = str(payload.get("item_id") or payload.get("id") or len(state["calls"]))
+            call = state["calls"].setdefault(
+                item_id,
+                {"call_id": payload.get("call_id") or item_id, "name": payload.get("name"), "arguments": ""},
+            )
+            if isinstance(payload.get("arguments"), (str, Mapping)):
+                call["arguments"] = payload["arguments"]
+            if isinstance(payload.get("name"), str):
+                call["name"] = payload["name"]
+            specs.extend(_finalize_stream_tool_calls(protocol, state, only=item_id))
+            handled = True
+        elif event_type in {"response.completed", "response.done"}:
+            usage = {}
+            if isinstance(response, Mapping) and isinstance(response.get("usage"), Mapping):
+                usage = dict(response["usage"])
+            elif isinstance(payload.get("usage"), Mapping):
+                usage = dict(payload["usage"])
+            specs.extend(_finalize_stream_tool_calls(protocol, state))
+            specs.append({"event_type": event_type, "usage": usage, "done": True})
+            handled = True
+    elif protocol == "openai_chat_completions":
+        choices = payload.get("choices")
+        if isinstance(choices, list) and choices and isinstance(choices[0], Mapping):
+            choice = choices[0]
+            delta = choice.get("delta")
+            if not isinstance(delta, Mapping):
+                delta = choice.get("message") if isinstance(choice.get("message"), Mapping) else {}
+            content = delta.get("content") if isinstance(delta, Mapping) else None
+            if isinstance(content, str) and content:
+                specs.append({"event_type": event_type, "text_delta": content})
+                handled = True
+            chunks = delta.get("tool_calls") if isinstance(delta, Mapping) else None
+            if isinstance(chunks, list):
+                for chunk in chunks:
+                    if not isinstance(chunk, Mapping):
+                        continue
+                    arguments_delta = ""
+                    index = str(chunk.get("index", len(state["calls"])))
+                    call = state["calls"].setdefault(
+                        index,
+                        {"call_id": chunk.get("id") or f"tool-call-{index}", "name": None, "arguments": ""},
+                    )
+                    if isinstance(chunk.get("id"), str):
+                        call["call_id"] = chunk["id"]
+                    function = chunk.get("function")
+                    if isinstance(function, Mapping):
+                        if isinstance(function.get("name"), str):
+                            call["name"] = function["name"]
+                        arguments_delta = function.get("arguments", "")
+                        if not isinstance(arguments_delta, str):
+                            raise ProviderError("provider streamed chat tool arguments were malformed")
+                        call["arguments"] = _append_stream_fragment(
+                            call.get("arguments", ""),
+                            arguments_delta,
+                            MAX_TOOL_ARGUMENT_BYTES,
+                            "provider streamed chat tool arguments",
+                        )
+                    specs.append(
+                        {
+                            "event_type": event_type,
+                            "tool_call_id": str(call["call_id"]),
+                            "tool_name": _string_or_none(call.get("name")),
+                            "arguments_delta": arguments_delta if isinstance(arguments_delta, str) else "",
+                        }
+                    )
+                    handled = True
+            finish_reason = choice.get("finish_reason")
+            if finish_reason == "tool_calls":
+                specs.extend(_finalize_stream_tool_calls(protocol, state))
+                specs.append({"event_type": event_type, "done": True})
+                handled = True
+            elif finish_reason is not None:
+                specs.append({"event_type": event_type, "done": True})
+                handled = True
+        if isinstance(payload.get("usage"), Mapping):
+            specs.append({"event_type": event_type, "usage": dict(payload["usage"])})
+            handled = True
+    else:
+        if event_type == "message_start":
+            message = payload.get("message")
+            if isinstance(message, Mapping):
+                if isinstance(message.get("id"), str):
+                    state["request_id"] = message["id"]
+                if isinstance(message.get("model"), str):
+                    state["model"] = message["model"]
+                if isinstance(message.get("usage"), Mapping):
+                    specs.append({"event_type": event_type, "usage": dict(message["usage"])})
+            handled = True
+        elif event_type == "content_block_start":
+            block = payload.get("content_block")
+            index = str(payload.get("index", len(state["calls"])))
+            if isinstance(block, Mapping) and block.get("type") == "tool_use":
+                state["calls"][index] = {
+                    "call_id": block.get("id") or f"tool-call-{index}",
+                    "name": block.get("name"),
+                    "arguments": "",
+                }
+            handled = True
+        elif event_type == "content_block_delta":
+            index = str(payload.get("index", len(state["calls"])))
+            delta = payload.get("delta")
+            if isinstance(delta, Mapping) and delta.get("type") == "text_delta":
+                text = delta.get("text", "")
+                if not isinstance(text, str):
+                    raise ProviderError("provider streamed Anthropic text delta was malformed")
+                specs.append({"event_type": event_type, "text_delta": text})
+            elif isinstance(delta, Mapping) and delta.get("type") == "input_json_delta":
+                call = state["calls"].setdefault(
+                    index,
+                    {"call_id": f"tool-call-{index}", "name": None, "arguments": ""},
+                )
+                partial = delta.get("partial_json", "")
+                if not isinstance(partial, str):
+                    raise ProviderError("provider streamed Anthropic tool arguments were malformed")
+                call["arguments"] = _append_stream_fragment(
+                    call.get("arguments", ""),
+                    partial,
+                    MAX_TOOL_ARGUMENT_BYTES,
+                    "provider streamed Anthropic tool arguments",
+                )
+                specs.append(
+                    {
+                        "event_type": event_type,
+                        "tool_call_id": str(call["call_id"]),
+                        "tool_name": _string_or_none(call.get("name")),
+                        "arguments_delta": partial,
+                    }
+                )
+            handled = True
+        elif event_type == "message_delta":
+            usage = payload.get("usage")
+            if isinstance(usage, Mapping):
+                specs.append({"event_type": event_type, "usage": dict(usage)})
+            handled = True
+        elif event_type == "message_stop":
+            specs.extend(_finalize_stream_tool_calls(protocol, state))
+            specs.append({"event_type": event_type, "done": True})
+            handled = True
+    if not handled:
+        specs.append({"event_type": event_type})
+    return specs
+
+
+def _finalize_stream_tool_calls(
+    protocol: str,
+    state: dict[str, Any],
+    *,
+    only: str | None = None,
+) -> list[dict[str, Any]]:
+    specs: list[dict[str, Any]] = []
+    keys = [only] if only is not None else list(state["calls"])
+    for key in keys:
+        if key is None or key not in state["calls"]:
+            continue
+        call = state["calls"].pop(key)
+        name = call.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise ProviderError("provider stream completed a tool call without a name")
+        arguments = _parse_stream_arguments(call.get("arguments", "{}"))
+        parsed = ProviderToolCall(
+            call_id=str(call.get("call_id") or key),
+            name=name,
+            arguments=arguments,
+        )
+        specs.append(
+            {
+                "event_type": "provider.tool_call.done",
+                "tool_call_id": parsed.call_id,
+                "tool_name": parsed.name,
+                "tool_call": parsed,
+            }
+        )
+    return specs
 
 
 def _header(headers: Mapping[str, str], name: str) -> str | None:

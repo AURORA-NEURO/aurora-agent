@@ -13,7 +13,10 @@ from prism_sdk.llm_runtime import (
     ProviderError,
     ProviderOnboarding,
     ProviderRequest,
+    ProviderStreamEvent,
     ProviderTool,
+    ProviderToolCall,
+    ProviderToolResult,
     anthropic_provider,
     openai_compatible_provider,
     openai_provider,
@@ -27,6 +30,7 @@ class _ProviderHandler(BaseHTTPRequestHandler):
         body = self.rfile.read(length)
         self.server.seen_headers = {key.lower(): value for key, value in self.headers.items()}  # type: ignore[attr-defined]
         self.server.seen_body = body  # type: ignore[attr-defined]
+        stream_frames: list[bytes] | None = None
         if self.path == "/failure":
             payload = b'{"error":"authorization secret-super-secret was rejected"}'
             self.send_response(401)
@@ -90,9 +94,65 @@ class _ProviderHandler(BaseHTTPRequestHandler):
                 separators=(",", ":"),
             ).encode()
             self.send_response(200)
+        elif self.path == "/stream":
+            stream_frames = [
+                b'event: response.created\ndata: {"type":"response.created","id":"resp_stream","model":"test-model"}\n\n',
+                b'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"hel"}\n\n',
+                b'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"lo"}\n\n',
+                b'event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp_stream","model":"test-model","usage":{"total_tokens":4}}}\n\n',
+            ]
+            payload = b""
+            self.send_response(200)
+        elif self.path == "/stream_tool":
+            stream_frames = [
+                b'event: response.created\ndata: {"type":"response.created","id":"resp_stream_tool","model":"test-model"}\n\n',
+                b'event: response.output_item.added\ndata: {"type":"response.output_item.added","item":{"type":"function_call","id":"item-1","call_id":"call-stream-1","name":"developer_platform_status"}}\n\n',
+                b'event: response.function_call_arguments.delta\ndata: {"type":"response.function_call_arguments.delta","item_id":"item-1","delta":"{\\"scope\\": "}\n\n',
+                b'event: response.function_call_arguments.delta\ndata: {"type":"response.function_call_arguments.delta","item_id":"item-1","delta":"\\"workspace\\"}"}\n\n',
+                b'event: response.function_call_arguments.done\ndata: {"type":"response.function_call_arguments.done","item_id":"item-1","arguments":"{\\"scope\\":\\"workspace\\"}"}\n\n',
+                b'event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp_stream_tool","model":"test-model","usage":{"total_tokens":6}}}\n\n',
+                b'data: [DONE]\n\n',
+            ]
+            payload = b""
+            self.send_response(200)
+        elif self.path == "/continue":
+            request_body = json.loads(body.decode("utf-8"))
+            input_items = request_body.get("input", [])
+            has_result = any(
+                isinstance(item, dict) and item.get("type") == "function_call_output"
+                for item in input_items
+            )
+            if has_result:
+                payload = b'{"id":"resp_final","model":"test-model","output_text":"continued","usage":{"total_tokens":9}}'
+            else:
+                payload = json.dumps(
+                    {
+                        "id": "resp_first",
+                        "model": "test-model",
+                        "output": [
+                            {
+                                "type": "function_call",
+                                "call_id": "call-loop-1",
+                                "name": "developer_platform_status",
+                                "arguments": "{}",
+                            }
+                        ],
+                        "usage": {"total_tokens": 5},
+                    },
+                    separators=(",", ":"),
+                ).encode()
+            self.send_response(200)
         else:
             payload = b'{"id":"resp_test","model":"test-model","output_text":"hello","usage":{"total_tokens":3}}'
             self.send_response(200)
+        if stream_frames is not None:
+            stream_payload = b"".join(stream_frames)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Content-Length", str(len(stream_payload)))
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            self.wfile.write(stream_payload)
+            return
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
         self.send_header("X-Request-Id", "request-test")
@@ -258,6 +318,180 @@ class LlmRuntimeTests(unittest.TestCase):
                 ),
                 credential=handle,
             )
+
+    def test_sse_stream_projects_text_and_terminal_events_without_raw_payloads(self) -> None:
+        store = CredentialStore()
+        runtime = LLMRuntime(store)
+        runtime.register_provider(
+            openai_provider(base_url=self.base_url, allow_insecure_http=True, path="/stream")
+        )
+        handle = store.register("openai", "super-secret")
+        request = ProviderRequest(
+            model="test-model",
+            messages=({"role": "user", "content": "hello"},),
+        )
+        events = list(runtime.invoke_stream("openai", request, credential=handle))
+        self.assertTrue(all(isinstance(event, ProviderStreamEvent) for event in events))
+        self.assertEqual("".join(event.text_delta for event in events), "hello")
+        self.assertTrue(events[-1].done)
+        self.assertNotIn("super-secret", json.dumps([event.to_dict() for event in events]))
+        response = runtime.collect_stream("openai", request, credential=handle)
+        self.assertEqual(response.text, "hello")
+        self.assertEqual(response.usage["total_tokens"], 4)
+        self.assertEqual(response.raw["stream"], True)
+
+    def test_sse_stream_finalizes_provider_tool_intent_and_validates_allowlist(self) -> None:
+        store = CredentialStore()
+        runtime = LLMRuntime(store)
+        runtime.register_provider(
+            openai_provider(base_url=self.base_url, allow_insecure_http=True, path="/stream_tool")
+        )
+        handle = store.register("openai", "super-secret")
+        tool = ProviderTool("developer_platform_status", parameters={"type": "object"})
+        request = ProviderRequest(
+            model="test-model",
+            messages=({"role": "user", "content": "inspect"},),
+            tools=(tool,),
+        )
+        events = list(runtime.invoke_stream("openai", request, credential=handle))
+        finalized = [event.tool_call for event in events if event.tool_call is not None]
+        self.assertEqual(len(finalized), 1)
+        self.assertEqual(finalized[0].arguments, {"scope": "workspace"})  # type: ignore[union-attr]
+        response = runtime.collect_stream("openai", request, credential=handle)
+        self.assertEqual(response.tool_calls[0].name, "developer_platform_status")
+        with self.assertRaisesRegex(ProviderError, "unrequested streamed tool call"):
+            runtime.collect_stream(
+                "openai",
+                ProviderRequest(
+                    model="test-model",
+                    messages=({"role": "user", "content": "inspect"},),
+                    tools=(ProviderTool("other_tool"),),
+                ),
+                credential=handle,
+            )
+
+    def test_tool_continuation_translates_to_each_provider_wire_shape(self) -> None:
+        call = ProviderToolCall(
+            call_id="call-1",
+            name="developer_platform_status",
+            arguments={"scope": "workspace"},
+        )
+        result = ProviderToolResult(
+            call_id="call-1",
+            content={"status": "ready"},
+            approved=True,
+        )
+        request = ProviderRequest(
+            model="test-model",
+            messages=({"role": "user", "content": "inspect"},),
+            tools=(ProviderTool("developer_platform_status"),),
+        ).with_tool_results((call,), (result,))
+        openai_body = LLMRuntime._body(
+            openai_provider(base_url=self.base_url, allow_insecure_http=True),
+            request,
+        )
+        chat_body = LLMRuntime._body(
+            openai_compatible_provider("local", self.base_url, allow_insecure_http=True),
+            request,
+        )
+        anthropic_body = LLMRuntime._body(
+            anthropic_provider(base_url=self.base_url, allow_insecure_http=True),
+            request,
+        )
+        self.assertEqual(openai_body["input"][-2]["type"], "function_call")
+        self.assertEqual(openai_body["input"][-1]["type"], "function_call_output")
+        self.assertEqual(chat_body["messages"][-2]["tool_calls"][0]["function"]["name"], "developer_platform_status")
+        self.assertEqual(chat_body["messages"][-1]["role"], "tool")
+        self.assertEqual(anthropic_body["messages"][-2]["content"][0]["type"], "tool_use")
+        self.assertEqual(anthropic_body["messages"][-1]["content"][0]["type"], "tool_result")
+        with self.assertRaisesRegex(ProviderError, "require caller approval"):
+            ProviderRequest(
+                model="test-model",
+                messages=({"role": "user", "content": "inspect"},),
+            ).with_tool_results((call,), (ProviderToolResult("call-1", "no", approved=False),))
+
+    def test_bounded_tool_loop_requires_caller_authorization_and_continues(self) -> None:
+        store = CredentialStore()
+        runtime = LLMRuntime(store)
+        runtime.register_provider(
+            openai_provider(base_url=self.base_url, allow_insecure_http=True, path="/continue")
+        )
+        handle = store.register("openai", "super-secret")
+        request = ProviderRequest(
+            model="test-model",
+            messages=({"role": "user", "content": "inspect"},),
+            tools=(ProviderTool("developer_platform_status"),),
+        )
+        result = runtime.invoke_tool_loop(
+            "openai",
+            request,
+            credential=handle,
+            authorize_and_execute=lambda calls: [
+                ProviderToolResult(
+                    call_id=calls[0].call_id,
+                    content={"status": "ready"},
+                    approved=True,
+                )
+            ],
+            max_turns=3,
+        )
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.turns, 2)
+        self.assertEqual(result.final_response.text, "continued")  # type: ignore[union-attr]
+        continued_body = json.loads(self.server.seen_body)  # type: ignore[attr-defined]
+        self.assertEqual(continued_body["input"][-1]["type"], "function_call_output")
+        refused = runtime.invoke_tool_loop(
+            "openai",
+            request,
+            credential=handle,
+            authorize_and_execute=lambda calls: [
+                ProviderToolResult(call_id=calls[0].call_id, content="refused", approved=False)
+            ],
+        )
+        self.assertEqual(refused.status, "authorization_required")
+        self.assertEqual(refused.turns, 1)
+
+    def test_autonomous_brain_exposes_authorized_native_tool_loop(self) -> None:
+        class Workspace:
+            def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+                if name == "brain_model_select":
+                    return {"selected_model": {"provider": "openai", "model": "test-model"}}
+                if name == "brain_prompt_assemble":
+                    return {"messages": [{"role": "user", "content": "inspect"}], "prompt_digest": "p"}
+                if name == "brain_plan":
+                    return {
+                        "ok": True,
+                        "plan": {
+                            "requires_approval": True,
+                            "steps": [{"effect": "provider_call"}],
+                            "plan_digest": "plan",
+                        },
+                    }
+                raise AssertionError(f"unexpected tool {name}")
+
+        store = CredentialStore()
+        runtime = LLMRuntime(store)
+        runtime.register_provider(
+            openai_provider(base_url=self.base_url, allow_insecure_http=True, path="/continue")
+        )
+        handle = store.register("openai", "super-secret")
+        brain = AutonomousBrain(Workspace(), runtime)
+        result = brain.run_tool_loop(
+            task="inspect",
+            model_selection={"models": [{"provider": "openai", "model": "test-model"}]},
+            prompt={"max_input_tokens": 100},
+            plan={"allowed_tools": ["provider.invoke"], "max_cost": 10},
+            credentials={"openai": handle},
+            provider_tools=(ProviderTool("developer_platform_status"),),
+            authorize_and_execute=lambda calls: [
+                ProviderToolResult(calls[0].call_id, {"status": "ready"}, approved=True)
+            ],
+            approve_provider_call=True,
+            max_turns=3,
+        )
+        self.assertEqual(result.status, "completed_provider_tool_loop")
+        self.assertEqual(result.provider_loop.final_response.text, "continued")  # type: ignore[union-attr]
+        self.assertNotIn("super-secret", json.dumps(result.to_dict()))
 
     def test_revocation_and_provider_mismatch_fail_closed(self) -> None:
         store = CredentialStore()

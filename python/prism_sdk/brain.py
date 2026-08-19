@@ -16,9 +16,18 @@ import os
 from pathlib import Path
 import threading
 import uuid
-from typing import Any, Mapping, Protocol, Sequence
+from typing import Any, Callable, Mapping, Protocol, Sequence
 
-from .llm_runtime import CredentialHandle, LLMRuntime, ProviderRequest, ProviderResponse, ProviderTool
+from .llm_runtime import (
+    CredentialHandle,
+    LLMRuntime,
+    ProviderRequest,
+    ProviderResponse,
+    ProviderTool,
+    ProviderToolCall,
+    ProviderToolLoopResult,
+    ProviderToolResult,
+)
 from .mission import MissionPolicy, MissionRequest
 
 
@@ -308,6 +317,31 @@ class BrainRunResult:
 
 
 @dataclass(frozen=True, slots=True)
+class BrainToolLoopResult:
+    """Brain-level envelope for a provider continuation loop.
+
+    The first decision is still planned and approved through the brain kernel. Subsequent native
+    tool turns are represented by the runtime's bounded loop; caller code remains the sole effect
+    authority through its authorization callback.
+    """
+
+    brain_run: BrainRunResult
+    status: str
+    provider_loop: ProviderToolLoopResult | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "brain_run": self.brain_run.to_dict(),
+            "provider_loop": None if self.provider_loop is None else self.provider_loop.to_dict(),
+            "authorization": {
+                "provider_call": "caller_approved_brain_plan",
+                "tool_execution": "caller_callback_only",
+            },
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class BrainMissionResult:
     """The outcome of proposing and optionally executing one model-authored mission.
 
@@ -465,6 +499,117 @@ class AutonomousBrain:
         )
         response = self.runtime.invoke(provider, request, credential=handle)
         return self._result(resolved_run_id, "completed_provider_call", selection, prompt_report, plan_report, response)
+
+    def run_tool_loop(
+        self,
+        *,
+        task: str,
+        model_selection: Mapping[str, Any],
+        prompt: Mapping[str, Any],
+        plan: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle],
+        authorize_and_execute: Callable[[tuple[ProviderToolCall, ...]], Sequence[ProviderToolResult]],
+        approve_provider_call: bool = False,
+        run_id: str | None = None,
+        max_output_tokens: int = 2048,
+        temperature: float | None = None,
+        require_json: bool = False,
+        response_schema: Mapping[str, Any] | None = None,
+        idempotency_key: str | None = None,
+        context: Mapping[str, Any] | None = None,
+        contextual_observations: Sequence[Mapping[str, Any]] = (),
+        provider_tools: Sequence[ProviderTool] = (),
+        tool_choice: str | None = None,
+        max_turns: int = 4,
+        max_tool_calls: int = 128,
+        stream: bool = False,
+    ) -> BrainToolLoopResult:
+        """Run the planned provider call and continue only through caller-approved tool results.
+
+        This method is the high-level bridge for applications that want native function calling
+        without converting every turn into a mission. The initial model decision still passes
+        through ``brain_plan`` and provider approval. The callback is intentionally typed and
+        explicit: it may invoke a caller-owned mission/executor, but the brain and provider
+        runtime never do so implicitly.
+        """
+
+        if not callable(authorize_and_execute):
+            raise BrainRunError("authorize_and_execute must be callable")
+        if not isinstance(provider_tools, Sequence) or isinstance(provider_tools, (str, bytes)):
+            raise BrainRunError("provider_tools must be a sequence")
+        if any(not isinstance(tool, ProviderTool) for tool in provider_tools):
+            raise BrainRunError("provider_tools must contain ProviderTool values")
+        if not isinstance(stream, bool):
+            raise BrainRunError("stream must be a boolean")
+        first = self.run(
+            task=task,
+            model_selection=model_selection,
+            prompt=prompt,
+            plan=plan,
+            credentials=credentials,
+            approve_provider_call=approve_provider_call,
+            run_id=run_id,
+            max_output_tokens=max_output_tokens,
+            temperature=temperature,
+            require_json=require_json,
+            response_schema=response_schema,
+            idempotency_key=idempotency_key,
+            context=context,
+            contextual_observations=contextual_observations,
+            tools=provider_tools,
+            tool_choice=tool_choice,
+        )
+        if first.status != "completed_provider_call" or first.response is None:
+            return BrainToolLoopResult(brain_run=first, status=first.status, provider_loop=None)
+        selected = first.selection.get("selected_model")
+        if not isinstance(selected, Mapping):
+            raise BrainRunError("model selection did not produce a continuation model")
+        provider = selected.get("provider")
+        model = selected.get("model")
+        if not isinstance(provider, str) or not isinstance(model, str):
+            raise BrainRunError("continuation model metadata is malformed")
+        prompt_messages = first.prompt.get("messages")
+        if not isinstance(prompt_messages, list) or not prompt_messages:
+            raise BrainRunError("brain prompt did not retain bounded provider messages")
+        provider_messages = tuple(
+            {"role": message["role"], "content": message["content"]}
+            for message in prompt_messages
+            if isinstance(message, Mapping)
+            and isinstance(message.get("role"), str)
+            and isinstance(message.get("content"), str)
+        )
+        if len(provider_messages) != len(prompt_messages):
+            raise BrainRunError("brain prompt returned malformed continuation messages")
+        handle = credentials.get(provider)
+        if handle is None:
+            raise BrainRunError(f"no user credential handle was supplied for provider {provider!r}")
+        request = ProviderRequest(
+            model=model,
+            messages=provider_messages,
+            max_output_tokens=max_output_tokens,
+            temperature=temperature,
+            require_json=require_json,
+            response_schema=response_schema,
+            idempotency_key=idempotency_key,
+            tools=tuple(provider_tools),
+            tool_choice=tool_choice,
+        )
+        loop = self.runtime.invoke_tool_loop(
+            provider,
+            request,
+            credential=handle,
+            authorize_and_execute=authorize_and_execute,
+            max_turns=max_turns,
+            max_tool_calls=max_tool_calls,
+            stream=stream,
+            initial_response=first.response,
+        )
+        status = {
+            "completed": "completed_provider_tool_loop",
+            "authorization_required": "tool_authorization_required",
+            "turn_limit_reached": "tool_turn_limit_reached",
+        }[loop.status]
+        return BrainToolLoopResult(brain_run=first, status=status, provider_loop=loop)
 
     def record_evaluator_outcome(
         self,

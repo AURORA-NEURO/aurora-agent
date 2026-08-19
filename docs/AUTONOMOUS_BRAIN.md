@@ -14,7 +14,8 @@ flowchart LR
     CR --> PA[Prompt assembly with bounded tool schemas]
     PA --> PL[Bounded plan DAG]
     PL --> RT
-    RT --> O[Value response]
+    RT --> ST[Bounded SSE stream]
+    ST --> O[Value response or typed tool intent]
     O --> MP[Structured mission proposal]
     MP --> MF[agent_mission preflight]
     MF --> MD[Caller dispatch approval]
@@ -111,18 +112,62 @@ redirects, does not allow plain HTTP unless explicitly enabled for local/test us
 bytes, retries only classified transient failures, opens a per-provider circuit after repeated
 failures, and can parse/validate bounded structured JSON locally. `AutonomousBrain.run` exposes
 output limits, temperature, structured-output requirements, response schemas, and idempotency
-keys without exposing credential material. Streaming and provider-native tool calling remain
-separate runtime layers; they must preserve the same credential, approval, and value-only learning
-boundaries.
+keys without exposing credential material. Streaming and provider-native tool calling are explicit
+runtime layers. `invoke_stream()` parses SSE framing into bounded `ProviderStreamEvent` deltas,
+while `collect_stream()` folds the same events into a normal `ProviderResponse`. Event bodies are
+not retained as raw provider payloads; text, argument fragments, event count, total bytes, and
+aggregate output are bounded. A partial stream is never replayed automatically, because replaying
+after a provider has emitted a tool intent could duplicate a caller-visible action. The documented
+OpenAI Responses stream events for output text and function-call argument deltas/finalization are
+projected into this same contract; other providers use their native event names but expose no
+secret-bearing raw event channel.
 
-`ProviderTool` and `ProviderToolCall` now implement the provider-native tool boundary for the
-non-streaming path. MCP `tools/list` schemas can be converted into OpenAI Responses, OpenAI-
+`ProviderTool` and `ProviderToolCall` implement the provider-native tool boundary for both
+collected and streamed responses. MCP `tools/list` schemas can be converted into OpenAI Responses, OpenAI-
 compatible Chat Completions, or Anthropic Messages wire shapes. Returned calls are parsed into
 typed intents, and an unrequested call is refused. A call is never dispatched by `LLMRuntime`:
 `AutonomousBrain.run_mission` converts routed calls into ordinary mission steps and sends them
 through `agent_mission` preflight, caller-owned allow-lists, schema validation, budgets, and the
 separate dispatch approval. Provider tool calls therefore improve model/tool selection without
 creating a hidden execution channel.
+
+`ProviderRequest.with_tool_results(...)` appends a caller-approved assistant/tool turn and
+translates it into native continuation history: Responses receives `function_call` and
+`function_call_output` items, Chat Completions receives an assistant `tool_calls` message followed
+by `tool` messages, and Anthropic receives `tool_use` followed by `tool_result` content blocks.
+`LLMRuntime.invoke_tool_loop(...)` bounds turns and total calls and requires a callback to return
+one `ProviderToolResult(approved=True)` for every intent in order. A missing, refused, or malformed
+result stops before the next provider request. `AutonomousBrain.run_tool_loop(...)` adds model
+selection, prompt assembly, plan approval, and the existing credential boundary around that
+primitive:
+
+```python
+from prism_sdk import ProviderTool, ProviderToolResult
+
+loop = brain.run_tool_loop(
+    task="inspect the current platform state",
+    model_selection=selection_request,
+    prompt={"max_input_tokens": 12_000},
+    plan=provider_plan,
+    credentials={"openai": handle},
+    provider_tools=(ProviderTool("developer_platform_status"),),
+    approve_provider_call=True,
+    max_turns=4,
+    authorize_and_execute=lambda calls: [
+        ProviderToolResult(
+            call_id=call.call_id,
+            content=execute_after_policy_review(call),
+            approved=True,
+        )
+        for call in calls
+    ],
+)
+```
+
+The callback is application-owned: it should apply the same mission policy, schema validation,
+approval, budgets, and audit/evaluator rules as `agent_mission`. The runtime only transports the
+approved result back to the model. A tool loop is therefore bounded continuation, not unrestricted
+agent self-execution.
 
 ## Run, evaluate, and learn
 

@@ -6,7 +6,14 @@ JSON without recreating domain semantics or silently converting refusals into or
 """
 
 from .async_client import AsyncClient
-from .brain import AutonomousBrain, BrainLearningLedger, BrainMissionResult, BrainRunError, BrainRunResult
+from .brain import (
+    AutonomousBrain,
+    BrainLearningLedger,
+    BrainMissionResult,
+    BrainRunError,
+    BrainRunResult,
+    BrainToolLoopResult,
+)
 from .llm_runtime import (
     CredentialError,
     CredentialHandle,
@@ -20,6 +27,9 @@ from .llm_runtime import (
     ProviderError,
     ProviderRequest,
     ProviderResponse,
+    ProviderStreamEvent,
+    ProviderToolLoopResult,
+    ProviderToolResult,
     SecretValue,
     anthropic_provider,
     openai_compatible_provider,
@@ -2315,6 +2325,7 @@ __all__ = [
     "BrainRunError",
     "BrainRunResult",
     "BrainMissionResult",
+    "BrainToolLoopResult",
     "ApiError",
     "AcceptanceResult",
     "AdapterDescriptor",
@@ -4278,6 +4289,9 @@ __all__ = [
     "ProviderError",
     "ProviderRequest",
     "ProviderResponse",
+    "ProviderStreamEvent",
+    "ProviderToolLoopResult",
+    "ProviderToolResult",
     "SecretValue",
     "anthropic_provider",
     "openai_compatible_provider",
