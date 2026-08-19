@@ -12,6 +12,7 @@ from prism_sdk import (
     AutonomousAgent,
     AutonomousBrain,
     AutonomousDomainRegistry,
+    AutonomousDomainPackRegistry,
     AutonomousDomainTool,
     AutonomousDomainToolRegistry,
     AutonomousExecutionJournal,
@@ -510,6 +511,9 @@ def test_autonomous_agent_composes_domain_tools_into_native_tool_loop():
         assert result.status == "completed_provider_tool_loop"
         assert any(name == "developer_platform_status" for name, _ in workspace.calls)
         assert agent.tools("operations")[0]["risk_class"] == "read_only"
+        tool_plan = agent.domain_pack_tool_plan("operations")
+        assert "observability" in tool_plan["covered_tool_capabilities"]
+        assert tool_plan["pack_digest"] == agent.domain_pack("operations")["pack_digest"]
         assert agent.tool_receipts()[0]["status"] == "executed"
         assert "workspace" not in json.dumps(agent.tool_receipts())
         assert "agent-domain-tool-secret" not in json.dumps(result.to_dict())
@@ -632,6 +636,7 @@ def test_builtin_domain_registry_covers_every_autonomous_domain_and_blueprint_re
         assert "private api key" not in json.dumps(public).lower()
         assert public["prompt"]["context_ids"] == [
             "autonomy-domain-policy",
+            "autonomy-domain-pack",
             "autonomy-workflow-contract",
             "autonomy-constraints",
             "autonomy-desired-outputs",
@@ -653,10 +658,39 @@ def test_builtin_domain_registry_covers_every_autonomous_domain_and_blueprint_re
             assert domain_blueprint.workflow.domain == domain
             assert domain_blueprint.workflow.stages
             assert domain_blueprint.plan["workflow_id"] == domain_blueprint.workflow.workflow_id
+            assert domain_blueprint.domain_pack.domain == domain
+            assert domain_blueprint.selection_context["domain_pack_digest"] == domain_blueprint.domain_pack.pack_digest
+            assert domain_blueprint.plan["steps"][0]["arguments"]["domain_pack_digest"] == domain_blueprint.domain_pack.pack_digest
     finally:
         server.shutdown()
         thread.join(timeout=2)
         server.server_close()
+
+
+def test_reviewed_domain_packs_cover_every_domain_and_bind_workflow_evaluator_and_tools():
+    domain_registry = AutonomousDomainRegistry.with_builtin_profiles()
+    workflow_registry = AutonomousWorkflowRegistry.with_builtin_strategies()
+    packs = AutonomousDomainPackRegistry.with_builtin_packs(domain_registry, workflow_registry)
+    assert {entry["domain"] for entry in packs.catalogue()} == set(AUTONOMOUS_DOMAINS)
+    assert len(packs.digest) == 64
+    for domain in AUTONOMOUS_DOMAINS:
+        profile = domain_registry.resolve(domain)
+        workflow = workflow_registry.resolve(domain)
+        pack = packs.resolve(domain)
+        assert pack.workflow_id == workflow.workflow_id
+        assert pack.evaluator_domain == profile.evaluator_domain
+        assert set(profile.required_model_capabilities).issubset(pack.model_capabilities)
+        assert set(profile.capabilities).issubset(pack.tool_capabilities)
+        assert set(workflow.evaluator_signals).issubset(pack.evidence_requirements)
+        assert len(pack.pack_digest) == 64
+        public = pack.to_dict()
+        assert "private api key" not in json.dumps(public).lower()
+
+    runtime = LLMRuntime()
+    agent = AutonomousAgent(_Workspace(), runtime)
+    readiness = agent.readiness()
+    assert len(readiness["domain_packs"]) == len(AUTONOMOUS_DOMAINS)
+    assert readiness["domain_pack_registry_digest"] == packs.digest
 
 
 def test_provider_free_router_covers_every_domain_and_abstains_without_evidence():
@@ -789,6 +823,7 @@ def test_run_autonomous_selects_assembles_plans_and_preserves_provider_approval(
         assert any(name == "brain_model_select_contextual" for name, _ in workspace.calls)
         prompt_call = next(args for name, args in workspace.calls if name == "brain_prompt_assemble")
         assert any(chunk["id"] == "autonomy-domain-policy" for chunk in prompt_call["context"])  # type: ignore[index]
+        assert any(chunk["id"] == "autonomy-domain-pack" for chunk in prompt_call["context"])  # type: ignore[index]
         assert "transport-secret" not in json.dumps(completed.to_dict())
     finally:
         server.shutdown()

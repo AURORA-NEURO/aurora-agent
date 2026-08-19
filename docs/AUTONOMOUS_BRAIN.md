@@ -11,7 +11,9 @@ flowchart LR
     RT --> P[Provider API]
     Q[Task and evidence metadata] --> MS[Model selection]
     MS --> CR[Cross-domain capability route]
+    CR --> DP[Reviewed domain capability pack]
     CR --> PA[Prompt assembly with bounded tool schemas]
+    DP --> PA
     PA --> PL[Bounded plan DAG]
     PL --> RT
     RT --> ST[Bounded SSE stream]
@@ -160,6 +162,38 @@ facade runs the explicit evaluator and caller-owned bandit state through the exi
 learning path; it does not turn a provider response into a reward automatically. An application
 can still call `AutonomousTaskOrchestrator` directly when it needs to provide every candidate
 mapping or policy field itself.
+
+### Reviewed capability packs for every domain
+
+The domain profile and workflow are joined by an `AutonomousDomainPack` for every built-in domain:
+coding, browser, data, science, biomedical, neuroscience, operations, enterprise, multi-agent,
+multimodal, cross-domain, and evaluation. A pack is a versioned, SHA-256-addressed contract
+containing required model capabilities, reviewed tool capability labels, workflow and evaluator
+identity, required evidence signals, planning principles, and review triggers.
+
+```python
+packs = agent.domain_packs()
+coding_pack = agent.domain_pack("coding")
+tool_plan = agent.domain_pack_tool_plan("coding")
+```
+
+`prepare()` binds `domain_pack_id`, `domain_pack_digest`, evidence requirements, review triggers,
+and evaluator identity into transient selection context. The prompt receives the same redacted
+contract as a required developer context block, and the plan includes the pack digest so a later
+evaluator can identify the reviewed contract behind it. `prepare_auto()` and cross-domain fan-out
+therefore carry a domain contract from provider-free route selection to execution.
+
+When the agent automatically exposes registered domain tools, it first selects tools whose
+declared capability matches the pack. If no registered tool matches, caller-defined tools remain
+visible for compatibility and application-specific extensions; this fallback does not authorize
+anything. Tool registration, provider approval, effect policy, and caller approval remain
+independent gates. `agent.readiness()` reports the pack catalogue, registry digest, and per-domain
+tool-capability coverage so a UI can show what is configured versus what is still missing.
+
+Packs do not contain task text, prompts, keys, provider payloads, tool arguments, or outputs. They
+are reviewed planning and evidence metadata, not a source of truth. A production application can
+replace a pack registry, but the orchestrator refuses to run when a pack is missing or its workflow
+or evaluator mapping is inconsistent with the selected domain registries.
 
 For restart-safe provider adaptation, give the agent a caller-owned `ProviderHealthLedger`:
 

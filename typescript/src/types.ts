@@ -295,10 +295,43 @@ export interface AutonomousRouteCatalogueEntry extends JsonObject {
   evidence: "reviewed_catalogue_vocabulary" | string;
 }
 
+/** Versioned planning/evidence contract shared with the Python autonomous façade. */
+export interface AutonomousDomainPack extends JsonObject {
+  schema: "bioprism-python-autonomous-domain-pack/0.1" | string;
+  domain: string;
+  pack_id: string;
+  pack_version: string;
+  workflow_id: string;
+  evaluator_domain: string;
+  evaluator_id: string;
+  model_capabilities: string[];
+  tool_capabilities: string[];
+  evidence_requirements: string[];
+  planning_principles: string[];
+  review_triggers: string[];
+  pack_digest: string;
+  execution: string;
+  credential_posture: string;
+}
+
+export interface AutonomousTaskBlueprint extends JsonObject {
+  schema: "bioprism-python-autonomous-task/0.1" | string;
+  task: JsonObject;
+  domain_profile: JsonObject;
+  domain_pack: AutonomousDomainPack;
+  workflow: JsonObject;
+  selection_context: JsonObject;
+  required_capabilities: string[];
+  prompt: JsonObject;
+  plan: JsonObject;
+  execution: "not_started" | string;
+  credential_posture: string;
+}
+
 export interface AutonomousAutoBlueprint extends JsonObject {
   schema: "bioprism-python-autonomous-auto-blueprint/0.1" | string;
   route: AutonomousRouteProposal;
-  blueprint: JsonObject | null;
+  blueprint: AutonomousTaskBlueprint | null;
   cross_domain_blueprint: JsonObject | null;
   execution: "not_started" | string;
   authorization: string;

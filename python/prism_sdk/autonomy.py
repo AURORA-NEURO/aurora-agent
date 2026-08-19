@@ -105,6 +105,7 @@ AUTONOMOUS_CROSS_DOMAIN_TRAJECTORY_LEARNING_SCHEMA = "bioprism-python-autonomous
 AUTONOMOUS_WORKFLOW_LEARNING_SCHEMA = "bioprism-python-autonomous-workflow-learning/0.1"
 AUTONOMOUS_WORKFLOW_TRAJECTORY_LEARNING_SCHEMA = "bioprism-python-autonomous-workflow-trajectory-learning/0.1"
 AUTONOMOUS_ROUTE_SCHEMA = "bioprism-python-autonomous-route/0.1"
+AUTONOMOUS_DOMAIN_PACK_SCHEMA = "bioprism-python-autonomous-domain-pack/0.1"
 AUTONOMOUS_ROUTE_REASONS = (
     "routed",
     "cross_domain",
@@ -114,6 +115,7 @@ AUTONOMOUS_ROUTE_REASONS = (
 )
 MAX_AUTONOMOUS_ROUTE_CANDIDATES = 8
 MAX_AUTONOMOUS_ROUTE_DOMAINS = 4
+MAX_AUTONOMOUS_DOMAIN_PACK_ITEMS = 64
 _SAFE_IDENTIFIER_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-")
 
 
@@ -1179,6 +1181,393 @@ def builtin_autonomous_domain_profiles() -> tuple[AutonomousDomainProfile, ...]:
     )
 
 
+_DOMAIN_PACK_POLICIES: dict[str, dict[str, tuple[str, ...]]] = {
+    "coding": {
+        "planning_principles": (
+            "inspect the current artifact before proposing a change",
+            "separate implementation, test, review, and delivery boundaries",
+            "prefer the smallest reversible change that can be verified",
+        ),
+        "review_triggers": (
+            "unverified_file_change",
+            "dependency_or_schema_change",
+            "failed_or_missing_test_evidence",
+            "external_effect_or_publish",
+        ),
+    },
+    "browser": {
+        "planning_principles": (
+            "state the freshness requirement before retrieving sources",
+            "compare independent sources and preserve source identity",
+            "distinguish retrieved text, inference, and unresolved access gaps",
+        ),
+        "review_triggers": (
+            "source_freshness_uncertain",
+            "single_source_claim",
+            "retrieval_or_paywall_gap",
+            "external_submission_or_account_effect",
+        ),
+    },
+    "data": {
+        "planning_principles": (
+            "profile schemas, units, missingness, and lineage before transformation",
+            "make quality gates executable and preserve before_after comparisons",
+            "keep exploratory analysis separate from production data effects",
+        ),
+        "review_triggers": (
+            "schema_or_unit_drift",
+            "lineage_gap",
+            "quality_gate_failure",
+            "destructive_or_external_write",
+        ),
+    },
+    "science": {
+        "planning_principles": (
+            "define the question, estimand, and falsifiable alternatives before analysis",
+            "separate observations, models, assumptions, and causal claims",
+            "make replication, uncertainty, and provenance part of the result",
+        ),
+        "review_triggers": (
+            "unsupported_causal_claim",
+            "unreported_uncertainty",
+            "non_reproducible_analysis",
+            "human_or_external_experiment_effect",
+        ),
+    },
+    "biomedical": {
+        "planning_principles": (
+            "classify the request boundary before interpreting biomedical information",
+            "preserve provenance, population limits, and uncertainty for every claim",
+            "escalate individualized or high-impact decisions to qualified humans",
+        ),
+        "review_triggers": (
+            "diagnosis_or_treatment_request",
+            "patient_identifying_or_sensitive_data",
+            "provenance_or_boundary_gap",
+            "clinical_or_high_impact_effect",
+        ),
+    },
+    "neuroscience": {
+        "planning_principles": (
+            "separate acquisition, preprocessing, measurement, model, and biological interpretation",
+            "report signal quality and confounds before interpreting a neural result",
+            "keep population evidence distinct from individual or clinical inference",
+        ),
+        "review_triggers": (
+            "signal_quality_or_preprocessing_gap",
+            "measurement_interpretation_confusion",
+            "individual_outcome_inference",
+            "human_subject_or_external_effect",
+        ),
+    },
+    "operations": {
+        "planning_principles": (
+            "establish current state, blast radius, owner, and observability before action",
+            "stage reversible checkpoints with an explicit rollback path",
+            "require accountable approval for every effectful boundary",
+        ),
+        "review_triggers": (
+            "blast_radius_unknown",
+            "rollback_missing",
+            "approval_or_owner_missing",
+            "production_or_external_effect",
+        ),
+    },
+    "enterprise": {
+        "planning_principles": (
+            "map stakeholders, policy, ownership, and decision rights before recommendation",
+            "make compliance evidence and accountable approvals explicit",
+            "prefer reversible decisions with a documented follow_up owner",
+        ),
+        "review_triggers": (
+            "accountable_owner_missing",
+            "policy_or_compliance_gap",
+            "conflicting_stakeholder_constraints",
+            "financial_or_external_commitment",
+        ),
+    },
+    "multi_agent": {
+        "planning_principles": (
+            "decompose into bounded contracts with inputs, outputs, and stop conditions",
+            "keep delegation and synthesis evidence separate from agent assertions",
+            "retain one accountable authority for effects and unresolved conflicts",
+        ),
+        "review_triggers": (
+            "unbounded_delegation",
+            "conflicting_specialist_result",
+            "synthesis_without_source_attribution",
+            "delegated_external_effect",
+        ),
+    },
+    "multimodal": {
+        "planning_principles": (
+            "inventory available modalities, resolution, timestamps, and blind spots first",
+            "align entities, time, scale, and provenance before cross_modal synthesis",
+            "never imply inspection of a modality or region that was unavailable",
+        ),
+        "review_triggers": (
+            "missing_modality",
+            "alignment_or_timestamp_gap",
+            "unsupported_cross_modal_claim",
+            "external_or_high_impact_effect",
+        ),
+    },
+    "cross_domain": {
+        "planning_principles": (
+            "decompose the question and preserve each discipline's evidence standard",
+            "route bounded subproblems and retain attribution through synthesis",
+            "surface disagreement and unresolved decision boundaries instead of flattening them",
+        ),
+        "review_triggers": (
+            "domain_route_uncertain",
+            "evidence_standard_conflict",
+            "synthesis_attribution_gap",
+            "combined_external_effect",
+        ),
+    },
+    "evaluation": {
+        "planning_principles": (
+            "freeze the rubric, cases, controls, and evaluator independence before scoring",
+            "make replay identity and failure classification reproducible",
+            "keep the subject under evaluation separate from the pass authority",
+        ),
+        "review_triggers": (
+            "rubric_or_case_drift",
+            "replay_not_reproducible",
+            "evaluator_contamination",
+            "release_or_policy_effect",
+        ),
+    },
+}
+
+_DOMAIN_EVALUATOR_IDS = {
+    "engineering": "domain-engineering-quality",
+    "research": "domain-research-quality",
+    "operations": "domain-operations-quality",
+    "data": "domain-data-quality",
+    "biomedical": "domain-biomedical-boundary",
+}
+_DOMAIN_EVALUATOR_SIGNALS = {
+    "engineering": ("schema_valid", "tests_passed", "evidence_complete"),
+    "research": ("evidence_traceable", "uncertainty_reported", "claim_scope_respected"),
+    "operations": ("safety_gate_passed", "approval_complete", "rollback_plan_present"),
+    "data": ("schema_valid", "lineage_complete", "quality_gate_passed"),
+    "biomedical": ("boundary_compliant", "provenance_complete", "human_review_ready"),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousDomainPack:
+    """Reviewed capability contract joining one domain to planning and evaluation.
+
+    A pack describes what an autonomous route must be able to reason about and what evidence
+    must be present before it can be treated as successful. It never contains provider names,
+    credentials, raw task text, tool arguments, or permission to execute a side effect. Concrete
+    tools remain caller-registered and provider capabilities remain selected at runtime.
+    """
+
+    domain: str
+    pack_id: str
+    pack_version: str
+    workflow_id: str
+    evaluator_domain: str
+    evaluator_id: str
+    model_capabilities: tuple[str, ...]
+    tool_capabilities: tuple[str, ...]
+    evidence_requirements: tuple[str, ...]
+    planning_principles: tuple[str, ...]
+    review_triggers: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        _identifier("domain pack domain", self.domain)
+        if self.domain not in AUTONOMOUS_DOMAINS:
+            raise BrainRunError(f"unsupported autonomous domain pack domain: {self.domain!r}")
+        _identifier("domain pack pack_id", self.pack_id)
+        _identifier("domain pack pack_version", self.pack_version)
+        _identifier("domain pack workflow_id", self.workflow_id)
+        _identifier("domain pack evaluator_domain", self.evaluator_domain)
+        if self.evaluator_domain not in _DOMAIN_EVALUATOR_SIGNALS:
+            raise BrainRunError("domain pack evaluator_domain is not a built-in evaluator domain")
+        _identifier("domain pack evaluator_id", self.evaluator_id)
+        for name, values in (
+            ("model_capabilities", self.model_capabilities),
+            ("tool_capabilities", self.tool_capabilities),
+            ("evidence_requirements", self.evidence_requirements),
+            ("planning_principles", self.planning_principles),
+            ("review_triggers", self.review_triggers),
+        ):
+            normalized = _sequence(f"domain pack {name}", values, maximum=MAX_AUTONOMOUS_DOMAIN_PACK_ITEMS)
+            if not normalized:
+                raise BrainRunError(f"domain pack {name} must contain at least one entry")
+            object.__setattr__(self, name, normalized)
+
+    def descriptor(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_DOMAIN_PACK_SCHEMA,
+            "domain": self.domain,
+            "pack_id": self.pack_id,
+            "pack_version": self.pack_version,
+            "workflow_id": self.workflow_id,
+            "evaluator_domain": self.evaluator_domain,
+            "evaluator_id": self.evaluator_id,
+            "model_capabilities": list(self.model_capabilities),
+            "tool_capabilities": list(self.tool_capabilities),
+            "evidence_requirements": list(self.evidence_requirements),
+            "planning_principles": list(self.planning_principles),
+            "review_triggers": list(self.review_triggers),
+        }
+
+    @property
+    def pack_digest(self) -> str:
+        return content_digest(self.descriptor())
+
+    def prompt_contract(self) -> dict[str, Any]:
+        """Return the bounded contract that may be included in a provider prompt."""
+
+        return {
+            "pack_id": self.pack_id,
+            "pack_version": self.pack_version,
+            "pack_digest": self.pack_digest,
+            "domain": self.domain,
+            "workflow_id": self.workflow_id,
+            "evaluator_domain": self.evaluator_domain,
+            "evaluator_id": self.evaluator_id,
+            "model_capabilities": list(self.model_capabilities),
+            "tool_capabilities": list(self.tool_capabilities),
+            "evidence_requirements": list(self.evidence_requirements),
+            "planning_principles": list(self.planning_principles),
+            "review_triggers": list(self.review_triggers),
+            "does_not_authorize": [
+                "provider access or credential use",
+                "unregistered tools or side effects",
+                "treating model output as evaluator evidence",
+            ],
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            **self.descriptor(),
+            "pack_digest": self.pack_digest,
+            "execution": "reviewed_metadata_contract_only",
+            "credential_posture": "caller_supplied_opaque_handles",
+        }
+
+
+def _build_domain_pack(
+    profile: AutonomousDomainProfile,
+    workflow: AutonomousWorkflowStrategy,
+) -> AutonomousDomainPack:
+    policy = _DOMAIN_PACK_POLICIES.get(profile.domain)
+    if policy is None:
+        raise BrainRunError(f"no reviewed domain pack policy is registered for {profile.domain!r}")
+    stage_capabilities = tuple(
+        dict.fromkeys(
+            capability
+            for stage in workflow.stages
+            for capability in stage.required_capabilities
+        )
+    )
+    evidence = tuple(
+        dict.fromkeys(
+            (
+                *_DOMAIN_EVALUATOR_SIGNALS[profile.evaluator_domain],
+                *workflow.evaluator_signals,
+                *(signal for stage in workflow.stages for signal in stage.evaluator_signals),
+            )
+        )
+    )
+    return AutonomousDomainPack(
+        domain=profile.domain,
+        pack_id=f"aurora-domain-{profile.domain}",
+        pack_version="1",
+        workflow_id=workflow.workflow_id,
+        evaluator_domain=profile.evaluator_domain,
+        evaluator_id=_DOMAIN_EVALUATOR_IDS[profile.evaluator_domain],
+        model_capabilities=tuple(dict.fromkeys(profile.required_model_capabilities)),
+        tool_capabilities=tuple(dict.fromkeys((*profile.capabilities, *stage_capabilities))),
+        evidence_requirements=evidence,
+        planning_principles=policy["planning_principles"],
+        review_triggers=policy["review_triggers"],
+    )
+
+
+class AutonomousDomainPackRegistry:
+    """Deterministic registry of reviewed capability packs for every autonomous domain."""
+
+    def __init__(self, packs: Sequence[AutonomousDomainPack] = ()) -> None:
+        if not isinstance(packs, Sequence) or isinstance(packs, (str, bytes)):
+            raise BrainRunError("domain packs must be a sequence")
+        if len(packs) > len(AUTONOMOUS_DOMAINS):
+            raise BrainRunError("domain packs may not exceed the autonomous domain catalogue")
+        self._packs: dict[str, AutonomousDomainPack] = {}
+        for pack in packs:
+            self.register(pack)
+
+    def register(self, pack: AutonomousDomainPack) -> None:
+        if not isinstance(pack, AutonomousDomainPack):
+            raise BrainRunError("domain pack registry entries must be AutonomousDomainPack values")
+        if pack.domain in self._packs:
+            raise BrainRunError(f"autonomous domain pack is already registered: {pack.domain}")
+        self._packs[pack.domain] = pack
+
+    def resolve(self, domain: str) -> AutonomousDomainPack:
+        _identifier("domain pack registry domain", domain)
+        pack = self._packs.get(domain)
+        if pack is None:
+            raise BrainRunError(f"no autonomous domain pack is registered for {domain!r}")
+        return pack
+
+    def for_domains(self, domains: Sequence[str]) -> tuple[AutonomousDomainPack, ...]:
+        normalized = _sequence("domain pack selection domains", domains, maximum=MAX_AUTONOMOUS_ROUTE_DOMAINS)
+        return tuple(self.resolve(domain) for domain in normalized)
+
+    def assert_aligned(
+        self,
+        registry: AutonomousDomainRegistry,
+        workflow_registry: AutonomousWorkflowRegistry,
+    ) -> None:
+        if not isinstance(registry, AutonomousDomainRegistry):
+            raise BrainRunError("domain pack alignment requires an AutonomousDomainRegistry")
+        if not isinstance(workflow_registry, AutonomousWorkflowRegistry):
+            raise BrainRunError("domain pack alignment requires an AutonomousWorkflowRegistry")
+        for profile in registry._profiles.values():
+            pack = self.resolve(profile.domain)
+            workflow = workflow_registry.resolve(profile.domain)
+            if pack.workflow_id != workflow.workflow_id:
+                raise BrainRunError(
+                    f"domain pack workflow does not match {profile.domain!r}: "
+                    f"{pack.workflow_id} != {workflow.workflow_id}"
+                )
+            if pack.evaluator_domain != profile.evaluator_domain:
+                raise BrainRunError(
+                    f"domain pack evaluator does not match {profile.domain!r}: "
+                    f"{pack.evaluator_domain} != {profile.evaluator_domain}"
+                )
+
+    def catalogue(self) -> list[dict[str, Any]]:
+        return [self._packs[key].to_dict() for key in sorted(self._packs)]
+
+    @property
+    def digest(self) -> str:
+        return content_digest(self.catalogue())
+
+    @classmethod
+    def with_builtin_packs(
+        cls,
+        registry: AutonomousDomainRegistry | None = None,
+        workflow_registry: AutonomousWorkflowRegistry | None = None,
+    ) -> "AutonomousDomainPackRegistry":
+        resolved_registry = registry or AutonomousDomainRegistry.with_builtin_profiles()
+        resolved_workflows = workflow_registry or AutonomousWorkflowRegistry.with_builtin_strategies()
+        packs = [
+            _build_domain_pack(profile, resolved_workflows.resolve(profile.domain))
+            for profile in resolved_registry._profiles.values()
+        ]
+        result = cls(packs)
+        result.assert_aligned(resolved_registry, resolved_workflows)
+        return result
+
+
 class AutonomousDomainRegistry:
     """Deterministic domain-profile registry used by task intake."""
 
@@ -1284,6 +1673,7 @@ class AutonomousTaskBlueprint:
 
     spec: AutonomousTaskSpec
     profile: AutonomousDomainProfile
+    domain_pack: AutonomousDomainPack
     workflow: AutonomousWorkflowStrategy
     selection_context: Mapping[str, Any]
     prompt: Mapping[str, Any]
@@ -1320,6 +1710,7 @@ class AutonomousTaskBlueprint:
             "schema": AUTONOMY_SCHEMA,
             "task": self.spec.to_dict(),
             "domain_profile": self.profile.to_dict(),
+            "domain_pack": self.domain_pack.to_dict(),
             "workflow": self.workflow.to_dict(),
             "selection_context": dict(self.selection_context),
             "required_capabilities": list(self.required_capabilities),
@@ -2030,11 +2421,17 @@ class AutonomousPromptBuilder:
         spec: AutonomousTaskSpec,
         profile: AutonomousDomainProfile,
         *,
+        domain_pack: AutonomousDomainPack | None = None,
         workflow: AutonomousWorkflowStrategy | None = None,
         max_input_tokens: int = 4_096,
         memory_episodes: Sequence[Mapping[str, Any]] = (),
     ) -> dict[str, Any]:
         workflow = workflow or _builtin_workflow_strategy(profile.domain)
+        if domain_pack is not None:
+            if not isinstance(domain_pack, AutonomousDomainPack):
+                raise BrainRunError("domain_pack must be an AutonomousDomainPack or None")
+            if domain_pack.domain != profile.domain or domain_pack.workflow_id != workflow.workflow_id:
+                raise BrainRunError("domain_pack must align with the profile and workflow")
         if not isinstance(max_input_tokens, int) or isinstance(max_input_tokens, bool) or max_input_tokens < 1:
             raise BrainRunError("max_input_tokens must be a positive integer")
         if not isinstance(memory_episodes, Sequence) or isinstance(memory_episodes, (str, bytes)):
@@ -2067,6 +2464,16 @@ class AutonomousPromptBuilder:
                 "priority": 1000,
             }
         ]
+        if domain_pack is not None:
+            context.append(
+                {
+                    "id": "autonomy-domain-pack",
+                    "role": "developer",
+                    "content": _json_text(domain_pack.prompt_contract()),
+                    "required": True,
+                    "priority": 995,
+                }
+            )
         context.append(
             {
                 "id": "autonomy-workflow-contract",
@@ -2182,8 +2589,14 @@ class AutonomousPlanBuilder:
     def build(
         spec: AutonomousTaskSpec,
         workflow: AutonomousWorkflowStrategy | None = None,
+        domain_pack: AutonomousDomainPack | None = None,
     ) -> dict[str, Any]:
         workflow = workflow or _builtin_workflow_strategy(spec.domain)
+        if domain_pack is not None:
+            if not isinstance(domain_pack, AutonomousDomainPack):
+                raise BrainRunError("domain_pack must be an AutonomousDomainPack or None")
+            if domain_pack.domain != spec.domain or domain_pack.workflow_id != workflow.workflow_id:
+                raise BrainRunError("domain_pack must align with the task and workflow")
         return {
             "objective": spec.task,
             "workflow_id": workflow.workflow_id,
@@ -2201,6 +2614,11 @@ class AutonomousPlanBuilder:
                         "workflow_id": workflow.workflow_id,
                         "workflow_digest": workflow.workflow_digest,
                         "stage_ids": [stage.id for stage in workflow.stages],
+                        "domain_pack_id": None if domain_pack is None else domain_pack.pack_id,
+                        "domain_pack_digest": None if domain_pack is None else domain_pack.pack_digest,
+                        "domain_pack_evidence_requirements": []
+                        if domain_pack is None
+                        else list(domain_pack.evidence_requirements),
                     },
                     "depends_on": [],
                     "effect": "provider_call",
@@ -2250,6 +2668,7 @@ class AutonomousTaskOrchestrator:
         registry: AutonomousDomainRegistry | None = None,
         workflow_registry: AutonomousWorkflowRegistry | None = None,
         router: AutonomousTaskRouter | None = None,
+        pack_registry: AutonomousDomainPackRegistry | None = None,
     ) -> None:
         if not isinstance(brain, AutonomousBrain):
             raise BrainRunError("brain must be an AutonomousBrain")
@@ -2259,6 +2678,8 @@ class AutonomousTaskOrchestrator:
             raise BrainRunError("workflow_registry must be an AutonomousWorkflowRegistry or None")
         if router is not None and not isinstance(router, AutonomousTaskRouter):
             raise BrainRunError("router must be an AutonomousTaskRouter or None")
+        if pack_registry is not None and not isinstance(pack_registry, AutonomousDomainPackRegistry):
+            raise BrainRunError("pack_registry must be an AutonomousDomainPackRegistry or None")
         self.brain = brain
         self.registry = registry or (router.registry if router is not None else AutonomousDomainRegistry.with_builtin_profiles())
         self.workflow_registry = workflow_registry or (
@@ -2272,6 +2693,11 @@ class AutonomousTaskOrchestrator:
             raise BrainRunError(
                 "router registries must be the same registries supplied to the orchestrator"
             )
+        self.pack_registry = pack_registry or AutonomousDomainPackRegistry.with_builtin_packs(
+            self.registry,
+            self.workflow_registry,
+        )
+        self.pack_registry.assert_aligned(self.registry, self.workflow_registry)
         self.router = router or AutonomousTaskRouter(
             self.registry,
             workflow_registry=self.workflow_registry,
@@ -2321,6 +2747,7 @@ class AutonomousTaskOrchestrator:
     ) -> AutonomousTaskBlueprint:
         profile = self.registry.resolve(domain)
         workflow = self.workflow_registry.resolve(profile.domain)
+        domain_pack = self.pack_registry.resolve(profile.domain)
         unsupported_workflow_capabilities = sorted(
             {
                 capability
@@ -2353,7 +2780,15 @@ class AutonomousTaskOrchestrator:
             execution_mode=execution_mode,
         )
         extra_capabilities = _sequence("required_model_capabilities", required_model_capabilities)
-        required = tuple(dict.fromkeys((*profile.required_model_capabilities, *extra_capabilities)))
+        required = tuple(
+            dict.fromkeys(
+                (
+                    *profile.required_model_capabilities,
+                    *domain_pack.model_capabilities,
+                    *extra_capabilities,
+                )
+            )
+        )
         selection_context = {
             "schema": AUTONOMY_SCHEMA,
             "workflow": "autonomous_task",
@@ -2362,6 +2797,13 @@ class AutonomousTaskOrchestrator:
             "risk_class": spec.risk_class,
             "execution_mode": spec.execution_mode,
             "domain_capabilities": list(profile.capabilities),
+            "domain_pack_id": domain_pack.pack_id,
+            "domain_pack_version": domain_pack.pack_version,
+            "domain_pack_digest": domain_pack.pack_digest,
+            "domain_pack_tool_capabilities": list(domain_pack.tool_capabilities),
+            "domain_pack_evidence_requirements": list(domain_pack.evidence_requirements),
+            "domain_pack_review_triggers": list(domain_pack.review_triggers),
+            "domain_pack_evaluator_id": domain_pack.evaluator_id,
             "workflow_id": workflow.workflow_id,
             "workflow_digest": workflow.workflow_digest,
             "workflow_stage_ids": [stage.id for stage in workflow.stages],
@@ -2374,15 +2816,17 @@ class AutonomousTaskOrchestrator:
         prompt = AutonomousPromptBuilder.build(
             spec,
             profile,
+            domain_pack=domain_pack,
             workflow=workflow,
             max_input_tokens=max_input_tokens,
             memory_episodes=memory_episodes,
         )
-        plan = AutonomousPlanBuilder.build(spec, workflow)
+        plan = AutonomousPlanBuilder.build(spec, workflow, domain_pack)
         _safe_json("autonomous selection context", selection_context)
         return AutonomousTaskBlueprint(
             spec=spec,
             profile=profile,
+            domain_pack=domain_pack,
             workflow=workflow,
             selection_context=selection_context,
             prompt=prompt,
@@ -2499,6 +2943,9 @@ class AutonomousTaskOrchestrator:
                 "id": f"stage-{stage.id}",
                 "query": f"{blueprint.profile.domain} {stage.objective}: {blueprint.spec.task}",
                 "max_items": max_tools,
+                "domain_pack_id": blueprint.domain_pack.pack_id,
+                "domain_pack_digest": blueprint.domain_pack.pack_digest,
+                "required_tool_capabilities": list(blueprint.domain_pack.tool_capabilities),
             }
             for stage in blueprint.workflow.stages
         ]
@@ -2983,6 +3430,7 @@ class AutonomousTaskOrchestrator:
             replacement = AutonomousTaskBlueprint(
                 spec=blueprint.spec,
                 profile=blueprint.profile,
+                domain_pack=blueprint.domain_pack,
                 workflow=blueprint.workflow,
                 selection_context=blueprint.selection_context,
                 prompt=prompt,
@@ -3096,7 +3544,7 @@ class AutonomousTaskOrchestrator:
                 evaluator_value = evaluator
                 if evaluator_value is None:
                     registry = evaluator_registry or DomainEvaluatorRegistry.with_builtin_profiles()
-                    evaluator_value = registry.resolve(blueprint.profile.evaluator_domain)
+                    evaluator_value = registry.resolve(blueprint.domain_pack.evaluator_domain)
                 options = {} if mission_options is None else dict(mission_options)
                 options.update(
                     {
@@ -3655,7 +4103,7 @@ class AutonomousTaskOrchestrator:
                 "workflow_digest": blueprint.workflow.workflow_digest,
                 "stage_id": stage.id,
                 "required_signals": list(stage.evaluator_signals),
-                "domain": blueprint.profile.evaluator_domain,
+                "domain": blueprint.domain_pack.evaluator_domain,
                 "capability": stage.required_capabilities[0] if stage.required_capabilities else blueprint.spec.capability,
                 "risk_class": blueprint.spec.risk_class,
                 "signals": normalized_signals,
@@ -3706,7 +4154,7 @@ class AutonomousTaskOrchestrator:
             raise BrainRunError("workflow evaluator_registry must be a DomainEvaluatorRegistry or None")
         resolved_evaluator = evaluator
         if resolved_evaluator is None and evaluator_registry is not None:
-            resolved_evaluator = evaluator_registry.resolve(blueprint.profile.evaluator_domain)
+            resolved_evaluator = evaluator_registry.resolve(blueprint.domain_pack.evaluator_domain)
         if resolved_evaluator is None:
             resolved_evaluator = AutonomousWorkflowEvaluator(blueprint.workflow)
         state: Mapping[str, Any] = dict(bandit_state)
@@ -3877,7 +4325,7 @@ class AutonomousTaskOrchestrator:
             raise BrainRunError("workflow trajectory evaluator_registry must be a DomainEvaluatorRegistry or None")
         resolved_evaluator = evaluator
         if resolved_evaluator is None and evaluator_registry is not None:
-            resolved_evaluator = evaluator_registry.resolve(blueprint.profile.evaluator_domain)
+            resolved_evaluator = evaluator_registry.resolve(blueprint.domain_pack.evaluator_domain)
         if resolved_evaluator is None:
             resolved_evaluator = AutonomousWorkflowEvaluator(blueprint.workflow)
         if not isinstance(resolved_evaluator, BrainOutcomeEvaluator):
@@ -4760,7 +5208,7 @@ class AutonomousTaskOrchestrator:
         resolved_evaluator = evaluator
         if resolved_evaluator is None:
             registry = evaluator_registry or DomainEvaluatorRegistry.with_builtin_profiles()
-            resolved_evaluator = registry.resolve(blueprint.profile.evaluator_domain)
+            resolved_evaluator = registry.resolve(blueprint.domain_pack.evaluator_domain)
         if not isinstance(resolved_evaluator, BrainOutcomeEvaluator):
             raise BrainRunError("evaluator must be a BrainOutcomeEvaluator")
         current_prompt = blueprint.prompt
@@ -4863,6 +5311,7 @@ class AutonomousAgent:
         registry: AutonomousDomainRegistry | None = None,
         workflow_registry: AutonomousWorkflowRegistry | None = None,
         router: AutonomousTaskRouter | None = None,
+        pack_registry: AutonomousDomainPackRegistry | None = None,
         ledger: BrainLearningLedger | None = None,
         memory: BrainEpisodicMemory | None = None,
         health_ledger: ProviderHealthLedger | None = None,
@@ -4891,6 +5340,8 @@ class AutonomousAgent:
             raise BrainRunError("tool_runtime must be an AutonomousDomainToolRuntime or None")
         if tool_runtime is not None and tool_registry is not None and tool_runtime.registry is not tool_registry:
             raise BrainRunError("tool_runtime registry must be the same registry supplied to the agent")
+        if pack_registry is not None and not isinstance(pack_registry, AutonomousDomainPackRegistry):
+            raise BrainRunError("pack_registry must be an AutonomousDomainPackRegistry or None")
         if execution_journal is not None and not isinstance(execution_journal, AutonomousExecutionJournal):
             raise BrainRunError("execution_journal must be an AutonomousExecutionJournal or None")
         if execution_policy is None:
@@ -4930,6 +5381,7 @@ class AutonomousAgent:
             registry=registry,
             workflow_registry=workflow_registry,
             router=router,
+            pack_registry=pack_registry,
         )
 
     def register_model(
@@ -4956,6 +5408,36 @@ class AutonomousAgent:
         """Return the deterministic workflow contracts available to automatic intake."""
 
         return self.orchestrator.workflow_registry.catalogue()
+
+    def domain_packs(self) -> list[dict[str, Any]]:
+        """Return reviewed capability/evidence contracts for every configured domain."""
+
+        return self.orchestrator.pack_registry.catalogue()
+
+    def domain_pack(self, domain: str) -> dict[str, Any]:
+        """Return one metadata-only domain pack without exposing task or credential material."""
+
+        return self.orchestrator.pack_registry.resolve(domain).to_dict()
+
+    def domain_pack_tool_plan(self, domain: str) -> dict[str, Any]:
+        """Show how registered tools cover a pack without granting or executing a tool."""
+
+        pack = self.orchestrator.pack_registry.resolve(domain)
+        registered = [] if self.tool_registry is None else self.tool_registry.tools_for((domain,))
+        available = sorted({tool.capability for tool in registered})
+        required = set(pack.tool_capabilities)
+        return {
+            "schema": AUTONOMOUS_DOMAIN_PACK_SCHEMA,
+            "domain": domain,
+            "pack_id": pack.pack_id,
+            "pack_digest": pack.pack_digest,
+            "required_tool_capabilities": list(pack.tool_capabilities),
+            "available_tool_capabilities": available,
+            "covered_tool_capabilities": sorted(required.intersection(available)),
+            "missing_tool_capabilities": sorted(required.difference(available)),
+            "registered_tool_count": len(registered),
+            "execution": "metadata_only; registration_is_not_authorization",
+        }
 
     def register_tool(
         self,
@@ -5046,6 +5528,12 @@ class AutonomousAgent:
             "provider_health": health,
             "domains": self.domains(),
             "workflows": self.workflows(),
+            "domain_packs": self.domain_packs(),
+            "domain_pack_registry_digest": self.orchestrator.pack_registry.digest,
+            "domain_pack_tool_plans": [
+                self.domain_pack_tool_plan(domain)
+                for domain in AUTONOMOUS_DOMAINS
+            ],
             "route_catalogue": self.orchestrator.router.catalogue(),
             "domain_tools": [] if self.tool_registry is None else self.tool_registry.catalogue(),
             "domain_tool_registry_digest": None if self.tool_registry is None else self.tool_registry.digest,
@@ -5157,7 +5645,22 @@ class AutonomousAgent:
         resolved_options.setdefault("ledger", self.ledger)
         resolved_options.setdefault("memory", self.memory)
         if self.tool_registry is not None and "provider_tools" not in resolved_options:
-            resolved_options["provider_tools"] = self.tool_registry.provider_tools(tool_domains or None)
+            selected_tools = self.tool_registry.tools_for(tool_domains or None)
+            pack_capabilities: set[str] = set()
+            for domain in tool_domains:
+                if domain in AUTONOMOUS_DOMAINS:
+                    pack_capabilities.update(self.orchestrator.pack_registry.resolve(domain).tool_capabilities)
+            pack_tools = tuple(
+                tool for tool in selected_tools
+                if tool.capability in pack_capabilities
+            )
+            # A caller may register an intentionally application-specific capability that is not
+            # in the reviewed built-in pack. Keep it visible rather than silently dropping it;
+            # pack matching is a narrowing aid when there is at least one reviewed match, never
+            # an authorization mechanism or a way to hide caller-registered tools.
+            resolved_options["provider_tools"] = tuple(
+                tool.to_provider_tool() for tool in (pack_tools or selected_tools)
+            )
         execution_controller: AutonomousExecutionController | None = None
         session_runtime: AutonomousDomainToolRuntime | None = None
         persistence_requested = self.execution_journal is not None or self.execution_policy is not None or execution_id is not None
@@ -5673,6 +6176,7 @@ __all__ = [
     "AUTONOMOUS_CROSS_DOMAIN_LEARNING_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_TRAJECTORY_LEARNING_SCHEMA",
     "AUTONOMOUS_ROUTE_SCHEMA",
+    "AUTONOMOUS_DOMAIN_PACK_SCHEMA",
     "AUTONOMOUS_ROUTE_REASONS",
     "MAX_AUTONOMOUS_ROUTE_CANDIDATES",
     "MAX_AUTONOMOUS_ROUTE_DOMAINS",
@@ -5684,6 +6188,8 @@ __all__ = [
     "AUTONOMOUS_WORKFLOW_STAGE_STATUSES",
     "AutonomousDomainProfile",
     "AutonomousDomainRegistry",
+    "AutonomousDomainPack",
+    "AutonomousDomainPackRegistry",
     "AutonomousRouteCandidate",
     "AutonomousRouteProposal",
     "AutonomousTaskRouter",
