@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -97,6 +98,10 @@ MAX_BRAIN_EVALUATOR_EVIDENCE_BYTES = 350_000
 MAX_BRAIN_EVALUATOR_INPUT_BYTES = 500_000
 MAX_BRAIN_REPLAY_BYTES = 16_000
 MAX_BRAIN_REPLAN_INSTRUCTION_BYTES = 4_096
+MAX_MODEL_SELECTION_AUDIT_RANKING = 64
+MAX_MODEL_SELECTION_AUDIT_INPUT_RANKING = 512
+MAX_MODEL_SELECTION_AUDIT_REASON_BYTES = 512
+MODEL_SELECTION_AUDIT_SCHEMA = "bioprism-brain-selection-audit/0.1"
 BRAIN_EVALUATOR_REPLAY_SCHEMA = "bioprism-brain-evaluator-replay/0.1"
 _REPLAN_SECRET_PATTERNS = (
     re.compile(
@@ -672,6 +677,162 @@ def _json_digest(value: Any) -> str:
         allow_nan=False,
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def build_model_selection_audit(selection: Mapping[str, Any]) -> dict[str, Any]:
+    """Project the Rust model-selection report into bounded routing evidence.
+
+    The Rust kernel remains authoritative for eligibility and ordering.  This projection makes
+    that decision inspectable at every Python execution boundary without copying the task,
+    prompts, credentials, or provider payloads.  ``routing_confidence`` is deliberately a
+    heuristic about selection stability (score margin plus observed coverage); it is not a
+    probability that the selected model will answer correctly and it never becomes reward by
+    itself.
+    """
+
+    if not isinstance(selection, Mapping):
+        raise BrainRunError("model selection must be a mapping")
+    raw_ranking = selection.get("ranking", [])
+    if not isinstance(raw_ranking, Sequence) or isinstance(raw_ranking, (str, bytes)):
+        raise BrainRunError("model selection ranking must be a sequence")
+    if len(raw_ranking) > MAX_MODEL_SELECTION_AUDIT_INPUT_RANKING:
+        raise BrainRunError("model selection ranking exceeds its bounded input size")
+
+    decision_digest = selection.get("decision_digest")
+    if decision_digest is not None and not _valid_digest(decision_digest):
+        raise BrainRunError("model selection decision_digest must be a lowercase SHA-256 digest")
+
+    ranking: list[dict[str, Any]] = []
+    rejection_counts: dict[str, int] = {}
+    eligible_count = 0
+    selected_id: str | None = None
+    selected_model = selection.get("selected_model")
+    if isinstance(selected_model, Mapping):
+        provider = selected_model.get("provider")
+        model = selected_model.get("model")
+        if isinstance(provider, str) and isinstance(model, str) and provider and model:
+            selected_id = f"{provider}/{model}"
+
+    def finite_number(value: Any, field: str) -> float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+            raise BrainRunError(f"model selection ranking {field} must be finite")
+        return float(value)
+
+    for raw in raw_ranking:
+        if not isinstance(raw, Mapping):
+            raise BrainRunError("model selection ranking must contain mappings")
+        model_id = raw.get("model_id")
+        eligible = raw.get("eligible")
+        reasons = raw.get("reasons", [])
+        pulls = raw.get("observed_pulls", 0)
+        if not isinstance(model_id, str) or not model_id.strip() or len(model_id.encode("utf-8")) > 512:
+            raise BrainRunError("model selection ranking model_id is malformed")
+        if not isinstance(eligible, bool):
+            raise BrainRunError("model selection ranking eligible flag is malformed")
+        if not isinstance(reasons, Sequence) or isinstance(reasons, (str, bytes)) or any(
+            not isinstance(reason, str)
+            or not reason.strip()
+            or len(reason.encode("utf-8")) > MAX_MODEL_SELECTION_AUDIT_REASON_BYTES
+            or any(ord(character) < 32 for character in reason)
+            for reason in reasons
+        ):
+            raise BrainRunError("model selection ranking reasons are malformed")
+        if not isinstance(pulls, int) or isinstance(pulls, bool) or pulls < 0:
+            raise BrainRunError("model selection ranking observed_pulls is malformed")
+        candidate = {
+            "model_id": model_id,
+            "eligible": eligible,
+            "reasons": list(reasons),
+            "base_score": finite_number(raw.get("base_score", 0.0), "base_score"),
+            "exploration_bonus": finite_number(raw.get("exploration_bonus", 0.0), "exploration_bonus"),
+            "score": finite_number(raw.get("score", 0.0), "score"),
+            "observed_pulls": pulls,
+        }
+        ranking.append(candidate)
+        if eligible:
+            eligible_count += 1
+        else:
+            for reason in reasons:
+                rejection_counts[reason] = rejection_counts.get(reason, 0) + 1
+
+    omitted = max(0, len(ranking) - MAX_MODEL_SELECTION_AUDIT_RANKING)
+    retained = ranking[:MAX_MODEL_SELECTION_AUDIT_RANKING]
+    selected = next((item for item in ranking if item["model_id"] == selected_id), None)
+    eligible_scores = [item for item in ranking if item["eligible"]]
+    eligible_scores.sort(key=lambda item: (-item["score"], item["model_id"]))
+    runner_up = next((item for item in eligible_scores if item["model_id"] != selected_id), None)
+    margin = None
+    if selected is not None and runner_up is not None:
+        margin = max(0.0, selected["score"] - runner_up["score"])
+    selected_pulls = 0 if selected is None else selected["observed_pulls"]
+    total_pulls = sum(item["observed_pulls"] for item in ranking)
+    observation_coverage = selected_pulls / (selected_pulls + 4.0)
+    margin_scale = 0.0 if selected is None or margin is None else margin / (abs(selected["score"]) + 1.0)
+    routing_confidence = max(0.0, min(1.0, 0.55 * margin_scale + 0.45 * observation_coverage))
+    exploration_bonus = None if selected is None else selected["exploration_bonus"]
+    selection_status = selection.get("selection_status")
+    if not isinstance(selection_status, str) or not selection_status.strip():
+        selection_status = "selected" if selected is not None else "refused_no_eligible_model"
+
+    audit_without_digest: dict[str, Any] = {
+        "schema": MODEL_SELECTION_AUDIT_SCHEMA,
+        "selection_status": selection_status,
+        "selected_model": None
+        if selected_id is None
+        else {"model_id": selected_id, "provider": selected_model.get("provider"), "model": selected_model.get("model")}
+        if isinstance(selected_model, Mapping)
+        else {"model_id": selected_id},
+        "decision_digest": decision_digest,
+        "ranking": retained,
+        "ranking_omitted": omitted,
+        "eligibility": {
+            "eligible_count": eligible_count,
+            "rejected_count": len(ranking) - eligible_count,
+            "rejection_counts": {key: rejection_counts[key] for key in sorted(rejection_counts)},
+        },
+        "exploration": {
+            "selected_bonus": exploration_bonus,
+            "selected_observed_pulls": selected_pulls,
+            "total_observed_pulls": total_pulls,
+            "unseen_eligible_count": sum(1 for item in eligible_scores if item["observed_pulls"] == 0),
+        },
+        "stability": {
+            "runner_up_model_id": None if runner_up is None else runner_up["model_id"],
+            "score_margin": margin,
+            "observation_coverage": observation_coverage,
+            "routing_confidence": routing_confidence,
+            "confidence_basis": "score_margin_and_observation_coverage_heuristic",
+        },
+        "does_not_claim": [
+            "routing confidence is not answer correctness probability",
+            "transport success is not task reward",
+            "selection does not authenticate a provider or redeem a credential",
+        ],
+        "retention": "metadata_only_no_task_or_provider_payloads",
+    }
+    audit_without_digest["audit_digest"] = _json_digest(audit_without_digest)
+    BrainLearningLedger._assert_safe(audit_without_digest)
+    try:
+        encoded = json.dumps(audit_without_digest, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    except (TypeError, ValueError) as error:
+        raise BrainRunError("model selection audit is not JSON-safe") from error
+    if len(encoded) > 150_000:
+        raise BrainRunError("model selection audit exceeds its bounded size")
+    return audit_without_digest
+
+
+def _selection_attempt_metadata(audit: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the small audit join carried by bounded failover metadata."""
+
+    stability = audit.get("stability")
+    eligibility = audit.get("eligibility")
+    exploration = audit.get("exploration")
+    return {
+        "selection_audit_digest": audit.get("audit_digest"),
+        "routing_confidence": stability.get("routing_confidence") if isinstance(stability, Mapping) else None,
+        "eligible_count": eligibility.get("eligible_count") if isinstance(eligibility, Mapping) else None,
+        "selected_exploration_bonus": exploration.get("selected_bonus") if isinstance(exploration, Mapping) else None,
+    }
 
 
 def _mission_wire_output(value: Any) -> Any:
@@ -1818,6 +1979,7 @@ class AutonomousBrain:
             selected = preview.get("selected_model")
             if not isinstance(selected, Mapping):
                 raise BrainRunError("adaptive selection has no eligible provider after failover")
+            attempt_audit = build_model_selection_audit(preview)
             provider = selected.get("provider")
             model = selected.get("model")
             if not isinstance(provider, str) or not isinstance(model, str):
@@ -1866,6 +2028,7 @@ class AutonomousBrain:
                         "model": model,
                         "arm_id": selected_id,
                         "status": "completed",
+                        **_selection_attempt_metadata(attempt_audit),
                     }
                 )
                 return replace(
@@ -1891,6 +2054,7 @@ class AutonomousBrain:
                         "status": "provider_refused",
                         "reason": "circuit_open" if error.circuit_open else "provider_error",
                         "status_code": error.status_code,
+                        **_selection_attempt_metadata(attempt_audit),
                     }
                 )
                 if attempt >= max_provider_failovers:
@@ -2019,6 +2183,7 @@ class AutonomousBrain:
             selected = preview.get("selected_model")
             if not isinstance(selected, Mapping):
                 raise BrainRunError("adaptive tool-loop selection has no eligible provider after failover")
+            attempt_audit = build_model_selection_audit(preview)
             provider = selected.get("provider")
             model = selected.get("model")
             if not isinstance(provider, str) or not isinstance(model, str):
@@ -2068,6 +2233,7 @@ class AutonomousBrain:
                         "model": model,
                         "arm_id": selected_id,
                         "status": "completed",
+                        **_selection_attempt_metadata(attempt_audit),
                     }
                 )
                 return replace(
@@ -2098,6 +2264,7 @@ class AutonomousBrain:
                         "status": "provider_refused",
                         "reason": "circuit_open" if error.circuit_open else "provider_error",
                         "status_code": error.status_code,
+                        **_selection_attempt_metadata(attempt_audit),
                     }
                 )
                 if attempt >= max_provider_failovers:
@@ -2216,6 +2383,7 @@ class AutonomousBrain:
             selected = preview.get("selected_model")
             if not isinstance(selected, Mapping):
                 raise BrainRunError("adaptive mission selection has no eligible provider after failover")
+            attempt_audit = build_model_selection_audit(preview)
             provider = selected.get("provider")
             model = selected.get("model")
             if not isinstance(provider, str) or not isinstance(model, str):
@@ -2282,6 +2450,7 @@ class AutonomousBrain:
                         "model": model,
                         "arm_id": selected_id,
                         "status": "completed",
+                        **_selection_attempt_metadata(attempt_audit),
                     }
                 )
                 return replace(
@@ -2312,6 +2481,7 @@ class AutonomousBrain:
                         "status": "provider_refused",
                         "reason": "circuit_open" if error.circuit_open else "provider_error",
                         "status_code": error.status_code,
+                        **_selection_attempt_metadata(attempt_audit),
                     }
                 )
                 if attempt >= max_provider_failovers:
@@ -3206,6 +3376,8 @@ class AutonomousBrain:
             selection = dict(nested_selection)
             selection["context_digest"] = context_digest
             selection["contextual_selection_status"] = contextual_report.get("selection_status")
+        selection = dict(selection)
+        selection["selection_audit"] = build_model_selection_audit(selection)
         if isinstance(selection_args.get("provider_health"), Mapping):
             selection["provider_health"] = dict(selection_args["provider_health"])
         selected = selection.get("selected_model")
@@ -4117,6 +4289,9 @@ def _evaluator_metadata_projection(result: BrainRunResult) -> dict[str, Any]:
         "selected_model": selected_model,
         "selection_digest": result.selection.get("decision_digest"),
         "context_digest": result.selection.get("context_digest"),
+        "selection_audit": dict(result.selection.get("selection_audit", {}))
+        if isinstance(result.selection.get("selection_audit"), Mapping)
+        else None,
         "prompt_digest": result.prompt.get("prompt_digest"),
         "plan_digest": plan_digest,
         "outcome_digest": result.outcome_digest,

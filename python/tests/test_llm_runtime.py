@@ -1678,6 +1678,12 @@ class LlmRuntimeTests(unittest.TestCase):
         self.assertEqual(result.response.provider, "fallback")  # type: ignore[union-attr]
         self.assertEqual(result.provider_failover["fallback_count"], 1)  # type: ignore[index]
         self.assertEqual(result.provider_failover["attempts"][0]["reason"], "provider_error")  # type: ignore[index]
+        self.assertEqual(
+            len(result.provider_failover["attempts"][0]["selection_audit_digest"]),  # type: ignore[index]
+            64,
+        )
+        self.assertIn("routing_confidence", result.provider_failover["attempts"][0])  # type: ignore[index]
+        self.assertIn("selection_audit", result.selection)
         self.assertNotIn("openai-secret", json.dumps(result.to_dict()))
         self.assertNotIn("fallback-secret", json.dumps(result.to_dict()))
 

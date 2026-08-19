@@ -281,6 +281,19 @@ receipts to an explicit evaluator. Transport health continues to flow through
 This separation prevents a fast HTTP success from being mistaken for a useful answer while still
 letting selection adapt to reliability, cost, latency, and bounded observed usage.
 
+Every Python brain result also carries a bounded `selection_audit` projection of the Rust
+selector's ranking. It includes the selected arm, eligible/rejected counts, hard-gate reason
+counts (for example missing capability, cost limit, open circuit, or unready credential), the
+selected arm's exploration bonus and observed pulls, the runner-up score margin, and a routing
+confidence heuristic. The heuristic combines score separation with observation coverage and is
+explicitly labelled as routing stability rather than answer correctness. It cannot update the
+bandit, authorize a provider call, or override a health/capability/cost gate. Failover attempt
+metadata carries the audit digest and the same small stability summary, so an operator can see
+why each candidate was tried without retaining task text or provider payloads. The audit is
+available through `build_model_selection_audit()` for applications that want to inspect a
+selection before invoking a provider, and it is included in the value-only evaluator input so a
+held-out evaluator can diagnose routing quality without confusing routing confidence with reward.
+
 Tool outcomes can be scored by an evaluator independent of the provider:
 
 ```python
