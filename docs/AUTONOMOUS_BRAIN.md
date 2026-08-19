@@ -401,10 +401,13 @@ with BrainJobStore("state/brain-jobs.sqlite3") as jobs:
 spec-free job view, runs the normal adaptive mission/evaluator cycle, and checkpoints only cycle
 status, attempt counts, replans, and outcome digests. An expired lease before dispatch is safely
 requeued; an expired lease at or after dispatch becomes `reconciliation_required` and cannot be
-claimed until an operator handles the uncertain external state. A waiting approval is released
-only through `resume_waiting(...)`, which records the approver before another worker can claim it.
-Any exception during an active cycle is conservatively recorded as reconciliation-required because
-the process cannot infer whether a remote effect began.
+claimed until an operator handles the uncertain external state. If the mission reaches
+`mission_approval_required`, the worker creates a digest-bound approval request and returns
+`waiting_approval`; it cannot mark the job succeeded on the strength of a proposal alone. Approval
+releases the job back to `queued`, and the next resolver-backed attempt receives the durable
+approval decision as an authorization to set `approve_mission_dispatch=True`. Any exception during
+an active cycle is conservatively recorded as reconciliation-required because the process cannot
+infer whether a remote effect began.
 
 ## Reusable domain evaluators
 
@@ -495,7 +498,10 @@ with BrainModelHealthStore("state/brain-health.sqlite3") as health:
 `BrainModelHealthStore` retains only provider/model identity, bounded status, latency, token counts,
 quality reward, and outcome digests. It aggregates observations across workers and projects a
 historical circuit signal back into the next model-selection request without overriding live
-credential, registration, or capability gates. A provider that repeatedly fails can therefore be
+credential, registration, or capability gates. `LLMRuntime` can emit value-only invocation
+observations; `BrainWorker` attaches a best-effort observer that records provider transport
+failures even when a job never produces a final brain result. Observer failures cannot change
+provider authorization or retry behavior. A provider that repeatedly fails can therefore be
 excluded deterministically until an operator resets or replaces the health state.
 
 `BrainReplayEngine` is the offline learning path. The caller rehydrates evidence from its own

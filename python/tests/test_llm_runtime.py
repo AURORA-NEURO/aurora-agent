@@ -348,6 +348,40 @@ class LlmRuntimeTests(unittest.TestCase):
         self.assertEqual(self.server.seen_headers["authorization"], "Bearer super-secret")  # type: ignore[attr-defined]
         self.assertNotIn(b"super-secret", self.server.seen_body)  # type: ignore[attr-defined]
 
+    def test_provider_observer_receives_value_only_success_and_failure_outcomes(self) -> None:
+        store = CredentialStore()
+        observations: list[dict[str, object]] = []
+        runtime = LLMRuntime(store, observation_callback=observations.append)
+        runtime.register_provider(
+            openai_provider(base_url=self.base_url, allow_insecure_http=True)
+        )
+        handle = store.register("openai", "super-secret")
+        runtime.invoke(
+            "openai",
+            ProviderRequest(model="test-model", messages=({"role": "user", "content": "hello"},)),
+            credential=handle,
+        )
+        runtime.register_provider(
+            openai_provider(
+                base_url=self.base_url,
+                allow_insecure_http=True,
+                path="/failure",
+                max_attempts=1,
+            )
+        )
+        with self.assertRaisesRegex(ProviderError, r"HTTP status 401"):
+            runtime.invoke(
+                "openai",
+                ProviderRequest(model="test-model", messages=({"role": "user", "content": "hello"},)),
+                credential=handle,
+            )
+        self.assertEqual([event["outcome"] for event in observations], ["success", "failure"])
+        self.assertEqual(observations[0]["provider"], "openai")
+        self.assertEqual(observations[1]["failure_class"], "provider_error")
+        serialized = json.dumps(observations)
+        self.assertNotIn("super-secret", serialized)
+        self.assertNotIn("hello", serialized)
+
     def test_provider_native_tool_calls_are_typed_and_never_executed(self) -> None:
         store = CredentialStore()
         runtime = LLMRuntime(store)

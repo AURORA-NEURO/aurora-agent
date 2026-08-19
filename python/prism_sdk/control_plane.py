@@ -628,7 +628,7 @@ class BrainModelHealthStore:
         for provider in projected.values():
             attempts = int(provider["historical_attempts"])
             failures = int(provider["historical_failures"])
-            if row.circuit == "open":
+            if any(model.get("circuit") == "open" for model in provider["models"].values()):
                 provider["circuit"] = "open"
             provider["historical_failure_rate"] = failures / attempts if attempts else 0.0
         return projected
@@ -881,6 +881,9 @@ class BrainWorker:
         ledger: BrainLearningLedger | None = None,
         memory: Any | None = None,
         health: BrainModelHealthStore | None = None,
+        approval_router: BrainApprovalRouter | None = None,
+        approval_scope: str | None = None,
+        required_approval_role: str = "operator",
         lease_seconds: float = 300.0,
         heartbeat_seconds: float = 30.0,
     ) -> None:
@@ -900,6 +903,15 @@ class BrainWorker:
         BrainLearningLedger._assert_safe(bandit_state)
         if health is not None and not isinstance(health, BrainModelHealthStore):
             raise BrainRunError("worker health must be a BrainModelHealthStore or None")
+        if approval_router is not None and not isinstance(approval_router, BrainApprovalRouter):
+            raise BrainRunError("worker approval_router must be a BrainApprovalRouter or None")
+        if approval_scope is not None and (
+            not isinstance(approval_scope, str)
+            or not approval_scope.strip()
+            or len(approval_scope.encode("utf-8")) > MAX_APPROVAL_SCOPE_BYTES
+        ):
+            raise BrainRunError("worker approval_scope must be a bounded non-empty string or None")
+        required_approval_role = _text("worker required_approval_role", required_approval_role, 128)
         if not isinstance(lease_seconds, (int, float)) or isinstance(lease_seconds, bool) or not 1 <= lease_seconds <= 86_400:
             raise BrainRunError("worker lease_seconds must be within [1, 86400]")
         if not isinstance(heartbeat_seconds, (int, float)) or isinstance(heartbeat_seconds, bool) or not 0.1 <= heartbeat_seconds < lease_seconds:
@@ -910,6 +922,9 @@ class BrainWorker:
         self.ledger = ledger
         self.memory = memory
         self.health = health
+        self.approvals = approval_router or BrainApprovalRouter(store)
+        self.approval_scope = approval_scope
+        self.required_approval_role = required_approval_role
         self.lease_seconds = float(lease_seconds)
         self.heartbeat_seconds = float(heartbeat_seconds)
 
@@ -936,6 +951,37 @@ class BrainWorker:
         thread = threading.Thread(target=heartbeat, name=f"aurora-brain-heartbeat-{self.worker_id}", daemon=True)
         started = time.perf_counter()
         thread.start()
+        result: BrainJobRunResult | None = None
+        runtime = getattr(self.brain, "runtime", None)
+        observation_callback: Callable[[Mapping[str, Any]], None] | None = None
+        if self.health is not None and runtime is not None and hasattr(runtime, "add_observation_callback"):
+            def observe_provider_failure(payload: Mapping[str, Any]) -> None:
+                if payload.get("outcome") != "failure":
+                    return
+                provider = payload.get("provider")
+                model = payload.get("model")
+                status = payload.get("status")
+                if not all(isinstance(value, str) and value.strip() for value in (provider, model, status)):
+                    return
+                self.health.record(
+                    BrainModelObservation(
+                        provider=provider,
+                        model=model,
+                        domain=claimed.domain,
+                        capability=claimed.capability,
+                        risk_class=claimed.risk_class,
+                        status=status,
+                        outcome="failure",
+                        latency_ms=payload.get("latency_ms", 0.0),
+                        input_tokens=payload.get("input_tokens"),
+                        output_tokens=payload.get("output_tokens"),
+                        failure_class=payload.get("failure_class", "provider_error"),
+                    )
+                )
+
+            observation_callback = observe_provider_failure
+            runtime.add_observation_callback(observation_callback)
+        operation_error: Exception | None = None
         try:
             result = self.brain.run_resumable_learning_job(
                 self.store,
@@ -947,14 +993,55 @@ class BrainWorker:
                 provider_health=None if self.health is None else self.health.provider_health(),
                 ledger=self.ledger,
                 memory=self.memory,
+                approval_router=self.approvals,
+                approval_scope=self.approval_scope,
+                required_approval_role=self.required_approval_role,
                 lease_seconds=self.lease_seconds,
             )
+        except Exception as error:
+            operation_error = error
         finally:
+            if observation_callback is not None and hasattr(runtime, "remove_observation_callback"):
+                runtime.remove_observation_callback(observation_callback)
             stop.set()
             thread.join(timeout=max(1.0, self.heartbeat_seconds))
+        if operation_error is not None:
+            try:
+                current = self.store.get(job_id)
+                if current is not None and current.lease_owner == self.worker_id and current.state in {"leased", "running"}:
+                    self.store.checkpoint(
+                        job_id,
+                        self.worker_id,
+                        phase="worker_execution_error",
+                        checkpoint={"error_class": type(operation_error).__name__},
+                        side_effect_boundary="unknown",
+                    )
+                    failed = self.store.fail(
+                        job_id,
+                        self.worker_id,
+                        reason="worker execution raised; reconciliation required",
+                        retryable=False,
+                    )
+                    return BrainJobRunResult(
+                        status=failed.state,
+                        job=failed.to_dict(),
+                        cycle=None,
+                        error_class=type(operation_error).__name__,
+                    )
+            except Exception as persistence_error:
+                raise BrainRunError("worker failure could not be durably recorded") from persistence_error
+            raise operation_error
+        if result is None:
+            raise BrainRunError("worker execution returned no result")
         if self.health is not None and result.cycle is not None:
             final = result.cycle.final_result
-            outcome = "success" if result.status == "succeeded" else "failure"
+            outcome = (
+                "success"
+                if result.status == "succeeded"
+                else "unknown"
+                if result.status == "waiting_approval"
+                else "failure"
+            )
             selected = final.brain_run.selection.get("selected_model")
             if isinstance(selected, Mapping) and isinstance(selected.get("provider"), str) and isinstance(selected.get("model"), str):
                 response = final.brain_run.response

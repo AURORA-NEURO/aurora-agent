@@ -61,6 +61,12 @@ can feed `BrainModelHealthStore` into future model selection. `BrainReplayEngine
 caller-rehydrated evidence across every built-in domain and optionally advances a caller-owned
 bandit updater without replaying provider calls.
 
+Approval-required missions are never completed as proposals: the worker parks them in
+`waiting_approval`, records only a request digest and bounded scope, and requeues them only after
+the caller-authenticated approval router releases the checkpoint. The runtime also exposes an
+optional value-only provider observation callback; it can report transport failures without
+exposing prompts, responses, headers, credential handles, or raw provider payloads.
+
 BrainControlClient and AsyncBrainControlClient expose the same control-plane lifecycle over
 the existing HTTP ApiClient/AsyncApiClient or stdio Client/AsyncClient. Their typed request
 objects compute and verify replay evidence digests locally, require proof digests for approval

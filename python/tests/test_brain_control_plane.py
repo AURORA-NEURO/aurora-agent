@@ -20,6 +20,8 @@ from prism_sdk import (
     CredentialStore,
     LLMRuntime,
     openai_provider,
+    ProviderError,
+    ProviderRequest,
 )
 from prism_sdk.brain import BrainRunError
 
@@ -86,6 +88,38 @@ class _StubBrain:
         worker_id = kwargs["worker_id"]
         completed = store.complete(job_id, worker_id, result_metadata={"stub": True})
         return BrainJobRunResult(status=completed.state, job=completed.to_dict(), cycle=None)
+
+
+class _RuntimeFailureBrain:
+    def __init__(self) -> None:
+        credentials = CredentialStore()
+        self.runtime = LLMRuntime(credentials)
+        self.runtime.register_provider(
+            openai_provider(
+                base_url="http://127.0.0.1:1",
+                allow_insecure_http=True,
+                timeout_seconds=0.2,
+                max_attempts=1,
+            )
+        )
+        self.handle = credentials.register("openai", "worker-secret")
+
+    def run_resumable_learning_job(self, store: BrainJobStore, **kwargs: object) -> BrainJobRunResult:
+        try:
+            self.runtime.invoke(
+                "openai",
+                ProviderRequest(model="failure-model", messages=({"role": "user", "content": "private"},)),
+                credential=self.handle,
+            )
+        except ProviderError:
+            job = store.fail(kwargs["job_id"], kwargs["worker_id"], reason="provider transport failed")
+            return BrainJobRunResult(status=job.state, job=job.to_dict(), cycle=None, error_class="ProviderError")
+        raise AssertionError("the unavailable provider unexpectedly succeeded")
+
+
+class _ExplodingBrain:
+    def run_resumable_learning_job(self, *_args: object, **_kwargs: object) -> BrainJobRunResult:
+        raise RuntimeError("unexpected worker exception")
 
 
 def test_control_plane_exposes_cursor_events_and_hash_head(tmp_path):
@@ -205,6 +239,13 @@ def test_model_health_store_aggregates_cross_process_safe_provider_observations(
             health.record({**observations[0].to_dict(), "api_key": "forbidden"})
 
 
+def test_empty_model_health_store_is_a_valid_closed_control_plane_snapshot(tmp_path):
+    with BrainModelHealthStore(tmp_path / "empty-health.sqlite3") as health:
+        assert health.health() == ()
+        assert health.provider_health() == {}
+        assert health.verify_integrity()["verified"] is True
+
+
 def test_replay_engine_runs_all_builtin_domains_and_updates_bandit_without_evidence_leak():
     registry = DomainEvaluatorRegistry.with_builtin_profiles()
     calls: list[dict[str, object]] = []
@@ -257,6 +298,53 @@ def test_worker_claims_and_completes_a_job_across_the_control_plane(tmp_path):
         assert result.status == "succeeded"
         assert store.get(job.job_id).state == "succeeded"
         assert worker.run_once() is None
+
+
+def test_worker_records_provider_transport_failures_without_persisting_provider_payloads(tmp_path):
+    with BrainJobStore(tmp_path / "jobs.sqlite3") as store, BrainModelHealthStore(tmp_path / "health.sqlite3") as health:
+        job, _ = store.submit(_packet("worker-provider-failure"))
+        brain = _RuntimeFailureBrain()
+        evaluator = DomainEvaluatorRegistry.with_builtin_profiles().resolve("engineering")
+        worker = BrainWorker(
+            brain,
+            store,
+            worker_id="worker-a",
+            resolver=lambda _: {},
+            evaluator=evaluator,
+            bandit_state={"arms": []},
+            health=health,
+            lease_seconds=2,
+            heartbeat_seconds=0.1,
+        )
+        result = worker.run_once(job.job_id)
+        assert result is not None
+        assert result.status == "failed"
+        rows = health.health(provider="openai", model="failure-model")
+        assert len(rows) == 1
+        assert rows[0].failures == 1
+        serialized = json.dumps(store.get(job.job_id).to_dict())
+        assert "worker-secret" not in serialized
+        assert "private" not in serialized
+
+
+def test_worker_converts_unhandled_execution_errors_into_reconciliation_state(tmp_path):
+    with BrainJobStore(tmp_path / "jobs.sqlite3") as store:
+        job, _ = store.submit(_packet("worker-exception"))
+        evaluator = DomainEvaluatorRegistry.with_builtin_profiles().resolve("engineering")
+        worker = BrainWorker(
+            _ExplodingBrain(),
+            store,
+            worker_id="worker-a",
+            resolver=lambda _: {},
+            evaluator=evaluator,
+            bandit_state={"arms": []},
+            lease_seconds=2,
+            heartbeat_seconds=0.1,
+        )
+        result = worker.run_once(job.job_id)
+        assert result is not None
+        assert result.status == "reconciliation_required"
+        assert store.get(job.job_id).side_effect_boundary == "unknown"  # type: ignore[union-attr]
 
 
 def test_durable_health_snapshot_narrows_live_model_selection_without_granting_eligibility():

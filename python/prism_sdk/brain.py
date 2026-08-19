@@ -2401,6 +2401,9 @@ class AutonomousBrain:
         lease_seconds: float = 60.0,
         ledger: BrainLearningLedger | None = None,
         memory: BrainEpisodicMemory | None = None,
+        approval_router: Any | None = None,
+        approval_scope: str | None = None,
+        required_approval_role: str = "operator",
     ) -> BrainJobRunResult:
         """Claim and execute one restart-safe learning job through a caller resolver.
 
@@ -2409,9 +2412,12 @@ class AutonomousBrain:
         rehydrates those values in-process (typically by resolving a secret-manager reference and
         collecting a fresh BYOK handle). Any exception during the cycle is conservatively marked
         as reconciliation-required because the process cannot prove whether a side effect began.
+        A mission that reaches an approval boundary is durably parked in ``waiting_approval``;
+        it is never reported as completed merely because its proposal was generated.
         """
 
         from .jobs import BrainJobError, BrainJobStore
+        from .control_plane import BrainApprovalRouter
 
         if not isinstance(store, BrainJobStore):
             raise BrainRunError("store must be a BrainJobStore")
@@ -2427,6 +2433,22 @@ class AutonomousBrain:
             BrainLearningLedger._assert_safe(provider_health)
         if not isinstance(lease_seconds, (int, float)) or isinstance(lease_seconds, bool) or not 1 <= lease_seconds <= 86_400:
             raise BrainRunError("lease_seconds must be within [1, 86400]")
+        if approval_router is None:
+            approval_router = BrainApprovalRouter(store)
+        elif not isinstance(approval_router, BrainApprovalRouter):
+            raise BrainRunError("approval_router must be a BrainApprovalRouter or None")
+        if approval_scope is not None and (
+            not isinstance(approval_scope, str)
+            or not approval_scope.strip()
+            or len(approval_scope.encode("utf-8")) > 512
+        ):
+            raise BrainRunError("approval_scope must be a bounded non-empty string or None")
+        if (
+            not isinstance(required_approval_role, str)
+            or not required_approval_role.strip()
+            or len(required_approval_role.encode("utf-8")) > 128
+        ):
+            raise BrainRunError("required_approval_role must be a bounded non-empty string")
         try:
             job = store.claim(job_id, worker_id, lease_seconds=lease_seconds)
         except BrainJobError as error:
@@ -2440,6 +2462,7 @@ class AutonomousBrain:
             )
         execution_started = False
         try:
+            approval_released = job.checkpoint.get("phase") == "approval_released"
             job = store.checkpoint(
                 job.job_id,
                 worker_id,
@@ -2480,6 +2503,16 @@ class AutonomousBrain:
             )
             execution_started = True
             resolved_for_cycle = dict(resolved)
+            if approval_released:
+                options = resolved_for_cycle.get("mission_options", {})
+                if not isinstance(options, Mapping):
+                    raise BrainRunError("approved job mission_options must be a mapping")
+                options = dict(options)
+                # The durable approval router is the authorization boundary for this rehydrated
+                # dispatch. The resolver still owns every private prompt/tool argument, but it
+                # cannot accidentally discard the operator's decision by returning False here.
+                options["approve_mission_dispatch"] = True
+                resolved_for_cycle["mission_options"] = options
             if provider_health is not None:
                 options = resolved_for_cycle.get("mission_options", {})
                 if not isinstance(options, Mapping):
@@ -2507,9 +2540,34 @@ class AutonomousBrain:
                 ledger=ledger,
                 memory=memory or self.memory,
             )
+            final_result = cycle.final_result
+            requires_approval = getattr(final_result, "status", None) in {
+                "mission_approval_required",
+                "approval_required",
+            }
+            if requires_approval:
+                request_digest = final_result.brain_run.outcome_digest
+                effective_scope = approval_scope or (
+                    f"{job.domain}:{job.capability}:{job.risk_class}:mission_dispatch"
+                )
+                approval_router.request(
+                    job.job_id,
+                    worker_id,
+                    approval_scope=effective_scope,
+                    request_digest=request_digest,
+                    required_role=required_approval_role,
+                )
+                waiting = store.get(job.job_id)
+                if waiting is None:
+                    raise BrainRunError("approval-waiting job disappeared from the durable store")
+                return BrainJobRunResult(
+                    status="waiting_approval",
+                    job=waiting.to_dict(),
+                    cycle=cycle,
+                )
             boundary = "dispatched" if (
-                cycle.final_result.status == "mission_dispatched"
-                or cycle.final_result.execution is not None
+                final_result.status == "mission_dispatched"
+                or final_result.execution is not None
             ) else "preflight"
             store.checkpoint(
                 job.job_id,

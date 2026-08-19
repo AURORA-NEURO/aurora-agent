@@ -47,6 +47,7 @@ SUPPORTED_PROTOCOLS = {
     "openai_chat_completions",
     "anthropic_messages",
 }
+PROVIDER_OBSERVATION_SCHEMA = "bioprism-llm-provider-observation/0.1"
 
 
 class CredentialError(ValueError):
@@ -816,12 +817,76 @@ class LLMRuntime:
         *,
         clock: Callable[[], float] = time.time,
         sleeper: Callable[[float], None] = time.sleep,
+        observation_callback: Callable[[Mapping[str, Any]], None] | None = None,
     ) -> None:
         self.credentials = credentials or CredentialStore()
         self._providers: dict[str, ProviderConfig] = {}
         self._circuits: dict[str, _CircuitState] = {}
         self._clock = clock
         self._sleeper = sleeper
+        self._observation_lock = threading.RLock()
+        self._observation_callbacks: list[Callable[[Mapping[str, Any]], None]] = []
+        if observation_callback is not None:
+            self.add_observation_callback(observation_callback)
+
+    def add_observation_callback(self, callback: Callable[[Mapping[str, Any]], None]) -> None:
+        """Register a best-effort value-only provider outcome observer.
+
+        Observers receive provider/model/status/latency/usage metadata only. They never receive
+        request messages, response text, headers, credential handles, or raw provider payloads.
+        Observer failures are isolated from the provider call so telemetry cannot change runtime
+        authorization or retry semantics.
+        """
+
+        if not callable(callback):
+            raise ProviderError("observation callback must be callable")
+        with self._observation_lock:
+            if callback not in self._observation_callbacks:
+                self._observation_callbacks.append(callback)
+
+    def remove_observation_callback(self, callback: Callable[[Mapping[str, Any]], None]) -> None:
+        with self._observation_lock:
+            if callback in self._observation_callbacks:
+                self._observation_callbacks.remove(callback)
+
+    def _notify_observation(
+        self,
+        config: ProviderConfig,
+        request: ProviderRequest,
+        *,
+        status: str,
+        outcome: str,
+        latency_ms: float,
+        response: ProviderResponse | None = None,
+        error: ProviderError | None = None,
+    ) -> None:
+        payload: dict[str, Any] = {
+            "schema": PROVIDER_OBSERVATION_SCHEMA,
+            "provider": config.provider,
+            "model": request.model,
+            "status": status,
+            "outcome": outcome,
+            "latency_ms": max(0.0, float(latency_ms)),
+            "retention": "metadata_only_no_provider_payloads",
+        }
+        if response is not None:
+            for key in ("input_tokens", "output_tokens"):
+                value = response.usage.get(key)
+                if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                    payload[key] = value
+        if error is not None:
+            payload["failure_class"] = "circuit_open" if error.circuit_open else "provider_error"
+            if error.status_code is not None:
+                payload["status_code"] = error.status_code
+        with self._observation_lock:
+            callbacks = tuple(self._observation_callbacks)
+        for callback in callbacks:
+            try:
+                callback(dict(payload))
+            except Exception:
+                # Telemetry is deliberately non-authoritative and must not turn a successful
+                # provider response into a failed model invocation.
+                continue
 
     def register_provider(self, config: ProviderConfig) -> None:
         self._providers[config.provider] = config
@@ -1088,6 +1153,35 @@ class LLMRuntime:
         headers: Mapping[str, str],
         request: ProviderRequest,
     ) -> Iterator[ProviderStreamEvent]:
+        started = time.perf_counter()
+        try:
+            yield from self._stream_with_circuit(config, body, headers, request)
+        except ProviderError as error:
+            self._notify_observation(
+                config,
+                request,
+                status="provider_refused",
+                outcome="failure",
+                latency_ms=(time.perf_counter() - started) * 1000.0,
+                error=error,
+            )
+            raise
+        else:
+            self._notify_observation(
+                config,
+                request,
+                status="completed",
+                outcome="success",
+                latency_ms=(time.perf_counter() - started) * 1000.0,
+            )
+
+    def _stream_with_circuit(
+        self,
+        config: ProviderConfig,
+        body: Mapping[str, Any],
+        headers: Mapping[str, str],
+        request: ProviderRequest,
+    ) -> Iterator[ProviderStreamEvent]:
         state = self._circuits.setdefault(config.provider, _CircuitState())
         now = self._clock()
         if state.opened_until is not None:
@@ -1235,6 +1329,36 @@ class LLMRuntime:
         return body
 
     def _post(
+        self,
+        config: ProviderConfig,
+        body: Mapping[str, Any],
+        headers: Mapping[str, str],
+        request: ProviderRequest,
+    ) -> ProviderResponse:
+        started = time.perf_counter()
+        try:
+            response = self._post_with_retries(config, body, headers, request)
+        except ProviderError as error:
+            self._notify_observation(
+                config,
+                request,
+                status="provider_refused",
+                outcome="failure",
+                latency_ms=(time.perf_counter() - started) * 1000.0,
+                error=error,
+            )
+            raise
+        self._notify_observation(
+            config,
+            request,
+            status="completed",
+            outcome="success",
+            latency_ms=(time.perf_counter() - started) * 1000.0,
+            response=response,
+        )
+        return response
+
+    def _post_with_retries(
         self,
         config: ProviderConfig,
         body: Mapping[str, Any],

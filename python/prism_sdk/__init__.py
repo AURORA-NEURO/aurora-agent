@@ -99,6 +99,7 @@ from .llm_runtime import (
     ProviderStreamEvent,
     ProviderToolLoopResult,
     ProviderToolResult,
+    PROVIDER_OBSERVATION_SCHEMA,
     SecretValue,
     anthropic_provider,
     openai_compatible_provider,

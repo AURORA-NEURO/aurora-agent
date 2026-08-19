@@ -21,6 +21,7 @@ from prism_sdk.evaluators import (
     builtin_domain_profiles,
 )
 from prism_sdk.jobs import BrainJobError, BrainJobStore
+from prism_sdk.control_plane import BrainApprovalRouter
 from prism_sdk.llm_runtime import LLMRuntime
 
 
@@ -252,11 +253,28 @@ class DomainEvaluatorTests(unittest.TestCase):
             recalled_memory=(),
             replan_count=0,
         )
+        dispatched = BrainMissionResult(
+            brain_run=run,
+            status="mission_dispatched",
+            mission={"steps": []},
+            preflight={"execution": "ready"},
+            execution={"status": "dispatched"},
+        )
+        dispatched_cycle = BrainLearningCycleResult(
+            status="completed",
+            final_result=dispatched,
+            attempts=(dispatched,),
+            evaluations=(),
+            memory_receipts=(),
+            recalled_memory=(),
+            replan_count=0,
+        )
         calls: list[dict[str, object]] = []
+        cycles = [cycle, dispatched_cycle]
 
         def fake_cycle(**kwargs: object) -> BrainLearningCycleResult:
             calls.append(kwargs)
-            return cycle
+            return cycles.pop(0)
 
         brain.run_adaptive_mission_learning_cycle = fake_cycle  # type: ignore[method-assign]
         evaluator = BrainOutcomeEvaluator(
@@ -294,10 +312,25 @@ class DomainEvaluatorTests(unittest.TestCase):
                     evaluator=evaluator,
                     bandit_state={"schema": "bioprism-brain-bandit/0.1", "arms": []},
                 )
-                self.assertEqual(result.status, "succeeded")
+                self.assertEqual(result.status, "waiting_approval")
                 self.assertEqual(result.cycle, cycle)
                 self.assertEqual(len(calls), 1)
                 self.assertEqual(len(seen_metadata), 1)
+                pending = BrainApprovalRouter(store).get("job-1")
+                self.assertIsNotNone(pending)
+                self.assertEqual(pending.state, "pending")  # type: ignore[union-attr]
+                BrainApprovalRouter(store).approve("job-1", approver="operator-1")
+                self.assertEqual(store.get("job-1").state, "queued")  # type: ignore[union-attr]
+                resumed = brain.run_resumable_learning_job(
+                    store,
+                    job_id="job-1",
+                    worker_id="worker-b",
+                    resolver=resolve,
+                    evaluator=evaluator,
+                    bandit_state={"schema": "bioprism-brain-bandit/0.1", "arms": []},
+                )
+                self.assertEqual(resumed.status, "succeeded")
+                self.assertTrue(calls[1]["mission_options"]["approve_mission_dispatch"])  # type: ignore[index]
                 serialized = str(store.get("job-1").to_dict())  # type: ignore[union-attr]
                 self.assertNotIn("private task text", serialized)
                 self.assertNotIn("in-memory-handle", serialized)
