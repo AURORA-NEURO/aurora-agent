@@ -114,9 +114,14 @@ AUTONOMOUS_ROUTE_REASONS = (
     "insufficient_confidence",
     "insufficient_margin",
 )
-MAX_AUTONOMOUS_ROUTE_CANDIDATES = 8
+MAX_AUTONOMOUS_ROUTE_CANDIDATES = len(AUTONOMOUS_DOMAINS)
 MAX_AUTONOMOUS_ROUTE_DOMAINS = 4
 MAX_AUTONOMOUS_DOMAIN_PACK_ITEMS = 64
+AUTONOMOUS_SEMANTIC_ROUTE_SCHEMA = "bioprism-python-autonomous-semantic-route/0.1"
+AUTONOMOUS_ROUTE_EVIDENCE = {
+    "fixed_catalogue_term_matches_only",
+    "hybrid_deterministic_and_provider_semantic_scores",
+}
 _SAFE_IDENTIFIER_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-")
 
 
@@ -312,6 +317,7 @@ class AutonomousRouteCandidate:
     capability: str
     risk_class: str
     workflow_id: str
+    evidence: str = "fixed_catalogue_term_matches_only"
 
     def __post_init__(self) -> None:
         _identifier("route candidate domain", self.domain)
@@ -325,6 +331,8 @@ class AutonomousRouteCandidate:
         _identifier("route candidate capability", self.capability)
         _identifier("route candidate risk_class", self.risk_class)
         _identifier("route candidate workflow_id", self.workflow_id)
+        if not isinstance(self.evidence, str) or self.evidence not in AUTONOMOUS_ROUTE_EVIDENCE:
+            raise BrainRunError("route candidate evidence is not recognized")
         object.__setattr__(self, "score", float(self.score))
         object.__setattr__(self, "matched_terms", terms)
 
@@ -336,7 +344,7 @@ class AutonomousRouteCandidate:
             "capability": self.capability,
             "risk_class": self.risk_class,
             "workflow_id": self.workflow_id,
-            "evidence": "fixed_catalogue_term_matches_only",
+            "evidence": self.evidence,
         }
 
 
@@ -351,6 +359,7 @@ class AutonomousRouteProposal:
     abstained: bool
     reason: str
     cross_domain: bool = False
+    source: str = "deterministic_vocabulary"
 
     def __post_init__(self) -> None:
         _route_digest(self.task_digest, "route task_digest")
@@ -373,6 +382,11 @@ class AutonomousRouteProposal:
             raise BrainRunError("route confidence must be within [0, 1]")
         if not isinstance(self.abstained, bool) or not isinstance(self.cross_domain, bool):
             raise BrainRunError("route abstained and cross_domain must be booleans")
+        if not isinstance(self.source, str) or self.source not in {
+            "deterministic_vocabulary",
+            "provider_semantic_hybrid",
+        }:
+            raise BrainRunError("route source is not recognized")
         if self.reason not in AUTONOMOUS_ROUTE_REASONS:
             raise BrainRunError("route reason is not recognized")
         if self.abstained and selected:
@@ -403,6 +417,7 @@ class AutonomousRouteProposal:
                 "abstained": self.abstained,
                 "reason": self.reason,
                 "cross_domain": self.cross_domain,
+                "source": self.source,
             }
         )
 
@@ -421,6 +436,7 @@ class AutonomousRouteProposal:
             "abstained": self.abstained,
             "reason": self.reason,
             "cross_domain": self.cross_domain,
+            "source": self.source,
             "route_digest": self.route_digest,
             "retention": "task_text_transient_only; fixed_catalogue_evidence_only",
             "does_not_claim": [
@@ -429,6 +445,128 @@ class AutonomousRouteProposal:
                 "authorization",
                 "scientific or operational validity",
             ],
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousSemanticRouteCandidate:
+    """Value-only score fusion for one reviewed autonomous domain."""
+
+    domain: str
+    semantic_score: float
+    deterministic_score: float
+    combined_score: float
+
+    def __post_init__(self) -> None:
+        _identifier("semantic route candidate domain", self.domain)
+        for name, value in (
+            ("semantic_score", self.semantic_score),
+            ("deterministic_score", self.deterministic_score),
+            ("combined_score", self.combined_score),
+        ):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                raise BrainRunError(f"semantic route {name} must be finite")
+            if not 0.0 <= float(value) <= 1.0:
+                raise BrainRunError(f"semantic route {name} must be within [0, 1]")
+        object.__setattr__(self, "semantic_score", float(self.semantic_score))
+        object.__setattr__(self, "deterministic_score", float(self.deterministic_score))
+        object.__setattr__(self, "combined_score", float(self.combined_score))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "domain": self.domain,
+            "semantic_score": self.semantic_score,
+            "deterministic_score": self.deterministic_score,
+            "combined_score": self.combined_score,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousSemanticRouteResult:
+    """Auditable provider-assisted routing without retaining the classifier transcript."""
+
+    status: str
+    route: AutonomousRouteProposal
+    deterministic_route: AutonomousRouteProposal
+    semantic_candidates: tuple[AutonomousSemanticRouteCandidate, ...] = ()
+    semantic_selected_domains: tuple[str, ...] = ()
+    semantic_confidence: float = 0.0
+    selected_model: Mapping[str, str] | None = None
+    selection_digest: str | None = None
+    prompt_digest: str | None = None
+    plan_digest: str | None = None
+    outcome_digest: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.status not in {
+            "completed",
+            "approval_required",
+            "plan_refused",
+            "provider_abstained",
+            "provider_invalid",
+            "provider_disagreement",
+        }:
+            raise BrainRunError("semantic route result has an invalid status")
+        if not isinstance(self.route, AutonomousRouteProposal) or not isinstance(
+            self.deterministic_route, AutonomousRouteProposal
+        ):
+            raise BrainRunError("semantic route result contains an invalid route")
+        if not isinstance(self.semantic_candidates, Sequence) or isinstance(self.semantic_candidates, (str, bytes)):
+            raise BrainRunError("semantic route candidates must be a sequence")
+        candidates = tuple(self.semantic_candidates)
+        if len(candidates) > len(AUTONOMOUS_DOMAINS):
+            raise BrainRunError("semantic route candidates exceed the domain catalogue")
+        if any(not isinstance(candidate, AutonomousSemanticRouteCandidate) for candidate in candidates):
+            raise BrainRunError("semantic route candidates are malformed")
+        if len({candidate.domain for candidate in candidates}) != len(candidates):
+            raise BrainRunError("semantic route candidates must be unique")
+        selected = _sequence(
+            "semantic route selected domains",
+            self.semantic_selected_domains,
+            maximum=MAX_AUTONOMOUS_ROUTE_DOMAINS,
+        ) if self.semantic_selected_domains else ()
+        if any(domain not in {candidate.domain for candidate in candidates} for domain in selected):
+            raise BrainRunError("semantic route selected domain is absent from candidates")
+        if isinstance(self.semantic_confidence, bool) or not isinstance(self.semantic_confidence, (int, float)):
+            raise BrainRunError("semantic route confidence must be finite")
+        if not math.isfinite(float(self.semantic_confidence)) or not 0.0 <= float(self.semantic_confidence) <= 1.0:
+            raise BrainRunError("semantic route confidence must be within [0, 1]")
+        if self.selected_model is not None:
+            if not isinstance(self.selected_model, Mapping):
+                raise BrainRunError("semantic route selected_model must be a mapping or None")
+            if set(self.selected_model) != {"provider", "model"} or any(
+                not isinstance(value, str) or not value.strip() for value in self.selected_model.values()
+            ):
+                raise BrainRunError("semantic route selected_model must contain provider and model")
+            object.__setattr__(self, "selected_model", dict(self.selected_model))
+        for name, value in (
+            ("selection_digest", self.selection_digest),
+            ("prompt_digest", self.prompt_digest),
+            ("plan_digest", self.plan_digest),
+            ("outcome_digest", self.outcome_digest),
+        ):
+            if value is not None:
+                _route_digest(value, f"semantic route {name}")
+        object.__setattr__(self, "semantic_candidates", candidates)
+        object.__setattr__(self, "semantic_selected_domains", selected)
+        object.__setattr__(self, "semantic_confidence", float(self.semantic_confidence))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_SEMANTIC_ROUTE_SCHEMA,
+            "status": self.status,
+            "route": self.route.to_dict(),
+            "deterministic_route": self.deterministic_route.to_dict(),
+            "semantic_candidates": [candidate.to_dict() for candidate in self.semantic_candidates],
+            "semantic_selected_domains": list(self.semantic_selected_domains),
+            "semantic_confidence": self.semantic_confidence,
+            "selected_model": None if self.selected_model is None else dict(self.selected_model),
+            "selection_digest": self.selection_digest,
+            "prompt_digest": self.prompt_digest,
+            "plan_digest": self.plan_digest,
+            "outcome_digest": self.outcome_digest,
+            "retention": "route_scores_and_digests_only; classifier_transcript_not_retained",
+            "authorization": "routing_evidence_only; no tools_or_effects_authorized",
         }
 
 
@@ -602,6 +740,39 @@ class AutonomousTaskRouter:
             abstained=False,
             reason="routed",
         )
+
+
+def _semantic_route_response_schema() -> dict[str, Any]:
+    """Return the strict provider output contract for semantic routing."""
+
+    return {
+        "type": "object",
+        "properties": {
+            "candidates": {
+                "type": "array",
+                "minItems": len(AUTONOMOUS_DOMAINS),
+                "maxItems": len(AUTONOMOUS_DOMAINS),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "domain": {"type": "string", "enum": list(AUTONOMOUS_DOMAINS)},
+                        "score": {"type": "number"},
+                    },
+                    "required": ["domain", "score"],
+                    "additionalProperties": False,
+                },
+            },
+            "selected_domains": {
+                "type": "array",
+                "maxItems": MAX_AUTONOMOUS_ROUTE_DOMAINS,
+                "items": {"type": "string", "enum": list(AUTONOMOUS_DOMAINS)},
+            },
+            "confidence": {"type": "number"},
+            "abstain": {"type": "boolean"},
+        },
+        "required": ["candidates", "selected_domains", "confidence", "abstain"],
+        "additionalProperties": False,
+    }
 
 
 AUTONOMOUS_WORKFLOW_SCHEMA = "bioprism-python-autonomous-workflow/0.1"
@@ -1730,6 +1901,7 @@ class AutonomousAutoBlueprint:
     route: AutonomousRouteProposal
     blueprint: AutonomousTaskBlueprint | None = None
     cross_domain_blueprint: "AutonomousCrossDomainBlueprint | None" = None
+    semantic_route: AutonomousSemanticRouteResult | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.route, AutonomousRouteProposal):
@@ -1740,6 +1912,13 @@ class AutonomousAutoBlueprint:
             self.cross_domain_blueprint, AutonomousCrossDomainBlueprint
         ):
             raise BrainRunError("automatic blueprint contains an invalid cross-domain blueprint")
+        if self.semantic_route is not None and not isinstance(
+            self.semantic_route, AutonomousSemanticRouteResult
+        ):
+            raise BrainRunError("automatic blueprint contains an invalid semantic route result")
+        if self.semantic_route is not None and self.semantic_route.status == "completed":
+            if self.semantic_route.route.route_digest != self.route.route_digest:
+                raise BrainRunError("completed semantic route must match the automatic blueprint route")
         if self.route.abstained and (self.blueprint is not None or self.cross_domain_blueprint is not None):
             raise BrainRunError("an abstained route cannot contain an executable blueprint")
         if not self.route.abstained:
@@ -1756,6 +1935,7 @@ class AutonomousAutoBlueprint:
             "cross_domain_blueprint": None
             if self.cross_domain_blueprint is None
             else self.cross_domain_blueprint.to_dict(),
+            "semantic_route": None if self.semantic_route is None else self.semantic_route.to_dict(),
             "execution": "not_started",
             "authorization": "caller_approval_per_provider_or_effect_boundary",
         }
@@ -2710,6 +2890,379 @@ class AutonomousTaskOrchestrator:
 
         return self.router.route(task, **kwargs)
 
+    def route_with_provider(
+        self,
+        *,
+        task: str,
+        model_candidates: Sequence[Mapping[str, Any]],
+        credentials: Mapping[str, CredentialHandle],
+        hints: Sequence[str] = (),
+        context: Mapping[str, Any] | None = None,
+        min_confidence: float = 0.25,
+        min_margin: float = 0.10,
+        max_domains: int = 3,
+        allow_cross_domain: bool = True,
+        semantic_weight: float = 0.65,
+        bandit_state: Mapping[str, Any] | None = None,
+        contextual_observations: Sequence[Mapping[str, Any]] = (),
+        selection_overrides: Mapping[str, Any] | None = None,
+        input_tokens: int = 4_096,
+        requested_output_tokens: int = 1_024,
+        max_cost_per_million_tokens: int | None = None,
+        max_latency_ms: int | None = None,
+        min_quality: float | None = None,
+        approve_provider_call: bool = False,
+        run_id: str | None = None,
+        max_output_tokens: int = 1_024,
+        temperature: float | None = None,
+    ) -> AutonomousSemanticRouteResult:
+        """Use one approved provider call to improve routing, then reconcile it with the catalogue.
+
+        The provider sees the transient task and reviewed route catalogue, but its output is only
+        a classification proposal. Every domain score is bounded, every domain must be returned,
+        and the final route is derived from a deterministic/semantic score fusion. Malformed,
+        abstaining, or contradictory provider output never creates an executable blueprint and
+        falls back to the provider-free route.
+        """
+
+        deterministic = self.route_task(
+            task=task,
+            hints=hints,
+            min_confidence=min_confidence,
+            min_margin=min_margin,
+            max_domains=max_domains,
+            allow_cross_domain=allow_cross_domain,
+        )
+        if not isinstance(model_candidates, Sequence) or isinstance(model_candidates, (str, bytes)):
+            raise BrainRunError("semantic route model_candidates must be a sequence")
+        if not isinstance(credentials, Mapping):
+            raise BrainRunError("semantic route credentials must be a mapping")
+        if any(
+            not isinstance(provider, str)
+            or not isinstance(handle, CredentialHandle)
+            or provider != handle.provider
+            for provider, handle in credentials.items()
+        ):
+            raise BrainRunError("semantic route credentials must map providers to matching handles")
+        if isinstance(semantic_weight, bool) or not isinstance(semantic_weight, (int, float)):
+            raise BrainRunError("semantic_weight must be within [0, 1]")
+        if not math.isfinite(float(semantic_weight)) or not 0.0 <= float(semantic_weight) <= 1.0:
+            raise BrainRunError("semantic_weight must be within [0, 1]")
+        if not isinstance(contextual_observations, Sequence) or isinstance(
+            contextual_observations, (str, bytes)
+        ):
+            raise BrainRunError("semantic route contextual_observations must be a sequence")
+        if context is not None and not isinstance(context, Mapping):
+            raise BrainRunError("semantic route context must be a mapping or None")
+        route_schema = _semantic_route_response_schema()
+        classifier_task = (
+            "Classify the following user request against the reviewed AURORA autonomous domain "
+            "catalogue. Return only the required JSON object. Do not execute tools, invent a "
+            "domain, or treat classification as authorization. Score every catalogue domain "
+            "from 0 to 1, select at most the requested number of domains, and abstain when the "
+            "request is genuinely ambiguous. User request:\n\n"
+            + task
+        )
+        _text("semantic route classifier task", classifier_task, maximum=MAX_AUTONOMY_TEXT_BYTES)
+        classifier_context: dict[str, Any] = {
+            "route_catalogue": self.router.catalogue(),
+            "deterministic_route": deterministic.to_dict(),
+            "semantic_route_contract": {
+                "schema": AUTONOMOUS_SEMANTIC_ROUTE_SCHEMA,
+                "max_selected_domains": max_domains,
+                "semantic_scores_are_proposals": True,
+                "does_not_authorize": ["provider access", "tools", "external effects", "truth claims"],
+            },
+        }
+        if context is not None:
+            BrainLearningLedger._assert_safe(context)
+            classifier_context["caller_context"] = dict(context)
+        blueprint = self.prepare(
+            task=classifier_task,
+            domain="cross_domain",
+            capability="routing",
+            context=classifier_context,
+            desired_outputs=("domain scores", "selected domains", "abstention decision"),
+            require_json=True,
+            response_schema=route_schema,
+            max_input_tokens=input_tokens,
+        )
+        selection_request = self.brain.build_adaptive_model_selection(
+            task=classifier_task,
+            model_candidates=model_candidates,
+            credentials=credentials,
+            bandit_state=bandit_state,
+            context=blueprint.selection_context,
+            contextual_observations=contextual_observations,
+            required_capabilities=("reasoning",),
+            input_tokens=input_tokens,
+            requested_output_tokens=requested_output_tokens,
+            max_cost_per_million_tokens=max_cost_per_million_tokens,
+            max_latency_ms=max_latency_ms,
+            min_quality=min_quality,
+            selection_overrides=selection_overrides,
+        )
+        run = self.brain.run(
+            task=classifier_task,
+            model_selection=selection_request,
+            prompt=blueprint.prompt,
+            plan=blueprint.plan,
+            credentials=credentials,
+            approve_provider_call=approve_provider_call,
+            run_id=run_id,
+            max_output_tokens=max_output_tokens,
+            temperature=temperature,
+            require_json=True,
+            response_schema=route_schema,
+            context=blueprint.selection_context,
+            contextual_observations=contextual_observations,
+        )
+        selection = run.selection
+        selected_model = selection.get("selected_model")
+        safe_model = None
+        if isinstance(selected_model, Mapping) and isinstance(selected_model.get("provider"), str) and isinstance(selected_model.get("model"), str):
+            safe_model = {"provider": selected_model["provider"], "model": selected_model["model"]}
+        plan_value = run.plan.get("plan")
+        plan_digest = plan_value.get("plan_digest") if isinstance(plan_value, Mapping) else None
+        metadata = {
+            "selected_model": safe_model,
+            "selection_digest": selection.get("decision_digest"),
+            "prompt_digest": run.prompt.get("prompt_digest"),
+            "plan_digest": plan_digest,
+            "outcome_digest": run.outcome_digest,
+        }
+        if run.status != "completed_provider_call" or run.response is None:
+            return AutonomousSemanticRouteResult(
+                status=run.status if run.status in {"approval_required", "plan_refused"} else "provider_invalid",
+                route=deterministic,
+                deterministic_route=deterministic,
+                **metadata,
+            )
+        raw = run.response.structured
+        if not isinstance(raw, Mapping):
+            return AutonomousSemanticRouteResult(
+                status="provider_invalid",
+                route=deterministic,
+                deterministic_route=deterministic,
+                **metadata,
+            )
+        raw_candidates = raw.get("candidates")
+        raw_selected = raw.get("selected_domains")
+        confidence = raw.get("confidence")
+        abstain = raw.get("abstain")
+        if (
+            not isinstance(raw_candidates, list)
+            or len(raw_candidates) != len(AUTONOMOUS_DOMAINS)
+            or not isinstance(raw_selected, list)
+            or not isinstance(confidence, (int, float))
+            or isinstance(confidence, bool)
+            or not math.isfinite(float(confidence))
+            or not 0.0 <= float(confidence) <= 1.0
+            or not isinstance(abstain, bool)
+        ):
+            return AutonomousSemanticRouteResult(
+                status="provider_invalid",
+                route=deterministic,
+                deterministic_route=deterministic,
+                **metadata,
+            )
+        semantic_scores: dict[str, float] = {}
+        for raw_candidate in raw_candidates:
+            if not isinstance(raw_candidate, Mapping):
+                semantic_scores = {}
+                break
+            domain = raw_candidate.get("domain")
+            score = raw_candidate.get("score")
+            if (
+                not isinstance(domain, str)
+                or domain not in AUTONOMOUS_DOMAINS
+                or domain in semantic_scores
+                or not isinstance(score, (int, float))
+                or isinstance(score, bool)
+                or not math.isfinite(float(score))
+                or not 0.0 <= float(score) <= 1.0
+            ):
+                semantic_scores = {}
+                break
+            semantic_scores[domain] = float(score)
+        semantic_selected = tuple(raw_selected)
+        if (
+            len(semantic_scores) != len(AUTONOMOUS_DOMAINS)
+            or any(not isinstance(domain, str) for domain in semantic_selected)
+            or any(domain not in AUTONOMOUS_DOMAINS for domain in semantic_selected)
+            or len(semantic_selected) > max_domains
+            or len(set(semantic_selected)) != len(semantic_selected)
+        ):
+            return AutonomousSemanticRouteResult(
+                status="provider_invalid",
+                route=deterministic,
+                deterministic_route=deterministic,
+                **metadata,
+            )
+        semantic_candidates = tuple(
+            AutonomousSemanticRouteCandidate(
+                domain=domain,
+                semantic_score=semantic_scores[domain],
+                deterministic_score=next(
+                    (candidate.score for candidate in deterministic.candidates if candidate.domain == domain),
+                    0.0,
+                ),
+                combined_score=min(
+                    1.0,
+                    float(semantic_weight) * semantic_scores[domain]
+                    + (1.0 - float(semantic_weight)) * next(
+                        (candidate.score for candidate in deterministic.candidates if candidate.domain == domain),
+                        0.0,
+                    ),
+                ),
+            )
+            for domain in AUTONOMOUS_DOMAINS
+        )
+        ranked = tuple(sorted(semantic_candidates, key=lambda candidate: (-candidate.combined_score, candidate.domain)))
+        if abstain:
+            return AutonomousSemanticRouteResult(
+                status="provider_abstained",
+                route=deterministic,
+                deterministic_route=deterministic,
+                semantic_candidates=ranked,
+                semantic_selected_domains=semantic_selected,
+                semantic_confidence=confidence,
+                **metadata,
+            )
+        top = ranked[0]
+        second = ranked[1]
+        if top.domain not in semantic_selected:
+            return AutonomousSemanticRouteResult(
+                status="provider_disagreement",
+                route=deterministic,
+                deterministic_route=deterministic,
+                semantic_candidates=ranked,
+                semantic_selected_domains=semantic_selected,
+                semantic_confidence=confidence,
+                **metadata,
+            )
+        if top.combined_score < float(min_confidence):
+            route = AutonomousRouteProposal(
+                task_digest=deterministic.task_digest,
+                candidates=tuple(
+                    AutonomousRouteCandidate(
+                        domain=domain,
+                        score=candidate.combined_score,
+                        matched_terms=next(
+                            (item.matched_terms for item in deterministic.candidates if item.domain == domain),
+                            (),
+                        ),
+                        capability=self.registry.resolve(domain).default_capability,
+                        risk_class=self.registry.resolve(domain).risk_class,
+                        workflow_id=self.workflow_registry.resolve(domain).workflow_id,
+                        evidence="hybrid_deterministic_and_provider_semantic_scores",
+                    )
+                    for domain, candidate in ((item.domain, item) for item in ranked)
+                ),
+                selected_domains=(),
+                confidence=top.combined_score,
+                abstained=True,
+                reason="insufficient_confidence",
+                source="provider_semantic_hybrid",
+            )
+            return AutonomousSemanticRouteResult(
+                status="completed",
+                route=route,
+                deterministic_route=deterministic,
+                semantic_candidates=ranked,
+                semantic_selected_domains=semantic_selected,
+                semantic_confidence=confidence,
+                **metadata,
+            )
+        selected: tuple[str, ...]
+        if top.combined_score - second.combined_score < float(min_margin):
+            eligible = tuple(
+                candidate.domain
+                for candidate in ranked
+                if candidate.combined_score >= float(min_confidence)
+                and candidate.combined_score >= top.combined_score - float(min_margin)
+            )[:max_domains]
+            selected = eligible if allow_cross_domain and len(eligible) > 1 else ()
+            if selected and any(domain not in semantic_selected for domain in selected):
+                return AutonomousSemanticRouteResult(
+                    status="provider_disagreement",
+                    route=deterministic,
+                    deterministic_route=deterministic,
+                    semantic_candidates=ranked,
+                    semantic_selected_domains=semantic_selected,
+                    semantic_confidence=confidence,
+                    **metadata,
+                )
+            if not selected:
+                route = AutonomousRouteProposal(
+                    task_digest=deterministic.task_digest,
+                    candidates=tuple(
+                        AutonomousRouteCandidate(
+                            domain=domain,
+                            score=candidate.combined_score,
+                            matched_terms=next(
+                                (item.matched_terms for item in deterministic.candidates if item.domain == domain),
+                                (),
+                            ),
+                            capability=self.registry.resolve(domain).default_capability,
+                            risk_class=self.registry.resolve(domain).risk_class,
+                            workflow_id=self.workflow_registry.resolve(domain).workflow_id,
+                            evidence="hybrid_deterministic_and_provider_semantic_scores",
+                        )
+                        for domain, candidate in ((item.domain, item) for item in ranked)
+                    ),
+                    selected_domains=(),
+                    confidence=top.combined_score,
+                    abstained=True,
+                    reason="insufficient_margin",
+                    source="provider_semantic_hybrid",
+                )
+                return AutonomousSemanticRouteResult(
+                    status="completed",
+                    route=route,
+                    deterministic_route=deterministic,
+                    semantic_candidates=ranked,
+                    semantic_selected_domains=semantic_selected,
+                    semantic_confidence=confidence,
+                    **metadata,
+                )
+        else:
+            selected = (top.domain,)
+        hybrid_candidates = tuple(
+            AutonomousRouteCandidate(
+                domain=domain,
+                score=candidate.combined_score,
+                matched_terms=next(
+                    (item.matched_terms for item in deterministic.candidates if item.domain == domain),
+                    (),
+                ),
+                capability=self.registry.resolve(domain).default_capability,
+                risk_class=self.registry.resolve(domain).risk_class,
+                workflow_id=self.workflow_registry.resolve(domain).workflow_id,
+                evidence="hybrid_deterministic_and_provider_semantic_scores",
+            )
+            for domain, candidate in ((item.domain, item) for item in ranked)
+        )
+        route = AutonomousRouteProposal(
+            task_digest=deterministic.task_digest,
+            candidates=hybrid_candidates,
+            selected_domains=selected,
+            confidence=top.combined_score,
+            abstained=False,
+            reason="cross_domain" if len(selected) > 1 else "routed",
+            cross_domain=len(selected) > 1,
+            source="provider_semantic_hybrid",
+        )
+        return AutonomousSemanticRouteResult(
+            status="completed",
+            route=route,
+            deterministic_route=deterministic,
+            semantic_candidates=ranked,
+            semantic_selected_domains=semantic_selected,
+            semantic_confidence=confidence,
+            **metadata,
+        )
+
     @staticmethod
     def _route_context(
         context: Mapping[str, Any] | None,
@@ -2836,11 +3389,33 @@ class AutonomousTaskOrchestrator:
             required_capabilities=required,
         )
 
-    def prepare_auto(
+    @staticmethod
+    def _route_review_proposal(
+        route: AutonomousRouteProposal,
+        *,
+        reason: str = "insufficient_confidence",
+    ) -> AutonomousRouteProposal:
+        """Convert an otherwise usable route into an explicit non-executable review value."""
+
+        if route.abstained:
+            return route
+        return AutonomousRouteProposal(
+            task_digest=route.task_digest,
+            candidates=route.candidates,
+            selected_domains=(),
+            confidence=route.confidence,
+            abstained=True,
+            reason=reason,
+            cross_domain=False,
+            source=route.source,
+        )
+
+    def _prepare_auto_from_route(
         self,
         *,
         task: str,
-        hints: Sequence[str] = (),
+        route: AutonomousRouteProposal,
+        semantic_route: AutonomousSemanticRouteResult | None = None,
         context: Mapping[str, Any] | None = None,
         constraints: Sequence[str] = (),
         desired_outputs: Sequence[str] = (),
@@ -2853,23 +3428,11 @@ class AutonomousTaskOrchestrator:
         max_input_tokens: int = 4_096,
         required_model_capabilities: Sequence[str] = (),
         memory_episodes: Sequence[Mapping[str, Any]] = (),
-        min_confidence: float = 0.25,
-        min_margin: float = 0.10,
-        max_domains: int = 3,
-        allow_cross_domain: bool = True,
     ) -> AutonomousAutoBlueprint:
-        """Create a single- or cross-domain blueprint, or an explicit review request."""
-
-        route = self.route_task(
-            task=task,
-            hints=hints,
-            min_confidence=min_confidence,
-            min_margin=min_margin,
-            max_domains=max_domains,
-            allow_cross_domain=allow_cross_domain,
-        )
+        if semantic_route is not None and semantic_route.status != "completed":
+            route = self._route_review_proposal(route)
         if route.abstained:
-            return AutonomousAutoBlueprint(route=route)
+            return AutonomousAutoBlueprint(route=route, semantic_route=semantic_route)
         routed_context = self._route_context(context, route)
         if len(route.selected_domains) == 1:
             blueprint = self.prepare(
@@ -2888,7 +3451,11 @@ class AutonomousTaskOrchestrator:
                 required_model_capabilities=required_model_capabilities,
                 memory_episodes=memory_episodes,
             )
-            return AutonomousAutoBlueprint(route=route, blueprint=blueprint)
+            return AutonomousAutoBlueprint(
+                route=route,
+                blueprint=blueprint,
+                semantic_route=semantic_route,
+            )
         subtasks = [
             {
                 "id": f"route-{domain}",
@@ -2923,7 +3490,141 @@ class AutonomousTaskOrchestrator:
             response_schema=response_schema,
             max_input_tokens=max_input_tokens,
         )
-        return AutonomousAutoBlueprint(route=route, cross_domain_blueprint=cross_domain)
+        return AutonomousAutoBlueprint(
+            route=route,
+            cross_domain_blueprint=cross_domain,
+            semantic_route=semantic_route,
+        )
+
+    def prepare_auto(
+        self,
+        *,
+        task: str,
+        hints: Sequence[str] = (),
+        context: Mapping[str, Any] | None = None,
+        constraints: Sequence[str] = (),
+        desired_outputs: Sequence[str] = (),
+        capability: str | None = None,
+        risk_class: str | None = None,
+        max_steps: int = 8,
+        require_json: bool = False,
+        response_schema: Mapping[str, Any] | None = None,
+        execution_mode: str = "provider",
+        max_input_tokens: int = 4_096,
+        required_model_capabilities: Sequence[str] = (),
+        memory_episodes: Sequence[Mapping[str, Any]] = (),
+        min_confidence: float = 0.25,
+        min_margin: float = 0.10,
+        max_domains: int = 3,
+        allow_cross_domain: bool = True,
+    ) -> AutonomousAutoBlueprint:
+        """Create a single- or cross-domain blueprint, or an explicit review request."""
+
+        route = self.route_task(
+            task=task,
+            hints=hints,
+            min_confidence=min_confidence,
+            min_margin=min_margin,
+            max_domains=max_domains,
+            allow_cross_domain=allow_cross_domain,
+        )
+        return self._prepare_auto_from_route(
+            task=task,
+            route=route,
+            context=context,
+            constraints=constraints,
+            desired_outputs=desired_outputs,
+            capability=capability,
+            risk_class=risk_class,
+            max_steps=max_steps,
+            require_json=require_json,
+            response_schema=response_schema,
+            execution_mode=execution_mode,
+            max_input_tokens=max_input_tokens,
+            required_model_capabilities=required_model_capabilities,
+            memory_episodes=memory_episodes,
+        )
+
+    def prepare_auto_with_provider(
+        self,
+        *,
+        task: str,
+        model_candidates: Sequence[Mapping[str, Any]],
+        credentials: Mapping[str, CredentialHandle],
+        hints: Sequence[str] = (),
+        context: Mapping[str, Any] | None = None,
+        constraints: Sequence[str] = (),
+        desired_outputs: Sequence[str] = (),
+        capability: str | None = None,
+        risk_class: str | None = None,
+        max_steps: int = 8,
+        require_json: bool = False,
+        response_schema: Mapping[str, Any] | None = None,
+        execution_mode: str = "provider",
+        max_input_tokens: int = 4_096,
+        required_model_capabilities: Sequence[str] = (),
+        memory_episodes: Sequence[Mapping[str, Any]] = (),
+        min_confidence: float = 0.25,
+        min_margin: float = 0.10,
+        max_domains: int = 3,
+        allow_cross_domain: bool = True,
+        semantic_weight: float = 0.65,
+        bandit_state: Mapping[str, Any] | None = None,
+        contextual_observations: Sequence[Mapping[str, Any]] = (),
+        selection_overrides: Mapping[str, Any] | None = None,
+        input_tokens: int = 4_096,
+        requested_output_tokens: int = 1_024,
+        max_cost_per_million_tokens: int | None = None,
+        max_latency_ms: int | None = None,
+        min_quality: float | None = None,
+        approve_provider_call: bool = False,
+        run_id: str | None = None,
+        max_output_tokens: int = 1_024,
+        temperature: float | None = None,
+    ) -> AutonomousAutoBlueprint:
+        """Use a caller-approved classifier, reconcile it, then build the executable blueprint."""
+
+        semantic = self.route_with_provider(
+            task=task,
+            model_candidates=model_candidates,
+            credentials=credentials,
+            hints=hints,
+            context=context,
+            min_confidence=min_confidence,
+            min_margin=min_margin,
+            max_domains=max_domains,
+            allow_cross_domain=allow_cross_domain,
+            semantic_weight=semantic_weight,
+            bandit_state=bandit_state,
+            contextual_observations=contextual_observations,
+            selection_overrides=selection_overrides,
+            input_tokens=input_tokens,
+            requested_output_tokens=requested_output_tokens,
+            max_cost_per_million_tokens=max_cost_per_million_tokens,
+            max_latency_ms=max_latency_ms,
+            min_quality=min_quality,
+            approve_provider_call=approve_provider_call,
+            run_id=run_id,
+            max_output_tokens=max_output_tokens,
+            temperature=temperature,
+        )
+        return self._prepare_auto_from_route(
+            task=task,
+            route=semantic.route,
+            semantic_route=semantic,
+            context=context,
+            constraints=constraints,
+            desired_outputs=desired_outputs,
+            capability=capability,
+            risk_class=risk_class,
+            max_steps=max_steps,
+            require_json=require_json,
+            response_schema=response_schema,
+            execution_mode=execution_mode,
+            max_input_tokens=max_input_tokens,
+            required_model_capabilities=required_model_capabilities,
+            memory_episodes=memory_episodes,
+        )
 
     @staticmethod
     def route_request_for(
@@ -5580,6 +6281,14 @@ class AutonomousAgent:
                 for domain in AUTONOMOUS_DOMAINS
             ],
             "route_catalogue": self.orchestrator.router.catalogue(),
+            "semantic_routing": {
+                "schema": AUTONOMOUS_SEMANTIC_ROUTE_SCHEMA,
+                "enabled": True,
+                "domain_count": len(AUTONOMOUS_DOMAINS),
+                "requires_caller_provider_approval": True,
+                "transcript_retention": "classifier_transcript_not_retained",
+                "authorization": "routing_evidence_only; no_tools_or_effects_authorized",
+            },
             "domain_tools": [] if self.tool_registry is None else self.tool_registry.catalogue(),
             "domain_tool_registry_digest": None if self.tool_registry is None else self.tool_registry.digest,
             "next_actions": next_actions,
@@ -5614,10 +6323,111 @@ class AutonomousAgent:
 
         return self.orchestrator.route_task(task=task, **kwargs)
 
+    def route_with_provider(
+        self,
+        *,
+        task: str,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        hints: Sequence[str] = (),
+        context: Mapping[str, Any] | None = None,
+        min_confidence: float = 0.25,
+        min_margin: float = 0.10,
+        max_domains: int = 3,
+        allow_cross_domain: bool = True,
+        semantic_weight: float = 0.65,
+        bandit_state: Mapping[str, Any] | None = None,
+        contextual_observations: Sequence[Mapping[str, Any]] = (),
+        selection_overrides: Mapping[str, Any] | None = None,
+        input_tokens: int = 4_096,
+        requested_output_tokens: int = 1_024,
+        max_cost_per_million_tokens: int | None = None,
+        max_latency_ms: int | None = None,
+        min_quality: float | None = None,
+        approve_provider_call: bool = False,
+        run_id: str | None = None,
+        max_output_tokens: int = 1_024,
+        temperature: float | None = None,
+    ) -> AutonomousSemanticRouteResult:
+        """Improve provider-free routing with a bounded, caller-approved semantic proposal."""
+
+        candidates = self._resolve_candidates(model_candidates)
+        resolved_credentials = self._credential_mapping(credentials)
+        resolved_overrides = None if selection_overrides is None else dict(selection_overrides)
+        if self.health_ledger is not None:
+            historical = self.health_ledger.selection_overrides()
+            if resolved_overrides is None:
+                resolved_overrides = historical or None
+            elif isinstance(resolved_overrides, Mapping):
+                merged = dict(historical)
+                merged.update(resolved_overrides)
+                historical_health = historical.get("provider_health")
+                supplied_health = resolved_overrides.get("provider_health")
+                if isinstance(historical_health, Mapping) and isinstance(supplied_health, Mapping):
+                    merged["provider_health"] = {**dict(historical_health), **dict(supplied_health)}
+                resolved_overrides = merged
+        return self.orchestrator.route_with_provider(
+            task=task,
+            model_candidates=candidates,
+            credentials=resolved_credentials,
+            hints=hints,
+            context=context,
+            min_confidence=min_confidence,
+            min_margin=min_margin,
+            max_domains=max_domains,
+            allow_cross_domain=allow_cross_domain,
+            semantic_weight=semantic_weight,
+            bandit_state=bandit_state,
+            contextual_observations=contextual_observations,
+            selection_overrides=resolved_overrides,
+            input_tokens=input_tokens,
+            requested_output_tokens=requested_output_tokens,
+            max_cost_per_million_tokens=max_cost_per_million_tokens,
+            max_latency_ms=max_latency_ms,
+            min_quality=min_quality,
+            approve_provider_call=approve_provider_call,
+            run_id=run_id,
+            max_output_tokens=max_output_tokens,
+            temperature=temperature,
+        )
+
     def prepare_auto(self, **kwargs: Any) -> AutonomousAutoBlueprint:
         """Build an automatic single-domain, cross-domain, or review-required blueprint."""
 
         return self.orchestrator.prepare_auto(**kwargs)
+
+    def prepare_auto_with_provider(
+        self,
+        *,
+        task: str,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> AutonomousAutoBlueprint:
+        """Use BYOK semantic routing, then build a reconciled automatic blueprint."""
+
+        candidates = self._resolve_candidates(model_candidates)
+        resolved_credentials = self._credential_mapping(credentials)
+        selection_overrides = kwargs.pop("selection_overrides", None)
+        if self.health_ledger is not None:
+            historical = self.health_ledger.selection_overrides()
+            if selection_overrides is None:
+                selection_overrides = historical or None
+            elif isinstance(selection_overrides, Mapping):
+                merged = dict(historical)
+                merged.update(selection_overrides)
+                historical_health = historical.get("provider_health")
+                supplied_health = selection_overrides.get("provider_health")
+                if isinstance(historical_health, Mapping) and isinstance(supplied_health, Mapping):
+                    merged["provider_health"] = {**dict(historical_health), **dict(supplied_health)}
+                selection_overrides = merged
+        return self.orchestrator.prepare_auto_with_provider(
+            task=task,
+            model_candidates=candidates,
+            credentials=resolved_credentials,
+            selection_overrides=selection_overrides,
+            **kwargs,
+        )
 
     def prepare_cross_domain(self, **kwargs: Any) -> AutonomousCrossDomainBlueprint:
         """Build bounded specialist fan-out and synthesis work without provider contact."""
@@ -5866,6 +6676,19 @@ class AutonomousAgent:
         min_margin: float = 0.10,
         max_domains: int = 3,
         allow_cross_domain: bool = True,
+        semantic_routing: bool = False,
+        semantic_weight: float = 0.65,
+        semantic_bandit_state: Mapping[str, Any] | None = None,
+        semantic_contextual_observations: Sequence[Mapping[str, Any]] = (),
+        semantic_selection_overrides: Mapping[str, Any] | None = None,
+        semantic_input_tokens: int = 4_096,
+        semantic_requested_output_tokens: int = 1_024,
+        semantic_max_cost_per_million_tokens: int | None = None,
+        semantic_max_latency_ms: int | None = None,
+        semantic_min_quality: float | None = None,
+        semantic_run_id: str | None = None,
+        semantic_max_output_tokens: int = 1_024,
+        semantic_temperature: float | None = None,
         execution_id: str | None = None,
         resume_execution: bool = False,
         **kwargs: Any,
@@ -5878,33 +6701,60 @@ class AutonomousAgent:
 
         if "domain" in kwargs:
             raise BrainRunError("run_auto chooses the domain; pass routing hints instead")
-        blueprint = self.prepare_auto(
-            task=task,
-            hints=hints,
-            min_confidence=min_confidence,
-            min_margin=min_margin,
-            max_domains=max_domains,
-            allow_cross_domain=allow_cross_domain,
-            **{
-                key: value
-                for key, value in kwargs.items()
-                if key
-                in {
-                    "context",
-                    "constraints",
-                    "desired_outputs",
-                    "capability",
-                    "risk_class",
-                    "max_steps",
-                    "require_json",
-                    "response_schema",
-                    "execution_mode",
-                    "max_input_tokens",
-                    "required_model_capabilities",
-                    "memory_episodes",
-                }
-            },
-        )
+        prepare_options = {
+            key: value
+            for key, value in kwargs.items()
+            if key
+            in {
+                "context",
+                "constraints",
+                "desired_outputs",
+                "capability",
+                "risk_class",
+                "max_steps",
+                "require_json",
+                "response_schema",
+                "execution_mode",
+                "max_input_tokens",
+                "required_model_capabilities",
+                "memory_episodes",
+            }
+        }
+        if semantic_routing:
+            blueprint = self.prepare_auto_with_provider(
+                task=task,
+                credentials=credentials,
+                model_candidates=model_candidates,
+                hints=hints,
+                min_confidence=min_confidence,
+                min_margin=min_margin,
+                max_domains=max_domains,
+                allow_cross_domain=allow_cross_domain,
+                semantic_weight=semantic_weight,
+                bandit_state=self.learning_state() if semantic_bandit_state is None else semantic_bandit_state,
+                contextual_observations=semantic_contextual_observations,
+                selection_overrides=semantic_selection_overrides,
+                input_tokens=semantic_input_tokens,
+                requested_output_tokens=semantic_requested_output_tokens,
+                max_cost_per_million_tokens=semantic_max_cost_per_million_tokens,
+                max_latency_ms=semantic_max_latency_ms,
+                min_quality=semantic_min_quality,
+                approve_provider_call=bool(kwargs.get("approve_provider_call", False)),
+                run_id=semantic_run_id,
+                max_output_tokens=semantic_max_output_tokens,
+                temperature=semantic_temperature,
+                **prepare_options,
+            )
+        else:
+            blueprint = self.prepare_auto(
+                task=task,
+                hints=hints,
+                min_confidence=min_confidence,
+                min_margin=min_margin,
+                max_domains=max_domains,
+                allow_cross_domain=allow_cross_domain,
+                **prepare_options,
+            )
         if blueprint.route.abstained:
             return AutonomousAutoResult(status="route_review_required", route=blueprint.route)
         execution_kwargs = dict(kwargs)

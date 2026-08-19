@@ -44,6 +44,35 @@ class _ProviderHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         self.server.request_body = self.rfile.read(length)  # type: ignore[attr-defined]
         request = json.loads(self.server.request_body.decode("utf-8"))  # type: ignore[attr-defined]
+        request_text = json.dumps(request)
+        if "Classify the following user request against the reviewed AURORA autonomous domain" in request_text:
+            scores = {
+                domain: (0.91 if domain == "neuroscience" else 0.08)
+                for domain in AUTONOMOUS_DOMAINS
+            }
+            response = {
+                "id": "autonomy-semantic-route",
+                "model": "test-model",
+                "output_text": json.dumps(
+                    {
+                        "candidates": [
+                            {"domain": domain, "score": score}
+                            for domain, score in scores.items()
+                        ],
+                        "selected_domains": ["neuroscience"],
+                        "confidence": 0.91,
+                        "abstain": False,
+                    }
+                ),
+                "usage": {"total_tokens": 12},
+            }
+            payload = json.dumps(response).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
         has_tools = bool(request.get("tools"))
         has_tool_result = any(
             isinstance(item, dict) and item.get("type") == "function_call_output"
@@ -312,6 +341,8 @@ def test_model_catalogue_and_agent_facade_connect_readiness_session_and_executio
             assert session.handles()["openai"].provider == "openai"
             ready = agent.readiness()
             assert ready["models"][0]["eligible_for_selection"] is True
+            assert ready["semantic_routing"]["domain_count"] == len(AUTONOMOUS_DOMAINS)
+            assert ready["semantic_routing"]["requires_caller_provider_approval"] is True
             assert "test-secret" not in json.dumps(ready)
             result = agent.run(
                 task="produce a bounded implementation review",
@@ -717,6 +748,77 @@ def test_provider_free_router_covers_every_domain_and_abstains_without_evidence(
     assert unknown.reason == "no_matching_evidence"
     assert unknown.selected_domains == ()
     assert unknown.to_dict()["retention"].startswith("task_text_transient_only")
+
+
+def test_provider_semantic_router_reconciles_all_domains_and_builds_a_blueprint():
+    runtime, store, server, thread = _runtime()
+    try:
+        agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+        with agent.onboarding.start_session(session_id="semantic-route-session") as session:
+            session.register_value("openai", "semantic-route-secret")
+            task = "compare synaptic oscillation artifacts across two measurement protocols"
+            result = agent.route_with_provider(
+                task=task,
+                credentials=session,
+                approve_provider_call=True,
+            )
+            assert result.status == "completed"
+            assert result.deterministic_route.abstained is True
+            assert result.route.primary_domain == "neuroscience"
+            assert result.route.source == "provider_semantic_hybrid"
+            assert len(result.semantic_candidates) == len(AUTONOMOUS_DOMAINS)
+            assert result.semantic_selected_domains == ("neuroscience",)
+            assert result.selected_model == {"provider": "openai", "model": "test-model"}
+            public = json.dumps(result.to_dict())
+            assert "semantic-route-secret" not in public
+            assert task not in public
+
+            blueprint = agent.prepare_auto_with_provider(
+                task=task,
+                credentials=session,
+                approve_provider_call=True,
+            )
+            assert blueprint.semantic_route is not None
+            assert blueprint.semantic_route.status == "completed"
+            assert blueprint.blueprint is not None
+            assert blueprint.blueprint.profile.domain == "neuroscience"
+            assert blueprint.blueprint.spec.context["autonomous_route"]["route_digest"] == blueprint.route.route_digest
+
+            executed = agent.run_auto(
+                task=task,
+                credentials=session,
+                semantic_routing=True,
+                approve_provider_call=True,
+            )
+            assert executed.status == "completed"
+            assert executed.route.primary_domain == "neuroscience"
+            assert executed.result is not None
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_provider_semantic_router_requires_approval_and_never_builds_executable_work():
+    runtime, store, server, thread = _runtime()
+    try:
+        agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+        with agent.onboarding.start_session(session_id="semantic-route-approval-session") as session:
+            session.register_value("openai", "semantic-approval-secret")
+            blueprint = agent.prepare_auto_with_provider(
+                task="compare synaptic oscillation artifacts across two measurement protocols",
+                credentials=session,
+            )
+            assert blueprint.semantic_route is not None
+            assert blueprint.semantic_route.status == "approval_required"
+            assert blueprint.route.abstained is True
+            assert blueprint.blueprint is None
+            assert blueprint.cross_domain_blueprint is None
+            assert not hasattr(server, "request_body")
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
 
 
 def test_router_explicitly_surfaces_cross_domain_ambiguity_and_review_policy():

@@ -361,6 +361,44 @@ profiles and workflow contracts. This lets a UI explain the available routes wit
 text, prompts, credentials, or provider payloads. The TypeScript SDK exposes the corresponding
 `AutonomousRouteProposal`, `AutonomousAutoBlueprint`, and `AutonomousAutoResult` wire types.
 
+### BYOK semantic routing and automatic planning
+
+The fixed-vocabulary router is intentionally useful without a key, but it cannot understand a
+new phrase merely because that phrase is absent from the reviewed catalogue. A caller that has
+collected a provider key may opt into one additional, approval-gated classifier call:
+
+```python
+with agent.start_credential_session(ttl_seconds=3_600) as session:
+    session.register_value("openai", protected_user_value)
+    result = agent.run_auto(
+        task="compare synaptic oscillation artifacts across two measurement protocols",
+        credentials=session,
+        approve_provider_call=True,
+        semantic_routing=True,
+    )
+    if result.status == "route_review_required":
+        send_to_review(result.to_dict())
+```
+
+`route_with_provider()` and `prepare_auto_with_provider()` pass the transient task and the
+reviewed twelve-domain catalogue to a selected model under a strict JSON schema. The model must
+score every domain, declare selected domains, and provide an abstention decision. The SDK fuses
+those scores with the provider-free evidence, binds the resulting route digest into the normal
+domain pack, evaluator, prompt, plan, and tool-selection context, and only then creates a
+blueprint. `run_auto(..., semantic_routing=True)` performs the same routing step before normal
+execution. The routing call and the eventual execution call each retain their own approval and
+budget boundary.
+
+Provider output never becomes authorization. Invalid JSON, missing domains, out-of-range scores,
+provider disagreement, abstention, insufficient confidence, or insufficient margin all produce a
+non-executable review result. A semantic route cannot add a domain, capability, tool, effect,
+credential, or model permission outside the reviewed registries. `AutonomousSemanticRouteResult`
+retains only bounded scores, route metadata, model identity, and digests; it explicitly excludes
+the classifier transcript and task text. A caller can use `semantic_weight`, `max_domains`,
+`allow_cross_domain`, contextual observations, the health overlay, and the persisted bandit state
+to control how exploration and reliability affect the classifier invocation without allowing
+learning to bypass safety gates.
+
 ### Restart-safe autonomous execution and tool outcome learning
 
 Long-horizon autonomy has a second persistence layer in addition to provider health, episodic

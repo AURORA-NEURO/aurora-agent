@@ -282,6 +282,7 @@ export interface AutonomousRouteProposal extends JsonObject {
   abstained: boolean;
   reason: AutonomousRouteReason;
   cross_domain: boolean;
+  source: "deterministic_vocabulary" | "provider_semantic_hybrid" | string;
   route_digest: string;
   retention: string;
   does_not_claim: string[];
@@ -293,6 +294,30 @@ export interface AutonomousRouteCatalogueEntry extends JsonObject {
   term_count: number;
   terms: string[];
   evidence: "reviewed_catalogue_vocabulary" | string;
+}
+
+export interface AutonomousSemanticRouteCandidate extends JsonObject {
+  domain: string;
+  semantic_score: number;
+  deterministic_score: number;
+  combined_score: number;
+}
+
+export interface AutonomousSemanticRouteResult extends JsonObject {
+  schema: "bioprism-python-autonomous-semantic-route/0.1" | string;
+  status: "completed" | "approval_required" | "plan_refused" | "provider_abstained" | "provider_invalid" | "provider_disagreement" | string;
+  route: AutonomousRouteProposal;
+  deterministic_route: AutonomousRouteProposal;
+  semantic_candidates: AutonomousSemanticRouteCandidate[];
+  semantic_selected_domains: string[];
+  semantic_confidence: number;
+  selected_model: { provider: string; model: string } | null;
+  selection_digest: string | null;
+  prompt_digest: string | null;
+  plan_digest: string | null;
+  outcome_digest: string | null;
+  retention: string;
+  authorization: string;
 }
 
 /** Versioned planning/evidence contract shared with the Python autonomous façade. */
@@ -374,6 +399,7 @@ export interface AutonomousAutoBlueprint extends JsonObject {
   route: AutonomousRouteProposal;
   blueprint: AutonomousTaskBlueprint | null;
   cross_domain_blueprint: JsonObject | null;
+  semantic_route: AutonomousSemanticRouteResult | null;
   execution: "not_started" | string;
   authorization: string;
 }
