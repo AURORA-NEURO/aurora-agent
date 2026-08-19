@@ -1926,6 +1926,7 @@ def test_run_workflow_learning_updates_each_completed_stage_with_explicit_signal
     finally:
         server.shutdown()
         thread.join(timeout=2)
+        server.server_close()
 
 
 def test_run_workflow_learning_missing_evidence_never_defaults_to_reward(tmp_path: Path):
@@ -1962,6 +1963,7 @@ def test_run_workflow_learning_missing_evidence_never_defaults_to_reward(tmp_pat
         memory.close()
         server.shutdown()
         thread.join(timeout=2)
+        server.server_close()
 
 
 def test_run_workflow_trajectory_learning_assigns_terminal_credit_after_stages():
@@ -2001,6 +2003,7 @@ def test_run_workflow_trajectory_learning_assigns_terminal_credit_after_stages()
     finally:
         server.shutdown()
         thread.join(timeout=2)
+        server.server_close()
 
 
 def test_durable_workflow_worker_releases_one_stage_and_resumes_after_store_restart(tmp_path: Path):
@@ -2230,6 +2233,7 @@ def test_durable_cross_domain_worker_resumes_children_and_synthesis_across_resta
     finally:
         server.shutdown()
         thread.join(timeout=2)
+        server.server_close()
 
 
 def test_durable_cross_domain_worker_parks_and_releases_provider_approval(tmp_path: Path):
@@ -2298,6 +2302,7 @@ def test_durable_cross_domain_worker_parks_and_releases_provider_approval(tmp_pa
     finally:
         server.shutdown()
         thread.join(timeout=2)
+        server.server_close()
 
 
 def test_durable_workflow_worker_rehydrates_accepted_plan_refinement_across_restart(tmp_path: Path):
@@ -2581,3 +2586,4 @@ def test_builtin_workflow_learning_signal_contract_covers_every_domain():
     finally:
         server.shutdown()
         thread.join(timeout=2)
+        server.server_close()
