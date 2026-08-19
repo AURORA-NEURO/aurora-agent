@@ -83,6 +83,7 @@ from .evaluators import (
 )
 from .autonomy import (
     AUTONOMOUS_DOMAINS,
+    AUTONOMOUS_EXECUTION_MODES,
     AUTONOMY_SCHEMA,
     AutonomousDomainProfile,
     AutonomousDomainRegistry,
@@ -4381,6 +4382,7 @@ __all__ = [
     "modality_comparability_check_report",
     "__version__",
     "AUTONOMOUS_DOMAINS",
+    "AUTONOMOUS_EXECUTION_MODES",
     "AUTONOMY_SCHEMA",
     "AutonomousDomainProfile",
     "AutonomousDomainRegistry",

@@ -35,6 +35,7 @@ from .brain import (
     BrainOutcomeEvaluator,
     BrainRunError,
     BrainRunResult,
+    BrainToolLoopResult,
 )
 from .evaluators import DomainEvaluatorRegistry
 from .llm_runtime import CredentialHandle, ProviderTool
@@ -43,6 +44,7 @@ from .mission import MissionPolicy
 
 
 AUTONOMY_SCHEMA = "bioprism-python-autonomous-task/0.1"
+AUTONOMOUS_EXECUTION_MODES = ("provider", "tool_loop", "mission")
 AUTONOMOUS_DOMAINS = (
     "coding",
     "browser",
@@ -336,12 +338,19 @@ class AutonomousTaskSpec:
     max_steps: int = 8
     require_json: bool = False
     response_schema: Mapping[str, Any] | None = None
+    execution_mode: str = "provider"
 
     def __post_init__(self) -> None:
         _text("autonomous task", self.task, maximum=MAX_AUTONOMY_TEXT_BYTES)
         _identifier("autonomous task domain", self.domain)
         _identifier("autonomous task capability", self.capability)
         _identifier("autonomous task risk_class", self.risk_class)
+        _identifier("autonomous task execution_mode", self.execution_mode)
+        if self.execution_mode not in AUTONOMOUS_EXECUTION_MODES:
+            raise BrainRunError(
+                "autonomous task execution_mode must be one of: "
+                + ", ".join(AUTONOMOUS_EXECUTION_MODES)
+            )
         constraints = _sequence("autonomous task constraints", self.constraints)
         desired_outputs = _sequence("autonomous task desired_outputs", self.desired_outputs)
         context = {} if self.context is None else _safe_json("autonomous task context", self.context)
@@ -379,6 +388,7 @@ class AutonomousTaskSpec:
             "max_steps": self.max_steps,
             "require_json": self.require_json,
             "response_schema_digest": None if self.response_schema is None else content_digest(self.response_schema),
+            "execution_mode": self.execution_mode,
             "retention": "task_text_transient_only",
         }
 
@@ -458,6 +468,8 @@ class AutonomousPromptBuilder:
                         "domain": profile.domain,
                         "risk_class": spec.risk_class,
                         "capability": spec.capability,
+                        "execution_mode": spec.execution_mode,
+                        "domain_capabilities": list(profile.capabilities),
                         "required_model_capabilities": list(profile.required_model_capabilities),
                         "guardrails": list(profile.guardrails),
                         "does_not_authorize": [
@@ -536,6 +548,7 @@ class AutonomousPromptBuilder:
                 (
                     "AURORA autonomous task contract.",
                     f"Domain strategy: {profile.domain}.",
+                    f"Execution mode: {spec.execution_mode}.",
                     "Follow the domain policy and treat the caller plan as proposal-only until approved.",
                     "Do not invent tool access, credentials, evidence, or completed actions.",
                 )
@@ -584,8 +597,8 @@ class AutonomousLearningResult:
 
     status: str
     blueprint: AutonomousTaskBlueprint
-    final_result: BrainRunResult
-    attempts: tuple[BrainRunResult, ...]
+    final_result: BrainRunResult | BrainToolLoopResult
+    attempts: tuple[BrainRunResult | BrainToolLoopResult, ...]
     evaluations: tuple[Mapping[str, Any], ...]
     memory_receipts: tuple[Mapping[str, Any], ...]
     replan_count: int
@@ -634,6 +647,7 @@ class AutonomousTaskOrchestrator:
         max_steps: int = 8,
         require_json: bool = False,
         response_schema: Mapping[str, Any] | None = None,
+        execution_mode: str = "provider",
         max_input_tokens: int = 4_096,
         required_model_capabilities: Sequence[str] = (),
         memory_episodes: Sequence[Mapping[str, Any]] = (),
@@ -652,6 +666,7 @@ class AutonomousTaskOrchestrator:
             max_steps=max_steps,
             require_json=require_json,
             response_schema=response_schema,
+            execution_mode=execution_mode,
         )
         extra_capabilities = _sequence("required_model_capabilities", required_model_capabilities)
         required = tuple(dict.fromkeys((*profile.required_model_capabilities, *extra_capabilities)))
@@ -661,6 +676,8 @@ class AutonomousTaskOrchestrator:
             "domain": spec.domain,
             "capability": spec.capability,
             "risk_class": spec.risk_class,
+            "execution_mode": spec.execution_mode,
+            "domain_capabilities": list(profile.capabilities),
             "task_digest": spec.task_digest,
             "user_context_digest": spec.context_digest,
             "context_keys": sorted(str(key) for key in spec.context),
@@ -682,6 +699,35 @@ class AutonomousTaskOrchestrator:
             plan=plan,
             required_capabilities=required,
         )
+
+    @staticmethod
+    def route_request_for(
+        blueprint: AutonomousTaskBlueprint,
+        *,
+        max_tools: int = 128,
+    ) -> dict[str, Any]:
+        """Create a bounded capability-route proposal from a prepared domain blueprint.
+
+        The proposal is intentionally only a router query. It does not grant a tool, authorize a
+        side effect, or persist the task text. The live capability service remains authoritative
+        for resolution and the caller remains authoritative for execution.
+        """
+
+        if not isinstance(max_tools, int) or isinstance(max_tools, bool) or not 1 <= max_tools <= 128:
+            raise BrainRunError("max_tools must be between 1 and 128")
+        query = f"{blueprint.profile.domain} {blueprint.spec.capability}: {blueprint.spec.task}"
+        return {
+            "goal": blueprint.spec.task,
+            "needs": [
+                {
+                    "id": "autonomous-task",
+                    "query": query,
+                    "max_items": max_tools,
+                }
+            ],
+            "max_tools": max_tools,
+            "include_tools": True,
+        }
 
     @staticmethod
     def _memory(
@@ -796,8 +842,15 @@ class AutonomousTaskOrchestrator:
         provider_tools: Sequence[ProviderTool],
         tool_choice: str | None,
         max_provider_failovers: int,
-    ) -> BrainRunResult | BrainMissionResult:
-        if mission_policy is None:
+        execution_mode: str,
+        tool_loop_options: Mapping[str, Any] | None,
+    ) -> BrainRunResult | BrainToolLoopResult | BrainMissionResult:
+        # Keep the legacy ``mission_policy`` shorthand while making the execution route
+        # explicit for new callers.
+        if execution_mode not in AUTONOMOUS_EXECUTION_MODES:
+            raise BrainRunError(f"unsupported autonomous execution mode: {execution_mode!r}")
+        effective_mode = "mission" if execution_mode == "provider" and mission_policy is not None else execution_mode
+        if effective_mode == "provider":
             return self.brain.run_adaptive(
                 task=blueprint.spec.task,
                 model_candidates=model_candidates,
@@ -825,6 +878,64 @@ class AutonomousTaskOrchestrator:
                 tool_choice=tool_choice,
                 max_provider_failovers=max_provider_failovers,
             )
+        if effective_mode == "tool_loop":
+            if tool_loop_options is not None and not isinstance(tool_loop_options, Mapping):
+                raise BrainRunError("tool_loop_options must be a mapping or None")
+            loop_options = {} if tool_loop_options is None else dict(tool_loop_options)
+            forbidden = {
+                "task", "model_candidates", "prompt", "plan", "credentials", "context",
+                "contextual_observations", "required_capabilities", "ledger", "selection_overrides",
+            }
+            unknown = sorted(forbidden.intersection(loop_options))
+            if unknown:
+                raise BrainRunError("tool_loop_options cannot override generated fields: " + ", ".join(unknown))
+            loop_options.update(
+                {
+                    "approve_provider_call": approve_provider_call,
+                    "run_id": run_id,
+                    "max_output_tokens": max_output_tokens,
+                    "temperature": temperature,
+                    "require_json": blueprint.spec.require_json,
+                    "response_schema": response_schema or blueprint.spec.response_schema,
+                    "idempotency_key": idempotency_key,
+                    "tool_choice": tool_choice,
+                    "approve_mission_dispatch": approve_mission_dispatch,
+                }
+            )
+            if mission_policy is not None:
+                loop_options["mission_policy"] = mission_policy
+            if provider_tools:
+                loop_options["provider_tools"] = tuple(provider_tools)
+            if route_request is not None:
+                loop_options["route_request"] = dict(route_request)
+                # A callback-authorized native loop has no mission policy to narrow. The route
+                # still supplies bounded schemas and evidence; mission-policy intersection is
+                # only meaningful when the built-in mission authorizer is active.
+                loop_options["enforce_route_tools"] = enforce_route_tools if mission_policy is not None else False
+                loop_options["require_resolved_route"] = require_resolved_route
+            return self.brain.run_adaptive_tool_loop(
+                task=blueprint.spec.task,
+                model_candidates=model_candidates,
+                prompt=blueprint.prompt,
+                plan=blueprint.plan,
+                credentials=credentials,
+                ledger=ledger,
+                context=blueprint.selection_context,
+                contextual_observations=contextual_observations,
+                required_capabilities=blueprint.required_capabilities,
+                input_tokens=input_tokens,
+                requested_output_tokens=requested_output_tokens,
+                max_cost_per_million_tokens=max_cost_per_million_tokens,
+                max_latency_ms=max_latency_ms,
+                min_quality=min_quality,
+                selection_overrides=selection_overrides,
+                tool_loop_options=loop_options,
+                max_provider_failovers=max_provider_failovers,
+            )
+        if effective_mode != "mission":
+            raise BrainRunError(f"unsupported autonomous execution mode: {effective_mode!r}")
+        if mission_policy is None:
+            raise BrainRunError("mission execution requires mission_policy")
         options = self._merge_options(
             mission_options,
             context=blueprint.selection_context,
@@ -866,7 +977,7 @@ class AutonomousTaskOrchestrator:
         prompt: Mapping[str, Any],
         *,
         attempt: int,
-        result: BrainRunResult,
+        result: BrainRunResult | BrainToolLoopResult,
         decision: BrainEvaluatorDecision,
     ) -> dict[str, Any]:
         current = dict(prompt)
@@ -876,6 +987,20 @@ class AutonomousTaskOrchestrator:
         chunks = [dict(chunk) for chunk in raw_context if isinstance(chunk, Mapping)]
         if len(chunks) != len(raw_context) or any(chunk.get("id") == "autonomy-replan" for chunk in chunks):
             raise BrainRunError("autonomous prompt has malformed or duplicate replan context")
+        if isinstance(result, BrainRunResult):
+            previous_status = result.status
+            previous_outcome_digest = result.outcome_digest
+        else:
+            previous_status = result.status
+            previous_outcome_digest = content_digest(
+                {
+                    "brain_outcome_digest": result.brain_run.outcome_digest,
+                    "status": result.status,
+                    "provider_loop_status": None if result.provider_loop is None else result.provider_loop.status,
+                    "turns": None if result.provider_loop is None else result.provider_loop.turns,
+                    "tool_calls": None if result.provider_loop is None else result.provider_loop.tool_calls,
+                }
+            )
         chunks.append(
             {
                 "id": "autonomy-replan",
@@ -884,8 +1009,8 @@ class AutonomousTaskOrchestrator:
                     {
                         "workflow": "bounded_autonomous_replan",
                         "attempt": attempt,
-                        "previous_status": result.status,
-                        "previous_outcome_digest": result.outcome_digest,
+                        "previous_status": previous_status,
+                        "previous_outcome_digest": previous_outcome_digest,
                         "failure_class": decision.failure_class,
                         "instruction": decision.replan_instruction,
                         "does_not_authorize": ["new tools", "new credentials", "external effects"],
@@ -944,14 +1069,15 @@ class AutonomousTaskOrchestrator:
             **kwargs,
         )
 
-    def _run_prepared(self, blueprint: AutonomousTaskBlueprint, **kwargs: Any) -> BrainRunResult | BrainMissionResult:
+    def _run_prepared(self, blueprint: AutonomousTaskBlueprint, **kwargs: Any) -> BrainRunResult | BrainToolLoopResult | BrainMissionResult:
         allowed = {
             "model_candidates", "credentials", "ledger", "contextual_observations", "input_tokens",
             "requested_output_tokens", "max_cost_per_million_tokens", "max_latency_ms", "min_quality",
             "selection_overrides", "approve_provider_call", "approve_mission_dispatch", "run_id",
             "max_output_tokens", "temperature", "response_schema", "idempotency_key", "mission_policy",
             "mission_options", "route_request", "enforce_route_tools", "require_resolved_route",
-            "provider_tools", "tool_choice", "max_provider_failovers", "prompt",
+            "provider_tools", "tool_choice", "max_provider_failovers", "prompt", "execution_mode",
+            "tool_loop_options",
         }
         unknown = sorted(set(kwargs).difference(allowed))
         if unknown:
@@ -968,6 +1094,8 @@ class AutonomousTaskOrchestrator:
             )
         else:
             replacement = blueprint
+        kwargs.setdefault("execution_mode", blueprint.spec.execution_mode)
+        kwargs.setdefault("tool_loop_options", None)
         return self._execute(replacement, **kwargs)
 
     def run(
@@ -985,6 +1113,7 @@ class AutonomousTaskOrchestrator:
         max_steps: int = 8,
         require_json: bool = False,
         response_schema: Mapping[str, Any] | None = None,
+        execution_mode: str = "provider",
         required_model_capabilities: Sequence[str] = (),
         ledger: BrainLearningLedger | None = None,
         memory: BrainEpisodicMemory | None = None,
@@ -1006,11 +1135,13 @@ class AutonomousTaskOrchestrator:
         mission_policy: MissionPolicy | Mapping[str, Any] | None = None,
         mission_options: Mapping[str, Any] | None = None,
         route_request: Mapping[str, Any] | None = None,
+        auto_route: bool = False,
         enforce_route_tools: bool = True,
         require_resolved_route: bool = True,
         provider_tools: Sequence[ProviderTool] = (),
         tool_choice: str | None = None,
         max_provider_failovers: int = 2,
+        tool_loop_options: Mapping[str, Any] | None = None,
         learn: bool = False,
         evaluator: BrainOutcomeEvaluator | None = None,
         evaluator_registry: DomainEvaluatorRegistry | None = None,
@@ -1038,12 +1169,24 @@ class AutonomousTaskOrchestrator:
             max_steps=max_steps,
             require_json=require_json,
             response_schema=response_schema,
+            execution_mode=execution_mode,
             max_input_tokens=input_tokens,
             required_model_capabilities=required_model_capabilities,
             memory_episodes=recalled,
         )
+        if not isinstance(auto_route, bool):
+            raise BrainRunError("auto_route must be a boolean")
+        effective_execution_mode = (
+            "mission" if execution_mode == "provider" and mission_policy is not None else execution_mode
+        )
+        effective_route_request = route_request
+        if auto_route:
+            if effective_execution_mode == "provider":
+                raise BrainRunError("auto_route requires execution_mode=tool_loop or mission")
+            if effective_route_request is None:
+                effective_route_request = self.route_request_for(blueprint)
         if learn:
-            if mission_policy is not None:
+            if mission_policy is not None and execution_mode != "tool_loop":
                 if bandit_state is None:
                     raise BrainRunError("bandit_state is required for mission learning")
                 if store is None:
@@ -1071,7 +1214,7 @@ class AutonomousTaskOrchestrator:
                         "temperature": temperature,
                         "response_schema": response_schema or blueprint.spec.response_schema,
                         "idempotency_key": idempotency_key,
-                        "route_request": route_request,
+                        "route_request": effective_route_request,
                         "enforce_route_tools": enforce_route_tools,
                         "require_resolved_route": require_resolved_route,
                         "provider_tools": provider_tools,
@@ -1126,14 +1269,16 @@ class AutonomousTaskOrchestrator:
                     "temperature": temperature,
                     "response_schema": response_schema,
                     "idempotency_key": idempotency_key,
-                    "mission_policy": None,
+                    "mission_policy": mission_policy if execution_mode == "tool_loop" else None,
                     "mission_options": mission_options,
-                    "route_request": route_request,
+                    "route_request": effective_route_request,
                     "enforce_route_tools": enforce_route_tools,
                     "require_resolved_route": require_resolved_route,
                     "provider_tools": provider_tools,
                     "tool_choice": tool_choice,
                     "max_provider_failovers": max_provider_failovers,
+                    "execution_mode": execution_mode,
+                    "tool_loop_options": tool_loop_options,
                 },
             )
         return self._execute(
@@ -1157,12 +1302,14 @@ class AutonomousTaskOrchestrator:
             idempotency_key=idempotency_key,
             mission_policy=mission_policy,
             mission_options=mission_options,
-            route_request=route_request,
+            route_request=effective_route_request,
             enforce_route_tools=enforce_route_tools,
             require_resolved_route=require_resolved_route,
             provider_tools=provider_tools,
             tool_choice=tool_choice,
             max_provider_failovers=max_provider_failovers,
+            execution_mode=execution_mode,
+            tool_loop_options=tool_loop_options,
         )
 
     def _run_learning_from_blueprint(
@@ -1191,7 +1338,7 @@ class AutonomousTaskOrchestrator:
             raise BrainRunError("evaluator must be a BrainOutcomeEvaluator")
         current_prompt = blueprint.prompt
         state: Mapping[str, Any] = dict(bandit_state)
-        attempts: list[BrainRunResult] = []
+        attempts: list[BrainRunResult | BrainToolLoopResult] = []
         evaluations: list[dict[str, Any]] = []
         receipts: list[dict[str, Any]] = []
         final_status = "completed"
@@ -1206,10 +1353,10 @@ class AutonomousTaskOrchestrator:
                 ledger=ledger,
                 **kwargs,
             )
-            if not isinstance(result, BrainRunResult):
-                raise BrainRunError("provider online learning does not accept mission results")
+            if not isinstance(result, (BrainRunResult, BrainToolLoopResult)):
+                raise BrainRunError("autonomous online learning does not accept mission results")
             attempts.append(result)
-            if result.status != "completed_provider_call":
+            if result.status not in {"completed_provider_call", "completed_provider_tool_loop"}:
                 final_status = result.status
                 break
             decision, report = resolved_evaluator.evaluate_and_record_with_decision(
@@ -1222,7 +1369,8 @@ class AutonomousTaskOrchestrator:
             next_state = report.get("next_state")
             if isinstance(next_state, Mapping):
                 state = dict(next_state)
-            episode_id = f"{result.run_id}-attempt-{attempt}"
+            brain_result = result if isinstance(result, BrainRunResult) else result.brain_run
+            episode_id = f"{brain_result.run_id}-attempt-{attempt}"
             receipt = self.brain.remember_result(
                 result,
                 task=blueprint.spec.task,
@@ -1265,6 +1413,7 @@ class AutonomousTaskOrchestrator:
 __all__ = [
     "AUTONOMY_SCHEMA",
     "AUTONOMOUS_DOMAINS",
+    "AUTONOMOUS_EXECUTION_MODES",
     "AutonomousDomainProfile",
     "AutonomousDomainRegistry",
     "AutonomousLearningResult",

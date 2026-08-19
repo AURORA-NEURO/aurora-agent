@@ -13,6 +13,7 @@ from prism_sdk import (
     BrainOutcomeEvaluator,
     CredentialStore,
     LLMRuntime,
+    ProviderToolResult,
     openai_provider,
 )
 
@@ -21,14 +22,41 @@ class _ProviderHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 - stdlib handler protocol
         length = int(self.headers.get("Content-Length", "0"))
         self.server.request_body = self.rfile.read(length)  # type: ignore[attr-defined]
-        payload = json.dumps(
-            {
+        request = json.loads(self.server.request_body.decode("utf-8"))  # type: ignore[attr-defined]
+        has_tools = bool(request.get("tools"))
+        has_tool_result = any(
+            isinstance(item, dict) and item.get("type") == "function_call_output"
+            for item in request.get("input", [])
+        )
+        if has_tools and not has_tool_result:
+            response = {
+                "id": "autonomy-tool-call",
+                "model": "test-model",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "call_id": "autonomy-call-1",
+                        "name": "developer_platform_status",
+                        "arguments": '{"scope":"workspace"}',
+                    }
+                ],
+                "usage": {"total_tokens": 6},
+            }
+        elif has_tools:
+            response = {
+                "id": "autonomy-tool-complete",
+                "model": "test-model",
+                "output_text": "continued bounded answer",
+                "usage": {"total_tokens": 9},
+            }
+        else:
+            response = {
                 "id": "autonomy-response",
                 "model": "test-model",
                 "output_text": "bounded answer",
                 "usage": {"total_tokens": 4},
             }
-        ).encode("utf-8")
+        payload = json.dumps(response).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
@@ -77,6 +105,40 @@ class _Workspace:
                     "steps": [{"effect": "provider_call"}],
                     "plan_digest": "b" * 64,
                 },
+            }
+        if name == "capability_route":
+            return {
+                "ok": True,
+                "workflow": "capability_route",
+                "route_id": "route-autonomy-test",
+                "catalog_digest": "k" * 64,
+                "goal": args.get("goal"),
+                "needs": [
+                    {
+                        "id": "workspace-status",
+                        "resolution": "resolved",
+                        "candidate_groups": ["operations"],
+                        "candidate_domains": ["operations"],
+                        "candidate_tools": ["developer_platform_status"],
+                    }
+                ],
+                "recommended_tools": ["developer_platform_status"],
+                "tool_schemas": [
+                    {
+                        "name": "developer_platform_status",
+                        "description": "Read bounded workspace status.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {"scope": {"type": "string"}},
+                            "required": ["scope"],
+                        },
+                    }
+                ],
+                "unresolved_needs": [],
+                "schema_attachment": {"status": "attached"},
+                "route_coverage": {"resolved": 1, "unresolved": 0},
+                "execution": "not_started",
+                "evidence_digest": "r" * 64,
             }
         if name == "brain_outcome_record":
             return {
@@ -254,6 +316,117 @@ def test_run_autonomous_learning_records_explicit_reward_and_only_metadata_in_me
         assert b"learn a safer code review response" not in memory_text
         assert b"learning-secret" not in memory_text
         assert "learning-secret" not in json.dumps(result.to_dict())
+    finally:
+        memory.close()
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_run_autonomous_tool_loop_executes_only_through_caller_callback():
+    runtime, store, server, thread = _runtime()
+    workspace = _Workspace()
+    handle = store.register("openai", "tool-loop-secret")
+    brain = AutonomousBrain(workspace, runtime)
+    callback_calls: list[str] = []
+
+    def authorize(calls: tuple[object, ...]) -> tuple[ProviderToolResult, ...]:
+        callback_calls.extend(getattr(call, "name", "") for call in calls)
+        return (
+            ProviderToolResult(
+                call_id=getattr(calls[0], "call_id"),
+                content={"status": "ready"},
+                approved=True,
+            ),
+        )
+
+    try:
+        waiting = brain.run_autonomous(
+            task="inspect the workspace status",
+            domain="operations",
+            execution_mode="tool_loop",
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            route_request={"needs": [{"id": "workspace-status", "query": "workspace status"}]},
+            tool_loop_options={"authorize_and_execute": authorize, "max_turns": 3},
+        )
+        assert waiting.status == "approval_required"
+        assert callback_calls == []
+        completed = brain.run_autonomous(
+            task="inspect the workspace status",
+            domain="operations",
+            execution_mode="tool_loop",
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            approve_provider_call=True,
+            auto_route=True,
+            tool_loop_options={"authorize_and_execute": authorize, "max_turns": 3},
+        )
+        assert completed.status == "completed_provider_tool_loop"
+        assert callback_calls == ["developer_platform_status"]
+        assert completed.provider_loop is not None
+        assert completed.provider_loop.final_response is not None
+        assert completed.provider_loop.final_response.text == "continued bounded answer"
+        assert any(name == "capability_route" for name, _ in workspace.calls)
+        assert "tool-loop-secret" not in json.dumps(completed.to_dict())
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_run_autonomous_tool_loop_learning_records_loop_metadata_only(tmp_path: Path):
+    runtime, store, server, thread = _runtime()
+    workspace = _Workspace()
+    handle = store.register("openai", "tool-learning-secret")
+    memory = BrainEpisodicMemory(tmp_path / "tool-loop.sqlite3")
+    brain = AutonomousBrain(workspace, runtime, memory=memory)
+
+    def authorize(calls: tuple[object, ...]) -> tuple[ProviderToolResult, ...]:
+        return (
+            ProviderToolResult(
+                call_id=getattr(calls[0], "call_id"),
+                content={"status": "ready"},
+                approved=True,
+            ),
+        )
+
+    try:
+        result = brain.run_autonomous(
+            task="learn the safest workspace inspection response",
+            domain="operations",
+            execution_mode="tool_loop",
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            approve_provider_call=True,
+            route_request={"needs": [{"id": "workspace-status", "query": "workspace status"}]},
+            tool_loop_options={"authorize_and_execute": authorize, "max_turns": 3},
+            learn=True,
+            evaluator=BrainOutcomeEvaluator(
+                lambda _input: {"reward": 0.7, "passed": True, "failed": False},
+                evaluator_id="tool-loop-evaluator",
+                evaluator_version="1",
+            ),
+            bandit_state={
+                "schema": "bioprism-brain-bandit/0.1",
+                "generation": 0,
+                "arms": [
+                    {
+                        "arm_id": "openai/test-model",
+                        "pulls": 0,
+                        "reward_sum": 0.0,
+                        "failures": 0,
+                        "disabled": False,
+                    }
+                ],
+            },
+        )
+        assert result.status == "completed"
+        assert result.final_result.status == "completed_provider_tool_loop"
+        assert result.bandit_state["generation"] == 1  # type: ignore[index]
+        assert len(result.memory_receipts) == 2
+        assert b"safest workspace inspection" not in (tmp_path / "tool-loop.sqlite3").read_bytes()
+        assert "tool-learning-secret" not in json.dumps(result.to_dict())
     finally:
         memory.close()
         server.shutdown()

@@ -272,6 +272,52 @@ uses the reserved `provider.invoke` effect and cannot execute until the caller s
 `approve_provider_call=True`. `model_candidates` still belong to the deployment because pricing,
 availability, quality priors, and capability labels are deployment-specific.
 
+Every blueprint records one of three bounded execution modes:
+
+* `provider` produces one provider response. This is the default and preserves the simple
+  approval-gated answer path.
+* `tool_loop` continues through native provider function calls. A caller may provide an explicit
+  `provider_tools` tuple, or pass a `route_request` so the live capability router supplies the
+  bounded schemas. Tool arguments are never executed by the brain; `tool_loop_options` must carry
+  an application-owned `authorize_and_execute` callback, or a caller-supplied `MissionPolicy` can
+  activate the built-in mission authorizer.
+* `mission` promotes the provider proposal into the existing route/workflow executor and requires
+  an explicit `MissionPolicy`. Dispatch remains separately gated by
+  `approve_mission_dispatch=True`.
+
+For example, a route-aware tool loop across any supported domain can be entered through the same
+facade:
+
+```python
+loop = brain.run_autonomous(
+    task="Inspect the current workspace and summarize its readiness.",
+    domain="operations",
+    execution_mode="tool_loop",
+    model_candidates=model_catalogue,
+    credentials={"openai": openai_handle},
+    route_request={
+        "needs": [{"id": "workspace-status", "query": "workspace status"}],
+        "include_tools": True,
+    },
+    tool_loop_options={
+        "authorize_and_execute": application_authorizer,
+        "max_turns": 4,
+        "max_tool_calls": 16,
+    },
+    approve_provider_call=True,
+)
+```
+
+The route is evidence and schema discovery, not permission. With a callback-authorized loop, the
+facade uses the route to derive provider tool schemas but does not require a mission-policy
+intersection; the callback remains the only effect authority. If `learn=True` is added with a
+bandit state, tool-loop results enter the same evaluator, metadata-only episodic memory, explicit
+`brain_outcome_record`, and bounded replan path as ordinary provider responses. Replanning can
+change the prompt proposal only; it cannot add tools, credentials, permissions, or effects.
+When a caller does not have a route query ready, `auto_route=True` derives a bounded query from the
+prepared domain profile and capability; it still performs no dispatch and still requires the same
+approval/callback boundary.
+
 For provider-only tasks, explicit online learning is available through the same entrypoint:
 
 ```python
@@ -296,9 +342,10 @@ the evaluator, records the explicit reward through `brain_outcome_record`, write
 episode/evaluation pair, and uses the returned bandit state on a later call. A failed evaluator
 decision can add one bounded replan context before the next proposal; it cannot add credentials,
 tools, permissions, or effects. Memory stores the task digest, not the task text, and never stores
-provider responses or keys. Mission tasks use the same `run_autonomous` entrypoint with a caller
-`MissionPolicy`; when `learn=True`, the existing durable mission learning cycle is selected and
-dispatch remains separately approval-gated.
+provider responses or keys. The same learning contract accepts a completed native tool loop and
+records only loop status, counts, route identity, model identity, and digests. Mission tasks use
+the same `run_autonomous` entrypoint with a caller `MissionPolicy`; when `learn=True`, the existing
+durable mission learning cycle is selected and dispatch remains separately approval-gated.
 
 For applications that want the Python facade to assemble this request from the live runtime and
 ledger, `AutonomousBrain.run_adaptive(...)` is the normal entry point:
