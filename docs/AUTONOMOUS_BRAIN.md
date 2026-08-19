@@ -185,6 +185,15 @@ fields and never stores API keys, request messages, response text, headers, cred
 model prompts. This is complementary to `BrainLearningLedger`: provider health describes
 transport reliability, while evaluator rewards describe task quality and drive bandit adaptation.
 
+The same façade covers the long-horizon forms of autonomy. `prepare_cross_domain()` creates a
+bounded specialist fan-out and synthesis blueprint; `run_cross_domain()` resolves catalogue
+candidates and credential-session handles once, then applies the same provider-health overlay to
+each child and the synthesis call. `run_workflow()` executes a checkpointable stage DAG and
+automatically resumes the latest value-only bandit state, while `run_workflow_learning()` applies
+one explicit evaluator update per completed stage and resumes from the latest ledger state unless
+the caller supplies an override. This keeps single-task, staged, and cross-domain execution on
+the same authorization, BYOK, model-selection, and learning boundaries.
+
 The OpenAI adapter targets the Responses API (`POST /v1/responses`) and Bearer authentication, as
 described in the [OpenAI API reference](https://platform.openai.com/docs/api-reference/introduction)
 and [quickstart](https://platform.openai.com/docs/quickstart/make-your-first-api-request). The

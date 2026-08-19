@@ -378,6 +378,84 @@ def test_autonomous_agent_replays_provider_health_into_selection_and_readiness(t
         server.server_close()
 
 
+def test_autonomous_agent_workflow_and_cross_domain_wrappers_share_catalogue_and_state():
+    runtime, store, server, thread = _runtime()
+    try:
+        handle = store.register("openai", "wrapper-secret")
+        agent = AutonomousAgent(
+            _Workspace(),
+            runtime,
+            model_catalogue=ModelCatalogue(_model()),
+        )
+        blueprint = agent.prepare(
+            task="execute a bounded staged coding review",
+            domain="coding",
+        )
+        captured: dict[str, object] = {}
+
+        def capture_workflow(**kwargs: object) -> str:
+            captured.update(kwargs)
+            return "workflow-captured"
+
+        agent.orchestrator.run_workflow = capture_workflow  # type: ignore[method-assign]
+        assert agent.run_workflow(
+            blueprint=blueprint,
+            credentials={"openai": handle},
+            approve_provider_call=True,
+        ) == "workflow-captured"
+        assert captured["model_candidates"] == agent.models()
+        assert captured["credentials"] == {"openai": handle}
+        assert captured["bandit_state"] == {
+            "schema": "bioprism-brain-bandit/0.1",
+            "generation": 0,
+            "arms": [],
+        }
+
+        captured.clear()
+
+        def capture_cross_domain(**kwargs: object) -> str:
+            captured.update(kwargs)
+            return "cross-domain-captured"
+
+        agent.orchestrator.run_cross_domain = capture_cross_domain  # type: ignore[method-assign]
+        assert agent.run_cross_domain(
+            task="reconcile a bounded coding and science review",
+            subtasks=(
+                {"id": "code", "domain": "coding", "task": "review implementation"},
+                {"id": "science", "domain": "science", "task": "review evidence"},
+            ),
+            credentials={"openai": handle},
+        ) == "cross-domain-captured"
+        assert captured["model_candidates"] == agent.models()
+        assert captured["bandit_state"] == {
+            "schema": "bioprism-brain-bandit/0.1",
+            "generation": 0,
+            "arms": [],
+        }
+
+        captured.clear()
+
+        def capture_workflow_learning(**kwargs: object) -> str:
+            captured.update(kwargs)
+            return "workflow-learning-captured"
+
+        agent.orchestrator.run_workflow_learning = capture_workflow_learning  # type: ignore[method-assign]
+        assert agent.run_workflow_learning(
+            blueprint=blueprint,
+            credentials={"openai": handle},
+            max_stage_calls=1,
+        ) == "workflow-learning-captured"
+        assert captured["bandit_state"] == {
+            "schema": "bioprism-brain-bandit/0.1",
+            "generation": 0,
+            "arms": [],
+        }
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
 def test_builtin_domain_registry_covers_every_autonomous_domain_and_blueprint_redacts_task():
     registry = AutonomousDomainRegistry.with_builtin_profiles()
     assert {entry["domain"] for entry in registry.catalogue()} == {

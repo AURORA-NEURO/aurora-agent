@@ -3138,6 +3138,7 @@ class AutonomousTaskOrchestrator:
         max_provider_failovers: int = 2,
         synthesize: bool = True,
         allow_partial: bool = False,
+        bandit_state: Mapping[str, Any] | None = None,
     ) -> AutonomousCrossDomainResult:
         """Execute bounded domain specialists, then optionally synthesize their outputs.
 
@@ -3149,6 +3150,10 @@ class AutonomousTaskOrchestrator:
 
         if not isinstance(synthesize, bool) or not isinstance(allow_partial, bool):
             raise BrainRunError("synthesize and allow_partial must be booleans")
+        if bandit_state is not None:
+            if not isinstance(bandit_state, Mapping):
+                raise BrainRunError("cross-domain bandit_state must be a mapping or None")
+            BrainLearningLedger._assert_safe(bandit_state)
         blueprint = self.prepare_cross_domain(
             task=task,
             subtasks=subtasks,
@@ -3193,6 +3198,7 @@ class AutonomousTaskOrchestrator:
                 max_latency_ms=max_latency_ms,
                 min_quality=min_quality,
                 selection_overrides=selection_overrides,
+                bandit_state=bandit_state,
                 approve_provider_call=approve_provider_call,
                 approve_mission_dispatch=approve_mission_dispatch,
                 run_id=self._cross_domain_identity("cross-child", run_id, child_id),
@@ -3265,6 +3271,7 @@ class AutonomousTaskOrchestrator:
             max_latency_ms=max_latency_ms,
             min_quality=min_quality,
             selection_overrides=selection_overrides,
+            bandit_state=bandit_state,
             approve_provider_call=approve_provider_call,
             approve_mission_dispatch=approve_mission_dispatch,
             run_id=self._cross_domain_identity("cross-synthesis", run_id, "synthesis"),
@@ -3542,6 +3549,11 @@ class AutonomousAgent:
 
         return self.orchestrator.prepare(**kwargs)
 
+    def prepare_cross_domain(self, **kwargs: Any) -> AutonomousCrossDomainBlueprint:
+        """Build bounded specialist fan-out and synthesis work without provider contact."""
+
+        return self.orchestrator.prepare_cross_domain(**kwargs)
+
     def learning_state(self) -> dict[str, Any]:
         """Return the latest caller-persisted bandit state or a first-run exploration state."""
 
@@ -3554,6 +3566,49 @@ class AutonomousAgent:
             "generation": 0,
             "arms": [],
         }
+
+    def _resolve_candidates(
+        self,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None,
+    ) -> list[dict[str, Any]]:
+        candidates = self.catalogue.candidates() if model_candidates is None else [
+            candidate.to_dict()
+            if isinstance(candidate, ModelCandidate)
+            else ModelCandidate.from_mapping(candidate).to_dict()
+            for candidate in model_candidates
+        ]
+        if not candidates:
+            raise BrainRunError("the autonomous agent has no model candidates")
+        return candidates
+
+    def _execution_inputs(
+        self,
+        *,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None,
+        options: Mapping[str, Any],
+        resume_learning: bool = False,
+    ) -> tuple[list[dict[str, Any]], dict[str, CredentialHandle], dict[str, Any]]:
+        resolved_credentials = self._credential_mapping(credentials)
+        resolved_options = dict(options)
+        resolved_options.setdefault("ledger", self.ledger)
+        resolved_options.setdefault("memory", self.memory)
+        if self.health_ledger is not None:
+            historical = self.health_ledger.selection_overrides()
+            supplied = resolved_options.get("selection_overrides")
+            if supplied is None:
+                resolved_options["selection_overrides"] = historical or None
+            elif isinstance(supplied, Mapping):
+                merged = dict(historical)
+                merged.update(dict(supplied))
+                historical_health = historical.get("provider_health")
+                supplied_health = supplied.get("provider_health")
+                if isinstance(historical_health, Mapping) and isinstance(supplied_health, Mapping):
+                    merged["provider_health"] = {**dict(historical_health), **dict(supplied_health)}
+                resolved_options["selection_overrides"] = merged
+        if resume_learning and resolved_options.get("bandit_state") is None:
+            resolved_options["bandit_state"] = self.learning_state()
+        return self._resolve_candidates(model_candidates), resolved_credentials, resolved_options
 
     def run(
         self,
@@ -3571,36 +3626,89 @@ class AutonomousAgent:
         provider/mission approval.  No option here widens those authorization boundaries.
         """
 
-        candidates = self.catalogue.candidates() if model_candidates is None else [
-            candidate.to_dict()
-            if isinstance(candidate, ModelCandidate)
-            else ModelCandidate.from_mapping(candidate).to_dict()
-            for candidate in model_candidates
-        ]
-        if not candidates:
-            raise BrainRunError("the autonomous agent has no model candidates")
-        resolved_credentials = self._credential_mapping(credentials)
-        options = dict(kwargs)
-        options.setdefault("ledger", self.ledger)
-        options.setdefault("memory", self.memory)
-        if self.health_ledger is not None:
-            historical = self.health_ledger.selection_overrides()
-            supplied = options.get("selection_overrides")
-            if supplied is None:
-                options["selection_overrides"] = historical or None
-            elif isinstance(supplied, Mapping):
-                merged = dict(historical)
-                merged.update(dict(supplied))
-                historical_health = historical.get("provider_health")
-                supplied_health = supplied.get("provider_health")
-                if isinstance(historical_health, Mapping) and isinstance(supplied_health, Mapping):
-                    merged["provider_health"] = {**dict(historical_health), **dict(supplied_health)}
-                options["selection_overrides"] = merged
-        if options.get("learn") and options.get("bandit_state") is None:
-            options["bandit_state"] = self.learning_state()
+        candidates, resolved_credentials, options = self._execution_inputs(
+            credentials=credentials,
+            model_candidates=model_candidates,
+            options=kwargs,
+            resume_learning=bool(kwargs.get("learn")),
+        )
         return self.orchestrator.run(
             task=task,
             domain=domain,
+            model_candidates=candidates,
+            credentials=resolved_credentials,
+            **options,
+        )
+
+    def run_workflow(
+        self,
+        *,
+        blueprint: AutonomousTaskBlueprint,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> AutonomousWorkflowRun:
+        """Run a staged workflow with the agent's catalogue, health, and durable state."""
+
+        candidates, resolved_credentials, options = self._execution_inputs(
+            credentials=credentials,
+            model_candidates=model_candidates,
+            options=kwargs,
+            resume_learning=True,
+        )
+        return self.orchestrator.run_workflow(
+            blueprint=blueprint,
+            model_candidates=candidates,
+            credentials=resolved_credentials,
+            **options,
+        )
+
+    def run_workflow_learning(
+        self,
+        *,
+        blueprint: AutonomousTaskBlueprint,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> AutonomousWorkflowLearningResult:
+        """Run staged workflow learning, resuming the latest value-only bandit state by default."""
+
+        options = dict(kwargs)
+        options["bandit_state"] = self.learning_state() if bandit_state is None else bandit_state
+        candidates, resolved_credentials, options = self._execution_inputs(
+            credentials=credentials,
+            model_candidates=model_candidates,
+            options=options,
+            resume_learning=False,
+        )
+        return self.orchestrator.run_workflow_learning(
+            blueprint=blueprint,
+            model_candidates=candidates,
+            credentials=resolved_credentials,
+            **options,
+        )
+
+    def run_cross_domain(
+        self,
+        *,
+        task: str,
+        subtasks: Sequence[Mapping[str, Any]],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> AutonomousCrossDomainResult:
+        """Run specialist fan-out and synthesis through the shared safety/learning envelope."""
+
+        candidates, resolved_credentials, options = self._execution_inputs(
+            credentials=credentials,
+            model_candidates=model_candidates,
+            options=kwargs,
+            resume_learning=True,
+        )
+        return self.orchestrator.run_cross_domain(
+            task=task,
+            subtasks=subtasks,
             model_candidates=candidates,
             credentials=resolved_credentials,
             **options,
