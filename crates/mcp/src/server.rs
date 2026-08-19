@@ -139,8 +139,8 @@ use bioprism_devplat::{
     query_domain_evidence_provider_external_payload_evidence, reconcile_domain_workflow,
     record_adapter_execution_evidence, record_domain_evidence_provider_external_payload,
     run_workbench, scaffold_domain_workflow, standard_walkthroughs,
-    validate_workflow_execution_evidence, verify_delivery_receipt,
-    verify_domain_evidence_provider_external_payload_replay,
+    validate_domain_decision_readiness, validate_workflow_execution_evidence,
+    verify_delivery_receipt, verify_domain_evidence_provider_external_payload_replay,
     verify_domain_evidence_provider_replay, verify_domain_workflow_portfolio,
     verify_mission_evidence_bundle, verify_workbench, AdapterExecutionEvidenceQueryRequest,
     AdapterExecutionEvidenceRequest, ArtifactRegistry, CapabilityCatalogue,
@@ -1622,6 +1622,8 @@ impl Server {
             "domain_evidence_harmonize" => self.domain_evidence_harmonize(&arguments),
             "domain_decision_readiness_audit" => self.domain_decision_readiness_audit(&arguments),
             "domain_decision_readiness_query" => self.domain_decision_readiness_query(&arguments),
+            "control_plane_readiness_audit" => self.control_plane_readiness_audit(&arguments),
+            "control_plane_readiness_query" => self.control_plane_readiness_query(&arguments),
             "domain_evidence_harmonization_coverage" => {
                 self.domain_evidence_harmonization_coverage(&arguments)
             }
@@ -4085,6 +4087,647 @@ impl Server {
                 include_audits,
             )
             .map_err(|error| format!("domain decision-readiness query refused: {error}"))
+    }
+
+    /// Compose independently retained domain, routing, operations, release, and workflow
+    /// evidence into one bounded control-plane posture.
+    ///
+    /// This is an evidence join, not a super-gate. Every component keeps its own state and
+    /// authority boundary, while the caller's explicit policy decides which missing or unsatisfied
+    /// components block the projection. The operation never dispatches a nested tool and never
+    /// turns structural completeness into execution or release authority.
+    fn control_plane_readiness_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode control-plane readiness input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err(
+                "control-plane readiness input exceeds the 20000000-byte safety bound".into(),
+            );
+        }
+        let object = arguments
+            .as_object()
+            .ok_or("control-plane readiness input must be an object")?;
+        let subject_id = object
+            .get("subject_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or("subject_id must be a non-empty string")?;
+        let policy_object = object
+            .get("policy")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        let policy_bool = |name: &str, default: bool| -> Result<bool, String> {
+            match policy_object.get(name) {
+                None => Ok(default),
+                Some(value) => value
+                    .as_bool()
+                    .ok_or_else(|| format!("policy.{name} must be a boolean")),
+            }
+        };
+        let require_domain_readiness = policy_bool("require_domain_readiness", true)?;
+        let require_route_review = policy_bool("require_route_review", false)?;
+        let require_route_plan = policy_bool("require_route_plan", false)?;
+        let require_operations_acceptance = policy_bool("require_operations_acceptance", false)?;
+        let require_release_ready = policy_bool("require_release_ready", false)?;
+        let require_workflow_evidence = policy_bool("require_workflow_evidence", false)?;
+        let policy = json!({
+            "require_domain_readiness": require_domain_readiness,
+            "require_route_review": require_route_review,
+            "require_route_plan": require_route_plan,
+            "require_operations_acceptance": require_operations_acceptance,
+            "require_release_ready": require_release_ready,
+            "require_workflow_evidence": require_workflow_evidence
+        });
+
+        let valid_digest = |value: Option<&Value>| -> Option<String> {
+            value
+                .and_then(Value::as_str)
+                .filter(|digest| bioprism_ids::ContentHash::parse((*digest).to_string()).is_ok())
+                .map(str::to_string)
+        };
+        let mut parent_digests = BTreeSet::new();
+        let mut domains = BTreeSet::new();
+        let mut components = Map::new();
+
+        let readiness_component = if let Some(value) = object.get("readiness_audit") {
+            let mut valid = true;
+            let mut errors: Vec<String> = Vec::new();
+            if value.get("workflow").and_then(Value::as_str)
+                != Some(DOMAIN_DECISION_READINESS_WORKFLOW)
+            {
+                valid = false;
+                errors.push("workflow must be domain_decision_readiness_audit".to_string());
+            }
+            if value.get("schema").and_then(Value::as_str)
+                != Some(DOMAIN_DECISION_READINESS_SCHEMA_VERSION)
+            {
+                valid = false;
+                errors.push("schema must be the domain decision-readiness schema".to_string());
+            }
+            if value.get("ok").and_then(Value::as_bool) != Some(true)
+                || value.get("readiness_claimed").and_then(Value::as_bool) != Some(false)
+                || value.get("execution").and_then(Value::as_str) != Some("not_started")
+            {
+                valid = false;
+                errors.push("readiness audit must be successful and non-executing".to_string());
+            }
+            let audit = value.get("audit");
+            if let Some(audit) = audit {
+                if let Err(error) = validate_domain_decision_readiness(audit) {
+                    valid = false;
+                    errors.push(format!("audit integrity validation failed: {error}"));
+                }
+                if audit.get("subject_id").and_then(Value::as_str) != Some(subject_id) {
+                    valid = false;
+                    errors.push(
+                        "audit subject_id does not match the control-plane subject_id".into(),
+                    );
+                }
+                if let Some(reports) = audit
+                    .pointer("/harmonization/reports")
+                    .and_then(Value::as_array)
+                {
+                    for report in reports {
+                        if let Some(values) = report.get("domains").and_then(Value::as_array) {
+                            domains.extend(
+                                values.iter().filter_map(Value::as_str).map(str::to_string),
+                            );
+                        }
+                    }
+                }
+            } else {
+                valid = false;
+                errors.push("audit is required".into());
+            }
+            let satisfied = valid
+                && value
+                    .pointer("/audit/policy_satisfied")
+                    .and_then(Value::as_bool)
+                    == Some(true);
+            let state = value
+                .pointer("/audit/decision_state")
+                .and_then(Value::as_str)
+                .unwrap_or(if valid { "incomplete" } else { "blocked" });
+            let registry_digest = valid_digest(value.pointer("/artifact_registry/content_digest"));
+            if value
+                .pointer("/artifact_registry/indexed")
+                .and_then(Value::as_bool)
+                != Some(true)
+                || value
+                    .pointer("/artifact_registry/kind")
+                    .and_then(Value::as_str)
+                    != Some("domain_decision_readiness")
+            {
+                valid = false;
+                errors.push(
+                    "artifact_registry must identify an indexed domain_decision_readiness artifact"
+                        .into(),
+                );
+            }
+            if let Some(digest) = registry_digest.as_ref() {
+                parent_digests.insert(digest.clone());
+            } else {
+                valid = false;
+                errors.push("artifact_registry.content_digest must be a valid digest".into());
+            }
+            json!({
+                "present": true,
+                "valid": valid,
+                "satisfied": satisfied && valid,
+                "state": if valid { state } else { "blocked" },
+                "workflow": DOMAIN_DECISION_READINESS_WORKFLOW,
+                "evidence_digest": value.pointer("/audit/digest"),
+                "content_digest": registry_digest,
+                "errors": errors,
+                "authority": "structural_domain_evidence_only",
+                "readiness_claimed": false,
+                "execution": "not_started"
+            })
+        } else {
+            json!({
+                "present": false,
+                "valid": false,
+                "satisfied": false,
+                "state": "incomplete",
+                "workflow": DOMAIN_DECISION_READINESS_WORKFLOW,
+                "errors": ["readiness_audit was not supplied"],
+                "authority": "structural_domain_evidence_only",
+                "readiness_claimed": false,
+                "execution": "not_started"
+            })
+        };
+        components.insert("domain_decision_readiness".into(), readiness_component);
+
+        let route_plan = object.get("route_plan");
+        let route_review = object.get("route_review");
+        let route_component = if let Some(value) = route_plan.or(route_review) {
+            let is_plan = route_plan.is_some();
+            let mut valid = true;
+            let mut errors: Vec<String> = Vec::new();
+            let review = if is_plan {
+                value.get("review")
+            } else {
+                Some(value)
+            };
+            if value.get("workflow").and_then(Value::as_str)
+                != Some(if is_plan {
+                    "capability_route_plan"
+                } else {
+                    "capability_route_review"
+                })
+            {
+                valid = false;
+                errors.push("route packet workflow is not the declared route workflow".into());
+            }
+            if value.get("execution").and_then(Value::as_str) != Some("not_started")
+                || (is_plan && value.get("dispatch").and_then(Value::as_str) != Some("not_started"))
+            {
+                valid = false;
+                errors.push("route packet must remain non-executing".into());
+            }
+            let review_ready = review
+                .and_then(|review| review.get("review_status").and_then(Value::as_str))
+                == Some("ready");
+            if !review_ready {
+                errors.push("route review_status is not ready".into());
+            }
+            if review.is_none() {
+                valid = false;
+                errors.push("route plan/review must contain a review object".into());
+            }
+            let plan_ready = !is_plan
+                || value.get("plan_status").and_then(Value::as_str)
+                    == Some("ready_for_caller_inspection");
+            if is_plan && !plan_ready {
+                errors.push("route plan is not ready_for_caller_inspection".into());
+            }
+            let route_id = valid_digest(review.and_then(|row| row.get("route_id")));
+            let review_id = valid_digest(review.and_then(|row| row.get("review_id")));
+            let plan_digest = valid_digest(value.get("plan_digest"));
+            if route_id.is_none() || review_id.is_none() || (is_plan && plan_digest.is_none()) {
+                valid = false;
+                errors
+                    .push("route identities and plan digest must be valid content digests".into());
+            }
+            for digest in [route_id.clone(), review_id.clone(), plan_digest.clone()]
+                .into_iter()
+                .flatten()
+            {
+                parent_digests.insert(digest);
+            }
+            let satisfied = valid && review_ready && plan_ready;
+            json!({
+                "present": true,
+                "valid": valid,
+                "satisfied": satisfied,
+                "state": if satisfied { "ready_for_human_review" } else if valid { "incomplete" } else { "blocked" },
+                "workflow": value.get("workflow"),
+                "route_id": route_id,
+                "review_id": review_id,
+                "plan_digest": plan_digest,
+                "errors": errors,
+                "authority": "non_executing_route_evidence_only",
+                "readiness_claimed": false,
+                "execution": "not_started"
+            })
+        } else {
+            json!({
+                "present": false,
+                "valid": false,
+                "satisfied": false,
+                "state": "incomplete",
+                "workflow": "capability_route_review",
+                "errors": ["route_review or route_plan was not supplied"],
+                "authority": "non_executing_route_evidence_only",
+                "readiness_claimed": false,
+                "execution": "not_started"
+            })
+        };
+        components.insert("capability_route".into(), route_component);
+
+        let operations_projection = object
+            .get("operations_gate_projection")
+            .or_else(|| object.get("operations_gate"));
+        let operations_review = object.get("operations_gate_review");
+        let operations_component = if let Some(value) = operations_projection {
+            let mut valid = true;
+            let mut errors: Vec<String> = Vec::new();
+            if value.get("schema").and_then(Value::as_str)
+                != Some("bioprism-operations-preflight-evidence/0.1")
+            {
+                valid = false;
+                errors.push("operations projection schema is invalid".into());
+            }
+            if value.get("readiness_claimed").and_then(Value::as_bool) == Some(true)
+                || value
+                    .get("acceptance_matches_current_gates")
+                    .and_then(Value::as_bool)
+                    != Some(true)
+                || value.get("review_present").and_then(Value::as_bool) != Some(true)
+            {
+                valid = false;
+                errors
+                    .push("operations projection is not bound to a current retained review".into());
+            }
+            let gate_digest = valid_digest(value.get("gate_digest"));
+            let review_id = valid_digest(value.get("review_id"));
+            if gate_digest.is_none() || review_id.is_none() {
+                valid = false;
+                errors.push(
+                    "operations gate_digest and review_id must be valid content digests".into(),
+                );
+            }
+            if let Some(review) = operations_review {
+                if review.get("workflow").and_then(Value::as_str) != Some("operations_gate_review")
+                    || review.get("readiness_claimed").and_then(Value::as_bool) == Some(true)
+                    || valid_digest(review.get("review_id")) != review_id
+                    || valid_digest(review.get("gate_digest")) != gate_digest
+                {
+                    valid = false;
+                    errors.push(
+                        "operations gate review does not match the projection identities".into(),
+                    );
+                }
+            }
+            for digest in [gate_digest.clone(), review_id.clone()]
+                .into_iter()
+                .flatten()
+            {
+                parent_digests.insert(digest);
+            }
+            let acceptance_valid =
+                value.get("acceptance_valid").and_then(Value::as_bool) == Some(true);
+            let satisfied = valid && acceptance_valid;
+            json!({
+                "present": true,
+                "valid": valid,
+                "satisfied": satisfied,
+                "state": if satisfied { "ready_for_human_review" } else if valid { "review_required" } else { "blocked" },
+                "workflow": "operations_gate_review",
+                "gate_digest": gate_digest,
+                "review_id": review_id,
+                "acceptance_valid": acceptance_valid,
+                "review_supplied": operations_review.is_some(),
+                "errors": errors,
+                "authority": "operator_gate_evidence_only",
+                "readiness_claimed": false,
+                "execution": "not_started"
+            })
+        } else {
+            json!({
+                "present": false,
+                "valid": false,
+                "satisfied": false,
+                "state": "incomplete",
+                "workflow": "operations_gate_review",
+                "errors": ["operations_gate_projection was not supplied"],
+                "authority": "operator_gate_evidence_only",
+                "readiness_claimed": false,
+                "execution": "not_started"
+            })
+        };
+        components.insert("operations_acceptance".into(), operations_component);
+
+        let release_component = if let Some(value) = object.get("release_audit") {
+            let workflow = value.get("workflow").and_then(Value::as_str).unwrap_or("");
+            let workflow_allowed = matches!(workflow, "release_audit" | "release_pipeline_audit");
+            let valid = workflow_allowed
+                && value.get("ok").and_then(Value::as_bool) == Some(true)
+                && value.get("readiness_claimed").and_then(Value::as_bool) != Some(true)
+                && value.get("execution").and_then(Value::as_str) != Some("started");
+            let satisfied = valid
+                && (value.get("release_ready").and_then(Value::as_bool) == Some(true)
+                    || (workflow == "release_pipeline_audit"
+                        && value.get("valid").and_then(Value::as_bool) == Some(true)));
+            let digest = bioprism_ids::ContentHash::of_value(value)
+                .map_err(|error| format!("release audit could not be digested: {error}"))?
+                .to_string();
+            parent_digests.insert(digest.clone());
+            json!({
+                "present": true,
+                "valid": valid,
+                "satisfied": satisfied,
+                "state": if satisfied { "ready_for_human_review" } else if valid { "incomplete" } else { "blocked" },
+                "workflow": workflow,
+                "content_digest": digest,
+                "release_ready": value.get("release_ready").or_else(|| value.get("valid")),
+                "errors": if valid { json!([]) } else { json!(["release audit workflow, ok, or non-executing posture is invalid"]) },
+                "authority": "local_release_structure_only",
+                "readiness_claimed": false,
+                "execution": "not_started"
+            })
+        } else {
+            json!({
+                "present": false,
+                "valid": false,
+                "satisfied": false,
+                "state": "incomplete",
+                "workflow": "release_audit",
+                "errors": ["release_audit was not supplied"],
+                "authority": "local_release_structure_only",
+                "readiness_claimed": false,
+                "execution": "not_started"
+            })
+        };
+        components.insert("release".into(), release_component);
+
+        let workflow_component = if let Some(value) = object.get("workflow_evidence") {
+            let workflow = value.get("workflow").and_then(Value::as_str).unwrap_or("");
+            let valid = !workflow.trim().is_empty()
+                && value.get("ok").and_then(Value::as_bool) == Some(true)
+                && value.get("readiness_claimed").and_then(Value::as_bool) != Some(true)
+                && value.get("execution").and_then(Value::as_str) != Some("started");
+            let digest = bioprism_ids::ContentHash::of_value(value)
+                .map_err(|error| format!("workflow evidence could not be digested: {error}"))?
+                .to_string();
+            parent_digests.insert(digest.clone());
+            json!({
+                "present": true,
+                "valid": valid,
+                "satisfied": valid,
+                "state": if valid { "ready_for_human_review" } else { "blocked" },
+                "workflow": workflow,
+                "content_digest": digest,
+                "errors": if valid { json!([]) } else { json!(["workflow evidence must be successful and non-executing"]) },
+                "authority": "workflow_structure_only",
+                "readiness_claimed": false,
+                "execution": "not_started"
+            })
+        } else {
+            json!({
+                "present": false,
+                "valid": false,
+                "satisfied": false,
+                "state": "incomplete",
+                "workflow": "workflow_evidence",
+                "errors": ["workflow_evidence was not supplied"],
+                "authority": "workflow_structure_only",
+                "readiness_claimed": false,
+                "execution": "not_started"
+            })
+        };
+        components.insert("workflow".into(), workflow_component);
+
+        let requirements = [
+            ("domain_decision_readiness", require_domain_readiness),
+            (
+                "capability_route",
+                require_route_review || require_route_plan,
+            ),
+            ("operations_acceptance", require_operations_acceptance),
+            ("release", require_release_ready),
+            ("workflow", require_workflow_evidence),
+        ];
+        let mut blockers = Vec::new();
+        let mut incomplete = false;
+        let mut blocked = false;
+        for (name, required) in requirements {
+            if !required {
+                continue;
+            }
+            let component = components
+                .get(name)
+                .expect("all control-plane components inserted");
+            if component.get("present").and_then(Value::as_bool) != Some(true) {
+                incomplete = true;
+                blockers.push(json!({
+                    "code": "required_component_missing",
+                    "severity": "error",
+                    "component": name,
+                    "message": "the caller's control-plane policy requires this evidence component"
+                }));
+            } else if component.get("valid").and_then(Value::as_bool) != Some(true) {
+                blocked = true;
+                blockers.push(json!({
+                    "code": "component_invalid",
+                    "severity": "error",
+                    "component": name,
+                    "errors": component.get("errors").cloned().unwrap_or_else(|| json!([])),
+                    "message": "a required evidence component failed its structural integrity checks"
+                }));
+            } else if component.get("satisfied").and_then(Value::as_bool) != Some(true) {
+                let state = component
+                    .get("state")
+                    .and_then(Value::as_str)
+                    .unwrap_or("incomplete");
+                if state == "blocked" {
+                    blocked = true;
+                } else {
+                    incomplete = true;
+                }
+                blockers.push(json!({
+                    "code": "required_component_not_satisfied",
+                    "severity": "error",
+                    "component": name,
+                    "state": state,
+                    "errors": component.get("errors").cloned().unwrap_or_else(|| json!([])),
+                    "message": "the required component is present but its own structural policy is not satisfied"
+                }));
+            }
+        }
+        if require_route_review && route_review.is_none() {
+            incomplete = true;
+            blockers.push(json!({
+                "code": "required_component_missing",
+                "severity": "error",
+                "component": "route_review",
+                "message": "policy.require_route_review requires the original capability_route_review packet"
+            }));
+        }
+        if require_route_plan && route_plan.is_none() {
+            incomplete = true;
+            blockers.push(json!({
+                "code": "required_component_missing",
+                "severity": "error",
+                "component": "route_plan",
+                "message": "policy.require_route_plan requires the non-executing capability_route_plan packet"
+            }));
+        }
+        let control_plane_state = if blocked {
+            "blocked"
+        } else if incomplete {
+            "incomplete"
+        } else if requirements.iter().any(|(_, required)| *required) {
+            "ready_for_human_review"
+        } else {
+            "review_required"
+        };
+        let policy_satisfied = control_plane_state == "ready_for_human_review";
+        let component_states = components
+            .iter()
+            .map(|(name, component)| {
+                (
+                    name.clone(),
+                    json!({
+                        "present": component.get("present"),
+                        "valid": component.get("valid"),
+                        "satisfied": component.get("satisfied"),
+                        "state": component.get("state"),
+                        "content_digest": component.get("content_digest").or_else(|| component.get("plan_digest")),
+                        "authority": component.get("authority")
+                    }),
+                )
+            })
+            .collect::<Map<_, _>>();
+        let mut audit = json!({
+            "schema": "bioprism-control-plane-readiness/0.1",
+            "workflow": "control_plane_readiness_audit",
+            "subject_id": subject_id,
+            "policy": policy,
+            "components": components,
+            "component_states": component_states,
+            "component_count": 5,
+            "parent_digests": parent_digests.iter().cloned().collect::<Vec<_>>(),
+            "domains": domains.iter().cloned().collect::<Vec<_>>(),
+            "control_plane_state": control_plane_state,
+            "policy_satisfied": policy_satisfied,
+            "blockers": blockers,
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "guarantees": [
+                "each component retains its own structural state and non-authority boundary",
+                "only explicitly required components can block policy_satisfied",
+                "valid content digests are retained as parent edges for replayable lineage"
+            ],
+            "does_not_claim": [
+                "structural completeness proves scientific, clinical, causal, regulatory, publication, or release validity",
+                "an operations acceptance grants authorization to execute a mission",
+                "a release audit proves deployment, signature verification, or external runner success",
+                "absence of an optional component is a negative result"
+            ]
+        });
+        audit["digest"] = Value::String(
+            bioprism_ids::ContentHash::of_value(&audit)
+                .map_err(|error| format!("control-plane readiness could not be digested: {error}"))?
+                .to_string(),
+        );
+        let projection = self.index_artifact_projection(
+            "control_plane_readiness",
+            subject_id,
+            domains.into_iter().collect(),
+            parent_digests.into_iter().collect(),
+            audit.clone(),
+        );
+        if projection.get("indexed") != Some(&Value::Bool(true)) {
+            return Err(format!(
+                "control-plane readiness could not be indexed: {}",
+                projection
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown artifact registry error")
+            ));
+        }
+        Ok(json!({
+            "ok": true,
+            "schema": "bioprism-control-plane-readiness/0.1",
+            "workflow": "control_plane_readiness_audit",
+            "audit": audit,
+            "artifact_registry": projection,
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "guarantees": [
+                "the projection joins supplied evidence without dispatching or recomputing nested tools",
+                "component authority is not widened by the overall state",
+                "the exact projection is retained in the digest-verified artifact registry"
+            ],
+            "does_not_claim": [
+                "a ready_for_human_review state is execution, deployment, scientific, clinical, or regulatory authorization",
+                "optional evidence absence is a failed domain result",
+                "local retained evidence is complete external history"
+            ]
+        }))
+    }
+
+    /// Query retained control-plane projections by structural state or explicit policy result.
+    fn control_plane_readiness_query(&self, arguments: &Value) -> Result<Value, String> {
+        let optional_string = |name: &str| -> Result<Option<&str>, String> {
+            arguments
+                .get(name)
+                .map(|value| {
+                    value
+                        .as_str()
+                        .filter(|value| !value.trim().is_empty())
+                        .ok_or_else(|| format!("{name} must be a non-empty string"))
+                })
+                .transpose()
+        };
+        let subject_id = optional_string("subject_id")?;
+        let control_plane_state = optional_string("control_plane_state")?;
+        let after = optional_string("after")?;
+        let policy_satisfied = arguments
+            .get("policy_satisfied")
+            .map(|value| value.as_bool().ok_or("policy_satisfied must be a boolean"))
+            .transpose()?;
+        let max_items = arguments
+            .get("max_items")
+            .map(|value| {
+                value
+                    .as_u64()
+                    .ok_or_else(|| "max_items must be an integer".to_string())
+                    .and_then(|number| {
+                        usize::try_from(number).map_err(|_| "max_items is too large".to_string())
+                    })
+            })
+            .transpose()?
+            .unwrap_or(100);
+        let include_audits = arguments
+            .get("include_audits")
+            .map(|value| value.as_bool().ok_or("include_audits must be a boolean"))
+            .transpose()?
+            .unwrap_or(false);
+        self.artifact_registry
+            .lock()
+            .map_err(|_| "artifact registry lock is poisoned".to_string())?
+            .control_plane_readiness_query(
+                subject_id,
+                control_plane_state,
+                policy_satisfied,
+                after,
+                max_items,
+                include_audits,
+            )
+            .map_err(|error| format!("control-plane readiness query refused: {error}"))
     }
 
     /// Query retained harmonization artifacts as a cross-domain observability surface.
@@ -34452,6 +35095,8 @@ pub fn workspace_capabilities() -> Value {
         "domain_evidence_coverage",
         "domain_decision_readiness_audit",
         "domain_decision_readiness_query",
+        "control_plane_readiness_audit",
+        "control_plane_readiness_query",
     ];
     if let Some(groups) = catalogue.as_array_mut() {
         for group in groups {
@@ -34762,6 +35407,41 @@ pub fn tool_definitions() -> Vec<Value> {
                     "after": { "type": "string", "description": "Exclusive content-digest cursor." },
                     "max_items": { "type": "integer", "minimum": 1, "maximum": 256, "description": "Bounded row count; defaults to 100." },
                     "include_audits": { "type": "boolean", "description": "Include full retained audit bodies; defaults false." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "control_plane_readiness_audit",
+            "description": "Join independently supplied domain decision-readiness, capability-route, operations-gate, release, and workflow evidence into one digest-bound structural control-plane posture. Each component retains its own authority boundary; only components explicitly required by policy can block the projection. The tool never dispatches nested tools, authorizes execution, or turns ready_for_human_review into scientific, clinical, deployment, or release authority.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "subject_id": { "type": "string", "description": "Caller-owned identity shared with the supplied domain decision-readiness audit." },
+                    "policy": { "type": "object", "description": "Optional explicit component policy: require_domain_readiness (default true), require_route_review, require_route_plan, require_operations_acceptance, require_release_ready, and require_workflow_evidence (all default false except domain readiness)." },
+                    "readiness_audit": { "type": "object", "description": "Validated domain_decision_readiness_audit response wrapper; required by default and retained as the domain component." },
+                    "route_review": { "type": "object", "description": "Optional non-executing capability_route_review response." },
+                    "route_plan": { "type": "object", "description": "Optional non-executing capability_route_plan response; when supplied it is checked more strictly than a review alone." },
+                    "operations_gate_projection": { "type": "object", "description": "Optional operations preflight projection with current gate, review, and acceptance identities." },
+                    "operations_gate_review": { "type": "object", "description": "Optional retained operations_gate_review response to cross-check against the projection." },
+                    "release_audit": { "type": "object", "description": "Optional release_audit or release_pipeline_audit response; release readiness remains local structural evidence." },
+                    "workflow_evidence": { "type": "object", "description": "Optional successful, non-executing workflow evidence packet supplied by the caller." }
+                },
+                "required": ["subject_id"]
+            }
+        }),
+        json!({
+            "name": "control_plane_readiness_query",
+            "description": "Query digest-ordered retained control-plane readiness projections by subject, structural state, or explicit policy result. Full projection bodies are opt-in; querying never reruns nested evidence, interprets a claim, or grants execution, scientific, clinical, deployment, or release authority.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "subject_id": { "type": "string", "description": "Optional exact subject filter." },
+                    "control_plane_state": { "type": "string", "enum": ["ready_for_human_review", "review_required", "incomplete", "blocked"], "description": "Optional structural control-plane state filter." },
+                    "policy_satisfied": { "type": "boolean", "description": "Optional exact policy-satisfied filter." },
+                    "after": { "type": "string", "description": "Exclusive content-digest cursor." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 256, "description": "Bounded row count; defaults to 100." },
+                    "include_audits": { "type": "boolean", "description": "Include full retained projections; defaults false." }
                 },
                 "required": []
             }

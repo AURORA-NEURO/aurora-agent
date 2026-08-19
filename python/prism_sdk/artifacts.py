@@ -25,6 +25,7 @@ ARTIFACT_KINDS = (
     "domain_evidence_provider_external_payload_replay",
     "domain_evidence_provider_external_payload_lineage_audit",
     "domain_decision_readiness",
+    "control_plane_readiness",
     "adapter_execution_evidence",
     "domain_evidence_source_plan",
     "external_reference",

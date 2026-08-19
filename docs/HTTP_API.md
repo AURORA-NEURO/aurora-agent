@@ -48,6 +48,8 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `POST /v1/domain-evidence/sources/execute` | Execute a retained source plan through bounded file/plain-HTTP connectors and retain the response intake |
 | `GET /v1/domain-evidence/coverage?group_id=&domain=&max_groups=&include_intake_digests=` | Count retained raw-intake envelopes plus advisory digest-verified artifact-family evidence by authoritative group |
 | `GET /v1/domain-decision-readiness?subject_id=&decision_state=&policy_satisfied=&after=&limit=&include_audits=` | Query retained structural decision-readiness audits by exact state/policy posture |
+| `POST /v1/control-plane-readiness` | Join explicitly supplied domain, route, operations, release, and workflow evidence into one retained structural posture |
+| `GET /v1/control-plane-readiness?subject_id=&control_plane_state=&policy_satisfied=&after=&limit=&include_audits=` | Query retained control-plane projections by exact state/policy posture |
 | `POST /v1/domain-workflows/reconciliations` | Verify and idempotently import one reconciliation report into the bounded audit registry |
 | `GET /v1/domain-workflows/reconciliations?mission_id=&workflow_id=&mission_plan_digest=&completion_status=&decision_readiness_state=&decision_readiness_gate_satisfied=&after=&limit=&include_records=` | Query digest-ordered reconciliation index rows, including optional readiness-gate filters |
 | `GET /v1/domain-workflows/reconciliations/{reconciliation_digest}` | Fetch one digest-verified reconciliation report |
@@ -345,6 +347,15 @@ harmonization. Rows expose the audit/content digests, subject, structural state,
 counts, and parent digests; full audits are opt-in. Workflow portfolio and reconciliation requests
 may supply a validated audit plus `policy.require_readiness`; the resulting gate is reported beside,
 not merged into, execution preflight and completion evidence.
+`POST /v1/control-plane-readiness` is the next composition boundary. It accepts the exact returned
+domain readiness wrapper plus optional capability-route review/plan, operations preflight and gate
+review, release audit, and workflow evidence packets. Policy flags explicitly decide which packets
+are required. The response reports each component's `present`, `valid`, `satisfied`, state, digest,
+and authority separately, then emits `ready_for_human_review`, `incomplete`, `blocked`, or
+`review_required` for the structural join. The join never calls a nested tool, authorizes a mission,
+promotes operator acceptance into deployment approval, or treats a release audit as proof of an
+external build. The exact projection is indexed as `control_plane_readiness`; the GET route is
+digest-ordered, cursor-bounded, and restart-safe when artifact persistence is configured.
 `POST /v1/domain-evidence/intake` is the raw-envelope boundary for all 29 capability groups. It
 requires a declared group, source tool, domain label, response JSON, explicit outcome, and claim
 posture; an original request is optional and its absence is distinguished from a supplied JSON

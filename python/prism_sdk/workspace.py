@@ -51,6 +51,12 @@ from .domain_decision_readiness import (
     DomainDecisionReadinessQueryReport,
     DomainDecisionReadinessQueryRequest,
 )
+from .control_plane_readiness import (
+    ControlPlaneReadinessReport,
+    ControlPlaneReadinessRequest,
+    ControlPlaneReadinessQueryReport,
+    ControlPlaneReadinessQueryRequest,
+)
 from .domain_evidence_intake import (
     DomainEvidenceIntakeCoverageReport,
     DomainEvidenceIntakeCoverageRequest,
@@ -2463,6 +2469,40 @@ class Workspace:
         request: DomainDecisionReadinessQueryRequest | Mapping[str, Any] | None = None,
     ) -> DomainDecisionReadinessQueryReport:
         return DomainDecisionReadinessQueryReport.from_wire(self.domain_decision_readiness_query(request))
+
+    def control_plane_readiness_audit(
+        self,
+        request: ControlPlaneReadinessRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, ControlPlaneReadinessRequest)
+            else ControlPlaneReadinessRequest(**dict(request))
+        )
+        return self.tool("control_plane_readiness_audit", normalized.to_arguments())
+
+    def control_plane_readiness_audit_report(
+        self,
+        request: ControlPlaneReadinessRequest | Mapping[str, Any],
+    ) -> ControlPlaneReadinessReport:
+        return ControlPlaneReadinessReport.from_wire(self.control_plane_readiness_audit(request))
+
+    def control_plane_readiness_query(
+        self,
+        request: ControlPlaneReadinessQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, ControlPlaneReadinessQueryRequest)
+            else ControlPlaneReadinessQueryRequest(**dict(request or {}))
+        )
+        return self.tool("control_plane_readiness_query", normalized.to_arguments())
+
+    def control_plane_readiness_query_report(
+        self,
+        request: ControlPlaneReadinessQueryRequest | Mapping[str, Any] | None = None,
+    ) -> ControlPlaneReadinessQueryReport:
+        return ControlPlaneReadinessQueryReport.from_wire(self.control_plane_readiness_query(request))
 
     def domain_evidence_harmonization_coverage(
         self,
@@ -6617,6 +6657,40 @@ class AsyncWorkspace:
         return DomainDecisionReadinessQueryReport.from_wire(
             await self.domain_decision_readiness_query(request)
         )
+
+    async def control_plane_readiness_audit(
+        self,
+        request: ControlPlaneReadinessRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, ControlPlaneReadinessRequest)
+            else ControlPlaneReadinessRequest(**dict(request))
+        )
+        return await self.tool("control_plane_readiness_audit", normalized.to_arguments())
+
+    async def control_plane_readiness_audit_report(
+        self,
+        request: ControlPlaneReadinessRequest | Mapping[str, Any],
+    ) -> ControlPlaneReadinessReport:
+        return ControlPlaneReadinessReport.from_wire(await self.control_plane_readiness_audit(request))
+
+    async def control_plane_readiness_query(
+        self,
+        request: ControlPlaneReadinessQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, ControlPlaneReadinessQueryRequest)
+            else ControlPlaneReadinessQueryRequest(**dict(request or {}))
+        )
+        return await self.tool("control_plane_readiness_query", normalized.to_arguments())
+
+    async def control_plane_readiness_query_report(
+        self,
+        request: ControlPlaneReadinessQueryRequest | Mapping[str, Any] | None = None,
+    ) -> ControlPlaneReadinessQueryReport:
+        return ControlPlaneReadinessQueryReport.from_wire(await self.control_plane_readiness_query(request))
 
     async def domain_evidence_harmonization_coverage(
         self,

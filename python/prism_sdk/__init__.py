@@ -232,6 +232,17 @@ from .domain_decision_readiness import (
     DomainDecisionReadinessQueryRequest,
     domain_decision_readiness_report,
 )
+from .control_plane_readiness import (
+    CONTROL_PLANE_READINESS_SCHEMA,
+    CONTROL_PLANE_READINESS_QUERY_SCHEMA,
+    CONTROL_PLANE_READINESS_STATES,
+    CONTROL_PLANE_READINESS_WORKFLOW,
+    ControlPlaneReadinessReport,
+    ControlPlaneReadinessRequest,
+    ControlPlaneReadinessQueryReport,
+    ControlPlaneReadinessQueryRequest,
+    control_plane_readiness_report,
+)
 from .domain_evidence_intake import (
     DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA,
     DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW,
@@ -3154,6 +3165,15 @@ __all__ = [
     "DomainDecisionReadinessQueryRequest",
     "DomainDecisionReadinessQueryReport",
     "domain_decision_readiness_report",
+    "CONTROL_PLANE_READINESS_SCHEMA",
+    "CONTROL_PLANE_READINESS_QUERY_SCHEMA",
+    "CONTROL_PLANE_READINESS_STATES",
+    "CONTROL_PLANE_READINESS_WORKFLOW",
+    "ControlPlaneReadinessRequest",
+    "ControlPlaneReadinessReport",
+    "ControlPlaneReadinessQueryRequest",
+    "ControlPlaneReadinessQueryReport",
+    "control_plane_readiness_report",
     "DOMAIN_EVIDENCE_INTAKE_OUTCOMES",
     "DOMAIN_EVIDENCE_INTAKE_SCHEMA",
     "DOMAIN_EVIDENCE_INTAKE_WORKFLOW",

@@ -1330,6 +1330,89 @@ fn domain_decision_readiness_audit_retains_cross_domain_policy_and_review_state(
 }
 
 #[test]
+fn control_plane_readiness_joins_components_without_widening_authority() {
+    let mut server = server();
+    let domain_report = call(
+        &mut server,
+        "domain_report_project",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "control-plane-subject",
+            "source_tool": "modality_catalog",
+            "report": {"observations": ["retained"]},
+            "claim_posture": {"status": "review_required", "does_not_claim": ["truth"]}
+        }),
+    );
+    let report = domain_report["report"].clone();
+    let report_digest = ContentHash::of_value(&report).unwrap().to_string();
+    let readiness = call(
+        &mut server,
+        "domain_decision_readiness_audit",
+        json!({
+            "subject_id": "control-plane-subject",
+            "claim": {"id": "control-plane-claim", "statement": "opaque"},
+            "reports": [report],
+            "links": [{"report_index": 0, "report_digest": report_digest, "role": "supports"}],
+            "policy": {
+                "required_group_ids": ["biological_domains"],
+                "required_domains": ["modalities"],
+                "minimum_supporting_reports": 1,
+                "allow_review_required": true
+            }
+        }),
+    );
+    let control = call(
+        &mut server,
+        "control_plane_readiness_audit",
+        json!({
+            "subject_id": "control-plane-subject",
+            "policy": {"require_route_review": true},
+            "readiness_audit": readiness,
+            "route_review": {
+                "ok": true,
+                "workflow": "capability_route_review",
+                "route_id": "a".repeat(64),
+                "review_id": "b".repeat(64),
+                "catalog_digest": "c".repeat(64),
+                "review_status": "ready",
+                "findings": [],
+                "execution": "not_started"
+            }
+        }),
+    );
+    assert_eq!(control["workflow"], json!("control_plane_readiness_audit"));
+    assert_eq!(
+        control["audit"]["component_states"]["capability_route"]["satisfied"],
+        json!(true)
+    );
+    assert_eq!(control["audit"]["control_plane_state"], json!("incomplete"));
+    assert_eq!(control["audit"]["policy_satisfied"], json!(false));
+    assert_eq!(control["readiness_claimed"], json!(false));
+    assert_eq!(control["execution"], json!("not_started"));
+    assert_eq!(control["artifact_registry"]["indexed"], json!(true));
+
+    let query = call(
+        &mut server,
+        "control_plane_readiness_query",
+        json!({
+            "subject_id": "control-plane-subject",
+            "control_plane_state": "incomplete",
+            "include_audits": true
+        }),
+    );
+    assert_eq!(
+        query["workflow"],
+        json!("artifact_registry_control_plane_readiness_query")
+    );
+    assert_eq!(query["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        query["rows"][0]["audit"]["subject_id"],
+        json!("control-plane-subject")
+    );
+}
+
+#[test]
 fn domain_evidence_intake_accepts_one_declared_envelope_from_every_capability_group() {
     let mut server = server();
     let catalogue = call(&mut server, "workspace_capabilities", json!({}));

@@ -66,6 +66,12 @@ from .domain_decision_readiness import (
     DomainDecisionReadinessQueryReport,
     DomainDecisionReadinessQueryRequest,
 )
+from .control_plane_readiness import (
+    ControlPlaneReadinessReport,
+    ControlPlaneReadinessRequest,
+    ControlPlaneReadinessQueryReport,
+    ControlPlaneReadinessQueryRequest,
+)
 from .domain_evidence_intake import (
     DomainEvidenceIntakeCoverageReport,
     DomainEvidenceIntakeCoverageRequest,
@@ -1102,6 +1108,63 @@ class ApiClient:
         )
         return DomainDecisionReadinessQueryReport.from_wire(
             self.call_tool("domain_decision_readiness_query", normalized.to_arguments())
+        )
+
+    def control_plane_readiness_audit(
+        self,
+        request: ControlPlaneReadinessRequest | Mapping[str, Any],
+    ) -> ControlPlaneReadinessReport:
+        """Compose explicitly supplied cross-control-plane evidence through REST."""
+
+        normalized = (
+            request
+            if isinstance(request, ControlPlaneReadinessRequest)
+            else ControlPlaneReadinessRequest(**dict(request))
+        )
+        return ControlPlaneReadinessReport.from_wire(
+            self.request("POST", "/v1/control-plane-readiness", normalized.to_arguments())
+        )
+
+    def control_plane_readiness_audit_tool(
+        self,
+        request: ControlPlaneReadinessRequest | Mapping[str, Any],
+    ) -> ControlPlaneReadinessReport:
+        normalized = (
+            request
+            if isinstance(request, ControlPlaneReadinessRequest)
+            else ControlPlaneReadinessRequest(**dict(request))
+        )
+        return ControlPlaneReadinessReport.from_wire(
+            self.call_tool("control_plane_readiness_audit", normalized.to_arguments())
+        )
+
+    def control_plane_readiness_query(
+        self,
+        request: ControlPlaneReadinessQueryRequest | Mapping[str, Any] | None = None,
+    ) -> ControlPlaneReadinessQueryReport:
+        normalized = (
+            request
+            if isinstance(request, ControlPlaneReadinessQueryRequest)
+            else ControlPlaneReadinessQueryRequest(**dict(request or {}))
+        )
+        return ControlPlaneReadinessQueryReport.from_wire(
+            self.request(
+                "GET",
+                f"/v1/control-plane-readiness?{urlencode(normalized.to_query_params())}",
+            )
+        )
+
+    def control_plane_readiness_query_tool(
+        self,
+        request: ControlPlaneReadinessQueryRequest | Mapping[str, Any] | None = None,
+    ) -> ControlPlaneReadinessQueryReport:
+        normalized = (
+            request
+            if isinstance(request, ControlPlaneReadinessQueryRequest)
+            else ControlPlaneReadinessQueryRequest(**dict(request or {}))
+        )
+        return ControlPlaneReadinessQueryReport.from_wire(
+            self.call_tool("control_plane_readiness_query", normalized.to_arguments())
         )
 
     def domain_evidence_harmonization_coverage(
@@ -6147,6 +6210,30 @@ class AsyncApiClient:
         request: DomainDecisionReadinessQueryRequest | Mapping[str, Any] | None = None,
     ) -> DomainDecisionReadinessQueryReport:
         return await asyncio.to_thread(self.client.domain_decision_readiness_query_tool, request)
+
+    async def control_plane_readiness_audit(
+        self,
+        request: ControlPlaneReadinessRequest | Mapping[str, Any],
+    ) -> ControlPlaneReadinessReport:
+        return await asyncio.to_thread(self.client.control_plane_readiness_audit, request)
+
+    async def control_plane_readiness_audit_tool(
+        self,
+        request: ControlPlaneReadinessRequest | Mapping[str, Any],
+    ) -> ControlPlaneReadinessReport:
+        return await asyncio.to_thread(self.client.control_plane_readiness_audit_tool, request)
+
+    async def control_plane_readiness_query(
+        self,
+        request: ControlPlaneReadinessQueryRequest | Mapping[str, Any] | None = None,
+    ) -> ControlPlaneReadinessQueryReport:
+        return await asyncio.to_thread(self.client.control_plane_readiness_query, request)
+
+    async def control_plane_readiness_query_tool(
+        self,
+        request: ControlPlaneReadinessQueryRequest | Mapping[str, Any] | None = None,
+    ) -> ControlPlaneReadinessQueryReport:
+        return await asyncio.to_thread(self.client.control_plane_readiness_query_tool, request)
 
     async def domain_evidence_harmonization_coverage(
         self,

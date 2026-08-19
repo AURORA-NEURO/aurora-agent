@@ -5942,6 +5942,71 @@ export interface DomainDecisionReadinessQueryResult extends JsonObject {
   does_not_claim: string[];
 }
 
+export interface ControlPlaneReadinessPolicy extends JsonObject {
+  require_domain_readiness?: boolean;
+  require_route_review?: boolean;
+  require_route_plan?: boolean;
+  require_operations_acceptance?: boolean;
+  require_release_ready?: boolean;
+  require_workflow_evidence?: boolean;
+}
+
+export interface ControlPlaneReadinessArgs extends JsonObject {
+  subject_id: string;
+  policy?: ControlPlaneReadinessPolicy;
+  readiness_audit?: JsonObject;
+  route_review?: JsonObject;
+  route_plan?: JsonObject;
+  operations_gate_projection?: JsonObject;
+  operations_gate_review?: JsonObject;
+  release_audit?: JsonObject;
+  workflow_evidence?: JsonObject;
+}
+
+export interface ControlPlaneReadinessResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-control-plane-readiness/0.1";
+  workflow: "control_plane_readiness_audit";
+  audit: JsonObject & {
+    subject_id: string;
+    control_plane_state: "ready_for_human_review" | "review_required" | "incomplete" | "blocked";
+    policy_satisfied: boolean;
+    components: Record<string, JsonObject>;
+    component_states: Record<string, JsonObject>;
+    blockers: JsonObject[];
+    digest: string;
+  };
+  artifact_registry: JsonObject;
+  readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export interface ControlPlaneReadinessQueryOptions extends JsonObject {
+  subject_id?: string;
+  control_plane_state?: "ready_for_human_review" | "review_required" | "incomplete" | "blocked";
+  policy_satisfied?: boolean;
+  after?: string;
+  max_items?: number;
+  include_audits?: boolean;
+}
+
+export interface ControlPlaneReadinessQueryResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-artifact-control-plane-readiness-query/0.1";
+  workflow: "artifact_registry_control_plane_readiness_query";
+  filters: ControlPlaneReadinessQueryOptions;
+  registry_generation: number;
+  registry_size: number;
+  rows: JsonObject[];
+  next_after: string | null;
+  has_more: boolean;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
 export interface DomainEvidenceHarmonizationCoverageOptions extends JsonObject {
   subject_id?: string;
   domain?: string;

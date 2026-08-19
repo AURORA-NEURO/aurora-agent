@@ -53,6 +53,8 @@ pub const ARTIFACT_REGISTRY_DOMAIN_EVIDENCE_LINEAGE_SCHEMA_VERSION: &str =
     "bioprism-devplat-artifact-domain-evidence-lineage/0.1";
 pub const ARTIFACT_REGISTRY_DOMAIN_DECISION_READINESS_QUERY_SCHEMA_VERSION: &str =
     "bioprism-devplat-artifact-domain-decision-readiness-query/0.1";
+pub const ARTIFACT_REGISTRY_CONTROL_PLANE_READINESS_QUERY_SCHEMA_VERSION: &str =
+    "bioprism-devplat-artifact-control-plane-readiness-query/0.1";
 pub const MAX_ARTIFACT_REGISTRY_RECORDS: usize = 512;
 pub const MAX_ARTIFACT_REGISTRY_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_ARTIFACT_REGISTRY_QUERY_ITEMS: usize = 256;
@@ -77,6 +79,7 @@ const ARTIFACT_KINDS: &[&str] = &[
     "domain_evidence_provider_external_payload_lineage_audit",
     "domain_evidence_provider_external_payload_execution_evidence",
     "domain_decision_readiness",
+    "control_plane_readiness",
     "adapter_execution_evidence",
     "domain_evidence_source_plan",
     "external_reference",
@@ -794,6 +797,121 @@ impl ArtifactRegistry {
                 "a ready_for_human_review state proves a scientific, clinical, causal, regulatory, publication, release, or execution conclusion",
                 "absence from this bounded registry proves that a readiness audit never existed",
                 "artifact retention proves external provenance, identity, consent, or authority"
+            ]
+        }))
+    }
+
+    /// Query retained control-plane readiness projections without returning their full bodies by
+    /// default. The projection is a digest-bound composition of independently evaluated evidence
+    /// packets; its state never grants execution, release, scientific, clinical, or regulatory
+    /// authority.
+    pub fn control_plane_readiness_query(
+        &self,
+        subject_id: Option<&str>,
+        control_plane_state: Option<&str>,
+        policy_satisfied: Option<bool>,
+        after: Option<&str>,
+        max_items: usize,
+        include_audits: bool,
+    ) -> Result<Value, ArtifactRegistryError> {
+        if !(1..=MAX_ARTIFACT_REGISTRY_QUERY_ITEMS).contains(&max_items) {
+            return Err(ArtifactRegistryError::InvalidInput(format!(
+                "max_items must be between 1 and {MAX_ARTIFACT_REGISTRY_QUERY_ITEMS}"
+            )));
+        }
+        if let Some(state) = control_plane_state {
+            if !matches!(
+                state,
+                "ready_for_human_review" | "review_required" | "incomplete" | "blocked"
+            ) {
+                return Err(ArtifactRegistryError::InvalidInput(
+                    "control_plane_state must be ready_for_human_review, review_required, incomplete, or blocked".into(),
+                ));
+            }
+        }
+        let mut rows = Vec::new();
+        let mut has_more = false;
+        for (digest, record) in self
+            .records
+            .iter()
+            .filter(|(digest, _)| after.is_none_or(|cursor| digest.as_str() > cursor))
+        {
+            if record.kind != "control_plane_readiness"
+                || subject_id.is_some_and(|value| value != record.subject_id)
+                || control_plane_state.is_some_and(|value| {
+                    record
+                        .artifact
+                        .get("control_plane_state")
+                        .and_then(Value::as_str)
+                        != Some(value)
+                })
+                || policy_satisfied.is_some_and(|value| {
+                    record
+                        .artifact
+                        .get("policy_satisfied")
+                        .and_then(Value::as_bool)
+                        != Some(value)
+                })
+            {
+                continue;
+            }
+            if rows.len() >= max_items {
+                has_more = true;
+                break;
+            }
+            let mut row = json!({
+                "content_digest": digest,
+                "audit_digest": record.artifact.get("digest"),
+                "subject_id": record.subject_id,
+                "domains": record.domains,
+                "control_plane_state": record.artifact.get("control_plane_state"),
+                "policy_satisfied": record.artifact.get("policy_satisfied"),
+                "component_states": record.artifact.get("component_states"),
+                "component_count": record.artifact.get("component_count"),
+                "parent_digests": record.parent_digests,
+                "verification": record.verification,
+            });
+            if include_audits {
+                row["audit"] = record.artifact.clone();
+            }
+            rows.push(row);
+        }
+        let next_after = if has_more {
+            rows.last()
+                .and_then(|row| row.get("content_digest"))
+                .cloned()
+                .unwrap_or(Value::Null)
+        } else {
+            Value::Null
+        };
+        Ok(json!({
+            "ok": true,
+            "schema": ARTIFACT_REGISTRY_CONTROL_PLANE_READINESS_QUERY_SCHEMA_VERSION,
+            "workflow": "artifact_registry_control_plane_readiness_query",
+            "filters": {
+                "subject_id": subject_id,
+                "control_plane_state": control_plane_state,
+                "policy_satisfied": policy_satisfied,
+                "after": after,
+                "max_items": max_items,
+                "include_audits": include_audits
+            },
+            "registry_generation": self.generation,
+            "registry_size": self.records.len(),
+            "rows": rows,
+            "next_after": next_after,
+            "has_more": has_more,
+            "execution": "not_started",
+            "guarantees": [
+                "only exact digest-verified control_plane_readiness artifacts are returned",
+                "rows are ordered by retained artifact content digest",
+                "component state remains separate from the authority of each source evidence packet",
+                "full projection bodies are opt-in and can be fetched again by content_digest"
+            ],
+            "does_not_claim": [
+                "a ready_for_human_review state proves scientific, clinical, release, deployment, or execution authority",
+                "absence from this bounded registry proves that a projection never existed",
+                "artifact retention proves external provenance, identity, consent, or approval"
             ]
         }))
     }
@@ -1922,6 +2040,75 @@ mod tests {
         assert_eq!(detailed["rows"][0]["audit"]["digest"], audit_digest);
         assert!(matches!(
             registry.domain_decision_readiness_query(None, Some("unknown"), None, None, 1, false),
+            Err(ArtifactRegistryError::InvalidInput(_))
+        ));
+    }
+
+    #[test]
+    fn control_plane_query_is_cursor_ordered_and_survives_digest_checked_snapshot_restore() {
+        let mut registry = ArtifactRegistry::new();
+        let first = registry
+            .register(&json!({
+                "kind": "control_plane_readiness",
+                "subject_id": "control-plane-query",
+                "domains": ["oncology"],
+                "parent_digests": ["a".repeat(64)],
+                "artifact": {
+                    "digest": "b".repeat(64),
+                    "control_plane_state": "ready_for_human_review",
+                    "policy_satisfied": true,
+                    "component_states": {"domain_decision_readiness": {"state": "ready_for_human_review"}},
+                    "component_count": 5
+                }
+            }))
+            .unwrap();
+        registry
+            .register(&json!({
+                "kind": "control_plane_readiness",
+                "subject_id": "control-plane-query",
+                "domains": ["oncology"],
+                "parent_digests": [],
+                "artifact": {
+                    "digest": "c".repeat(64),
+                    "control_plane_state": "incomplete",
+                    "policy_satisfied": false,
+                    "component_states": {"release": {"state": "incomplete"}},
+                    "component_count": 5
+                }
+            }))
+            .unwrap();
+        let page = registry
+            .control_plane_readiness_query(
+                Some("control-plane-query"),
+                Some("ready_for_human_review"),
+                Some(true),
+                None,
+                1,
+                false,
+            )
+            .unwrap();
+        assert_eq!(page["rows"].as_array().unwrap().len(), 1);
+        assert!(page["rows"][0].get("audit").is_none());
+        assert_eq!(page["rows"][0]["content_digest"], first["content_digest"]);
+
+        let snapshot = registry.snapshot().unwrap();
+        let restored = ArtifactRegistry::from_snapshot(&snapshot).unwrap();
+        let detailed = restored
+            .control_plane_readiness_query(
+                Some("control-plane-query"),
+                Some("ready_for_human_review"),
+                Some(true),
+                None,
+                1,
+                true,
+            )
+            .unwrap();
+        assert_eq!(
+            detailed["rows"][0]["audit"]["digest"],
+            json!("b".repeat(64))
+        );
+        assert!(matches!(
+            restored.control_plane_readiness_query(None, Some("unknown"), None, None, 1, false),
             Err(ArtifactRegistryError::InvalidInput(_))
         ));
     }

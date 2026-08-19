@@ -54,6 +54,10 @@ import type {
   DomainDecisionReadinessResult,
   DomainDecisionReadinessQueryOptions,
   DomainDecisionReadinessQueryResult,
+  ControlPlaneReadinessArgs,
+  ControlPlaneReadinessResult,
+  ControlPlaneReadinessQueryOptions,
+  ControlPlaneReadinessQueryResult,
   DomainEvidenceHarmonizationCoverageOptions,
   DomainEvidenceHarmonizationCoverageResult,
   DomainEvidenceIntakeArgs,
@@ -859,6 +863,69 @@ export class ApiClient {
     const maxItems = args.max_items ?? 100;
     if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 256) throw new ArgumentError("max_items must be 1..=256");
     return this.callTool<DomainDecisionReadinessQueryResult>("domain_decision_readiness_query", args, options);
+  }
+
+  /** Compose explicitly supplied cross-domain control-plane evidence through MCP. */
+  async controlPlaneReadinessAudit(
+    args: ControlPlaneReadinessArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<ControlPlaneReadinessResult>> {
+    if (!isObject(args)) throw new ArgumentError("control-plane readiness arguments must be an object");
+    if (typeof args.subject_id !== "string" || args.subject_id.trim().length === 0) throw new ArgumentError("subject_id must be a non-empty string");
+    for (const [name, value] of [["readiness_audit", args.readiness_audit], ["route_review", args.route_review], ["route_plan", args.route_plan], ["operations_gate_projection", args.operations_gate_projection], ["operations_gate_review", args.operations_gate_review], ["release_audit", args.release_audit], ["workflow_evidence", args.workflow_evidence]] as const) {
+      if (value !== undefined && !isObject(value)) throw new ArgumentError(`${name} must be an object`);
+    }
+    if (args.policy !== undefined) {
+      if (!isObject(args.policy)) throw new ArgumentError("policy must be an object");
+      for (const [name, value] of [["require_domain_readiness", args.policy.require_domain_readiness], ["require_route_review", args.policy.require_route_review], ["require_route_plan", args.policy.require_route_plan], ["require_operations_acceptance", args.policy.require_operations_acceptance], ["require_release_ready", args.policy.require_release_ready], ["require_workflow_evidence", args.policy.require_workflow_evidence]] as const) {
+        if (value !== undefined && typeof value !== "boolean") throw new ArgumentError(`${name} must be a boolean`);
+      }
+    }
+    return this.callTool<ControlPlaneReadinessResult>("control_plane_readiness_audit", args, options);
+  }
+
+  /** Compose the same control-plane projection through its dedicated REST endpoint. */
+  async controlPlaneReadinessAuditRest(
+    args: ControlPlaneReadinessArgs,
+    options?: ClientRequestOptions,
+  ): Promise<ControlPlaneReadinessResult> {
+    if (!isObject(args)) throw new ArgumentError("control-plane readiness arguments must be an object");
+    if (typeof args.subject_id !== "string" || args.subject_id.trim().length === 0) throw new ArgumentError("subject_id must be a non-empty string");
+    return this.request<ControlPlaneReadinessResult>("POST", "/v1/control-plane-readiness", args, options);
+  }
+
+  /** Query retained control-plane projections through the dedicated REST route. */
+  async controlPlaneReadinessQuery(
+    args: ControlPlaneReadinessQueryOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<ControlPlaneReadinessQueryResult> {
+    if (!isObject(args)) throw new ArgumentError("control-plane readiness query arguments must be an object");
+    for (const [name, value] of [["subject_id", args.subject_id], ["control_plane_state", args.control_plane_state], ["after", args.after]] as const) {
+      if (value !== undefined && (typeof value !== "string" || value.trim().length === 0)) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    if (args.control_plane_state !== undefined && !["ready_for_human_review", "review_required", "incomplete", "blocked"].includes(args.control_plane_state)) throw new ArgumentError("control_plane_state is invalid");
+    if (args.policy_satisfied !== undefined && typeof args.policy_satisfied !== "boolean") throw new ArgumentError("policy_satisfied must be a boolean");
+    if (args.include_audits !== undefined && typeof args.include_audits !== "boolean") throw new ArgumentError("include_audits must be a boolean");
+    const maxItems = args.max_items ?? 100;
+    if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 256) throw new ArgumentError("max_items must be 1..=256");
+    const query = new URLSearchParams({ limit: String(maxItems), include_audits: String(args.include_audits ?? false) });
+    for (const [name, value] of [["subject_id", args.subject_id], ["control_plane_state", args.control_plane_state], ["after", args.after]] as const) {
+      if (value !== undefined) query.set(name, value);
+    }
+    if (args.policy_satisfied !== undefined) query.set("policy_satisfied", String(args.policy_satisfied));
+    return this.request<ControlPlaneReadinessQueryResult>("GET", `/v1/control-plane-readiness?${query.toString()}`, undefined, options);
+  }
+
+  /** Query retained control-plane projections through the MCP dispatcher. */
+  async controlPlaneReadinessQueryTool(
+    args: ControlPlaneReadinessQueryOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<ControlPlaneReadinessQueryResult>> {
+    if (!isObject(args)) throw new ArgumentError("control-plane readiness query arguments must be an object");
+    if (args.control_plane_state !== undefined && !["ready_for_human_review", "review_required", "incomplete", "blocked"].includes(args.control_plane_state)) throw new ArgumentError("control_plane_state is invalid");
+    const maxItems = args.max_items ?? 100;
+    if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 256) throw new ArgumentError("max_items must be 1..=256");
+    return this.callTool<ControlPlaneReadinessQueryResult>("control_plane_readiness_query", args, options);
   }
 
   /** Query retained harmonization artifacts without returning their full bodies. */

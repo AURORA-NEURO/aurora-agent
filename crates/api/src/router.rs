@@ -1724,6 +1724,12 @@ impl ApiRouter {
             ("GET", "/v1/domain-decision-readiness") => {
                 self.query_domain_decision_readiness(&request, &request_id)
             }
+            ("POST", "/v1/control-plane-readiness") => {
+                self.control_plane_readiness_audit(&request, &request_id)
+            }
+            ("GET", "/v1/control-plane-readiness") => {
+                self.query_control_plane_readiness(&request, &request_id)
+            }
             ("GET", "/v1/artifacts/persistence") => self.artifact_persistence_status(),
             ("POST", "/v1/artifacts/persistence/flush") => {
                 self.flush_artifact_persistence(&request_id)
@@ -3794,6 +3800,7 @@ impl ApiRouter {
                     "domain_evidence_source_execute": "/v1/domain-evidence/sources/execute",
                     "domain_evidence_coverage": "/v1/domain-evidence/coverage",
                     "domain_decision_readiness": "/v1/domain-decision-readiness",
+                    "control_plane_readiness": "/v1/control-plane-readiness",
                     "domain_workflow_scaffold": "/v1/domain-workflows/scaffold",
                     "domain_workflow_instantiate": "/v1/domain-workflows/instantiate",
                     "domain_workflow_portfolio": "/v1/domain-workflows/portfolio",
@@ -3823,6 +3830,7 @@ impl ApiRouter {
                      "evidence_bundle_persistence_flush": "/v1/evidence-bundles/persistence/flush",
                     "artifacts": "/v1/artifacts",
                     "domain_decision_readiness_query": "/v1/domain-decision-readiness",
+                    "control_plane_readiness_query": "/v1/control-plane-readiness",
                      "artifact_persistence": "/v1/artifacts/persistence",
                      "artifact_persistence_flush": "/v1/artifacts/persistence/flush",
                     "mission_persistence": "/v1/missions/persistence",
@@ -3886,6 +3894,8 @@ impl ApiRouter {
                     "domain_evidence_source_execute": true,
                     "domain_evidence_coverage": true,
                     "domain_decision_readiness_query": true,
+                    "control_plane_readiness_audit": true,
+                    "control_plane_readiness_query": true,
                     "capability_dashboard": true,
                     "capability_route": true,
                     "capability_route_review": true,
@@ -7135,6 +7145,104 @@ impl ApiRouter {
         }
     }
 
+    fn control_plane_readiness_audit(
+        &self,
+        request: &HttpRequest,
+        request_id: &str,
+    ) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        self.domain_workflow_tool(
+            request_id,
+            "control_plane_readiness_audit",
+            Value::Object(arguments),
+        )
+    }
+
+    fn query_control_plane_readiness(
+        &self,
+        request: &HttpRequest,
+        request_id: &str,
+    ) -> HttpResponse {
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        for key in query.keys() {
+            if !matches!(
+                key.as_str(),
+                "subject_id"
+                    | "control_plane_state"
+                    | "policy_satisfied"
+                    | "after"
+                    | "limit"
+                    | "include_audits"
+            ) {
+                return self.error(
+                    400,
+                    "invalid_query",
+                    "control-plane readiness query accepts only subject_id, control_plane_state, policy_satisfied, after, limit, and include_audits",
+                    request_id,
+                );
+            }
+        }
+        let subject_id = query.get("subject_id").map(String::as_str);
+        let control_plane_state = query.get("control_plane_state").map(String::as_str);
+        let after = query.get("after").map(String::as_str);
+        let policy_satisfied = match query
+            .get("policy_satisfied")
+            .map(|_| query_bool(&query, "policy_satisfied", false))
+        {
+            Some(Ok(value)) => Some(value),
+            Some(Err(error)) => return self.error(422, "invalid_query", &error, request_id),
+            None => None,
+        };
+        let max_items = match query_usize(&query, "limit", 100) {
+            Ok(value)
+                if (1..=bioprism_devplat::MAX_ARTIFACT_REGISTRY_QUERY_ITEMS).contains(&value) =>
+            {
+                value
+            }
+            Ok(_) => {
+                return self.error(
+                    422,
+                    "invalid_query",
+                    "limit must be between 1 and 256",
+                    request_id,
+                )
+            }
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let include_audits = match query_bool(&query, "include_audits", false) {
+            Ok(value) => value,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let result = match self.artifact_registry.lock() {
+            Ok(registry) => registry.control_plane_readiness_query(
+                subject_id,
+                control_plane_state,
+                policy_satisfied,
+                after,
+                max_items,
+                include_audits,
+            ),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "artifact_registry_unavailable",
+                    "artifact registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match result {
+            Ok(value) => HttpResponse::json(200, &value),
+            Err(error) => self.error(422, "invalid_query", &error.to_string(), request_id),
+        }
+    }
+
     fn query_artifacts(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
         let query = match request.query() {
             Ok(query) => query,
@@ -8684,6 +8792,7 @@ impl ApiRouter {
                     "/v1/evidence-bundles/persistence": { "get": { "responses": { "200": { "description": "restart-aware evidence registry checkpoint status" } } } },
                     "/v1/evidence-bundles/persistence/flush": { "post": { "responses": { "200": { "description": "force a bounded evidence registry checkpoint" }, "409": { "description": "persistence is disabled" } } } },
                     "/v1/domain-decision-readiness": { "get": { "parameters": [{ "name": "subject_id", "in": "query" }, { "name": "decision_state", "in": "query" }, { "name": "policy_satisfied", "in": "query" }, { "name": "after", "in": "query" }, { "name": "limit", "in": "query" }, { "name": "include_audits", "in": "query" }], "responses": { "200": { "description": "bounded digest-ordered retained decision-readiness posture query" } } } },
+                    "/v1/control-plane-readiness": { "get": { "parameters": [{ "name": "subject_id", "in": "query" }, { "name": "control_plane_state", "in": "query" }, { "name": "policy_satisfied", "in": "query" }, { "name": "after", "in": "query" }, { "name": "limit", "in": "query" }, { "name": "include_audits", "in": "query" }], "responses": { "200": { "description": "bounded digest-ordered retained control-plane readiness query" } } }, "post": { "responses": { "200": { "description": "digest-bound structural control-plane readiness projection" }, "422": { "description": "invalid component evidence or policy" } } } },
                     "/v1/artifacts": { "get": { "parameters": [{ "name": "kind", "in": "query" }, { "name": "domain", "in": "query" }, { "name": "subject_id", "in": "query" }, { "name": "after", "in": "query" }, { "name": "limit", "in": "query" }, { "name": "include_artifacts", "in": "query" }], "responses": { "200": { "description": "bounded cross-domain artifact index query" } } }, "post": { "responses": { "201": { "description": "registered content-addressed artifact" }, "200": { "description": "idempotent artifact registration" } } } },
                     "/v1/artifacts/cross-store": { "get": { "responses": { "200": { "description": "digest-only consistency audit across artifact, evidence, and workflow-reconciliation registries" } } } },
                     "/v1/artifacts/{content_digest}": { "get": { "parameters": [{ "name": "content_digest", "in": "path", "required": true }], "responses": { "200": { "description": "one artifact record with verification posture" }, "404": { "description": "artifact digest is not present" } } } },

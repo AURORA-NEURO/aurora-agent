@@ -62,6 +62,13 @@ subject/state/policy filters, cursor pagination, and opt-in audit bodies through
 matching `Workspace` and `AsyncWorkspace` helpers. Portfolio and reconciliation request models
 accept `readiness_audit` plus `policy.require_readiness`; their typed reports keep that gate
 separate from completion evidence.
+`ControlPlaneReadinessRequest` / `ControlPlaneReadinessReport` compose the returned domain audit
+with optional route, operations, release, and workflow packets. Each component remains separately
+typed as present/valid/satisfied evidence, and the top-level state is never treated as execution,
+deployment, scientific, clinical, or release authority. `ControlPlaneReadinessQueryRequest` /
+`ControlPlaneReadinessQueryReport` provide exact subject/state/policy filters and opt-in retained
+bodies. Sync/async HTTP clients expose dedicated REST and MCP variants; Workspace and
+AsyncWorkspace expose the same typed projection helpers.
 `DomainEvidenceHarmonizationCoverageRequest` and
 `DomainEvidenceHarmonizationCoverageReport` provide the bounded retained read model through
 `ApiClient.domain_evidence_harmonization_coverage()` and its tool counterpart, plus matching

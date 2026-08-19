@@ -132,6 +132,12 @@ readiness posture with exact subject/state/policy filters, cursors, and opt-in a
 Portfolio and reconciliation arguments accept an explicit `readiness_audit` plus
 `policy.require_readiness`; their typed results keep that gate separate from execution preflight
 and completion evidence.
+`controlPlaneReadinessAudit` and `controlPlaneReadinessAuditRest` compose an exact domain audit
+with optional route, operations, release, and workflow evidence packets. The typed result preserves
+component-level validity, satisfaction, digests, authority labels, and the separate top-level
+structural state; it never widens `ready_for_human_review` into execution or release authority.
+`controlPlaneReadinessQuery` and `controlPlaneReadinessQueryTool` expose cursor-bounded retained
+projections with exact subject/state/policy filters and opt-in full bodies.
 `domainEvidenceHarmonizationCoverage` and
 `domainEvidenceHarmonizationCoverageTool` query the retained harmonization index with typed subject,
 domain, bridge, traceability, cursor, page-size, and digest-inclusion options. The result separates

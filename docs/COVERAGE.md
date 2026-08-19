@@ -10,7 +10,7 @@ an implementation — so read the numbers as *"someone has read this and taken a
 never as *"this is done"*. The stronger criterion would be a conformance test per module. It does
 not exist and is not being claimed.
 
-The MCP integration layer currently exposes 234 callable tools. That count is intentionally
+The MCP integration layer currently exposes 236 callable tools. That count is intentionally
 separate from this citation denominator: `pack_health_assess`, `sdk_registry_check`, and
 `repository_impact` make existing typed contracts agent-callable, while `world_generate`,
 `hub_submission_review`, and `telemetry_project` add bounded in-tree generation, public-hub
@@ -286,6 +286,12 @@ The HTTP event page and bounded SSE snapshot accept the same exact `review_id` f
 `/v1/route-reviews/{review_id}/evidence` provides a typed retained-evidence lookup. Missing
 retained evidence is reported as an empty bounded window, never upgraded into a historical
 non-existence claim.
+`control_plane_readiness_audit` is the cross-domain composition seam over the retained domain
+readiness wrapper plus optional route review/plan, operations acceptance, release audit, and
+workflow evidence. It preserves component-level `present`/`valid`/`satisfied` states and only
+lets explicitly required components block the structural result; `control_plane_readiness_query`
+indexes that projection with digest cursors and snapshot recovery. The join does not execute nested
+tools, widen operator or release authority, or treat `ready_for_human_review` as authorization.
 The Python SDK now covers the complete FIBER progressive-disclosure lifecycle through typed sync,
 async, and HTTP helpers: bounded world/query compilation at l0--l4, handle-or-source refinement,
 compile-plan explanation, certificate verification, and opt-in graph/hypergraph/timeline/table
