@@ -35,11 +35,31 @@ from .memory import (
     MemoryReceipt,
 )
 from .jobs import (
+    JOB_EVENT_SCHEMA,
     JOB_SCHEMA,
     BrainJobError,
+    BrainJobEvent,
     BrainJobEventReceipt,
     BrainJobRecord,
     BrainJobStore,
+)
+from .control_plane import (
+    CONTROL_PLANE_SCHEMA,
+    MODEL_HEALTH_SCHEMA,
+    MODEL_OBSERVATION_SCHEMA,
+    REPLAY_CASE_SCHEMA,
+    REPLAY_REPORT_SCHEMA,
+    BrainApprovalRequest,
+    BrainApprovalRouter,
+    BrainControlEventPage,
+    BrainControlPlane,
+    BrainModelHealth,
+    BrainModelHealthStore,
+    BrainModelObservation,
+    BrainReplayCase,
+    BrainReplayEngine,
+    BrainReplayReport,
+    BrainWorker,
 )
 from .evaluators import (
     DOMAIN_EVALUATOR_SCHEMA,

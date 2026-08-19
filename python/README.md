@@ -55,7 +55,11 @@ approval. `BrainEpisodicMemory` provides optional restart-safe, hash-chained met
 and bounded pre-dispatch replanning without retaining provider text, tool arguments, or secrets.
 `BrainJobStore` adds resolver-backed leases and checkpoints for restart-safe learning jobs, while
 `DomainEvaluatorRegistry` supplies reusable evidence-only evaluator profiles for engineering,
-research, operations, data, and biomedical workflows.
+research, operations, data, and biomedical workflows. `BrainControlPlane` adds cursorable job
+events and explicit approval routing; `BrainWorker` renews leases across process boundaries and
+can feed `BrainModelHealthStore` into future model selection. `BrainReplayEngine` re-evaluates
+caller-rehydrated evidence across every built-in domain and optionally advances a caller-owned
+bandit updater without replaying provider calls.
 
 The package also includes dependency-free authoring builders for digest-bound benchmark packs,
 set-valued decision cells, deterministic metamorphic mutations, versioned oracle manifests,

@@ -149,6 +149,32 @@ class BrainJobEventReceipt:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class BrainJobEvent:
+    """A verified, metadata-only event from the durable job journal."""
+
+    sequence: int
+    event_type: str
+    job_id: str
+    payload: Mapping[str, Any]
+    previous_digest: str
+    event_digest: str
+    created_ns: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": JOB_EVENT_SCHEMA,
+            "sequence": self.sequence,
+            "event_type": self.event_type,
+            "job_id": self.job_id,
+            "payload": dict(self.payload),
+            "previous_digest": self.previous_digest,
+            "event_digest": self.event_digest,
+            "created_ns": self.created_ns,
+            "retention": "metadata_only_hash_chained",
+        }
+
+
 class BrainJobStore:
     """Bounded SQLite job journal with leases, idempotency, checkpoints, and safe recovery."""
 
@@ -539,7 +565,11 @@ class BrainJobStore:
                     reason=reason,
                     lease_owner=None,
                     lease_expires_ns=None,
-                    checkpoint={"phase": "cancelled", "reason": reason},
+                    checkpoint={
+                        **dict(record.checkpoint),
+                        "phase": "cancelled",
+                        "reason": reason,
+                    },
                 )
                 self._connection.execute("COMMIT")
                 return self._row_to_record(
@@ -597,6 +627,43 @@ class BrainJobStore:
             except Exception:
                 self._connection.execute("ROLLBACK")
                 raise
+
+    def events(
+        self,
+        *,
+        after_sequence: int = 0,
+        job_id: str | None = None,
+        limit: int = 100,
+    ) -> tuple[BrainJobEvent, ...]:
+        """Read a bounded cursor page for cross-process workers and operator dashboards."""
+
+        if not isinstance(after_sequence, int) or isinstance(after_sequence, bool) or after_sequence < 0:
+            raise BrainJobError("after_sequence must be a non-negative integer")
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= MAX_JOB_INVENTORY:
+            raise BrainJobError(f"event limit must be within [1, {MAX_JOB_INVENTORY}]")
+        if job_id is not None:
+            job_id = _job_text("job_id", job_id, MAX_JOB_ID_BYTES)
+        with self._lock:
+            try:
+                if job_id is None:
+                    rows = self._connection.execute(
+                        "SELECT * FROM brain_job_events WHERE sequence > ? ORDER BY sequence ASC LIMIT ?",
+                        (after_sequence, limit),
+                    ).fetchall()
+                else:
+                    rows = self._connection.execute(
+                        "SELECT * FROM brain_job_events WHERE sequence > ? AND job_id = ? ORDER BY sequence ASC LIMIT ?",
+                        (after_sequence, job_id, limit),
+                    ).fetchall()
+                return tuple(self._row_to_event(row) for row in rows)
+            except sqlite3.Error as error:
+                raise BrainJobError("could not read brain job events") from error
+
+    def head_digest(self) -> str:
+        """Return the current event-chain head without exposing event bodies."""
+
+        with self._lock:
+            return self._head_locked()
 
     def verify_integrity(self) -> dict[str, Any]:
         with self._lock:
@@ -897,6 +964,23 @@ class BrainJobStore:
             record_digest=row["record_digest"],
         )
 
+    def _row_to_event(self, row: sqlite3.Row) -> BrainJobEvent:
+        try:
+            payload = json.loads(row["payload_json"])
+        except (TypeError, ValueError, json.JSONDecodeError) as error:
+            raise BrainJobError("job event contains invalid JSON") from error
+        if not isinstance(payload, Mapping) or payload.get("schema") != JOB_EVENT_SCHEMA:
+            raise BrainJobError("job event has an invalid schema")
+        return BrainJobEvent(
+            sequence=int(row["sequence"]),
+            event_type=str(row["event_type"]),
+            job_id=str(row["job_id"]),
+            payload=dict(payload),
+            previous_digest=str(row["previous_digest"]),
+            event_digest=str(row["event_digest"]),
+            created_ns=int(row["created_ns"]),
+        )
+
     def _append_event_locked(self, *, event_type: str, job_id: str, details: Mapping[str, Any]) -> BrainJobEventReceipt:
         previous = self._head_locked()
         sequence = int(self._connection.execute("SELECT COALESCE(MAX(sequence), 0) + 1 FROM brain_job_events").fetchone()[0])
@@ -954,8 +1038,10 @@ class BrainJobStore:
 
 __all__ = [
     "BrainJobError",
+    "BrainJobEvent",
     "BrainJobEventReceipt",
     "BrainJobRecord",
     "BrainJobStore",
+    "JOB_EVENT_SCHEMA",
     "JOB_SCHEMA",
 ]

@@ -1421,6 +1421,12 @@ class AutonomousBrain:
             raise BrainRunError("selection_overrides must be a mapping or None")
         if selection_overrides is not None:
             BrainLearningLedger._assert_safe(selection_overrides)
+        health_overrides: Mapping[str, Any] = {}
+        if selection_overrides is not None and selection_overrides.get("provider_health") is not None:
+            raw_health_overrides = selection_overrides.get("provider_health")
+            if not isinstance(raw_health_overrides, Mapping):
+                raise BrainRunError("selection_overrides.provider_health must be a mapping")
+            health_overrides = raw_health_overrides
 
         provider_metadata = {
             row.get("provider"): row
@@ -1512,6 +1518,30 @@ class AutonomousBrain:
                 model["enabled"] = False
             health["eligible"] = bool(model["enabled"]) and bool(health["credential_ready"])
             normalized_models.append(model)
+
+        # A durable health snapshot may add historical evidence to the live provider gate. It can
+        # never make an unregistered or credential-ineligible provider eligible; an explicit open
+        # historical circuit only narrows the candidate set until an operator resets it.
+        for provider, historical in health_overrides.items():
+            if not isinstance(provider, str) or not isinstance(historical, Mapping):
+                raise BrainRunError("selection_overrides.provider_health must map provider names to objects")
+            current = provider_health.setdefault(
+                provider,
+                {
+                    "registered": False,
+                    "circuit": "unconfigured",
+                    "consecutive_failures": 0,
+                    "credential_ready": False,
+                    "eligible": False,
+                },
+            )
+            current["historical"] = dict(historical)
+            if historical.get("circuit") == "open":
+                current["circuit"] = "open"
+                for model in normalized_models:
+                    if model.get("provider") == provider:
+                        model["enabled"] = False
+                        current["eligible"] = False
 
         global_state = None if ledger is None else ledger.latest_state()
         observations = _bandit_observations(global_state)
@@ -2145,6 +2175,7 @@ class AutonomousBrain:
         mission_policy: MissionPolicy | Mapping[str, Any],
         evaluator: "BrainOutcomeEvaluator",
         bandit_state: Mapping[str, Any],
+        provider_health: Mapping[str, Any] | None = None,
         ledger: BrainLearningLedger | None = None,
         memory: BrainEpisodicMemory | None = None,
         memory_query: MemoryQuery | Mapping[str, Any] | None = None,
@@ -2171,6 +2202,10 @@ class AutonomousBrain:
             raise BrainRunError("evaluator must be a BrainOutcomeEvaluator")
         if not isinstance(bandit_state, Mapping):
             raise BrainRunError("bandit_state must be a mapping")
+        if provider_health is not None:
+            if not isinstance(provider_health, Mapping):
+                raise BrainRunError("provider_health must be a mapping or None")
+            BrainLearningLedger._assert_safe(provider_health)
         BrainLearningLedger._assert_safe(bandit_state)
         if not isinstance(max_replans, int) or isinstance(max_replans, bool) or not 0 <= max_replans <= 3:
             raise BrainRunError("max_replans must be within [0, 3]")
@@ -2192,6 +2227,21 @@ class AutonomousBrain:
         if mission_options is not None and not isinstance(mission_options, Mapping):
             raise BrainRunError("mission_options must be a mapping or None")
         options = {} if mission_options is None else dict(mission_options)
+        if provider_health is not None:
+            overrides = options.get("selection_overrides", {})
+            if not isinstance(overrides, Mapping):
+                raise BrainRunError("mission_options.selection_overrides must be a mapping")
+            overrides = dict(overrides)
+            prior_health = overrides.get("provider_health", {})
+            if not isinstance(prior_health, Mapping):
+                raise BrainRunError("mission_options.provider_health must be a mapping")
+            merged_health = dict(prior_health)
+            for provider, snapshot in provider_health.items():
+                if not isinstance(provider, str) or not isinstance(snapshot, Mapping):
+                    raise BrainRunError("provider_health must map provider names to objects")
+                merged_health[provider] = dict(snapshot)
+            overrides["provider_health"] = merged_health
+            options["selection_overrides"] = overrides
         allowed_options = {
             "context",
             "contextual_observations",
@@ -2347,6 +2397,8 @@ class AutonomousBrain:
         resolver: Callable[[Mapping[str, Any]], Mapping[str, Any]],
         evaluator: "BrainOutcomeEvaluator",
         bandit_state: Mapping[str, Any],
+        provider_health: Mapping[str, Any] | None = None,
+        lease_seconds: float = 60.0,
         ledger: BrainLearningLedger | None = None,
         memory: BrainEpisodicMemory | None = None,
     ) -> BrainJobRunResult:
@@ -2369,8 +2421,14 @@ class AutonomousBrain:
             raise BrainRunError("evaluator must be a BrainOutcomeEvaluator")
         if not isinstance(bandit_state, Mapping):
             raise BrainRunError("bandit_state must be a mapping")
+        if provider_health is not None:
+            if not isinstance(provider_health, Mapping):
+                raise BrainRunError("provider_health must be a mapping or None")
+            BrainLearningLedger._assert_safe(provider_health)
+        if not isinstance(lease_seconds, (int, float)) or isinstance(lease_seconds, bool) or not 1 <= lease_seconds <= 86_400:
+            raise BrainRunError("lease_seconds must be within [1, 86400]")
         try:
-            job = store.claim(job_id, worker_id)
+            job = store.claim(job_id, worker_id, lease_seconds=lease_seconds)
         except BrainJobError as error:
             raise BrainRunError("brain job claim failed") from error
         if job.terminal:
@@ -2421,8 +2479,29 @@ class AutonomousBrain:
                 side_effect_boundary="not_started",
             )
             execution_started = True
+            resolved_for_cycle = dict(resolved)
+            if provider_health is not None:
+                options = resolved_for_cycle.get("mission_options", {})
+                if not isinstance(options, Mapping):
+                    raise BrainRunError("job mission_options must be a mapping")
+                options = dict(options)
+                overrides = options.get("selection_overrides", {})
+                if not isinstance(overrides, Mapping):
+                    raise BrainRunError("job mission_options.selection_overrides must be a mapping")
+                overrides = dict(overrides)
+                prior_health = overrides.get("provider_health", {})
+                if not isinstance(prior_health, Mapping):
+                    raise BrainRunError("job mission_options.provider_health must be a mapping")
+                merged_health = dict(prior_health)
+                for provider, snapshot in provider_health.items():
+                    if not isinstance(provider, str) or not isinstance(snapshot, Mapping):
+                        raise BrainRunError("provider_health must map provider names to objects")
+                    merged_health[provider] = dict(snapshot)
+                overrides["provider_health"] = merged_health
+                options["selection_overrides"] = overrides
+                resolved_for_cycle["mission_options"] = options
             cycle = self.run_adaptive_mission_learning_cycle(
-                **dict(resolved),
+                **resolved_for_cycle,
                 evaluator=evaluator,
                 bandit_state=bandit_state,
                 ledger=ledger,
@@ -3680,6 +3759,31 @@ class BrainOutcomeEvaluator:
         if decision.evidence_digest is None and expected_evidence_digest is not None:
             decision = replace(decision, evidence_digest=expected_evidence_digest)
         return decision
+
+    def assess_value_only_input(self, evaluation_input: Mapping[str, Any]) -> BrainEvaluatorDecision:
+        """Assess a replayed, already-projected input without requiring a live provider result.
+
+        Offline replay may retain only a caller-owned evidence packet and its digest. This public
+        seam applies the same decision validation as a live run while keeping prompts, responses,
+        credentials, and tool envelopes out of the replay path.
+        """
+
+        if not isinstance(evaluation_input, Mapping):
+            raise BrainRunError("value-only evaluator input must be a mapping")
+        BrainLearningLedger._assert_safe(evaluation_input)
+        try:
+            encoded = json.dumps(
+                dict(evaluation_input),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        except (TypeError, ValueError) as error:
+            raise BrainRunError("value-only evaluator input must be JSON-safe") from error
+        if len(encoded) > MAX_BRAIN_EVALUATOR_INPUT_BYTES:
+            raise BrainRunError("value-only evaluator input exceeds the bounded size")
+        return self._assess_input(json.loads(encoded.decode("utf-8")))
 
     def evaluate_and_record(
         self,

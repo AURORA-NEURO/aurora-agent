@@ -361,6 +361,85 @@ The adapter is a `BrainOutcomeEvaluator`, so it plugs directly into
 `run_adaptive_mission_learning_cycle(...)` and retains the same secret-safe replay and explicit
 bandit-update boundary across all five domains.
 
+## Cross-process control plane and offline adaptation
+
+`BrainControlPlane` exposes the durable job journal as a bounded cursor stream for worker
+processes, dashboards, and operators. Every page carries the journal head digest and each event
+retains its previous digest, so a consumer can detect a stale cursor or tampered state instead of
+silently missing a transition. `BrainApprovalRouter` turns a running job into a durable, role-labelled
+approval request; approval releases it back to `queued`, while denial terminally cancels it. Neither
+operation grants identity or policy authority—the caller remains responsible for authenticating the
+approver and deciding whether the requested scope is allowed.
+
+```python
+from prism_sdk import BrainControlPlane, BrainJobStore
+
+with BrainJobStore("state/brain-jobs.sqlite3") as jobs:
+    control = BrainControlPlane(jobs)
+    page = control.events(after_sequence=operator_cursor, limit=64)
+    for event in page.events:
+        audit_sink.append(event.to_dict())
+    operator_cursor = page.next_after
+
+    pending = control.approvals.pending(limit=32)
+    # The application authenticates the operator before calling approve/deny.
+    if pending:
+        control.approvals.approve(
+            pending[0].job_id,
+            approver="operator-42",
+            reason="release gate reviewed",
+        )
+```
+
+`BrainWorker` is a process-safe execution facade. Multiple workers may share the SQLite job
+journal; the lease transaction chooses one owner, the heartbeat renews the lease while the
+resolver and provider runtime work, and the existing preflight/dispatched boundary still decides
+whether a crash is safe to replay. The resolver is where an application reconnects its secret
+manager or `ProviderOnboarding` flow and creates fresh opaque `CredentialHandle` values. A person
+does not put a key into the job packet, event stream, health database, or replay case.
+
+```python
+from prism_sdk import BrainModelHealthStore, BrainWorker
+
+with BrainModelHealthStore("state/brain-health.sqlite3") as health:
+    worker = BrainWorker(
+        brain,
+        jobs,
+        worker_id="worker-us-central-1",
+        resolver=resolve_job_from_application_secret_store,
+        evaluator=evaluator,
+        bandit_state=ledger.latest_state() or {"arms": []},
+        ledger=ledger,
+        health=health,
+    )
+    result = worker.run_once()
+```
+
+`BrainModelHealthStore` retains only provider/model identity, bounded status, latency, token counts,
+quality reward, and outcome digests. It aggregates observations across workers and projects a
+historical circuit signal back into the next model-selection request without overriding live
+credential, registration, or capability gates. A provider that repeatedly fails can therefore be
+excluded deterministically until an operator resets or replaces the health state.
+
+`BrainReplayEngine` is the offline learning path. The caller rehydrates evidence from its own
+retained source, supplies the exact evidence digest, and selects a registered evaluator version.
+The engine recomputes decisions for engineering, research, operations, data, and biomedical cases,
+reports pass rates/reward by domain, detects decision-digest drift, and can call a caller-owned
+bandit updater with evidence-free metadata. It never reconstructs or replays a provider request and
+never lets replayed evidence widen tools, credentials, budgets, or approval state.
+
+```python
+from prism_sdk import BrainReplayEngine
+
+replay = BrainReplayEngine().replay(
+    caller_rehydrated_cases,
+    evaluators=DomainEvaluatorRegistry.with_builtin_profiles(),
+    bandit_state=ledger.latest_state() or {"arms": []},
+    bandit_updater=rust_bandit_update_from_value_only_metadata,
+)
+print(replay.to_dict()["by_domain"])
+```
+
 ## Provider-neutral boundary
 
 The current Python runtime supports:
