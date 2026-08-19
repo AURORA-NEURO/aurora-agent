@@ -3543,7 +3543,11 @@ class AutonomousBrain:
         options before the next stage can run.
         """
 
-        from .autonomy import AutonomousTaskBlueprint, AutonomousWorkflowCheckpoint
+        from .autonomy import (
+            AutonomousPlanRefinementResult,
+            AutonomousTaskBlueprint,
+            AutonomousWorkflowCheckpoint,
+        )
         from .control_plane import BrainApprovalRouter
         from .jobs import BrainJobError, BrainJobStore, MAX_JOB_CHECKPOINT_BYTES
 
@@ -3621,6 +3625,7 @@ class AutonomousBrain:
                 "workflow_status": result.status,
                 "bandit_state": dict(state),
                 "stage_evaluation_count": len(result.evaluations),
+                "accepted_plan_refinement_digest": checkpoint.plan_refinement_digest,
             }
             inline_candidate = {**metadata, "checkpoint_storage": "inline", "workflow_checkpoint": checkpoint_dict}
             encoded_size = len(
@@ -3691,6 +3696,7 @@ class AutonomousBrain:
                 "mission_policy", "mission_options", "route_request", "auto_route", "enforce_route_tools",
                 "require_resolved_route", "provider_tools", "tool_choice", "max_provider_failovers",
                 "tool_loop_options", "stage_evidence", "memory_tags", "resume_after_replan", "max_stage_calls",
+                "accepted_plan_refinement",
             }
             unknown_options = sorted(set(options).difference(allowed_options))
             if unknown_options:
@@ -3720,6 +3726,11 @@ class AutonomousBrain:
             if options.get("max_stage_calls") not in (None, 1):
                 raise BrainRunError("durable workflow jobs execute at most one stage per lease")
             options["max_stage_calls"] = 1
+            accepted_plan = options.get("accepted_plan_refinement")
+            if accepted_plan is not None and not isinstance(accepted_plan, AutonomousPlanRefinementResult):
+                raise BrainRunError(
+                    "workflow_options.accepted_plan_refinement must be an AutonomousPlanRefinementResult"
+                )
             if approval_released:
                 options["approve_provider_call"] = True
                 if str(previous_checkpoint.get("approval_scope", "")).endswith(":mission_dispatch"):
@@ -3747,6 +3758,9 @@ class AutonomousBrain:
                     **dict(resolving.checkpoint),
                     "workflow_id": blueprint.workflow.workflow_id,
                     "workflow_digest": blueprint.workflow.workflow_digest,
+                    "accepted_plan_refinement_digest": None
+                    if accepted_plan is None
+                    else _json_digest(accepted_plan.to_dict()),
                     "workflow_run_id": options.get("run_id") or (
                         checkpoint_value.run_id if checkpoint_value is not None else f"job-{job.job_id}"
                     ),
@@ -3764,7 +3778,7 @@ class AutonomousBrain:
                 memory=memory or self.memory,
                 **options,
             )
-            persisted = _persist_workflow_state(
+            _persist_workflow_state(
                 job,
                 workflow_result,
                 phase="workflow_stage_checkpointed",
@@ -3812,6 +3826,7 @@ class AutonomousBrain:
                         "workflow_checkpoint_digest": workflow_run.checkpoint.checkpoint_digest,
                         "completed_stage_ids": list(workflow_run.checkpoint.completed_stage_ids),
                         "stage_evaluation_count": len(workflow_result.evaluations),
+                        "accepted_plan_refinement_digest": workflow_run.checkpoint.plan_refinement_digest,
                     },
                 )
                 return BrainJobRunResult(

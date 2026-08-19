@@ -7140,6 +7140,12 @@ class AutonomousAgent:
         workflow_stage_evidence: Mapping[str, Mapping[str, Any]] | None = None,
         workflow_trajectory_discount: float = 0.90,
         workflow_trajectory_terminal_reward: float | None = None,
+        cross_domain_learning: bool = False,
+        cross_domain_trajectory_learning: bool = False,
+        cross_domain_evidence: Mapping[str, Mapping[str, Any]] | None = None,
+        cross_domain_evaluator: BrainOutcomeEvaluator | None = None,
+        cross_domain_trajectory_discount: float = 0.90,
+        cross_domain_trajectory_terminal_reward: float | None = None,
         accepted_plan_refinement: AutonomousPlanRefinementResult | None = None,
         workflow_checkpoint: AutonomousWorkflowCheckpoint | Mapping[str, Any] | None = None,
         workflow_retry_blocked: bool = False,
@@ -7155,7 +7161,9 @@ class AutonomousAgent:
         single-domain route into its checkpointable stage DAG. An accepted plan refinement is
         advisory until the caller passes it explicitly here; it can only reorder ready stages.
         ``workflow_learning`` and ``workflow_trajectory_learning`` make the evaluator boundary
-        explicit and never infer reward from provider success.
+        explicit and never infer reward from provider success. ``cross_domain_learning`` and
+        ``cross_domain_trajectory_learning`` expose the same explicit evaluator and value-only
+        bandit controls for automatically classified fan-out/synthesis routes.
         An abstained route never invokes a provider.
         """
 
@@ -7165,6 +7173,14 @@ class AutonomousAgent:
             raise BrainRunError("workflow learning modes must be booleans")
         if workflow_learning and workflow_trajectory_learning:
             raise BrainRunError("workflow_learning and workflow_trajectory_learning are mutually exclusive")
+        if not isinstance(cross_domain_learning, bool) or not isinstance(cross_domain_trajectory_learning, bool):
+            raise BrainRunError("cross-domain learning modes must be booleans")
+        if cross_domain_learning and cross_domain_trajectory_learning:
+            raise BrainRunError(
+                "cross_domain_learning and cross_domain_trajectory_learning are mutually exclusive"
+            )
+        if cross_domain_evaluator is not None and not isinstance(cross_domain_evaluator, BrainOutcomeEvaluator):
+            raise BrainRunError("cross_domain_evaluator must be a BrainOutcomeEvaluator or None")
         if not isinstance(workflow_retry_blocked, bool):
             raise BrainRunError("workflow_retry_blocked must be a boolean")
         if not workflow_execution and (
@@ -7261,6 +7277,13 @@ class AutonomousAgent:
         routed_context = self.orchestrator._route_context(kwargs.get("context"), blueprint.route)
         execution_kwargs["context"] = routed_context
         if blueprint.blueprint is not None:
+            if (
+                cross_domain_learning
+                or cross_domain_trajectory_learning
+                or cross_domain_evidence is not None
+                or cross_domain_evaluator is not None
+            ):
+                raise BrainRunError("cross-domain learning options require a cross-domain route")
             if workflow_execution:
                 if execution_kwargs.pop("learn", False):
                     if not workflow_learning and not workflow_trajectory_learning:
@@ -7347,15 +7370,67 @@ class AutonomousAgent:
                 }
                 for domain in blueprint.route.selected_domains
             ]
-            result = self.run_cross_domain(
-                task=task,
-                subtasks=subtasks,
-                credentials=credentials,
-                model_candidates=model_candidates,
-                execution_id=execution_id,
-                resume_execution=resume_execution,
-                **execution_kwargs,
-            )
+            if execution_kwargs.pop("learn", False):
+                raise BrainRunError(
+                    "cross-domain intake does not accept learn=True; select an explicit cross-domain learning mode"
+                )
+            if cross_domain_evidence is not None and not (
+                cross_domain_learning or cross_domain_trajectory_learning
+            ):
+                raise BrainRunError("cross_domain_evidence requires an explicit cross-domain learning mode")
+            if cross_domain_evaluator is not None and not (
+                cross_domain_learning or cross_domain_trajectory_learning
+            ):
+                raise BrainRunError("cross_domain_evaluator requires an explicit cross-domain learning mode")
+            bandit_state = execution_kwargs.get("bandit_state")
+            if cross_domain_learning or cross_domain_trajectory_learning:
+                bandit_state = execution_kwargs.pop("bandit_state", None)
+                if bandit_state is None:
+                    raise BrainRunError(
+                        "cross-domain learning requires caller-owned bandit_state"
+                    )
+            if cross_domain_evidence is not None:
+                if "evidence" in execution_kwargs:
+                    raise BrainRunError("cross_domain_evidence cannot be combined with evidence")
+                execution_kwargs["evidence"] = cross_domain_evidence
+            if cross_domain_evaluator is not None:
+                if "evaluator" in execution_kwargs:
+                    raise BrainRunError("cross_domain_evaluator cannot be combined with evaluator")
+                execution_kwargs["evaluator"] = cross_domain_evaluator
+            if cross_domain_learning:
+                result = self.run_cross_domain_learning(
+                    task=task,
+                    subtasks=subtasks,
+                    credentials=credentials,
+                    model_candidates=model_candidates,
+                    bandit_state=bandit_state,
+                    execution_id=execution_id,
+                    resume_execution=resume_execution,
+                    **execution_kwargs,
+                )
+            elif cross_domain_trajectory_learning:
+                execution_kwargs["trajectory_discount"] = cross_domain_trajectory_discount
+                execution_kwargs["trajectory_terminal_reward"] = cross_domain_trajectory_terminal_reward
+                result = self.run_cross_domain_trajectory_learning(
+                    task=task,
+                    subtasks=subtasks,
+                    credentials=credentials,
+                    model_candidates=model_candidates,
+                    bandit_state=bandit_state,
+                    execution_id=execution_id,
+                    resume_execution=resume_execution,
+                    **execution_kwargs,
+                )
+            else:
+                result = self.run_cross_domain(
+                    task=task,
+                    subtasks=subtasks,
+                    credentials=credentials,
+                    model_candidates=model_candidates,
+                    execution_id=execution_id,
+                    resume_execution=resume_execution,
+                    **execution_kwargs,
+                )
         return AutonomousAutoResult(status="completed", route=blueprint.route, result=result)
 
     def run_cross_domain_learning(

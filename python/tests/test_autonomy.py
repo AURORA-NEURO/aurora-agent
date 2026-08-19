@@ -1127,6 +1127,70 @@ def test_run_auto_exposes_explicit_workflow_online_learning_modes():
         server.server_close()
 
 
+def test_run_auto_exposes_explicit_cross_domain_online_learning_modes(tmp_path: Path):
+    runtime, store, server, thread = _runtime()
+    memory = BrainEpisodicMemory(tmp_path / "auto-cross-domain-learning.sqlite3")
+    workspace = _Workspace()
+    handle = store.register("openai", "auto-cross-domain-learning-secret")
+    evaluator = BrainOutcomeEvaluator(
+        lambda _input: {"reward": 0.8, "passed": True, "failed": False},
+        evaluator_id="auto-cross-domain-quality",
+        evaluator_version="1",
+    )
+    bandit_state = {"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []}
+    evidence = {
+        "route-coding": {"signals": {"schema_valid": True}},
+        "route-data": {"signals": {"evidence_complete": True}},
+        "synthesis": {"signals": {"decision_traceable": True}},
+    }
+    try:
+        agent = AutonomousAgent(workspace, runtime, memory=memory)
+        task = "write python code for the dataset pipeline"
+        online = agent.run_auto(
+            task=task,
+            credentials={"openai": handle},
+            model_candidates=_model(),
+            min_confidence=0.20,
+            min_margin=0.10,
+            cross_domain_learning=True,
+            cross_domain_evidence=evidence,
+            cross_domain_evaluator=evaluator,
+            bandit_state=bandit_state,
+            approve_provider_call=True,
+        )
+        assert online.result is not None
+        assert online.result.status == "completed"
+        assert len(online.result.evaluations) == 3
+        assert online.result.cross_domain.synthesis_result is not None
+        assert online.result.bandit_state["generation"] == 1
+
+        trajectory = agent.run_auto(
+            task=task,
+            credentials={"openai": handle},
+            model_candidates=_model(),
+            min_confidence=0.20,
+            min_margin=0.10,
+            cross_domain_trajectory_learning=True,
+            cross_domain_evidence=evidence,
+            cross_domain_evaluator=evaluator,
+            cross_domain_trajectory_discount=0.5,
+            cross_domain_trajectory_terminal_reward=0.25,
+            bandit_state=bandit_state,
+            approve_provider_call=True,
+        )
+        assert trajectory.result is not None
+        assert trajectory.result.status == "completed"
+        assert len(trajectory.result.evaluations) == 3
+        assert len(trajectory.result.trajectory_result.credited_rewards) == 3
+        public = json.dumps(trajectory.to_dict())
+        assert "auto-cross-domain-learning-secret" not in public
+    finally:
+        memory.close()
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
 def test_builtin_workflow_registry_drives_all_domains_with_valid_stage_dags():
     registry = AutonomousWorkflowRegistry.with_builtin_strategies()
     strategies = registry.catalogue()
@@ -1906,6 +1970,109 @@ def test_durable_workflow_worker_releases_one_stage_and_resumes_after_store_rest
                 for name, arguments in workspace.calls
                 if name in {"brain_model_select", "brain_model_select_contextual"}
             )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_durable_workflow_worker_rehydrates_accepted_plan_refinement_across_restart(tmp_path: Path):
+    runtime, credentials, server, thread = _structured_runtime()
+    handle = credentials.register("openai", "durable-accepted-plan-secret")
+    workspace = _Workspace()
+    brain = AutonomousBrain(workspace, runtime)
+    job_path = tmp_path / "durable-accepted-plan.sqlite3"
+    try:
+        blueprint = brain.prepare_autonomous(
+            task="Execute a restart-safe staged implementation review with an accepted plan.",
+            domain="coding",
+        )
+        stage_ids = tuple(stage.id for stage in blueprint.workflow.stages)
+        refinement = AutonomousPlanRefinementResult(
+            status="completed",
+            task_digest=blueprint.spec.task_digest,
+            base_plan_digest=content_digest(blueprint.plan),
+            workflow_digest=blueprint.workflow.workflow_digest,
+            priority_stage_ids=stage_ids,
+            focus_stage_ids=(stage_ids[1],),
+            review_required=False,
+            confidence=1.0,
+        )
+        refinement_digest = content_digest(refinement.to_dict())
+        stage_evidence = {
+            stage.id: {"signals": {signal: True for signal in stage.evaluator_signals}}
+            for stage in blueprint.workflow.stages
+        }
+        packet = {
+            "idempotency_key": "durable-accepted-plan-review",
+            "spec_digest": "c" * 64,
+            "domain": "coding",
+            "capability": "implementation_review",
+            "risk_class": "review",
+            "max_attempts": 8,
+        }
+
+        def resolve(metadata: dict[str, object]) -> dict[str, object]:
+            recorded = metadata.get("accepted_plan_refinement_digest")
+            assert recorded in {None, refinement_digest}
+            assert "restart-safe staged implementation review" not in json.dumps(metadata)
+            return {
+                "blueprint": blueprint,
+                "model_candidates": _model(),
+                "credentials": {"openai": handle},
+                "workflow_options": {
+                    "approve_provider_call": True,
+                    "stage_evidence": stage_evidence,
+                    "accepted_plan_refinement": refinement,
+                },
+            }
+
+        with BrainJobStore(job_path) as store:
+            job, _ = store.submit(packet)
+            worker = BrainWorker(
+                brain,
+                store,
+                worker_id="accepted-plan-worker-a",
+                resolver=resolve,
+                evaluator=None,
+                bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+                execution_kind="workflow_learning",
+                lease_seconds=10,
+                heartbeat_seconds=0.1,
+            )
+            first = worker.run_once(job.job_id)
+            assert first is not None
+            assert first.status == "queued"
+            assert first.workflow is not None
+            assert first.workflow.workflow.checkpoint.plan_refinement_digest == refinement_digest
+            first_record = store.get(job.job_id)
+            assert first_record is not None
+            assert first_record.checkpoint["accepted_plan_refinement_digest"] == refinement_digest
+
+        with BrainJobStore(job_path) as reopened:
+            restarted = BrainWorker(
+                brain,
+                reopened,
+                worker_id="accepted-plan-worker-b",
+                resolver=resolve,
+                evaluator=None,
+                bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+                execution_kind="workflow_learning",
+                lease_seconds=10,
+                heartbeat_seconds=0.1,
+            )
+            results = [restarted.run_once(job.job_id) for _ in range(len(stage_ids) - 1)]
+            assert all(result is not None for result in results)
+            assert results[-1] is not None
+            assert results[-1].status == "succeeded"
+            final = reopened.get(job.job_id)
+            assert final is not None
+            assert final.state == "succeeded"
+            assert final.checkpoint["result_metadata"]["accepted_plan_refinement_digest"] == refinement_digest
+            serialized = json.dumps(final.to_dict())
+            assert "restart-safe staged implementation review" not in serialized
+            assert "durable-accepted-plan-secret" not in serialized
+            assert reopened.verify_integrity()["ok"] is True
     finally:
         server.shutdown()
         thread.join(timeout=2)

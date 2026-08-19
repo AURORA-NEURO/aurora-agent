@@ -927,6 +927,38 @@ result = brain.run_cross_domain(
 )
 ```
 
+Automatic intake can use the same fan-out path with explicit online learning. Set
+`cross_domain_learning=True` when each completed child should update the value-only selector before
+the next child and synthesis decision. Set `cross_domain_trajectory_learning=True` when all child
+and synthesis outcomes should be scored as one delayed-credit trajectory. Both modes require a
+caller-owned `bandit_state`, an explicit evaluator (or a domain evaluator registry for online
+learning), and optional evidence keyed by the routed child ids plus `synthesis`:
+
+```python
+learning = agent.run_auto(
+    task="write python code for the dataset pipeline",
+    credentials=session,
+    min_confidence=0.20,
+    min_margin=0.10,
+    cross_domain_learning=True,
+    cross_domain_evaluator=quality_evaluator,
+    cross_domain_evidence={
+        "route-coding": {"signals": {"tests_passed": 1.0}},
+        "route-data": {"signals": {"lineage_checked": 1.0}},
+        "synthesis": {"signals": {"decision_traceable": 1.0}},
+    },
+    bandit_state=caller_owned_bandit_state,
+    approve_provider_call=True,
+)
+```
+
+The automatic route remains fail-closed: `learn=True` is not an implicit substitute for either
+explicit mode, missing evaluator evidence is not inferred from provider success, and the
+cross-domain evaluator cannot grant tools or effects. Sequential child updates are visible only as
+bounded evaluation receipts and bandit metadata; provider output, task text, credentials, and raw
+evidence remain outside the learning stores. Trajectory mode requires one evaluator identity so
+delayed credit has stable semantics across every child and the final synthesis.
+
 For example, a route-aware tool loop across any supported domain can be entered through the same
 facade:
 
@@ -1189,6 +1221,7 @@ def resolve_workflow(job):
         "workflow_options": {
             "approve_provider_call": application_provider_approval(job),
             "stage_evidence": application_stage_evidence(blueprint, job),
+            "accepted_plan_refinement": application_accepted_plan(blueprint, job),
         },
     }
 
@@ -1213,7 +1246,10 @@ record, the journal retains it under `workflow_checkpoint`; otherwise the caller
 only `checkpoint_storage="caller_owned"`, its content digest, completed/next stage ids, and the
 value-only bandit state. The resolver is responsible for loading that external checkpoint after a
 restart and returning it with the same digest. Structured stage output is never silently
-truncated to satisfy the SQLite journal limit.
+truncated to satisfy the SQLite journal limit. If a provider plan was accepted, the resolver must
+return the same dependency-closed `AutonomousPlanRefinementResult` on every continuation. The
+worker records its digest at stage start and in the persisted checkpoint, and the workflow runner
+rejects a missing, changed, or blueprint-incompatible plan before any resumed provider call.
 
 Provider approval is a durable state transition. A stage that cannot invoke its provider returns
 `waiting_approval`; `BrainApprovalRouter.approve(...)` releases the job to `queued`, while the
