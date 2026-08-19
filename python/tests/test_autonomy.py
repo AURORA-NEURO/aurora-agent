@@ -17,6 +17,11 @@ from prism_sdk import (
     AutonomousDomainToolRegistry,
     AutonomousExecutionJournal,
     AutonomousExecutionPolicy,
+    AutonomousPlanHoldoutCase,
+    AutonomousPlanHoldoutEvaluator,
+    AutonomousPlanRefinementResult,
+    AutonomousRoutingHoldoutCase,
+    AutonomousRoutingHoldoutEvaluator,
     AutonomousTaskRouter,
     AutonomousWorkflowRegistry,
     BrainRunError,
@@ -36,6 +41,7 @@ from prism_sdk import (
     ProviderToolResult,
     builtin_autonomous_domain_evaluator_profiles,
     openai_provider,
+    content_digest,
 )
 
 
@@ -770,6 +776,61 @@ def test_provider_free_router_covers_every_domain_and_abstains_without_evidence(
     assert unknown.reason == "no_matching_evidence"
     assert unknown.selected_domains == ()
     assert unknown.to_dict()["retention"].startswith("task_text_transient_only")
+
+
+def test_held_out_routing_and_planning_evaluators_are_value_only_and_cover_every_domain():
+    router = AutonomousTaskRouter(AutonomousDomainRegistry.with_builtin_profiles())
+    cases = tuple(
+        AutonomousRoutingHoldoutCase(
+            case_id=f"holdout-{domain}",
+            task=f"please prepare a bounded {domain} task",
+            expected_domains=(domain,),
+        )
+        for domain in AUTONOMOUS_DOMAINS
+    )
+    routing_report = AutonomousRoutingHoldoutEvaluator(
+        router,
+        evaluator_id="routing-holdout",
+        evaluator_version="2026-08-19",
+    ).evaluate(cases)
+    assert routing_report.case_count == len(AUTONOMOUS_DOMAINS)
+    assert routing_report.exact_match_count == len(AUTONOMOUS_DOMAINS)
+    assert routing_report.to_dict()["coverage"] == 1.0
+    public_routing = json.dumps(routing_report.to_dict())
+    assert "please prepare" not in public_routing
+    assert "expected_domains" not in public_routing
+
+    agent = AutonomousAgent(_Workspace(), LLMRuntime())
+    plan_cases = []
+    for domain in AUTONOMOUS_DOMAINS:
+        blueprint = agent.prepare(task=f"prepare a bounded {domain} workflow", domain=domain)
+        stage_ids = tuple(stage.id for stage in blueprint.workflow.stages)
+        refinement = AutonomousPlanRefinementResult(
+            status="completed",
+            task_digest=blueprint.spec.task_digest,
+            base_plan_digest=content_digest(blueprint.plan),
+            workflow_digest=blueprint.workflow.workflow_digest,
+            priority_stage_ids=stage_ids,
+            focus_stage_ids=(stage_ids[1],),
+            review_required=False,
+            confidence=1.0,
+        )
+        plan_cases.append(
+            AutonomousPlanHoldoutCase(
+                case_id=f"plan-holdout-{domain}",
+                blueprint=blueprint,
+                refinement=refinement,
+                expected_priority_stage_ids=stage_ids,
+            )
+        )
+    plan_report = AutonomousPlanHoldoutEvaluator(
+        evaluator_id="planning-holdout",
+        evaluator_version="2026-08-19",
+    ).evaluate(tuple(plan_cases))
+    assert plan_report.case_count == len(AUTONOMOUS_DOMAINS)
+    assert plan_report.exact_order_count == len(AUTONOMOUS_DOMAINS)
+    assert plan_report.to_dict()["exact_order_accuracy"] == 1.0
+    assert "fix the Rust" not in json.dumps(plan_report.to_dict())
 
 
 def test_provider_semantic_router_reconciles_all_domains_and_builds_a_blueprint():

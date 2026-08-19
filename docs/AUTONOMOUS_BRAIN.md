@@ -423,6 +423,40 @@ digests; accepting the proposal remains an application decision. This keeps mode
 planning useful for novel tasks while preserving deterministic workflow and caller approval as
 the execution authority.
 
+### Held-out routing and planning evaluation
+
+Use the held-out evaluators with caller-owned cases that are never passed as labels or reference
+orders to the router or provider. Routing reports separate coverage from exact-match accuracy and
+retain only case digests, route digests, and aggregate counts:
+
+```python
+from prism_sdk import (
+    AutonomousRoutingHoldoutCase,
+    AutonomousRoutingHoldoutEvaluator,
+)
+
+report = AutonomousRoutingHoldoutEvaluator(
+    agent.orchestrator.router,
+    evaluator_id="routing-holdout",
+    evaluator_version="2026-08-19",
+).evaluate(
+    (
+        AutonomousRoutingHoldoutCase(
+            case_id="private-case-001",
+            task=holdout_task,
+            expected_domains=("neuroscience",),
+        ),
+    )
+)
+```
+
+`AutonomousPlanHoldoutCase` additionally binds a provider planning proposal to the exact
+workflow and base-plan digests before scoring stage-order fidelity. This prevents a result from
+one domain, workflow version, or task from being counted against another. Both evaluators are
+offline, do not invoke tools or providers, require the `holdout` split explicitly, and expose
+`authorization="evaluation_only; no_tools_or_effects_authorized"`. They measure the decision
+surface without becoming a second execution path or allowing a model to author its own reward.
+
 ### Restart-safe autonomous execution and tool outcome learning
 
 Long-horizon autonomy has a second persistence layer in addition to provider health, episodic

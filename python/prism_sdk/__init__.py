@@ -151,6 +151,16 @@ from .autonomy import (
     builtin_autonomous_workflow_strategies,
     builtin_autonomous_domain_profiles,
 )
+from .autonomy_evals import (
+    AUTONOMOUS_HOLDOUT_EVALUATION_SCHEMA,
+    MAX_AUTONOMOUS_HOLDOUT_CASES,
+    AutonomousPlanHoldoutCase,
+    AutonomousPlanHoldoutEvaluator,
+    AutonomousPlanHoldoutReport,
+    AutonomousRoutingHoldoutCase,
+    AutonomousRoutingHoldoutEvaluator,
+    AutonomousRoutingHoldoutReport,
+)
 from .domain_tools import (
     DOMAIN_TOOL_EXECUTION_STATUSES,
     DOMAIN_TOOL_REGISTRY_SCHEMA,
@@ -4563,6 +4573,14 @@ __all__ = [
     "AutonomousWorkflowStageResult",
     "builtin_autonomous_workflow_strategies",
     "builtin_autonomous_domain_profiles",
+    "AUTONOMOUS_HOLDOUT_EVALUATION_SCHEMA",
+    "MAX_AUTONOMOUS_HOLDOUT_CASES",
+    "AutonomousRoutingHoldoutCase",
+    "AutonomousRoutingHoldoutEvaluator",
+    "AutonomousRoutingHoldoutReport",
+    "AutonomousPlanHoldoutCase",
+    "AutonomousPlanHoldoutEvaluator",
+    "AutonomousPlanHoldoutReport",
     "DOMAIN_TOOL_EXECUTION_STATUSES",
     "DOMAIN_TOOL_REGISTRY_SCHEMA",
     "DOMAIN_TOOL_RISK_CLASSES",

@@ -339,6 +339,40 @@ export interface AutonomousPlanRefinementResult extends JsonObject {
   authorization: string;
 }
 
+export interface AutonomousRoutingHoldoutReport extends JsonObject {
+  schema: "bioprism-python-autonomous-holdout-evaluation/0.1" | string;
+  evaluator_id: string;
+  evaluator_version: string;
+  split: "holdout";
+  case_count: number;
+  routed_count: number;
+  abstained_count: number;
+  exact_match_count: number;
+  exact_accuracy: number;
+  coverage: number;
+  selective_accuracy: number;
+  case_statuses: JsonObject[];
+  confusion_digest: string;
+  retention: string;
+  authorization: string;
+}
+
+export interface AutonomousPlanHoldoutReport extends JsonObject {
+  schema: "bioprism-python-autonomous-holdout-evaluation/0.1" | string;
+  evaluator_id: string;
+  evaluator_version: string;
+  split: "holdout";
+  case_count: number;
+  completed_count: number;
+  exact_order_count: number;
+  review_count: number;
+  exact_order_accuracy: number;
+  case_statuses: JsonObject[];
+  order_digest: string;
+  retention: string;
+  authorization: string;
+}
+
 /** Versioned planning/evidence contract shared with the Python autonomous façade. */
 export interface AutonomousDomainPack extends JsonObject {
   schema: "bioprism-python-autonomous-domain-pack/0.1" | string;
