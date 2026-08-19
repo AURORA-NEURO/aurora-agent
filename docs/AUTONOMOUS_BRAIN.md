@@ -1665,6 +1665,40 @@ the process an embedding application uses after a person has completed provider 
 5. Supply an approval callback for effectful tools. Read-only tools may be automatically executed
    through the workspace adapter, while effectful tools remain refused without approval.
 
+For a real MCP-backed workspace, use the bulk binding path after the application snapshots
+`tools/list`. The catalogue owns the exact schemas; the application owns the policy mapping. Every
+tool must be explicitly bound by default, so a newly exposed server tool cannot silently become
+available to the model or inherit a guessed risk class:
+
+```python
+agent = AutonomousAgent(workspace, runtime, model_catalogue=model_catalogue)
+agent.register_workspace_tools(
+    {
+        "developer_platform_status": {
+            "domains": ["coding", "operations", "cross_domain"],
+            "capability": "observability",
+            "risk_class": "read_only",
+            "read_only": True,
+            "approval_required": False,
+        },
+        "release_apply": {
+            "domains": ["coding", "operations"],
+            "capability": "delivery",
+            "risk_class": "external_effect",
+            "read_only": False,
+            "approval_required": True,
+        },
+    }
+)
+```
+
+`register_workspace_tools()` reads `workspace.tool_catalogue()` when no catalogue snapshot is
+provided, validates all bindings before mutating the registry, and wires the existing
+caller-owned `workspace.tool()` adapter when available. Use `require_all=False` only when the
+application intentionally wants a partial allow-list. Unknown binding names and duplicate
+conflicts still fail closed. The resulting registry is provider-visible metadata; it does not
+authorize a call, grant credentials, or bypass the read-only/effect approval boundary.
+
 The registry is metadata and schema composition; it does not grant authority. A provider-generated
 tool call is still an intent. `AutonomousDomainToolRuntime` validates the call against the exact
 registered schema, rejects credential-shaped fields, applies the read-only/effect approval policy,

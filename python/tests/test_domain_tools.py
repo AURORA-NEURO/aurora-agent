@@ -5,9 +5,11 @@ import pytest
 from prism_sdk import (
     AUTONOMOUS_DOMAINS,
     AutonomousDomainTool,
+    AutonomousDomainToolBinding,
     AutonomousDomainToolRegistry,
     AutonomousDomainToolRuntime,
     ProviderToolCall,
+    ToolCatalogue,
 )
 from prism_sdk.errors import ArgumentError
 
@@ -124,4 +126,79 @@ def test_effectful_tools_cannot_be_declared_without_approval() -> None:
             risk_class="external_effect",
             read_only=False,
             approval_required=False,
+        )
+
+
+def test_registry_binds_a_live_catalogue_only_with_explicit_policy_and_is_atomic() -> None:
+    catalogue = ToolCatalogue.from_definitions(
+        [
+            {
+                "name": "operations_status",
+                "description": "Read bounded operational status.",
+                "inputSchema": {"type": "object", "additionalProperties": False},
+            },
+            {
+                "name": "release_apply",
+                "description": "Apply a reviewed release.",
+                "inputSchema": {"type": "object", "additionalProperties": False},
+            },
+        ]
+    )
+    registry = AutonomousDomainToolRegistry()
+
+    with pytest.raises(ArgumentError, match="missing explicit bindings"):
+        registry.register_mcp_catalogue(
+            catalogue,
+            {
+                "operations_status": AutonomousDomainToolBinding(
+                    "operations_status", ("operations",), "observability"
+                )
+            },
+        )
+    assert registry.catalogue() == []
+
+    registered = registry.register_mcp_catalogue(
+        catalogue,
+        {
+            "operations_status": {
+                "domains": ["operations", "cross_domain"],
+                "capability": "observability",
+            },
+            "release_apply": AutonomousDomainToolBinding(
+                "release_apply",
+                ("operations",),
+                "delivery",
+                risk_class="external_effect",
+                read_only=False,
+                approval_required=True,
+            ),
+        },
+    )
+
+    assert [tool.name for tool in registered] == ["operations_status", "release_apply"]
+    assert registry.resolve("operations_status").parameters == catalogue.get("operations_status").input_schema
+    assert registry.resolve("release_apply").approval_required is True
+    assert registry.to_dict()["execution"] == "metadata_only"
+
+
+def test_registry_rejects_binding_for_a_tool_not_in_the_live_catalogue() -> None:
+    catalogue = ToolCatalogue.from_definitions(
+        [
+            {
+                "name": "operations_status",
+                "inputSchema": {"type": "object"},
+            }
+        ]
+    )
+    with pytest.raises(ArgumentError, match="absent from the live catalogue"):
+        AutonomousDomainToolRegistry().register_mcp_catalogue(
+            catalogue,
+            {
+                "typo_status": {
+                    "name": "typo_status",
+                    "domains": ["operations"],
+                    "capability": "observability",
+                }
+            },
+            require_all=False,
         )

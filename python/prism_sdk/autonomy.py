@@ -43,6 +43,7 @@ from .brain import (
 )
 from .domain_tools import (
     AutonomousDomainTool,
+    AutonomousDomainToolBinding,
     AutonomousDomainToolReceipt,
     AutonomousDomainToolRegistry,
     AutonomousDomainToolRuntime,
@@ -71,6 +72,7 @@ from .llm_runtime import (
 )
 from .memory import BrainEpisodicMemory, BrainMemoryError, MemoryQuery
 from .mission import MissionPolicy
+from .tooling import ToolCatalogue, ToolDefinition
 
 
 AUTONOMY_SCHEMA = "bioprism-python-autonomous-task/0.1"
@@ -7759,6 +7761,46 @@ class AutonomousAgent:
             )
         return registered
 
+    def register_workspace_tools(
+        self,
+        bindings: Mapping[str, AutonomousDomainToolBinding | Mapping[str, Any]],
+        *,
+        catalogue: ToolCatalogue | Sequence[Mapping[str, Any] | ToolDefinition] | None = None,
+        require_all: bool = True,
+        replace_existing: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Bind the workspace's live MCP catalogue into the autonomous tool registry.
+
+        The workspace supplies authoritative schemas and the caller supplies every domain,
+        capability, and risk decision. If no registry was provided at construction, this
+        method creates one; registration still grants no execution authority. When the
+        workspace exposes ``tool``, the default runtime is wired to that caller-owned adapter,
+        preserving the existing approval and metadata-only receipt boundary.
+        """
+
+        if catalogue is None:
+            catalogue_reader = getattr(self.brain.workspace, "tool_catalogue", None)
+            if not callable(catalogue_reader):
+                raise BrainRunError("register_workspace_tools requires a catalogue or workspace.tool_catalogue()")
+            catalogue = catalogue_reader()
+        if self.tool_registry is None:
+            self.tool_registry = AutonomousDomainToolRegistry()
+        try:
+            registered = self.tool_registry.register_mcp_catalogue(
+                catalogue,
+                bindings,
+                require_all=require_all,
+                replace_existing=replace_existing,
+            )
+        except (ArgumentError, TypeError, ValueError) as error:
+            raise BrainRunError("workspace tool binding failed") from error
+        if self.tool_runtime is None and hasattr(self.brain.workspace, "tool") and callable(getattr(self.brain.workspace, "tool")):
+            self.tool_runtime = AutonomousDomainToolRuntime(
+                self.tool_registry,
+                executor=lambda resolved, arguments: self.brain.workspace.tool(resolved.name, dict(arguments)),
+            )
+        return [tool.to_dict() for tool in registered]
+
     def tools(self, domain: str | None = None) -> list[dict[str, Any]]:
         """Return metadata-only domain tools visible to a domain or to the full registry."""
 
@@ -8973,6 +9015,7 @@ __all__ = [
     "AutonomousRouteProposal",
     "AutonomousTaskRouter",
     "AutonomousDomainTool",
+    "AutonomousDomainToolBinding",
     "AutonomousDomainToolRegistry",
     "AutonomousDomainToolRuntime",
     "AutonomousCrossDomainBlueprint",

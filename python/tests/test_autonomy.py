@@ -14,6 +14,7 @@ from prism_sdk import (
     AutonomousDomainRegistry,
     AutonomousDomainPackRegistry,
     AutonomousDomainTool,
+    AutonomousDomainToolBinding,
     AutonomousDomainToolRegistry,
     AutonomousExecutionJournal,
     AutonomousExecutionPolicy,
@@ -326,6 +327,50 @@ def _model() -> list[dict[str, object]]:
             "reliability": 0.95,
         }
     ]
+
+
+def test_agent_bootstraps_a_live_workspace_catalogue_with_explicit_bindings():
+    runtime, _store, server, thread = _runtime()
+
+    class CatalogueWorkspace(_Workspace):
+        def tool_catalogue(self) -> list[dict[str, object]]:
+            return [
+                {
+                    "name": "developer_platform_status",
+                    "description": "Read bounded workspace status.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {"scope": {"type": "string"}},
+                        "required": ["scope"],
+                        "additionalProperties": False,
+                    },
+                }
+            ]
+
+    agent = AutonomousAgent(
+        CatalogueWorkspace(),
+        runtime,
+        model_catalogue=ModelCatalogue(_model()),
+    )
+    try:
+        registered = agent.register_workspace_tools(
+            {
+                "developer_platform_status": AutonomousDomainToolBinding(
+                    "developer_platform_status",
+                    ("coding", "operations", "cross_domain"),
+                    "observability",
+                )
+            }
+        )
+        assert [tool["name"] for tool in registered] == ["developer_platform_status"]
+        assert agent.tool_registry is not None
+        assert agent.tool_runtime is not None
+        assert agent.tools("operations")[0]["capability"] == "observability"
+        assert agent.domain_pack_tool_plan("operations")["covered_tool_capabilities"] == ["observability"]
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
 
 
 def _runtime() -> tuple[LLMRuntime, CredentialStore, HTTPServer, threading.Thread]:

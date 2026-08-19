@@ -36,6 +36,7 @@ from .tooling import ToolCatalogue, ToolDefinition, ToolSchemaError
 
 DOMAIN_TOOL_SCHEMA = "bioprism-python-autonomous-domain-tool/0.1"
 DOMAIN_TOOL_REGISTRY_SCHEMA = "bioprism-python-autonomous-domain-tool-registry/0.1"
+DOMAIN_TOOL_BINDING_SCHEMA = "bioprism-python-autonomous-domain-tool-binding/0.1"
 DOMAIN_TOOL_RISK_CLASSES = (
     "read_only",
     "reversible_effect",
@@ -243,6 +244,77 @@ class AutonomousDomainTool:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class AutonomousDomainToolBinding:
+    """Explicit application-owned policy for binding one live MCP tool to the brain.
+
+    A binding deliberately contains no executor and no credential material. It is the
+    auditable policy layer between a live ``tools/list`` definition and the provider-facing
+    domain registry. Tool names, descriptions, and schemas are taken from the authoritative
+    catalogue; only domain/capability/effect metadata is supplied by the application.
+    """
+
+    name: str
+    domains: tuple[str, ...]
+    capability: str
+    risk_class: str = "read_only"
+    read_only: bool = True
+    approval_required: bool = False
+
+    def __post_init__(self) -> None:
+        name = _identifier("domain tool binding name", self.name)
+        domains = _sequence("domain tool binding domains", self.domains, maximum=MAX_DOMAIN_TOOL_DOMAINS)
+        capability = _identifier("domain tool binding capability", self.capability)
+        if self.risk_class not in DOMAIN_TOOL_RISK_CLASSES:
+            raise ArgumentError(
+                "domain tool binding risk_class must be one of: " + ", ".join(DOMAIN_TOOL_RISK_CLASSES)
+            )
+        if not isinstance(self.read_only, bool) or not isinstance(self.approval_required, bool):
+            raise ArgumentError("domain tool binding safety flags must be booleans")
+        if self.read_only and self.risk_class != "read_only":
+            raise ArgumentError("read-only bindings must use risk_class=read_only")
+        if not self.read_only and not self.approval_required:
+            raise ArgumentError("effectful bindings must require approval")
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "domains", domains)
+        object.__setattr__(self, "capability", capability)
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "AutonomousDomainToolBinding":
+        if not isinstance(value, Mapping):
+            raise ArgumentError("domain tool binding must be a mapping")
+        name = value.get("name", value.get("tool"))
+        domains = value.get("domains")
+        capability = value.get("capability")
+        if not isinstance(name, str):
+            raise ArgumentError("domain tool binding requires a string name")
+        if not isinstance(domains, Sequence) or isinstance(domains, (str, bytes)):
+            raise ArgumentError(f"domain tool binding {name!r} requires domains")
+        if not isinstance(capability, str):
+            raise ArgumentError(f"domain tool binding {name!r} requires a capability")
+        return cls(
+            name=name,
+            domains=tuple(domains),
+            capability=capability,
+            risk_class=value.get("risk_class", "read_only"),
+            read_only=value.get("read_only", True),
+            approval_required=value.get("approval_required", False),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": DOMAIN_TOOL_BINDING_SCHEMA,
+            "name": self.name,
+            "domains": list(self.domains),
+            "capability": self.capability,
+            "risk_class": self.risk_class,
+            "read_only": self.read_only,
+            "approval_required": self.approval_required,
+            "authorization": "metadata_only; registration_is_not_authorization",
+            "secret_material": "never_returned",
+        }
+
+
 class AutonomousDomainToolRegistry:
     """Bounded, duplicate-free registry of tools available to the autonomous brain."""
 
@@ -287,6 +359,71 @@ class AutonomousDomainToolRegistry:
             ),
             replace_existing=replace_existing,
         )
+
+    def register_mcp_catalogue(
+        self,
+        catalogue: ToolCatalogue | Sequence[Mapping[str, Any] | ToolDefinition],
+        bindings: Mapping[str, AutonomousDomainToolBinding | Mapping[str, Any]],
+        *,
+        require_all: bool = True,
+        replace_existing: bool = False,
+    ) -> tuple[AutonomousDomainTool, ...]:
+        """Atomically bind a live MCP catalogue using explicit application policy.
+
+        ``tools/list`` definitions are never interpreted as permissions. Every registered
+        definition must have a caller-supplied binding unless ``require_all=False``; unknown
+        binding names are rejected so a typo cannot silently leave a tool ungoverned. All
+        definitions and bindings are validated before this registry is mutated.
+        """
+
+        snapshot = catalogue if isinstance(catalogue, ToolCatalogue) else ToolCatalogue.from_definitions(catalogue)
+        if not isinstance(bindings, Mapping):
+            raise ArgumentError("domain tool bindings must be a mapping keyed by tool name")
+        definitions = {definition.name: definition for definition in snapshot.definitions}
+        normalized: dict[str, AutonomousDomainToolBinding] = {}
+        for key, value in bindings.items():
+            if not isinstance(key, str) or not key.strip():
+                raise ArgumentError("domain tool binding keys must be non-empty strings")
+            if isinstance(value, AutonomousDomainToolBinding):
+                binding = value
+            else:
+                if not isinstance(value, Mapping):
+                    raise ArgumentError(f"domain tool binding {key!r} must be a mapping")
+                raw_binding = dict(value)
+                raw_binding.setdefault("name", key)
+                binding = AutonomousDomainToolBinding.from_mapping(raw_binding)
+            if binding.name != key:
+                raise ArgumentError(
+                    f"domain tool binding key {key!r} does not match binding name {binding.name!r}"
+                )
+            normalized[key] = binding
+        unknown = sorted(set(normalized).difference(definitions))
+        if unknown:
+            raise ArgumentError("bindings reference tools absent from the live catalogue: " + ", ".join(unknown))
+        missing = sorted(set(definitions).difference(normalized))
+        if require_all and missing:
+            raise ArgumentError("live catalogue tools are missing explicit bindings: " + ", ".join(missing))
+        selected = [
+            AutonomousDomainTool.from_mcp_definition(
+                definition,
+                domains=normalized[definition.name].domains,
+                capability=normalized[definition.name].capability,
+                risk_class=normalized[definition.name].risk_class,
+                read_only=normalized[definition.name].read_only,
+                approval_required=normalized[definition.name].approval_required,
+            )
+            for definition in snapshot.definitions
+            if definition.name in normalized
+        ]
+        selected_names = {tool.name for tool in selected}
+        existing_conflicts = sorted(selected_names.intersection(self._tools))
+        if existing_conflicts and not replace_existing:
+            raise ArgumentError("domain tools are already registered: " + ", ".join(existing_conflicts))
+        if len(self._tools) - len(existing_conflicts) + len(selected) > MAX_DOMAIN_TOOLS:
+            raise ArgumentError(f"domain tools may contain at most {MAX_DOMAIN_TOOLS} entries")
+        for tool in selected:
+            self._tools[tool.name] = tool
+        return tuple(selected)
 
     def resolve(self, name: str) -> AutonomousDomainTool:
         _identifier("domain tool name", name)
@@ -727,6 +864,7 @@ class AutonomousDomainToolRuntime:
 
 
 __all__ = [
+    "DOMAIN_TOOL_BINDING_SCHEMA",
     "DOMAIN_TOOL_EXECUTION_STATUSES",
     "DOMAIN_TOOL_REGISTRY_SCHEMA",
     "DOMAIN_TOOL_RISK_CLASSES",
@@ -734,6 +872,7 @@ __all__ = [
     "MAX_DOMAIN_TOOL_CALLS",
     "MAX_DOMAIN_TOOLS",
     "AutonomousDomainTool",
+    "AutonomousDomainToolBinding",
     "AutonomousDomainToolReceipt",
     "AutonomousDomainToolRegistry",
     "AutonomousDomainToolRuntime",
