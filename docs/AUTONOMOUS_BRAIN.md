@@ -326,6 +326,42 @@ tool-call counts, final provider/model identity, and request identity; provider 
 tool envelopes are not persisted. This makes evaluator feedback usable for actual multi-domain
 work without turning model self-report into reward.
 
+For applications that evaluate several execution shapes, `BrainOutcomeEvaluator` provides the
+standard adapter boundary. Its callback receives a bounded projection with the run identity,
+selection/prompt/plan/outcome digests, provider status and usage counts, route identity, tool-loop
+counts, mission preflight/execution counts, and optional caller-owned evidence. It never receives
+the runtime credential, prompt text, provider response text, or opaque tool envelopes:
+
+```python
+from prism_sdk import BrainOutcomeEvaluator
+
+quality_gate = BrainOutcomeEvaluator(
+    lambda observation: {
+        "reward": 0.9 if observation["evidence"]["schema_valid"] else 0.0,
+        "passed": observation["evidence"]["schema_valid"],
+        "failure_class": None if observation["evidence"]["schema_valid"] else "schema_invalid",
+    },
+    evaluator_id="held-out-quality-v2",
+    evaluator_version="2026-08-18",
+)
+
+quality_gate.evaluate_and_record(
+    brain,
+    result,  # BrainRunResult, BrainToolLoopResult, or BrainMissionResult
+    bandit_state=bandit_state,
+    evidence={"schema_valid": True, "domain": "engineering"},
+    ledger=ledger,
+)
+```
+
+The adapter JSON-bounds and secret-scans evidence, computes its SHA-256 digest, and requires any
+callback-supplied digest to match. Callback decisions are limited to reward/status fields and
+value-only digests; arbitrary notes, answer copies, credentials, and unsupported fields are
+rejected. The Rust kernel remains the final validator for the configured reward policy and
+advances the caller-owned bandit state only after the explicit assessment is accepted. This
+keeps domain-specific grading pluggable while preserving one replayable learning contract across
+all catalogued domains.
+
 The caller may feed `ledger.latest_state()` into the next `brain_bandit_select` request after
 reviewing the evaluator provenance. The ledger is append-only, bounded, fsynced per record, and
 rejects secret-shaped fields. This is online bandit adaptation over explicit observations—not an

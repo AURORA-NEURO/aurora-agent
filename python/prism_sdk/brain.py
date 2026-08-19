@@ -9,7 +9,7 @@ itself tools, side effects, or credentials.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import json
 import os
@@ -23,6 +23,7 @@ from .llm_runtime import (
     LLMRuntime,
     ProviderRequest,
     ProviderResponse,
+    ProviderError,
     ProviderTool,
     ProviderToolCall,
     ProviderToolLoopResult,
@@ -84,6 +85,10 @@ MAX_ROUTE_PROMPT_SCHEMAS = 128
 MAX_MISSION_AUTHORIZATION_CALLS = 128
 MAX_MISSION_AUTHORIZATION_RESULT_BYTES = 750_000
 MAX_MISSION_AUTHORIZATION_STEP_OUTPUT_BYTES = 350_000
+MAX_ADAPTIVE_ROUTE_LABEL_BYTES = 256
+MAX_BRAIN_EVALUATOR_ID_BYTES = 128
+MAX_BRAIN_EVALUATOR_EVIDENCE_BYTES = 350_000
+MAX_BRAIN_EVALUATOR_INPUT_BYTES = 500_000
 
 
 def _bounded_route_prompt_context(route: Mapping[str, Any]) -> dict[str, Any]:
@@ -143,6 +148,65 @@ def _bounded_route_prompt_context(route: Mapping[str, Any]) -> dict[str, Any]:
     return packet
 
 
+def _adaptive_route_context(
+    route: Mapping[str, Any],
+    *,
+    task: str,
+    route_request: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Derive bounded contextual-selection labels from one authoritative live route."""
+
+    if route.get("workflow") != "capability_route":
+        raise BrainRunError("adaptive route must be a capability_route report")
+    if route.get("goal") != task:
+        raise BrainRunError("adaptive route goal must match the task")
+    unresolved = route.get("unresolved_needs", [])
+    if not isinstance(unresolved, list) or any(not isinstance(item, str) for item in unresolved):
+        raise BrainRunError("adaptive route returned malformed unresolved_needs")
+    if unresolved:
+        raise BrainRunError("adaptive route contains unresolved needs: " + ", ".join(unresolved))
+    needs = route.get("needs", [])
+    if not isinstance(needs, list) or any(not isinstance(need, Mapping) for need in needs):
+        raise BrainRunError("adaptive route returned malformed needs")
+    domains: set[str] = set()
+    capabilities: set[str] = set()
+    for need in needs:
+        for key, target in (("candidate_domains", domains), ("candidate_groups", capabilities)):
+            values = need.get(key, [])
+            if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
+                raise BrainRunError(f"adaptive route need {key} must be a string list")
+            target.update(value for value in values if value.strip())
+    coverage = route.get("route_coverage")
+    if isinstance(coverage, Mapping):
+        for value in coverage.get("candidate_domains", []):
+            if isinstance(value, str) and value.strip():
+                domains.add(value)
+        for value in coverage.get("candidate_groups", []):
+            if isinstance(value, str) and value.strip():
+                capabilities.add(value)
+    if not domains:
+        domains.add("cross_domain")
+    if not capabilities:
+        capabilities.add("cross_domain")
+    risk_class = route_request.get("risk_class", "routed_standard")
+    task_family = route_request.get("task_family", "routed_task")
+    if not isinstance(risk_class, str) or not risk_class.strip():
+        raise BrainRunError("route_request.risk_class must be a non-empty string")
+    if not isinstance(task_family, str) or not task_family.strip():
+        raise BrainRunError("route_request.task_family must be a non-empty string")
+    context = {
+        "domain": "cross_domain:" + ",".join(sorted(domains)),
+        "capability": "route:" + ",".join(sorted(capabilities)),
+        "risk_class": risk_class,
+        "task_family": task_family,
+    }
+    for name, value in context.items():
+        if len(value.encode("utf-8")) > MAX_ADAPTIVE_ROUTE_LABEL_BYTES:
+            raise BrainRunError(f"adaptive route context {name} exceeds the bounded label size")
+    BrainLearningLedger._assert_safe(context)
+    return context
+
+
 class BrainLearningLedger:
     """Append-only, value-only persistence for evaluator judgments and bandit state.
 
@@ -161,6 +225,10 @@ class BrainLearningLedger:
         "secret",
         "access_token",
         "refresh_token",
+    }
+    _FORBIDDEN_NORMALIZED_FIELDS = {
+        "".join(character for character in field if character.isalnum())
+        for field in _FORBIDDEN_FIELDS
     }
 
     def __init__(
@@ -278,10 +346,15 @@ class BrainLearningLedger:
     def _assert_safe(cls, value: Any) -> None:
         if isinstance(value, Mapping):
             for key, child in value.items():
-                if isinstance(key, str) and key.lower() in cls._FORBIDDEN_FIELDS:
+                normalized_key = (
+                    "".join(character for character in key.lower() if character.isalnum())
+                    if isinstance(key, str)
+                    else ""
+                )
+                if normalized_key in cls._FORBIDDEN_NORMALIZED_FIELDS:
                     raise BrainRunError("learning evidence contains a forbidden secret field")
                 cls._assert_safe(child)
-        elif isinstance(value, list):
+        elif isinstance(value, (list, tuple)):
             for child in value:
                 cls._assert_safe(child)
 
@@ -380,6 +453,7 @@ class BrainRunResult:
     plan: Mapping[str, Any]
     response: ProviderResponse | None
     outcome_digest: str
+    provider_failover: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -390,6 +464,7 @@ class BrainRunResult:
             "plan": dict(self.plan),
             "response": None if self.response is None else self.response.to_dict(),
             "outcome_digest": self.outcome_digest,
+            "provider_failover": None if self.provider_failover is None else dict(self.provider_failover),
             "credential_posture": "handle_only_not_serialized",
             "execution": "provider_call_only",
             "tool_execution": "not_started",
@@ -1025,6 +1100,21 @@ class AutonomousBrain:
             for row in self.runtime.provider_metadata()
             if isinstance(row, Mapping) and isinstance(row.get("provider"), str)
         }
+        provider_health: dict[str, dict[str, Any]] = {}
+        for provider, metadata in provider_metadata.items():
+            status = self.runtime.provider_status(provider)
+            provider_health[provider] = {
+                "registered": True,
+                "circuit": status.get("circuit"),
+                "consecutive_failures": status.get("consecutive_failures", 0),
+                "credential_ready": (
+                    not bool(metadata.get("requires_credential", True))
+                    or (
+                        isinstance(credentials.get(provider), CredentialHandle)
+                        and credentials[provider].provider == provider
+                    )
+                ),
+            }
         normalized_models: list[dict[str, Any]] = []
         for candidate in model_candidates:
             if not isinstance(candidate, Mapping):
@@ -1062,12 +1152,25 @@ class AutonomousBrain:
             )
             requires_credential = bool(model["requires_credential"]) or runtime_requires_credential
             model["requires_credential"] = requires_credential
+            health = provider_health.get(provider)
+            if health is None:
+                health = provider_health[provider] = {
+                    "registered": False,
+                    "circuit": "unconfigured",
+                    "consecutive_failures": 0,
+                    "credential_ready": False,
+                    "eligible": False,
+                }
             if registered is None:
                 model["enabled"] = False
             elif requires_credential:
                 handle = credentials.get(provider)
                 if handle is None or not isinstance(handle, CredentialHandle) or handle.provider != provider:
                     model["enabled"] = False
+            health = provider_health[provider]
+            if health["circuit"] == "open":
+                model["enabled"] = False
+            health["eligible"] = bool(model["enabled"])
             normalized_models.append(model)
 
         global_state = None if ledger is None else ledger.latest_state()
@@ -1098,6 +1201,7 @@ class AutonomousBrain:
                 "requested_output_tokens": requested_output_tokens,
                 "models": normalized_models,
                 "observations": observations,
+                "provider_health": provider_health,
             }
         )
         if max_cost_per_million_tokens is not None:
@@ -1115,6 +1219,77 @@ class AutonomousBrain:
         except (TypeError, ValueError) as error:
             raise BrainRunError("adaptive model-selection request must be JSON-safe") from error
         return request
+
+    def _prepare_adaptive_route(
+        self,
+        *,
+        task: str,
+        route_request: Mapping[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        if not isinstance(route_request, Mapping):
+            raise BrainRunError("route_request must be a mapping")
+        BrainLearningLedger._assert_safe(route_request)
+        arguments = dict(route_request)
+        supplied_goal = arguments.get("goal")
+        if supplied_goal is not None and supplied_goal != task:
+            raise BrainRunError("route_request.goal must match the adaptive task")
+        arguments["goal"] = task
+        arguments.setdefault("needs", [{"id": "task", "query": task}])
+        arguments.setdefault("include_tools", True)
+        arguments.setdefault("max_tools", 128)
+        try:
+            encoded = json.dumps(
+                arguments,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        except (TypeError, ValueError) as error:
+            raise BrainRunError("route_request must be JSON-safe") from error
+        if len(encoded) > MAX_ROUTE_REQUEST_BYTES:
+            raise BrainRunError("route_request exceeds the bounded size")
+        response = self.workspace.tool("capability_route", arguments)
+        if not isinstance(response, Mapping):
+            raise BrainRunError("capability route returned a non-object")
+        if response.get("ok") is False or response.get("workflow") != "capability_route":
+            raise BrainRunError("capability route was refused")
+        route = dict(response)
+        BrainLearningLedger._assert_safe(route)
+        context = _adaptive_route_context(route, task=task, route_request=arguments)
+        return route, context
+
+    def _preview_adaptive_selection(
+        self,
+        *,
+        task: str,
+        selection: Mapping[str, Any],
+        context: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        arguments = dict(selection)
+        arguments["task"] = task
+        if context is None:
+            report = self.workspace.tool("brain_model_select", arguments)
+            if not isinstance(report, Mapping):
+                raise BrainRunError("adaptive model selection preview returned a non-object")
+            return dict(report)
+        observations = selection.get("contextual_observations", [])
+        if not isinstance(observations, list):
+            raise BrainRunError("adaptive contextual selection observations are malformed")
+        report = self.workspace.tool(
+            "brain_model_select_contextual",
+            {
+                "context": dict(context),
+                "base": arguments,
+                "observations": [dict(observation) for observation in observations],
+            },
+        )
+        if not isinstance(report, Mapping):
+            raise BrainRunError("adaptive contextual selection preview returned a non-object")
+        nested = report.get("selection")
+        if not isinstance(nested, Mapping):
+            raise BrainRunError("adaptive contextual selection preview omitted selection")
+        return dict(nested)
 
     def run_adaptive(
         self,
@@ -1143,8 +1318,12 @@ class AutonomousBrain:
         idempotency_key: str | None = None,
         tools: Sequence[ProviderTool] = (),
         tool_choice: str | None = None,
+        max_provider_failovers: int = 2,
     ) -> BrainRunResult:
         """Select, plan, and invoke from live providers using caller-persisted learning state."""
+
+        if not isinstance(max_provider_failovers, int) or isinstance(max_provider_failovers, bool) or not 0 <= max_provider_failovers <= 8:
+            raise BrainRunError("max_provider_failovers must be within [0, 8]")
 
         selection = self.build_adaptive_model_selection(
             task=task,
@@ -1161,28 +1340,90 @@ class AutonomousBrain:
             min_quality=min_quality,
             selection_overrides=selection_overrides,
         )
-        return self.run(
-            task=task,
-            model_selection=selection,
-            prompt=prompt,
-            plan=plan,
-            credentials=credentials,
-            approve_provider_call=approve_provider_call,
-            run_id=run_id,
-            max_output_tokens=max_output_tokens,
-            temperature=temperature,
-            require_json=require_json,
-            response_schema=response_schema,
-            idempotency_key=idempotency_key,
-            context=context,
-            contextual_observations=(
-                selection.get("contextual_observations", contextual_observations)
-                if context is not None
-                else contextual_observations
-            ),
-            tools=tools,
-            tool_choice=tool_choice,
+        effective_contextual_observations = (
+            selection.get("contextual_observations", contextual_observations)
+            if context is not None
+            else contextual_observations
         )
+        attempt_selection = dict(selection)
+        failed_ids: set[str] = set()
+        failover_attempts: list[dict[str, Any]] = []
+        for attempt in range(max_provider_failovers + 1):
+            if attempt:
+                attempt_selection["models"] = [
+                    {
+                        **dict(candidate),
+                        "enabled": False
+                        if f"{candidate.get('provider')}/{candidate.get('model')}" in failed_ids
+                        else candidate.get("enabled", True),
+                    }
+                    for candidate in selection.get("models", [])
+                    if isinstance(candidate, Mapping)
+                ]
+            preview = self._preview_adaptive_selection(
+                task=task,
+                selection=attempt_selection,
+                context=context,
+            )
+            selected = preview.get("selected_model")
+            if not isinstance(selected, Mapping):
+                raise BrainRunError("adaptive selection has no eligible provider after failover")
+            provider = selected.get("provider")
+            model = selected.get("model")
+            if not isinstance(provider, str) or not isinstance(model, str):
+                raise BrainRunError("adaptive selection returned malformed provider metadata")
+            selected_id = f"{provider}/{model}"
+            try:
+                result = self.run(
+                    task=task,
+                    model_selection=attempt_selection,
+                    prompt=prompt,
+                    plan=plan,
+                    credentials=credentials,
+                    approve_provider_call=approve_provider_call,
+                    run_id=run_id,
+                    max_output_tokens=max_output_tokens,
+                    temperature=temperature,
+                    require_json=require_json,
+                    response_schema=response_schema,
+                    idempotency_key=idempotency_key,
+                    context=context,
+                    contextual_observations=effective_contextual_observations,
+                    tools=tools,
+                    tool_choice=tool_choice,
+                )
+                if not failover_attempts:
+                    return result
+                failover_attempts.append(
+                    {
+                        "provider": provider,
+                        "model": model,
+                        "status": "completed",
+                    }
+                )
+                return replace(
+                    result,
+                    provider_failover={
+                        "strategy": "deterministic_model_selector_with_provider_health_gating",
+                        "attempts": list(failover_attempts),
+                        "fallback_count": len(failover_attempts) - 1,
+                        "retention": "metadata_only",
+                    },
+                )
+            except ProviderError as error:
+                failed_ids.add(selected_id)
+                failover_attempts.append(
+                    {
+                        "provider": provider,
+                        "model": model,
+                        "status": "provider_refused",
+                        "reason": "circuit_open" if error.circuit_open else "provider_error",
+                        "status_code": error.status_code,
+                    }
+                )
+                if attempt >= max_provider_failovers:
+                    raise
+        raise BrainRunError("adaptive provider failover exhausted")
 
     def run_adaptive_tool_loop(
         self,
@@ -1212,21 +1453,6 @@ class AutonomousBrain:
         the task, credentials, context, or learned selection assembled by this method.
         """
 
-        selection = self.build_adaptive_model_selection(
-            task=task,
-            model_candidates=model_candidates,
-            credentials=credentials,
-            ledger=ledger,
-            context=context,
-            contextual_observations=contextual_observations,
-            required_capabilities=required_capabilities,
-            input_tokens=input_tokens,
-            requested_output_tokens=requested_output_tokens,
-            max_cost_per_million_tokens=max_cost_per_million_tokens,
-            max_latency_ms=max_latency_ms,
-            min_quality=min_quality,
-            selection_overrides=selection_overrides,
-        )
         if not isinstance(tool_loop_options, (Mapping, type(None))):
             raise BrainRunError("tool_loop_options must be a mapping or None")
         options = {} if tool_loop_options is None else dict(tool_loop_options)
@@ -1257,9 +1483,34 @@ class AutonomousBrain:
         unknown = sorted(set(options).difference(allowed_options))
         if unknown:
             raise BrainRunError(f"tool_loop_options contains unsupported fields: {', '.join(unknown)}")
+        effective_context = context
+        route_report: dict[str, Any] | None = None
+        if "route_request" in options:
+            route_report, route_context = self._prepare_adaptive_route(
+                task=task,
+                route_request=options["route_request"],
+            )
+            if effective_context is None:
+                effective_context = route_context
+            options["route_report"] = route_report
+        selection = self.build_adaptive_model_selection(
+            task=task,
+            model_candidates=model_candidates,
+            credentials=credentials,
+            ledger=ledger,
+            context=effective_context,
+            contextual_observations=contextual_observations,
+            required_capabilities=required_capabilities,
+            input_tokens=input_tokens,
+            requested_output_tokens=requested_output_tokens,
+            max_cost_per_million_tokens=max_cost_per_million_tokens,
+            max_latency_ms=max_latency_ms,
+            min_quality=min_quality,
+            selection_overrides=selection_overrides,
+        )
         effective_contextual_observations = (
             selection.get("contextual_observations", contextual_observations)
-            if context is not None
+            if effective_context is not None
             else contextual_observations
         )
         return self.run_tool_loop(
@@ -1268,7 +1519,7 @@ class AutonomousBrain:
             prompt=prompt,
             plan=plan,
             credentials=credentials,
-            context=context,
+            context=effective_context,
             contextual_observations=effective_contextual_observations,
             **options,
         )
@@ -1336,6 +1587,8 @@ class AutonomousBrain:
             selection = dict(nested_selection)
             selection["context_digest"] = context_digest
             selection["contextual_selection_status"] = contextual_report.get("selection_status")
+        if isinstance(selection_args.get("provider_health"), Mapping):
+            selection["provider_health"] = dict(selection_args["provider_health"])
         selected = selection.get("selected_model")
         if not isinstance(selected, Mapping):
             raise BrainRunError("model selection did not produce an eligible model")
@@ -1427,6 +1680,7 @@ class AutonomousBrain:
         evaluator_review: Mapping[str, Any] | None = None,
         workflow_binding: Mapping[str, Any] | None = None,
         operations_gate_acceptance: Mapping[str, Any] | None = None,
+        route_report: Mapping[str, Any] | None = None,
     ) -> BrainToolLoopResult:
         """Run the planned provider call and continue only through caller-approved tool results.
 
@@ -1447,6 +1701,12 @@ class AutonomousBrain:
             raise BrainRunError("stream must be a boolean")
         if not isinstance(enforce_route_tools, bool) or not isinstance(require_resolved_route, bool):
             raise BrainRunError("route enforcement flags must be booleans")
+        if route_report is not None:
+            if route_request is None:
+                raise BrainRunError("route_report requires route_request")
+            if not isinstance(route_report, Mapping):
+                raise BrainRunError("route_report must be a mapping")
+            BrainLearningLedger._assert_safe(route_report)
         prompt_request = dict(prompt)
         route: dict[str, Any] | None = None
         raw_route: dict[str, Any] | None = None
@@ -1474,7 +1734,11 @@ class AutonomousBrain:
                 raise BrainRunError("route_request must be JSON-safe") from error
             if len(encoded_route_request) > MAX_ROUTE_REQUEST_BYTES:
                 raise BrainRunError("route_request exceeds the bounded size")
-            route_response = self.workspace.tool("capability_route", route_arguments)
+            route_response = (
+                dict(route_report)
+                if route_report is not None
+                else self.workspace.tool("capability_route", route_arguments)
+            )
             if not isinstance(route_response, Mapping):
                 raise BrainRunError("capability route returned a non-object")
             if route_response.get("ok") is False or route_response.get("workflow") != "capability_route":
@@ -2061,4 +2325,362 @@ class AutonomousBrain:
             plan=plan,
             response=response,
             outcome_digest=hashlib.sha256(encoded).hexdigest(),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class BrainEvaluatorDecision:
+    """A validated, value-only evaluator judgment for one brain outcome.
+
+    The evaluator is intentionally separate from the provider. A provider response can be
+    inspected by a caller-owned evaluator, but only this compact decision crosses the learning
+    boundary. ``evidence_digest`` binds the decision to the optional caller-supplied evidence
+    packet without copying that packet into the learning ledger.
+    """
+
+    evaluator_id: str
+    evaluator_version: str
+    reward: float
+    passed: bool
+    failed: bool = False
+    feedback_digest: str | None = None
+    failure_class: str | None = None
+    evidence_digest: str | None = None
+
+    def __post_init__(self) -> None:
+        for field_name, value in (
+            ("evaluator_id", self.evaluator_id),
+            ("evaluator_version", self.evaluator_version),
+        ):
+            if (
+                not isinstance(value, str)
+                or not value.strip()
+                or len(value.encode("utf-8")) > MAX_BRAIN_EVALUATOR_ID_BYTES
+            ):
+                raise BrainRunError(f"{field_name} must be a bounded non-empty string")
+        if (
+            not isinstance(self.reward, (int, float))
+            or isinstance(self.reward, bool)
+            or not isinstance(self.passed, bool)
+            or not isinstance(self.failed, bool)
+        ):
+            raise BrainRunError("evaluator decision has malformed reward or status fields")
+        try:
+            json.dumps(self.reward, allow_nan=False)
+        except (TypeError, ValueError) as error:
+            raise BrainRunError("evaluator reward must be finite") from error
+        if self.passed and self.failed:
+            raise BrainRunError("evaluator decision cannot be both passed and failed")
+        for field_name, value in (
+            ("feedback_digest", self.feedback_digest),
+            ("evidence_digest", self.evidence_digest),
+        ):
+            if value is not None and not _valid_digest(value):
+                raise BrainRunError(f"{field_name} must be a lowercase SHA-256 digest")
+        if self.failure_class is not None and (
+            not isinstance(self.failure_class, str)
+            or not self.failure_class.strip()
+            or len(self.failure_class.encode("utf-8")) > MAX_BRAIN_EVALUATOR_ID_BYTES
+        ):
+            raise BrainRunError("failure_class must be a bounded non-empty string")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "evaluator_id": self.evaluator_id,
+            "evaluator_version": self.evaluator_version,
+            "reward": self.reward,
+            "passed": self.passed,
+            "failed": self.failed,
+            "feedback_digest": self.feedback_digest,
+            "failure_class": self.failure_class,
+            "evidence_digest": self.evidence_digest,
+        }
+
+
+def _evaluator_metadata_projection(result: BrainRunResult) -> dict[str, Any]:
+    """Project the common run identity without exposing prompt or provider response content."""
+
+    selected = result.selection.get("selected_model")
+    selected_model = (
+        {"provider": selected.get("provider"), "model": selected.get("model")}
+        if isinstance(selected, Mapping)
+        else None
+    )
+    plan = result.plan.get("plan")
+    plan_digest = plan.get("plan_digest") if isinstance(plan, Mapping) else None
+    projection: dict[str, Any] = {
+        "run_id": result.run_id,
+        "status": result.status,
+        "selected_model": selected_model,
+        "selection_digest": result.selection.get("decision_digest"),
+        "context_digest": result.selection.get("context_digest"),
+        "prompt_digest": result.prompt.get("prompt_digest"),
+        "plan_digest": plan_digest,
+        "outcome_digest": result.outcome_digest,
+        "provider_failover": None
+        if result.provider_failover is None
+        else {
+            "strategy": result.provider_failover.get("strategy"),
+            "fallback_count": result.provider_failover.get("fallback_count"),
+            "attempt_count": len(result.provider_failover.get("attempts", []))
+            if isinstance(result.provider_failover.get("attempts"), list)
+            else None,
+            "retention": result.provider_failover.get("retention"),
+        },
+    }
+    if result.response is not None:
+        projection["response"] = {
+            "provider": result.response.provider,
+            "model": result.response.model,
+            "request_id": result.response.request_id,
+            "usage": dict(result.response.usage),
+            "structured": result.response.structured is not None,
+            "tool_call_count": len(result.response.tool_calls),
+        }
+    else:
+        projection["response"] = None
+    return projection
+
+
+def build_brain_evaluation_input(
+    result: BrainRunResult | BrainToolLoopResult | BrainMissionResult,
+    *,
+    evidence: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a bounded evaluator input for any brain execution shape.
+
+    Only identities, digests, status/count metadata, route identity, and caller-supplied bounded
+    evidence are exposed. Provider text, prompt text, credentials, and opaque tool wire envelopes
+    are deliberately absent. The returned value is JSON round-tripped so an evaluator cannot
+    mutate the caller's original mappings through shared references.
+    """
+
+    if evidence is not None:
+        if not isinstance(evidence, Mapping):
+            raise BrainRunError("evaluator evidence must be a mapping or None")
+        BrainLearningLedger._assert_safe(evidence)
+        try:
+            encoded_evidence = json.dumps(
+                dict(evidence),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        except (TypeError, ValueError) as error:
+            raise BrainRunError("evaluator evidence must be JSON-safe") from error
+        if len(encoded_evidence) > MAX_BRAIN_EVALUATOR_EVIDENCE_BYTES:
+            raise BrainRunError("evaluator evidence exceeds the bounded size")
+        evidence_copy = json.loads(encoded_evidence.decode("utf-8"))
+        evidence_digest = hashlib.sha256(encoded_evidence).hexdigest()
+    else:
+        evidence_copy = None
+        evidence_digest = None
+
+    if isinstance(result, BrainRunResult):
+        projection = _evaluator_metadata_projection(result)
+        result_kind = "run"
+    elif isinstance(result, BrainToolLoopResult):
+        projection = _evaluator_metadata_projection(result.brain_run)
+        loop = result.provider_loop
+        final_response = None if loop is None else loop.final_response
+        receipt_statuses: dict[str, int] = {}
+        for receipt in result.authorization_receipts:
+            if not isinstance(receipt, Mapping):
+                continue
+            status = receipt.get("status")
+            if isinstance(status, str):
+                receipt_statuses[status] = receipt_statuses.get(status, 0) + 1
+        projection.update(
+            {
+                "result_kind": "tool_loop",
+                "status": result.status,
+                "route": None
+                if result.route is None
+                else {
+                    "route_digest": _json_digest(dict(result.route)),
+                    "evidence_digest": result.route.get("evidence_digest"),
+                    "execution": result.route.get("execution"),
+                },
+                "tool_loop": None
+                if loop is None
+                else {
+                    "status": loop.status,
+                    "turns": loop.turns,
+                    "tool_calls": loop.tool_calls,
+                    "final_provider": None if final_response is None else final_response.provider,
+                    "final_model": None if final_response is None else final_response.model,
+                    "final_request_id": None
+                    if final_response is None
+                    else final_response.request_id,
+                },
+                "tool_receipts": {
+                    "receipt_count": len(result.authorization_receipts),
+                    "status_counts": receipt_statuses,
+                },
+            }
+        )
+        result_kind = "tool_loop"
+    elif isinstance(result, BrainMissionResult):
+        projection = _evaluator_metadata_projection(result.brain_run)
+        execution = result.execution if isinstance(result.execution, Mapping) else None
+        preflight = result.preflight if isinstance(result.preflight, Mapping) else None
+        projection.update(
+            {
+                "result_kind": "mission",
+                "status": result.status,
+                "route": None
+                if result.route is None
+                else {
+                    "route_digest": _json_digest(dict(result.route)),
+                    "evidence_digest": result.route.get("evidence_digest"),
+                    "execution": result.route.get("execution"),
+                },
+                "mission": {
+                    "preflight": None
+                    if preflight is None
+                    else _bounded_mission_report_projection(preflight, include_outputs=False),
+                    "execution": None
+                    if execution is None
+                    else _bounded_mission_report_projection(execution, include_outputs=False),
+                },
+            }
+        )
+        result_kind = "mission"
+    else:
+        raise BrainRunError("result must be a BrainRunResult, BrainToolLoopResult, or BrainMissionResult")
+
+    projection["schema"] = "bioprism-brain-evaluator-input/0.1"
+    projection["result_kind"] = result_kind
+    projection["evidence_digest"] = evidence_digest
+    projection["evidence"] = evidence_copy
+    BrainLearningLedger._assert_safe(projection)
+    try:
+        encoded_projection = json.dumps(
+            projection,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as error:
+        raise BrainRunError("evaluator input must be JSON-safe") from error
+    if len(encoded_projection) > MAX_BRAIN_EVALUATOR_INPUT_BYTES:
+        raise BrainRunError("evaluator input exceeds the bounded size")
+    return json.loads(encoded_projection.decode("utf-8"))
+
+
+class BrainOutcomeEvaluator:
+    """Adapt a caller-owned evaluator into the value-only learning boundary.
+
+    The callback receives :func:`build_brain_evaluation_input`, never a raw provider response or
+    runtime credential. It may return a :class:`BrainEvaluatorDecision` or a mapping containing
+    only ``reward``, ``passed``, ``failed``, ``feedback_digest``, and ``failure_class``. The
+    adapter computes and binds the evidence digest, then delegates persistence to the brain.
+    """
+
+    _ALLOWED_DECISION_FIELDS = {
+        "reward",
+        "passed",
+        "failed",
+        "feedback_digest",
+        "failure_class",
+        "evidence_digest",
+    }
+
+    def __init__(
+        self,
+        evaluator: Callable[[Mapping[str, Any]], Mapping[str, Any] | BrainEvaluatorDecision],
+        *,
+        evaluator_id: str,
+        evaluator_version: str,
+    ) -> None:
+        if not callable(evaluator):
+            raise BrainRunError("evaluator must be callable")
+        self.evaluator = evaluator
+        self.evaluator_id = evaluator_id
+        self.evaluator_version = evaluator_version
+        BrainEvaluatorDecision(
+            evaluator_id=evaluator_id,
+            evaluator_version=evaluator_version,
+            reward=0.0,
+            passed=False,
+        )
+
+    def assess(
+        self,
+        result: BrainRunResult | BrainToolLoopResult | BrainMissionResult,
+        *,
+        evidence: Mapping[str, Any] | None = None,
+    ) -> BrainEvaluatorDecision:
+        evaluation_input = build_brain_evaluation_input(result, evidence=evidence)
+        try:
+            raw_decision = self.evaluator(evaluation_input)
+        except Exception as error:
+            raise BrainRunError("evaluator callback failed") from error
+        if isinstance(raw_decision, BrainEvaluatorDecision):
+            if (
+                raw_decision.evaluator_id != self.evaluator_id
+                or raw_decision.evaluator_version != self.evaluator_version
+            ):
+                raise BrainRunError("evaluator decision identity does not match the adapter")
+            decision = raw_decision
+        else:
+            if not isinstance(raw_decision, Mapping):
+                raise BrainRunError("evaluator callback must return a decision object")
+            BrainLearningLedger._assert_safe(raw_decision)
+            unknown_fields = set(raw_decision) - self._ALLOWED_DECISION_FIELDS
+            if unknown_fields:
+                raise BrainRunError("evaluator decision contains unsupported fields")
+            if "reward" not in raw_decision or "passed" not in raw_decision:
+                raise BrainRunError("evaluator decision requires reward and passed")
+            passed = raw_decision["passed"]
+            if not isinstance(passed, bool):
+                raise BrainRunError("evaluator decision passed must be boolean")
+            failed = raw_decision.get("failed", not passed)
+            if not isinstance(failed, bool):
+                raise BrainRunError("evaluator decision failed must be boolean")
+            decision = BrainEvaluatorDecision(
+                evaluator_id=self.evaluator_id,
+                evaluator_version=self.evaluator_version,
+                reward=raw_decision["reward"],
+                passed=passed,
+                failed=failed,
+                feedback_digest=raw_decision.get("feedback_digest"),
+                failure_class=raw_decision.get("failure_class"),
+                evidence_digest=raw_decision.get("evidence_digest"),
+            )
+        expected_evidence_digest = evaluation_input.get("evidence_digest")
+        if decision.evidence_digest is not None and decision.evidence_digest != expected_evidence_digest:
+            raise BrainRunError("evaluator decision evidence_digest does not match evidence")
+        if decision.evidence_digest is None and expected_evidence_digest is not None:
+            decision = replace(decision, evidence_digest=expected_evidence_digest)
+        return decision
+
+    def evaluate_and_record(
+        self,
+        brain: AutonomousBrain,
+        result: BrainRunResult | BrainToolLoopResult | BrainMissionResult,
+        *,
+        bandit_state: Mapping[str, Any],
+        evidence: Mapping[str, Any] | None = None,
+        arm_id: str | None = None,
+        ledger: BrainLearningLedger | None = None,
+    ) -> dict[str, Any]:
+        if not isinstance(brain, AutonomousBrain):
+            raise BrainRunError("brain must be an AutonomousBrain")
+        decision = self.assess(result, evidence=evidence)
+        return brain.record_evaluator_outcome(
+            result,
+            bandit_state=bandit_state,
+            evaluator_id=decision.evaluator_id,
+            evaluator_version=decision.evaluator_version,
+            reward=decision.reward,
+            passed=decision.passed,
+            arm_id=arm_id,
+            failed=decision.failed,
+            feedback_digest=decision.feedback_digest,
+            failure_class=decision.failure_class,
+            evidence_digest=decision.evidence_digest,
+            ledger=ledger,
         )

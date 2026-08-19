@@ -13,7 +13,9 @@ from prism_sdk.llm_runtime import (
     LLMRuntime,
     ProviderError,
     ProviderOnboarding,
+    ProviderConfig,
     ProviderRequest,
+    ProviderResponse,
     ProviderStreamEvent,
     ProviderTool,
     ProviderToolCall,
@@ -24,9 +26,14 @@ from prism_sdk.llm_runtime import (
 )
 from prism_sdk.brain import (
     AutonomousBrain,
+    BrainEvaluatorDecision,
     BrainLearningLedger,
+    BrainOutcomeEvaluator,
     BrainRunError,
     BrainRunResult,
+    BrainMissionResult,
+    BrainToolLoopResult,
+    build_brain_evaluation_input,
     MissionToolAuthorizer,
 )
 
@@ -1445,6 +1452,87 @@ class LlmRuntimeTests(unittest.TestCase):
         self.assertEqual(result.selection["context_digest"], expected)
         self.assertEqual(workspace.arguments["observations"][0]["context_digest"], expected)  # type: ignore[index]
 
+    def test_adaptive_invocation_fails_over_deterministically_after_provider_refusal(self) -> None:
+        class Workspace:
+            def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+                if name == "brain_model_select":
+                    assert arguments is not None
+                    selected = next(
+                        model for model in arguments["models"]  # type: ignore[index]
+                        if model.get("enabled", True)  # type: ignore[union-attr]
+                    )
+                    return {
+                        "selected_model": {
+                            "provider": selected["provider"],  # type: ignore[index]
+                            "model": selected["model"],  # type: ignore[index]
+                        },
+                        "decision_digest": "a" * 64,
+                    }
+                if name == "brain_prompt_assemble":
+                    return {"messages": [{"role": "user", "content": "hello"}], "prompt_digest": "b" * 64}
+                if name == "brain_plan":
+                    return {
+                        "ok": True,
+                        "plan": {
+                            "requires_approval": True,
+                            "steps": [{"effect": "provider_call"}],
+                            "plan_digest": "c" * 64,
+                        },
+                    }
+                raise AssertionError(f"unexpected tool {name}")
+
+        store = CredentialStore()
+        runtime = LLMRuntime(store)
+        runtime.register_provider(
+            openai_provider(base_url=self.base_url, path="/failure", allow_insecure_http=True)
+        )
+        runtime.register_provider(
+            ProviderConfig(
+                provider="fallback",
+                base_url=self.base_url,
+                path="/fallback",
+                allow_insecure_http=True,
+            )
+        )
+        openai_handle = store.register("openai", "openai-secret")
+        fallback_handle = store.register("fallback", "fallback-secret")
+        result = AutonomousBrain(Workspace(), runtime).run_adaptive(
+            task="hello",
+            model_candidates=[
+                {
+                    "provider": "openai",
+                    "model": "primary",
+                    "context_window_tokens": 16_000,
+                    "max_output_tokens": 2_048,
+                    "quality": 0.99,
+                    "latency_ms": 10,
+                    "cost_per_million_tokens": 1,
+                    "reliability": 0.99,
+                },
+                {
+                    "provider": "fallback",
+                    "model": "backup",
+                    "context_window_tokens": 16_000,
+                    "max_output_tokens": 2_048,
+                    "quality": 0.8,
+                    "latency_ms": 20,
+                    "cost_per_million_tokens": 2,
+                    "reliability": 0.9,
+                },
+            ],
+            prompt={"max_input_tokens": 100},
+            plan={"allowed_tools": ["provider.invoke"], "max_cost": 10},
+            credentials={"openai": openai_handle, "fallback": fallback_handle},
+            approve_provider_call=True,
+            max_provider_failovers=1,
+        )
+        self.assertEqual(result.status, "completed_provider_call")
+        self.assertEqual(result.response.provider, "fallback")  # type: ignore[union-attr]
+        self.assertEqual(result.provider_failover["fallback_count"], 1)  # type: ignore[index]
+        self.assertEqual(result.provider_failover["attempts"][0]["reason"], "provider_error")  # type: ignore[index]
+        self.assertNotIn("openai-secret", json.dumps(result.to_dict()))
+        self.assertNotIn("fallback-secret", json.dumps(result.to_dict()))
+
     def test_adaptive_tool_loop_selects_before_continuing_with_caller_callback(self) -> None:
         class Workspace:
             def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
@@ -1528,6 +1616,128 @@ class LlmRuntimeTests(unittest.TestCase):
         self.assertEqual(report["status"], "recorded_evaluator_reward")
         self.assertNotIn("continued", json.dumps(outcome_workspace.arguments))
 
+    def test_adaptive_tool_loop_binds_selection_and_execution_to_one_live_route(self) -> None:
+        class Workspace:
+            def __init__(self) -> None:
+                self.route_calls = 0
+                self.selection_context: dict[str, object] | None = None
+                self.missions: list[dict[str, object]] = []
+
+            def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+                if name == "capability_route":
+                    self.route_calls += 1
+                    return {
+                        "ok": True,
+                        "workflow": "capability_route",
+                        "route_id": "r" * 64,
+                        "catalog_digest": "c" * 64,
+                        "goal": "inspect platform",
+                        "unresolved_needs": [],
+                        "recommended_tools": ["developer_platform_status"],
+                        "needs": [
+                            {
+                                "id": "task",
+                                "resolution": "explicit",
+                                "candidate_groups": ["developer_platform"],
+                                "candidate_domains": ["engineering"],
+                                "candidate_tools": ["developer_platform_status"],
+                            }
+                        ],
+                        "route_coverage": {
+                            "candidate_domains": ["engineering"],
+                            "candidate_groups": ["developer_platform"],
+                        },
+                        "tool_schemas": [
+                            {
+                                "name": "developer_platform_status",
+                                "description": "Read bounded platform status.",
+                                "inputSchema": {"type": "object", "properties": {}},
+                            }
+                        ],
+                        "tool_schemas_omitted": 0,
+                        "schema_attachment": {"requested": True, "returned": 1, "missing": []},
+                    }
+                if name == "brain_model_select_contextual":
+                    assert arguments is not None
+                    self.selection_context = arguments["context"]  # type: ignore[assignment]
+                    return {
+                        "context_digest": "d" * 64,
+                        "selection_status": "contextual_selection_global_history_only",
+                        "selection": {
+                            "selected_model": {"provider": "openai", "model": "test-model"},
+                            "decision_digest": "a" * 64,
+                        },
+                    }
+                if name == "brain_prompt_assemble":
+                    assert arguments is not None
+                    assert any(chunk["id"] == "capability-route" for chunk in arguments["context"])  # type: ignore[index]
+                    return {"messages": [{"role": "user", "content": "inspect"}], "prompt_digest": "b" * 64}
+                if name == "brain_plan":
+                    return {
+                        "ok": True,
+                        "plan": {
+                            "requires_approval": True,
+                            "steps": [{"effect": "provider_call"}],
+                            "plan_digest": "c" * 64,
+                        },
+                    }
+                if name == "agent_mission":
+                    assert arguments is not None
+                    self.missions.append(arguments)
+                    execute = arguments["policy"]["execute"]  # type: ignore[index]
+                    return {
+                        "ok": True,
+                        "workflow": "agent_mission",
+                        "execution": "executed" if execute else "planned",
+                        "mission_status": "succeeded" if execute else "planned",
+                        "results": [],
+                    }
+                raise AssertionError(f"unexpected tool {name}")
+
+        store = CredentialStore()
+        runtime = LLMRuntime(store)
+        runtime.register_provider(openai_provider(base_url=self.base_url, allow_insecure_http=True, path="/continue"))
+        handle = store.register("openai", "super-secret")
+        workspace = Workspace()
+        result = AutonomousBrain(workspace, runtime).run_adaptive_tool_loop(
+            task="inspect platform",
+            model_candidates=[
+                {
+                    "provider": "openai",
+                    "model": "test-model",
+                    "capabilities": ["reasoning"],
+                    "context_window_tokens": 16_000,
+                    "max_output_tokens": 2_048,
+                    "quality": 0.9,
+                    "latency_ms": 100,
+                    "cost_per_million_tokens": 10,
+                    "reliability": 0.95,
+                }
+            ],
+            prompt={"max_input_tokens": 100},
+            plan={"allowed_tools": ["provider.invoke"], "max_cost": 10},
+            credentials={"openai": handle},
+            tool_loop_options={
+                "mission_policy": {
+                    "allowed_tools": ["developer_platform_status"],
+                    "max_steps": 2,
+                    "max_step_output_bytes": 100_000,
+                    "max_total_output_bytes": 100_000,
+                },
+                "route_request": {"needs": [{"id": "task", "query": "platform"}]},
+                "approve_provider_call": True,
+                "approve_mission_dispatch": True,
+                "max_turns": 3,
+            },
+        )
+        self.assertEqual(result.status, "completed_provider_tool_loop")
+        self.assertEqual(workspace.route_calls, 1)
+        self.assertEqual(workspace.selection_context["domain"], "cross_domain:engineering")  # type: ignore[index]
+        self.assertEqual(len(workspace.missions), 2)
+        self.assertFalse(workspace.missions[0]["policy"]["execute"])  # type: ignore[index]
+        self.assertTrue(workspace.missions[1]["policy"]["execute"])  # type: ignore[index]
+        self.assertNotIn("super-secret", json.dumps(result.to_dict()))
+
     def test_evaluator_outcome_is_persisted_without_provider_text_or_credentials(self) -> None:
         class Workspace:
             def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
@@ -1571,6 +1781,168 @@ class LlmRuntimeTests(unittest.TestCase):
             encoded = json.dumps(ledger.records())
             self.assertNotIn("super-secret", encoded)
             self.assertNotIn("api_key", encoded)
+
+    def test_evaluator_adapter_projects_all_execution_shapes_without_provider_text(self) -> None:
+        response = ProviderResponse(
+            provider="openai",
+            model="test-model",
+            text="provider-secret-answer",
+            status_code=200,
+            request_id="req-1",
+            usage={"total_tokens": 12},
+            raw={"output_text": "provider-secret-answer"},
+        )
+        run = BrainRunResult(
+            run_id="run-evaluator",
+            status="completed_provider_call",
+            selection={
+                "selected_model": {"provider": "openai", "model": "test-model"},
+                "decision_digest": "a" * 64,
+                "context_digest": "b" * 64,
+            },
+            prompt={"prompt_digest": "c" * 64},
+            plan={"plan": {"plan_digest": "d" * 64}},
+            response=response,
+            outcome_digest="e" * 64,
+        )
+        observed: list[dict[str, object]] = []
+        adapter = BrainOutcomeEvaluator(
+            lambda payload: observed.append(dict(payload)) or {"reward": 0.75, "passed": True},
+            evaluator_id="held-out-quality",
+            evaluator_version="2026-08",
+        )
+        decision = adapter.assess(
+            run,
+            evidence={"schema_valid": True, "quality_score": 0.75},
+        )
+        encoded_input = json.dumps(observed[0])
+        self.assertEqual(decision.evidence_digest, observed[0]["evidence_digest"])
+        self.assertNotIn("provider-secret-answer", encoded_input)
+        self.assertNotIn("output_text", encoded_input)
+        self.assertEqual(observed[0]["response"]["tool_call_count"], 0)  # type: ignore[index]
+        self.assertEqual(observed[0]["result_kind"], "run")
+
+        tool_loop = BrainToolLoopResult(
+            brain_run=run,
+            status="completed_provider_tool_loop",
+            provider_loop=None,
+            route={"workflow": "capability_route", "evidence_digest": "f" * 64, "wire": "secret"},
+        )
+        loop_input = build_brain_evaluation_input(tool_loop)
+        self.assertEqual(loop_input["result_kind"], "tool_loop")
+        self.assertNotIn("secret", json.dumps(loop_input))
+
+        mission = BrainMissionResult(
+            brain_run=run,
+            status="mission_approval_required",
+            mission={"steps": [{"arguments": {"secret": "do-not-project"}}]},
+            preflight={
+                "workflow": "agent_mission",
+                "results": [{"wire": {"result": {"structuredContent": {"secret": "hidden"}}}}],
+            },
+            execution=None,
+        )
+        mission_input = build_brain_evaluation_input(mission)
+        self.assertEqual(mission_input["result_kind"], "mission")
+        self.assertNotIn("do-not-project", json.dumps(mission_input))
+        self.assertNotIn("hidden", json.dumps(mission_input))
+
+    def test_evaluator_adapter_records_only_digest_bound_decision(self) -> None:
+        class Workspace:
+            def __init__(self) -> None:
+                self.arguments: dict[str, object] | None = None
+
+            def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+                assert name == "brain_outcome_record"
+                self.arguments = arguments
+                return {
+                    "ok": True,
+                    "status": "recorded_evaluator_reward",
+                    "next_state": {"schema": "bioprism-brain-bandit/0.1", "generation": 1, "arms": []},
+                    "learning_evidence": {
+                        "schema": "bioprism-brain-learning-evidence/0.1",
+                        "evidence_digest": "f" * 64,
+                    },
+                }
+
+        workspace = Workspace()
+        brain = AutonomousBrain(workspace, LLMRuntime())
+        result = BrainRunResult(
+            run_id="run-adapter",
+            status="completed_provider_call",
+            selection={
+                "selected_model": {"provider": "openai", "model": "test-model"},
+                "decision_digest": "a" * 64,
+            },
+            prompt={"prompt_digest": "b" * 64},
+            plan={"plan": {"plan_digest": "c" * 64}},
+            response=None,
+            outcome_digest="d" * 64,
+        )
+        adapter = BrainOutcomeEvaluator(
+            lambda payload: {
+                "reward": 0.8 if payload["evidence"]["quality"] == 0.8 else 0.0,  # type: ignore[index]
+                "passed": True,
+                "feedback_digest": "e" * 64,
+            },
+            evaluator_id="quality-gate",
+            evaluator_version="1",
+        )
+        report = adapter.evaluate_and_record(
+            brain,
+            result,
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "arms": []},
+            evidence={"quality": 0.8, "provider_text": "caller-owned evidence is not persisted"},
+        )
+        self.assertEqual(report["status"], "recorded_evaluator_reward")
+        assert workspace.arguments is not None
+        encoded = json.dumps(workspace.arguments)
+        self.assertNotIn("caller-owned evidence", encoded)
+        self.assertEqual(workspace.arguments["assessment"]["evidence_digest"], hashlib.sha256(  # type: ignore[index]
+            json.dumps(
+                {"provider_text": "caller-owned evidence is not persisted", "quality": 0.8},
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest())  # type: ignore[index]
+
+    def test_evaluator_adapter_rejects_secret_fields_and_contradictory_decisions(self) -> None:
+        result = BrainRunResult(
+            run_id="run-reject",
+            status="planned",
+            selection={"selected_model": {"provider": "openai", "model": "test-model"}},
+            prompt={},
+            plan={},
+            response=None,
+            outcome_digest="a" * 64,
+        )
+        with self.assertRaises(BrainRunError):
+            BrainOutcomeEvaluator(
+                lambda _: {"reward": 1.0, "passed": True, "notes": "raw answer"},
+                evaluator_id="quality",
+                evaluator_version="1",
+            ).assess(result)
+        with self.assertRaises(BrainRunError):
+            BrainOutcomeEvaluator(
+                lambda _: {"reward": 1.0, "passed": True, "failed": True},
+                evaluator_id="quality",
+                evaluator_version="1",
+            ).assess(result)
+        with self.assertRaises(BrainRunError):
+            BrainOutcomeEvaluator(
+                lambda _: BrainEvaluatorDecision(
+                    evaluator_id="other",
+                    evaluator_version="1",
+                    reward=1.0,
+                    passed=True,
+                ),
+                evaluator_id="quality",
+                evaluator_version="1",
+            ).assess(result)
+        with self.assertRaises(BrainRunError):
+            build_brain_evaluation_input(result, evidence={"api_key": "must-refuse"})
+        with self.assertRaises(BrainRunError):
+            build_brain_evaluation_input(result, evidence={"nested": ({"apiKey": "must-refuse"},)})
 
 
 if __name__ == "__main__":
