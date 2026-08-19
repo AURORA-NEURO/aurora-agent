@@ -41,6 +41,34 @@ class _ProviderHandler(BaseHTTPRequestHandler):
         elif self.path == "/json":
             payload = b'{"id":"resp_json","model":"test-model","output_text":"{\\"answer\\":\\"yes\\",\\"score\\":1}","usage":{"total_tokens":3}}'
             self.send_response(200)
+        elif self.path == "/mission":
+            mission_text = json.dumps(
+                {
+                    "mission": {
+                        "steps": [
+                            {
+                                "id": "inspect",
+                                "domain": "engineering",
+                                "capability": "platform_status",
+                                "objective": "inspect the bounded platform state",
+                                "tool": "developer_platform_status",
+                                "arguments": {},
+                            }
+                        ]
+                    }
+                },
+                separators=(",", ":"),
+            )
+            payload = json.dumps(
+                {
+                    "id": "resp_mission",
+                    "model": "test-model",
+                    "output_text": mission_text,
+                    "usage": {"total_tokens": 8},
+                },
+                separators=(",", ":"),
+            ).encode()
+            self.send_response(200)
         else:
             payload = b'{"id":"resp_test","model":"test-model","output_text":"hello","usage":{"total_tokens":3}}'
             self.send_response(200)
@@ -212,6 +240,78 @@ class LlmRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(response.structured, {"answer": "yes", "score": 1})
 
+    def test_autonomous_brain_routes_structured_decision_through_mission_approval(self) -> None:
+        class Workspace:
+            def __init__(self) -> None:
+                self.missions: list[dict[str, object]] = []
+
+            def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+                if name == "brain_model_select":
+                    return {"selected_model": {"provider": "openai", "model": "test-model"}}
+                if name == "brain_prompt_assemble":
+                    return {"messages": [{"role": "user", "content": "plan"}], "prompt_digest": "p"}
+                if name == "brain_plan":
+                    return {
+                        "ok": True,
+                        "plan": {
+                            "requires_approval": True,
+                            "steps": [{"effect": "provider_call"}],
+                            "plan_digest": "plan",
+                        },
+                    }
+                if name == "agent_mission":
+                    assert arguments is not None
+                    self.missions.append(arguments)
+                    execute = arguments.get("policy", {}).get("execute", False)  # type: ignore[union-attr]
+                    return {
+                        "ok": True,
+                        "workflow": "agent_mission",
+                        "execution": "executed" if execute else "planned",
+                        "mission_status": "succeeded" if execute else "planned",
+                    }
+                raise AssertionError(f"unexpected tool {name}")
+
+        store = CredentialStore()
+        runtime = LLMRuntime(store)
+        runtime.register_provider(
+            openai_provider(base_url=self.base_url, allow_insecure_http=True, path="/mission")
+        )
+        handle = store.register("openai", "super-secret")
+        workspace = Workspace()
+        kwargs = {
+            "task": "inspect the platform",
+            "model_selection": {
+                "input_tokens": 10,
+                "requested_output_tokens": 100,
+                "models": [{"provider": "openai", "model": "test-model"}],
+            },
+            "prompt": {"max_input_tokens": 100},
+            "plan": {"allowed_tools": ["provider.invoke"], "max_cost": 10},
+            "credentials": {"openai": handle},
+            "mission_policy": {
+                "allowed_tools": ["developer_platform_status"],
+                "max_steps": 4,
+                "max_step_output_bytes": 100_000,
+                "max_total_output_bytes": 100_000,
+            },
+            "approve_provider_call": True,
+        }
+        preview = AutonomousBrain(workspace, runtime).run_mission(**kwargs)
+        self.assertEqual(preview.status, "mission_approval_required")
+        self.assertIsNone(preview.execution)
+        self.assertEqual(len(workspace.missions), 1)
+        self.assertFalse(workspace.missions[0]["policy"]["execute"])  # type: ignore[index]
+        self.assertEqual(workspace.missions[0]["policy"]["allowed_tools"], ["developer_platform_status"])  # type: ignore[index]
+
+        dispatched = AutonomousBrain(workspace, runtime).run_mission(
+            **kwargs,
+            approve_mission_dispatch=True,
+        )
+        self.assertEqual(dispatched.status, "mission_dispatched")
+        self.assertEqual(len(workspace.missions), 3)
+        self.assertTrue(workspace.missions[-1]["policy"]["execute"])  # type: ignore[index]
+        self.assertNotIn("super-secret", json.dumps(dispatched.to_dict()))
+
     def test_autonomous_loop_stops_at_approval_before_provider_effect(self) -> None:
         class Workspace:
             def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
@@ -329,6 +429,61 @@ class LlmRuntimeTests(unittest.TestCase):
         self.assertEqual(json.loads(self.server.seen_body)["max_output_tokens"], 128)  # type: ignore[attr-defined]
         self.assertEqual(self.server.seen_headers["idempotency-key"], "brain-run-1")  # type: ignore[attr-defined]
 
+    def test_autonomous_loop_uses_contextual_model_selection_and_keeps_context_identity(self) -> None:
+        class Workspace:
+            def __init__(self) -> None:
+                self.contextual_arguments: dict[str, object] | None = None
+
+            def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+                if name == "brain_model_select_contextual":
+                    self.contextual_arguments = arguments
+                    return {
+                        "schema": "bioprism-brain-contextual-model-selection/0.1",
+                        "context_digest": "c" * 64,
+                        "selection_status": "contextual_selection_mixed_history",
+                        "selection": {
+                            "selected_model": {"provider": "openai", "model": "test-model"},
+                            "decision_digest": "a" * 64,
+                        },
+                    }
+                if name == "brain_prompt_assemble":
+                    return {"messages": [{"role": "user", "content": "hello"}], "prompt_digest": "b" * 64}
+                if name == "brain_plan":
+                    return {
+                        "ok": True,
+                        "plan": {
+                            "requires_approval": True,
+                            "steps": [{"effect": "provider_call"}],
+                            "plan_digest": "c" * 64,
+                        },
+                    }
+                raise AssertionError(f"unexpected tool {name}")
+
+        store = CredentialStore()
+        runtime = LLMRuntime(store)
+        runtime.register_provider(openai_provider(base_url=self.base_url, allow_insecure_http=True))
+        handle = store.register("openai", "super-secret")
+        workspace = Workspace()
+        result = AutonomousBrain(workspace, runtime).run(
+            task="hello",
+            model_selection={
+                "input_tokens": 10,
+                "requested_output_tokens": 10,
+                "models": [{"provider": "openai", "model": "test-model"}],
+            },
+            prompt={"max_input_tokens": 100},
+            plan={"allowed_tools": ["provider.invoke"], "max_cost": 10},
+            credentials={"openai": handle},
+            approve_provider_call=True,
+            context={"domain": "engineering", "capability": "platform_status", "risk_class": "low"},
+            contextual_observations=[
+                {"context_digest": "c" * 64, "arm_id": "openai/test-model", "pulls": 2, "reward_sum": 1.5}
+            ],
+        )
+        self.assertEqual(result.status, "completed_provider_call")
+        self.assertEqual(result.selection["context_digest"], "c" * 64)
+        self.assertEqual(workspace.contextual_arguments["context"]["domain"], "engineering")  # type: ignore[index]
+
     def test_evaluator_outcome_is_persisted_without_provider_text_or_credentials(self) -> None:
         class Workspace:
             def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
@@ -343,7 +498,11 @@ class LlmRuntimeTests(unittest.TestCase):
         result = BrainRunResult(
             run_id="run-1",
             status="completed_provider_call",
-            selection={"selected_model": {"provider": "openai", "model": "test-model"}, "decision_digest": "a" * 64},
+            selection={
+                "selected_model": {"provider": "openai", "model": "test-model"},
+                "decision_digest": "a" * 64,
+                "context_digest": "e" * 64,
+            },
             prompt={"prompt_digest": "b" * 64},
             plan={"plan": {"plan_digest": "c" * 64}},
             response=None,
@@ -363,6 +522,8 @@ class LlmRuntimeTests(unittest.TestCase):
             )
             self.assertEqual(report["status"], "recorded_evaluator_reward")
             self.assertEqual(ledger.latest_state()["generation"], 1)  # type: ignore[index]
+            self.assertEqual(ledger.latest_state("e" * 64)["generation"], 1)  # type: ignore[index]
+            self.assertIsNone(ledger.latest_state("f" * 64))
             encoded = json.dumps(ledger.records())
             self.assertNotIn("super-secret", encoded)
             self.assertNotIn("api_key", encoded)

@@ -482,6 +482,8 @@ import type {
   BrainOutcomeRecordResult,
   BrainModelSelectionArgs,
   BrainModelSelectionResult,
+  BrainContextualModelSelectionArgs,
+  BrainContextualModelSelectionResult,
   BrainPlanArgs,
   BrainPlanResult,
   BrainPromptArgs,
@@ -1635,6 +1637,28 @@ export class ApiClient {
     if (!isObject(args) || typeof args.task !== "string" || !args.task.trim()) throw new ArgumentError("brain model-selection task must be a non-empty string");
     if (!Array.isArray(args.models) || args.models.length === 0) throw new ArgumentError("brain model-selection models must be non-empty");
     return this.callTool<BrainModelSelectionResult>("brain_model_select", args, options);
+  }
+
+  /** Select a model using caller-owned domain/capability/risk-scoped online-learning history. */
+  async brainModelSelectContextual(
+    args: BrainContextualModelSelectionArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainContextualModelSelectionResult>> {
+    if (!isObject(args) || !isObject(args.context) || !isObject(args.base)) {
+      throw new ArgumentError("contextual brain selection requires context and base objects");
+    }
+    for (const field of ["domain", "capability", "risk_class"]) {
+      if (typeof args.context[field] !== "string" || !args.context[field].trim()) {
+        throw new ArgumentError(`context.${field} must be a non-empty string`);
+      }
+    }
+    if (!Array.isArray(args.base.models) || args.base.models.length === 0) {
+      throw new ArgumentError("contextual brain base selection models must be non-empty");
+    }
+    if (args.observations !== undefined && (!Array.isArray(args.observations) || args.observations.length > 256 || args.observations.some((observation) => !isObject(observation)))) {
+      throw new ArgumentError("contextual brain observations must contain at most 256 objects");
+    }
+    return this.callTool<BrainContextualModelSelectionResult>("brain_model_select_contextual", args, options);
   }
 
   /** Assemble a digest-bound prompt under a hard input budget. */

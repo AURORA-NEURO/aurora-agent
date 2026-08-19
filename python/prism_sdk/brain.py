@@ -1,9 +1,10 @@
 """High-level autonomous decision loop over the Rust brain and :mod:`llm_runtime`.
 
-This facade is intentionally small but real: it selects a model, assembles a bounded prompt,
-validates a plan, requires explicit approval for the provider effect, and then invokes the model
-with a caller-owned credential handle. It does not execute arbitrary tools after the model reply;
-that next transition must be routed through the existing mission/runtime/safety gates.
+This facade is intentionally bounded but real: it selects a model, assembles a bounded prompt,
+validates a plan, requires explicit approval for the provider effect, and invokes the model with a
+caller-owned credential handle. A structured model decision can then be proposed to the existing
+mission executor for server-side preflight and a separate caller approval; the model never grants
+itself tools, side effects, or credentials.
 """
 
 from __future__ import annotations
@@ -15,13 +16,56 @@ import os
 from pathlib import Path
 import threading
 import uuid
-from typing import Any, Mapping, Protocol
+from typing import Any, Mapping, Protocol, Sequence
 
 from .llm_runtime import CredentialHandle, LLMRuntime, ProviderRequest, ProviderResponse
+from .mission import MissionPolicy, MissionRequest
 
 
 class BrainRunError(RuntimeError):
     """The bounded autonomous loop could not reach a provider invocation."""
+
+
+DEFAULT_MISSION_RESPONSE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": ["mission"],
+    "properties": {
+        "mission": {
+            "type": "object",
+            "required": ["steps"],
+            "properties": {
+                "steps": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 128,
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "id",
+                            "domain",
+                            "capability",
+                            "objective",
+                            "tool",
+                            "arguments",
+                        ],
+                        "properties": {
+                            "id": {"type": "string", "minLength": 1, "maxLength": 256},
+                            "domain": {"type": "string", "minLength": 1, "maxLength": 256},
+                            "capability": {"type": "string", "minLength": 1, "maxLength": 256},
+                            "objective": {"type": "string", "minLength": 1, "maxLength": 4096},
+                            "tool": {"type": "string", "minLength": 1, "maxLength": 256},
+                            "arguments": {"type": "object"},
+                            "depends_on": {"type": "array", "items": {"type": "string"}, "maxItems": 128},
+                            "required": {"type": "boolean"},
+                            "bindings": {"type": "array", "maxItems": 128},
+                        },
+                    },
+                }
+            },
+        }
+    },
+    "additionalProperties": False,
+}
 
 
 class BrainLearningLedger:
@@ -58,13 +102,20 @@ class BrainLearningLedger:
         self.max_bytes = max_bytes
         self._lock = threading.RLock()
 
-    def append(self, report: Mapping[str, Any]) -> dict[str, Any]:
+    def append(
+        self,
+        report: Mapping[str, Any],
+        *,
+        context_digest: str | None = None,
+    ) -> dict[str, Any]:
         if not isinstance(report, Mapping):
             raise BrainRunError("learning ledger report must be an object")
         evidence = report.get("learning_evidence")
         next_state = report.get("next_state")
         if not isinstance(evidence, Mapping) or not isinstance(next_state, Mapping):
             raise BrainRunError("learning ledger report must contain evidence and next_state")
+        if context_digest is not None and not _valid_digest(context_digest):
+            raise BrainRunError("context_digest must be a lowercase SHA-256 digest")
         self._assert_safe(report)
         try:
             encoded_report = json.dumps(
@@ -78,11 +129,14 @@ class BrainLearningLedger:
             raise BrainRunError("learning ledger report must be JSON-safe") from error
         if len(encoded_report) > self.max_bytes:
             raise BrainRunError("learning ledger record exceeds max_bytes")
+        record: dict[str, Any] = {
+            "learning_evidence": evidence,
+            "next_state": next_state,
+        }
+        if context_digest is not None:
+            record["context_digest"] = context_digest
         line = json.dumps(
-            {
-                "schema": self._SCHEMA,
-                "record": json.loads(encoded_report.decode("utf-8")),
-            },
+            {"schema": self._SCHEMA, "record": record},
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
@@ -112,12 +166,19 @@ class BrainLearningLedger:
         with self._lock:
             return self._read_records_locked()
 
-    def latest_state(self) -> dict[str, Any] | None:
-        records = self.records()
-        if not records:
-            return None
-        state = records[-1].get("record", {}).get("next_state")
-        return dict(state) if isinstance(state, Mapping) else None
+    def latest_state(self, context_digest: str | None = None) -> dict[str, Any] | None:
+        if context_digest is not None and not _valid_digest(context_digest):
+            raise BrainRunError("context_digest must be a lowercase SHA-256 digest")
+        for row in reversed(self.records()):
+            record = row.get("record")
+            if not isinstance(record, Mapping):
+                continue
+            if context_digest is not None and record.get("context_digest") != context_digest:
+                continue
+            state = record.get("next_state")
+            if isinstance(state, Mapping):
+                return dict(state)
+        return None
 
     def _read_records_locked(self) -> list[dict[str, Any]]:
         if not self.path.exists():
@@ -154,6 +215,12 @@ class BrainWorkspace(Protocol):
     def tool(self, name: str, arguments: Mapping[str, Any] | None = None) -> dict[str, Any]: ...
 
 
+def _valid_digest(value: Any) -> bool:
+    return isinstance(value, str) and len(value) == 64 and all(
+        character in "0123456789abcdef" for character in value
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class BrainRunResult:
     run_id: str
@@ -179,6 +246,36 @@ class BrainRunResult:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class BrainMissionResult:
+    """The outcome of proposing and optionally executing one model-authored mission.
+
+    ``preflight`` is always the non-executing server response. ``execution`` is present only
+    after the caller explicitly authorizes mission dispatch. The normalized mission carries the
+    caller's policy, not a policy selected by the model.
+    """
+
+    brain_run: BrainRunResult
+    status: str
+    mission: Mapping[str, Any] | None
+    preflight: Mapping[str, Any] | None
+    execution: Mapping[str, Any] | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "brain_run": self.brain_run.to_dict(),
+            "mission": None if self.mission is None else dict(self.mission),
+            "preflight": None if self.preflight is None else dict(self.preflight),
+            "execution": None if self.execution is None else dict(self.execution),
+            "authorization": {
+                "provider_call": "recorded_in_brain_run",
+                "mission_dispatch": "caller_approved_only",
+            },
+            "tool_execution": "bounded_agent_mission_executor",
+        }
+
+
 class AutonomousBrain:
     """Coordinate the value-only Rust kernel with a real caller-approved provider invocation."""
 
@@ -201,6 +298,8 @@ class AutonomousBrain:
         require_json: bool = False,
         response_schema: Mapping[str, Any] | None = None,
         idempotency_key: str | None = None,
+        context: Mapping[str, Any] | None = None,
+        contextual_observations: Sequence[Mapping[str, Any]] = (),
     ) -> BrainRunResult:
         if not isinstance(task, str) or not task.strip():
             raise BrainRunError("task must be a non-empty string")
@@ -209,7 +308,38 @@ class AutonomousBrain:
             raise BrainRunError("run_id must be a bounded non-empty string")
         selection_args = dict(model_selection)
         selection_args["task"] = task
-        selection = self.workspace.tool("brain_model_select", selection_args)
+        if context is None:
+            if contextual_observations:
+                raise BrainRunError("contextual_observations require a context mapping")
+            selection = self.workspace.tool("brain_model_select", selection_args)
+        else:
+            if not isinstance(context, Mapping):
+                raise BrainRunError("context must be a mapping")
+            BrainLearningLedger._assert_safe(context)
+            if not isinstance(contextual_observations, Sequence) or isinstance(
+                contextual_observations, (str, bytes)
+            ):
+                raise BrainRunError("contextual_observations must be a sequence")
+            if any(not isinstance(observation, Mapping) for observation in contextual_observations):
+                raise BrainRunError("contextual_observations must contain mappings")
+            BrainLearningLedger._assert_safe(list(contextual_observations))
+            contextual_report = self.workspace.tool(
+                "brain_model_select_contextual",
+                {
+                    "context": dict(context),
+                    "base": selection_args,
+                    "observations": [dict(observation) for observation in contextual_observations],
+                },
+            )
+            nested_selection = contextual_report.get("selection")
+            if not isinstance(nested_selection, Mapping):
+                raise BrainRunError("contextual model selection did not produce a selection report")
+            context_digest = contextual_report.get("context_digest")
+            if not _valid_digest(context_digest):
+                raise BrainRunError("contextual model selection returned an invalid context digest")
+            selection = dict(nested_selection)
+            selection["context_digest"] = context_digest
+            selection["contextual_selection_status"] = contextual_report.get("selection_status")
         selected = selection.get("selected_model")
         if not isinstance(selected, Mapping):
             raise BrainRunError("model selection did not produce an eligible model")
@@ -326,8 +456,141 @@ class AutonomousBrain:
         if not isinstance(report, Mapping) or not report.get("ok"):
             raise BrainRunError("brain outcome recording returned a refusal")
         if ledger is not None:
-            ledger.append(report)
+            context_digest = result.selection.get("context_digest")
+            ledger.append(
+                report,
+                context_digest=context_digest if isinstance(context_digest, str) else None,
+            )
         return dict(report)
+
+    def run_mission(
+        self,
+        *,
+        task: str,
+        model_selection: Mapping[str, Any],
+        prompt: Mapping[str, Any],
+        plan: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle],
+        mission_policy: MissionPolicy | Mapping[str, Any],
+        approve_provider_call: bool = False,
+        approve_mission_dispatch: bool = False,
+        run_id: str | None = None,
+        max_output_tokens: int = 2048,
+        temperature: float | None = None,
+        response_schema: Mapping[str, Any] | None = None,
+        idempotency_key: str | None = None,
+        claim_requests: Sequence[Mapping[str, Any]] = (),
+        context: Mapping[str, Any] | None = None,
+        contextual_observations: Sequence[Mapping[str, Any]] = (),
+        evaluator_review: Mapping[str, Any] | None = None,
+        workflow_binding: Mapping[str, Any] | None = None,
+        route_review: Mapping[str, Any] | None = None,
+        operations_gate_acceptance: Mapping[str, Any] | None = None,
+    ) -> BrainMissionResult:
+        """Run a model decision through the existing bounded mission executor.
+
+        The model supplies only step data. The caller supplies the mission policy and therefore
+        the tool allow-list, output budgets, parallelism, and side-effect posture. The server
+        receives a preview with ``execute=false`` first; dispatch is a separate request after
+        ``approve_mission_dispatch=True``. Claims/evaluator bindings are caller-owned metadata and
+        are not accepted from the model response.
+        """
+
+        if not isinstance(mission_policy, (MissionPolicy, Mapping)):
+            raise BrainRunError("mission_policy must be a MissionPolicy or mapping")
+        policy = (
+            mission_policy.to_dict()
+            if isinstance(mission_policy, MissionPolicy)
+            else dict(mission_policy)
+        )
+        if not isinstance(claim_requests, Sequence) or isinstance(claim_requests, (str, bytes)):
+            raise BrainRunError("claim_requests must be a sequence")
+        policy["execute"] = False
+        brain_run = self.run(
+            task=task,
+            model_selection=model_selection,
+            prompt=prompt,
+            plan=plan,
+            credentials=credentials,
+            approve_provider_call=approve_provider_call,
+            run_id=run_id,
+            max_output_tokens=max_output_tokens,
+            temperature=temperature,
+            require_json=True,
+            response_schema=response_schema or DEFAULT_MISSION_RESPONSE_SCHEMA,
+            idempotency_key=idempotency_key,
+            context=context,
+            contextual_observations=contextual_observations,
+        )
+        if brain_run.status != "completed_provider_call" or brain_run.response is None:
+            return BrainMissionResult(
+                brain_run=brain_run,
+                status="brain_run_not_completed",
+                mission=None,
+                preflight=None,
+                execution=None,
+            )
+        structured = brain_run.response.structured
+        if not isinstance(structured, Mapping):
+            raise BrainRunError("structured brain response did not contain a JSON object")
+        proposed = structured.get("mission")
+        if not isinstance(proposed, Mapping):
+            raise BrainRunError("structured brain response did not contain a mission object")
+        raw_steps = proposed.get("steps")
+        if not isinstance(raw_steps, list) or not raw_steps:
+            raise BrainRunError("model mission must contain a non-empty steps array")
+
+        mission_id = f"{brain_run.run_id}-mission"
+        preview_request = MissionRequest(
+            mission_id=mission_id,
+            goal=task,
+            steps=raw_steps,
+            policy=policy,
+            claim_requests=claim_requests,
+            evaluator_review=evaluator_review,
+            workflow_binding=workflow_binding,
+            route_review=route_review,
+            operations_gate_acceptance=operations_gate_acceptance,
+        )
+        preview_arguments = preview_request.to_mcp_arguments()
+        preflight = self.workspace.tool("agent_mission", preview_arguments)
+        if not isinstance(preflight, Mapping):
+            raise BrainRunError("agent mission preflight returned a non-object")
+        if preflight.get("workflow") not in (None, "agent_mission"):
+            raise BrainRunError("agent mission preflight returned the wrong workflow")
+        mission = dict(preview_arguments)
+        if not approve_mission_dispatch:
+            return BrainMissionResult(
+                brain_run=brain_run,
+                status="mission_approval_required",
+                mission=mission,
+                preflight=dict(preflight),
+                execution=None,
+            )
+
+        execute_policy = dict(policy)
+        execute_policy["execute"] = True
+        execute_request = MissionRequest(
+            mission_id=mission_id,
+            goal=task,
+            steps=raw_steps,
+            policy=execute_policy,
+            claim_requests=claim_requests,
+            evaluator_review=evaluator_review,
+            workflow_binding=workflow_binding,
+            route_review=route_review,
+            operations_gate_acceptance=operations_gate_acceptance,
+        )
+        execution = self.workspace.tool("agent_mission", execute_request.to_mcp_arguments())
+        if not isinstance(execution, Mapping):
+            raise BrainRunError("agent mission execution returned a non-object")
+        return BrainMissionResult(
+            brain_run=brain_run,
+            status="mission_dispatched",
+            mission=mission,
+            preflight=dict(preflight),
+            execution=dict(execution),
+        )
 
     @staticmethod
     def _result(

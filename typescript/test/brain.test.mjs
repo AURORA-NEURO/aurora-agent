@@ -24,6 +24,9 @@ test("client exposes the autonomous brain value-only kernel", async () => {
       if (path.endsWith("brain_model_select")) {
         return new Response(JSON.stringify({ ok: true, tool: "brain_model_select", mcp: { result: { structuredContent: { selected_model_id: "openai/test-model" } } } }), { status: 200, headers: { "content-type": "application/json" } });
       }
+      if (path.endsWith("brain_model_select_contextual")) {
+        return new Response(JSON.stringify({ ok: true, tool: "brain_model_select_contextual", mcp: { result: { structuredContent: { context_digest: "c".repeat(64), selection: { selected_model_id: "openai/test-model" }, selection_status: "contextual_selection_exact_history" } } } }), { status: 200, headers: { "content-type": "application/json" } });
+      }
       if (path.endsWith("brain_prompt_assemble")) {
         return new Response(JSON.stringify({ ok: true, tool: "brain_prompt_assemble", mcp: { result: { structuredContent: { prompt_digest: "p" } } } }), { status: 200, headers: { "content-type": "application/json" } });
       }
@@ -46,6 +49,11 @@ test("client exposes the autonomous brain value-only kernel", async () => {
     requested_output_tokens: 100,
     models: [model],
   });
+  const contextual = await client.brainModelSelectContextual({
+    context: { domain: "engineering", capability: "platform_status", risk_class: "low" },
+    base: { task: "reason", input_tokens: 100, requested_output_tokens: 100, models: [model] },
+    observations: [{ context_digest: "c".repeat(64), arm_id: "openai/test-model", pulls: 2, reward_sum: 1.5 }],
+  });
   const prompt = await client.brainPromptAssemble({ task: "reason", max_input_tokens: 100 });
   const plan = await client.brainPlan({
     objective: "reason",
@@ -64,12 +72,13 @@ test("client exposes the autonomous brain value-only kernel", async () => {
   });
 
   assert.equal(selected.mcp.result.structuredContent.selected_model_id, "openai/test-model");
+  assert.equal(contextual.mcp.result.structuredContent.context_digest, "c".repeat(64));
   assert.equal(prompt.mcp.result.structuredContent.prompt_digest, "p");
   assert.equal(plan.mcp.result.structuredContent.ok, true);
   assert.equal(bandit.mcp.result.structuredContent.selected_arm_id, "openai/test-model");
   assert.equal(updated.mcp.result.structuredContent.generation, 1);
   assert.equal(outcome.mcp.result.structuredContent.status, "recorded_evaluator_reward");
-  assert.equal(seen.length, 6);
+  assert.equal(seen.length, 7);
   assert.ok(seen.every(({ body }) => !Object.prototype.hasOwnProperty.call(body, "api_key")));
 });
 

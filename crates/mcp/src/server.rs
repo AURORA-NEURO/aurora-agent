@@ -112,8 +112,9 @@ use bioprism_biolang::{compile as compile_bioql, QuerySchema};
 use bioprism_bioworlds::SliceCatalog;
 use bioprism_brain::{
     assemble_prompt, plan_autonomous, record_brain_outcome, select_bandit_arm, select_model,
-    update_bandit, AutonomousPlanRequest, BanditState, BanditUpdate, BrainOutcomeRecordRequest,
-    ModelSelectionRequest, PromptAssemblyRequest,
+    select_model_contextual, update_bandit, AutonomousPlanRequest, BanditState, BanditUpdate,
+    BrainOutcomeRecordRequest, ContextualModelSelectionRequest, ModelSelectionRequest,
+    PromptAssemblyRequest,
 };
 use bioprism_bundle::{
     KeyRegistry, PubliclyAttestedBundle, ResultBundle, TrustPolicy, VerificationKey,
@@ -1634,6 +1635,7 @@ impl Server {
             }
             "control_plane_readiness_query" => self.control_plane_readiness_query(&arguments),
             "brain_model_select" => self.brain_model_select(&arguments),
+            "brain_model_select_contextual" => self.brain_model_select_contextual(&arguments),
             "brain_prompt_assemble" => self.brain_prompt_assemble(&arguments),
             "brain_plan" => self.brain_plan(&arguments),
             "brain_bandit_select" => self.brain_bandit_select(&arguments),
@@ -1946,6 +1948,20 @@ impl Server {
             .map_err(|error| format!("brain model selection refused: {error}"))?;
         serde_json::to_value(report)
             .map_err(|error| format!("cannot encode brain model-selection report: {error}"))
+    }
+
+    /// Select a model with domain/capability/risk-scoped observations. Exact contextual history
+    /// overrides global history for an arm; the caller still owns all state and credentials.
+    fn brain_model_select_contextual(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ContextualModelSelectionRequest = serde_json::from_value(arguments.clone())
+            .map_err(|error| {
+                format!("invalid contextual brain model-selection request: {error}")
+            })?;
+        let report = select_model_contextual(&request)
+            .map_err(|error| format!("contextual brain model selection refused: {error}"))?;
+        serde_json::to_value(report).map_err(|error| {
+            format!("cannot encode contextual brain model-selection report: {error}")
+        })
     }
 
     /// Assemble a bounded prompt with explicit omission accounting. The server does not invoke a
@@ -35543,7 +35559,7 @@ pub fn workspace_capabilities() -> Value {
             "domains": ["model selection", "prompt assembly", "bounded autonomous planning", "online bandit adaptation", "evaluator-backed learning evidence", "provider-neutral invocation contracts"],
             "crates": ["bioprism-brain", "bioprism-runtime", "bioprism-routing", "bioprism-adaptive"],
             "python_artifacts": ["python/prism_sdk/llm_runtime.py", "python/prism_sdk/brain.py"],
-            "mcp_tools": ["brain_model_select", "brain_prompt_assemble", "brain_plan", "brain_bandit_select", "brain_bandit_update", "brain_outcome_record"],
+            "mcp_tools": ["brain_model_select", "brain_model_select_contextual", "brain_prompt_assemble", "brain_plan", "brain_bandit_select", "brain_bandit_update", "brain_outcome_record"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -35712,6 +35728,28 @@ pub fn tool_definitions() -> Vec<Value> {
                     "weights": { "type": "object" }
                 },
                 "required": ["task", "input_tokens", "requested_output_tokens", "models"]
+            }
+        }),
+        json!({
+            "name": "brain_model_select_contextual",
+            "description": "Select a provider/model using domain, capability, risk-class, and optional task-family context. Exact context observations override global observations per arm; missing context history falls back to global history. The context digest is returned for caller-owned persistence. No API key, network call, or hidden server state is used.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "context": {
+                        "type": "object",
+                        "properties": {
+                            "domain": { "type": "string" },
+                            "capability": { "type": "string" },
+                            "risk_class": { "type": "string" },
+                            "task_family": { "type": ["string", "null"] }
+                        },
+                        "required": ["domain", "capability", "risk_class"]
+                    },
+                    "base": { "type": "object", "description": "Ordinary brain_model_select request, including candidate models and global observations." },
+                    "observations": { "type": "array", "maxItems": 256, "description": "Context-scoped observations whose context_digest must match the returned context identity." }
+                },
+                "required": ["context", "base"]
             }
         }),
         json!({

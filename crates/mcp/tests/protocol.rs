@@ -326,7 +326,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 244);
+    assert_eq!(tools.len(), 245);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -8642,12 +8642,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(30));
-    assert_eq!(result["unique_catalog_tools"], json!(244));
-    assert_eq!(result["advertised_tool_count"], json!(244));
+    assert_eq!(result["unique_catalog_tools"], json!(245));
+    assert_eq!(result["advertised_tool_count"], json!(245));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(244));
-    assert_eq!(result["schema_quality"]["valid"], json!(244));
+    assert_eq!(result["schema_quality"]["checked"], json!(245));
+    assert_eq!(result["schema_quality"]["valid"], json!(245));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

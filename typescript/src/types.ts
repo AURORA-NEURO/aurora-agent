@@ -139,6 +139,39 @@ export interface BrainModelSelectionResult extends JsonObject {
   does_not_claim: string[];
 }
 
+export interface BrainModelSelectionContext extends JsonObject {
+  domain: string;
+  capability: string;
+  risk_class: string;
+  task_family?: string | null;
+}
+
+export interface BrainContextualModelObservation extends JsonObject {
+  context_digest: string;
+  arm_id: string;
+  pulls?: number;
+  reward_sum?: number;
+  failures?: number;
+  disabled?: boolean;
+}
+
+export interface BrainContextualModelSelectionArgs extends JsonObject {
+  context: BrainModelSelectionContext;
+  base: BrainModelSelectionArgs;
+  observations?: BrainContextualModelObservation[];
+}
+
+export interface BrainContextualModelSelectionResult extends JsonObject {
+  schema: "bioprism-brain-contextual-model-selection/0.1";
+  context: BrainModelSelectionContext;
+  context_digest: string;
+  selection: BrainModelSelectionResult;
+  contextual_observations_used: number;
+  global_observation_fallbacks: number;
+  selection_status: string;
+  does_not_claim: string[];
+}
+
 export interface BrainPromptChunk extends JsonObject {
   id: string;
   role?: string;

@@ -27,6 +27,7 @@ use thiserror::Error;
 
 pub const BRAIN_SCHEMA_VERSION: &str = "bioprism-autonomous-brain/0.1";
 pub const MODEL_SELECTION_SCHEMA: &str = "bioprism-brain-model-selection/0.1";
+pub const CONTEXTUAL_MODEL_SELECTION_SCHEMA: &str = "bioprism-brain-contextual-model-selection/0.1";
 pub const PROMPT_ASSEMBLY_SCHEMA: &str = "bioprism-brain-prompt-assembly/0.1";
 pub const PLAN_SCHEMA: &str = "bioprism-brain-plan/0.1";
 pub const BANDIT_SCHEMA: &str = "bioprism-brain-bandit/0.1";
@@ -37,6 +38,7 @@ const MAX_PROMPT_CHUNKS: usize = 512;
 const MAX_PLAN_STEPS: usize = 256;
 const MAX_TOOL_NAME_BYTES: usize = 256;
 const MAX_EVALUATOR_ID_BYTES: usize = 256;
+const MAX_CONTEXT_LABEL_BYTES: usize = 256;
 
 #[derive(Debug, Error)]
 pub enum BrainError {
@@ -62,6 +64,10 @@ pub enum BrainError {
     ToolNotAllowed { step: String },
     #[error("bandit arm {0:?} is not present")]
     UnknownArm(String),
+    #[error("contextual observation digest does not match the selected context")]
+    ContextDigestMismatch,
+    #[error("contextual observations contain duplicate arm {0:?}")]
+    DuplicateContextObservation(String),
     #[error("bandit state contains duplicate arm {0:?}")]
     DuplicateArm(String),
     #[error("bandit reward is outside the configured range")]
@@ -437,6 +443,161 @@ pub fn select_model(request: &ModelSelectionRequest) -> Result<ModelSelectionRep
         return Ok(report);
     }
     Ok(report)
+}
+
+/// Stable, non-secret context labels used to keep online model observations scoped to a domain
+/// and risk posture. The raw task remains in the base selection request; this structure is safe to
+/// retain in a learning ledger and its digest is the join key for contextual observations.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ModelSelectionContext {
+    pub domain: String,
+    pub capability: String,
+    pub risk_class: String,
+    #[serde(default)]
+    pub task_family: Option<String>,
+}
+
+impl ModelSelectionContext {
+    fn validate(&self) -> Result<(), BrainError> {
+        for (field, value) in [
+            ("context.domain", &self.domain),
+            ("context.capability", &self.capability),
+            ("context.risk_class", &self.risk_class),
+        ] {
+            non_empty(value, field)?;
+            if value.len() > MAX_CONTEXT_LABEL_BYTES {
+                return Err(BrainError::TooMany {
+                    field,
+                    max: MAX_CONTEXT_LABEL_BYTES,
+                });
+            }
+        }
+        if let Some(task_family) = &self.task_family {
+            non_empty(task_family, "context.task_family")?;
+            if task_family.len() > MAX_CONTEXT_LABEL_BYTES {
+                return Err(BrainError::TooMany {
+                    field: "context.task_family",
+                    max: MAX_CONTEXT_LABEL_BYTES,
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ContextualModelObservation {
+    pub context_digest: String,
+    pub arm_id: String,
+    #[serde(default)]
+    pub pulls: u64,
+    #[serde(default)]
+    pub reward_sum: f64,
+    #[serde(default)]
+    pub failures: u64,
+    #[serde(default)]
+    pub disabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ContextualModelSelectionRequest {
+    pub context: ModelSelectionContext,
+    pub base: ModelSelectionRequest,
+    #[serde(default)]
+    pub observations: Vec<ContextualModelObservation>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ContextualModelSelectionReport {
+    pub schema: String,
+    pub context: ModelSelectionContext,
+    pub context_digest: String,
+    pub selection: ModelSelectionReport,
+    pub contextual_observations_used: usize,
+    pub global_observation_fallbacks: usize,
+    pub selection_status: String,
+    pub does_not_claim: Vec<String>,
+}
+
+/// Select a model with observations scoped to one domain/capability/risk context.
+///
+/// Exact contextual observations override global observations for the same model arm. Missing
+/// contextual observations fall back to the base request's global observation, so a new domain is
+/// exploratory without erasing useful system-wide history. The server retains no hidden state.
+pub fn select_model_contextual(
+    request: &ContextualModelSelectionRequest,
+) -> Result<ContextualModelSelectionReport, BrainError> {
+    request.context.validate()?;
+    let context_digest = digest(&request.context)?;
+    let mut base = request.base.clone();
+    let global_arm_ids = base
+        .observations
+        .iter()
+        .map(|observation| observation.arm_id.clone())
+        .collect::<BTreeSet<_>>();
+    let mut contextual_by_arm = BTreeMap::new();
+    for observation in &request.observations {
+        if observation.context_digest != context_digest {
+            return Err(BrainError::ContextDigestMismatch);
+        }
+        if contextual_by_arm
+            .insert(observation.arm_id.clone(), observation)
+            .is_some()
+        {
+            return Err(BrainError::DuplicateContextObservation(
+                observation.arm_id.clone(),
+            ));
+        }
+    }
+    let mut merged = base.observations.clone();
+    let global_fallbacks = request
+        .base
+        .observations
+        .iter()
+        .filter(|observation| !contextual_by_arm.contains_key(&observation.arm_id))
+        .count();
+    for observation in contextual_by_arm.values() {
+        let replacement = ModelObservation {
+            arm_id: observation.arm_id.clone(),
+            pulls: observation.pulls,
+            reward_sum: observation.reward_sum,
+            failures: observation.failures,
+            disabled: observation.disabled,
+        };
+        if let Some(existing) = merged
+            .iter_mut()
+            .find(|existing| existing.arm_id == replacement.arm_id)
+        {
+            *existing = replacement;
+        } else {
+            merged.push(replacement);
+        }
+    }
+    base.observations = merged;
+    let selection = select_model(&base)?;
+    let contextual_observations_used = request.observations.len();
+    let selection_status = if contextual_observations_used == 0 {
+        "contextual_selection_global_history_only"
+    } else if global_fallbacks == global_arm_ids.len() {
+        "contextual_selection_exact_history"
+    } else {
+        "contextual_selection_mixed_history"
+    };
+    Ok(ContextualModelSelectionReport {
+        schema: CONTEXTUAL_MODEL_SELECTION_SCHEMA.into(),
+        context: request.context.clone(),
+        context_digest,
+        selection,
+        contextual_observations_used,
+        global_observation_fallbacks: global_fallbacks,
+        selection_status: selection_status.into(),
+        does_not_claim: vec![
+            "context labels scope observations but do not prove domain similarity".into(),
+            "a contextual reward remains evaluator-supplied and does not verify a model answer"
+                .into(),
+            "the contextual selector does not authenticate providers or redeem credentials".into(),
+        ],
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1259,6 +1420,70 @@ mod tests {
         assert!(report.selected_model_id.is_none());
         assert!(report.ranking.iter().all(|candidate| !candidate.eligible));
         assert_eq!(report.selection_status, "refused_no_eligible_model");
+    }
+
+    #[test]
+    fn contextual_model_selection_overrides_global_history_without_hidden_state() {
+        let context = ModelSelectionContext {
+            domain: "oncology".into(),
+            capability: "assay_fidelity".into(),
+            risk_class: "high_review".into(),
+            task_family: Some("evidence_summary".into()),
+        };
+        let context_digest = digest(&context).unwrap();
+        let base = ModelSelectionRequest {
+            task: "summarize assay evidence".into(),
+            required_capabilities: vec!["reasoning".into()],
+            input_tokens: 100,
+            requested_output_tokens: 100,
+            max_cost_per_million_tokens: None,
+            max_latency_ms: None,
+            min_quality: None,
+            models: vec![
+                model("a", "global", 0.8, 10),
+                model("b", "context", 0.8, 10),
+            ],
+            observations: vec![
+                ModelObservation {
+                    arm_id: "a/global".into(),
+                    pulls: 10,
+                    reward_sum: 8.0,
+                    failures: 0,
+                    disabled: false,
+                },
+                ModelObservation {
+                    arm_id: "b/context".into(),
+                    pulls: 10,
+                    reward_sum: 0.0,
+                    failures: 0,
+                    disabled: false,
+                },
+            ],
+            weights: SelectionWeights::default(),
+        };
+        let report = select_model_contextual(&ContextualModelSelectionRequest {
+            context,
+            base,
+            observations: vec![ContextualModelObservation {
+                context_digest,
+                arm_id: "b/context".into(),
+                pulls: 10,
+                reward_sum: 10.0,
+                failures: 0,
+                disabled: false,
+            }],
+        })
+        .unwrap();
+        assert_eq!(
+            report.selection.selected_model_id.as_deref(),
+            Some("b/context")
+        );
+        assert_eq!(report.contextual_observations_used, 1);
+        assert_eq!(report.global_observation_fallbacks, 1);
+        assert_eq!(
+            report.selection_status,
+            "contextual_selection_mixed_history"
+        );
     }
 
     #[test]

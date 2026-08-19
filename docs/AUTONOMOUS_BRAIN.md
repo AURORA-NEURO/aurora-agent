@@ -14,6 +14,10 @@ flowchart LR
     PA --> PL[Bounded plan DAG]
     PL --> RT
     RT --> O[Value response]
+    O --> MP[Structured mission proposal]
+    MP --> MF[agent_mission preflight]
+    MF --> MD[Caller dispatch approval]
+    MD --> ME[Bounded multi-step executor]
     O --> EV[Held-out evaluator or human review]
     EV --> OE[Value-only outcome evidence]
     OE --> BU[Explicit bandit update]
@@ -64,10 +68,14 @@ must choose their provider data-retention posture separately.
 
 ## Decision loop
 
-The `bioprism-brain` crate exposes six value-only operations through MCP:
+The `bioprism-brain` crate exposes seven value-only operations through MCP:
 
 - `brain_model_select` applies capability, context-window, quality, latency, and cost gates, then
   ranks eligible models with deterministic utility plus an exploration bonus.
+- `brain_model_select_contextual` scopes online observations to a domain, capability, risk class,
+  and optional task family. Exact context history overrides global history per arm; missing history
+  falls back to global observations. The returned context digest is the caller-owned persistence
+  join key.
 - `brain_prompt_assemble` orders required and prioritized context under a hard input budget. It
   refuses when required material does not fit and reports optional omissions with a prompt digest.
 - `brain_plan` validates an allow-listed dependency DAG, orders it deterministically, checks cost,
@@ -140,6 +148,17 @@ The caller may feed `ledger.latest_state()` into the next `brain_bandit_select` 
 reviewing the evaluator provenance. The ledger is append-only, bounded, fsynced per record, and
 rejects secret-shaped fields. This is online bandit adaptation over explicit observations—not an
 unbounded self-modifying policy and not a claim of general intelligence.
+
+## Structured decisions and multi-step work
+
+`AutonomousBrain.run_mission(...)` is the bridge from a model response to the existing mission
+executor. It requires JSON output containing a bounded `mission.steps` array, then sends that
+proposal to `agent_mission` with `execute=false`. The caller owns the mission policy and allow-list;
+the model cannot add tools, widen budgets, enable side effects, or provide evaluator claims. Only
+after inspecting the preflight result may the caller request the second dispatch with
+`approve_mission_dispatch=True`. The Rust executor then applies dependency ordering, schema checks,
+bindings, output budgets, refusal propagation, cancellation, execution traces, and retained
+workflow/evaluator lineage across domain tools.
 
 ## Safety boundary
 
