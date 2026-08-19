@@ -14,11 +14,11 @@ from prism_sdk.brain import (
     BrainRunResult,
 )
 from prism_sdk.evaluators import (
-    DomainEvaluationEvidence,
     DomainEvaluatorAdapter,
     DomainEvaluatorRegistry,
     DomainEvaluatorProfile,
     builtin_domain_profiles,
+    builtin_autonomous_domain_evaluator_profiles,
 )
 from prism_sdk.jobs import BrainJobError, BrainJobStore
 from prism_sdk.control_plane import BrainApprovalRouter
@@ -261,6 +261,74 @@ class DomainEvaluatorTests(unittest.TestCase):
                 }
             )
 
+    def test_domain_adapter_accepts_workflow_metadata_but_scores_only_value_signals(self) -> None:
+        profile = next(
+            profile
+            for profile in builtin_autonomous_domain_evaluator_profiles()
+            if profile.domain == "coding"
+        )
+        adapter = DomainEvaluatorAdapter(profile)
+        normalized = adapter.normalize_evidence(
+            {
+                "schema": "bioprism-python-autonomous-workflow-evaluator/0.1",
+                "workflow_id": "coding_delivery",
+                "workflow_digest": "a" * 64,
+                "stage_id": "verify",
+                "required_signals": ["tests_passed"],
+                "domain": "coding",
+                "capability": "testing",
+                "risk_class": "review",
+                "signals": {signal: True for signal in profile.required_signals},
+            }
+        )
+        self.assertEqual(set(normalized.signals), set(profile.required_signals))
+        self.assertTrue(adapter.assess(self._result(), evidence=normalized.to_dict()).passed)
+
+    def test_autonomous_profiles_cover_all_twelve_domains_and_keep_legacy_aliases(self) -> None:
+        registry = DomainEvaluatorRegistry.with_builtin_autonomous_profiles()
+        profiles = builtin_autonomous_domain_evaluator_profiles()
+        domains = {profile.domain for profile in profiles}
+        self.assertEqual(len(profiles), 12)
+        self.assertEqual(
+            domains,
+            {
+                "coding", "browser", "data", "science", "biomedical", "neuroscience",
+                "operations", "enterprise", "multi_agent", "multimodal", "cross_domain", "evaluation",
+            },
+        )
+        self.assertEqual(len(registry.catalogue()), 17)
+        for profile in profiles:
+            adapter = registry.resolve_for_autonomous_domain(profile.domain)
+            evidence = adapter.normalize_evidence(
+                {
+                    "domain": profile.domain,
+                    "capability": "bounded_task",
+                    "risk_class": "review",
+                    "signals": {signal: True for signal in profile.required_signals},
+                }
+            )
+            decision = adapter.assess(self._result(), evidence=evidence.to_dict())
+            self.assertTrue(decision.passed, profile.domain)
+            self.assertEqual(decision.evaluator_id, profile.evaluator_id)
+        self.assertIs(
+            registry.resolve_for_autonomous_domain("coding").profile,
+            registry.resolve("coding").profile,
+        )
+        self.assertEqual(
+            registry.resolve_for_autonomous_domain("coding", fallback_domain="engineering").evaluator_id,
+            "autonomous-coding-quality",
+        )
+        legacy = DomainEvaluatorRegistry.with_builtin_profiles().resolve("engineering")
+        self.assertTrue(
+            legacy.normalize_evidence(
+                {
+                    "domain": "coding",
+                    "capability": "implementation",
+                    "risk_class": "review",
+                    "signals": {signal: True for signal in legacy.profile.required_signals},
+                }
+            )
+        )
     def test_resumable_job_rehydrates_spec_without_persisting_task_or_credentials(self) -> None:
         brain = AutonomousBrain(_OutcomeWorkspace(), LLMRuntime())
         run = self._result()

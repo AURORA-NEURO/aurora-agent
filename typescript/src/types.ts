@@ -314,6 +314,19 @@ export interface AutonomousDomainPack extends JsonObject {
   credential_posture: string;
 }
 
+/** Exact-domain held-out evaluator contract shared with the Python replay registry. */
+export interface AutonomousDomainEvaluatorProfile extends JsonObject {
+  schema: "bioprism-brain-domain-evaluator/0.1" | string;
+  domain: string;
+  evaluator_id: string;
+  evaluator_version: string;
+  required_signals: string[];
+  signal_weights: Record<string, number>;
+  pass_threshold: number;
+  accepted_evidence_domains: string[];
+  execution: "caller_declared_signal_scoring_only" | string;
+}
+
 export interface AutonomousTaskBlueprint extends JsonObject {
   schema: "bioprism-python-autonomous-task/0.1" | string;
   task: JsonObject;

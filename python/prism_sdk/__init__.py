@@ -94,6 +94,7 @@ from .evaluators import (
     DomainEvaluatorProfile,
     DomainEvaluatorRegistry,
     builtin_domain_profiles,
+    builtin_autonomous_domain_evaluator_profiles,
 )
 from .autonomy import (
     AUTONOMOUS_DOMAINS,
@@ -4497,6 +4498,13 @@ __all__ = [
     "ModalityComparabilityCheckReport",
     "modality_comparability_check_report",
     "__version__",
+    "DOMAIN_EVALUATOR_SCHEMA",
+    "DomainEvaluationEvidence",
+    "DomainEvaluatorAdapter",
+    "DomainEvaluatorProfile",
+    "DomainEvaluatorRegistry",
+    "builtin_domain_profiles",
+    "builtin_autonomous_domain_evaluator_profiles",
     "AUTONOMOUS_DOMAINS",
     "AUTONOMOUS_EXECUTION_MODES",
     "AUTONOMOUS_CROSS_DOMAIN_LEARNING_SCHEMA",

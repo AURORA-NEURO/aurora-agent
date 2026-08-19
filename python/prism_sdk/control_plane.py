@@ -507,7 +507,6 @@ class BrainModelHealthStore:
     def record(self, observation: BrainModelObservation | Mapping[str, Any]) -> dict[str, Any]:
         normalized = observation if isinstance(observation, BrainModelObservation) else BrainModelObservation.from_mapping(observation)
         payload = normalized.to_dict()
-        encoded_payload = _canonical(payload).encode("utf-8")
         with self._lock:
             try:
                 self._connection.execute("BEGIN IMMEDIATE")
@@ -772,7 +771,7 @@ class BrainReplayEngine:
             raise BrainRunError("replay cases must be a sequence")
         if not 1 <= len(cases) <= MAX_REPLAY_CASES:
             raise BrainRunError(f"replay cases must contain 1..{MAX_REPLAY_CASES} entries")
-        registry = evaluators or DomainEvaluatorRegistry.with_builtin_profiles()
+        registry = evaluators or DomainEvaluatorRegistry.with_builtin_autonomous_profiles()
         if not isinstance(registry, DomainEvaluatorRegistry):
             raise BrainRunError("evaluators must be a DomainEvaluatorRegistry")
         if bandit_state is not None:
@@ -787,7 +786,11 @@ class BrainReplayEngine:
         disagreements = 0
         for raw_case in cases:
             case = raw_case if isinstance(raw_case, BrainReplayCase) else BrainReplayCase.from_mapping(raw_case)
-            evaluator = registry.resolve(case.domain)
+            evaluator = registry.resolve_for_replay(
+                case.domain,
+                evaluator_id=case.evaluator_id,
+                evaluator_version=case.evaluator_version,
+            )
             if evaluator.evaluator_id != case.evaluator_id or evaluator.evaluator_version != case.evaluator_version:
                 raise BrainRunError("replay case evaluator identity does not match the registered domain evaluator")
             decision = evaluator.assess_value_only_input(

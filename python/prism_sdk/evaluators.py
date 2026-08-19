@@ -16,7 +16,7 @@ import math
 import re
 from typing import Any, Mapping, Sequence
 
-from .brain import BrainEvaluatorDecision, BrainOutcomeEvaluator, BrainRunError
+from .brain import BrainOutcomeEvaluator, BrainRunError
 from .memory import BrainMemoryError, _safe_value
 
 
@@ -54,6 +54,7 @@ class DomainEvaluatorProfile:
     required_signals: tuple[str, ...]
     signal_weights: Mapping[str, float]
     pass_threshold: float = 1.0
+    accepted_evidence_domains: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _text("domain evaluator domain", self.domain)
@@ -85,8 +86,19 @@ class DomainEvaluatorProfile:
             raise BrainRunError("domain evaluator must weight at least one required signal")
         if not isinstance(self.pass_threshold, (int, float)) or isinstance(self.pass_threshold, bool) or not 0 <= self.pass_threshold <= 1:
             raise BrainRunError("domain evaluator pass_threshold must be within [0, 1]")
+        if not isinstance(self.accepted_evidence_domains, Sequence) or isinstance(
+            self.accepted_evidence_domains, (str, bytes)
+        ):
+            raise BrainRunError("domain evaluator accepted_evidence_domains must be a sequence")
+        accepted_domains: list[str] = []
+        for accepted_domain in self.accepted_evidence_domains:
+            _text("domain evaluator accepted evidence domain", accepted_domain)
+            if accepted_domain in accepted_domains or accepted_domain == self.domain:
+                raise BrainRunError("domain evaluator accepted evidence domains must be unique and distinct")
+            accepted_domains.append(accepted_domain)
         if not math.isfinite(total) or total <= 0:
             raise BrainRunError("domain evaluator signal weights must have a finite positive sum")
+        object.__setattr__(self, "accepted_evidence_domains", tuple(accepted_domains))
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -97,6 +109,7 @@ class DomainEvaluatorProfile:
             "required_signals": list(self.required_signals),
             "signal_weights": dict(self.signal_weights),
             "pass_threshold": self.pass_threshold,
+            "accepted_evidence_domains": list(self.accepted_evidence_domains),
             "execution": "caller_declared_signal_scoring_only",
         }
 
@@ -143,7 +156,22 @@ class DomainEvaluationEvidence:
     def from_mapping(cls, value: Mapping[str, Any]) -> "DomainEvaluationEvidence":
         if not isinstance(value, Mapping):
             raise BrainRunError("domain evaluation evidence must be a mapping")
-        allowed = {"schema", "domain", "capability", "risk_class", "signals", "references", "limitations", "retention"}
+        allowed = {
+            "schema",
+            "domain",
+            "capability",
+            "risk_class",
+            "signals",
+            "references",
+            "limitations",
+            "retention",
+            # Workflow evaluators add these bounded routing fields. Domain adapters deliberately
+            # ignore them after validating the value-only evidence projection.
+            "workflow_id",
+            "workflow_digest",
+            "stage_id",
+            "required_signals",
+        }
         if any(not isinstance(key, str) for key in value) or set(value).difference(allowed):
             raise BrainRunError("domain evaluation evidence contains unsupported fields")
         raw_signals = value.get("signals")
@@ -209,7 +237,8 @@ class DomainEvaluatorAdapter(BrainOutcomeEvaluator):
 
     def normalize_evidence(self, evidence: Mapping[str, Any]) -> DomainEvaluationEvidence:
         normalized = DomainEvaluationEvidence.from_mapping(evidence)
-        if normalized.domain != self.profile.domain:
+        accepted_domains = {self.profile.domain, *self.profile.accepted_evidence_domains}
+        if normalized.domain not in accepted_domains:
             raise BrainRunError(
                 f"domain evaluator {self.profile.domain!r} cannot evaluate {normalized.domain!r} evidence"
             )
@@ -270,6 +299,7 @@ class DomainEvaluatorRegistry:
 
     def __init__(self, adapters: Sequence[DomainEvaluatorAdapter] = ()) -> None:
         self._adapters: dict[str, DomainEvaluatorAdapter] = {}
+        self._autonomous_adapters: dict[str, DomainEvaluatorAdapter] = {}
         for adapter in adapters:
             self.register(adapter)
 
@@ -281,21 +311,79 @@ class DomainEvaluatorRegistry:
             raise BrainRunError(f"domain evaluator is already registered: {domain}")
         self._adapters[domain] = adapter
 
+    def register_autonomous(self, adapter: DomainEvaluatorAdapter) -> None:
+        """Register an exact-domain adapter without shadowing a canonical evaluator key."""
+
+        if not isinstance(adapter, DomainEvaluatorAdapter):
+            raise BrainRunError("autonomous registry entries must be DomainEvaluatorAdapter values")
+        domain = adapter.profile.domain
+        if domain in self._autonomous_adapters:
+            raise BrainRunError(f"autonomous domain evaluator is already registered: {domain}")
+        self._autonomous_adapters[domain] = adapter
+
     def resolve(self, domain: str) -> DomainEvaluatorAdapter:
         _text("evaluator registry domain", domain)
         adapter = self._adapters.get(domain)
         if adapter is None:
+            adapter = self._autonomous_adapters.get(domain)
+        if adapter is None:
             raise BrainRunError(f"no domain evaluator is registered for {domain!r}")
         return adapter
 
+    def resolve_for_autonomous_domain(
+        self,
+        domain: str,
+        *,
+        fallback_domain: str | None = None,
+    ) -> DomainEvaluatorAdapter:
+        """Prefer an exact autonomous-domain evaluator, with an explicit legacy fallback."""
+
+        _text("autonomous evaluator domain", domain)
+        exact = self._autonomous_adapters.get(domain)
+        if exact is not None:
+            return exact
+        if fallback_domain is not None:
+            return self.resolve(fallback_domain)
+        raise BrainRunError(f"no evaluator is registered for autonomous domain {domain!r}")
+
     def catalogue(self) -> list[dict[str, Any]]:
-        return [self._adapters[key].catalogue_entry() for key in sorted(self._adapters)]
+        adapters = [*self._adapters.values(), *self._autonomous_adapters.values()]
+        return [
+            adapter.catalogue_entry()
+            for adapter in sorted(adapters, key=lambda item: (item.profile.domain, item.profile.evaluator_id))
+        ]
+
+    def resolve_for_replay(
+        self,
+        domain: str,
+        *,
+        evaluator_id: str,
+        evaluator_version: str,
+    ) -> DomainEvaluatorAdapter:
+        """Select the canonical or exact adapter that matches a replay case identity."""
+
+        primary = self.resolve(domain)
+        if primary.evaluator_id == evaluator_id and primary.evaluator_version == evaluator_version:
+            return primary
+        exact = self._autonomous_adapters.get(domain)
+        if exact is not None and exact.evaluator_id == evaluator_id and exact.evaluator_version == evaluator_version:
+            return exact
+        return primary
 
     @classmethod
     def with_builtin_profiles(cls) -> "DomainEvaluatorRegistry":
         registry = cls()
         for profile in builtin_domain_profiles():
             registry.register(DomainEvaluatorAdapter(profile))
+        return registry
+
+    @classmethod
+    def with_builtin_autonomous_profiles(cls) -> "DomainEvaluatorRegistry":
+        """Return specialized profiles for all autonomous domains plus non-overlapping legacy profiles."""
+
+        registry = cls.with_builtin_profiles()
+        for profile in builtin_autonomous_domain_evaluator_profiles():
+            registry.register_autonomous(DomainEvaluatorAdapter(profile))
         return registry
 
 
@@ -309,6 +397,7 @@ def builtin_domain_profiles() -> tuple[DomainEvaluatorProfile, ...]:
             evaluator_version="1",
             required_signals=("schema_valid", "tests_passed", "evidence_complete"),
             signal_weights={"schema_valid": 1.0, "tests_passed": 2.0, "evidence_complete": 1.0},
+            accepted_evidence_domains=("coding", "multi_agent", "evaluation"),
         ),
         DomainEvaluatorProfile(
             domain="research",
@@ -316,6 +405,7 @@ def builtin_domain_profiles() -> tuple[DomainEvaluatorProfile, ...]:
             evaluator_version="1",
             required_signals=("evidence_traceable", "uncertainty_reported", "claim_scope_respected"),
             signal_weights={"evidence_traceable": 2.0, "uncertainty_reported": 1.0, "claim_scope_respected": 2.0},
+            accepted_evidence_domains=("browser", "science", "multimodal", "cross_domain"),
         ),
         DomainEvaluatorProfile(
             domain="operations",
@@ -323,6 +413,7 @@ def builtin_domain_profiles() -> tuple[DomainEvaluatorProfile, ...]:
             evaluator_version="1",
             required_signals=("safety_gate_passed", "approval_complete", "rollback_plan_present"),
             signal_weights={"safety_gate_passed": 3.0, "approval_complete": 2.0, "rollback_plan_present": 1.0},
+            accepted_evidence_domains=("enterprise",),
         ),
         DomainEvaluatorProfile(
             domain="data",
@@ -337,6 +428,108 @@ def builtin_domain_profiles() -> tuple[DomainEvaluatorProfile, ...]:
             evaluator_version="1",
             required_signals=("boundary_compliant", "provenance_complete", "human_review_ready"),
             signal_weights={"boundary_compliant": 3.0, "provenance_complete": 2.0, "human_review_ready": 2.0},
+            accepted_evidence_domains=("neuroscience",),
+        ),
+    )
+
+
+def builtin_autonomous_domain_evaluator_profiles() -> tuple[DomainEvaluatorProfile, ...]:
+    """Return specialized, conservative evaluator contracts for all twelve autonomous domains."""
+
+    return (
+        DomainEvaluatorProfile(
+            domain="coding",
+            evaluator_id="autonomous-coding-quality",
+            evaluator_version="1",
+            required_signals=("schema_valid", "tests_passed", "evidence_complete"),
+            signal_weights={"schema_valid": 1.0, "tests_passed": 2.0, "evidence_complete": 1.0},
+            accepted_evidence_domains=("engineering",),
+        ),
+        DomainEvaluatorProfile(
+            domain="browser",
+            evaluator_id="autonomous-browser-quality",
+            evaluator_version="1",
+            required_signals=("evidence_traceable", "source_comparison", "freshness_reported", "claim_scope_respected"),
+            signal_weights={"evidence_traceable": 2.0, "source_comparison": 1.0, "freshness_reported": 1.0, "claim_scope_respected": 2.0},
+            accepted_evidence_domains=("research",),
+        ),
+        DomainEvaluatorProfile(
+            domain="data",
+            evaluator_id="autonomous-data-quality",
+            evaluator_version="1",
+            required_signals=("schema_valid", "lineage_complete", "quality_gate_passed"),
+            signal_weights={"schema_valid": 1.0, "lineage_complete": 2.0, "quality_gate_passed": 2.0},
+        ),
+        DomainEvaluatorProfile(
+            domain="science",
+            evaluator_id="autonomous-science-quality",
+            evaluator_version="1",
+            required_signals=("evidence_traceable", "uncertainty_reported", "claim_scope_respected", "reproducible"),
+            signal_weights={"evidence_traceable": 2.0, "uncertainty_reported": 1.0, "claim_scope_respected": 2.0, "reproducible": 1.0},
+            accepted_evidence_domains=("research",),
+        ),
+        DomainEvaluatorProfile(
+            domain="biomedical",
+            evaluator_id="autonomous-biomedical-boundary",
+            evaluator_version="1",
+            required_signals=("boundary_compliant", "provenance_complete", "human_review_ready"),
+            signal_weights={"boundary_compliant": 3.0, "provenance_complete": 2.0, "human_review_ready": 2.0},
+        ),
+        DomainEvaluatorProfile(
+            domain="neuroscience",
+            evaluator_id="autonomous-neuroscience-quality",
+            evaluator_version="1",
+            required_signals=("signal_quality_reported", "preprocessing_traceable", "claim_scope_respected", "reproducible"),
+            signal_weights={"signal_quality_reported": 2.0, "preprocessing_traceable": 2.0, "claim_scope_respected": 2.0, "reproducible": 1.0},
+            accepted_evidence_domains=("biomedical",),
+        ),
+        DomainEvaluatorProfile(
+            domain="operations",
+            evaluator_id="autonomous-operations-quality",
+            evaluator_version="1",
+            required_signals=("safety_gate_passed", "approval_complete", "rollback_plan_present"),
+            signal_weights={"safety_gate_passed": 3.0, "approval_complete": 2.0, "rollback_plan_present": 2.0, "observability_ready": 1.0},
+            accepted_evidence_domains=(),
+        ),
+        DomainEvaluatorProfile(
+            domain="enterprise",
+            evaluator_id="autonomous-enterprise-quality",
+            evaluator_version="1",
+            required_signals=("ownership_complete", "policy_aligned", "approval_complete", "decision_traceable"),
+            signal_weights={"ownership_complete": 2.0, "policy_aligned": 2.0, "approval_complete": 2.0, "decision_traceable": 1.0},
+            accepted_evidence_domains=("operations",),
+        ),
+        DomainEvaluatorProfile(
+            domain="multi_agent",
+            evaluator_id="autonomous-multi-agent-quality",
+            evaluator_version="1",
+            required_signals=("contract_complete", "attribution_complete", "conflict_resolved", "approval_complete"),
+            signal_weights={"contract_complete": 2.0, "attribution_complete": 2.0, "conflict_resolved": 2.0, "approval_complete": 1.0},
+            accepted_evidence_domains=("engineering",),
+        ),
+        DomainEvaluatorProfile(
+            domain="multimodal",
+            evaluator_id="autonomous-multimodal-quality",
+            evaluator_version="1",
+            required_signals=("modality_inventory_complete", "alignment_valid", "uncertainty_reported", "claim_scope_respected"),
+            signal_weights={"modality_inventory_complete": 2.0, "alignment_valid": 2.0, "uncertainty_reported": 1.0, "claim_scope_respected": 2.0},
+            accepted_evidence_domains=("research",),
+        ),
+        DomainEvaluatorProfile(
+            domain="cross_domain",
+            evaluator_id="autonomous-cross-domain-quality",
+            evaluator_version="1",
+            required_signals=("route_traceable", "evidence_aligned", "attribution_complete", "uncertainty_reported"),
+            signal_weights={"route_traceable": 1.0, "evidence_aligned": 2.0, "attribution_complete": 2.0, "uncertainty_reported": 1.0},
+            accepted_evidence_domains=("research",),
+        ),
+        DomainEvaluatorProfile(
+            domain="evaluation",
+            evaluator_id="autonomous-evaluation-quality",
+            evaluator_version="1",
+            required_signals=("rubric_frozen", "replay_reproducible", "evaluator_independent", "evidence_complete"),
+            signal_weights={"rubric_frozen": 2.0, "replay_reproducible": 2.0, "evaluator_independent": 2.0, "evidence_complete": 1.0},
+            accepted_evidence_domains=("engineering",),
         ),
     )
 
@@ -348,4 +541,5 @@ __all__ = [
     "DomainEvaluatorProfile",
     "DomainEvaluatorRegistry",
     "builtin_domain_profiles",
+    "builtin_autonomous_domain_evaluator_profiles",
 ]

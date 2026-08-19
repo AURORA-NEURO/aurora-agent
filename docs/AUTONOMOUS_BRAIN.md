@@ -195,6 +195,46 @@ are reviewed planning and evidence metadata, not a source of truth. A production
 replace a pack registry, but the orchestrator refuses to run when a pack is missing or its workflow
 or evaluator mapping is inconsistent with the selected domain registries.
 
+### Domain-specific evaluation and held-out replay
+
+`DomainEvaluatorRegistry.with_builtin_autonomous_profiles()` adds an exact evaluator contract for
+each of the twelve autonomous domains while retaining the original canonical engineering and
+research evaluator keys for older control-plane callers. Autonomous learning prefers the exact
+domain adapter and falls back to the profile's canonical evaluator only when a caller supplied a
+legacy registry. Each specialized adapter has its own evaluator identity and required signals;
+for example, browser work requires traceable evidence, source comparison, freshness reporting, and
+claim-scope discipline, while operations requires safety, approval, rollback, and optional
+observability evidence.
+
+```python
+from prism_sdk import DomainEvaluatorRegistry
+
+evaluators = DomainEvaluatorRegistry.with_builtin_autonomous_profiles()
+adapter = evaluators.resolve_for_autonomous_domain(
+    "neuroscience",
+    fallback_domain="biomedical",
+)
+decision = adapter.assess_value_only_input({
+    "schema": "bioprism-brain-evaluator-input/0.1",
+    "result_kind": "offline_replay",
+    "run_id": "held-out-case-001",
+    "evidence_digest": evidence_digest,
+    "evidence": held_out_evidence,
+})
+```
+
+Held-out replay still receives only caller-normalized signal values, reference digests, and
+limitations. It never sees provider text, prompts, credentials, tool arguments, or tool outputs.
+`BrainReplayEngine` can replay all twelve exact-domain contracts, compare expected decision
+digests, and update a caller-owned bandit state. The evidence domain is allowed to carry the
+legacy canonical alias, but the exact autonomous adapter remains the evaluator identity recorded
+in the learning and replay receipt.
+
+`resolve()` remains canonical-first for compatibility with older control-plane code. Autonomous
+orchestration uses `resolve_for_autonomous_domain()` so overlapping names such as `data`,
+`operations`, and `biomedical` receive their exact specialized contracts rather than silently
+using the legacy canonical profile.
+
 For restart-safe provider adaptation, give the agent a caller-owned `ProviderHealthLedger`:
 
 ```python
@@ -469,9 +509,9 @@ control-plane contract. The MCP server exposes:
 - brain_model_health: records and projects provider/model status, latency, bounded quality,
   usage counts, registration posture, and credential readiness. A runtime can feed the resulting
   provider_health map into brain_model_select to hard-gate open circuits or unready providers.
-- brain_replay_evaluate: evaluates digest-bound normalized [0, 1] signals for engineering,
-  research, operations, data, biomedical, or an explicit custom domain profile. It is an offline
-  evaluator only; it does not contact a provider or replay a domain tool.
+- brain_replay_evaluate: evaluates digest-bound normalized [0, 1] signals for the canonical
+  evaluator domains and the twelve exact autonomous domain profiles, or an explicit custom domain
+  profile. It is an offline evaluator only; it does not contact a provider or replay a domain tool.
 
 The same tools are reachable through the existing /v1/tools/{name} HTTP route and stdio
 tools/call. The typed Python bridge keeps the wire shape consistent:

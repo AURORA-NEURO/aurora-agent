@@ -34,6 +34,7 @@ from prism_sdk import (
     ProviderHealthLedger,
     ProviderError,
     ProviderToolResult,
+    builtin_autonomous_domain_evaluator_profiles,
     openai_provider,
 )
 
@@ -671,6 +672,10 @@ def test_reviewed_domain_packs_cover_every_domain_and_bind_workflow_evaluator_an
     domain_registry = AutonomousDomainRegistry.with_builtin_profiles()
     workflow_registry = AutonomousWorkflowRegistry.with_builtin_strategies()
     packs = AutonomousDomainPackRegistry.with_builtin_packs(domain_registry, workflow_registry)
+    evaluator_profiles = {
+        profile.domain: profile
+        for profile in builtin_autonomous_domain_evaluator_profiles()
+    }
     assert {entry["domain"] for entry in packs.catalogue()} == set(AUTONOMOUS_DOMAINS)
     assert len(packs.digest) == 64
     for domain in AUTONOMOUS_DOMAINS:
@@ -679,9 +684,11 @@ def test_reviewed_domain_packs_cover_every_domain_and_bind_workflow_evaluator_an
         pack = packs.resolve(domain)
         assert pack.workflow_id == workflow.workflow_id
         assert pack.evaluator_domain == profile.evaluator_domain
+        assert pack.evaluator_id == evaluator_profiles[domain].evaluator_id
         assert set(profile.required_model_capabilities).issubset(pack.model_capabilities)
         assert set(profile.capabilities).issubset(pack.tool_capabilities)
         assert set(workflow.evaluator_signals).issubset(pack.evidence_requirements)
+        assert set(evaluator_profiles[domain].required_signals).issubset(pack.evidence_requirements)
         assert len(pack.pack_digest) == 64
         public = pack.to_dict()
         assert "private api key" not in json.dumps(public).lower()

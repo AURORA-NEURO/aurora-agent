@@ -51,7 +51,7 @@ from .autonomy_persistence import (
     AutonomousExecutionPolicy,
     AutonomyPersistenceError,
 )
-from .evaluators import DomainEvaluatorRegistry
+from .evaluators import DomainEvaluatorRegistry, builtin_autonomous_domain_evaluator_profiles
 from .llm_runtime import (
     CredentialHandle,
     CredentialSession,
@@ -1340,12 +1340,12 @@ _DOMAIN_PACK_POLICIES: dict[str, dict[str, tuple[str, ...]]] = {
     },
 }
 
+_DOMAIN_AUTONOMOUS_EVALUATOR_PROFILES = {
+    profile.domain: profile for profile in builtin_autonomous_domain_evaluator_profiles()
+}
 _DOMAIN_EVALUATOR_IDS = {
-    "engineering": "domain-engineering-quality",
-    "research": "domain-research-quality",
-    "operations": "domain-operations-quality",
-    "data": "domain-data-quality",
-    "biomedical": "domain-biomedical-boundary",
+    domain: profile.evaluator_id
+    for domain, profile in _DOMAIN_AUTONOMOUS_EVALUATOR_PROFILES.items()
 }
 _DOMAIN_EVALUATOR_SIGNALS = {
     "engineering": ("schema_valid", "tests_passed", "evidence_complete"),
@@ -1471,6 +1471,7 @@ def _build_domain_pack(
         dict.fromkeys(
             (
                 *_DOMAIN_EVALUATOR_SIGNALS[profile.evaluator_domain],
+                *_DOMAIN_AUTONOMOUS_EVALUATOR_PROFILES[profile.domain].required_signals,
                 *workflow.evaluator_signals,
                 *(signal for stage in workflow.stages for signal in stage.evaluator_signals),
             )
@@ -1482,7 +1483,7 @@ def _build_domain_pack(
         pack_version="1",
         workflow_id=workflow.workflow_id,
         evaluator_domain=profile.evaluator_domain,
-        evaluator_id=_DOMAIN_EVALUATOR_IDS[profile.evaluator_domain],
+        evaluator_id=_DOMAIN_EVALUATOR_IDS[profile.domain],
         model_capabilities=tuple(dict.fromkeys(profile.required_model_capabilities)),
         tool_capabilities=tuple(dict.fromkeys((*profile.capabilities, *stage_capabilities))),
         evidence_requirements=evidence,
@@ -3543,8 +3544,11 @@ class AutonomousTaskOrchestrator:
                     raise BrainRunError("memory is required for mission learning")
                 evaluator_value = evaluator
                 if evaluator_value is None:
-                    registry = evaluator_registry or DomainEvaluatorRegistry.with_builtin_profiles()
-                    evaluator_value = registry.resolve(blueprint.domain_pack.evaluator_domain)
+                    registry = evaluator_registry or DomainEvaluatorRegistry.with_builtin_autonomous_profiles()
+                    evaluator_value = registry.resolve_for_autonomous_domain(
+                        blueprint.domain_pack.domain,
+                        fallback_domain=blueprint.domain_pack.evaluator_domain,
+                    )
                 options = {} if mission_options is None else dict(mission_options)
                 options.update(
                     {
@@ -4103,7 +4107,7 @@ class AutonomousTaskOrchestrator:
                 "workflow_digest": blueprint.workflow.workflow_digest,
                 "stage_id": stage.id,
                 "required_signals": list(stage.evaluator_signals),
-                "domain": blueprint.domain_pack.evaluator_domain,
+                "domain": blueprint.domain_pack.domain,
                 "capability": stage.required_capabilities[0] if stage.required_capabilities else blueprint.spec.capability,
                 "risk_class": blueprint.spec.risk_class,
                 "signals": normalized_signals,
@@ -4154,7 +4158,10 @@ class AutonomousTaskOrchestrator:
             raise BrainRunError("workflow evaluator_registry must be a DomainEvaluatorRegistry or None")
         resolved_evaluator = evaluator
         if resolved_evaluator is None and evaluator_registry is not None:
-            resolved_evaluator = evaluator_registry.resolve(blueprint.domain_pack.evaluator_domain)
+            resolved_evaluator = evaluator_registry.resolve_for_autonomous_domain(
+                blueprint.domain_pack.domain,
+                fallback_domain=blueprint.domain_pack.evaluator_domain,
+            )
         if resolved_evaluator is None:
             resolved_evaluator = AutonomousWorkflowEvaluator(blueprint.workflow)
         state: Mapping[str, Any] = dict(bandit_state)
@@ -4325,7 +4332,10 @@ class AutonomousTaskOrchestrator:
             raise BrainRunError("workflow trajectory evaluator_registry must be a DomainEvaluatorRegistry or None")
         resolved_evaluator = evaluator
         if resolved_evaluator is None and evaluator_registry is not None:
-            resolved_evaluator = evaluator_registry.resolve(blueprint.domain_pack.evaluator_domain)
+            resolved_evaluator = evaluator_registry.resolve_for_autonomous_domain(
+                blueprint.domain_pack.domain,
+                fallback_domain=blueprint.domain_pack.evaluator_domain,
+            )
         if resolved_evaluator is None:
             resolved_evaluator = AutonomousWorkflowEvaluator(blueprint.workflow)
         if not isinstance(resolved_evaluator, BrainOutcomeEvaluator):
@@ -4822,10 +4832,13 @@ class AutonomousTaskOrchestrator:
         child_results: list[BrainRunResult | BrainToolLoopResult | BrainMissionResult] = []
         evaluations: list[Mapping[str, Any]] = []
         memory_receipts: list[Mapping[str, Any]] = []
-        registry = evaluator_registry or DomainEvaluatorRegistry.with_builtin_profiles()
+        registry = evaluator_registry or DomainEvaluatorRegistry.with_builtin_autonomous_profiles()
 
-        def evaluator_for(domain: str) -> BrainOutcomeEvaluator:
-            selected = evaluator or registry.resolve(domain)
+        def evaluator_for(domain: str, fallback_domain: str) -> BrainOutcomeEvaluator:
+            selected = evaluator or registry.resolve_for_autonomous_domain(
+                domain,
+                fallback_domain=fallback_domain,
+            )
             if not isinstance(selected, BrainOutcomeEvaluator):
                 raise BrainRunError("cross-domain evaluator registry returned an invalid evaluator")
             return selected
@@ -4841,7 +4854,10 @@ class AutonomousTaskOrchestrator:
             nonlocal state
             if not result.status.startswith("completed"):
                 return
-            resolved = evaluator_for(blueprint_item.profile.evaluator_domain)
+            resolved = evaluator_for(
+                blueprint_item.domain_pack.domain,
+                blueprint_item.domain_pack.evaluator_domain,
+            )
             decision, report = resolved.evaluate_and_record_with_decision(
                 self.brain,
                 result,
@@ -5207,8 +5223,11 @@ class AutonomousTaskOrchestrator:
             raise BrainRunError("memory is required for autonomous online learning")
         resolved_evaluator = evaluator
         if resolved_evaluator is None:
-            registry = evaluator_registry or DomainEvaluatorRegistry.with_builtin_profiles()
-            resolved_evaluator = registry.resolve(blueprint.domain_pack.evaluator_domain)
+            registry = evaluator_registry or DomainEvaluatorRegistry.with_builtin_autonomous_profiles()
+            resolved_evaluator = registry.resolve_for_autonomous_domain(
+                blueprint.domain_pack.domain,
+                fallback_domain=blueprint.domain_pack.evaluator_domain,
+            )
         if not isinstance(resolved_evaluator, BrainOutcomeEvaluator):
             raise BrainRunError("evaluator must be a BrainOutcomeEvaluator")
         current_prompt = blueprint.prompt

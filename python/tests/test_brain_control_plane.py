@@ -16,6 +16,7 @@ from prism_sdk import (
     BrainReplayCase,
     BrainReplayEngine,
     DomainEvaluatorRegistry,
+    builtin_autonomous_domain_evaluator_profiles,
     BrainWorker,
     CredentialStore,
     LLMRuntime,
@@ -277,6 +278,39 @@ def test_replay_engine_runs_all_builtin_domains_and_updates_bandit_without_evide
     secret["evidence_digest"] = _digest(secret["evidence"])
     with pytest.raises(BrainRunError):
         BrainReplayCase.from_mapping(secret)
+
+
+def test_replay_engine_supports_specialized_contracts_for_all_autonomous_domains():
+    registry = DomainEvaluatorRegistry.with_builtin_autonomous_profiles()
+    cases = []
+    for profile in builtin_autonomous_domain_evaluator_profiles():
+        evidence = {
+            "domain": profile.domain,
+            "capability": "bounded_autonomous_review",
+            "risk_class": "review",
+            "signals": {signal: True for signal in profile.required_signals},
+            "references": ["c" * 64],
+            "limitations": ["caller supplied held-out evidence"],
+        }
+        cases.append(
+            {
+                "run_id": f"autonomous-replay-{profile.domain}",
+                "domain": profile.domain,
+                "capability": "bounded_autonomous_review",
+                "risk_class": "review",
+                "evaluator_id": profile.evaluator_id,
+                "evaluator_version": profile.evaluator_version,
+                "evidence": evidence,
+                "evidence_digest": _digest(evidence),
+            }
+        )
+    report = BrainReplayEngine().replay(cases, evaluators=registry, bandit_state={"arms": []})
+    assert report.cases == 12
+    assert set(report.by_domain) == {profile.domain for profile in builtin_autonomous_domain_evaluator_profiles()}
+    assert all(row["passed"] for row in report.decisions)
+    assert {row["evaluator_id"] for row in report.decisions} == {
+        profile.evaluator_id for profile in builtin_autonomous_domain_evaluator_profiles()
+    }
 
 
 def test_worker_claims_and_completes_a_job_across_the_control_plane(tmp_path):
