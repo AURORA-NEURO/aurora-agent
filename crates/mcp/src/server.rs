@@ -4760,9 +4760,9 @@ impl Server {
             if !audit.get("components").and_then(Value::as_object).is_some() {
                 return Err(format!("{name}.audit.components must be an object"));
             }
-            if !audit.get("blockers").map_or(true, Value::is_array)
-                || !audit.get("domains").map_or(true, Value::is_array)
-                || !audit.get("parent_digests").map_or(true, Value::is_array)
+            if !audit.get("blockers").is_none_or(Value::is_array)
+                || !audit.get("domains").is_none_or(Value::is_array)
+                || !audit.get("parent_digests").is_none_or(Value::is_array)
             {
                 return Err(format!("{name}.audit arrays are malformed"));
             }
