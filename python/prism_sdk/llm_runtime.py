@@ -25,6 +25,7 @@ from dataclasses import dataclass, field, replace
 import getpass
 import http.client
 import json
+import math
 import os
 import secrets
 import threading
@@ -48,6 +49,37 @@ SUPPORTED_PROTOCOLS = {
     "anthropic_messages",
 }
 PROVIDER_OBSERVATION_SCHEMA = "bioprism-llm-provider-observation/0.1"
+MODEL_CATALOGUE_SCHEMA = "bioprism-llm-model-catalogue/0.1"
+MAX_MODEL_CANDIDATES = 512
+MAX_MODEL_METADATA_BYTES = 256_000
+_MODEL_CANDIDATE_FIELDS = frozenset(
+    {
+        "provider",
+        "model",
+        "context_window_tokens",
+        "max_output_tokens",
+        "quality",
+        "latency_ms",
+        "cost_per_million_tokens",
+        "reliability",
+        "capabilities",
+        "requires_credential",
+        "enabled",
+        "metadata",
+    }
+)
+_MODEL_SECRET_METADATA_KEYS = frozenset(
+    {
+        "api_key",
+        "apikey",
+        "authorization",
+        "bearer",
+        "credential",
+        "password",
+        "secret",
+        "token",
+    }
+)
 
 
 class CredentialError(ValueError):
@@ -422,6 +454,226 @@ class ProviderConfig:
             "circuit_breaker_failure_threshold": self.circuit_breaker_failure_threshold,
             "circuit_breaker_reset_seconds": self.circuit_breaker_reset_seconds,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class ModelCandidate:
+    """Typed, non-secret metadata for one selectable provider model.
+
+    A candidate is a routing prior, not a claim that the model is available, safe, or suitable
+    for a particular decision.  Runtime registration and credential readiness are evaluated by
+    :class:`LLMRuntime`/``AutonomousBrain`` at selection time.  The catalogue intentionally
+    contains no key, endpoint credential, prompt, or provider response.
+    """
+
+    provider: str
+    model: str
+    context_window_tokens: int
+    max_output_tokens: int
+    quality: float
+    latency_ms: int
+    cost_per_million_tokens: int
+    reliability: float = 0.5
+    capabilities: tuple[str, ...] = ()
+    requires_credential: bool = True
+    enabled: bool = True
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.provider, str)
+            or not self.provider.strip()
+            or "/" in self.provider
+            or " " in self.provider
+        ):
+            raise ProviderError("model candidate provider must be a path-safe identifier")
+        if not isinstance(self.model, str) or not self.model.strip() or len(self.model.encode("utf-8")) > 512:
+            raise ProviderError("model candidate model must be a bounded non-empty string")
+        for name, value in (
+            ("context_window_tokens", self.context_window_tokens),
+            ("max_output_tokens", self.max_output_tokens),
+        ):
+            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                raise ProviderError(f"model candidate {name} must be a positive integer")
+        for name, value in (
+            ("latency_ms", self.latency_ms),
+            ("cost_per_million_tokens", self.cost_per_million_tokens),
+        ):
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise ProviderError(f"model candidate {name} must be a non-negative integer")
+        if self.max_output_tokens > self.context_window_tokens:
+            raise ProviderError("model candidate max_output_tokens cannot exceed its context window")
+        for name, value in (("quality", self.quality), ("reliability", self.reliability)):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+                or not 0 <= float(value) <= 1
+            ):
+                raise ProviderError(f"model candidate {name} must be within [0, 1]")
+        if not isinstance(self.capabilities, Sequence) or isinstance(self.capabilities, (str, bytes)):
+            raise ProviderError("model candidate capabilities must be a string sequence")
+        capabilities: list[str] = []
+        for capability in self.capabilities:
+            if (
+                not isinstance(capability, str)
+                or not capability.strip()
+                or len(capability.encode("utf-8")) > 128
+                or any(ord(character) < 32 for character in capability)
+            ):
+                raise ProviderError("model candidate capabilities must contain bounded strings")
+            if capability not in capabilities:
+                capabilities.append(capability)
+        object.__setattr__(self, "capabilities", tuple(capabilities))
+        if not isinstance(self.requires_credential, bool) or not isinstance(self.enabled, bool):
+            raise ProviderError("model candidate availability flags must be booleans")
+        if not isinstance(self.metadata, Mapping):
+            raise ProviderError("model candidate metadata must be an object")
+        for key in self.metadata:
+            if not isinstance(key, str) or not key.strip() or len(key.encode("utf-8")) > 128:
+                raise ProviderError("model candidate metadata keys must be bounded strings")
+            normalized_key = key.lower().replace("-", "_")
+            if normalized_key in _MODEL_CANDIDATE_FIELDS:
+                raise ProviderError(f"model candidate metadata cannot override field {key!r}")
+            if normalized_key in _MODEL_SECRET_METADATA_KEYS:
+                raise ProviderError("model candidate metadata cannot contain credential fields")
+        try:
+            encoded = json.dumps(self.metadata, ensure_ascii=False, allow_nan=False).encode("utf-8")
+        except (TypeError, ValueError) as error:
+            raise ProviderError("model candidate metadata must be JSON-safe") from error
+        if len(encoded) > MAX_MODEL_METADATA_BYTES:
+            raise ProviderError("model candidate metadata exceeds its bounded size")
+        object.__setattr__(self, "metadata", dict(self.metadata))
+
+    @property
+    def arm_id(self) -> str:
+        return f"{self.provider}/{self.model}"
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "ModelCandidate":
+        if not isinstance(value, Mapping):
+            raise ProviderError("model candidate must be an object")
+        known = _MODEL_CANDIDATE_FIELDS
+        metadata = value.get("metadata", {})
+        if not isinstance(metadata, Mapping):
+            raise ProviderError("model candidate metadata must be an object")
+        extras = {key: item for key, item in value.items() if key not in known}
+        merged_metadata = {**dict(metadata), **extras}
+        return cls(
+            provider=value.get("provider"),
+            model=value.get("model"),
+            context_window_tokens=value.get("context_window_tokens"),
+            max_output_tokens=value.get("max_output_tokens"),
+            quality=value.get("quality"),
+            latency_ms=value.get("latency_ms"),
+            cost_per_million_tokens=value.get("cost_per_million_tokens"),
+            reliability=value.get("reliability", 0.5),
+            capabilities=tuple(value.get("capabilities", ())),
+            requires_credential=value.get("requires_credential", True),
+            enabled=value.get("enabled", True),
+            metadata=merged_metadata,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "provider": self.provider,
+            "model": self.model,
+            "context_window_tokens": self.context_window_tokens,
+            "max_output_tokens": self.max_output_tokens,
+            "quality": float(self.quality),
+            "latency_ms": self.latency_ms,
+            "cost_per_million_tokens": self.cost_per_million_tokens,
+            "reliability": float(self.reliability),
+            "capabilities": list(self.capabilities),
+            "requires_credential": self.requires_credential,
+            "enabled": self.enabled,
+        }
+        result.update(dict(self.metadata))
+        return result
+
+
+class ModelCatalogue:
+    """Thread-safe caller-owned registry of selectable model metadata.
+
+    Registration is deliberately independent from provider credentials.  An application can
+    install its approved model inventory at startup, show it in a UI, then collect a key later.
+    ``candidates()`` returns deterministic mappings ready for ``AutonomousBrain`` selection;
+    provider registration, circuit state, and credential readiness remain live runtime gates.
+    """
+
+    def __init__(self, candidates: Sequence[ModelCandidate | Mapping[str, Any]] = ()) -> None:
+        if not isinstance(candidates, Sequence) or isinstance(candidates, (str, bytes)):
+            raise ProviderError("model catalogue candidates must be a sequence")
+        self._lock = threading.RLock()
+        self._candidates: dict[tuple[str, str], ModelCandidate] = {}
+        for candidate in candidates:
+            self.register(candidate)
+
+    def register(
+        self,
+        candidate: ModelCandidate | Mapping[str, Any],
+        *,
+        replace_existing: bool = False,
+    ) -> ModelCandidate:
+        resolved = candidate if isinstance(candidate, ModelCandidate) else ModelCandidate.from_mapping(candidate)
+        if not isinstance(replace_existing, bool):
+            raise ProviderError("replace_existing must be a boolean")
+        key = (resolved.provider, resolved.model)
+        with self._lock:
+            if key in self._candidates and not replace_existing:
+                raise ProviderError(f"model candidate is already registered: {resolved.arm_id}")
+            if len(self._candidates) >= MAX_MODEL_CANDIDATES and key not in self._candidates:
+                raise ProviderError("model catalogue capacity is exhausted")
+            self._candidates[key] = resolved
+        return resolved
+
+    def remove(self, provider: str, model: str) -> ModelCandidate:
+        key = (provider, model)
+        with self._lock:
+            candidate = self._candidates.pop(key, None)
+        if candidate is None:
+            raise ProviderError(f"model candidate is not registered: {provider}/{model}")
+        return candidate
+
+    def get(self, provider: str, model: str) -> ModelCandidate | None:
+        with self._lock:
+            return self._candidates.get((provider, model))
+
+    def candidates(
+        self,
+        *,
+        providers: Sequence[str] | None = None,
+        enabled_only: bool = False,
+    ) -> list[dict[str, Any]]:
+        if providers is not None and (not isinstance(providers, Sequence) or isinstance(providers, (str, bytes))):
+            raise ProviderError("model catalogue providers must be a sequence")
+        if providers is not None and any(not isinstance(item, str) for item in providers):
+            raise ProviderError("model catalogue providers must contain strings")
+        provider_filter = None if providers is None else set(providers)
+        if not isinstance(enabled_only, bool):
+            raise ProviderError("enabled_only must be a boolean")
+        with self._lock:
+            values = tuple(self._candidates.values())
+        return [
+            candidate.to_dict()
+            for candidate in sorted(values, key=lambda item: item.arm_id)
+            if (provider_filter is None or candidate.provider in provider_filter)
+            and (not enabled_only or candidate.enabled)
+        ]
+
+    def to_dict(self) -> dict[str, Any]:
+        values = self.candidates()
+        return {
+            "schema": MODEL_CATALOGUE_SCHEMA,
+            "candidate_count": len(values),
+            "candidates": values,
+            "credential_posture": "caller_supplied_opaque_handles",
+            "secret_material": "never_returned",
+        }
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._candidates)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1779,6 +2031,21 @@ class CredentialSession:
         with self._lock:
             providers = tuple(sorted(self._handles))
         return [self.onboarding.status(provider) for provider in providers]
+
+    def handles(self) -> dict[str, CredentialHandle]:
+        """Return a caller-owned snapshot for one bounded execution call.
+
+        The returned mapping contains opaque handles only.  It is intentionally a snapshot so a
+        concurrent revoke or session expiry cannot mutate a mapping already handed to a brain
+        invocation; the runtime still revalidates every handle at the provider boundary.
+        """
+
+        self._assert_active()
+        with self._lock:
+            handles = dict(self._handles)
+        for handle in handles.values():
+            self.onboarding.runtime.credentials.metadata(handle)
+        return handles
 
     def revoke(self, provider: str) -> None:
         self._assert_active()

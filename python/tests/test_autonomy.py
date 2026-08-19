@@ -9,6 +9,7 @@ import pytest
 
 from prism_sdk import (
     AUTONOMOUS_DOMAINS,
+    AutonomousAgent,
     AutonomousBrain,
     AutonomousDomainRegistry,
     AutonomousWorkflowRegistry,
@@ -21,6 +22,9 @@ from prism_sdk import (
     BrainWorker,
     CredentialStore,
     LLMRuntime,
+    ModelCandidate,
+    ModelCatalogue,
+    ProviderError,
     ProviderToolResult,
     openai_provider,
 )
@@ -266,6 +270,55 @@ def _structured_runtime() -> tuple[LLMRuntime, CredentialStore, HTTPServer, thre
         )
     )
     return runtime, store, server, thread
+
+
+def test_model_catalogue_and_agent_facade_connect_readiness_session_and_execution():
+    unconfigured = AutonomousAgent(
+        _Workspace(),
+        LLMRuntime(),
+        model_catalogue=ModelCatalogue([_model()[0]]),
+    ).readiness()
+    assert unconfigured["providers"][0]["next_action"] == "register_provider"
+
+    runtime, _store, server, thread = _runtime()
+    try:
+        catalogue = ModelCatalogue([_model()[0]])
+        agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=catalogue)
+        assert agent.models() == catalogue.candidates()
+        before = agent.readiness()
+        assert before["models"][0]["eligible_for_selection"] is False
+        assert before["providers"][0]["next_action"] == "collect_user_credential"
+
+        with agent.onboarding.start_session(session_id="test-session") as session:
+            session.register_value("openai", "test-secret")
+            assert session.handles()["openai"].provider == "openai"
+            ready = agent.readiness()
+            assert ready["models"][0]["eligible_for_selection"] is True
+            assert "test-secret" not in json.dumps(ready)
+            result = agent.run(
+                task="produce a bounded implementation review",
+                domain="coding",
+                credentials=session,
+                approve_provider_call=True,
+            )
+            assert result.status == "completed_provider_call"
+            assert result.response.text == "bounded answer"
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_model_candidate_catalogue_is_typed_and_deterministic():
+    second = dict(_model()[0])
+    second["model"] = "second-model"
+    catalogue = ModelCatalogue([second, _model()[0]])
+    assert [item["model"] for item in catalogue.candidates()] == ["second-model", "test-model"]
+    replacement = ModelCandidate.from_mapping({**_model()[0], "quality": 0.95})
+    catalogue.register(replacement, replace_existing=True)
+    assert catalogue.get("openai", "test-model").quality == 0.95  # type: ignore[union-attr]
+    with pytest.raises(ProviderError):
+        ModelCandidate.from_mapping({**_model()[0], "api_key": "must-not-enter-catalogue"})
 
 
 def test_builtin_domain_registry_covers_every_autonomous_domain_and_blueprint_redacts_task():

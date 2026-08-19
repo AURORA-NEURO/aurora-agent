@@ -113,6 +113,48 @@ variable value. They accept model metadata and opaque outcome references only. D
 or a key into a plan's arbitrary `arguments` object; pass the handle to `LLMRuntime.invoke` at the
 runtime boundary.
 
+## Application composition and model inventory
+
+The lower-level APIs intentionally make every decision input visible. An embedding application can
+use `AutonomousAgent` when it wants one composition object that still preserves those boundaries:
+
+```python
+from prism_sdk import AutonomousAgent, ModelCatalogue, openai_provider
+
+agent = AutonomousAgent(workspace, runtime, model_catalogue=ModelCatalogue([
+    {
+        "provider": "openai",
+        "model": "gpt-5",
+        "capabilities": ["reasoning", "code", "science"],
+        "context_window_tokens": 128_000,
+        "max_output_tokens": 16_000,
+        "quality": 0.8,
+        "reliability": 0.9,
+        "latency_ms": 900,
+        "cost_per_million_tokens": 10,
+    }
+]))
+agent.onboarding.register_provider(openai_provider())
+
+with agent.onboarding.start_session(ttl_seconds=3_600) as session:
+    session.configure_from_environment("openai")  # or protected UI / secret-manager resolver
+    result = agent.run(
+        task="review the next bounded implementation step",
+        domain="coding",
+        credentials=session,
+        approve_provider_call=True,
+    )
+```
+
+`ModelCatalogue` stores only deterministic model metadata and rejects credential-shaped metadata
+fields; it is safe to populate before a user has supplied any key. `agent.readiness()` projects
+provider registration, credential readiness, and model eligibility without exposing secret material.
+If `learn=True` is supplied, the same
+facade runs the explicit evaluator and caller-owned bandit state through the existing online
+learning path; it does not turn a provider response into a reward automatically. An application
+can still call `AutonomousTaskOrchestrator` directly when it needs to provide every candidate
+mapping or policy field itself.
+
 The OpenAI adapter targets the Responses API (`POST /v1/responses`) and Bearer authentication, as
 described in the [OpenAI API reference](https://platform.openai.com/docs/api-reference/introduction)
 and [quickstart](https://platform.openai.com/docs/quickstart/make-your-first-api-request). The

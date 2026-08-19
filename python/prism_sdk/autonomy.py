@@ -39,7 +39,15 @@ from .brain import (
     BrainToolLoopResult,
 )
 from .evaluators import DomainEvaluatorRegistry
-from .llm_runtime import CredentialHandle, ProviderTool
+from .llm_runtime import (
+    CredentialHandle,
+    CredentialSession,
+    LLMRuntime,
+    ModelCandidate,
+    ModelCatalogue,
+    ProviderOnboarding,
+    ProviderTool,
+)
 from .memory import BrainEpisodicMemory, BrainMemoryError, MemoryQuery
 from .mission import MissionPolicy
 
@@ -3383,6 +3391,170 @@ class AutonomousTaskOrchestrator:
         )
 
 
+class AutonomousAgent:
+    """Application-facing composition of onboarding, catalogue, planning, and execution.
+
+    The lower-level classes remain available for infrastructure callers that need every
+    decision input explicitly.  This façade is for an embedding application that wants one
+    durable object: register non-secret provider transport metadata, register its approved model
+    inventory, collect a key through ``onboarding``/``CredentialSession``, and call ``run``.
+
+    It never accepts a raw key.  ``credentials`` must be a mapping of opaque handles or a live
+    credential session.  The session is converted to a short-lived handle snapshot immediately
+    before orchestration, while the runtime revalidates each handle at invocation time.
+    """
+
+    def __init__(
+        self,
+        workspace: Any,
+        runtime: LLMRuntime,
+        *,
+        model_catalogue: ModelCatalogue | None = None,
+        brain: AutonomousBrain | None = None,
+        registry: AutonomousDomainRegistry | None = None,
+        workflow_registry: AutonomousWorkflowRegistry | None = None,
+    ) -> None:
+        if not isinstance(runtime, LLMRuntime):
+            raise BrainRunError("runtime must be an LLMRuntime")
+        if brain is not None and not isinstance(brain, AutonomousBrain):
+            raise BrainRunError("brain must be an AutonomousBrain or None")
+        if brain is not None and brain.runtime is not runtime:
+            raise BrainRunError("brain runtime must be the same runtime supplied to the agent")
+        if model_catalogue is not None and not isinstance(model_catalogue, ModelCatalogue):
+            raise BrainRunError("model_catalogue must be a ModelCatalogue or None")
+        self.runtime = runtime
+        self.onboarding = ProviderOnboarding(runtime)
+        self.catalogue = model_catalogue or ModelCatalogue()
+        self.brain = brain or AutonomousBrain(workspace, runtime)
+        self.orchestrator = AutonomousTaskOrchestrator(
+            self.brain,
+            registry=registry,
+            workflow_registry=workflow_registry,
+        )
+
+    def register_model(
+        self,
+        candidate: ModelCandidate | Mapping[str, Any],
+        *,
+        replace_existing: bool = False,
+    ) -> ModelCandidate:
+        """Add one non-secret model route to the application-owned inventory."""
+
+        return self.catalogue.register(candidate, replace_existing=replace_existing)
+
+    def models(self, *, enabled_only: bool = False) -> list[dict[str, Any]]:
+        """Return deterministic model metadata suitable for a configuration UI."""
+
+        return self.catalogue.candidates(enabled_only=enabled_only)
+
+    def readiness(self) -> dict[str, Any]:
+        """Project provider/model readiness without exposing credentials or prompt material."""
+
+        provider_names = {
+            candidate["provider"]
+            for candidate in self.catalogue.candidates()
+            if isinstance(candidate.get("provider"), str)
+        }
+        providers_by_name = {
+            row["provider"]: row
+            for row in self.onboarding.statuses()
+            if isinstance(row, Mapping) and isinstance(row.get("provider"), str)
+        }
+        for provider in sorted(provider_names.difference(providers_by_name)):
+            providers_by_name[provider] = self.onboarding.status(provider)
+        providers = [providers_by_name[provider] for provider in sorted(providers_by_name)]
+        status_by_provider = {
+            row["provider"]: row
+            for row in providers
+            if isinstance(row, Mapping) and isinstance(row.get("provider"), str)
+        }
+        models: list[dict[str, Any]] = []
+        for candidate in self.catalogue.candidates():
+            provider = candidate["provider"]
+            provider_status = status_by_provider.get(provider, {})
+            models.append(
+                {
+                    "provider": provider,
+                    "model": candidate["model"],
+                    "enabled": candidate.get("enabled", True),
+                    "provider_registered": bool(provider_status.get("provider_registered", False)),
+                    "credential_ready": bool(provider_status.get("ready", False)),
+                    "eligible_for_selection": bool(candidate.get("enabled", True))
+                    and bool(provider_status.get("ready", False)),
+                }
+            )
+        next_actions = sorted(
+            {
+                str(row.get("next_action"))
+                for row in providers
+                if isinstance(row, Mapping) and row.get("next_action") not in (None, "ready")
+            }
+        )
+        return {
+            "schema": "bioprism-autonomous-agent-readiness/0.1",
+            "providers": providers,
+            "models": models,
+            "next_actions": next_actions,
+            "secret_material": "never_returned",
+            "credential_posture": "caller_supplied_opaque_handles",
+        }
+
+    @staticmethod
+    def _credential_mapping(
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+    ) -> dict[str, CredentialHandle]:
+        if isinstance(credentials, CredentialSession):
+            return credentials.handles()
+        if not isinstance(credentials, Mapping):
+            raise BrainRunError("credentials must be a mapping or CredentialSession")
+        resolved = dict(credentials)
+        if any(
+            not isinstance(provider, str) or not isinstance(handle, CredentialHandle)
+            or provider != handle.provider
+            for provider, handle in resolved.items()
+        ):
+            raise BrainRunError("credentials must map provider names to matching opaque handles")
+        return resolved
+
+    def prepare(self, **kwargs: Any) -> AutonomousTaskBlueprint:
+        """Build a domain-aware plan and prompt without contacting any provider."""
+
+        return self.orchestrator.prepare(**kwargs)
+
+    def run(
+        self,
+        *,
+        task: str,
+        domain: str,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Run a task using the registered catalogue unless an explicit candidate slice is given.
+
+        All existing orchestrator options remain available, including ``learn=True``,
+        ``execution_mode="tool_loop"``/``"mission"``, evaluator evidence, bandit state, and
+        provider/mission approval.  No option here widens those authorization boundaries.
+        """
+
+        candidates = self.catalogue.candidates() if model_candidates is None else [
+            candidate.to_dict()
+            if isinstance(candidate, ModelCandidate)
+            else ModelCandidate.from_mapping(candidate).to_dict()
+            for candidate in model_candidates
+        ]
+        if not candidates:
+            raise BrainRunError("the autonomous agent has no model candidates")
+        resolved_credentials = self._credential_mapping(credentials)
+        return self.orchestrator.run(
+            task=task,
+            domain=domain,
+            model_candidates=candidates,
+            credentials=resolved_credentials,
+            **kwargs,
+        )
+
+
 __all__ = [
     "AUTONOMY_SCHEMA",
     "AUTONOMOUS_DOMAINS",
@@ -3397,6 +3569,7 @@ __all__ = [
     "AutonomousCrossDomainBlueprint",
     "AutonomousCrossDomainResult",
     "AutonomousLearningResult",
+    "AutonomousAgent",
     "AutonomousWorkflowCheckpoint",
     "AutonomousWorkflowEvaluator",
     "AutonomousWorkflowLearningResult",
