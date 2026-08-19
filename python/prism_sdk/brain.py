@@ -98,11 +98,13 @@ MAX_BRAIN_EVALUATOR_EVIDENCE_BYTES = 350_000
 MAX_BRAIN_EVALUATOR_INPUT_BYTES = 500_000
 MAX_BRAIN_REPLAY_BYTES = 16_000
 MAX_BRAIN_REPLAN_INSTRUCTION_BYTES = 4_096
+MAX_BRAIN_LEARNING_EPISODE_BYTES = 64_000
 MAX_MODEL_SELECTION_AUDIT_RANKING = 64
 MAX_MODEL_SELECTION_AUDIT_INPUT_RANKING = 512
 MAX_MODEL_SELECTION_AUDIT_REASON_BYTES = 512
 MODEL_SELECTION_AUDIT_SCHEMA = "bioprism-brain-selection-audit/0.1"
 BRAIN_EVALUATOR_REPLAY_SCHEMA = "bioprism-brain-evaluator-replay/0.1"
+BRAIN_LEARNING_EPISODE_SCHEMA = "bioprism-brain-learning-episode/0.1"
 _REPLAN_SECRET_PATTERNS = (
     re.compile(
         r"(?i)\b(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|password|authorization|secret)\b\s*[:=]\s*\S+"
@@ -346,9 +348,115 @@ class BrainLearningLedger:
                 "replay_digest": None if replay is None else _json_digest(dict(replay)),
             }
 
+    def begin_episode(
+        self,
+        episode: BrainLearningEpisode | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Persist a pending, metadata-only episode before delayed evaluation.
+
+        The operation is idempotent for the same episode identity and content. A different
+        episode with an already-used identity is rejected so a delayed evaluator cannot silently
+        credit a different provider run.
+        """
+
+        normalized = episode if isinstance(episode, BrainLearningEpisode) else BrainLearningEpisode.from_mapping(episode)
+        payload = normalized.to_dict()
+        self._assert_safe(payload)
+        record = {
+            "record_type": "pending_episode",
+            "episode": payload,
+        }
+        encoded_record = json.dumps(
+            record,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+        if len(encoded_record) > MAX_BRAIN_LEARNING_EPISODE_BYTES:
+            raise BrainRunError("learning episode record exceeds the bounded size")
+        line = json.dumps(
+            {"schema": self._SCHEMA, "record": record},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8") + b"\n"
+        with self._lock:
+            existing_size = self.path.stat().st_size if self.path.exists() else 0
+            existing_records = self._read_records_locked()
+            for row in existing_records:
+                prior = row.get("record")
+                prior_episode = prior.get("episode") if isinstance(prior, Mapping) else None
+                if not isinstance(prior_episode, Mapping) or prior_episode.get("episode_id") != normalized.episode_id:
+                    continue
+                if prior_episode != payload:
+                    raise BrainRunError("learning episode identity is already bound to different content")
+                prior_line = json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+                return {
+                    "schema": self._SCHEMA,
+                    "record_index": existing_records.index(row),
+                    "record_digest": hashlib.sha256(prior_line).hexdigest(),
+                    "episode_id": normalized.episode_id,
+                    "idempotent": True,
+                }
+            if existing_size + len(line) > self.max_bytes:
+                raise BrainRunError("learning ledger capacity is exhausted")
+            if len(existing_records) >= self.max_records:
+                raise BrainRunError("learning ledger record capacity is exhausted")
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with self.path.open("ab") as handle:
+                handle.write(line)
+                handle.flush()
+                os.fsync(handle.fileno())
+            record_digest = hashlib.sha256(line.rstrip(b"\n")).hexdigest()
+            return {
+                "schema": self._SCHEMA,
+                "record_index": len(existing_records),
+                "record_digest": record_digest,
+                "episode_id": normalized.episode_id,
+                "idempotent": False,
+            }
+
     def records(self) -> list[dict[str, Any]]:
         with self._lock:
             return self._read_records_locked()
+
+    def pending_episodes(self, *, limit: int = 128) -> list[BrainLearningEpisode]:
+        """Return unsettled delayed-learning episodes without loading provider content."""
+
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= self.max_records:
+            raise BrainRunError("pending episode limit must be within the ledger record bound")
+        rows = self.records()
+        episodes: dict[str, BrainLearningEpisode] = {}
+        settled: set[str] = set()
+        for row in rows:
+            record = row.get("record")
+            if not isinstance(record, Mapping):
+                continue
+            episode_raw = record.get("episode")
+            if record.get("record_type") == "pending_episode" and isinstance(episode_raw, Mapping):
+                episode = BrainLearningEpisode.from_mapping(episode_raw)
+                episodes[episode.episode_id] = episode
+            replay = record.get("replay")
+            if isinstance(replay, Mapping) and isinstance(replay.get("episode_id"), str):
+                settled.add(replay["episode_id"])
+        return [
+            episode
+            for episode_id, episode in list(episodes.items())[-limit:]
+            if episode_id not in settled
+        ]
+
+    def episode(self, episode_id: str) -> BrainLearningEpisode | None:
+        """Look up one pending or settled episode by identity."""
+
+        if not isinstance(episode_id, str) or not episode_id.strip():
+            raise BrainRunError("episode_id must be a non-empty string")
+        for row in reversed(self.records()):
+            record = row.get("record")
+            raw = record.get("episode") if isinstance(record, Mapping) else None
+            if isinstance(raw, Mapping) and raw.get("episode_id") == episode_id:
+                return BrainLearningEpisode.from_mapping(raw)
+        return None
 
     def latest_state(self, context_digest: str | None = None) -> dict[str, Any] | None:
         if context_digest is not None and not _valid_digest(context_digest):
@@ -515,6 +623,71 @@ def _bandit_observations(state: Mapping[str, Any] | None) -> list[dict[str, Any]
     return observations
 
 
+def _ensure_bandit_arm(state: Mapping[str, Any], arm_id: str) -> dict[str, Any]:
+    """Return a safe state that contains the selected arm for first-run learning.
+
+    A brand-new application quite reasonably starts with ``arms=[]``.  Selection can explore
+    candidates without an arm record, but the later evaluator update needs a concrete arm to
+    credit.  Hydrating only the selected provider/model here keeps that bootstrap deterministic,
+    bounded, and independent of any provider payload.
+    """
+
+    if not isinstance(state, Mapping):
+        raise BrainRunError("bandit_state must be a mapping")
+    if not isinstance(arm_id, str) or not arm_id.strip() or len(arm_id.encode("utf-8")) > 512:
+        raise BrainRunError("bandit arm_id must be a bounded non-empty string")
+    BrainLearningLedger._assert_safe(state)
+    normalized = dict(state)
+    normalized.setdefault("schema", "bioprism-brain-bandit/0.1")
+    generation = normalized.get("generation", 0)
+    if not isinstance(generation, int) or isinstance(generation, bool) or generation < 0:
+        raise BrainRunError("bandit_state generation must be a non-negative integer")
+    normalized["generation"] = generation
+    arms = normalized.get("arms", [])
+    if not isinstance(arms, list):
+        raise BrainRunError("bandit_state arms must be a list")
+    if len(arms) > 512:
+        raise BrainRunError("bandit_state contains too many arms")
+    copied_arms: list[dict[str, Any]] = []
+    found = False
+    seen: set[str] = set()
+    for raw_arm in arms:
+        if not isinstance(raw_arm, Mapping):
+            raise BrainRunError("bandit_state arms must contain mappings")
+        current = dict(raw_arm)
+        current_id = current.get("arm_id")
+        if not isinstance(current_id, str) or not current_id.strip():
+            raise BrainRunError("bandit_state arms require non-empty arm_id")
+        if current_id in seen:
+            raise BrainRunError(f"bandit_state contains duplicate arm {current_id!r}")
+        seen.add(current_id)
+        current.setdefault("pulls", 0)
+        current.setdefault("reward_sum", 0.0)
+        current.setdefault("failures", 0)
+        current.setdefault("disabled", False)
+        copied_arms.append(current)
+        found = found or current_id == arm_id
+    if not found:
+        copied_arms.append(
+            {
+                "arm_id": arm_id,
+                "pulls": 0,
+                "reward_sum": 0.0,
+                "failures": 0,
+                "disabled": False,
+            }
+        )
+    normalized["arms"] = copied_arms
+    BrainLearningLedger._assert_safe(normalized)
+    try:
+        encoded = json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    except (TypeError, ValueError) as error:
+        raise BrainRunError("bandit_state must be JSON-safe") from error
+    if len(encoded) > MAX_BRAIN_LEARNING_EPISODE_BYTES:
+        raise BrainRunError("bandit_state exceeds the bounded learning state size")
+    return json.loads(encoded.decode("utf-8"))
+
+
 @dataclass(frozen=True, slots=True)
 class BrainRunResult:
     run_id: str
@@ -668,6 +841,93 @@ def _mission_tool_identifier(value: Any) -> bool:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class BrainLearningEpisode:
+    """A restart-safe, value-only handle for delayed evaluator feedback.
+
+    The episode stores the evaluator projection rather than a provider transcript. Applications
+    may persist this object and later supply their separately retained evidence packet to
+    :meth:`BrainOutcomeEvaluator.evaluate_episode`. The episode itself contains no task text,
+    prompt, credential, response, tool argument, or tool output.
+    """
+
+    episode_id: str
+    evaluation_input: Mapping[str, Any]
+    arm_id: str
+    evidence_digest: str | None = None
+    status: str = "pending"
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.episode_id, str) or not self.episode_id.strip() or len(self.episode_id.encode("utf-8")) > 512:
+            raise BrainRunError("learning episode_id must be a bounded non-empty string")
+        if not isinstance(self.arm_id, str) or not self.arm_id.strip() or len(self.arm_id.encode("utf-8")) > 512:
+            raise BrainRunError("learning episode arm_id must be a bounded non-empty string")
+        if self.status not in {"pending", "settled"}:
+            raise BrainRunError("learning episode status must be pending or settled")
+        if not isinstance(self.evaluation_input, Mapping):
+            raise BrainRunError("learning episode evaluation_input must be a mapping")
+        if self.evaluation_input.get("schema") != "bioprism-brain-evaluator-input/0.1":
+            raise BrainRunError("learning episode evaluation_input has an invalid schema")
+        BrainLearningLedger._assert_safe(self.evaluation_input)
+        try:
+            encoded = json.dumps(
+                dict(self.evaluation_input),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        except (TypeError, ValueError) as error:
+            raise BrainRunError("learning episode evaluation_input must be JSON-safe") from error
+        if len(encoded) > MAX_BRAIN_LEARNING_EPISODE_BYTES:
+            raise BrainRunError("learning episode exceeds the bounded size")
+        if self.evidence_digest is not None and not _valid_digest(self.evidence_digest):
+            raise BrainRunError("learning episode evidence_digest must be a lowercase SHA-256 digest")
+        input_digest = self.evaluation_input.get("evidence_digest")
+        if input_digest is not None and not _valid_digest(input_digest):
+            raise BrainRunError("learning episode evaluation_input evidence_digest is malformed")
+        if self.evidence_digest != input_digest:
+            raise BrainRunError("learning episode evidence_digest must match evaluation_input")
+        object.__setattr__(self, "evaluation_input", json.loads(encoded.decode("utf-8")))
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "BrainLearningEpisode":
+        if not isinstance(value, Mapping) or value.get("schema") != BRAIN_LEARNING_EPISODE_SCHEMA:
+            raise BrainRunError("learning episode has an invalid schema")
+        return cls(
+            episode_id=value.get("episode_id"),
+            evaluation_input=value.get("evaluation_input"),
+            arm_id=value.get("arm_id"),
+            evidence_digest=value.get("evidence_digest"),
+            status=value.get("status", "pending"),
+        )
+
+    @property
+    def run_id(self) -> str:
+        value = self.evaluation_input.get("run_id")
+        if not isinstance(value, str) or not value.strip():
+            raise BrainRunError("learning episode evaluation_input is missing run_id")
+        return value
+
+    @property
+    def result_kind(self) -> str:
+        value = self.evaluation_input.get("result_kind")
+        if not isinstance(value, str) or not value.strip():
+            raise BrainRunError("learning episode evaluation_input is missing result_kind")
+        return value
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": BRAIN_LEARNING_EPISODE_SCHEMA,
+            "episode_id": self.episode_id,
+            "evaluation_input": dict(self.evaluation_input),
+            "arm_id": self.arm_id,
+            "evidence_digest": self.evidence_digest,
+            "status": self.status,
+            "retention": "value_only_evaluator_projection_and_digests",
+        }
+
+
 def _json_digest(value: Any) -> str:
     encoded = json.dumps(
         value,
@@ -677,6 +937,45 @@ def _json_digest(value: Any) -> str:
         allow_nan=False,
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _learning_outcome_digest(
+    result: BrainRunResult | BrainToolLoopResult | BrainMissionResult,
+) -> str:
+    """Bind evaluator credit to the complete bounded execution shape."""
+
+    if isinstance(result, BrainRunResult):
+        return result.outcome_digest
+    if isinstance(result, BrainToolLoopResult):
+        final_response = None if result.provider_loop is None else result.provider_loop.final_response
+        return _json_digest(
+            {
+                "brain_outcome_digest": result.brain_run.outcome_digest,
+                "status": result.status,
+                "provider_loop_status": None
+                if result.provider_loop is None
+                else result.provider_loop.status,
+                "turns": None if result.provider_loop is None else result.provider_loop.turns,
+                "tool_calls": None
+                if result.provider_loop is None
+                else result.provider_loop.tool_calls,
+                "final_provider": None if final_response is None else final_response.provider,
+                "final_model": None if final_response is None else final_response.model,
+                "final_request_id": None if final_response is None else final_response.request_id,
+            }
+        )
+    if isinstance(result, BrainMissionResult):
+        execution = result.execution or {}
+        return _json_digest(
+            {
+                "brain_outcome_digest": result.brain_run.outcome_digest,
+                "status": result.status,
+                "mission_status": execution.get("mission_status"),
+                "execution": execution.get("execution"),
+                "result_digest": execution.get("result_digest"),
+            }
+        )
+    raise BrainRunError("result must be a BrainRunResult, BrainToolLoopResult, or BrainMissionResult")
 
 
 def build_model_selection_audit(selection: Mapping[str, Any]) -> dict[str, Any]:
@@ -1376,6 +1675,13 @@ class AutonomousBrain:
         from .autonomy import AutonomousTaskOrchestrator
 
         return AutonomousTaskOrchestrator(self).run_cross_domain(**kwargs)
+
+    def run_cross_domain_learning(self, **kwargs: Any) -> Any:
+        """Run cross-domain specialists with sequential evaluator and bandit updates."""
+
+        from .autonomy import AutonomousTaskOrchestrator
+
+        return AutonomousTaskOrchestrator(self).run_cross_domain_learning(**kwargs)
 
     def recall_memory(
         self,
@@ -3808,6 +4114,8 @@ class AutonomousBrain:
         for name, value in (("selection_digest", selection_digest), ("prompt_digest", prompt_digest), ("plan_digest", plan_digest)):
             if not isinstance(value, str) or len(value) != 64:
                 raise BrainRunError(f"{name} is missing or is not a SHA-256 digest")
+        effective_arm_id = arm_id or f"{provider}/{model}"
+        normalized_bandit_state = _ensure_bandit_arm(bandit_state, effective_arm_id)
         report = self.workspace.tool(
             "brain_outcome_record",
             {
@@ -3831,8 +4139,8 @@ class AutonomousBrain:
                     "failure_class": failure_class,
                     "evidence_digest": evidence_digest,
                 },
-                "bandit_state": dict(bandit_state),
-                "arm_id": arm_id or f"{provider}/{model}",
+                "bandit_state": normalized_bandit_state,
+                "arm_id": effective_arm_id,
             },
         )
         if not isinstance(report, Mapping) or not report.get("ok"):
@@ -3843,6 +4151,176 @@ class AutonomousBrain:
                 report,
                 context_digest=context_digest if isinstance(context_digest, str) else None,
                 replay=replay_metadata,
+            )
+        return dict(report)
+
+    def prepare_learning_episode(
+        self,
+        result: BrainRunResult | BrainToolLoopResult | BrainMissionResult,
+        *,
+        evidence: Mapping[str, Any] | None = None,
+        arm_id: str | None = None,
+        episode_id: str | None = None,
+        ledger: BrainLearningLedger | None = None,
+    ) -> BrainLearningEpisode:
+        """Create and optionally persist a delayed-feedback episode.
+
+        Only the value-only evaluator projection is retained. If the caller already has a
+        bounded evidence packet, its digest is bound now while the packet itself remains the
+        caller's responsibility to retain and re-submit at settlement time.
+        """
+
+        metadata = build_brain_evaluation_input(result)
+        evidence_digest: str | None = None
+        if evidence is not None:
+            with_evidence = build_brain_evaluation_input(result, evidence=evidence)
+            evidence_digest = with_evidence.get("evidence_digest")
+            if not isinstance(evidence_digest, str) or not _valid_digest(evidence_digest):
+                raise BrainRunError("learning episode evidence digest was not generated")
+            metadata["evidence_digest"] = evidence_digest
+        selected = metadata.get("selected_model")
+        if not isinstance(selected, Mapping):
+            raise BrainRunError("cannot create a learning episode without selected model metadata")
+        provider = selected.get("provider")
+        model = selected.get("model")
+        if not isinstance(provider, str) or not isinstance(model, str) or not provider or not model:
+            raise BrainRunError("learning episode selected model metadata is malformed")
+        effective_arm_id = arm_id or f"{provider}/{model}"
+        if not isinstance(effective_arm_id, str) or not effective_arm_id.strip():
+            raise BrainRunError("learning episode arm_id must be a non-empty string")
+        resolved_episode_id = episode_id
+        if resolved_episode_id is None:
+            resolved_episode_id = "episode-" + _json_digest(
+                {
+                    "run_id": metadata.get("run_id"),
+                    "result_kind": metadata.get("result_kind"),
+                    "learning_outcome_digest": metadata.get("learning_outcome_digest"),
+                    "arm_id": effective_arm_id,
+                }
+            )
+        episode = BrainLearningEpisode(
+            episode_id=resolved_episode_id,
+            evaluation_input=metadata,
+            arm_id=effective_arm_id,
+            evidence_digest=evidence_digest,
+        )
+        if ledger is not None:
+            ledger.begin_episode(episode)
+        return episode
+
+    def record_value_only_evaluator_outcome(
+        self,
+        episode: BrainLearningEpisode | Mapping[str, Any],
+        *,
+        bandit_state: Mapping[str, Any],
+        evaluator_id: str,
+        evaluator_version: str,
+        reward: float,
+        passed: bool,
+        failed: bool = False,
+        feedback_digest: str | None = None,
+        failure_class: str | None = None,
+        evidence: Mapping[str, Any] | None = None,
+        ledger: BrainLearningLedger | None = None,
+        replay_metadata: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Settle delayed evaluator feedback using only a persisted episode projection.
+
+        This is the restart-safe counterpart to :meth:`record_evaluator_outcome`. It never needs
+        the original provider response or credential handle, and it still routes the reward through
+        the Rust kernel's explicit bandit update.
+        """
+
+        normalized_episode = episode if isinstance(episode, BrainLearningEpisode) else BrainLearningEpisode.from_mapping(episode)
+        if normalized_episode.status != "pending":
+            raise BrainRunError("learning episode is already settled")
+        if ledger is not None and normalized_episode.episode_id not in {
+            item.episode_id for item in ledger.pending_episodes(limit=ledger.max_records)
+        }:
+            raise BrainRunError("learning episode is already settled or was not registered")
+        evaluation_input = build_brain_evaluation_input_from_metadata(
+            normalized_episode.evaluation_input,
+            evidence=evidence,
+        )
+        selected = evaluation_input.get("selected_model")
+        if not isinstance(selected, Mapping):
+            raise BrainRunError("learning episode selected model metadata is malformed")
+        provider = selected.get("provider")
+        model = selected.get("model")
+        if not isinstance(provider, str) or not isinstance(model, str) or not provider or not model:
+            raise BrainRunError("learning episode selected model metadata is malformed")
+        run_id = evaluation_input.get("run_id")
+        selection_digest = evaluation_input.get("selection_digest")
+        prompt_digest = evaluation_input.get("prompt_digest")
+        plan_digest = evaluation_input.get("plan_digest")
+        outcome_digest = evaluation_input.get("learning_outcome_digest", evaluation_input.get("outcome_digest"))
+        for name, value in (
+            ("run_id", run_id),
+            ("selection_digest", selection_digest),
+            ("prompt_digest", prompt_digest),
+            ("plan_digest", plan_digest),
+            ("outcome_digest", outcome_digest),
+        ):
+            if not isinstance(value, str) or not value.strip() or (name != "run_id" and not _valid_digest(value)):
+                raise BrainRunError(f"learning episode {name} is missing or malformed")
+        response = evaluation_input.get("response")
+        request_id = response.get("request_id") if isinstance(response, Mapping) else None
+        if request_id is None:
+            loop = evaluation_input.get("tool_loop")
+            request_id = loop.get("final_request_id") if isinstance(loop, Mapping) else None
+        if request_id is not None and (not isinstance(request_id, str) or not request_id.strip()):
+            raise BrainRunError("learning episode request_id is malformed")
+        normalized_bandit_state = _ensure_bandit_arm(bandit_state, normalized_episode.arm_id)
+        report = self.workspace.tool(
+            "brain_outcome_record",
+            {
+                "run": {
+                    "run_id": run_id,
+                    "selection_digest": selection_digest,
+                    "prompt_digest": prompt_digest,
+                    "plan_digest": plan_digest,
+                    "provider": provider,
+                    "model": model,
+                    "outcome_digest": outcome_digest,
+                    "request_id": request_id,
+                },
+                "assessment": {
+                    "evaluator_id": evaluator_id,
+                    "evaluator_version": evaluator_version,
+                    "reward": reward,
+                    "passed": passed,
+                    "failed": failed,
+                    "feedback_digest": feedback_digest,
+                    "failure_class": failure_class,
+                    "evidence_digest": evaluation_input.get("evidence_digest"),
+                },
+                "bandit_state": normalized_bandit_state,
+                "arm_id": normalized_episode.arm_id,
+            },
+        )
+        if not isinstance(report, Mapping) or not report.get("ok"):
+            raise BrainRunError("brain outcome recording returned a refusal")
+        replay = dict(replay_metadata or {})
+        replay.setdefault("schema", BRAIN_EVALUATOR_REPLAY_SCHEMA)
+        replay.update(
+            {
+                "episode_id": normalized_episode.episode_id,
+                "result_kind": evaluation_input.get("result_kind"),
+                "run_id": run_id,
+                "outcome_digest": outcome_digest,
+                "evaluation_input_digest": _json_digest(evaluation_input),
+                "evidence_digest": evaluation_input.get("evidence_digest"),
+                "evaluator_id": evaluator_id,
+                "evaluator_version": evaluator_version,
+                "retention": "metadata_and_digests_only",
+            }
+        )
+        if ledger is not None:
+            context_digest = evaluation_input.get("context_digest")
+            ledger.append(
+                report,
+                context_digest=context_digest if isinstance(context_digest, str) else None,
+                replay=replay,
             )
         return dict(report)
 
@@ -4431,6 +4909,7 @@ def build_brain_evaluation_input(
 
     projection["schema"] = "bioprism-brain-evaluator-input/0.1"
     projection["result_kind"] = result_kind
+    projection["learning_outcome_digest"] = _learning_outcome_digest(result)
     projection["evidence_digest"] = evidence_digest
     projection["evidence"] = evidence_copy
     BrainLearningLedger._assert_safe(projection)
@@ -4447,6 +4926,79 @@ def build_brain_evaluation_input(
     if len(encoded_projection) > MAX_BRAIN_EVALUATOR_INPUT_BYTES:
         raise BrainRunError("evaluator input exceeds the bounded size")
     return json.loads(encoded_projection.decode("utf-8"))
+
+
+def build_brain_evaluation_input_from_metadata(
+    metadata: Mapping[str, Any],
+    *,
+    evidence: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Rehydrate a value-only evaluator input without a live provider result.
+
+    ``metadata`` is normally read from :class:`BrainLearningEpisode`. It may contain only the
+    redacted projection produced by :func:`build_brain_evaluation_input`; the optional evidence
+    packet is caller-owned and is digest-checked before it reaches the evaluator.
+    """
+
+    if not isinstance(metadata, Mapping) or metadata.get("schema") != "bioprism-brain-evaluator-input/0.1":
+        raise BrainRunError("value-only evaluator metadata has an invalid schema")
+    if metadata.get("evidence") not in (None, {}):
+        raise BrainRunError("value-only evaluator metadata must not contain retained evidence")
+    BrainLearningLedger._assert_safe(metadata)
+    try:
+        normalized = json.loads(
+            json.dumps(
+                dict(metadata),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            )
+        )
+    except (TypeError, ValueError) as error:
+        raise BrainRunError("value-only evaluator metadata must be JSON-safe") from error
+    if not isinstance(normalized, dict):
+        raise BrainRunError("value-only evaluator metadata must be an object")
+    expected_digest = normalized.get("evidence_digest")
+    if expected_digest is not None and not _valid_digest(expected_digest):
+        raise BrainRunError("value-only evaluator evidence_digest is malformed")
+    if evidence is None:
+        normalized["evidence"] = None
+    else:
+        if not isinstance(evidence, Mapping):
+            raise BrainRunError("value-only evaluator evidence must be a mapping or None")
+        BrainLearningLedger._assert_safe(evidence)
+        try:
+            encoded_evidence = json.dumps(
+                dict(evidence),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        except (TypeError, ValueError) as error:
+            raise BrainRunError("value-only evaluator evidence must be JSON-safe") from error
+        if len(encoded_evidence) > MAX_BRAIN_EVALUATOR_EVIDENCE_BYTES:
+            raise BrainRunError("value-only evaluator evidence exceeds the bounded size")
+        actual_digest = hashlib.sha256(encoded_evidence).hexdigest()
+        if expected_digest is not None and expected_digest != actual_digest:
+            raise BrainRunError("value-only evaluator evidence does not match its episode digest")
+        normalized["evidence_digest"] = actual_digest
+        normalized["evidence"] = json.loads(encoded_evidence.decode("utf-8"))
+    BrainLearningLedger._assert_safe(normalized)
+    try:
+        encoded = json.dumps(
+            normalized,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as error:
+        raise BrainRunError("value-only evaluator input must be JSON-safe") from error
+    if len(encoded) > MAX_BRAIN_EVALUATOR_INPUT_BYTES:
+        raise BrainRunError("value-only evaluator input exceeds the bounded size")
+    return json.loads(encoded.decode("utf-8"))
 
 
 class BrainOutcomeEvaluator:
@@ -4568,6 +5120,60 @@ class BrainOutcomeEvaluator:
             raise BrainRunError("value-only evaluator input exceeds the bounded size")
         return self._assess_input(json.loads(encoded.decode("utf-8")))
 
+    def evaluate_episode(
+        self,
+        brain: AutonomousBrain,
+        episode: BrainLearningEpisode | Mapping[str, Any],
+        *,
+        bandit_state: Mapping[str, Any],
+        evidence: Mapping[str, Any] | None = None,
+        ledger: BrainLearningLedger | None = None,
+    ) -> tuple[BrainEvaluatorDecision, dict[str, Any]]:
+        """Evaluate and settle a delayed episode after a restart or later human review."""
+
+        if not isinstance(brain, AutonomousBrain):
+            raise BrainRunError("brain must be an AutonomousBrain")
+        normalized_episode = episode if isinstance(episode, BrainLearningEpisode) else BrainLearningEpisode.from_mapping(episode)
+        if normalized_episode.status != "pending":
+            raise BrainRunError("learning episode is already settled")
+        if ledger is not None and normalized_episode.episode_id not in {
+            item.episode_id for item in ledger.pending_episodes(limit=ledger.max_records)
+        }:
+            raise BrainRunError("learning episode is already settled or was not registered")
+        evaluation_input = build_brain_evaluation_input_from_metadata(
+            normalized_episode.evaluation_input,
+            evidence=evidence,
+        )
+        decision = self._assess_input(evaluation_input)
+        replay = {
+            "schema": BRAIN_EVALUATOR_REPLAY_SCHEMA,
+            "episode_id": normalized_episode.episode_id,
+            "result_kind": evaluation_input.get("result_kind"),
+            "run_id": evaluation_input.get("run_id"),
+            "outcome_digest": evaluation_input.get("learning_outcome_digest", evaluation_input.get("outcome_digest")),
+            "evaluation_input_digest": _json_digest(evaluation_input),
+            "evidence_digest": evaluation_input.get("evidence_digest"),
+            "evaluator_id": decision.evaluator_id,
+            "evaluator_version": decision.evaluator_version,
+            "decision_digest": _json_digest(decision.to_dict()),
+            "retention": "metadata_and_digests_only",
+        }
+        report = brain.record_value_only_evaluator_outcome(
+            normalized_episode,
+            bandit_state=bandit_state,
+            evaluator_id=decision.evaluator_id,
+            evaluator_version=decision.evaluator_version,
+            reward=decision.reward,
+            passed=decision.passed,
+            failed=decision.failed,
+            feedback_digest=decision.feedback_digest,
+            failure_class=decision.failure_class,
+            evidence=evidence,
+            ledger=ledger,
+            replay_metadata=replay,
+        )
+        return decision, report
+
     def evaluate_and_record(
         self,
         brain: AutonomousBrain,
@@ -4610,7 +5216,8 @@ class BrainOutcomeEvaluator:
             "schema": BRAIN_EVALUATOR_REPLAY_SCHEMA,
             "result_kind": evaluation_input["result_kind"],
             "run_id": evaluation_input["run_id"],
-            "outcome_digest": evaluation_input["outcome_digest"],
+            "outcome_digest": evaluation_input.get("learning_outcome_digest", evaluation_input["outcome_digest"]),
+            "learning_outcome_digest": evaluation_input.get("learning_outcome_digest"),
             "evaluation_input_digest": _json_digest(evaluation_input),
             "evidence_digest": evaluation_input.get("evidence_digest"),
             "evaluator_id": decision.evaluator_id,

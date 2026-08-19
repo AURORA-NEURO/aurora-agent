@@ -194,6 +194,26 @@ one explicit evaluator update per completed stage and resumes from the latest le
 the caller supplies an override. This keeps single-task, staged, and cross-domain execution on
 the same authorization, BYOK, model-selection, and learning boundaries.
 
+For a real delayed-feedback deployment, call `brain.prepare_learning_episode(result, ledger=ledger)`
+immediately after a provider, tool-loop, or mission result. The ledger stores a bounded evaluator
+projection, the selected arm, and digest-bound identity only; it does not store the provider
+response or the evidence packet. A later reviewer, evaluator worker, or reconciliation process can
+load `ledger.pending_episodes()`, rehydrate its separately owned evidence, and call
+`BrainOutcomeEvaluator.evaluate_episode(...)`. Settlement verifies the evidence digest, binds the
+reward to the original selection/prompt/plan/outcome identity, advances the Rust bandit, and marks
+the episode settled through the replay metadata. Reusing a settled identity is refused. If a first
+run begins with `arms=[]`, the selected `provider/model` arm is bootstrapped before the update, so
+the documented first-run exploration state is executable rather than a dead-end.
+
+`AutonomousAgent.run_cross_domain_learning()` applies this same loop between fan-out members and
+the synthesis call. Child results are scored in declaration order, the next child receives the
+updated value-only state, and synthesis receives all preceding updates. Evidence may be supplied
+as a bounded mapping keyed by child id plus `synthesis`; without evidence, the evaluator remains
+the only authority and can conservatively return a zero or incomplete reward. This is the generic
+online-learning path for coding, browser, data, science, biomedical, neuroscience, operations,
+enterprise, multi-agent, multimodal, evaluation, and cross-domain profiles; it does not infer a
+reward from HTTP success or from the model's own claims.
+
 ### Restart-safe autonomous execution and tool outcome learning
 
 Long-horizon autonomy has a second persistence layer in addition to provider health, episodic

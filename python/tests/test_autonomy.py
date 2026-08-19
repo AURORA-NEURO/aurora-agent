@@ -995,6 +995,56 @@ def test_run_cross_domain_fans_out_then_synthesizes_with_approval_boundary():
         server.server_close()
 
 
+def test_cross_domain_learning_updates_state_between_children_and_synthesis(tmp_path: Path):
+    runtime, store, server, thread = _runtime()
+    workspace = _Workspace()
+    memory = BrainEpisodicMemory(tmp_path / "cross-domain-learning.sqlite3")
+    handle = store.register("openai", "cross-domain-learning-secret")
+    evaluator = BrainOutcomeEvaluator(
+        lambda _input: {"reward": 0.8, "passed": True, "failed": False},
+        evaluator_id="cross-domain-quality",
+        evaluator_version="1",
+    )
+    try:
+        agent = AutonomousAgent(workspace, runtime, memory=memory)
+        result = agent.run_cross_domain_learning(
+            task="coordinate a bounded engineering and data review",
+            subtasks=[
+                {"id": "engineering", "task": "review implementation risks", "domain": "coding"},
+                {"id": "data", "task": "review lineage risks", "domain": "data"},
+            ],
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            approve_provider_call=True,
+            evaluator=evaluator,
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+        )
+        assert result.status == "completed"
+        assert len(result.cross_domain.child_results) == 2
+        assert result.cross_domain.synthesis_result is not None
+        assert len(result.evaluations) == 3
+        assert [item["scope"] for item in result.evaluations] == ["child", "child", "synthesis"]
+        assert result.bandit_state["generation"] == 1  # type: ignore[index]
+        selection_calls = [
+            arguments
+            for name, arguments in workspace.calls
+            if name == "brain_model_select_contextual"
+        ]
+        assert len(selection_calls) >= 3
+        assert any(
+            arguments.get("contextual_observations")
+            or arguments.get("observations")
+            for arguments in selection_calls[1:]
+        )
+        assert b"cross-domain-learning-secret" not in (tmp_path / "cross-domain-learning.sqlite3").read_bytes()
+        assert "cross-domain-learning-secret" not in json.dumps(result.to_dict())
+    finally:
+        memory.close()
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
 def test_run_workflow_executes_stage_dag_and_resumes_only_unfinished_stages():
     runtime, store, server, thread = _structured_runtime()
     workspace = _Workspace()

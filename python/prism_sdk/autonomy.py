@@ -98,6 +98,7 @@ AUTONOMOUS_WORKFLOW_EXECUTION_STATUSES = (
 )
 AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA = "bioprism-python-autonomous-workflow-checkpoint/0.1"
 AUTONOMOUS_WORKFLOW_EVALUATOR_SCHEMA = "bioprism-python-autonomous-workflow-evaluator/0.1"
+AUTONOMOUS_CROSS_DOMAIN_LEARNING_SCHEMA = "bioprism-python-autonomous-cross-domain-learning/0.1"
 AUTONOMOUS_WORKFLOW_LEARNING_SCHEMA = "bioprism-python-autonomous-workflow-learning/0.1"
 _SAFE_IDENTIFIER_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-")
 
@@ -989,6 +990,49 @@ class AutonomousCrossDomainResult:
             "synthesis_result": None if self.synthesis_result is None else self.synthesis_result.to_dict(),
             "execution": "completed" if self.synthesis_result is not None else "partial_or_blocked",
             "retention": "provider_responses_returned_to_caller; learning_memory_not_implicit",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousCrossDomainLearningResult:
+    """Cross-domain execution with sequential evaluator credit assignment.
+
+    Child specialists are evaluated in declaration order before synthesis is selected. The next
+    child therefore sees the value-only state produced by prior children, while the synthesis
+    call sees all prior updates. Provider responses remain caller-visible only; the learning
+    receipts contain identities, digests, decisions, and next state.
+    """
+
+    status: str
+    cross_domain: AutonomousCrossDomainResult
+    evaluations: tuple[Mapping[str, Any], ...]
+    bandit_state: Mapping[str, Any]
+    memory_receipts: tuple[Mapping[str, Any], ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.cross_domain, AutonomousCrossDomainResult):
+            raise BrainRunError("cross-domain learning result contains an invalid execution result")
+        if not isinstance(self.evaluations, Sequence) or isinstance(self.evaluations, (str, bytes)):
+            raise BrainRunError("cross-domain learning evaluations must be a sequence")
+        if any(not isinstance(item, Mapping) for item in self.evaluations):
+            raise BrainRunError("cross-domain learning evaluations must contain mappings")
+        if not isinstance(self.bandit_state, Mapping):
+            raise BrainRunError("cross-domain learning bandit_state must be a mapping")
+        BrainLearningLedger._assert_safe(self.bandit_state)
+        if not isinstance(self.memory_receipts, Sequence) or isinstance(self.memory_receipts, (str, bytes)):
+            raise BrainRunError("cross-domain learning memory_receipts must be a sequence")
+        if any(not isinstance(item, Mapping) for item in self.memory_receipts):
+            raise BrainRunError("cross-domain learning memory_receipts must contain mappings")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_CROSS_DOMAIN_LEARNING_SCHEMA,
+            "status": self.status,
+            "cross_domain": self.cross_domain.to_dict(),
+            "evaluations": [dict(item) for item in self.evaluations],
+            "bandit_state": dict(self.bandit_state),
+            "memory_receipts": [dict(item) for item in self.memory_receipts],
+            "retention": "provider_results_caller_owned; learning_value_only",
         }
 
 
@@ -3323,6 +3367,332 @@ class AutonomousTaskOrchestrator:
             synthesis_result,
         )
 
+    def run_cross_domain_learning(
+        self,
+        *,
+        task: str,
+        subtasks: Sequence[Mapping[str, Any]],
+        model_candidates: Sequence[Mapping[str, Any]],
+        credentials: Mapping[str, CredentialHandle],
+        bandit_state: Mapping[str, Any],
+        evaluator: BrainOutcomeEvaluator | None = None,
+        evaluator_registry: DomainEvaluatorRegistry | None = None,
+        evidence: Mapping[str, Mapping[str, Any]] | None = None,
+        memory: BrainEpisodicMemory | None = None,
+        memory_tags: Sequence[str] = (),
+        ledger: BrainLearningLedger | None = None,
+        **kwargs: Any,
+    ) -> AutonomousCrossDomainLearningResult:
+        """Run specialists and synthesis with sequential online learning updates.
+
+        ``evidence`` is keyed by child id and optionally ``"synthesis"``. Each completed result
+        is scored before the next selection, so this path is genuinely adaptive rather than a
+        batch of rewards written after all routing decisions have already happened.
+        """
+
+        if not isinstance(bandit_state, Mapping):
+            raise BrainRunError("cross-domain learning bandit_state must be a mapping")
+        BrainLearningLedger._assert_safe(bandit_state)
+        memory_store = memory or self.brain.memory
+        if memory_store is None:
+            raise BrainRunError("memory is required for cross-domain online learning")
+        if not isinstance(memory_store, BrainEpisodicMemory):
+            raise BrainRunError("cross-domain learning memory must be a BrainEpisodicMemory")
+        if evaluator is not None and not isinstance(evaluator, BrainOutcomeEvaluator):
+            raise BrainRunError("cross-domain evaluator must be a BrainOutcomeEvaluator or None")
+        if evaluator_registry is not None and not isinstance(evaluator_registry, DomainEvaluatorRegistry):
+            raise BrainRunError("cross-domain evaluator_registry must be a DomainEvaluatorRegistry or None")
+        if evidence is not None:
+            if not isinstance(evidence, Mapping) or any(
+                not isinstance(key, str) or not isinstance(value, Mapping)
+                for key, value in evidence.items()
+            ):
+                raise BrainRunError("cross-domain evidence must map ids to mappings")
+            _safe_json("cross-domain learning evidence", evidence, maximum=1_000_000)
+        normalized_tags = _sequence("cross-domain learning memory_tags", memory_tags, maximum=32)
+
+        def take(name: str, default: Any) -> Any:
+            return kwargs.pop(name, default)
+
+        context = take("context", None)
+        desired_outputs = take(
+            "desired_outputs",
+            ("domain-attributed findings", "cross-domain conflicts and uncertainty", "safe next actions"),
+        )
+        child_execution_mode = take("child_execution_mode", "provider")
+        synthesis_execution_mode = take("synthesis_execution_mode", "provider")
+        max_steps = take("max_steps", 8)
+        require_json = take("require_json", False)
+        response_schema = take("response_schema", None)
+        memory_query = take("memory_query", None)
+        memory_limit = take("memory_limit", 8)
+        contextual_observations = take("contextual_observations", ())
+        input_tokens = take("input_tokens", 4_096)
+        requested_output_tokens = take("requested_output_tokens", 2_048)
+        max_cost_per_million_tokens = take("max_cost_per_million_tokens", None)
+        max_latency_ms = take("max_latency_ms", None)
+        min_quality = take("min_quality", None)
+        selection_overrides = take("selection_overrides", None)
+        approve_provider_call = take("approve_provider_call", False)
+        approve_mission_dispatch = take("approve_mission_dispatch", False)
+        run_id = take("run_id", None)
+        max_output_tokens = take("max_output_tokens", 2_048)
+        temperature = take("temperature", None)
+        idempotency_key = take("idempotency_key", None)
+        mission_policy = take("mission_policy", None)
+        mission_options = take("mission_options", None)
+        route_request = take("route_request", None)
+        auto_route = take("auto_route", False)
+        enforce_route_tools = take("enforce_route_tools", True)
+        require_resolved_route = take("require_resolved_route", True)
+        provider_tools = take("provider_tools", ())
+        tool_choice = take("tool_choice", None)
+        tool_loop_options = take("tool_loop_options", None)
+        max_provider_failovers = take("max_provider_failovers", 2)
+        synthesize = take("synthesize", True)
+        allow_partial = take("allow_partial", False)
+        execution_controller = take("execution_controller", None)
+        if kwargs:
+            raise BrainRunError(
+                "unsupported cross-domain learning options: " + ", ".join(sorted(kwargs))
+            )
+        if not isinstance(synthesize, bool) or not isinstance(allow_partial, bool):
+            raise BrainRunError("cross-domain learning synthesize and allow_partial must be booleans")
+
+        blueprint = self.prepare_cross_domain(
+            task=task,
+            subtasks=subtasks,
+            context=context,
+            desired_outputs=desired_outputs,
+            child_execution_mode=child_execution_mode,
+            synthesis_execution_mode=synthesis_execution_mode,
+            max_steps=max_steps,
+            require_json=require_json,
+            response_schema=response_schema,
+            max_input_tokens=input_tokens,
+        )
+        state: Mapping[str, Any] = dict(bandit_state)
+        child_results: list[BrainRunResult | BrainToolLoopResult | BrainMissionResult] = []
+        evaluations: list[Mapping[str, Any]] = []
+        memory_receipts: list[Mapping[str, Any]] = []
+        registry = evaluator_registry or DomainEvaluatorRegistry.with_builtin_profiles()
+
+        def evaluator_for(domain: str) -> BrainOutcomeEvaluator:
+            selected = evaluator or registry.resolve(domain)
+            if not isinstance(selected, BrainOutcomeEvaluator):
+                raise BrainRunError("cross-domain evaluator registry returned an invalid evaluator")
+            return selected
+
+        def evaluate_result(
+            *,
+            scope: str,
+            item_id: str,
+            blueprint_item: AutonomousTaskBlueprint,
+            result: BrainRunResult | BrainToolLoopResult | BrainMissionResult,
+            item_evidence: Mapping[str, Any] | None,
+        ) -> None:
+            nonlocal state
+            if not result.status.startswith("completed"):
+                return
+            resolved = evaluator_for(blueprint_item.profile.evaluator_domain)
+            decision, report = resolved.evaluate_and_record_with_decision(
+                self.brain,
+                result,
+                bandit_state=state,
+                evidence=item_evidence,
+                ledger=ledger,
+            )
+            next_state = report.get("next_state")
+            if isinstance(next_state, Mapping):
+                state = dict(next_state)
+            brain_result = result if isinstance(result, BrainRunResult) else result.brain_run
+            episode_id = f"cross-{scope}-{item_id}-{brain_result.run_id}"
+            if len(episode_id.encode("utf-8")) > 256:
+                episode_id = "cross-episode-" + content_digest(
+                    {"scope": scope, "item_id": item_id, "run_id": brain_result.run_id}
+                )
+            receipt = self.brain.remember_result(
+                result,
+                task=blueprint_item.spec.task,
+                episode_id=episode_id,
+                context=blueprint_item.selection_context,
+                tags=[
+                    *normalized_tags,
+                    f"domain:{blueprint_item.spec.domain}",
+                    f"cross_domain:{scope}",
+                    f"item:{item_id}",
+                ],
+                lesson=decision.replan_instruction if decision.replan_requested else None,
+                provenance={
+                    "scope": scope,
+                    "item_id": item_id,
+                    "evaluator_id": decision.evaluator_id,
+                    "evaluator_version": decision.evaluator_version,
+                },
+                memory=memory_store,
+            )
+            evaluation_receipt = memory_store.record_evaluation(
+                episode_id,
+                {**decision.to_dict(), "decision_digest": content_digest(decision.to_dict())},
+            ).to_dict()
+            memory_receipts.extend((receipt, evaluation_receipt))
+            evaluations.append(
+                {
+                    "scope": scope,
+                    "item_id": item_id,
+                    "decision": decision.to_dict(),
+                    "recording": {
+                        "status": report.get("status"),
+                        "next_state": report.get("next_state"),
+                        "learning_evidence": report.get("learning_evidence"),
+                    },
+                }
+            )
+
+        for child_id, child in zip(blueprint.child_ids, blueprint.child_blueprints):
+            result = self.run(
+                task=child.spec.task,
+                domain=child.spec.domain,
+                model_candidates=model_candidates,
+                credentials=credentials,
+                capability=child.spec.capability,
+                risk_class=child.spec.risk_class,
+                constraints=child.spec.constraints,
+                desired_outputs=child.spec.desired_outputs,
+                context=child.spec.context,
+                max_steps=child.spec.max_steps,
+                require_json=child.spec.require_json,
+                response_schema=child.spec.response_schema,
+                execution_mode=child.spec.execution_mode,
+                required_model_capabilities=tuple(
+                    capability
+                    for capability in child.required_capabilities
+                    if capability not in child.profile.required_model_capabilities
+                ),
+                ledger=ledger,
+                memory=memory_store,
+                memory_query=memory_query,
+                memory_limit=memory_limit,
+                contextual_observations=contextual_observations,
+                input_tokens=input_tokens,
+                requested_output_tokens=requested_output_tokens,
+                max_cost_per_million_tokens=max_cost_per_million_tokens,
+                max_latency_ms=max_latency_ms,
+                min_quality=min_quality,
+                selection_overrides=selection_overrides,
+                approve_provider_call=approve_provider_call,
+                approve_mission_dispatch=approve_mission_dispatch,
+                run_id=self._cross_domain_identity("cross-child", run_id, child_id),
+                max_output_tokens=max_output_tokens,
+                temperature=temperature,
+                idempotency_key=self._cross_domain_identity("cross-key", idempotency_key, child_id),
+                mission_policy=mission_policy,
+                mission_options=mission_options,
+                route_request=route_request,
+                auto_route=auto_route,
+                enforce_route_tools=enforce_route_tools,
+                require_resolved_route=require_resolved_route,
+                provider_tools=provider_tools,
+                tool_choice=tool_choice,
+                max_provider_failovers=max_provider_failovers,
+                tool_loop_options=tool_loop_options,
+                bandit_state=state,
+                execution_controller=execution_controller,
+            )
+            if not isinstance(result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
+                raise BrainRunError("cross-domain learning child returned an unsupported result")
+            child_results.append(result)
+            item_evidence = None if evidence is None else evidence.get(child_id)
+            evaluate_result(
+                scope="child",
+                item_id=child_id,
+                blueprint_item=child,
+                result=result,
+                item_evidence=item_evidence,
+            )
+
+        complete = [result.status.startswith("completed") for result in child_results]
+        if not all(complete) and not allow_partial:
+            status = "approval_required" if any(result.status == "approval_required" for result in child_results) else "child_incomplete"
+            cross_domain = AutonomousCrossDomainResult(status, blueprint, tuple(child_results), None)
+            return AutonomousCrossDomainLearningResult(status, cross_domain, tuple(evaluations), state, tuple(memory_receipts))
+        if not synthesize:
+            status = "children_completed" if all(complete) else "children_partial"
+            cross_domain = AutonomousCrossDomainResult(status, blueprint, tuple(child_results), None)
+            return AutonomousCrossDomainLearningResult(status, cross_domain, tuple(evaluations), state, tuple(memory_receipts))
+
+        child_outputs = [
+            {
+                "id": child_id,
+                "domain": child.profile.domain,
+                "workflow_id": child.workflow.workflow_id,
+                "workflow_digest": child.workflow.workflow_digest,
+                "status": result.status,
+                "output": self._cross_domain_output(result),
+                "output_digest": content_digest({"output": self._cross_domain_output(result)}),
+            }
+            for child_id, child, result in zip(blueprint.child_ids, blueprint.child_blueprints, child_results)
+        ]
+        synthesis = blueprint.synthesis_blueprint
+        synthesis_context = dict(synthesis.spec.context)
+        synthesis_context["child_outputs"] = child_outputs
+        synthesis_result = self.run(
+            task=synthesis.spec.task,
+            domain=synthesis.spec.domain,
+            model_candidates=model_candidates,
+            credentials=credentials,
+            capability=synthesis.spec.capability,
+            risk_class=synthesis.spec.risk_class,
+            constraints=synthesis.spec.constraints,
+            desired_outputs=synthesis.spec.desired_outputs,
+            context=synthesis_context,
+            max_steps=synthesis.spec.max_steps,
+            require_json=synthesis.spec.require_json,
+            response_schema=synthesis.spec.response_schema,
+            execution_mode=synthesis.spec.execution_mode,
+            ledger=ledger,
+            memory=memory_store,
+            memory_query=memory_query,
+            memory_limit=memory_limit,
+            contextual_observations=contextual_observations,
+            input_tokens=input_tokens,
+            requested_output_tokens=requested_output_tokens,
+            max_cost_per_million_tokens=max_cost_per_million_tokens,
+            max_latency_ms=max_latency_ms,
+            min_quality=min_quality,
+            selection_overrides=selection_overrides,
+            approve_provider_call=approve_provider_call,
+            approve_mission_dispatch=approve_mission_dispatch,
+            run_id=self._cross_domain_identity("cross-synthesis", run_id, "synthesis"),
+            max_output_tokens=max_output_tokens,
+            temperature=temperature,
+            idempotency_key=self._cross_domain_identity("cross-key", idempotency_key, "synthesis"),
+            mission_policy=mission_policy,
+            mission_options=mission_options,
+            route_request=route_request,
+            auto_route=auto_route,
+            enforce_route_tools=enforce_route_tools,
+            require_resolved_route=require_resolved_route,
+            provider_tools=provider_tools,
+            tool_choice=tool_choice,
+            max_provider_failovers=max_provider_failovers,
+            tool_loop_options=tool_loop_options,
+            bandit_state=state,
+            execution_controller=execution_controller,
+        )
+        if not isinstance(synthesis_result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
+            raise BrainRunError("cross-domain learning synthesis returned an unsupported result")
+        evaluate_result(
+            scope="synthesis",
+            item_id="synthesis",
+            blueprint_item=synthesis,
+            result=synthesis_result,
+            item_evidence=None if evidence is None else evidence.get("synthesis"),
+        )
+        status = "completed" if synthesis_result.status.startswith("completed") else synthesis_result.status
+        cross_domain = AutonomousCrossDomainResult(status, blueprint, tuple(child_results), synthesis_result)
+        return AutonomousCrossDomainLearningResult(status, cross_domain, tuple(evaluations), state, tuple(memory_receipts))
+
     def _run_learning_from_blueprint(
         self,
         blueprint: AutonomousTaskBlueprint,
@@ -3866,6 +4236,53 @@ class AutonomousAgent:
         self._finish_execution(execution_controller, result=result)
         return result
 
+    def run_cross_domain_learning(
+        self,
+        *,
+        task: str,
+        subtasks: Sequence[Mapping[str, Any]],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> AutonomousCrossDomainLearningResult:
+        """Run fan-out and synthesis while adapting routing between completed episodes."""
+
+        options = dict(kwargs)
+        options["bandit_state"] = self.learning_state() if bandit_state is None else bandit_state
+        candidates, resolved_credentials, options, execution_controller = self._execution_inputs(
+            credentials=credentials,
+            model_candidates=model_candidates,
+            options=options,
+            tool_domains=tuple(
+                dict.fromkeys(
+                    ["cross_domain"]
+                    + [
+                        value.get("domain")
+                        for value in subtasks
+                        if isinstance(value, Mapping) and isinstance(value.get("domain"), str)
+                    ]
+            )),
+            resume_learning=False,
+            execution_id=execution_id,
+            resume_execution=resume_execution,
+        )
+        try:
+            result = self.orchestrator.run_cross_domain_learning(
+                task=task,
+                subtasks=subtasks,
+                model_candidates=candidates,
+                credentials=resolved_credentials,
+                **options,
+            )
+        except Exception as error:
+            self._finish_execution(execution_controller, error=error)
+            raise
+        self._finish_execution(execution_controller, result=result)
+        return result
+
     def run_workflow(
         self,
         *,
@@ -3987,6 +4404,7 @@ __all__ = [
     "AUTONOMY_SCHEMA",
     "AUTONOMOUS_DOMAINS",
     "AUTONOMOUS_EXECUTION_MODES",
+    "AUTONOMOUS_CROSS_DOMAIN_LEARNING_SCHEMA",
     "AUTONOMOUS_WORKFLOW_SCHEMA",
     "AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA",
     "AUTONOMOUS_WORKFLOW_EVALUATOR_SCHEMA",
@@ -3999,6 +4417,7 @@ __all__ = [
     "AutonomousDomainToolRuntime",
     "AutonomousCrossDomainBlueprint",
     "AutonomousCrossDomainResult",
+    "AutonomousCrossDomainLearningResult",
     "AutonomousLearningResult",
     "AutonomousAgent",
     "AutonomousWorkflowCheckpoint",
