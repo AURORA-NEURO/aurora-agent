@@ -177,6 +177,27 @@ class DomainEvaluationEvidence:
         raw_signals = value.get("signals")
         if not isinstance(raw_signals, Mapping):
             raise BrainRunError("domain evaluation evidence signals must be a mapping")
+        workflow_id = value.get("workflow_id")
+        if workflow_id is not None:
+            _text("domain evaluation workflow_id", workflow_id)
+        workflow_digest = value.get("workflow_digest")
+        if workflow_digest is not None:
+            _text("domain evaluation workflow_digest", workflow_digest)
+            if len(workflow_digest) != 64 or any(character not in "0123456789abcdef" for character in workflow_digest):
+                raise BrainRunError("domain evaluation workflow_digest must be a lowercase SHA-256 digest")
+        stage_id = value.get("stage_id")
+        if stage_id is not None:
+            _text("domain evaluation stage_id", stage_id)
+        required_signals = value.get("required_signals")
+        if required_signals is not None:
+            if not isinstance(required_signals, Sequence) or isinstance(required_signals, (str, bytes)):
+                raise BrainRunError("domain evaluation required_signals must be a sequence")
+            if len(required_signals) > MAX_DOMAIN_EVALUATOR_SIGNAL_COUNT:
+                raise BrainRunError("domain evaluation required_signals exceed the bounded count")
+            for signal in required_signals:
+                _text("domain evaluation required signal", signal)
+                if not _SAFE_SIGNAL.fullmatch(signal):
+                    raise BrainRunError(f"domain evaluation required signal is not a safe identifier: {signal}")
         normalized_signals: dict[str, float] = {}
         for signal, raw in raw_signals.items():
             if isinstance(raw, bool):
@@ -339,7 +360,7 @@ class DomainEvaluatorRegistry:
         """Prefer an exact autonomous-domain evaluator, with an explicit legacy fallback."""
 
         _text("autonomous evaluator domain", domain)
-        exact = self._autonomous_adapters.get(domain)
+        exact = self._autonomous_adapters.get(domain) or self._adapters.get(domain)
         if exact is not None:
             return exact
         if fallback_domain is not None:

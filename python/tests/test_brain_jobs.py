@@ -283,6 +283,14 @@ class DomainEvaluatorTests(unittest.TestCase):
         )
         self.assertEqual(set(normalized.signals), set(profile.required_signals))
         self.assertTrue(adapter.assess(self._result(), evidence=normalized.to_dict()).passed)
+        with self.assertRaises(BrainRunError):
+            adapter.normalize_evidence({
+                "domain": "coding",
+                "capability": "testing",
+                "risk_class": "review",
+                "workflow_id": "x" * 257,
+                "signals": {signal: True for signal in profile.required_signals},
+            })
 
     def test_autonomous_profiles_cover_all_twelve_domains_and_keep_legacy_aliases(self) -> None:
         registry = DomainEvaluatorRegistry.with_builtin_autonomous_profiles()
@@ -317,6 +325,23 @@ class DomainEvaluatorTests(unittest.TestCase):
         self.assertEqual(
             registry.resolve_for_autonomous_domain("coding", fallback_domain="engineering").evaluator_id,
             "autonomous-coding-quality",
+        )
+        custom = DomainEvaluatorRegistry(
+            [
+                DomainEvaluatorAdapter(
+                    DomainEvaluatorProfile(
+                        domain="coding",
+                        evaluator_id="custom-coding-quality",
+                        evaluator_version="1",
+                        required_signals=("tests_passed",),
+                        signal_weights={"tests_passed": 1.0},
+                    )
+                )
+            ]
+        )
+        self.assertEqual(
+            custom.resolve_for_autonomous_domain("coding", fallback_domain="engineering").evaluator_id,
+            "custom-coding-quality",
         )
         legacy = DomainEvaluatorRegistry.with_builtin_profiles().resolve("engineering")
         self.assertTrue(
