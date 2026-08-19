@@ -25,6 +25,12 @@ from typing import Any, Callable, Mapping, Sequence
 from .authoring import content_digest
 from .errors import ArgumentError
 from .llm_runtime import ProviderTool, ProviderToolCall, ProviderToolResult
+from .autonomy_persistence import (
+    AutonomousExecutionController,
+    AutonomousExecutionJournal,
+    AutonomousExecutionPolicy,
+    AutonomyPolicyError,
+)
 from .tooling import ToolCatalogue, ToolDefinition, ToolSchemaError
 
 
@@ -39,6 +45,7 @@ DOMAIN_TOOL_RISK_CLASSES = (
 DOMAIN_TOOL_EXECUTION_STATUSES = (
     "executed",
     "approval_required",
+    "policy_refused",
     "unknown_tool",
     "schema_refused",
     "execution_failed",
@@ -348,6 +355,10 @@ class AutonomousDomainToolReceipt:
     schema_digest: str | None = None
     arguments_digest: str | None = None
     output_digest: str | None = None
+    execution_id: str | None = None
+    domain: str | None = None
+    capability: str | None = None
+    risk_class: str | None = None
 
     def __post_init__(self) -> None:
         _text("tool receipt call_id", self.call_id, maximum=256)
@@ -357,6 +368,9 @@ class AutonomousDomainToolReceipt:
         for name, value in (("schema_digest", self.schema_digest), ("arguments_digest", self.arguments_digest), ("output_digest", self.output_digest)):
             if value is not None and (not isinstance(value, str) or len(value) != 64 or any(character not in "0123456789abcdef" for character in value)):
                 raise ArgumentError(f"{name} must be a lowercase SHA-256 digest or None")
+        for name, value in (("execution_id", self.execution_id), ("domain", self.domain), ("capability", self.capability), ("risk_class", self.risk_class)):
+            if value is not None:
+                _identifier(f"tool receipt {name}", value)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -367,6 +381,10 @@ class AutonomousDomainToolReceipt:
             "schema_digest": self.schema_digest,
             "arguments_digest": self.arguments_digest,
             "output_digest": self.output_digest,
+            "execution_id": self.execution_id,
+            "domain": self.domain,
+            "capability": self.capability,
+            "risk_class": self.risk_class,
             "retention": "metadata_only_no_arguments_or_outputs",
         }
 
@@ -381,6 +399,8 @@ class AutonomousDomainToolRuntime:
         executor: Callable[[AutonomousDomainTool, Mapping[str, Any]], Any],
         approve: Callable[[AutonomousDomainTool, ProviderToolCall], bool] | None = None,
         auto_execute_read_only: bool = True,
+        controller: AutonomousExecutionController | None = None,
+        _receipt_store: list[AutonomousDomainToolReceipt] | None = None,
     ) -> None:
         if not isinstance(registry, AutonomousDomainToolRegistry):
             raise ArgumentError("domain tool runtime requires an AutonomousDomainToolRegistry")
@@ -390,11 +410,47 @@ class AutonomousDomainToolRuntime:
             raise ArgumentError("domain tool runtime approval callback must be callable")
         if not isinstance(auto_execute_read_only, bool):
             raise ArgumentError("auto_execute_read_only must be a boolean")
+        if controller is not None and not isinstance(controller, AutonomousExecutionController):
+            raise ArgumentError("domain tool runtime controller must be an AutonomousExecutionController or None")
+        if _receipt_store is not None and not isinstance(_receipt_store, list):
+            raise ArgumentError("domain tool runtime receipt store must be a list or None")
         self.registry = registry
         self.executor = executor
         self.approve = approve
         self.auto_execute_read_only = auto_execute_read_only
-        self._receipts: list[AutonomousDomainToolReceipt] = []
+        self.controller = controller
+        self._receipts = _receipt_store if _receipt_store is not None else []
+
+    def session(
+        self,
+        *,
+        execution_id: str,
+        domain: str,
+        capability: str,
+        risk_class: str,
+        policy: AutonomousExecutionPolicy | Mapping[str, Any] | None = None,
+        journal: AutonomousExecutionJournal | None = None,
+        resume: bool = False,
+    ) -> "AutonomousDomainToolRuntime":
+        """Create an isolated run controller while preserving the application receipt stream."""
+
+        controller = AutonomousExecutionController(
+            execution_id=execution_id,
+            domain=domain,
+            capability=capability,
+            risk_class=risk_class,
+            policy=policy,
+            journal=journal,
+            resume=resume,
+        )
+        return AutonomousDomainToolRuntime(
+            self.registry,
+            executor=self.executor,
+            approve=self.approve,
+            auto_execute_read_only=self.auto_execute_read_only,
+            controller=controller,
+            _receipt_store=self._receipts,
+        )
 
     @property
     def receipts(self) -> tuple[AutonomousDomainToolReceipt, ...]:
@@ -452,6 +508,33 @@ class AutonomousDomainToolRuntime:
                     )
                 )
                 continue
+            if self.controller is not None:
+                try:
+                    self.controller.admit_tool_call(
+                        tool=tool.name,
+                        call_id=call.call_id,
+                        read_only=tool.read_only,
+                        approval_required=tool.approval_required,
+                    )
+                except AutonomyPolicyError:
+                    refusals.append(
+                        (
+                            call,
+                            "policy_refused",
+                            AutonomousDomainToolReceipt(
+                                call.call_id,
+                                tool.name,
+                                "policy_refused",
+                                schema_digest=plan.schema_digest,
+                                arguments_digest=arguments_digest,
+                                execution_id=self.controller.state.execution_id,
+                                domain=self.controller.state.domain,
+                                capability=tool.capability,
+                                risk_class=tool.risk_class,
+                            ),
+                        )
+                    )
+                    continue
             authorized = tool.read_only and self.auto_execute_read_only
             if not authorized and self.approve is not None:
                 try:
@@ -469,6 +552,10 @@ class AutonomousDomainToolRuntime:
                             "approval_required",
                             schema_digest=plan.schema_digest,
                             arguments_digest=arguments_digest,
+                            execution_id=None if self.controller is None else self.controller.state.execution_id,
+                            domain=None if self.controller is None else self.controller.state.domain,
+                            capability=tool.capability,
+                            risk_class=tool.risk_class,
                         ),
                     )
                 )
@@ -476,7 +563,6 @@ class AutonomousDomainToolRuntime:
             prepared.append((call, tool, plan.arguments, arguments_digest))
 
         if refusals:
-            refused_ids = {call.call_id for call, _status, _receipt in refusals}
             results: list[ProviderToolResult] = []
             for call in calls:
                 matching = next((item for item in refusals if item[0].call_id == call.call_id), None)
@@ -491,6 +577,14 @@ class AutonomousDomainToolRuntime:
                             receipt=receipt,
                         )
                     )
+                    if self.controller is not None and status == "approval_required":
+                        tool = self.registry.resolve(call.name)
+                        self.controller.record_tool_outcome(
+                            tool=tool.name,
+                            call_id=call.call_id,
+                            status="approval_required",
+                            reason="caller_approval_missing",
+                        )
                 else:
                     tool = next(item[1] for item in prepared if item[0].call_id == call.call_id)
                     results.append(
@@ -505,9 +599,20 @@ class AutonomousDomainToolRuntime:
                                 "approval_required",
                                 schema_digest=tool.schema_digest,
                                 arguments_digest=content_digest(dict(call.arguments)),
+                                execution_id=None if self.controller is None else self.controller.state.execution_id,
+                                domain=None if self.controller is None else self.controller.state.domain,
+                                capability=tool.capability,
+                                risk_class=tool.risk_class,
                             ),
                         )
                     )
+                    if self.controller is not None:
+                        self.controller.record_tool_outcome(
+                            tool=tool.name,
+                            call_id=call.call_id,
+                            status="approval_required",
+                            reason="batch_contains_unapproved_call",
+                        )
             return tuple(results)
 
         results: list[ProviderToolResult] = []
@@ -530,9 +635,20 @@ class AutonomousDomainToolRuntime:
                             schema_digest=tool.schema_digest,
                             arguments_digest=arguments_digest,
                             output_digest=content_digest(output if isinstance(output, Mapping) else {"result": output}),
+                            execution_id=None if self.controller is None else self.controller.state.execution_id,
+                            domain=None if self.controller is None else self.controller.state.domain,
+                            capability=tool.capability,
+                            risk_class=tool.risk_class,
                         ),
                     )
                 )
+                if self.controller is not None:
+                    self.controller.record_tool_outcome(
+                        tool=tool.name,
+                        call_id=call.call_id,
+                        status="executed",
+                        outcome_digest=content_digest(output if isinstance(output, Mapping) else {"result": output}),
+                    )
             except Exception:
                 results.append(
                     self._result(
@@ -546,9 +662,20 @@ class AutonomousDomainToolRuntime:
                             "execution_failed",
                             schema_digest=tool.schema_digest,
                             arguments_digest=arguments_digest,
+                            execution_id=None if self.controller is None else self.controller.state.execution_id,
+                            domain=None if self.controller is None else self.controller.state.domain,
+                            capability=tool.capability,
+                            risk_class=tool.risk_class,
                         ),
                     )
                 )
+                if self.controller is not None:
+                    self.controller.record_tool_outcome(
+                        tool=tool.name,
+                        call_id=call.call_id,
+                        status="execution_failed",
+                        reason="executor_error",
+                    )
         return tuple(results)
 
 

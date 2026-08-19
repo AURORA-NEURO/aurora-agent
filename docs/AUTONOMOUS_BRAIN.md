@@ -194,6 +194,107 @@ one explicit evaluator update per completed stage and resumes from the latest le
 the caller supplies an override. This keeps single-task, staged, and cross-domain execution on
 the same authorization, BYOK, model-selection, and learning boundaries.
 
+### Restart-safe autonomous execution and tool outcome learning
+
+Long-horizon autonomy has a second persistence layer in addition to provider health, episodic
+memory, learning ledgers, and workflow checkpoints. `AutonomousExecutionJournal` is an append-only,
+SHA-256 hash-chained JSONL journal for one execution envelope. It retains only an execution id,
+domain/capability/risk labels, policy digest, bounded counters, tool/schema/argument/output
+digests, evaluator identity, reward, and state transitions. It does not retain the task, prompt,
+provider transcript, credentials, tool arguments, or tool outputs. The embedding application must
+rehydrate those transient values and explicitly opt into a resume:
+
+```python
+from prism_sdk import (
+    AutonomousAgent,
+    AutonomousExecutionJournal,
+    AutonomousExecutionPolicy,
+)
+
+journal = AutonomousExecutionJournal("state/autonomous-executions.jsonl")
+policy = AutonomousExecutionPolicy(
+    max_steps=64,
+    max_provider_calls=16,
+    max_tool_calls=128,
+    max_effectful_calls=0,       # read-only by default
+    allow_side_effects=False,    # caller must opt in separately
+    max_replans=4,
+    max_cost_units=250,
+)
+agent = AutonomousAgent(
+    workspace,
+    runtime,
+    model_catalogue=catalogue,
+    tool_registry=tool_registry,
+    execution_journal=journal,
+    execution_policy=policy,
+)
+
+first = agent.run(
+    task="inspect the bounded operational state",
+    domain="operations",
+    credentials=session,
+    execution_id="ops-run-2026-08-19-001",
+    execution_mode="tool_loop",
+    approve_provider_call=True,
+)
+
+# Rehydrate the task/blueprint and short-lived credential session in the application, then:
+resumed = agent.run(
+    task="inspect the bounded operational state",
+    domain="operations",
+    credentials=session,
+    execution_id="ops-run-2026-08-19-001",
+    resume_execution=True,
+    execution_mode="tool_loop",
+    approve_provider_call=True,
+)
+```
+
+Resuming is rejected unless `resume_execution=True`, the policy digest is identical, the
+execution is non-terminal, and the journal hash chain verifies. Terminal runs cannot be replayed
+as if they were unfinished. `agent.execution_state(id)` and `agent.execution_events(id)` expose
+the redacted state machine for an operator UI; they never expose provider content. A journal is
+not a transcript archive and cannot reconstruct a model conversation by itself.
+
+The same policy controller is attached to every native domain-tool session. It admits bounded
+tool intents before execution, fails closed when a budget or effect posture is exceeded, records
+tool outcome digests, and shares metadata-only receipts across the agent's sessions. Read-only
+tools can run when the policy allows; effectful tools require all three independent conditions:
+the tool is declared effectful and approval-required, the execution policy explicitly enables a
+positive effect budget, and the caller approval callback returns true. A model-generated tool call
+never satisfies any of those conditions.
+
+Tool outcomes can be scored by an evaluator independent of the provider:
+
+```python
+from prism_sdk import AutonomousToolOutcomeEvaluator, BrainLearningLedger
+
+evaluator = AutonomousToolOutcomeEvaluator(
+    lambda safe_input: {
+        "reward": 1.0 if safe_input["status"] == "executed" else -1.0,
+        "passed": safe_input["status"] == "executed",
+    },
+    evaluator_id="operations-quality",
+    evaluator_version="2026-08-19",
+)
+report = evaluator.evaluate_and_record(
+    outcome_evidence,
+    controller=tool_runtime.controller,
+    bandit_state={"generation": 0, "arms": []},
+    bandit_updater=update_tool_arm,
+    ledger=BrainLearningLedger("state/learning.jsonl"),
+)
+```
+
+The evaluator receives tool identity, status, schema digest, argument digest, output digest, and
+caller-supplied safe evidence—not the argument or output itself. The optional bandit updater is
+caller-owned and receives the same value-only projection. `AutonomousToolReplayCase` and
+`AutonomousToolReplayEngine` replay those evaluator inputs across all built-in domains without
+invoking a provider or tool, report evaluator disagreement, and return only decision digests,
+domain counts, and the next bandit state. This gives model/tool routing an auditable online
+learning loop while keeping reward authority outside the model and outside the action executor.
+
 The OpenAI adapter targets the Responses API (`POST /v1/responses`) and Bearer authentication, as
 described in the [OpenAI API reference](https://platform.openai.com/docs/api-reference/introduction)
 and [quickstart](https://platform.openai.com/docs/quickstart/make-your-first-api-request). The

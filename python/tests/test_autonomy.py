@@ -14,6 +14,8 @@ from prism_sdk import (
     AutonomousDomainRegistry,
     AutonomousDomainTool,
     AutonomousDomainToolRegistry,
+    AutonomousExecutionJournal,
+    AutonomousExecutionPolicy,
     AutonomousWorkflowRegistry,
     BrainRunError,
     BrainEpisodicMemory,
@@ -507,6 +509,78 @@ def test_autonomous_agent_composes_domain_tools_into_native_tool_loop():
         assert agent.tool_receipts()[0]["status"] == "executed"
         assert "workspace" not in json.dumps(agent.tool_receipts())
         assert "agent-domain-tool-secret" not in json.dumps(result.to_dict())
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_autonomous_agent_persists_native_tool_execution_and_terminal_state(tmp_path):
+    runtime, store, server, thread = _runtime()
+
+    class ToolWorkspace(_Workspace):
+        def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+            if name == "developer_platform_status":
+                self.calls.append((name, {} if arguments is None else dict(arguments)))
+                return {"status": "ready", "scope": (arguments or {}).get("scope")}
+            return super().tool(name, arguments)
+
+    workspace = ToolWorkspace()
+    registry = AutonomousDomainToolRegistry(
+        [
+            AutonomousDomainTool(
+                name="developer_platform_status",
+                domains=("operations",),
+                capability="observability",
+                description="Read bounded workspace status.",
+                parameters={
+                    "type": "object",
+                    "properties": {"scope": {"type": "string"}},
+                    "required": ["scope"],
+                    "additionalProperties": False,
+                },
+            )
+        ]
+    )
+    handle = store.register("openai", "agent-domain-tool-persistence-secret")
+    journal = AutonomousExecutionJournal(tmp_path / "agent-execution.jsonl")
+    agent = AutonomousAgent(
+        workspace,
+        runtime,
+        model_catalogue=ModelCatalogue(_model()),
+        tool_registry=registry,
+        execution_journal=journal,
+        execution_policy=AutonomousExecutionPolicy(max_steps=16, max_tool_calls=4),
+    )
+    try:
+        result = agent.run(
+            task="inspect the workspace status",
+            domain="operations",
+            credentials={"openai": handle},
+            execution_id="persisted-agent-run",
+            execution_mode="tool_loop",
+            approve_provider_call=True,
+            tool_loop_options={"max_turns": 3},
+        )
+        assert result.status == "completed_provider_tool_loop"
+        state = agent.execution_state("persisted-agent-run")
+        assert state is not None
+        assert state["status"] == "completed"
+        kinds = {event["event"]["kind"] for event in agent.execution_events("persisted-agent-run")}
+        assert {"started", "tool_intent", "tool_outcome", "completed"}.issubset(kinds)
+        assert journal.verify_integrity()["verified"] is True
+        assert "agent-domain-tool-persistence-secret" not in json.dumps(agent.execution_events("persisted-agent-run"))
+        with pytest.raises(BrainRunError):
+            agent.run(
+                task="inspect the workspace status",
+                domain="operations",
+                credentials={"openai": handle},
+                execution_id="persisted-agent-run",
+                resume_execution=True,
+                execution_mode="tool_loop",
+                approve_provider_call=True,
+                tool_loop_options={"max_turns": 1},
+            )
     finally:
         server.shutdown()
         thread.join(timeout=2)

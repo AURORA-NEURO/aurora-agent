@@ -43,6 +43,12 @@ from .domain_tools import (
     AutonomousDomainToolRegistry,
     AutonomousDomainToolRuntime,
 )
+from .autonomy_persistence import (
+    AutonomousExecutionController,
+    AutonomousExecutionJournal,
+    AutonomousExecutionPolicy,
+    AutonomyPersistenceError,
+)
 from .evaluators import DomainEvaluatorRegistry
 from .llm_runtime import (
     CredentialHandle,
@@ -3431,6 +3437,8 @@ class AutonomousAgent:
         health_ledger: ProviderHealthLedger | None = None,
         tool_registry: AutonomousDomainToolRegistry | None = None,
         tool_runtime: AutonomousDomainToolRuntime | None = None,
+        execution_journal: AutonomousExecutionJournal | None = None,
+        execution_policy: AutonomousExecutionPolicy | Mapping[str, Any] | None = None,
     ) -> None:
         if not isinstance(runtime, LLMRuntime):
             raise BrainRunError("runtime must be an LLMRuntime")
@@ -3452,6 +3460,19 @@ class AutonomousAgent:
             raise BrainRunError("tool_runtime must be an AutonomousDomainToolRuntime or None")
         if tool_runtime is not None and tool_registry is not None and tool_runtime.registry is not tool_registry:
             raise BrainRunError("tool_runtime registry must be the same registry supplied to the agent")
+        if execution_journal is not None and not isinstance(execution_journal, AutonomousExecutionJournal):
+            raise BrainRunError("execution_journal must be an AutonomousExecutionJournal or None")
+        if execution_policy is None:
+            resolved_execution_policy = None
+        elif isinstance(execution_policy, AutonomousExecutionPolicy):
+            resolved_execution_policy = execution_policy
+        elif isinstance(execution_policy, Mapping):
+            try:
+                resolved_execution_policy = AutonomousExecutionPolicy.from_mapping(execution_policy)
+            except AutonomyPersistenceError as error:
+                raise BrainRunError("execution_policy is invalid") from error
+        else:
+            raise BrainRunError("execution_policy must be an AutonomousExecutionPolicy, mapping, or None")
         self.runtime = runtime
         self.onboarding = ProviderOnboarding(runtime)
         self.catalogue = model_catalogue or ModelCatalogue()
@@ -3460,6 +3481,8 @@ class AutonomousAgent:
         self.memory = memory
         self.health_ledger = health_ledger
         self.tool_registry = tool_registry
+        self.execution_journal = execution_journal
+        self.execution_policy = resolved_execution_policy
         if tool_runtime is not None:
             self.tool_runtime = tool_runtime
         elif tool_registry is not None and hasattr(workspace, "tool") and callable(getattr(workspace, "tool")):
@@ -3626,6 +3649,27 @@ class AutonomousAgent:
             "arms": [],
         }
 
+    def execution_state(self, execution_id: str) -> dict[str, Any] | None:
+        """Read one restart-safe execution state without returning task or provider content."""
+
+        if self.execution_journal is None:
+            return None
+        state = self.execution_journal.state(execution_id)
+        return None if state is None else state.to_dict()
+
+    def execution_events(
+        self,
+        execution_id: str,
+        *,
+        after_sequence: int = 0,
+        limit: int = 256,
+    ) -> list[dict[str, Any]]:
+        """Read hash-verified metadata events for an execution."""
+
+        if self.execution_journal is None:
+            return []
+        return [dict(row) for row in self.execution_journal.events(execution_id=execution_id, after_sequence=after_sequence, limit=limit)]
+
     def _resolve_candidates(
         self,
         model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None,
@@ -3648,14 +3692,67 @@ class AutonomousAgent:
         options: Mapping[str, Any],
         tool_domains: Sequence[str] = (),
         resume_learning: bool = False,
-    ) -> tuple[list[dict[str, Any]], dict[str, CredentialHandle], dict[str, Any]]:
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+    ) -> tuple[list[dict[str, Any]], dict[str, CredentialHandle], dict[str, Any], AutonomousExecutionController | None]:
         resolved_credentials = self._credential_mapping(credentials)
         resolved_options = dict(options)
+        if not isinstance(resume_execution, bool):
+            raise BrainRunError("resume_execution must be a boolean")
         resolved_options.setdefault("ledger", self.ledger)
         resolved_options.setdefault("memory", self.memory)
         if self.tool_registry is not None and "provider_tools" not in resolved_options:
             resolved_options["provider_tools"] = self.tool_registry.provider_tools(tool_domains or None)
-        if self.tool_runtime is not None:
+        execution_controller: AutonomousExecutionController | None = None
+        session_runtime: AutonomousDomainToolRuntime | None = None
+        persistence_requested = self.execution_journal is not None or self.execution_policy is not None or execution_id is not None
+        if resume_execution and self.execution_journal is None:
+            raise BrainRunError("resume_execution requires execution_journal")
+        if persistence_requested:
+            selected_domain = next((value for value in tool_domains if value in AUTONOMOUS_DOMAINS), "cross_domain")
+            try:
+                profile = self.orchestrator.registry.resolve(selected_domain)
+                default_capability = profile.default_capability
+                default_risk_class = profile.risk_class
+            except BrainRunError:
+                default_capability = "tool_execution"
+                default_risk_class = "cross_domain"
+            selected_capability = resolved_options.get("capability")
+            selected_risk_class = resolved_options.get("risk_class")
+            if not isinstance(selected_capability, str) or not selected_capability.strip():
+                selected_capability = default_capability
+            if not isinstance(selected_risk_class, str) or not selected_risk_class.strip():
+                selected_risk_class = default_risk_class
+            resolved_execution_id = execution_id or resolved_options.get("run_id") or f"execution-{uuid.uuid4().hex}"
+            if not isinstance(resolved_execution_id, str):
+                raise BrainRunError("execution_id must be a string")
+            resolved_options.setdefault("run_id", resolved_execution_id)
+            execution_policy = self.execution_policy or AutonomousExecutionPolicy()
+            try:
+                if self.tool_runtime is not None:
+                    session_runtime = self.tool_runtime.session(
+                        execution_id=resolved_execution_id,
+                        domain=selected_domain,
+                        capability=selected_capability,
+                        risk_class=selected_risk_class,
+                        policy=execution_policy,
+                        journal=self.execution_journal,
+                        resume=resume_execution,
+                    )
+                    execution_controller = session_runtime.controller
+                else:
+                    execution_controller = AutonomousExecutionController(
+                        execution_id=resolved_execution_id,
+                        domain=selected_domain,
+                        capability=selected_capability,
+                        risk_class=selected_risk_class,
+                        policy=execution_policy,
+                        journal=self.execution_journal,
+                        resume=resume_execution,
+                    )
+            except AutonomyPersistenceError as error:
+                raise BrainRunError("autonomous execution persistence could not start") from error
+        if self.tool_runtime is not None or session_runtime is not None:
             loop_options = resolved_options.get("tool_loop_options")
             if loop_options is None:
                 loop_options = {}
@@ -3663,7 +3760,10 @@ class AutonomousAgent:
                 raise BrainRunError("tool_loop_options must be a mapping or None")
             else:
                 loop_options = dict(loop_options)
-            loop_options.setdefault("authorize_and_execute", self.tool_runtime)
+            if session_runtime is not None:
+                loop_options["authorize_and_execute"] = session_runtime
+            elif self.tool_runtime is not None:
+                loop_options.setdefault("authorize_and_execute", self.tool_runtime)
             resolved_options["tool_loop_options"] = loop_options
         if self.health_ledger is not None:
             historical = self.health_ledger.selection_overrides()
@@ -3680,7 +3780,31 @@ class AutonomousAgent:
                 resolved_options["selection_overrides"] = merged
         if resume_learning and resolved_options.get("bandit_state") is None:
             resolved_options["bandit_state"] = self.learning_state()
-        return self._resolve_candidates(model_candidates), resolved_credentials, resolved_options
+        return self._resolve_candidates(model_candidates), resolved_credentials, resolved_options, execution_controller
+
+    @staticmethod
+    def _finish_execution(
+        controller: AutonomousExecutionController | None,
+        result: Any = None,
+        error: BaseException | None = None,
+    ) -> None:
+        if controller is None:
+            return
+        if error is not None:
+            try:
+                controller.fail(reason="execution_error")
+            except Exception:
+                pass
+            return
+        status = getattr(result, "status", None)
+        if not isinstance(status, str):
+            status = "completed"
+        if status.startswith("completed"):
+            controller.complete()
+        elif "approval" in status or status in {"paused", "stage_blocked", "stage_proposed", "stage_not_attempted", "stage_failed"}:
+            controller.checkpoint(status="paused", reason="execution_paused")
+        else:
+            controller.fail(reason="execution_failed")
 
     def run(
         self,
@@ -3689,6 +3813,8 @@ class AutonomousAgent:
         domain: str,
         credentials: Mapping[str, CredentialHandle] | CredentialSession,
         model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
         **kwargs: Any,
     ) -> Any:
         """Run a task using the registered catalogue unless an explicit candidate slice is given.
@@ -3698,20 +3824,28 @@ class AutonomousAgent:
         provider/mission approval.  No option here widens those authorization boundaries.
         """
 
-        candidates, resolved_credentials, options = self._execution_inputs(
+        candidates, resolved_credentials, options, execution_controller = self._execution_inputs(
             credentials=credentials,
             model_candidates=model_candidates,
             options=kwargs,
             tool_domains=(domain,),
             resume_learning=bool(kwargs.get("learn")),
+            execution_id=execution_id,
+            resume_execution=resume_execution,
         )
-        return self.orchestrator.run(
-            task=task,
-            domain=domain,
-            model_candidates=candidates,
-            credentials=resolved_credentials,
-            **options,
-        )
+        try:
+            result = self.orchestrator.run(
+                task=task,
+                domain=domain,
+                model_candidates=candidates,
+                credentials=resolved_credentials,
+                **options,
+            )
+        except Exception as error:
+            self._finish_execution(execution_controller, error=error)
+            raise
+        self._finish_execution(execution_controller, result=result)
+        return result
 
     def run_workflow(
         self,
@@ -3719,23 +3853,33 @@ class AutonomousAgent:
         blueprint: AutonomousTaskBlueprint,
         credentials: Mapping[str, CredentialHandle] | CredentialSession,
         model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
         **kwargs: Any,
     ) -> AutonomousWorkflowRun:
         """Run a staged workflow with the agent's catalogue, health, and durable state."""
 
-        candidates, resolved_credentials, options = self._execution_inputs(
+        candidates, resolved_credentials, options, execution_controller = self._execution_inputs(
             credentials=credentials,
             model_candidates=model_candidates,
             options=kwargs,
             tool_domains=(blueprint.spec.domain,),
             resume_learning=True,
+            execution_id=execution_id,
+            resume_execution=resume_execution,
         )
-        return self.orchestrator.run_workflow(
-            blueprint=blueprint,
-            model_candidates=candidates,
-            credentials=resolved_credentials,
-            **options,
-        )
+        try:
+            result = self.orchestrator.run_workflow(
+                blueprint=blueprint,
+                model_candidates=candidates,
+                credentials=resolved_credentials,
+                **options,
+            )
+        except Exception as error:
+            self._finish_execution(execution_controller, error=error)
+            raise
+        self._finish_execution(execution_controller, result=result)
+        return result
 
     def run_workflow_learning(
         self,
@@ -3744,25 +3888,35 @@ class AutonomousAgent:
         credentials: Mapping[str, CredentialHandle] | CredentialSession,
         model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
         bandit_state: Mapping[str, Any] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
         **kwargs: Any,
     ) -> AutonomousWorkflowLearningResult:
         """Run staged workflow learning, resuming the latest value-only bandit state by default."""
 
         options = dict(kwargs)
         options["bandit_state"] = self.learning_state() if bandit_state is None else bandit_state
-        candidates, resolved_credentials, options = self._execution_inputs(
+        candidates, resolved_credentials, options, execution_controller = self._execution_inputs(
             credentials=credentials,
             model_candidates=model_candidates,
             options=options,
             tool_domains=(blueprint.spec.domain,),
             resume_learning=False,
+            execution_id=execution_id,
+            resume_execution=resume_execution,
         )
-        return self.orchestrator.run_workflow_learning(
-            blueprint=blueprint,
-            model_candidates=candidates,
-            credentials=resolved_credentials,
-            **options,
-        )
+        try:
+            result = self.orchestrator.run_workflow_learning(
+                blueprint=blueprint,
+                model_candidates=candidates,
+                credentials=resolved_credentials,
+                **options,
+            )
+        except Exception as error:
+            self._finish_execution(execution_controller, error=error)
+            raise
+        self._finish_execution(execution_controller, result=result)
+        return result
 
     def run_cross_domain(
         self,
@@ -3771,11 +3925,13 @@ class AutonomousAgent:
         subtasks: Sequence[Mapping[str, Any]],
         credentials: Mapping[str, CredentialHandle] | CredentialSession,
         model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
         **kwargs: Any,
     ) -> AutonomousCrossDomainResult:
         """Run specialist fan-out and synthesis through the shared safety/learning envelope."""
 
-        candidates, resolved_credentials, options = self._execution_inputs(
+        candidates, resolved_credentials, options, execution_controller = self._execution_inputs(
             credentials=credentials,
             model_candidates=model_candidates,
             options=kwargs,
@@ -3790,14 +3946,22 @@ class AutonomousAgent:
                 )
             ),
             resume_learning=True,
+            execution_id=execution_id,
+            resume_execution=resume_execution,
         )
-        return self.orchestrator.run_cross_domain(
-            task=task,
-            subtasks=subtasks,
-            model_candidates=candidates,
-            credentials=resolved_credentials,
-            **options,
-        )
+        try:
+            result = self.orchestrator.run_cross_domain(
+                task=task,
+                subtasks=subtasks,
+                model_candidates=candidates,
+                credentials=resolved_credentials,
+                **options,
+            )
+        except Exception as error:
+            self._finish_execution(execution_controller, error=error)
+            raise
+        self._finish_execution(execution_controller, result=result)
+        return result
 
 
 __all__ = [
