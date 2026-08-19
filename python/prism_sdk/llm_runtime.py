@@ -38,6 +38,7 @@ from urllib.parse import urlsplit
 
 MAX_MESSAGES = 512
 MAX_MESSAGE_CHARS = 2_000_000
+MAX_CREDENTIAL_BYTES = 16_384
 MAX_RESPONSE_BYTES = 20_000_000
 MAX_PROVIDER_TOOLS = 128
 MAX_TOOL_NAME_BYTES = 256
@@ -269,6 +270,8 @@ class CredentialStore:
         self._validate_provider(provider)
         if not isinstance(secret, str) or not secret.strip():
             raise CredentialError("credential value must be a non-empty string")
+        if len(secret.encode("utf-8")) > MAX_CREDENTIAL_BYTES:
+            raise CredentialError("credential value exceeds the bounded size")
         if ttl_seconds is not None and (not isinstance(ttl_seconds, (int, float)) or ttl_seconds <= 0):
             raise CredentialError("ttl_seconds must be positive or None")
         if not isinstance(source, str) or source not in self._SOURCES:

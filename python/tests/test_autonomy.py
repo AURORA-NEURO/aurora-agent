@@ -299,13 +299,15 @@ def test_model_catalogue_and_agent_facade_connect_readiness_session_and_executio
         catalogue = ModelCatalogue([_model()[0]])
         agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=catalogue)
         assert agent.models() == catalogue.candidates()
+        assert agent.credential_statuses()[0]["provider"] == "openai"
         before = agent.readiness()
         assert {row["domain"] for row in before["route_catalogue"]} == set(AUTONOMOUS_DOMAINS)
         assert len(before["workflows"]) == len(AUTONOMOUS_DOMAINS)
         assert before["models"][0]["eligible_for_selection"] is False
         assert before["providers"][0]["next_action"] == "collect_user_credential"
 
-        with agent.onboarding.start_session(session_id="test-session") as session:
+        assert agent.credential_status("openai")["next_action"] == "collect_user_credential"
+        with agent.start_credential_session(session_id="test-session") as session:
             session.register_value("openai", "test-secret")
             assert session.handles()["openai"].provider == "openai"
             ready = agent.readiness()

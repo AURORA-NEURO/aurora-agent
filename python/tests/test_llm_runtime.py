@@ -230,6 +230,11 @@ class LlmRuntimeTests(unittest.TestCase):
         self.assertNotIn("super-secret", json.dumps(metadata))
         self.assertEqual(metadata["secret_persistence"], "in_memory_only")
 
+    def test_credential_value_is_bounded_before_storage(self) -> None:
+        store = CredentialStore()
+        with self.assertRaises(CredentialError):
+            store.register("openai", "x" * 16_385)
+
     def test_prompt_path_is_injectable_for_no_echo_ui_and_tests(self) -> None:
         store = CredentialStore()
         handle = store.prompt("anthropic", reader=lambda prompt: "typed-secret")

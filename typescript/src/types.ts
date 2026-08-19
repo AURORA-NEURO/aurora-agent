@@ -327,6 +327,34 @@ export interface AutonomousDomainEvaluatorProfile extends JsonObject {
   execution: "caller_declared_signal_scoring_only" | string;
 }
 
+/** Redacted BYOK readiness projected to an application UI; never contains key material. */
+export interface AutonomousCredentialStatus extends JsonObject {
+  provider: string;
+  provider_registered: boolean;
+  credential: {
+    provider: string;
+    configured: boolean;
+    credential_count: number;
+    credentials: JsonObject[];
+    secret_persistence: "in_memory_only" | string;
+    secret_material: "never_returned" | string;
+  };
+  ready: boolean;
+  next_action: "register_provider" | "collect_user_credential" | "ready" | string;
+  secret_material: "never_returned" | string;
+}
+
+/** Redacted status for one request-scoped key collection session. */
+export interface AutonomousCredentialSessionStatus extends JsonObject {
+  session_id: string;
+  active: boolean;
+  created_at: number;
+  expires_at: number | null;
+  providers: string[];
+  secret_persistence: "in_memory_only" | string;
+  secret_material: "never_returned" | string;
+}
+
 export interface AutonomousTaskBlueprint extends JsonObject {
   schema: "bioprism-python-autonomous-task/0.1" | string;
   task: JsonObject;

@@ -60,6 +60,7 @@ from .llm_runtime import (
     ModelCatalogue,
     ProviderHealthLedger,
     ProviderOnboarding,
+    ProviderConfig,
     ProviderTool,
 )
 from .memory import BrainEpisodicMemory, BrainMemoryError, MemoryQuery
@@ -5412,6 +5413,31 @@ class AutonomousAgent:
         """Add one non-secret model route to the application-owned inventory."""
 
         return self.catalogue.register(candidate, replace_existing=replace_existing)
+
+    def register_provider(self, config: ProviderConfig) -> None:
+        """Register non-secret provider transport metadata for the key-entry flow."""
+
+        self.onboarding.register_provider(config)
+
+    def credential_status(self, provider: str) -> dict[str, Any]:
+        """Return one redacted provider onboarding state for a UI or request gate."""
+
+        return self.onboarding.status(provider)
+
+    def credential_statuses(self) -> list[dict[str, Any]]:
+        """Return redacted onboarding states without returning keys, handles, or references."""
+
+        return self.onboarding.statuses()
+
+    def start_credential_session(
+        self,
+        *,
+        ttl_seconds: float | None = None,
+        session_id: str | None = None,
+    ) -> CredentialSession:
+        """Start a short-lived BYOK session for protected UI or request-scoped collection."""
+
+        return self.onboarding.start_session(ttl_seconds=ttl_seconds, session_id=session_id)
 
     def models(self, *, enabled_only: bool = False) -> list[dict[str, Any]]:
         """Return deterministic model metadata suitable for a configuration UI."""

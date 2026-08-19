@@ -136,9 +136,9 @@ agent = AutonomousAgent(workspace, runtime, model_catalogue=ModelCatalogue([
         "cost_per_million_tokens": 10,
     }
 ]))
-agent.onboarding.register_provider(openai_provider())
+agent.register_provider(openai_provider())
 
-with agent.onboarding.start_session(ttl_seconds=3_600) as session:
+with agent.start_credential_session(ttl_seconds=3_600) as session:
     session.configure_from_environment("openai")  # or protected UI / secret-manager resolver
     result = agent.run(
         task="review the next bounded implementation step",
@@ -157,6 +157,11 @@ remain append-only/value-only persistence owned by the embedding application.
 `ModelCatalogue` stores only deterministic model metadata and rejects credential-shaped metadata
 fields; it is safe to populate before a user has supplied any key. `agent.readiness()` projects
 provider registration, credential readiness, and model eligibility without exposing secret material.
+For UI integrations, `agent.credential_status(provider)` and `agent.credential_statuses()` expose
+the same redacted onboarding state, while `agent.start_credential_session()` creates the
+request-scoped handle group. The application sends the entered value directly to
+`session.register_value()` over its protected input boundary; no generic brain or MCP endpoint
+accepts the raw key.
 If `learn=True` is supplied, the same
 facade runs the explicit evaluator and caller-owned bandit state through the existing online
 learning path; it does not turn a provider response into a reward automatically. An application
