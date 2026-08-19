@@ -326,7 +326,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 245);
+    assert_eq!(tools.len(), 251);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -15777,4 +15777,172 @@ fn projection_bundle_keeps_four_views_bound_to_one_compiled_certificate() {
     );
     assert_eq!(result["fidelity"].as_array().unwrap().len(), 4);
     assert!(result["views"].is_null());
+}
+
+#[test]
+fn brain_control_plane_is_idempotent_hash_chained_and_approval_gated() {
+    let mut server = server();
+    let spec_digest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let submitted = call(
+        &mut server,
+        "brain_job_submit",
+        json!({
+            "idempotency_key": "request-001",
+            "spec_digest": spec_digest,
+            "domain": "engineering",
+            "capability": "code_change",
+            "risk_class": "reversible",
+        }),
+    );
+    assert_eq!(submitted["__isError"], json!(false));
+    assert_eq!(submitted["created"], json!(true));
+    let job_id = submitted["job"]["job_id"].as_str().unwrap().to_string();
+    assert_eq!(
+        submitted["job"]["spec"],
+        json!("not_returned; caller resolver owns rehydration")
+    );
+    assert!(submitted["job"].get("prompt").is_none());
+
+    let idempotent = call(
+        &mut server,
+        "brain_job_submit",
+        json!({
+            "idempotency_key": "request-001",
+            "spec_digest": spec_digest,
+            "domain": "engineering",
+            "capability": "code_change",
+            "risk_class": "reversible",
+        }),
+    );
+    assert_eq!(idempotent["__isError"], json!(false));
+    assert_eq!(idempotent["idempotent"], json!(true));
+    assert_eq!(idempotent["job"]["job_id"], json!(job_id));
+
+    let requested = call(
+        &mut server,
+        "brain_job_approval",
+        json!({"job_id": job_id, "action": "request", "reason": "write operation"}),
+    );
+    assert_eq!(requested["__isError"], json!(false));
+    assert_eq!(requested["job"]["state"], json!("waiting_approval"));
+
+    let missing_proof = call(
+        &mut server,
+        "brain_job_approval",
+        json!({"job_id": job_id, "action": "approve"}),
+    );
+    assert_eq!(missing_proof["__isError"], json!(true));
+
+    let approved = call(
+        &mut server,
+        "brain_job_approval",
+        json!({
+            "job_id": job_id,
+            "action": "approve",
+            "authorization_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        }),
+    );
+    assert_eq!(approved["__isError"], json!(false));
+    assert_eq!(approved["job"]["state"], json!("queued"));
+    assert_eq!(
+        approved["authorization"]["verified_by_server"],
+        json!(false)
+    );
+    assert_eq!(approved["authorization"]["execution"], json!("not_started"));
+
+    let status = call(&mut server, "brain_job_status", json!({"job_id": job_id}));
+    assert_eq!(status["__isError"], json!(false));
+    assert_eq!(status["job"]["state"], json!("queued"));
+    let events = call(
+        &mut server,
+        "brain_job_events",
+        json!({"job_id": job_id, "limit": 16}),
+    );
+    assert_eq!(events["__isError"], json!(false));
+    assert_eq!(events["events"].as_array().unwrap().len(), 3);
+    assert_eq!(events["chain"], json!("sha256_prev_digest"));
+    assert!(events["head_digest"].as_str().unwrap().len() == 64);
+}
+
+#[test]
+fn brain_control_plane_health_and_replay_remain_value_only() {
+    let mut server = server();
+    let health = call(
+        &mut server,
+        "brain_model_health",
+        json!({
+            "operation": "record",
+            "provider": "openai",
+            "model": "gpt-test",
+            "status": "success",
+            "latency_ms": 120,
+            "quality": 0.9,
+            "tokens": 512,
+            "registered": true,
+            "credential_ready": true,
+            "eligible": true,
+        }),
+    );
+    assert_eq!(health["__isError"], json!(false));
+    assert_eq!(health["health"][0]["provider"], json!("openai"));
+    assert!(health["health"][0].get("secret").is_none());
+
+    let evidence = json!({
+        "schema": "bioprism-brain-domain-evaluator/0.1",
+        "domain": "engineering",
+        "capability": "code_change",
+        "risk_class": "reversible",
+        "signals": {
+            "schema_valid": 1.0,
+            "tests_passed": 1.0,
+            "evidence_complete": 1.0,
+        },
+        "references": [],
+        "limitations": [],
+        "retention": "value_only_digests_and_signal_scores",
+    });
+    let evidence_digest = bioprism_ids::ContentHash::of_value(&evidence)
+        .unwrap()
+        .to_string();
+    let replay = call(
+        &mut server,
+        "brain_replay_evaluate",
+        json!({
+            "case_id": "case-001",
+            "domain": "engineering",
+            "capability": "code_change",
+            "risk_class": "reversible",
+            "evidence_digest": evidence_digest,
+            "signals": {
+                "schema_valid": true,
+                "tests_passed": true,
+                "evidence_complete": true,
+            },
+        }),
+    );
+    assert_eq!(replay["__isError"], json!(false));
+    assert_eq!(replay["passed"], json!(true));
+    assert_eq!(
+        replay["execution"],
+        json!("offline_value_only_replay; no provider or domain tool invocation")
+    );
+    assert_eq!(
+        replay["truth_authority"],
+        json!("caller_declared_normalized_signals")
+    );
+
+    let secret_attempt = call(
+        &mut server,
+        "brain_replay_evaluate",
+        json!({
+            "case_id": "case-002",
+            "domain": "engineering",
+            "capability": "code_change",
+            "risk_class": "reversible",
+            "evidence_digest": evidence_digest,
+            "signals": {"schema_valid": true, "tests_passed": true, "evidence_complete": true},
+            "api_key": "must-never-cross-the-boundary",
+        }),
+    );
+    assert_eq!(secret_attempt["__isError"], json!(true));
 }

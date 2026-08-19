@@ -119,9 +119,86 @@ and [quickstart](https://platform.openai.com/docs/quickstart/make-your-first-api
 adapter sets no provider-side persistence option implicitly beyond the request shape; applications
 must choose their provider data-retention posture separately.
 
+## Transport control plane
+
+The brain's durable Python orchestration and its MCP/HTTP transport now share one value-only
+control-plane contract. The MCP server exposes:
+
+- brain_job_submit: admits an idempotent, rehydratable job identity from a spec_digest,
+  domain, capability, and risk class. It never accepts the task, prompt, plan, provider response,
+  credential, or API key.
+- brain_job_status and brain_job_events: return bounded state and cursorable
+  SHA-256-prev-digest journal pages. The event journal is metadata-only and explicitly reports
+  scope: mcp_process; restart-safe execution still belongs to BrainJobStore.
+- brain_job_approval: moves a queued job into waiting_approval, or returns it to queued
+  after a caller-authenticated authorization proof digest. The transport records that the proof
+  was supplied but does not verify identity and never dispatches work.
+- brain_model_health: records and projects provider/model status, latency, bounded quality,
+  usage counts, registration posture, and credential readiness. A runtime can feed the resulting
+  provider_health map into brain_model_select to hard-gate open circuits or unready providers.
+- brain_replay_evaluate: evaluates digest-bound normalized [0, 1] signals for engineering,
+  research, operations, data, biomedical, or an explicit custom domain profile. It is an offline
+  evaluator only; it does not contact a provider or replay a domain tool.
+
+The same tools are reachable through the existing /v1/tools/{name} HTTP route and stdio
+tools/call. The typed Python bridge keeps the wire shape consistent:
+
+`python
+from prism_sdk import (
+    BrainControlClient,
+    BrainJobSubmission,
+    BrainReplayRequest,
+)
+
+control = BrainControlClient.from_http(api)  # or BrainControlClient.from_mcp(client)
+receipt = control.submit_job(
+    BrainJobSubmission(
+        idempotency_key="request-001",
+        spec_digest="a" * 64,
+        domain="engineering",
+        capability="code_change",
+        risk_class="reversible",
+    )
+)
+job_id = receipt["job"]["job_id"]
+control.replay(
+    BrainReplayRequest(
+        case_id=job_id,
+        domain="engineering",
+        capability="code_change",
+        risk_class="reversible",
+        signals={
+            "schema_valid": True,
+            "tests_passed": True,
+            "evidence_complete": True,
+        },
+    )
+)
+`
+
+Use ProviderOnboarding and LLMRuntime for the actual BYOK invocation. The normal sequence is:
+
+1. register non-secret provider transport metadata;
+2. collect a key from the embedding application's protected UI, no-echo prompt, environment, or
+   secret-manager resolver;
+3. hold the resulting opaque handle in a short-lived credential session;
+4. select a model with value-only health and bandit observations;
+5. assemble the prompt, preflight the plan, and obtain explicit effect approval;
+6. invoke the provider with the handle at the runtime boundary; and
+7. report only status, usage, latency, evaluator signals, and digests to the control plane before
+   revoking or expiring the handle.
+
+The Rust projection is bounded process state and intentionally does not pretend to be a durable
+queue. A worker that must survive restart should submit the same metadata to BrainJobStore,
+rehydrate the task/prompt/plan/evaluator from its own resolver, and use the MCP/HTTP projection
+for operator visibility. This split prevents a public MCP endpoint from becoming an accidental
+secret vault or transcript archive while keeping model selection, invocation, approvals, replay,
+and online adaptation connected in one inspectable workflow.
+
 ## Decision loop
 
-The `bioprism-brain` crate exposes seven value-only operations through MCP:
+The `bioprism-brain` crate exposes the deterministic decision operations through MCP, and the
+transport control plane above adds the job, approval, health, and replay lifecycle:
 
 - `brain_model_select` applies capability, context-window, quality, latency, and cost gates, then
   ranks eligible models with deterministic utility plus an exploration bonus.

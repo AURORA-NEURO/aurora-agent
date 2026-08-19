@@ -61,6 +61,13 @@ can feed `BrainModelHealthStore` into future model selection. `BrainReplayEngine
 caller-rehydrated evidence across every built-in domain and optionally advances a caller-owned
 bandit updater without replaying provider calls.
 
+BrainControlClient and AsyncBrainControlClient expose the same control-plane lifecycle over
+the existing HTTP ApiClient/AsyncApiClient or stdio Client/AsyncClient. Their typed request
+objects compute and verify replay evidence digests locally, require proof digests for approval
+decisions, and emit only bounded job metadata, health values, and normalized evaluator signals.
+They are intentionally not credential clients: collect keys through ProviderOnboarding, invoke
+through LLMRuntime, and report only value-only outcome metadata back to the control plane.
+
 The package also includes dependency-free authoring builders for digest-bound benchmark packs,
 set-valued decision cells, deterministic metamorphic mutations, versioned oracle manifests,
 evidence judgements, reference panels, evidence-conditioned BioCapability audit requests, evaluation requests, and typed metrics observations,

@@ -5,6 +5,7 @@
 //! only as far into the evidence as it needs, and verify a certificate — without linking the
 //! engine or learning a new SDK.
 
+mod brain_control;
 pub mod rpc;
 pub mod server;
 

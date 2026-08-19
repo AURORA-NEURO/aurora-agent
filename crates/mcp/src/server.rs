@@ -15,6 +15,7 @@
 //! Omissions travel with every response at every layer. An agent that reads only L0 still learns
 //! how much was excluded and whether the sufficiency claim holds.
 
+use crate::brain_control::BrainControlState;
 use crate::rpc::{code, Request, Response};
 use bioprism_adapter::{
     certify, AdapterPlanRequest, AdapterRegistry, Source, SourceProvenance, TabularAdapter,
@@ -577,6 +578,7 @@ pub struct Server {
     workbench_registry: Arc<Mutex<WorkbenchReportRegistry>>,
     ci_provider_evidence_registry: Arc<Mutex<CiProviderEvidenceRegistry>>,
     artifact_registry: Arc<Mutex<ArtifactRegistry>>,
+    brain_control_state: Arc<Mutex<BrainControlState>>,
 }
 
 enum ParallelPending<'a> {
@@ -1301,6 +1303,7 @@ impl Server {
             workbench_registry,
             ci_provider_evidence_registry,
             artifact_registry,
+            brain_control_state: Arc::new(Mutex::new(BrainControlState::default())),
         }
     }
 
@@ -1641,6 +1644,12 @@ impl Server {
             "brain_bandit_select" => self.brain_bandit_select(&arguments),
             "brain_bandit_update" => self.brain_bandit_update(&arguments),
             "brain_outcome_record" => self.brain_outcome_record(&arguments),
+            "brain_job_submit" => self.brain_job_submit(&arguments),
+            "brain_job_status" => self.brain_job_status(&arguments),
+            "brain_job_events" => self.brain_job_events(&arguments),
+            "brain_job_approval" => self.brain_job_approval(&arguments),
+            "brain_model_health" => self.brain_model_health(&arguments),
+            "brain_replay_evaluate" => self.brain_replay_evaluate(&arguments),
             "domain_evidence_harmonization_coverage" => {
                 self.domain_evidence_harmonization_coverage(&arguments)
             }
@@ -2033,6 +2042,48 @@ impl Server {
             .map_err(|error| format!("brain outcome record refused: {error}"))?;
         serde_json::to_value(report)
             .map_err(|error| format!("cannot encode brain learning evidence: {error}"))
+    }
+
+    fn brain_job_submit(&self, arguments: &Value) -> Result<Value, String> {
+        self.brain_control_state
+            .lock()
+            .map_err(|_| "brain control-plane state is unavailable".to_string())?
+            .submit_job(arguments)
+    }
+
+    fn brain_job_status(&self, arguments: &Value) -> Result<Value, String> {
+        self.brain_control_state
+            .lock()
+            .map_err(|_| "brain control-plane state is unavailable".to_string())?
+            .job_status(arguments)
+    }
+
+    fn brain_job_events(&self, arguments: &Value) -> Result<Value, String> {
+        self.brain_control_state
+            .lock()
+            .map_err(|_| "brain control-plane state is unavailable".to_string())?
+            .job_events(arguments)
+    }
+
+    fn brain_job_approval(&self, arguments: &Value) -> Result<Value, String> {
+        self.brain_control_state
+            .lock()
+            .map_err(|_| "brain control-plane state is unavailable".to_string())?
+            .job_approval(arguments)
+    }
+
+    fn brain_model_health(&self, arguments: &Value) -> Result<Value, String> {
+        self.brain_control_state
+            .lock()
+            .map_err(|_| "brain control-plane state is unavailable".to_string())?
+            .model_health(arguments)
+    }
+
+    fn brain_replay_evaluate(&self, arguments: &Value) -> Result<Value, String> {
+        self.brain_control_state
+            .lock()
+            .map_err(|_| "brain control-plane state is unavailable".to_string())?
+            .replay_evaluate(arguments)
     }
 
     fn compiled(
@@ -35559,7 +35610,7 @@ pub fn workspace_capabilities() -> Value {
             "domains": ["model selection", "prompt assembly", "bounded autonomous planning", "online bandit adaptation", "evaluator-backed learning evidence", "provider-neutral invocation contracts"],
             "crates": ["bioprism-brain", "bioprism-runtime", "bioprism-routing", "bioprism-adaptive"],
             "python_artifacts": ["python/prism_sdk/llm_runtime.py", "python/prism_sdk/brain.py"],
-            "mcp_tools": ["brain_model_select", "brain_model_select_contextual", "brain_prompt_assemble", "brain_plan", "brain_bandit_select", "brain_bandit_update", "brain_outcome_record"],
+            "mcp_tools": ["brain_model_select", "brain_model_select_contextual", "brain_prompt_assemble", "brain_plan", "brain_bandit_select", "brain_bandit_update", "brain_outcome_record", "brain_job_submit", "brain_job_status", "brain_job_events", "brain_job_approval", "brain_model_health", "brain_replay_evaluate"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -35709,7 +35760,7 @@ pub fn tool_definitions() -> Vec<Value> {
         "required": ["world", "query"]
     });
 
-    vec![
+    let definitions = vec![
         json!({
             "name": "brain_model_select",
             "description": "Select an available provider/model from explicit capability, context-window, quality, latency, cost, reliability, and caller-owned online-learning observations. Every rejected candidate remains visible. This tool accepts no API key, opens no network connection, and does not claim that a future model response will be correct.",
@@ -39663,5 +39714,8 @@ pub fn tool_definitions() -> Vec<Value> {
                 "required": ["event", "policy", "trace"]
             }
         }),
-    ]
+    ];
+    let mut control = crate::brain_control::tool_definitions();
+    control.extend(definitions);
+    control
 }
