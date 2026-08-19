@@ -1165,6 +1165,13 @@ class AutonomousBrain:
 
         return AutonomousTaskOrchestrator(self).prepare(**kwargs)
 
+    def prepare_cross_domain(self, **kwargs: Any) -> Any:
+        """Build bounded fan-out/fan-in domain work without contacting a provider."""
+
+        from .autonomy import AutonomousTaskOrchestrator
+
+        return AutonomousTaskOrchestrator(self).prepare_cross_domain(**kwargs)
+
     def run_autonomous(self, **kwargs: Any) -> Any:
         """Run a domain-aware task through adaptive selection and bounded provider execution.
 
@@ -1176,6 +1183,13 @@ class AutonomousBrain:
         from .autonomy import AutonomousTaskOrchestrator
 
         return AutonomousTaskOrchestrator(self).run(**kwargs)
+
+    def run_cross_domain(self, **kwargs: Any) -> Any:
+        """Run bounded domain specialists and an optional cross-domain synthesis."""
+
+        from .autonomy import AutonomousTaskOrchestrator
+
+        return AutonomousTaskOrchestrator(self).run_cross_domain(**kwargs)
 
     def recall_memory(
         self,

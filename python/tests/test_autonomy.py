@@ -6,8 +6,10 @@ from pathlib import Path
 import threading
 
 from prism_sdk import (
+    AUTONOMOUS_DOMAINS,
     AutonomousBrain,
     AutonomousDomainRegistry,
+    AutonomousWorkflowRegistry,
     BrainEpisodicMemory,
     BrainLearningLedger,
     BrainOutcomeEvaluator,
@@ -167,7 +169,10 @@ def _model() -> list[dict[str, object]]:
         {
             "provider": "openai",
             "model": "test-model",
-            "capabilities": ["reasoning", "code", "science", "data", "web"],
+            "capabilities": [
+                "reasoning", "code", "science", "data", "web", "biomedical", "operations",
+                "enterprise", "coordination", "multimodal", "evaluation",
+            ],
             "context_window_tokens": 16_000,
             "max_output_tokens": 2_048,
             "quality": 0.9,
@@ -213,7 +218,8 @@ def test_builtin_domain_registry_covers_every_autonomous_domain_and_blueprint_re
     }
     runtime, _store, server, thread = _runtime()
     try:
-        blueprint = AutonomousBrain(_Workspace(), runtime).prepare_autonomous(
+        brain = AutonomousBrain(_Workspace(), runtime)
+        blueprint = brain.prepare_autonomous(
             task="use the private api key only in the provider transport",
             domain="coding",
             context={"repository": "aurora", "mode": "review"},
@@ -225,15 +231,47 @@ def test_builtin_domain_registry_covers_every_autonomous_domain_and_blueprint_re
         assert "private api key" not in json.dumps(public).lower()
         assert public["prompt"]["context_ids"] == [
             "autonomy-domain-policy",
+            "autonomy-workflow-contract",
             "autonomy-constraints",
             "autonomy-desired-outputs",
             "autonomy-user-context",
         ]
         assert blueprint.plan["steps"][0]["effect"] == "provider_call"
+        structured = brain.prepare_autonomous(
+            task="return a structured review",
+            domain="coding",
+            require_json=True,
+        )
+        assert structured.spec.response_schema is not None
+        assert structured.spec.response_schema["properties"]["workflow_id"]["enum"] == ["coding_delivery"]  # type: ignore[index]
+        for domain in AUTONOMOUS_DOMAINS:
+            domain_blueprint = brain.prepare_autonomous(
+                task=f"prepare a bounded {domain} review",
+                domain=domain,
+            )
+            assert domain_blueprint.workflow.domain == domain
+            assert domain_blueprint.workflow.stages
+            assert domain_blueprint.plan["workflow_id"] == domain_blueprint.workflow.workflow_id
     finally:
         server.shutdown()
         thread.join(timeout=2)
         server.server_close()
+
+
+def test_builtin_workflow_registry_drives_all_domains_with_valid_stage_dags():
+    registry = AutonomousWorkflowRegistry.with_builtin_strategies()
+    strategies = registry.catalogue()
+    assert len(strategies) == 12
+    assert {item["domain"] for item in strategies} == set(AUTONOMOUS_DOMAINS)
+    for strategy in strategies:
+        assert strategy["schema"] == "bioprism-python-autonomous-workflow/0.1"
+        assert len(strategy["workflow_digest"]) == 64
+        stages = strategy["stages"]
+        assert 4 <= len(stages) <= 5
+        stage_ids = {stage["id"] for stage in stages}
+        assert all(set(stage["depends_on"]).issubset(stage_ids) for stage in stages)
+        assert strategy["evaluator_signals"]
+        assert "learn the safest workspace inspection" not in json.dumps(strategy)
 
 
 def test_run_autonomous_selects_assembles_plans_and_preserves_provider_approval():
@@ -429,6 +467,62 @@ def test_run_autonomous_tool_loop_learning_records_loop_metadata_only(tmp_path: 
         assert "tool-learning-secret" not in json.dumps(result.to_dict())
     finally:
         memory.close()
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_run_cross_domain_fans_out_then_synthesizes_with_approval_boundary():
+    runtime, store, server, thread = _runtime()
+    workspace = _Workspace()
+    handle = store.register("openai", "cross-domain-secret")
+    brain = AutonomousBrain(workspace, runtime)
+    subtasks = [
+        {
+            "id": "engineering-review",
+            "task": "Review the implementation risk and verification plan.",
+            "domain": "coding",
+        },
+        {
+            "id": "data-review",
+            "task": "Review the migration schema and lineage risks.",
+            "domain": "data",
+        },
+    ]
+    try:
+        prepared = brain.prepare_cross_domain(
+            task="Combine engineering and data review into one decision package.",
+            subtasks=subtasks,
+            context={"repository": "aurora", "environment": "staging"},
+        )
+        public = prepared.to_dict()
+        assert len(public["children"]) == 2
+        assert public["dependency_graph"]["fan_in"]
+        assert "Review the implementation risk" not in json.dumps(public)
+        waiting = brain.run_cross_domain(
+            task="Combine engineering and data review into one decision package.",
+            subtasks=subtasks,
+            model_candidates=_model(),
+            credentials={"openai": handle},
+        )
+        assert waiting.status == "approval_required"
+        assert len(waiting.child_results) == 2
+        assert waiting.synthesis_result is None
+        assert not hasattr(server, "request_body")
+        completed = brain.run_cross_domain(
+            task="Combine engineering and data review into one decision package.",
+            subtasks=subtasks,
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            approve_provider_call=True,
+        )
+        assert completed.status == "completed"
+        assert len(completed.child_results) == 2
+        assert all(result.status == "completed_provider_call" for result in completed.child_results)
+        assert completed.synthesis_result is not None
+        assert completed.synthesis_result.status == "completed_provider_call"
+        assert "cross-domain-secret" not in json.dumps(completed.to_dict())
+    finally:
         server.shutdown()
         thread.join(timeout=2)
         server.server_close()

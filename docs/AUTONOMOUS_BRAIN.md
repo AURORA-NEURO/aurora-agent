@@ -241,6 +241,15 @@ domain-specific capability requirements, guardrails, a conservative risk class, 
 one of the five evidence-only evaluator families. The profile is a strategy scaffold, not a claim
 that the model understands a domain or that the generated answer is true.
 
+Each built-in profile is paired with a deterministic workflow strategy. The strategy is no longer
+just a prompt label: it supplies dependency-ordered stages, stage capability requirements,
+evidence outputs, route intents, completion criteria, and evaluator signal names. The current
+strategies cover coding delivery, browser research, data quality analysis, scientific inquiry,
+biomedical review, neuroscience analysis, operations change, enterprise governance, multi-agent
+coordination, multimodal alignment, cross-domain synthesis, and evaluation reliability. A
+workflow digest is carried into model selection, prompt assembly, planning, route requests, and
+the public blueprint so a later review can identify exactly which planning contract was used.
+
 ```python
 from prism_sdk import AutonomousBrain
 
@@ -283,7 +292,34 @@ Every blueprint records one of three bounded execution modes:
   activate the built-in mission authorizer.
 * `mission` promotes the provider proposal into the existing route/workflow executor and requires
   an explicit `MissionPolicy`. Dispatch remains separately gated by
-  `approve_mission_dispatch=True`.
+`approve_mission_dispatch=True`.
+
+When `require_json=True` and no response schema is supplied, the selected workflow generates a
+bounded structured-output schema containing workflow identity, stage status, evidence strings,
+uncertainty, summary, and next actions. A caller-provided schema still takes precedence. This
+keeps structured output useful without pretending that a model-generated stage status is external
+verification.
+
+For work that genuinely spans domains, `prepare_cross_domain` and `run_cross_domain` provide a
+bounded fan-out/fan-in path. Child tasks are prepared with their own domain workflow contracts,
+run sequentially in declared order, and are synthesized by the `cross_domain` workflow only after
+all children complete. Pending approval or child failure blocks synthesis by default; callers must
+opt into `allow_partial=True` when partial synthesis is appropriate. Provider output is passed to
+the synthesis prompt in process but is not implicitly written to episodic memory or the learning
+ledger.
+
+```python
+result = brain.run_cross_domain(
+    task="Combine engineering and data-quality review into one decision package.",
+    subtasks=(
+        {"id": "engineering", "domain": "coding", "task": "Review implementation risk."},
+        {"id": "data", "domain": "data", "task": "Review schema and lineage risk."},
+    ),
+    model_candidates=model_catalogue,
+    credentials={"openai": openai_handle},
+    approve_provider_call=True,
+)
+```
 
 For example, a route-aware tool loop across any supported domain can be entered through the same
 facade:

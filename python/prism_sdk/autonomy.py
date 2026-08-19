@@ -161,6 +161,418 @@ class AutonomousDomainProfile:
         }
 
 
+AUTONOMOUS_WORKFLOW_SCHEMA = "bioprism-python-autonomous-workflow/0.1"
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousWorkflowStage:
+    """One bounded cognitive or evidence stage in a domain workflow."""
+
+    id: str
+    objective: str
+    required_capabilities: tuple[str, ...]
+    depends_on: tuple[str, ...] = ()
+    evidence_outputs: tuple[str, ...] = ()
+    evaluator_signals: tuple[str, ...] = ()
+    read_only: bool = True
+    approval_required: bool = False
+
+    def __post_init__(self) -> None:
+        _identifier("workflow stage id", self.id)
+        _text("workflow stage objective", self.objective, maximum=2_048)
+        capabilities = _sequence("workflow stage required_capabilities", self.required_capabilities)
+        dependencies = _sequence("workflow stage depends_on", self.depends_on)
+        outputs = _sequence("workflow stage evidence_outputs", self.evidence_outputs)
+        signals = _sequence("workflow stage evaluator_signals", self.evaluator_signals)
+        if not capabilities:
+            raise BrainRunError("workflow stage must require at least one capability")
+        if not isinstance(self.read_only, bool) or not isinstance(self.approval_required, bool):
+            raise BrainRunError("workflow stage safety flags must be booleans")
+        if not self.read_only and not self.approval_required:
+            raise BrainRunError("non-read-only workflow stages must require approval")
+        object.__setattr__(self, "required_capabilities", capabilities)
+        object.__setattr__(self, "depends_on", dependencies)
+        object.__setattr__(self, "evidence_outputs", outputs)
+        object.__setattr__(self, "evaluator_signals", signals)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "objective": self.objective,
+            "required_capabilities": list(self.required_capabilities),
+            "depends_on": list(self.depends_on),
+            "evidence_outputs": list(self.evidence_outputs),
+            "evaluator_signals": list(self.evaluator_signals),
+            "read_only": self.read_only,
+            "approval_required": self.approval_required,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousWorkflowStrategy:
+    """Deterministic, domain-specific planning contract used by autonomous task intake."""
+
+    workflow_id: str
+    domain: str
+    stages: tuple[AutonomousWorkflowStage, ...]
+    route_intents: tuple[str, ...]
+    evaluator_signals: tuple[str, ...]
+    completion_contract: str
+
+    def __post_init__(self) -> None:
+        _identifier("autonomous workflow id", self.workflow_id)
+        _identifier("autonomous workflow domain", self.domain)
+        if self.domain not in AUTONOMOUS_DOMAINS:
+            raise BrainRunError(f"unsupported autonomous workflow domain: {self.domain!r}")
+        if not isinstance(self.stages, Sequence) or isinstance(self.stages, (str, bytes)):
+            raise BrainRunError("autonomous workflow stages must be a sequence")
+        stages = tuple(self.stages)
+        if not 1 <= len(stages) <= 16:
+            raise BrainRunError("autonomous workflow must contain between 1 and 16 stages")
+        if any(not isinstance(stage, AutonomousWorkflowStage) for stage in stages):
+            raise BrainRunError("autonomous workflow stages must contain AutonomousWorkflowStage values")
+        ids = [stage.id for stage in stages]
+        if len(set(ids)) != len(ids):
+            raise BrainRunError("autonomous workflow stage ids must be unique")
+        id_set = set(ids)
+        for stage in stages:
+            if any(dependency not in id_set for dependency in stage.depends_on):
+                raise BrainRunError(f"workflow stage {stage.id!r} depends on an unknown stage")
+        # A workflow is a plan contract, so reject cycles before it reaches any execution kernel.
+        visiting: set[str] = set()
+        visited: set[str] = set()
+
+        def visit(stage_id: str) -> None:
+            if stage_id in visiting:
+                raise BrainRunError("autonomous workflow stages contain a dependency cycle")
+            if stage_id in visited:
+                return
+            visiting.add(stage_id)
+            stage = next(item for item in stages if item.id == stage_id)
+            for dependency in stage.depends_on:
+                visit(dependency)
+            visiting.remove(stage_id)
+            visited.add(stage_id)
+
+        for stage_id in ids:
+            visit(stage_id)
+        route_intents = _sequence("autonomous workflow route_intents", self.route_intents)
+        signals = _sequence("autonomous workflow evaluator_signals", self.evaluator_signals)
+        _text("autonomous workflow completion_contract", self.completion_contract, maximum=4_096)
+        if not route_intents:
+            raise BrainRunError("autonomous workflow must expose at least one route intent")
+        if not signals:
+            raise BrainRunError("autonomous workflow must expose at least one evaluator signal")
+        object.__setattr__(self, "stages", stages)
+        object.__setattr__(self, "route_intents", route_intents)
+        object.__setattr__(self, "evaluator_signals", signals)
+
+    def descriptor(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_WORKFLOW_SCHEMA,
+            "workflow_id": self.workflow_id,
+            "domain": self.domain,
+            "stages": [stage.to_dict() for stage in self.stages],
+            "route_intents": list(self.route_intents),
+            "evaluator_signals": list(self.evaluator_signals),
+            "completion_contract": self.completion_contract,
+        }
+
+    @property
+    def workflow_digest(self) -> str:
+        return content_digest(self.descriptor())
+
+    def response_schema(self) -> dict[str, Any]:
+        """Return the bounded structured-output contract for this workflow."""
+
+        return {
+            "type": "object",
+            "properties": {
+                "workflow_id": {"type": "string", "enum": [self.workflow_id]},
+                "stages": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string", "enum": [stage.id for stage in self.stages]},
+                            "status": {
+                                "type": "string",
+                                "enum": ["completed", "proposed", "blocked", "not_attempted"],
+                            },
+                            "evidence": {"type": "array", "items": {"type": "string"}},
+                            "uncertainty": {"type": "array", "items": {"type": "string"}},
+                            "notes": {"type": "string"},
+                        },
+                        "required": ["id", "status"],
+                        "additionalProperties": False,
+                    },
+                },
+                "summary": {"type": "string"},
+                "uncertainty": {"type": "array", "items": {"type": "string"}},
+                "next_actions": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["workflow_id", "stages", "summary", "uncertainty", "next_actions"],
+            "additionalProperties": False,
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            **self.descriptor(),
+            "workflow_digest": self.workflow_digest,
+            "execution": "strategy_metadata_only",
+        }
+
+
+class AutonomousWorkflowRegistry:
+    """Deterministic registry for domain workflow strategies."""
+
+    def __init__(self, strategies: Sequence[AutonomousWorkflowStrategy] = ()) -> None:
+        self._strategies: dict[str, AutonomousWorkflowStrategy] = {}
+        for strategy in strategies:
+            self.register(strategy)
+
+    def register(self, strategy: AutonomousWorkflowStrategy) -> None:
+        if not isinstance(strategy, AutonomousWorkflowStrategy):
+            raise BrainRunError("workflow registry entries must be AutonomousWorkflowStrategy values")
+        if strategy.domain in self._strategies:
+            raise BrainRunError(f"autonomous workflow is already registered for {strategy.domain}")
+        self._strategies[strategy.domain] = strategy
+
+    def resolve(self, domain: str) -> AutonomousWorkflowStrategy:
+        _identifier("autonomous workflow domain", domain)
+        strategy = self._strategies.get(domain)
+        if strategy is None:
+            raise BrainRunError(f"no autonomous workflow strategy is registered for {domain!r}")
+        return strategy
+
+    def catalogue(self) -> list[dict[str, Any]]:
+        return [self._strategies[key].to_dict() for key in sorted(self._strategies)]
+
+    @classmethod
+    def with_builtin_strategies(cls) -> "AutonomousWorkflowRegistry":
+        return cls(builtin_autonomous_workflow_strategies())
+
+
+def _workflow_stage(
+    stage_id: str,
+    objective: str,
+    *capabilities: str,
+    depends_on: Sequence[str] = (),
+    evidence_outputs: Sequence[str] = (),
+    evaluator_signals: Sequence[str] = (),
+    read_only: bool = True,
+    approval_required: bool = False,
+) -> AutonomousWorkflowStage:
+    return AutonomousWorkflowStage(
+        id=stage_id,
+        objective=objective,
+        required_capabilities=tuple(capabilities),
+        depends_on=tuple(depends_on),
+        evidence_outputs=tuple(evidence_outputs),
+        evaluator_signals=tuple(evaluator_signals),
+        read_only=read_only,
+        approval_required=approval_required,
+    )
+
+
+def _workflow(
+    workflow_id: str,
+    domain: str,
+    stages: Sequence[AutonomousWorkflowStage],
+    route_intents: Sequence[str],
+    evaluator_signals: Sequence[str],
+    completion_contract: str,
+) -> AutonomousWorkflowStrategy:
+    return AutonomousWorkflowStrategy(
+        workflow_id=workflow_id,
+        domain=domain,
+        stages=tuple(stages),
+        route_intents=tuple(route_intents),
+        evaluator_signals=tuple(evaluator_signals),
+        completion_contract=completion_contract,
+    )
+
+
+def builtin_autonomous_workflow_strategies() -> tuple[AutonomousWorkflowStrategy, ...]:
+    """Return executable planning contracts for all built-in autonomous domains."""
+
+    return (
+        _workflow(
+            "coding_delivery",
+            "coding",
+            (
+                _workflow_stage("scope", "Bound the change, assumptions, and acceptance criteria", "review", evidence_outputs=("scope", "acceptance_criteria"), evaluator_signals=("schema_valid",)),
+                _workflow_stage("inspect", "Inspect relevant code, tests, dependencies, and failure evidence", "review", "debugging", depends_on=("scope",), evidence_outputs=("observations", "evidence_gaps"), evaluator_signals=("evidence_complete",)),
+                _workflow_stage("implement", "Propose the smallest verifiable implementation and migration path", "implementation", depends_on=("inspect",), evidence_outputs=("change_plan", "rollback_plan"), evaluator_signals=("schema_valid",)),
+                _workflow_stage("verify", "Run or request bounded tests and report exact verification results", "testing", depends_on=("implement",), evidence_outputs=("test_results", "residual_risks"), evaluator_signals=("tests_passed",)),
+                _workflow_stage("handoff", "Synthesize the change, evidence, limitations, and next review decision", "review", depends_on=("verify",), evidence_outputs=("handoff",), evaluator_signals=("evidence_complete",)),
+            ),
+            ("repository inspection", "code and test validation", "reversible implementation"),
+            ("schema_valid", "tests_passed", "evidence_complete"),
+            "Every recommendation has bounded scope, explicit evidence, and reported verification status.",
+        ),
+        _workflow(
+            "browser_research",
+            "browser",
+            (
+                _workflow_stage("scope", "Define the information need, freshness requirement, and source constraints", "web_research", evidence_outputs=("research_question", "freshness_requirement"), evaluator_signals=("uncertainty_reported",)),
+                _workflow_stage("retrieve", "Retrieve bounded sources and preserve source identity and timestamps", "web_research", "navigation", depends_on=("scope",), evidence_outputs=("sources", "retrieval_gaps"), evaluator_signals=("evidence_traceable",)),
+                _workflow_stage("compare", "Compare independent sources and identify disagreement or stale claims", "source_comparison", depends_on=("retrieve",), evidence_outputs=("comparison", "disagreements"), evaluator_signals=("claim_scope_respected",)),
+                _workflow_stage("synthesize", "Answer with citations, freshness, uncertainty, and unresolved retrieval limits", "web_research", "source_comparison", depends_on=("compare",), evidence_outputs=("answer", "citations", "uncertainty"), evaluator_signals=("evidence_traceable", "uncertainty_reported")),
+            ),
+            ("source retrieval", "source comparison", "freshness and provenance"),
+            ("evidence_traceable", "uncertainty_reported", "claim_scope_respected"),
+            "Every substantive claim is attached to traceable source evidence or marked unresolved.",
+        ),
+        _workflow(
+            "data_quality_analysis",
+            "data",
+            (
+                _workflow_stage("schema", "Define fields, units, cohort, grain, and expected schema invariants", "schema_validation", evidence_outputs=("schema_contract",), evaluator_signals=("schema_valid",)),
+                _workflow_stage("lineage", "Trace sources, transformations, joins, and missingness provenance", "lineage", depends_on=("schema",), evidence_outputs=("lineage", "missingness"), evaluator_signals=("lineage_complete",)),
+                _workflow_stage("quality", "Measure quality gates, anomalies, distributions, and uncertainty", "quality_control", "data_analysis", depends_on=("lineage",), evidence_outputs=("quality_metrics", "anomalies"), evaluator_signals=("quality_gate_passed",)),
+                _workflow_stage("transform", "Propose reversible transformations and validation checks without silent mutation", "data_analysis", "schema_validation", depends_on=("quality",), evidence_outputs=("transformation_plan", "validation_plan"), evaluator_signals=("schema_valid",)),
+                _workflow_stage("report", "Synthesize data findings, limitations, lineage, and safe next actions", "quality_control", depends_on=("transform",), evidence_outputs=("data_report",), evaluator_signals=("lineage_complete", "quality_gate_passed")),
+            ),
+            ("schema and units validation", "lineage and missingness", "quality gates", "reversible transformation"),
+            ("schema_valid", "lineage_complete", "quality_gate_passed"),
+            "No conclusion or transformation is accepted without schema, lineage, and quality evidence.",
+        ),
+        _workflow(
+            "scientific_inquiry",
+            "science",
+            (
+                _workflow_stage("question", "Formalize the question, estimand, assumptions, and competing explanations", "hypothesis", evidence_outputs=("question", "assumptions"), evaluator_signals=("claim_scope_respected",)),
+                _workflow_stage("evidence", "Acquire and compare literature or supplied evidence with provenance", "literature", depends_on=("question",), evidence_outputs=("evidence_map", "gaps"), evaluator_signals=("evidence_traceable",)),
+                _workflow_stage("hypothesis", "Separate hypotheses, predictions, correlations, and causal claims", "hypothesis", "statistics", depends_on=("evidence",), evidence_outputs=("hypotheses", "predictions"), evaluator_signals=("claim_scope_respected",)),
+                _workflow_stage("design", "Design a discriminating, reproducible analysis or experiment with controls", "experiment", "statistics", depends_on=("hypothesis",), evidence_outputs=("design", "controls"), evaluator_signals=("evidence_complete",)),
+                _workflow_stage("reproduce", "Specify analysis, provenance, uncertainty, and reproducibility checks", "reproducibility", depends_on=("design",), evidence_outputs=("reproduction_plan", "limitations"), evaluator_signals=("uncertainty_reported", "evidence_traceable")),
+            ),
+            ("literature evidence", "hypothesis and predictions", "experimental design", "reproducibility"),
+            ("evidence_traceable", "uncertainty_reported", "claim_scope_respected"),
+            "The result distinguishes evidence, hypothesis, prediction, design, and unresolved uncertainty.",
+        ),
+        _workflow(
+            "biomedical_review",
+            "biomedical",
+            (
+                _workflow_stage("scope", "Classify the request and establish the non-diagnostic information boundary", "biomedical_review", "safety_boundary", evidence_outputs=("scope", "boundary"), evaluator_signals=("boundary_compliant",)),
+                _workflow_stage("provenance", "Trace biomedical evidence, population, date, and applicability limits", "provenance", depends_on=("scope",), evidence_outputs=("provenance", "applicability"), evaluator_signals=("provenance_complete",)),
+                _workflow_stage("review", "Analyze evidence while separating population findings from individual decisions", "biomedical_review", depends_on=("provenance",), evidence_outputs=("review", "uncertainty"), evaluator_signals=("boundary_compliant",)),
+                _workflow_stage("escalate", "Identify human-review, clinician, institutional, or safety escalation needs", "human_review", depends_on=("review",), evidence_outputs=("escalation", "review_questions"), evaluator_signals=("human_review_ready",)),
+                _workflow_stage("communicate", "Produce a provenance-aware summary without diagnosis or prescription", "biomedical_review", depends_on=("escalate",), evidence_outputs=("summary", "limitations"), evaluator_signals=("boundary_compliant", "provenance_complete")),
+            ),
+            ("biomedical provenance", "safety boundary", "human review readiness"),
+            ("boundary_compliant", "provenance_complete", "human_review_ready"),
+            "The response stays within the information boundary and makes qualified human review explicit.",
+        ),
+        _workflow(
+            "neuroscience_analysis",
+            "neuroscience",
+            (
+                _workflow_stage("measurement", "Inventory modalities, acquisition, cohort, and measurement limitations", "neuroscience_analysis", evidence_outputs=("measurement_contract",), evaluator_signals=("evidence_traceable",)),
+                _workflow_stage("preprocess", "Make preprocessing, exclusions, confounds, and signal assumptions explicit", "signal_interpretation", depends_on=("measurement",), evidence_outputs=("preprocessing", "confounds"), evaluator_signals=("evidence_complete",)),
+                _workflow_stage("model", "Compare analysis models and distinguish signal from proxy or artifact", "neuroscience_analysis", "signal_interpretation", depends_on=("preprocess",), evidence_outputs=("model", "sensitivity"), evaluator_signals=("claim_scope_respected",)),
+                _workflow_stage("biology", "Connect findings to biological interpretation without overclaiming individual outcomes", "neuroscience_analysis", depends_on=("model",), evidence_outputs=("interpretation", "alternative_explanations"), evaluator_signals=("uncertainty_reported",)),
+                _workflow_stage("reproduce", "Specify reproducibility, provenance, and follow-up validation", "study_design", "reproducibility", depends_on=("biology",), evidence_outputs=("validation_plan",), evaluator_signals=("evidence_complete",)),
+            ),
+            ("modality and measurement", "signal preprocessing", "model sensitivity", "reproducibility"),
+            ("evidence_traceable", "uncertainty_reported", "claim_scope_respected"),
+            "Measurement and preprocessing limitations remain attached to every biological interpretation.",
+        ),
+        _workflow(
+            "operations_change",
+            "operations",
+            (
+                _workflow_stage("observe", "Establish current state, telemetry, incident scope, and evidence freshness", "observability", "incident_response", evidence_outputs=("observations", "freshness"), evaluator_signals=("safety_gate_passed",)),
+                _workflow_stage("impact", "Bound blast radius, dependencies, failure modes, and stop conditions", "risk_review", depends_on=("observe",), evidence_outputs=("impact", "stop_conditions"), evaluator_signals=("safety_gate_passed",)),
+                _workflow_stage("rollback", "Define reversible checkpoints, rollback, recovery, and verification", "rollback", depends_on=("impact",), evidence_outputs=("rollback", "recovery"), evaluator_signals=("rollback_plan_present",)),
+                _workflow_stage("approval", "Prepare the accountable approval request and required operational gates", "approval", depends_on=("rollback",), evidence_outputs=("approval_request", "gates"), evaluator_signals=("approval_complete",), approval_required=True),
+                _workflow_stage("handoff", "Summarize the runbook and explicitly separate proposed from executed work", "runbook", depends_on=("approval",), evidence_outputs=("runbook", "execution_boundary"), evaluator_signals=("safety_gate_passed", "rollback_plan_present")),
+            ),
+            ("observability and incident state", "blast radius", "rollback and recovery", "approval gate"),
+            ("safety_gate_passed", "approval_complete", "rollback_plan_present"),
+            "No operational effect is considered complete without safety, approval, rollback, and verification evidence.",
+        ),
+        _workflow(
+            "enterprise_governance",
+            "enterprise",
+            (
+                _workflow_stage("request", "Clarify the business request, stakeholders, scope, and decision horizon", "workflow", "coordination", evidence_outputs=("request", "stakeholders"), evaluator_signals=("schema_valid",)),
+                _workflow_stage("policy", "Identify applicable policy, compliance, privacy, and authorization constraints", "governance", "compliance", depends_on=("request",), evidence_outputs=("policy_map", "constraints"), evaluator_signals=("approval_complete",)),
+                _workflow_stage("options", "Compare reversible options, costs, risks, and accountable owners", "analytics", "governance", depends_on=("policy",), evidence_outputs=("options", "tradeoffs"), evaluator_signals=("evidence_complete",)),
+                _workflow_stage("decision", "Prepare a traceable decision package and explicit approver handoff", "coordination", depends_on=("options",), evidence_outputs=("decision_package", "approver"), evaluator_signals=("approval_complete",)),
+                _workflow_stage("audit", "Define follow-up metrics, ownership, and review evidence", "governance", "analytics", depends_on=("decision",), evidence_outputs=("audit_plan",), evaluator_signals=("evidence_complete",)),
+            ),
+            ("policy and compliance", "owner and approver mapping", "reversible options", "audit evidence"),
+            ("schema_valid", "approval_complete", "evidence_complete"),
+            "The result identifies accountable ownership and does not infer authorization from context.",
+        ),
+        _workflow(
+            "multi_agent_coordination",
+            "multi_agent",
+            (
+                _workflow_stage("decompose", "Split the task into bounded specialist contracts with explicit interfaces", "delegation", "coordination", evidence_outputs=("subtasks", "interfaces"), evaluator_signals=("schema_valid",)),
+                _workflow_stage("delegate", "Assign each subtask to an eligible specialist without widening authority", "delegation", depends_on=("decompose",), evidence_outputs=("assignments", "budgets"), evaluator_signals=("approval_complete",)),
+                _workflow_stage("reconcile", "Compare specialist outputs, conflicts, omissions, and provenance", "consensus", "conflict_resolution", depends_on=("delegate",), evidence_outputs=("reconciliation", "conflicts"), evaluator_signals=("evidence_complete",)),
+                _workflow_stage("synthesize", "Produce one accountable synthesis with dissent and uncertainty preserved", "handoff", "coordination", depends_on=("reconcile",), evidence_outputs=("synthesis", "dissent"), evaluator_signals=("claim_scope_respected",)),
+            ),
+            ("bounded subtask delegation", "specialist handoff", "conflict reconciliation", "synthesis"),
+            ("schema_valid", "evidence_complete", "claim_scope_respected"),
+            "Delegation remains bounded and one accountable effect authority owns any external action.",
+        ),
+        _workflow(
+            "multimodal_alignment",
+            "multimodal",
+            (
+                _workflow_stage("inventory", "Inventory available modalities, resolution, timestamps, and missing inputs", "document", "cross_modal_alignment", evidence_outputs=("modality_inventory", "missing_modalities"), evaluator_signals=("evidence_traceable",)),
+                _workflow_stage("extract", "Extract modality-specific observations without implying unavailable inspection", "image", "audio", "video", "document", depends_on=("inventory",), evidence_outputs=("observations",), evaluator_signals=("evidence_complete",)),
+                _workflow_stage("align", "Align entities, time, scale, and provenance across modalities", "cross_modal_alignment", depends_on=("extract",), evidence_outputs=("alignment", "mismatches"), evaluator_signals=("schema_valid",)),
+                _workflow_stage("uncertainty", "Report blind spots, ambiguity, and modality-specific confidence", "cross_modal_alignment", depends_on=("align",), evidence_outputs=("uncertainty", "blind_spots"), evaluator_signals=("uncertainty_reported",)),
+                _workflow_stage("synthesize", "Synthesize only claims supported by the available aligned modalities", "document", "cross_modal_alignment", depends_on=("uncertainty",), evidence_outputs=("multimodal_summary",), evaluator_signals=("claim_scope_respected",)),
+            ),
+            ("modality inventory", "modality-specific extraction", "cross-modal alignment", "blind-spot analysis"),
+            ("evidence_traceable", "uncertainty_reported", "claim_scope_respected"),
+            "Every conclusion states which modalities support it and which unavailable inputs limit it.",
+        ),
+        _workflow(
+            "cross_domain_synthesis",
+            "cross_domain",
+            (
+                _workflow_stage("decompose", "Identify the contributing disciplines, questions, and evidence standards", "routing", "synthesis", evidence_outputs=("domain_questions", "standards"), evaluator_signals=("schema_valid",)),
+                _workflow_stage("route", "Route each question to an appropriate capability and preserve route evidence", "routing", depends_on=("decompose",), evidence_outputs=("route", "unresolved_needs"), evaluator_signals=("evidence_traceable",)),
+                _workflow_stage("align", "Align terminology, units, provenance, and disagreement across domains", "evidence_alignment", depends_on=("route",), evidence_outputs=("alignment", "disagreements"), evaluator_signals=("claim_scope_respected",)),
+                _workflow_stage("synthesize", "Synthesize domain-scoped findings without flattening different evidence standards", "synthesis", depends_on=("align",), evidence_outputs=("synthesis", "domain_attributions"), evaluator_signals=("evidence_complete",)),
+                _workflow_stage("gate", "State unresolved conflicts, decision boundaries, and accountable next review", "workflow_composition", depends_on=("synthesize",), evidence_outputs=("decision_gate", "open_questions"), evaluator_signals=("uncertainty_reported",)),
+            ),
+            ("domain decomposition", "capability routing", "evidence alignment", "cross-domain synthesis"),
+            ("schema_valid", "evidence_traceable", "evidence_complete", "uncertainty_reported"),
+            "Domain-specific claims retain attribution, evidence standards, disagreement, and unresolved boundaries.",
+        ),
+        _workflow(
+            "evaluation_reliability",
+            "evaluation",
+            (
+                _workflow_stage("rubric", "Define the evaluation question, rubric, pass criteria, and evaluator independence", "rubric", evidence_outputs=("rubric", "pass_criteria"), evaluator_signals=("schema_valid",)),
+                _workflow_stage("cases", "Select or construct bounded cases with coverage, controls, and replay identity", "benchmarking", depends_on=("rubric",), evidence_outputs=("cases", "coverage"), evaluator_signals=("evidence_complete",)),
+                _workflow_stage("replay", "Run or inspect reproducible evaluation evidence without letting the subject author its pass signal", "replay", depends_on=("cases",), evidence_outputs=("replay", "outcomes"), evaluator_signals=("tests_passed",)),
+                _workflow_stage("failure", "Analyze failures, regressions, uncertainty, and evaluator disagreement", "failure_analysis", depends_on=("replay",), evidence_outputs=("failures", "regressions"), evaluator_signals=("evidence_complete",)),
+                _workflow_stage("report", "Report bounded conclusions, limitations, and the next learning update", "reproducibility", depends_on=("failure",), evidence_outputs=("evaluation_report", "learning_recommendation"), evaluator_signals=("tests_passed", "claim_scope_respected")),
+            ),
+            ("evaluation rubric", "benchmark coverage", "replay evidence", "failure analysis"),
+            ("schema_valid", "evidence_complete", "tests_passed", "claim_scope_respected"),
+            "Pass/fail conclusions are independent, replayable, and bounded by the declared rubric and cases.",
+        ),
+    )
+
+
+def _builtin_workflow_strategy(domain: str) -> AutonomousWorkflowStrategy:
+    for strategy in builtin_autonomous_workflow_strategies():
+        if strategy.domain == domain:
+            return strategy
+    raise BrainRunError(f"no built-in autonomous workflow strategy is registered for {domain!r}")
+
+
 def builtin_autonomous_domain_profiles() -> tuple[AutonomousDomainProfile, ...]:
     """Return conservative strategies for every domain exposed by the authoring layer."""
 
@@ -236,7 +648,7 @@ def builtin_autonomous_domain_profiles() -> tuple[AutonomousDomainProfile, ...]:
             risk_class="operational_effect",
             default_capability="operations_planning",
             required_model_capabilities=("reasoning", "operations"),
-            capabilities=("runbook", "incident_response", "risk_review", "rollback", "approval"),
+            capabilities=("runbook", "incident_response", "observability", "risk_review", "rollback", "approval"),
             guardrails=(*common, "plan reversible checkpoints and require explicit authorization before effects"),
             system_instructions="Act as a reliability and operations planner. Make blast radius, rollback, approvals, and observability concrete.",
             evaluator_domain="operations",
@@ -399,6 +811,7 @@ class AutonomousTaskBlueprint:
 
     spec: AutonomousTaskSpec
     profile: AutonomousDomainProfile
+    workflow: AutonomousWorkflowStrategy
     selection_context: Mapping[str, Any]
     prompt: Mapping[str, Any]
     plan: Mapping[str, Any]
@@ -418,6 +831,9 @@ class AutonomousTaskBlueprint:
         }
         plan_public = {
             "objective_digest": self.spec.task_digest,
+            "workflow_id": self.workflow.workflow_id,
+            "workflow_digest": self.workflow.workflow_digest,
+            "workflow_stage_ids": [stage.id for stage in self.workflow.stages],
             "allowed_tools": list(self.plan.get("allowed_tools", [])),
             "step_ids": [
                 step.get("id")
@@ -431,12 +847,79 @@ class AutonomousTaskBlueprint:
             "schema": AUTONOMY_SCHEMA,
             "task": self.spec.to_dict(),
             "domain_profile": self.profile.to_dict(),
+            "workflow": self.workflow.to_dict(),
             "selection_context": dict(self.selection_context),
             "required_capabilities": list(self.required_capabilities),
             "prompt": prompt_public,
             "plan": plan_public,
             "execution": "not_started",
             "credential_posture": "caller_handles_only",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousCrossDomainBlueprint:
+    """A bounded fan-out/fan-in plan for composing multiple domain specialists."""
+
+    task_digest: str
+    child_blueprints: tuple[AutonomousTaskBlueprint, ...]
+    synthesis_blueprint: AutonomousTaskBlueprint
+    child_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.task_digest, str) or len(self.task_digest) != 64:
+            raise BrainRunError("cross-domain task_digest must be a SHA-256 digest")
+        if not 1 <= len(self.child_blueprints) <= 8:
+            raise BrainRunError("cross-domain blueprint must contain between 1 and 8 child tasks")
+        if any(not isinstance(item, AutonomousTaskBlueprint) for item in self.child_blueprints):
+            raise BrainRunError("cross-domain children must be AutonomousTaskBlueprint values")
+        if not isinstance(self.synthesis_blueprint, AutonomousTaskBlueprint):
+            raise BrainRunError("cross-domain synthesis must be an AutonomousTaskBlueprint")
+        child_ids = self.child_ids or tuple(f"child-{index + 1}" for index in range(len(self.child_blueprints)))
+        if len(child_ids) != len(self.child_blueprints):
+            raise BrainRunError("cross-domain child_ids must align with child_blueprints")
+        normalized_ids = _sequence("cross-domain child_ids", child_ids, maximum=8)
+        object.__setattr__(self, "child_ids", normalized_ids)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": "bioprism-python-autonomous-cross-domain/0.1",
+            "task_digest": self.task_digest,
+            "children": [
+                {"id": child_id, "blueprint": item.to_dict()}
+                for child_id, item in zip(self.child_ids, self.child_blueprints)
+            ],
+            "synthesis": self.synthesis_blueprint.to_dict(),
+            "dependency_graph": {
+                "fan_out": [
+                    {"id": child_id, "task_digest": item.spec.task_digest}
+                    for child_id, item in zip(self.child_ids, self.child_blueprints)
+                ],
+                "fan_in": self.synthesis_blueprint.spec.task_digest,
+            },
+            "execution": "not_started",
+            "authorization": "caller_approval_per_provider_or_effect_boundary",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousCrossDomainResult:
+    """Results from bounded child execution and optional cross-domain synthesis."""
+
+    status: str
+    blueprint: AutonomousCrossDomainBlueprint
+    child_results: tuple[BrainRunResult | BrainToolLoopResult | BrainMissionResult, ...]
+    synthesis_result: BrainRunResult | BrainToolLoopResult | BrainMissionResult | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": "bioprism-python-autonomous-cross-domain-result/0.1",
+            "status": self.status,
+            "blueprint": self.blueprint.to_dict(),
+            "child_results": [result.to_dict() for result in self.child_results],
+            "synthesis_result": None if self.synthesis_result is None else self.synthesis_result.to_dict(),
+            "execution": "completed" if self.synthesis_result is not None else "partial_or_blocked",
+            "retention": "provider_responses_returned_to_caller; learning_memory_not_implicit",
         }
 
 
@@ -448,9 +931,11 @@ class AutonomousPromptBuilder:
         spec: AutonomousTaskSpec,
         profile: AutonomousDomainProfile,
         *,
+        workflow: AutonomousWorkflowStrategy | None = None,
         max_input_tokens: int = 4_096,
         memory_episodes: Sequence[Mapping[str, Any]] = (),
     ) -> dict[str, Any]:
+        workflow = workflow or _builtin_workflow_strategy(profile.domain)
         if not isinstance(max_input_tokens, int) or isinstance(max_input_tokens, bool) or max_input_tokens < 1:
             raise BrainRunError("max_input_tokens must be a positive integer")
         if not isinstance(memory_episodes, Sequence) or isinstance(memory_episodes, (str, bytes)):
@@ -483,6 +968,29 @@ class AutonomousPromptBuilder:
                 "priority": 1000,
             }
         ]
+        context.append(
+            {
+                "id": "autonomy-workflow-contract",
+                "role": "developer",
+                "content": _json_text(
+                    {
+                        "workflow_id": workflow.workflow_id,
+                        "workflow_digest": workflow.workflow_digest,
+                        "stages": [stage.to_dict() for stage in workflow.stages],
+                        "route_intents": list(workflow.route_intents),
+                        "evaluator_signals": list(workflow.evaluator_signals),
+                        "completion_contract": workflow.completion_contract,
+                        "does_not_authorize": [
+                            "skipping approval or human review",
+                            "claiming evidence that a stage did not produce",
+                            "executing an unselected route or tool",
+                        ],
+                    }
+                ),
+                "required": True,
+                "priority": 990,
+            }
+        )
         if spec.constraints:
             context.append(
                 {
@@ -538,10 +1046,16 @@ class AutonomousPromptBuilder:
             "recommendations, and uncertainty. State what would verify the result. Do not claim "
             "that an unexecuted plan or provider response changed the outside world."
         )
+        output_contract += (
+            " Follow the supplied workflow stages in dependency order; for each stage report "
+            "completed, proposed, blocked, or not_attempted, attach available evidence, and "
+            "preserve unresolved dependencies."
+        )
+        output_contract += f" Completion standard: {workflow.completion_contract}"
         if spec.desired_outputs:
             output_contract += " Address each desired output explicitly."
         if spec.require_json:
-            output_contract += " Return only JSON matching the caller-provided response schema."
+            output_contract += " Return only JSON matching the caller-provided or workflow-generated response schema."
         request = {
             "system": profile.system_instructions,
             "developer": "\n".join(
@@ -566,9 +1080,15 @@ class AutonomousPlanBuilder:
     """Build the minimal provider-effect plan that the Rust planner can validate."""
 
     @staticmethod
-    def build(spec: AutonomousTaskSpec) -> dict[str, Any]:
+    def build(
+        spec: AutonomousTaskSpec,
+        workflow: AutonomousWorkflowStrategy | None = None,
+    ) -> dict[str, Any]:
+        workflow = workflow or _builtin_workflow_strategy(spec.domain)
         return {
             "objective": spec.task,
+            "workflow_id": workflow.workflow_id,
+            "workflow_digest": workflow.workflow_digest,
             "steps": [
                 {
                     "id": "provider-decision",
@@ -579,6 +1099,9 @@ class AutonomousPlanBuilder:
                         "capability": spec.capability,
                         "risk_class": spec.risk_class,
                         "task_digest": spec.task_digest,
+                        "workflow_id": workflow.workflow_id,
+                        "workflow_digest": workflow.workflow_digest,
+                        "stage_ids": [stage.id for stage in workflow.stages],
                     },
                     "depends_on": [],
                     "effect": "provider_call",
@@ -626,13 +1149,17 @@ class AutonomousTaskOrchestrator:
         self,
         brain: AutonomousBrain,
         registry: AutonomousDomainRegistry | None = None,
+        workflow_registry: AutonomousWorkflowRegistry | None = None,
     ) -> None:
         if not isinstance(brain, AutonomousBrain):
             raise BrainRunError("brain must be an AutonomousBrain")
         if registry is not None and not isinstance(registry, AutonomousDomainRegistry):
             raise BrainRunError("registry must be an AutonomousDomainRegistry or None")
+        if workflow_registry is not None and not isinstance(workflow_registry, AutonomousWorkflowRegistry):
+            raise BrainRunError("workflow_registry must be an AutonomousWorkflowRegistry or None")
         self.brain = brain
         self.registry = registry or AutonomousDomainRegistry.with_builtin_profiles()
+        self.workflow_registry = workflow_registry or AutonomousWorkflowRegistry.with_builtin_strategies()
 
     def prepare(
         self,
@@ -653,8 +1180,25 @@ class AutonomousTaskOrchestrator:
         memory_episodes: Sequence[Mapping[str, Any]] = (),
     ) -> AutonomousTaskBlueprint:
         profile = self.registry.resolve(domain)
+        workflow = self.workflow_registry.resolve(profile.domain)
+        unsupported_workflow_capabilities = sorted(
+            {
+                capability
+                for stage in workflow.stages
+                for capability in stage.required_capabilities
+                if capability not in set(profile.capabilities)
+            }
+        )
+        if unsupported_workflow_capabilities:
+            raise BrainRunError(
+                "workflow requires capabilities outside the domain profile: "
+                + ", ".join(unsupported_workflow_capabilities)
+            )
         resolved_capability = profile.default_capability if capability is None else _identifier("capability", capability)
         resolved_risk = profile.risk_class if risk_class is None else _identifier("risk_class", risk_class)
+        resolved_response_schema = response_schema
+        if require_json and resolved_response_schema is None:
+            resolved_response_schema = workflow.response_schema()
         spec = AutonomousTaskSpec(
             task=task,
             domain=profile.domain,
@@ -665,7 +1209,7 @@ class AutonomousTaskOrchestrator:
             context={} if context is None else context,
             max_steps=max_steps,
             require_json=require_json,
-            response_schema=response_schema,
+            response_schema=resolved_response_schema,
             execution_mode=execution_mode,
         )
         extra_capabilities = _sequence("required_model_capabilities", required_model_capabilities)
@@ -678,6 +1222,10 @@ class AutonomousTaskOrchestrator:
             "risk_class": spec.risk_class,
             "execution_mode": spec.execution_mode,
             "domain_capabilities": list(profile.capabilities),
+            "workflow_id": workflow.workflow_id,
+            "workflow_digest": workflow.workflow_digest,
+            "workflow_stage_ids": [stage.id for stage in workflow.stages],
+            "workflow_evaluator_signals": list(workflow.evaluator_signals),
             "task_digest": spec.task_digest,
             "user_context_digest": spec.context_digest,
             "context_keys": sorted(str(key) for key in spec.context),
@@ -686,14 +1234,16 @@ class AutonomousTaskOrchestrator:
         prompt = AutonomousPromptBuilder.build(
             spec,
             profile,
+            workflow=workflow,
             max_input_tokens=max_input_tokens,
             memory_episodes=memory_episodes,
         )
-        plan = AutonomousPlanBuilder.build(spec)
+        plan = AutonomousPlanBuilder.build(spec, workflow)
         _safe_json("autonomous selection context", selection_context)
         return AutonomousTaskBlueprint(
             spec=spec,
             profile=profile,
+            workflow=workflow,
             selection_context=selection_context,
             prompt=prompt,
             plan=plan,
@@ -715,19 +1265,127 @@ class AutonomousTaskOrchestrator:
 
         if not isinstance(max_tools, int) or isinstance(max_tools, bool) or not 1 <= max_tools <= 128:
             raise BrainRunError("max_tools must be between 1 and 128")
-        query = f"{blueprint.profile.domain} {blueprint.spec.capability}: {blueprint.spec.task}"
+        needs = [
+            {
+                "id": f"stage-{stage.id}",
+                "query": f"{blueprint.profile.domain} {stage.objective}: {blueprint.spec.task}",
+                "max_items": max_tools,
+            }
+            for stage in blueprint.workflow.stages
+        ]
         return {
             "goal": blueprint.spec.task,
-            "needs": [
-                {
-                    "id": "autonomous-task",
-                    "query": query,
-                    "max_items": max_tools,
-                }
-            ],
+            "needs": needs,
             "max_tools": max_tools,
             "include_tools": True,
         }
+
+    def prepare_cross_domain(
+        self,
+        *,
+        task: str,
+        subtasks: Sequence[Mapping[str, Any]],
+        context: Mapping[str, Any] | None = None,
+        desired_outputs: Sequence[str] = (
+            "domain-attributed findings",
+            "cross-domain conflicts and uncertainty",
+            "safe next actions",
+        ),
+        child_execution_mode: str = "provider",
+        synthesis_execution_mode: str = "provider",
+        max_steps: int = 8,
+        require_json: bool = False,
+        response_schema: Mapping[str, Any] | None = None,
+        max_input_tokens: int = 4_096,
+    ) -> AutonomousCrossDomainBlueprint:
+        """Prepare bounded fan-out/fan-in work without contacting a provider or tool."""
+
+        _text("cross-domain task", task, maximum=MAX_AUTONOMY_TEXT_BYTES)
+        if not isinstance(subtasks, Sequence) or isinstance(subtasks, (str, bytes)):
+            raise BrainRunError("cross-domain subtasks must be a sequence")
+        if not 1 <= len(subtasks) <= 8:
+            raise BrainRunError("cross-domain subtasks must contain between 1 and 8 items")
+        if context is not None:
+            _safe_json("cross-domain context", context)
+        parent_digest = content_digest({"task": task})
+        children: list[AutonomousTaskBlueprint] = []
+        child_ids: list[str] = []
+        allowed = {
+            "id", "task", "domain", "capability", "risk_class", "constraints", "desired_outputs",
+            "context", "max_steps", "require_json", "response_schema", "execution_mode",
+            "required_model_capabilities",
+        }
+        for index, raw in enumerate(subtasks):
+            if not isinstance(raw, Mapping):
+                raise BrainRunError("cross-domain subtasks must contain mappings")
+            unknown = sorted(set(raw).difference(allowed))
+            if unknown:
+                raise BrainRunError("cross-domain subtask contains unsupported fields: " + ", ".join(unknown))
+            child_id = raw.get("id", f"child-{index + 1}")
+            child_ids.append(_identifier("cross-domain child id", child_id))
+            child_task = _text("cross-domain child task", raw.get("task"), maximum=MAX_AUTONOMY_TEXT_BYTES)
+            child_context: dict[str, Any] = {
+                "cross_domain_parent_digest": parent_digest,
+                "cross_domain_child_id": child_id,
+            }
+            if context is not None:
+                child_context["parent_context"] = dict(context)
+            raw_context = raw.get("context")
+            if raw_context is not None:
+                if not isinstance(raw_context, Mapping):
+                    raise BrainRunError("cross-domain child context must be a mapping")
+                child_context["child_context"] = dict(raw_context)
+            child = self.prepare(
+                task=child_task,
+                domain=_identifier("cross-domain child domain", raw.get("domain")),
+                capability=raw.get("capability"),
+                risk_class=raw.get("risk_class"),
+                constraints=raw.get("constraints", ()),
+                desired_outputs=raw.get("desired_outputs", ()),
+                context=child_context,
+                max_steps=raw.get("max_steps", max_steps),
+                require_json=raw.get("require_json", require_json),
+                response_schema=raw.get("response_schema"),
+                execution_mode=raw.get("execution_mode", child_execution_mode),
+                max_input_tokens=max_input_tokens,
+                required_model_capabilities=raw.get("required_model_capabilities", ()),
+            )
+            children.append(child)
+        synthesis_context = {
+            "cross_domain_parent_digest": parent_digest,
+            "children": [
+                {
+                    "id": child_id,
+                    "domain": child.profile.domain,
+                    "capability": child.spec.capability,
+                    "task_digest": child.spec.task_digest,
+                    "workflow_id": child.workflow.workflow_id,
+                    "workflow_digest": child.workflow.workflow_digest,
+                    "stage_ids": [stage.id for stage in child.workflow.stages],
+                }
+                for child_id, child in zip(child_ids, children)
+            ],
+        }
+        if context is not None:
+            synthesis_context["parent_context"] = dict(context)
+        synthesis = self.prepare(
+            task=f"Synthesize the domain analyses for: {task}",
+            domain="cross_domain",
+            capability="cross_domain_synthesis",
+            desired_outputs=desired_outputs,
+            context=synthesis_context,
+            max_steps=max_steps,
+            require_json=require_json,
+            response_schema=response_schema,
+            execution_mode=synthesis_execution_mode,
+            max_input_tokens=max_input_tokens,
+        )
+        return AutonomousCrossDomainBlueprint(
+            task_digest=parent_digest,
+            child_blueprints=tuple(children),
+            synthesis_blueprint=synthesis,
+            child_ids=tuple(child_ids),
+        )
 
     @staticmethod
     def _memory(
@@ -1087,6 +1745,7 @@ class AutonomousTaskOrchestrator:
             replacement = AutonomousTaskBlueprint(
                 spec=blueprint.spec,
                 profile=blueprint.profile,
+                workflow=blueprint.workflow,
                 selection_context=blueprint.selection_context,
                 prompt=prompt,
                 plan=blueprint.plan,
@@ -1312,6 +1971,228 @@ class AutonomousTaskOrchestrator:
             tool_loop_options=tool_loop_options,
         )
 
+    @staticmethod
+    def _cross_domain_output(result: BrainRunResult | BrainToolLoopResult | BrainMissionResult) -> str:
+        response = None
+        if isinstance(result, BrainRunResult):
+            response = result.response
+        elif isinstance(result, BrainToolLoopResult):
+            response = None if result.provider_loop is None else result.provider_loop.final_response
+            if response is None:
+                response = result.brain_run.response
+        elif isinstance(result, BrainMissionResult):
+            response = result.brain_run.response
+        if response is None or not isinstance(response.text, str):
+            return ""
+        encoded = response.text.encode("utf-8")[:32_000]
+        return encoded.decode("utf-8", errors="ignore")
+
+    @staticmethod
+    def _cross_domain_identity(prefix: str, parent: str | None, child_id: str) -> str | None:
+        if parent is None:
+            return None
+        return f"{prefix}-{content_digest({'parent': parent, 'child': child_id})}"
+
+    def run_cross_domain(
+        self,
+        *,
+        task: str,
+        subtasks: Sequence[Mapping[str, Any]],
+        model_candidates: Sequence[Mapping[str, Any]],
+        credentials: Mapping[str, CredentialHandle],
+        context: Mapping[str, Any] | None = None,
+        desired_outputs: Sequence[str] = (
+            "domain-attributed findings",
+            "cross-domain conflicts and uncertainty",
+            "safe next actions",
+        ),
+        child_execution_mode: str = "provider",
+        synthesis_execution_mode: str = "provider",
+        max_steps: int = 8,
+        require_json: bool = False,
+        response_schema: Mapping[str, Any] | None = None,
+        ledger: BrainLearningLedger | None = None,
+        memory: BrainEpisodicMemory | None = None,
+        memory_query: MemoryQuery | Mapping[str, Any] | None = None,
+        memory_limit: int = 8,
+        contextual_observations: Sequence[Mapping[str, Any]] = (),
+        input_tokens: int = 4_096,
+        requested_output_tokens: int = 2_048,
+        max_cost_per_million_tokens: int | None = None,
+        max_latency_ms: int | None = None,
+        min_quality: float | None = None,
+        selection_overrides: Mapping[str, Any] | None = None,
+        approve_provider_call: bool = False,
+        approve_mission_dispatch: bool = False,
+        run_id: str | None = None,
+        max_output_tokens: int = 2_048,
+        temperature: float | None = None,
+        idempotency_key: str | None = None,
+        mission_policy: MissionPolicy | Mapping[str, Any] | None = None,
+        mission_options: Mapping[str, Any] | None = None,
+        route_request: Mapping[str, Any] | None = None,
+        auto_route: bool = False,
+        enforce_route_tools: bool = True,
+        require_resolved_route: bool = True,
+        provider_tools: Sequence[ProviderTool] = (),
+        tool_choice: str | None = None,
+        tool_loop_options: Mapping[str, Any] | None = None,
+        max_provider_failovers: int = 2,
+        synthesize: bool = True,
+        allow_partial: bool = False,
+    ) -> AutonomousCrossDomainResult:
+        """Execute bounded domain specialists, then optionally synthesize their outputs.
+
+        Children run sequentially in declared order so approval, provider health, and failure
+        boundaries are observable. A child failure or pending approval prevents synthesis unless
+        ``allow_partial`` is explicitly enabled. This method never invents a child permission or
+        silently persists provider output into learning memory.
+        """
+
+        if not isinstance(synthesize, bool) or not isinstance(allow_partial, bool):
+            raise BrainRunError("synthesize and allow_partial must be booleans")
+        blueprint = self.prepare_cross_domain(
+            task=task,
+            subtasks=subtasks,
+            context=context,
+            desired_outputs=desired_outputs,
+            child_execution_mode=child_execution_mode,
+            synthesis_execution_mode=synthesis_execution_mode,
+            max_steps=max_steps,
+            require_json=require_json,
+            response_schema=response_schema,
+            max_input_tokens=input_tokens,
+        )
+        child_results: list[BrainRunResult | BrainToolLoopResult | BrainMissionResult] = []
+        for child_id, child in zip(blueprint.child_ids, blueprint.child_blueprints):
+            result = self.run(
+                task=child.spec.task,
+                domain=child.spec.domain,
+                model_candidates=model_candidates,
+                credentials=credentials,
+                capability=child.spec.capability,
+                risk_class=child.spec.risk_class,
+                constraints=child.spec.constraints,
+                desired_outputs=child.spec.desired_outputs,
+                context=child.spec.context,
+                max_steps=child.spec.max_steps,
+                require_json=child.spec.require_json,
+                response_schema=child.spec.response_schema,
+                execution_mode=child.spec.execution_mode,
+                required_model_capabilities=tuple(
+                    capability
+                    for capability in child.required_capabilities
+                    if capability not in child.profile.required_model_capabilities
+                ),
+                ledger=ledger,
+                memory=memory,
+                memory_query=memory_query,
+                memory_limit=memory_limit,
+                contextual_observations=contextual_observations,
+                input_tokens=input_tokens,
+                requested_output_tokens=requested_output_tokens,
+                max_cost_per_million_tokens=max_cost_per_million_tokens,
+                max_latency_ms=max_latency_ms,
+                min_quality=min_quality,
+                selection_overrides=selection_overrides,
+                approve_provider_call=approve_provider_call,
+                approve_mission_dispatch=approve_mission_dispatch,
+                run_id=self._cross_domain_identity("cross-child", run_id, child_id),
+                max_output_tokens=max_output_tokens,
+                temperature=temperature,
+                idempotency_key=self._cross_domain_identity("cross-key", idempotency_key, child_id),
+                mission_policy=mission_policy,
+                mission_options=mission_options,
+                route_request=route_request,
+                auto_route=auto_route,
+                enforce_route_tools=enforce_route_tools,
+                require_resolved_route=require_resolved_route,
+                provider_tools=provider_tools,
+                tool_choice=tool_choice,
+                max_provider_failovers=max_provider_failovers,
+                tool_loop_options=tool_loop_options,
+            )
+            if not isinstance(result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
+                raise BrainRunError("cross-domain child returned an unsupported result")
+            child_results.append(result)
+
+        complete = [result.status.startswith("completed") for result in child_results]
+        if not all(complete) and not allow_partial:
+            status = "approval_required" if any(result.status == "approval_required" for result in child_results) else "child_incomplete"
+            return AutonomousCrossDomainResult(status, blueprint, tuple(child_results), None)
+        if not synthesize:
+            return AutonomousCrossDomainResult(
+                "children_completed" if all(complete) else "children_partial",
+                blueprint,
+                tuple(child_results),
+                None,
+            )
+        child_outputs = [
+            {
+                "id": child_id,
+                "domain": child.profile.domain,
+                "workflow_id": child.workflow.workflow_id,
+                "workflow_digest": child.workflow.workflow_digest,
+                "status": result.status,
+                "output": self._cross_domain_output(result),
+                "output_digest": content_digest({"output": self._cross_domain_output(result)}),
+            }
+            for child_id, child, result in zip(blueprint.child_ids, blueprint.child_blueprints, child_results)
+        ]
+        synthesis_context = dict(blueprint.synthesis_blueprint.spec.context)
+        synthesis_context["child_outputs"] = child_outputs
+        synthesis = blueprint.synthesis_blueprint
+        synthesis_result = self.run(
+            task=synthesis.spec.task,
+            domain=synthesis.spec.domain,
+            model_candidates=model_candidates,
+            credentials=credentials,
+            capability=synthesis.spec.capability,
+            risk_class=synthesis.spec.risk_class,
+            constraints=synthesis.spec.constraints,
+            desired_outputs=synthesis.spec.desired_outputs,
+            context=synthesis_context,
+            max_steps=synthesis.spec.max_steps,
+            require_json=synthesis.spec.require_json,
+            response_schema=synthesis.spec.response_schema,
+            execution_mode=synthesis.spec.execution_mode,
+            ledger=ledger,
+            memory=memory,
+            memory_query=memory_query,
+            memory_limit=memory_limit,
+            contextual_observations=contextual_observations,
+            input_tokens=input_tokens,
+            requested_output_tokens=requested_output_tokens,
+            max_cost_per_million_tokens=max_cost_per_million_tokens,
+            max_latency_ms=max_latency_ms,
+            min_quality=min_quality,
+            selection_overrides=selection_overrides,
+            approve_provider_call=approve_provider_call,
+            approve_mission_dispatch=approve_mission_dispatch,
+            run_id=self._cross_domain_identity("cross-synthesis", run_id, "synthesis"),
+            max_output_tokens=max_output_tokens,
+            temperature=temperature,
+            idempotency_key=self._cross_domain_identity("cross-key", idempotency_key, "synthesis"),
+            mission_policy=mission_policy,
+            mission_options=mission_options,
+            route_request=route_request,
+            auto_route=auto_route,
+            enforce_route_tools=enforce_route_tools,
+            require_resolved_route=require_resolved_route,
+            provider_tools=provider_tools,
+            tool_choice=tool_choice,
+            max_provider_failovers=max_provider_failovers,
+            tool_loop_options=tool_loop_options,
+        )
+        if not isinstance(synthesis_result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
+            raise BrainRunError("cross-domain synthesis returned an unsupported result")
+        return AutonomousCrossDomainResult(
+            "completed" if synthesis_result.status.startswith("completed") else synthesis_result.status,
+            blueprint,
+            tuple(child_results),
+            synthesis_result,
+        )
+
     def _run_learning_from_blueprint(
         self,
         blueprint: AutonomousTaskBlueprint,
@@ -1414,13 +2295,20 @@ __all__ = [
     "AUTONOMY_SCHEMA",
     "AUTONOMOUS_DOMAINS",
     "AUTONOMOUS_EXECUTION_MODES",
+    "AUTONOMOUS_WORKFLOW_SCHEMA",
     "AutonomousDomainProfile",
     "AutonomousDomainRegistry",
+    "AutonomousCrossDomainBlueprint",
+    "AutonomousCrossDomainResult",
     "AutonomousLearningResult",
     "AutonomousPlanBuilder",
     "AutonomousPromptBuilder",
     "AutonomousTaskBlueprint",
     "AutonomousTaskOrchestrator",
     "AutonomousTaskSpec",
+    "AutonomousWorkflowRegistry",
+    "AutonomousWorkflowStage",
+    "AutonomousWorkflowStrategy",
+    "builtin_autonomous_workflow_strategies",
     "builtin_autonomous_domain_profiles",
 ]
