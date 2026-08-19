@@ -1012,6 +1012,86 @@ The same route/authorizer path works for every tool returned by the live cross-d
 domain-specific readiness, operations gates, and evidence contracts remain authoritative in the
 Rust mission executor rather than being guessed by the model.
 
+### Domain tool registry and BYOK application composition
+
+The high-level `AutonomousAgent` façade can compose a caller-owned domain tool registry. This is
+the process an embedding application uses after a person has completed provider onboarding:
+
+1. Register only non-secret provider metadata and model candidates.
+2. Collect the provider key through `ProviderOnboarding`/`CredentialSession`; pass only the opaque
+   `CredentialHandle` to the agent.
+3. Register each actual MCP/workspace tool with its domains, capability, exact input schema, and
+   risk posture.
+4. Let the agent expose only tools matching the current domain, plus deliberately shared
+   `cross_domain` tools.
+5. Supply an approval callback for effectful tools. Read-only tools may be automatically executed
+   through the workspace adapter, while effectful tools remain refused without approval.
+
+The registry is metadata and schema composition; it does not grant authority. A provider-generated
+tool call is still an intent. `AutonomousDomainToolRuntime` validates the call against the exact
+registered schema, rejects credential-shaped fields, applies the read-only/effect approval policy,
+and invokes the caller-owned executor. A mixed batch containing one unapproved call is refused as
+a batch so an approved call cannot partially execute around a denied sibling. The executor's
+output is bounded and returned only as a provider continuation value. `AutonomousAgent.tool_receipts()`
+returns call, schema, argument, and output digests plus status—never raw arguments, outputs,
+provider payloads, or credentials.
+
+```python
+from prism_sdk import (
+    AutonomousAgent,
+    AutonomousDomainTool,
+    AutonomousDomainToolRegistry,
+    AutonomousDomainToolRuntime,
+)
+
+tools = AutonomousDomainToolRegistry()
+tools.register_mcp_definition(
+    {
+        "name": "developer_platform_status",
+        "description": "Read bounded workspace status.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"scope": {"type": "string"}},
+            "required": ["scope"],
+            "additionalProperties": False,
+        },
+    },
+    domains=("coding", "operations", "cross_domain"),
+    capability="observability",
+    read_only=True,
+)
+tools.register(
+    AutonomousDomainTool(
+        name="release_apply",
+        domains=("coding", "operations"),
+        capability="delivery",
+        description="Apply an already reviewed release.",
+        parameters={"type": "object", "additionalProperties": False},
+        risk_class="external_effect",
+        read_only=False,
+        approval_required=True,
+    )
+)
+
+agent = AutonomousAgent(workspace, runtime, tool_registry=tools)
+result = agent.run(
+    task="Inspect the current workspace and summarize readiness.",
+    domain="operations",
+    credentials={"openai": openai_handle},  # opaque handle, never a raw key
+    execution_mode="tool_loop",
+    approve_provider_call=True,
+    tool_loop_options={"max_turns": 4, "max_tool_calls": 16},
+)
+print(agent.tool_receipts())
+```
+
+For an effectful tool, provide `tool_runtime=AutonomousDomainToolRuntime(...)` with an approval
+callback, or replace the default workspace adapter with an application executor that enforces
+identity, scope, idempotency, and operator policy. The agent never derives approval from the model,
+domain label, route recommendation, provider credential readiness, or bandit preference. `read_only`
+is an explicit registration claim and should only be used for tools whose executor has no external
+effect.
+
 The adaptive loop can be combined with that standard authorizer:
 
 ```python

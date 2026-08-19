@@ -12,6 +12,8 @@ from prism_sdk import (
     AutonomousAgent,
     AutonomousBrain,
     AutonomousDomainRegistry,
+    AutonomousDomainTool,
+    AutonomousDomainToolRegistry,
     AutonomousWorkflowRegistry,
     BrainRunError,
     BrainEpisodicMemory,
@@ -450,6 +452,61 @@ def test_autonomous_agent_workflow_and_cross_domain_wrappers_share_catalogue_and
             "generation": 0,
             "arms": [],
         }
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_autonomous_agent_composes_domain_tools_into_native_tool_loop():
+    runtime, store, server, thread = _runtime()
+
+    class ToolWorkspace(_Workspace):
+        def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+            if name == "developer_platform_status":
+                self.calls.append((name, {} if arguments is None else dict(arguments)))
+                return {"status": "ready", "scope": (arguments or {}).get("scope")}
+            return super().tool(name, arguments)
+
+    workspace = ToolWorkspace()
+    registry = AutonomousDomainToolRegistry(
+        [
+            AutonomousDomainTool(
+                name="developer_platform_status",
+                domains=("operations", "cross_domain"),
+                capability="observability",
+                description="Read bounded workspace status.",
+                parameters={
+                    "type": "object",
+                    "properties": {"scope": {"type": "string"}},
+                    "required": ["scope"],
+                    "additionalProperties": False,
+                },
+            )
+        ]
+    )
+    handle = store.register("openai", "agent-domain-tool-secret")
+    agent = AutonomousAgent(
+        workspace,
+        runtime,
+        model_catalogue=ModelCatalogue(_model()),
+        tool_registry=registry,
+    )
+    try:
+        result = agent.run(
+            task="inspect the workspace status",
+            domain="operations",
+            credentials={"openai": handle},
+            execution_mode="tool_loop",
+            approve_provider_call=True,
+            tool_loop_options={"max_turns": 3},
+        )
+        assert result.status == "completed_provider_tool_loop"
+        assert any(name == "developer_platform_status" for name, _ in workspace.calls)
+        assert agent.tools("operations")[0]["risk_class"] == "read_only"
+        assert agent.tool_receipts()[0]["status"] == "executed"
+        assert "workspace" not in json.dumps(agent.tool_receipts())
+        assert "agent-domain-tool-secret" not in json.dumps(result.to_dict())
     finally:
         server.shutdown()
         thread.join(timeout=2)

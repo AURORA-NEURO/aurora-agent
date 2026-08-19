@@ -38,6 +38,11 @@ from .brain import (
     BrainRunResult,
     BrainToolLoopResult,
 )
+from .domain_tools import (
+    AutonomousDomainTool,
+    AutonomousDomainToolRegistry,
+    AutonomousDomainToolRuntime,
+)
 from .evaluators import DomainEvaluatorRegistry
 from .llm_runtime import (
     CredentialHandle,
@@ -3424,6 +3429,8 @@ class AutonomousAgent:
         ledger: BrainLearningLedger | None = None,
         memory: BrainEpisodicMemory | None = None,
         health_ledger: ProviderHealthLedger | None = None,
+        tool_registry: AutonomousDomainToolRegistry | None = None,
+        tool_runtime: AutonomousDomainToolRuntime | None = None,
     ) -> None:
         if not isinstance(runtime, LLMRuntime):
             raise BrainRunError("runtime must be an LLMRuntime")
@@ -3439,6 +3446,12 @@ class AutonomousAgent:
             raise BrainRunError("memory must be a BrainEpisodicMemory or None")
         if health_ledger is not None and not isinstance(health_ledger, ProviderHealthLedger):
             raise BrainRunError("health_ledger must be a ProviderHealthLedger or None")
+        if tool_registry is not None and not isinstance(tool_registry, AutonomousDomainToolRegistry):
+            raise BrainRunError("tool_registry must be an AutonomousDomainToolRegistry or None")
+        if tool_runtime is not None and not isinstance(tool_runtime, AutonomousDomainToolRuntime):
+            raise BrainRunError("tool_runtime must be an AutonomousDomainToolRuntime or None")
+        if tool_runtime is not None and tool_registry is not None and tool_runtime.registry is not tool_registry:
+            raise BrainRunError("tool_runtime registry must be the same registry supplied to the agent")
         self.runtime = runtime
         self.onboarding = ProviderOnboarding(runtime)
         self.catalogue = model_catalogue or ModelCatalogue()
@@ -3446,6 +3459,16 @@ class AutonomousAgent:
         self.ledger = ledger
         self.memory = memory
         self.health_ledger = health_ledger
+        self.tool_registry = tool_registry
+        if tool_runtime is not None:
+            self.tool_runtime = tool_runtime
+        elif tool_registry is not None and hasattr(workspace, "tool") and callable(getattr(workspace, "tool")):
+            self.tool_runtime = AutonomousDomainToolRuntime(
+                tool_registry,
+                executor=lambda tool, arguments: workspace.tool(tool.name, dict(arguments)),
+            )
+        else:
+            self.tool_runtime = None
         if health_ledger is not None:
             runtime.add_observation_callback(health_ledger.record)
         self.orchestrator = AutonomousTaskOrchestrator(
@@ -3468,6 +3491,40 @@ class AutonomousAgent:
         """Return deterministic model metadata suitable for a configuration UI."""
 
         return self.catalogue.candidates(enabled_only=enabled_only)
+
+    def register_tool(
+        self,
+        tool: AutonomousDomainTool,
+        *,
+        replace_existing: bool = False,
+    ) -> AutonomousDomainTool:
+        """Register one application-owned domain tool without accepting credentials."""
+
+        if self.tool_registry is None:
+            raise BrainRunError("register_tool requires an AutonomousDomainToolRegistry")
+        if not isinstance(tool, AutonomousDomainTool):
+            raise BrainRunError("register_tool accepts an AutonomousDomainTool value")
+        registered = self.tool_registry.register(tool, replace_existing=replace_existing)
+        if self.tool_runtime is None and hasattr(self.brain.workspace, "tool") and callable(getattr(self.brain.workspace, "tool")):
+            self.tool_runtime = AutonomousDomainToolRuntime(
+                self.tool_registry,
+                executor=lambda resolved, arguments: self.brain.workspace.tool(resolved.name, dict(arguments)),
+            )
+        return registered
+
+    def tools(self, domain: str | None = None) -> list[dict[str, Any]]:
+        """Return metadata-only domain tools visible to a domain or to the full registry."""
+
+        if self.tool_registry is None:
+            return []
+        return self.tool_registry.catalogue(None if domain is None else (domain,))
+
+    def tool_receipts(self) -> list[dict[str, Any]]:
+        """Return metadata-only receipts from the application-owned domain tool runtime."""
+
+        if self.tool_runtime is None:
+            return []
+        return [receipt.to_dict() for receipt in self.tool_runtime.receipts]
 
     def readiness(self) -> dict[str, Any]:
         """Project provider/model readiness without exposing credentials or prompt material."""
@@ -3522,6 +3579,8 @@ class AutonomousAgent:
             "providers": providers,
             "models": models,
             "provider_health": health,
+            "domain_tools": [] if self.tool_registry is None else self.tool_registry.catalogue(),
+            "domain_tool_registry_digest": None if self.tool_registry is None else self.tool_registry.digest,
             "next_actions": next_actions,
             "secret_material": "never_returned",
             "credential_posture": "caller_supplied_opaque_handles",
@@ -3587,12 +3646,25 @@ class AutonomousAgent:
         credentials: Mapping[str, CredentialHandle] | CredentialSession,
         model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None,
         options: Mapping[str, Any],
+        tool_domains: Sequence[str] = (),
         resume_learning: bool = False,
     ) -> tuple[list[dict[str, Any]], dict[str, CredentialHandle], dict[str, Any]]:
         resolved_credentials = self._credential_mapping(credentials)
         resolved_options = dict(options)
         resolved_options.setdefault("ledger", self.ledger)
         resolved_options.setdefault("memory", self.memory)
+        if self.tool_registry is not None and "provider_tools" not in resolved_options:
+            resolved_options["provider_tools"] = self.tool_registry.provider_tools(tool_domains or None)
+        if self.tool_runtime is not None:
+            loop_options = resolved_options.get("tool_loop_options")
+            if loop_options is None:
+                loop_options = {}
+            elif not isinstance(loop_options, Mapping):
+                raise BrainRunError("tool_loop_options must be a mapping or None")
+            else:
+                loop_options = dict(loop_options)
+            loop_options.setdefault("authorize_and_execute", self.tool_runtime)
+            resolved_options["tool_loop_options"] = loop_options
         if self.health_ledger is not None:
             historical = self.health_ledger.selection_overrides()
             supplied = resolved_options.get("selection_overrides")
@@ -3630,6 +3702,7 @@ class AutonomousAgent:
             credentials=credentials,
             model_candidates=model_candidates,
             options=kwargs,
+            tool_domains=(domain,),
             resume_learning=bool(kwargs.get("learn")),
         )
         return self.orchestrator.run(
@@ -3654,6 +3727,7 @@ class AutonomousAgent:
             credentials=credentials,
             model_candidates=model_candidates,
             options=kwargs,
+            tool_domains=(blueprint.spec.domain,),
             resume_learning=True,
         )
         return self.orchestrator.run_workflow(
@@ -3680,6 +3754,7 @@ class AutonomousAgent:
             credentials=credentials,
             model_candidates=model_candidates,
             options=options,
+            tool_domains=(blueprint.spec.domain,),
             resume_learning=False,
         )
         return self.orchestrator.run_workflow_learning(
@@ -3704,6 +3779,16 @@ class AutonomousAgent:
             credentials=credentials,
             model_candidates=model_candidates,
             options=kwargs,
+            tool_domains=tuple(
+                dict.fromkeys(
+                    ["cross_domain"]
+                    + [
+                        value.get("domain")
+                        for value in subtasks
+                        if isinstance(value, Mapping) and isinstance(value.get("domain"), str)
+                    ]
+                )
+            ),
             resume_learning=True,
         )
         return self.orchestrator.run_cross_domain(
@@ -3726,6 +3811,9 @@ __all__ = [
     "AUTONOMOUS_WORKFLOW_STAGE_STATUSES",
     "AutonomousDomainProfile",
     "AutonomousDomainRegistry",
+    "AutonomousDomainTool",
+    "AutonomousDomainToolRegistry",
+    "AutonomousDomainToolRuntime",
     "AutonomousCrossDomainBlueprint",
     "AutonomousCrossDomainResult",
     "AutonomousLearningResult",

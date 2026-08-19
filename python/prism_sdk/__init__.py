@@ -113,6 +113,16 @@ from .autonomy import (
     builtin_autonomous_workflow_strategies,
     builtin_autonomous_domain_profiles,
 )
+from .domain_tools import (
+    DOMAIN_TOOL_EXECUTION_STATUSES,
+    DOMAIN_TOOL_REGISTRY_SCHEMA,
+    DOMAIN_TOOL_RISK_CLASSES,
+    DOMAIN_TOOL_SCHEMA,
+    AutonomousDomainTool,
+    AutonomousDomainToolReceipt,
+    AutonomousDomainToolRegistry,
+    AutonomousDomainToolRuntime,
+)
 from .llm_runtime import (
     CredentialError,
     CredentialHandle,
