@@ -3816,7 +3816,7 @@ fn mission_evaluator_discovery_covers_domains_without_executing_tools() {
     assert_eq!(all["result_count"], json!(29));
     assert_eq!(all["coverage"]["capability_group_count"], json!(30));
     assert_eq!(all["coverage"]["evaluator_group_count"], json!(29));
-    assert_eq!(all["coverage"]["complete"], json!(true));
+    assert_eq!(all["coverage"]["complete"], json!(false));
     assert_eq!(
         all["matches"][0]["adapter"]["status"],
         json!("candidate_only")
