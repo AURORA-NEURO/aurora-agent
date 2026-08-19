@@ -6512,6 +6512,27 @@ class AutonomousTaskOrchestrator:
             return None
         return f"{prefix}-{content_digest({'parent': parent, 'child': child_id})}"
 
+    @staticmethod
+    def _cross_domain_tool_loop_options(
+        options: Mapping[str, Any] | None,
+        *,
+        execution_id: str | None,
+        domain: str,
+    ) -> Mapping[str, Any] | None:
+        """Bind a shared domain-tool runtime to one specialist without widening authority."""
+
+        if options is None or not isinstance(options, Mapping):
+            return options
+        runtime = options.get("authorize_and_execute")
+        if not isinstance(runtime, AutonomousDomainToolRuntime):
+            return options
+        scoped = dict(options)
+        scoped["authorize_and_execute"] = runtime.scoped(
+            execution_id=execution_id or f"cross-tool-{uuid.uuid4().hex}",
+            domain=domain,
+        )
+        return scoped
+
     def run_cross_domain(
         self,
         *,
@@ -6654,7 +6675,11 @@ class AutonomousTaskOrchestrator:
                 provider_tools=provider_tools,
                 tool_choice=tool_choice,
                 max_provider_failovers=max_provider_failovers,
-                tool_loop_options=tool_loop_options,
+                tool_loop_options=self._cross_domain_tool_loop_options(
+                    tool_loop_options,
+                    execution_id=self._cross_domain_identity("cross-tool", run_id, child_id),
+                    domain=child.spec.domain,
+                ),
                 execution_controller=execution_controller,
             )
             if not isinstance(result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
@@ -6744,7 +6769,11 @@ class AutonomousTaskOrchestrator:
             provider_tools=provider_tools,
             tool_choice=tool_choice,
             max_provider_failovers=max_provider_failovers,
-            tool_loop_options=tool_loop_options,
+            tool_loop_options=self._cross_domain_tool_loop_options(
+                tool_loop_options,
+                execution_id=self._cross_domain_identity("cross-tool", run_id, "synthesis"),
+                domain=synthesis.spec.domain,
+            ),
             execution_controller=execution_controller,
         )
         if not isinstance(synthesis_result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
@@ -7009,7 +7038,11 @@ class AutonomousTaskOrchestrator:
                 provider_tools=provider_tools,
                 tool_choice=tool_choice,
                 max_provider_failovers=max_provider_failovers,
-                tool_loop_options=tool_loop_options,
+                tool_loop_options=self._cross_domain_tool_loop_options(
+                    tool_loop_options,
+                    execution_id=self._cross_domain_identity("cross-tool", run_id, child_id),
+                    domain=child.spec.domain,
+                ),
                 bandit_state=state,
                 execution_controller=execution_controller,
             )
@@ -7111,7 +7144,11 @@ class AutonomousTaskOrchestrator:
             provider_tools=provider_tools,
             tool_choice=tool_choice,
             max_provider_failovers=max_provider_failovers,
-            tool_loop_options=tool_loop_options,
+            tool_loop_options=self._cross_domain_tool_loop_options(
+                tool_loop_options,
+                execution_id=self._cross_domain_identity("cross-tool", run_id, "synthesis"),
+                domain=synthesis.spec.domain,
+            ),
             bandit_state=state,
             execution_controller=execution_controller,
         )
@@ -8191,6 +8228,7 @@ class AutonomousAgent:
             # credit the wrong domain arm.  No journal or checkpoint is created here.
             selected_domain = next((value for value in tool_domains if value in AUTONOMOUS_DOMAINS), "cross_domain")
             resolved_execution_id = execution_id or resolved_options.get("run_id") or f"execution-{uuid.uuid4().hex}"
+            resolved_options.setdefault("run_id", resolved_execution_id)
             session_runtime = self.tool_runtime.scoped(
                 execution_id=resolved_execution_id,
                 domain=selected_domain,

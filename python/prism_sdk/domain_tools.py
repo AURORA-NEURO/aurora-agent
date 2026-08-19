@@ -424,8 +424,6 @@ class AutonomousDomainToolRuntime:
                 raise ArgumentError("domain tool runtime scope must contain execution_id and domain")
             _text("domain tool runtime scope execution_id", _scope[0], maximum=256)
             _identifier("domain tool runtime scope domain", _scope[1])
-        if controller is not None and _scope is not None:
-            raise ArgumentError("domain tool runtime cannot combine a controller and an ephemeral scope")
         self.registry = registry
         self.executor = executor
         self.approve = approve
@@ -437,16 +435,20 @@ class AutonomousDomainToolRuntime:
     def scoped(self, *, execution_id: str, domain: str) -> "AutonomousDomainToolRuntime":
         """Create a non-persistent run scope that still binds receipt identity to a domain."""
 
-        if self.controller is not None:
-            raise ArgumentError("a controller-backed tool runtime cannot create an ephemeral scope")
+        resolved_execution_id = (
+            self.controller.state.execution_id
+            if self.controller is not None
+            else _text("domain tool scope execution_id", execution_id, maximum=256)
+        )
         return AutonomousDomainToolRuntime(
             self.registry,
             executor=self.executor,
             approve=self.approve,
             auto_execute_read_only=self.auto_execute_read_only,
+            controller=self.controller,
             _receipt_store=self._receipts,
             _scope=(
-                _text("domain tool scope execution_id", execution_id, maximum=256),
+                resolved_execution_id,
                 _identifier("domain tool scope domain", domain),
             ),
         )
@@ -507,12 +509,10 @@ class AutonomousDomainToolRuntime:
 
         scoped_execution_id = None if self._scope is None else self._scope[0]
         scoped_domain = None if self._scope is None else self._scope[1]
-        execution_id = (
-            self.controller.state.execution_id
-            if self.controller is not None
-            else scoped_execution_id
+        execution_id = self.controller.state.execution_id if self.controller is not None else scoped_execution_id
+        domain = scoped_domain if self._scope is not None else (
+            None if self.controller is None else self.controller.state.domain
         )
-        domain = self.controller.state.domain if self.controller is not None else scoped_domain
         if len({call.call_id for call in calls}) != len(calls):
             return tuple(
                 self._result(

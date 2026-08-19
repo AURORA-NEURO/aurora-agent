@@ -568,7 +568,7 @@ def test_autonomous_agent_composes_domain_tools_into_native_tool_loop():
         [
             AutonomousDomainTool(
                 name="developer_platform_status",
-                domains=("operations", "cross_domain"),
+                domains=("operations", "coding", "cross_domain"),
                 capability="observability",
                 description="Read bounded workspace status.",
                 parameters={
@@ -619,6 +619,22 @@ def test_autonomous_agent_composes_domain_tools_into_native_tool_loop():
         assert learning.status == "completed"
         assert learning.next_bandit_state["generation"] == 1
         assert learning.by_domain == {"operations": 1}
+        cross = agent.run_cross_domain(
+            task="inspect operations and coding workspace status",
+            subtasks=[
+                {"id": "operations-check", "task": "inspect operations status", "domain": "operations", "execution_mode": "tool_loop"},
+                {"id": "coding-check", "task": "inspect coding status", "domain": "coding", "execution_mode": "tool_loop"},
+            ],
+            credentials={"openai": handle},
+            model_candidates=_model(),
+            child_execution_mode="tool_loop",
+            synthesize=False,
+            tool_loop_options={"max_turns": 3},
+            approve_provider_call=True,
+        )
+        assert cross.status == "children_completed"
+        cross_receipts = agent.tool_receipts()[-2:]
+        assert {receipt["domain"] for receipt in cross_receipts} == {"operations", "coding"}
     finally:
         server.shutdown()
         thread.join(timeout=2)
