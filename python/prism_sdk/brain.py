@@ -1419,6 +1419,7 @@ class AutonomousBrain:
         model_candidates: Sequence[Mapping[str, Any]],
         credentials: Mapping[str, CredentialHandle],
         ledger: BrainLearningLedger | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
         context: Mapping[str, Any] | None = None,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         required_capabilities: Sequence[str] = (),
@@ -1467,6 +1468,10 @@ class AutonomousBrain:
             raise BrainRunError("min_quality must be within [0, 1] or None")
         if ledger is not None and not isinstance(ledger, BrainLearningLedger):
             raise BrainRunError("ledger must be a BrainLearningLedger or None")
+        if bandit_state is not None:
+            if not isinstance(bandit_state, Mapping):
+                raise BrainRunError("bandit_state must be a mapping or None")
+            BrainLearningLedger._assert_safe(bandit_state)
         if context is not None and not isinstance(context, Mapping):
             raise BrainRunError("context must be a mapping or None")
         if not isinstance(contextual_observations, Sequence) or isinstance(
@@ -1601,12 +1606,20 @@ class AutonomousBrain:
                         model["enabled"] = False
                         current["eligible"] = False
 
-        global_state = None if ledger is None else ledger.latest_state()
+        global_state = (
+            dict(bandit_state)
+            if bandit_state is not None
+            else None if ledger is None else ledger.latest_state()
+        )
         observations = _bandit_observations(global_state)
         scoped_observations: list[dict[str, Any]] = []
         if context is not None:
             context_digest = _context_identity_digest(context)
-            scoped_state = None if ledger is None else ledger.latest_state(context_digest)
+            scoped_state = (
+                dict(bandit_state)
+                if bandit_state is not None
+                else None if ledger is None else ledger.latest_state(context_digest)
+            )
             scoped_by_arm = {
                 observation["arm_id"]: observation
                 for observation in _bandit_observations(scoped_state)
@@ -1728,6 +1741,7 @@ class AutonomousBrain:
         plan: Mapping[str, Any],
         credentials: Mapping[str, CredentialHandle],
         ledger: BrainLearningLedger | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
         context: Mapping[str, Any] | None = None,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         required_capabilities: Sequence[str] = (),
@@ -1758,6 +1772,7 @@ class AutonomousBrain:
             model_candidates=model_candidates,
             credentials=credentials,
             ledger=ledger,
+            bandit_state=bandit_state,
             context=context,
             contextual_observations=contextual_observations,
             required_capabilities=required_capabilities,
@@ -1866,6 +1881,7 @@ class AutonomousBrain:
         plan: Mapping[str, Any],
         credentials: Mapping[str, CredentialHandle],
         ledger: BrainLearningLedger | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
         context: Mapping[str, Any] | None = None,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         required_capabilities: Sequence[str] = (),
@@ -1937,6 +1953,7 @@ class AutonomousBrain:
             model_candidates=model_candidates,
             credentials=credentials,
             ledger=ledger,
+            bandit_state=bandit_state,
             context=effective_context,
             contextual_observations=contextual_observations,
             required_capabilities=required_capabilities,
@@ -2046,6 +2063,7 @@ class AutonomousBrain:
         credentials: Mapping[str, CredentialHandle],
         mission_policy: MissionPolicy | Mapping[str, Any],
         ledger: BrainLearningLedger | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
         context: Mapping[str, Any] | None = None,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         required_capabilities: Sequence[str] = (),
@@ -2106,6 +2124,7 @@ class AutonomousBrain:
             model_candidates=model_candidates,
             credentials=credentials,
             ledger=ledger,
+            bandit_state=bandit_state,
             context=effective_context,
             contextual_observations=contextual_observations,
             required_capabilities=required_capabilities,
@@ -2365,6 +2384,7 @@ class AutonomousBrain:
                 plan=plan,
                 credentials=credentials,
                 mission_policy=mission_policy,
+                bandit_state=current_bandit_state,
                 **options,
             )
             attempts.append(result)

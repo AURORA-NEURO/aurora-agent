@@ -481,6 +481,75 @@ def test_run_autonomous_tool_loop_executes_only_through_caller_callback():
         server.server_close()
 
 
+def test_supplied_bandit_state_changes_the_next_adaptive_model_choice():
+    runtime, credentials, server, thread = _runtime()
+
+    class BanditWorkspace(_Workspace):
+        def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+            if name == "brain_model_select":
+                args = {} if arguments is None else arguments
+                observations = args.get("observations", [])
+                scores: dict[str, float] = {}
+                if isinstance(observations, list):
+                    for observation in observations:
+                        if not isinstance(observation, dict):
+                            continue
+                        arm_id = observation.get("arm_id")
+                        pulls = observation.get("pulls", 0)
+                        reward_sum = observation.get("reward_sum", 0.0)
+                        if isinstance(arm_id, str) and isinstance(pulls, int) and pulls > 0 and isinstance(reward_sum, (int, float)):
+                            scores[arm_id] = float(reward_sum) / pulls
+                selected = max(scores, key=scores.get) if scores else "openai/model-a"
+                return {
+                    "selected_model": {
+                        "provider": selected.split("/", 1)[0],
+                        "model": selected.split("/", 1)[1],
+                    },
+                    "decision_digest": "d" * 64,
+                }
+            return super().tool(name, arguments)
+
+    brain = AutonomousBrain(BanditWorkspace(), runtime)
+    handle = credentials.register("openai", "bandit-choice-secret")
+    candidates = [{**_model()[0], "model": "model-a"}, {**_model()[0], "model": "model-b"}]
+
+    def state(a_reward: float, b_reward: float) -> dict[str, object]:
+        return {
+            "schema": "bioprism-brain-bandit/0.1",
+            "generation": 3,
+            "arms": [
+                {"arm_id": "openai/model-a", "pulls": 10, "reward_sum": a_reward, "failures": 0, "disabled": False},
+                {"arm_id": "openai/model-b", "pulls": 10, "reward_sum": b_reward, "failures": 0, "disabled": False},
+            ],
+        }
+
+    try:
+        preferred_a = brain.run_adaptive(
+            task="Choose the best bounded provider for this review.",
+            model_candidates=candidates,
+            prompt={"context": []},
+            plan={},
+            credentials={"openai": handle},
+            bandit_state=state(9.0, 1.0),
+        )
+        preferred_b = brain.run_adaptive(
+            task="Choose the best bounded provider for this review.",
+            model_candidates=candidates,
+            prompt={"context": []},
+            plan={},
+            credentials={"openai": handle},
+            bandit_state=state(1.0, 9.0),
+        )
+        assert preferred_a.status == "approval_required"
+        assert preferred_b.status == "approval_required"
+        assert preferred_a.selection["selected_model"]["model"] == "model-a"  # type: ignore[index]
+        assert preferred_b.selection["selected_model"]["model"] == "model-b"  # type: ignore[index]
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
 def test_run_autonomous_tool_loop_learning_records_loop_metadata_only(tmp_path: Path):
     runtime, store, server, thread = _runtime()
     workspace = _Workspace()
@@ -700,7 +769,8 @@ def test_run_workflow_requires_approval_and_supports_explicit_blocked_stage_retr
 def test_run_workflow_stage_contract_is_executable_for_every_builtin_domain():
     runtime, store, server, thread = _structured_runtime()
     handle = store.register("openai", "all-domain-workflow-secret")
-    brain = AutonomousBrain(_Workspace(), runtime)
+    workspace = _Workspace()
+    brain = AutonomousBrain(workspace, runtime)
     try:
         for domain in AUTONOMOUS_DOMAINS:
             blueprint = brain.prepare_autonomous(
@@ -811,7 +881,8 @@ def test_run_workflow_learning_missing_evidence_never_defaults_to_reward(tmp_pat
 def test_durable_workflow_worker_releases_one_stage_and_resumes_after_store_restart(tmp_path: Path):
     runtime, credentials, server, thread = _structured_runtime()
     handle = credentials.register("openai", "durable-workflow-secret")
-    brain = AutonomousBrain(_Workspace(), runtime)
+    workspace = _Workspace()
+    brain = AutonomousBrain(workspace, runtime)
     job_path = tmp_path / "durable-workflow.sqlite3"
     try:
         blueprint = brain.prepare_autonomous(
@@ -892,6 +963,20 @@ def test_durable_workflow_worker_releases_one_stage_and_resumes_after_store_rest
             assert final.state == "succeeded"
             assert final.checkpoint["phase"] == "completed"
             assert reopened.verify_integrity()["ok"] is True
+            assert any(
+                any(
+                    isinstance(observation, dict) and observation.get("pulls") == 1
+                    for observation in (
+                        arguments.get("observations", [])
+                        if name == "brain_model_select"
+                        else arguments.get("base", {}).get("observations", [])
+                        if isinstance(arguments.get("base", {}), dict)
+                        else []
+                    )
+                )
+                for name, arguments in workspace.calls
+                if name in {"brain_model_select", "brain_model_select_contextual"}
+            )
     finally:
         server.shutdown()
         thread.join(timeout=2)

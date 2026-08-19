@@ -1947,6 +1947,7 @@ class AutonomousTaskOrchestrator:
         model_candidates: Sequence[Mapping[str, Any]],
         credentials: Mapping[str, CredentialHandle],
         ledger: BrainLearningLedger | None,
+        bandit_state: Mapping[str, Any] | None,
         contextual_observations: Sequence[Mapping[str, Any]],
         input_tokens: int,
         requested_output_tokens: int,
@@ -1985,6 +1986,7 @@ class AutonomousTaskOrchestrator:
                 plan=blueprint.plan,
                 credentials=credentials,
                 ledger=ledger,
+                bandit_state=bandit_state,
                 context=blueprint.selection_context,
                 contextual_observations=contextual_observations,
                 required_capabilities=blueprint.required_capabilities,
@@ -2047,6 +2049,7 @@ class AutonomousTaskOrchestrator:
                 plan=blueprint.plan,
                 credentials=credentials,
                 ledger=ledger,
+                bandit_state=bandit_state,
                 context=blueprint.selection_context,
                 contextual_observations=contextual_observations,
                 required_capabilities=blueprint.required_capabilities,
@@ -2096,6 +2099,7 @@ class AutonomousTaskOrchestrator:
             credentials=credentials,
             mission_policy=mission_policy,
             ledger=ledger,
+            bandit_state=bandit_state,
             **options,
         )
 
@@ -2204,7 +2208,7 @@ class AutonomousTaskOrchestrator:
             "max_output_tokens", "temperature", "response_schema", "idempotency_key", "mission_policy",
             "mission_options", "route_request", "enforce_route_tools", "require_resolved_route",
             "provider_tools", "tool_choice", "max_provider_failovers", "prompt", "execution_mode",
-            "tool_loop_options",
+            "tool_loop_options", "bandit_state",
         }
         unknown = sorted(set(kwargs).difference(allowed))
         if unknown:
@@ -2304,6 +2308,10 @@ class AutonomousTaskOrchestrator:
         )
         if not isinstance(auto_route, bool):
             raise BrainRunError("auto_route must be a boolean")
+        if bandit_state is not None:
+            if not isinstance(bandit_state, Mapping):
+                raise BrainRunError("bandit_state must be a mapping or None")
+            BrainLearningLedger._assert_safe(bandit_state)
         effective_execution_mode = (
             "mission" if execution_mode == "provider" and mission_policy is not None else execution_mode
         )
@@ -2407,6 +2415,7 @@ class AutonomousTaskOrchestrator:
                     "max_provider_failovers": max_provider_failovers,
                     "execution_mode": execution_mode,
                     "tool_loop_options": tool_loop_options,
+                    "bandit_state": bandit_state,
                 },
             )
         return self._execute(
@@ -2438,6 +2447,7 @@ class AutonomousTaskOrchestrator:
             max_provider_failovers=max_provider_failovers,
             execution_mode=execution_mode,
             tool_loop_options=tool_loop_options,
+            bandit_state=bandit_state,
         )
 
     @staticmethod
@@ -2559,6 +2569,7 @@ class AutonomousTaskOrchestrator:
         max_stage_calls: int | None = None,
         stage_execution_mode: str | None = None,
         ledger: BrainLearningLedger | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
         memory: BrainEpisodicMemory | None = None,
         memory_query: MemoryQuery | Mapping[str, Any] | None = None,
         memory_limit: int = 8,
@@ -2596,6 +2607,10 @@ class AutonomousTaskOrchestrator:
 
         if not isinstance(blueprint, AutonomousTaskBlueprint):
             raise BrainRunError("workflow execution requires an AutonomousTaskBlueprint")
+        if bandit_state is not None:
+            if not isinstance(bandit_state, Mapping):
+                raise BrainRunError("workflow bandit_state must be a mapping or None")
+            BrainLearningLedger._assert_safe(bandit_state)
         if not isinstance(retry_blocked, bool):
             raise BrainRunError("retry_blocked must be a boolean")
         if stage_execution_mode is not None and stage_execution_mode not in AUTONOMOUS_EXECUTION_MODES:
@@ -2717,6 +2732,7 @@ class AutonomousTaskOrchestrator:
                 execution_mode=stage_execution_mode or blueprint.spec.execution_mode,
                 required_model_capabilities=blueprint.required_capabilities,
                 ledger=ledger,
+                bandit_state=bandit_state,
                 memory=memory,
                 memory_query=memory_query,
                 memory_limit=memory_limit,
@@ -2922,82 +2938,113 @@ class AutonomousTaskOrchestrator:
             resolved_evaluator = evaluator_registry.resolve(blueprint.profile.evaluator_domain)
         if resolved_evaluator is None:
             resolved_evaluator = AutonomousWorkflowEvaluator(blueprint.workflow)
-        workflow_run = self.run_workflow(memory=memory_store, **workflow_kwargs)
         state: Mapping[str, Any] = dict(bandit_state)
         evaluations: list[AutonomousWorkflowStageEvaluation] = []
         receipts: list[Mapping[str, Any]] = []
         should_replan = False
-        for stage_result in workflow_run.stage_results:
-            if (
-                stage_result.result is None
-                or stage_result.execution_status != "completed"
-                or stage_result.declared_status != "completed"
-            ):
-                continue
-            evidence = self._workflow_stage_evidence(
-                blueprint,
-                stage_result.stage,
-                None if stage_evidence is None else stage_evidence.get(stage_result.stage.id),
-            )
-            decision, report = resolved_evaluator.evaluate_and_record_with_decision(
-                self.brain,
-                stage_result.result,
-                bandit_state=state,
-                evidence=evidence,
-                ledger=workflow_kwargs.get("ledger"),
-            )
-            next_state = report.get("next_state")
-            if isinstance(next_state, Mapping):
-                state = dict(next_state)
-            should_replan = should_replan or decision.replan_requested
-            evaluation = AutonomousWorkflowStageEvaluation(
-                stage_id=stage_result.stage.id,
-                stage_status=stage_result.declared_status,
-                decision=decision,
-                recording={
-                    "status": report.get("status"),
-                    "next_state": report.get("next_state"),
-                    "learning_evidence": report.get("learning_evidence"),
-                },
-                evidence_digest=decision.evidence_digest,
-            )
-            evaluations.append(evaluation)
-            if memory_store is not None:
-                episode_id = f"{workflow_run.run_id}-{stage_result.stage.id}"
-                if len(episode_id.encode("utf-8")) > 256:
-                    episode_id = "episode-" + content_digest({"run_id": workflow_run.run_id, "stage_id": stage_result.stage.id})
-                receipt = self.brain.remember_result(
-                    stage_result.result,
-                    task=blueprint.spec.task,
-                    episode_id=episode_id,
-                    context=blueprint.selection_context,
-                    tags=[
-                        *normalized_tags,
-                        f"domain:{blueprint.spec.domain}",
-                        f"workflow:{blueprint.workflow.workflow_id}",
-                        f"stage:{stage_result.stage.id}",
-                    ],
-                    lesson=decision.replan_instruction if decision.replan_requested else None,
-                    provenance={
-                        "workflow_id": blueprint.workflow.workflow_id,
-                        "workflow_digest": blueprint.workflow.workflow_digest,
-                        "stage_id": stage_result.stage.id,
-                        "evaluator_id": decision.evaluator_id,
-                        "evaluator_version": decision.evaluator_version,
-                    },
-                    memory=memory_store,
+        requested_calls = workflow_kwargs.get("max_stage_calls")
+        if requested_calls is None:
+            requested_calls = len(blueprint.workflow.stages)
+        if not isinstance(requested_calls, int) or isinstance(requested_calls, bool) or not 1 <= requested_calls <= 16:
+            raise BrainRunError("workflow learning max_stage_calls must be between 1 and 16")
+        continuation_kwargs = dict(workflow_kwargs)
+        continuation_kwargs.pop("bandit_state", None)
+        checkpoint = continuation_kwargs.get("checkpoint")
+        workflow_run: AutonomousWorkflowRun | None = None
+        all_stage_results: list[AutonomousWorkflowStageResult] = []
+        for _ in range(requested_calls):
+            call_kwargs = dict(continuation_kwargs)
+            call_kwargs["max_stage_calls"] = 1
+            call_kwargs["bandit_state"] = dict(state)
+            if checkpoint is not None:
+                call_kwargs["checkpoint"] = checkpoint
+            workflow_run = self.run_workflow(memory=memory_store, **call_kwargs)
+            all_stage_results.extend(workflow_run.stage_results)
+            checkpoint = workflow_run.checkpoint
+            for stage_result in workflow_run.stage_results:
+                if (
+                    stage_result.result is None
+                    or stage_result.execution_status != "completed"
+                    or stage_result.declared_status != "completed"
+                ):
+                    continue
+                evidence = self._workflow_stage_evidence(
+                    blueprint,
+                    stage_result.stage,
+                    None if stage_evidence is None else stage_evidence.get(stage_result.stage.id),
                 )
-                try:
-                    evaluation_receipt = memory_store.record_evaluation(
-                        episode_id,
-                        {
-                            **decision.to_dict(),
-                            "decision_digest": content_digest(decision.to_dict()),
+                decision, report = resolved_evaluator.evaluate_and_record_with_decision(
+                    self.brain,
+                    stage_result.result,
+                    bandit_state=state,
+                    evidence=evidence,
+                    ledger=continuation_kwargs.get("ledger"),
+                )
+                next_state = report.get("next_state")
+                if isinstance(next_state, Mapping):
+                    state = dict(next_state)
+                should_replan = should_replan or decision.replan_requested
+                evaluation = AutonomousWorkflowStageEvaluation(
+                    stage_id=stage_result.stage.id,
+                    stage_status=stage_result.declared_status,
+                    decision=decision,
+                    recording={
+                        "status": report.get("status"),
+                        "next_state": report.get("next_state"),
+                        "learning_evidence": report.get("learning_evidence"),
+                    },
+                    evidence_digest=decision.evidence_digest,
+                )
+                evaluations.append(evaluation)
+                if memory_store is not None:
+                    episode_id = f"{workflow_run.run_id}-{stage_result.stage.id}"
+                    if len(episode_id.encode("utf-8")) > 256:
+                        episode_id = "episode-" + content_digest({"run_id": workflow_run.run_id, "stage_id": stage_result.stage.id})
+                    receipt = self.brain.remember_result(
+                        stage_result.result,
+                        task=blueprint.spec.task,
+                        episode_id=episode_id,
+                        context=blueprint.selection_context,
+                        tags=[
+                            *normalized_tags,
+                            f"domain:{blueprint.spec.domain}",
+                            f"workflow:{blueprint.workflow.workflow_id}",
+                            f"stage:{stage_result.stage.id}",
+                        ],
+                        lesson=decision.replan_instruction if decision.replan_requested else None,
+                        provenance={
+                            "workflow_id": blueprint.workflow.workflow_id,
+                            "workflow_digest": blueprint.workflow.workflow_digest,
+                            "stage_id": stage_result.stage.id,
+                            "evaluator_id": decision.evaluator_id,
+                            "evaluator_version": decision.evaluator_version,
                         },
-                    ).to_dict()
-                except BrainMemoryError as error:
-                    raise BrainRunError("workflow stage evaluation memory record failed") from error
-                receipts.extend((receipt, evaluation_receipt))
+                        memory=memory_store,
+                    )
+                    try:
+                        evaluation_receipt = memory_store.record_evaluation(
+                            episode_id,
+                            {
+                                **decision.to_dict(),
+                                "decision_digest": content_digest(decision.to_dict()),
+                            },
+                        ).to_dict()
+                    except BrainMemoryError as error:
+                        raise BrainRunError("workflow stage evaluation memory record failed") from error
+                    receipts.extend((receipt, evaluation_receipt))
+            if workflow_run.status != "paused" or should_replan or not workflow_run.next_stage_ids:
+                break
+        if workflow_run is None:
+            raise BrainRunError("workflow learning did not produce a workflow run")
+        if len(all_stage_results) != len(workflow_run.stage_results):
+            workflow_run = AutonomousWorkflowRun(
+                workflow_run.run_id,
+                workflow_run.status,
+                workflow_run.blueprint,
+                tuple(all_stage_results),
+                workflow_run.checkpoint,
+                workflow_run.next_stage_ids,
+            )
         if should_replan:
             learning_status = "learning_replan_requested"
         elif workflow_run.status == "completed":
@@ -3269,6 +3316,9 @@ class AutonomousTaskOrchestrator:
         for attempt in range(max_replans + 1):
             kwargs = dict(execution_kwargs)
             kwargs["prompt"] = current_prompt
+            # Feed the evaluator's latest value-only state into the next model-selection call;
+            # recording a reward without changing the next arm choice is not online learning.
+            kwargs["bandit_state"] = state
             result = self._run_prepared(
                 blueprint,
                 model_candidates=model_candidates,
