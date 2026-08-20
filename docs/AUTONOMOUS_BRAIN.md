@@ -558,6 +558,32 @@ The runner verifies its task, base-plan, workflow, and dependency digests, uses 
 among currently-ready stages, and binds its digest into every checkpoint so a different plan
 cannot be substituted during resume.
 
+The automatic entrypoint can also perform that planning step itself when the caller opts into
+`planning_mode="provider"`:
+
+```python
+result = agent.run_auto(
+    task="fix the Rust tests in the repository",
+    credentials=session,
+    planning_mode="provider",
+    workflow_max_stage_calls=2,
+    approve_provider_call=True,
+)
+if result.status == "planning_review_required":
+    send_to_review(result.planning.to_dict())
+```
+
+Provider planning is a separate, explicit model call after routing. For one domain it promotes
+the request into the reviewed checkpointable workflow automatically; for a cross-domain route it
+can reorder only the existing `route-*` specialists. The same provider approval is required for
+both calls. Missing approval, malformed JSON, dependency disagreement, abstention, or
+`review_required=true` returns `planning_review_required` with no execution result. A successful
+non-review proposal is accepted only because the caller explicitly selected this planning mode;
+the runner still verifies the task, workflow, domain-pack, and base-plan digests before any stage
+or specialist call. The returned automatic result includes the metadata-only planning proposal
+and `planning_mode`, while the planner transcript, task text, credentials, and provider payload
+remain transient.
+
 The same intake path exposes explicit online-learning choices. Use
 `workflow_learning=True` with caller-supplied stage evidence to update the value-only bandit
 after each completed stage; use `workflow_trajectory_learning=True` with a discount and optional

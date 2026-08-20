@@ -65,13 +65,16 @@ class _ProviderHandler(BaseHTTPRequestHandler):
         request = json.loads(self.server.request_body.decode("utf-8"))  # type: ignore[attr-defined]
         request_text = json.dumps(request)
         if "Propose a bounded cross-domain planning refinement" in request_text:
+            route_children = "route-coding" in request_text
             response = {
                 "id": "autonomy-cross-domain-plan-refinement",
                 "model": "test-model",
                 "output_text": json.dumps(
                     {
-                        "priority_order": ["data-review", "engineering-review"],
-                        "focus_child_ids": ["data-review"],
+                        "priority_order": ["route-data", "route-coding"]
+                        if route_children
+                        else ["data-review", "engineering-review"],
+                        "focus_child_ids": ["route-data"] if route_children else ["data-review"],
                         "review_required": False,
                         "confidence": 0.82,
                         "abstain": False,
@@ -184,6 +187,29 @@ class _StructuredWorkflowProviderHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 - stdlib handler protocol
         length = int(self.headers.get("Content-Length", "0"))
         request = json.loads(self.rfile.read(length).decode("utf-8"))
+        request_text = json.dumps(request)
+        if "Propose a bounded planning refinement for the reviewed workflow" in request_text:
+            response = {
+                "id": "structured-autonomy-plan-refinement",
+                "model": "test-model",
+                "output_text": json.dumps(
+                    {
+                        "priority_order": ["scope", "inspect", "implement", "verify", "handoff"],
+                        "focus_stage_ids": ["inspect", "verify"],
+                        "review_required": False,
+                        "confidence": 0.85,
+                        "abstain": False,
+                    }
+                ),
+                "usage": {"total_tokens": 10},
+            }
+            payload = json.dumps(response).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
         stage_id = "unknown"
         for item in request.get("input", []):
             content = item.get("content") if isinstance(item, dict) else None
@@ -1386,6 +1412,126 @@ def test_agent_prepare_auto_and_run_auto_reuse_explicit_runtime_boundaries():
         server.shutdown()
         thread.join(timeout=2)
         server.server_close()
+
+
+def test_run_auto_provider_planning_is_approval_gated_and_never_dispatches_without_consent():
+    runtime, store, server, thread = _runtime()
+    try:
+        agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+        with agent.onboarding.start_session(session_id="auto-provider-planning-approval") as session:
+            session.register_value("openai", "auto-provider-planning-secret")
+            result = agent.run_auto(
+                task="fix the Rust tests in the repository",
+                credentials=session,
+                planning_mode="provider",
+            )
+            assert result.status == "planning_review_required"
+            assert result.result is None
+            assert result.planning_mode == "provider"
+            assert result.planning is not None
+            assert result.planning.status == "approval_required"
+            public = json.dumps(result.to_dict())
+            assert "auto-provider-planning-secret" not in public
+            assert "fix the Rust tests" not in public
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_run_auto_provider_planning_executes_the_validated_single_domain_workflow():
+    runtime, store, server, thread = _structured_runtime()
+    try:
+        agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+        handle = store.register("openai", "auto-provider-planning-execution-secret")
+        result = agent.run_auto(
+            task="fix the Rust tests in the repository",
+            credentials={"openai": handle},
+            planning_mode="provider",
+            workflow_max_stage_calls=2,
+            approve_provider_call=True,
+        )
+        assert result.status == "completed"
+        assert result.planning_mode == "provider"
+        assert isinstance(result.planning, AutonomousPlanRefinementResult)
+        assert result.planning.status == "completed"
+        assert result.result is not None
+        assert result.result.status == "paused"
+        assert [item.stage.id for item in result.result.stage_results] == ["scope", "inspect"]
+        assert result.result.checkpoint.plan_refinement_digest == content_digest(result.planning.to_dict())
+        public = json.dumps(result.to_dict())
+        assert "auto-provider-planning-execution-secret" not in public
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_run_auto_provider_planning_reorders_the_reviewed_cross_domain_route():
+    runtime, store, server, thread = _runtime()
+    try:
+        agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+        handle = store.register("openai", "auto-provider-cross-planning-secret")
+        result = agent.run_auto(
+            task="write python code for the dataset pipeline",
+            credentials={"openai": handle},
+            model_candidates=_model(),
+            min_confidence=0.20,
+            min_margin=0.10,
+            planning_mode="provider",
+            approve_provider_call=True,
+        )
+        assert result.status == "completed"
+        assert isinstance(result.planning, AutonomousCrossDomainPlanRefinementResult)
+        assert result.planning.priority_child_ids == ("route-data", "route-coding")
+        assert result.result is not None
+        assert result.result.execution_child_ids == ("route-data", "route-coding")
+        assert result.result.plan_refinement_digest == content_digest(result.planning.to_dict())
+        assert "auto-provider-cross-planning-secret" not in json.dumps(result.to_dict())
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_run_auto_provider_planning_contract_is_domain_neutral_across_all_builtin_domains():
+    agent = AutonomousAgent(_Workspace(), LLMRuntime(), model_catalogue=ModelCatalogue(_model()))
+    planned_domains: list[str] = []
+
+    def fake_plan(*, blueprint: object, **_kwargs: object) -> AutonomousPlanRefinementResult:
+        assert hasattr(blueprint, "spec")
+        assert hasattr(blueprint, "workflow")
+        planned_domains.append(blueprint.spec.domain)  # type: ignore[union-attr]
+        stage_ids = tuple(stage.id for stage in blueprint.workflow.stages)  # type: ignore[union-attr]
+        return AutonomousPlanRefinementResult(
+            status="completed",
+            task_digest=blueprint.spec.task_digest,  # type: ignore[union-attr]
+            base_plan_digest=content_digest(blueprint.plan),  # type: ignore[union-attr]
+            workflow_digest=blueprint.workflow.workflow_digest,  # type: ignore[union-attr]
+            priority_stage_ids=stage_ids,
+            focus_stage_ids=stage_ids[:1],
+            review_required=False,
+            confidence=1.0,
+        )
+
+    def fake_workflow(**_kwargs: object) -> object:
+        return object()
+
+    agent.plan_with_provider = fake_plan  # type: ignore[method-assign]
+    agent.run_workflow = fake_workflow  # type: ignore[method-assign]
+    for domain in AUTONOMOUS_DOMAINS:
+        result = agent.run_auto(
+            task=f"please prepare a bounded {domain} workflow",
+            credentials={},
+            model_candidates=_model(),
+            planning_mode="provider",
+            approve_provider_call=True,
+        )
+        assert result.status == "completed"
+        assert result.route.primary_domain == domain
+        assert isinstance(result.planning, AutonomousPlanRefinementResult)
+        assert result.planning.workflow_digest
+    assert planned_domains == list(AUTONOMOUS_DOMAINS)
 
 
 def test_run_auto_can_execute_a_accepted_plan_through_the_checkpointable_workflow():

@@ -101,6 +101,7 @@ from .tooling import ToolCatalogue, ToolDefinition
 AUTONOMY_SCHEMA = "bioprism-python-autonomous-task/0.1"
 AUTONOMOUS_EXECUTION_MODES = ("provider", "tool_loop", "mission")
 AUTONOMOUS_LEARNING_MODES = ("off", "online", "trajectory")
+AUTONOMOUS_PLANNING_MODES = ("deterministic", "provider")
 AUTONOMOUS_DOMAINS = AUTONOMOUS_DOMAIN_NAMES
 MAX_AUTONOMY_TEXT_BYTES = 16_000
 MAX_AUTONOMY_CONTEXT_BYTES = 2_000_000
@@ -2861,9 +2862,11 @@ class AutonomousAutoResult:
     route: AutonomousRouteProposal
     result: Any | None = None
     learning_mode: str = "off"
+    planning_mode: str = "deterministic"
+    planning: AutonomousPlanRefinementResult | AutonomousCrossDomainPlanRefinementResult | None = None
 
     def __post_init__(self) -> None:
-        if self.status not in {"completed", "route_review_required"}:
+        if self.status not in {"completed", "route_review_required", "planning_review_required"}:
             raise BrainRunError("automatic result status is invalid")
         if not isinstance(self.route, AutonomousRouteProposal):
             raise BrainRunError("automatic result requires an AutonomousRouteProposal")
@@ -2872,8 +2875,29 @@ class AutonomousAutoResult:
                 "automatic result learning_mode must be one of: "
                 + ", ".join(AUTONOMOUS_LEARNING_MODES)
             )
-        if self.status == "route_review_required" and (not self.route.abstained or self.result is not None):
+        if self.planning_mode not in AUTONOMOUS_PLANNING_MODES:
+            raise BrainRunError(
+                "automatic result planning_mode must be one of: "
+                + ", ".join(AUTONOMOUS_PLANNING_MODES)
+            )
+        if self.planning is not None and not isinstance(
+            self.planning,
+            (AutonomousPlanRefinementResult, AutonomousCrossDomainPlanRefinementResult),
+        ):
+            raise BrainRunError("automatic result planning proposal is invalid")
+        if self.status == "route_review_required" and (
+            not self.route.abstained or self.result is not None or self.planning is not None
+        ):
             raise BrainRunError("route review result must contain an abstained route without execution")
+        if self.status == "planning_review_required" and (
+            self.route.abstained
+            or self.result is not None
+            or self.planning_mode != "provider"
+            or self.planning is None
+        ):
+            raise BrainRunError(
+                "planning review result must contain a non-abstained route and provider planning proposal"
+            )
         if self.status == "completed" and (self.route.abstained or self.result is None):
             raise BrainRunError("completed automatic result requires an executed routed task")
 
@@ -2890,6 +2914,8 @@ class AutonomousAutoResult:
             "route": self.route.to_dict(),
             "result": result,
             "learning_mode": self.learning_mode,
+            "planning_mode": self.planning_mode,
+            "planning": None if self.planning is None else self.planning.to_dict(),
             "retention": "route_metadata_only; provider_result_caller_owned",
         }
 
@@ -11670,6 +11696,9 @@ class AutonomousAgent:
         semantic_run_id: str | None = None,
         semantic_max_output_tokens: int = 1_024,
         semantic_temperature: float | None = None,
+        planning_mode: str = "deterministic",
+        planning_run_id: str | None = None,
+        planning_max_output_tokens: int = 1_024,
         learning_mode: str = "off",
         workflow_execution: bool = False,
         workflow_learning: bool = False,
@@ -11709,6 +11738,12 @@ class AutonomousAgent:
         ``cross_domain_replan_learning=True`` selects bounded evaluator-guided cross-domain
         attempts; it requires ``cross_domain_evaluator`` and settles one trajectory before each
         retry, with ``cross_domain_replan_max_replans`` capped at three.
+        ``planning_mode="provider"`` adds one explicit provider planning call after routing. For
+        a single-domain route it promotes execution to the checkpointable workflow path; for a
+        cross-domain route it may reorder only the already-reviewed specialists. The provider
+        proposal is executed only when it is dependency-closed, non-abstaining, and not marked
+        for review. Provider approval applies to both planning and execution, and a planning
+        refusal returns ``planning_review_required`` without dispatching the task.
         Evaluator evidence remains caller-owned and reward is never inferred from provider
         success. The explicit route-specific flags remain available for backwards compatibility.
         An accepted cross-domain plan can reorder existing specialists only after explicit caller
@@ -11718,6 +11753,18 @@ class AutonomousAgent:
 
         if not isinstance(workflow_execution, bool):
             raise BrainRunError("workflow_execution must be a boolean")
+        if planning_mode not in AUTONOMOUS_PLANNING_MODES:
+            raise BrainRunError(
+                "planning_mode must be one of: " + ", ".join(AUTONOMOUS_PLANNING_MODES)
+            )
+        if planning_run_id is not None:
+            _identifier("planning_run_id", planning_run_id)
+        if planning_mode == "provider" and (
+            accepted_plan_refinement is not None or accepted_cross_domain_plan_refinement is not None
+        ):
+            raise BrainRunError(
+                "provider planning cannot be combined with a caller-supplied accepted plan refinement"
+            )
         if learning_mode not in AUTONOMOUS_LEARNING_MODES:
             raise BrainRunError(
                 "learning_mode must be one of: " + ", ".join(AUTONOMOUS_LEARNING_MODES)
@@ -11768,7 +11815,7 @@ class AutonomousAgent:
             )
         if not isinstance(workflow_retry_blocked, bool):
             raise BrainRunError("workflow_retry_blocked must be a boolean")
-        if not workflow_execution and (
+        if planning_mode != "provider" and not workflow_execution and (
             workflow_learning
             or workflow_trajectory_learning
             or workflow_stage_evidence is not None
@@ -11846,7 +11893,75 @@ class AutonomousAgent:
                 status="route_review_required",
                 route=blueprint.route,
                 learning_mode=learning_mode,
+                planning_mode=planning_mode,
             )
+
+        planning_result: AutonomousPlanRefinementResult | AutonomousCrossDomainPlanRefinementResult | None = None
+        if planning_mode == "provider":
+            planning_candidates = self._resolve_candidates(model_candidates)
+            planning_credentials = self._credential_mapping(credentials)
+            planning_state = kwargs.get("bandit_state")
+            if planning_state is None and learning_mode != "off":
+                planning_state = self.learning_state()
+            planning_common = {
+                "model_candidates": planning_candidates,
+                "credentials": planning_credentials,
+                "context": kwargs.get("context"),
+                "bandit_state": planning_state,
+                "contextual_observations": kwargs.get("contextual_observations", ()),
+                "selection_overrides": kwargs.get("selection_overrides"),
+                "input_tokens": kwargs.get("input_tokens", 4_096),
+                "requested_output_tokens": kwargs.get("requested_output_tokens", 1_024),
+                "max_cost_per_million_tokens": kwargs.get("max_cost_per_million_tokens"),
+                "max_latency_ms": kwargs.get("max_latency_ms"),
+                "min_quality": kwargs.get("min_quality"),
+                "approve_provider_call": kwargs.get("approve_provider_call", False),
+                "run_id": planning_run_id,
+                "max_output_tokens": planning_max_output_tokens,
+                "temperature": kwargs.get("temperature"),
+            }
+            if blueprint.blueprint is not None:
+                planning_result = self.plan_with_provider(
+                    blueprint=blueprint.blueprint,
+                    **planning_common,
+                )
+            elif blueprint.cross_domain_blueprint is not None:
+                planning_result = self.plan_cross_domain_with_provider(
+                    blueprint=blueprint.cross_domain_blueprint,
+                    **planning_common,
+                )
+            else:  # pragma: no cover - AutonomousAutoBlueprint invariants make this unreachable
+                raise BrainRunError("provider planning requires an executable automatic blueprint")
+            if planning_result.status != "completed" or planning_result.review_required:
+                return AutonomousAutoResult(
+                    status="planning_review_required",
+                    route=blueprint.route,
+                    learning_mode=learning_mode,
+                    planning_mode=planning_mode,
+                    planning=planning_result,
+                )
+            if blueprint.blueprint is not None:
+                if not isinstance(planning_result, AutonomousPlanRefinementResult):
+                    raise BrainRunError("single-domain provider planning returned the wrong proposal type")
+                accepted_plan_refinement = planning_result
+                # A stage priority has no meaning on the one-shot provider path. Provider
+                # planning therefore explicitly opts the automatic route into its reviewed DAG.
+                workflow_execution = True
+            else:
+                if not isinstance(planning_result, AutonomousCrossDomainPlanRefinementResult):
+                    raise BrainRunError("cross-domain provider planning returned the wrong proposal type")
+                accepted_cross_domain_plan_refinement = planning_result
+
+        if not workflow_execution and (
+            workflow_learning
+            or workflow_trajectory_learning
+            or workflow_stage_evidence is not None
+            or accepted_plan_refinement is not None
+            or workflow_checkpoint is not None
+            or workflow_retry_blocked
+            or workflow_max_stage_calls is not None
+        ):
+            raise BrainRunError("workflow options require workflow_execution=True")
         execution_kwargs = dict(kwargs)
         for key in {
             "context",
@@ -12068,6 +12183,8 @@ class AutonomousAgent:
             route=blueprint.route,
             result=result,
             learning_mode=learning_mode,
+            planning_mode=planning_mode,
+            planning=planning_result,
         )
 
     def run_cross_domain_learning(
