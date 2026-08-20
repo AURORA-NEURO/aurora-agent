@@ -656,6 +656,7 @@ impl BrainControlState {
                     "last_latency_ms": record.last_latency_ms,
                     "success_rate": if record.observations == 0 { 0.0 } else { record.successes as f64 / record.observations as f64 },
                     "average_quality": if record.quality_observations == 0 { Value::Null } else { json!(record.quality_sum / record.quality_observations as f64) },
+                    "quality_observations": record.quality_observations,
                     "last_status": record.last_status,
                     "last_sequence": record.last_sequence,
                     "registered": record.registered,
@@ -685,6 +686,8 @@ impl BrainControlState {
                         "registered": record.registered,
                         "credential_ready": record.credential_ready,
                         "eligible": record.eligible,
+                        "quality_mean": if record.quality_observations == 0 { Value::Null } else { json!(record.quality_sum / record.quality_observations as f64) },
+                        "quality_observations": record.quality_observations,
                     }),
                 )
             })

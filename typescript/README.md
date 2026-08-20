@@ -100,7 +100,10 @@ For restart-safe cross-runtime feedback, construct `AutonomousBrainControlPlaneB
 same `ApiClient` used for the Rust/Python brain tools and pass it as `modelHealthBridge` to
 `AutonomousAgent`. The bridge mirrors invocation outcomes to `brain_model_health`, converts
 caller-rehydrated replay cases to `brain_replay_evaluate`, and computes the shared evidence digest
-without sending prompts, responses, tool payloads, credential handles, or keys. Use
+without sending prompts, responses, tool payloads, credential handles, or keys. When no explicit
+selector, learner, or contextual selector is supplied, the agent also reads persisted remote model
+rows back into selection; local registration, credential readiness, capability, capacity, and
+approval gates still decide eligibility. Use
 `autonomousReplayEvidenceDigest()` when a replay artifact must be independently reproduced by
 Python or Rust; all twelve built-in domain evaluator profiles use the same bounded signal policy.
 

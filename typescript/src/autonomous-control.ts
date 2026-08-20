@@ -689,7 +689,61 @@ export class AutonomousBrainControlPlaneBridge {
   }
 
   snapshot(provider?: string, model?: string): Promise<RestToolResponse<BrainModelHealthResult>> {
-    return this.client.brainModelHealth({ operation: "snapshot", provider, model });
+    const args: BrainModelHealthArgs = { operation: "snapshot" };
+    if (provider !== undefined) args.provider = provider;
+    if (model !== undefined) args.model = model;
+    return this.client.brainModelHealth(args);
+  }
+
+  /**
+   * Select with restart-persisted remote model health while retaining local provider gates.
+   * Remote rows can influence reliability/quality/circuit scoring, but cannot make an
+   * unregistered provider or an unready local credential eligible.
+   */
+  selector(options: { circuitFailureThreshold?: number } = {}): AutonomousModelSelector {
+    const circuitFailureThreshold = options.circuitFailureThreshold ?? 3;
+    if (!Number.isSafeInteger(circuitFailureThreshold) || circuitFailureThreshold < 1 || circuitFailureThreshold > 128) throw new ArgumentError("remote health circuitFailureThreshold is outside its bounds");
+    return async (request: AutonomousSelectionRequest): Promise<AutonomousSelectionDecision> => {
+      const response = await this.snapshot();
+      if (!response.ok || !isObject(response.mcp) || response.mcp.error || response.mcp.result?.isError) throw new ProviderRuntimeError("remote model health snapshot returned a refusal");
+      const projected = response.mcp.result?.structuredContent as BrainModelHealthResult | undefined;
+      if (!projected || !Array.isArray(projected.models)) throw new ProviderRuntimeError("remote model health snapshot returned no bounded model rows");
+      const remoteHealth: Record<string, ProviderHealth & { model: string; quality_mean?: number | null; quality_observations?: number }> = {};
+      for (const row of projected.models) {
+        if (!isObject(row) || typeof row.provider !== "string" || typeof row.model !== "string") throw new ProviderRuntimeError("remote model health snapshot contains a malformed model row");
+        const attempts = nonnegativeInteger("remote health attempts", row.attempts) ?? 0;
+        const successes = nonnegativeInteger("remote health successes", row.successes) ?? 0;
+        const failures = nonnegativeInteger("remote health failures", row.failures) ?? 0;
+        const consecutiveFailures = nonnegativeInteger("remote health consecutive_failures", row.consecutive_failures) ?? 0;
+        const averageLatency = finite("remote health average_latency_ms", row.average_latency_ms, 0, 86_400_000);
+        if (successes > attempts || failures > attempts) throw new ProviderRuntimeError("remote model health snapshot contains inconsistent counters");
+        const qualityMean = row.average_quality === null || row.average_quality === undefined ? null : finite("remote health average_quality", row.average_quality, 0, 1);
+        const qualityObservations = row.quality_observations === undefined ? (qualityMean === null ? 0 : 1) : nonnegativeInteger("remote health quality_observations", row.quality_observations) ?? 0;
+        remoteHealth[`${row.provider}/${row.model}`] = {
+          provider: row.provider,
+          model: row.model,
+          circuit: row.last_status === "circuit_open" || consecutiveFailures >= circuitFailureThreshold ? "open" : "closed",
+          consecutive_failures: consecutiveFailures,
+          attempts,
+          successes,
+          failures,
+          success_rate: attempts === 0 ? 0 : successes / attempts,
+          mean_latency_ms: attempts === 0 ? null : averageLatency,
+          last_latency_ms: attempts === 0 ? null : averageLatency,
+          last_model: row.model,
+          last_status_code: null,
+          credential_posture: "caller_supplied_opaque_handle",
+          credential_required: false,
+          credential_ready: true,
+          quality_mean: qualityMean,
+          quality_observations: qualityObservations,
+        };
+      }
+      const merged: AutonomousSelectionRequest = { ...request, model_health: { ...remoteHealth, ...request.model_health } };
+      const ranking = rankAutonomousModels(merged);
+      const chosen = ranking.find((row) => row.eligible);
+      return { selected_model: chosen ? { provider: chosen.provider, model: chosen.model } : null, strategy: "caller_selector", ranking, abstention_reason: chosen ? null : "no eligible model candidate after remote persisted health" };
+    };
   }
 
   observer(context: AutonomousHealthSelectorContext): ProviderInvocationObserver {

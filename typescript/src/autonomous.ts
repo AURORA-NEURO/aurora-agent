@@ -1266,7 +1266,7 @@ export class AutonomousAgent {
     this.toolCatalogue = options.toolCatalogue;
     this.toolExecutor = options.toolExecutor;
     this.toolApprover = options.toolApprover;
-    const selector = options.selector ?? (this.modelHealthController ? this.modelHealthController.selector() : options.learner ? (request: AutonomousSelectionRequest) => options.learner!.select(request) : options.apiClient ? contextualSelector(options.apiClient) : undefined);
+    const selector = options.selector ?? (this.modelHealthController ? this.modelHealthController.selector() : options.learner ? (request: AutonomousSelectionRequest) => options.learner!.select(request) : options.apiClient ? contextualSelector(options.apiClient) : this.modelHealthBridge ? this.modelHealthBridge.selector() : undefined);
     this.runtime = new AutonomousRuntime(llm, { selector });
   }
 

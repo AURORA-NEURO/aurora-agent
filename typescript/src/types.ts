@@ -838,6 +838,7 @@ export interface BrainModelHealthRow extends JsonObject {
   consecutive_failures: number;
   average_latency_ms: number;
   average_quality?: number | null;
+  quality_observations?: number;
   last_status: BrainHealthStatus;
   last_sequence: number;
   registered: boolean;

@@ -202,7 +202,11 @@ test("control-plane bridge sends health and replay metadata only", async () => {
 test("AutonomousAgent can mirror invocation health to the remote control plane", async () => {
   const healthCalls = [];
   const bridge = new AutonomousBrainControlPlaneBridge({
-    brainModelHealth: async (args) => { healthCalls.push(args); return { ok: true }; },
+    brainModelHealth: async (args) => {
+      if (args.operation === "snapshot") return { ok: true, mcp: { result: { structuredContent: { ok: true, operation: "snapshot", models: [{ provider: "remote-health-provider", model: "remote-health-model", attempts: 1, successes: 1, failures: 0, consecutive_failures: 0, average_latency_ms: 10, average_quality: 1, quality_observations: 1, last_status: "success", last_sequence: 1, registered: true, credential_ready: true, eligible: true }] } } } };
+      healthCalls.push(args);
+      return { ok: true };
+    },
     brainReplayEvaluate: async () => ({ ok: true }),
   });
   const llm = new LLMRuntime({
@@ -219,4 +223,61 @@ test("AutonomousAgent can mirror invocation health to the remote control plane",
   assert.equal(healthCalls[0].status, "success");
   assert.equal("response" in healthCalls[0], false);
   assert.equal("prompt" in healthCalls[0], false);
+});
+
+test("remote persisted health drives selection for every built-in domain without bypassing local readiness", async () => {
+  const profiles = await builtinAutonomousDomainEvaluatorProfiles();
+  const remoteRows = [
+    { provider: "provider-a", model: "model-a", attempts: 10, successes: 2, failures: 8, consecutive_failures: 4, average_latency_ms: 100, average_quality: 0.2, quality_observations: 10, last_status: "failure", last_sequence: 1, registered: true, credential_ready: true, eligible: false },
+    { provider: "provider-b", model: "model-b", attempts: 10, successes: 9, failures: 1, consecutive_failures: 0, average_latency_ms: 80, average_quality: 0.95, quality_observations: 10, last_status: "success", last_sequence: 2, registered: true, credential_ready: true, eligible: true },
+  ];
+  const bridge = new AutonomousBrainControlPlaneBridge({
+    brainModelHealth: async (args) => args.operation === "snapshot"
+      ? { ok: true, mcp: { result: { structuredContent: { ok: true, operation: "snapshot", models: remoteRows } } } }
+      : { ok: true },
+    brainReplayEvaluate: async () => ({ ok: true }),
+  });
+  const select = bridge.selector();
+  const providerHealth = {
+    "provider-a": { provider: "provider-a", circuit: "closed", consecutive_failures: 0, attempts: 0, successes: 0, failures: 0, success_rate: 0, mean_latency_ms: null, last_latency_ms: null, last_model: null, last_status_code: null, credential_posture: "caller_supplied_opaque_handle", credential_required: false, credential_ready: true },
+    "provider-b": { provider: "provider-b", circuit: "closed", consecutive_failures: 0, attempts: 0, successes: 0, failures: 0, success_rate: 0, mean_latency_ms: null, last_latency_ms: null, last_model: null, last_status_code: null, credential_posture: "caller_supplied_opaque_handle", credential_required: false, credential_ready: true },
+  };
+  for (const profile of profiles) {
+    const decision = await select({
+      task: `bounded ${profile.domain} task`,
+      domain: profile.domain,
+      capability: "reasoning",
+      risk_class: "review_required",
+      required_capabilities: [],
+      estimated_input_tokens: 100,
+      requested_output_tokens: 100,
+      candidates: [
+        { provider: "provider-a", model: "model-a", capabilities: ["reasoning"], context_window_tokens: 10_000, max_output_tokens: 1_000, quality: 0.99, latency_ms: 10, cost_per_million_tokens: 1, reliability: 0.99 },
+        { provider: "provider-b", model: "model-b", capabilities: ["reasoning"], context_window_tokens: 10_000, max_output_tokens: 1_000, quality: 0.7, latency_ms: 300, cost_per_million_tokens: 50, reliability: 0.7 },
+      ],
+      provider_health: providerHealth,
+      model_health: {},
+    });
+    assert.deepEqual(decision.selected_model, { provider: "provider-b", model: "model-b" });
+    assert.equal(decision.ranking.find((row) => row.model === "model-a").eligible, false);
+  }
+});
+
+test("remote selection fails closed on an incomplete health snapshot", async () => {
+  const bridge = new AutonomousBrainControlPlaneBridge({
+    brainModelHealth: async () => ({ ok: true }),
+    brainReplayEvaluate: async () => ({ ok: true }),
+  });
+  await assert.rejects(bridge.selector()({
+    task: "bounded task",
+    domain: "coding",
+    capability: "reasoning",
+    risk_class: "review_required",
+    required_capabilities: [],
+    estimated_input_tokens: 1,
+    requested_output_tokens: 1,
+    candidates: [{ provider: "provider", model: "model", capabilities: ["reasoning"], context_window_tokens: 1_000, max_output_tokens: 100, quality: 0.5, latency_ms: 100, cost_per_million_tokens: 1, reliability: 0.5 }],
+    provider_health: { provider: { provider: "provider", circuit: "closed", consecutive_failures: 0, attempts: 0, successes: 0, failures: 0, success_rate: 0, mean_latency_ms: null, last_latency_ms: null, last_model: null, last_status_code: null, credential_posture: "caller_supplied_opaque_handle", credential_required: false, credential_ready: true } },
+    model_health: {},
+  }), /remote model health snapshot returned a refusal/);
 });

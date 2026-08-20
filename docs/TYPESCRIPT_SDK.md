@@ -1309,8 +1309,11 @@ and evaluator observations to the existing `brain_model_health` metadata contrac
 only normalized replay signals, reference digests, limitations, and evaluator overrides to
 `brain_replay_evaluate`. It never sends the local evaluator ID as an authority claim, task text,
 prompt, response, tool argument, credential handle, or key. Passing `modelHealthBridge` to
-`AutonomousAgent` automatically mirrors provider outcomes to the remote health ledger while the
-local selector and approval boundaries remain authoritative.
+`AutonomousAgent` automatically mirrors provider outcomes to the remote health ledger and, when no
+explicit selector, learner, or contextual selector is supplied, reads the persisted model rows back
+into ranking. Remote health can affect reliability, quality, and model circuits, but local provider
+registration, credential readiness, capacity, capability, and approval boundaries remain
+authoritative. Malformed or refused remote snapshots fail closed.
 The high-level `AutonomousAgent` accepts the same store through `modelHealthStore`; it then wires
 the persisted selector and metadata-only invocation observer into ordinary single- and
 cross-domain runs automatically. Explicit evaluator updates remain caller-controlled.

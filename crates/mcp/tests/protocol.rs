@@ -15902,6 +15902,14 @@ fn brain_control_plane_health_and_replay_remain_value_only() {
         snapshot["model_health"]["openai/gpt-test"]["last_latency_ms"],
         json!(120)
     );
+    assert_eq!(
+        snapshot["model_health"]["openai/gpt-test"]["quality_observations"],
+        json!(1)
+    );
+    assert_eq!(
+        snapshot["model_health"]["openai/gpt-test"]["quality_mean"],
+        json!(0.9)
+    );
 
     let evidence = json!({
         "schema": "bioprism-brain-domain-evaluator/0.1",
