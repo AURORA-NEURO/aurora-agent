@@ -1450,13 +1450,16 @@ attached to a single-domain prompt. `AutonomousAgent.blueprint()` returns a
 prompt budget, required model capabilities, exact tool allow-list, and task digest. The dependency
 graph is explicit: children fan out independently, then synthesis fans in after their results.
 
-`runCrossDomain()` runs children sequentially so provider selection, tool calls, effect approvals,
-failures, and evaluator observations remain attributable to a child. The synthesis prompt receives
-only bounded local output text plus child IDs, domains, statuses, and output digests. A child that is
-approval-blocked or fails prevents synthesis by default. `allowPartial: true` is an explicit choice
-to synthesize incomplete evidence; `synthesize: false` returns child results without claiming an
-integrated conclusion. `run()` automatically delegates to this path when it receives an ambiguous
-task with more than one selected domain and no explicit domain override.
+`runCrossDomain()` uses a bounded worker pool for specialist calls (four in flight by default;
+`maxParallelChildren` may request 1 through 4), then projects results back into blueprint order so
+provider selection, tool calls, effect approvals, failures, and evaluator observations remain
+attributable to a child. The synthesis prompt receives only bounded local output text plus child
+IDs, domains, statuses, and output digests. A child that is approval-blocked or fails prevents
+synthesis by default; children already in flight may finish, but a bounded failure prevents new
+children from being scheduled. `allowPartial: true` is an explicit choice to synthesize incomplete
+evidence; `synthesize: false` returns child results without claiming an integrated conclusion.
+`run()` automatically delegates to this path when it receives an ambiguous task with more than one
+selected domain and no explicit domain override.
 
 The result preserves `completed_children`, `total_children`, `partial`, child-local run results,
 and synthesis status. The returned provider responses stay application-local; the cross-domain

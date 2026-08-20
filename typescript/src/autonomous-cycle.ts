@@ -387,6 +387,7 @@ function crossRunOptions(options: AutonomousCrossDomainDecisionCycleOptions, rou
     subtasks: options.subtasks,
     allowPartial: options.allowPartial,
     synthesize: options.synthesize,
+    maxParallelChildren: options.maxParallelChildren,
     learning: options.learning?.controller,
   };
 }

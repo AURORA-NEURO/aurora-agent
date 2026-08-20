@@ -210,6 +210,65 @@ test("cross-domain execution fans out to specialists, gates approval, and synthe
   assert.ok(synthesisBody.messages.some((message) => String(message.content).includes("neuroscience signal finding")));
 });
 
+test("cross-domain fan-out uses bounded concurrency and preserves deterministic child order", async () => {
+  let active = 0;
+  let maximumActive = 0;
+  let started = 0;
+  let release;
+  let resolveStarted;
+  const releaseGate = new Promise((resolve) => { release = resolve; });
+  const startedGate = new Promise((resolve) => { resolveStarted = resolve; });
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      started += 1;
+      if (started === 2) resolveStarted();
+      await releaseGate;
+      active -= 1;
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: "bounded specialist result" }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("parallel", "https://parallel.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel(candidate("parallel", "parallel-model", ["reasoning", "science", "coordination", "biomedical", "neuroscience"]));
+  const runPromise = agent.runCrossDomain("Research a biomedical neuroscience study", {
+    candidates: agent.models(),
+    approveProviderCall: true,
+    synthesize: false,
+    maxParallelChildren: 2,
+    subtasks: [
+      { id: "bio", domain: "biomedical", task: "Review biomedical evidence." },
+      { id: "neuro", domain: "neuroscience", task: "Review neuroscience signals." },
+    ],
+  });
+  const observedParallelism = await Promise.race([
+    startedGate.then(() => true),
+    new Promise((resolve) => setTimeout(() => resolve(false), 250)),
+  ]);
+  release();
+  const result = await runPromise;
+  assert.equal(observedParallelism, true);
+  assert.equal(maximumActive, 2);
+  assert.equal(result.status, "children_completed");
+  assert.deepEqual(result.child_runs.map((child) => child.id), ["bio", "neuro"]);
+  assert.equal(result.completed_children, 2);
+  await assert.rejects(
+    agent.runCrossDomain("Research a biomedical neuroscience study", {
+      candidates: agent.models(),
+      approveProviderCall: true,
+      synthesize: false,
+      maxParallelChildren: 5,
+      subtasks: [
+        { id: "bio", domain: "biomedical", task: "Review biomedical evidence." },
+        { id: "neuro", domain: "neuroscience", task: "Review neuroscience signals." },
+      ],
+    }),
+    (error) => error?.name === "ArgumentError",
+  );
+});
+
 test("online learner adapts only from explicit evaluator rewards", async () => {
   const learner = new AutonomousOnlineLearner();
   const request = {

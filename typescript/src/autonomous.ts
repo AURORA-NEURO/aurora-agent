@@ -49,6 +49,7 @@ export const AUTONOMOUS_LEARNING_SCHEMA = "bioprism-typescript-autonomous-online
 export const AUTONOMOUS_CROSS_DOMAIN_SCHEMA = "bioprism-typescript-autonomous-cross-domain/0.1" as const;
 export const AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA = "bioprism-typescript-autonomous-cross-domain-result/0.1" as const;
 export const AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN = 8;
+export const AUTONOMOUS_CROSS_DOMAIN_MAX_CONCURRENCY = 4;
 
 export const AUTONOMOUS_DOMAIN_NAMES = [
   "coding",
@@ -456,6 +457,8 @@ export interface AutonomousCrossDomainRunOptions extends AutonomousRunOptions {
   subtasks?: readonly AutonomousCrossDomainSubtask[];
   allowPartial?: boolean;
   synthesize?: boolean;
+  /** Maximum number of specialist provider calls in flight during bounded fan-out. */
+  maxParallelChildren?: number;
   learning?: AutonomousLearningController;
 }
 
@@ -604,6 +607,14 @@ function boundedIdentifier(name: string, value: unknown): string {
   const text = boundedText(name, value, 256);
   if (!/^[A-Za-z0-9_.-]+$/.test(text)) throw new ArgumentError(`${name} must be a bounded identifier`);
   return text;
+}
+
+function normalizedCrossDomainConcurrency(value: number | undefined, totalChildren: number): number {
+  const requested = value ?? AUTONOMOUS_CROSS_DOMAIN_MAX_CONCURRENCY;
+  if (!Number.isSafeInteger(requested) || requested < 1 || requested > AUTONOMOUS_CROSS_DOMAIN_MAX_CONCURRENCY) {
+    throw new ArgumentError(`cross-domain maxParallelChildren must be an integer within [1, ${AUTONOMOUS_CROSS_DOMAIN_MAX_CONCURRENCY}]`);
+  }
+  return Math.min(requested, totalChildren);
 }
 
 function normalizeRouteText(value: string): string {
@@ -1446,7 +1457,7 @@ export class AutonomousAgent {
     return { schema: "bioprism-typescript-autonomous-run/0.1", status: "completed", route, blueprint, selection: result.selection, response: result.response, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
   }
 
-  /** Execute routed specialist children sequentially, then hand bounded local outputs to synthesis. */
+  /** Execute routed specialist children with bounded fan-out, then hand local outputs to synthesis. */
   async runCrossDomain(task: string, options: AutonomousCrossDomainRunOptions = {}): Promise<AutonomousCrossDomainRunResult> {
     const taskText = boundedText("cross-domain task", task, 32_000);
     const route = options.routeOverride ? await assertRouteOverride(taskText, options.routeOverride) : await this.route(taskText, { hints: options.hints, allowCrossDomain: options.allowCrossDomain });
@@ -1466,10 +1477,16 @@ export class AutonomousAgent {
     }
     const candidates = options.candidates ? [...options.candidates] : this.models();
     if (!candidates.length) throw new ProviderRuntimeError("cross-domain run requires at least one registered model candidate");
-    const childRuns: AutonomousCrossDomainChildRun[] = [];
-    const learningEpisodeIds: string[] = [];
-    const childOutputs: Array<{ id: string; domain: AutonomousDomainName; status: string; output: string }> = [];
-    for (let index = 0; index < blueprint.child_blueprints.length; index += 1) {
+    const totalChildren = blueprint.child_blueprints.length;
+    const maxParallelChildren = normalizedCrossDomainConcurrency(options.maxParallelChildren, totalChildren);
+    const childRunsByIndex: Array<AutonomousCrossDomainChildRun | undefined> = new Array(totalChildren);
+    const childOutputsByIndex: Array<{ id: string; domain: AutonomousDomainName; status: string; output: string } | undefined> = new Array(totalChildren);
+    const learningEpisodeIdsByIndex: Array<string | null> = new Array(totalChildren).fill(null);
+    let nextChildIndex = 0;
+    let stopDispatch = false;
+    let fatalChildFailure = false;
+
+    const executeChild = async (index: number): Promise<void> => {
       const child = blueprint.child_blueprints[index];
       if (!child) throw new ProviderRuntimeError(`cross-domain child blueprint ${index + 1} is missing`);
       const childId = blueprint.child_ids[index] ?? `child-${index + 1}`;
@@ -1499,15 +1516,38 @@ export class AutonomousAgent {
       const rawOutput = childResult.response?.text ?? (childResult.response?.structured === null || childResult.response?.structured === undefined ? "" : JSON.stringify(childResult.response.structured));
       const boundedOutput = rawOutput.length > 48_000 ? `${rawOutput.slice(0, 48_000)}\n[child output bounded locally]` : rawOutput;
       const output = boundedOutput.trim() || "[child returned no textual or structured output]";
-      childOutputs.push({ id: childId, domain: child.domain_profile.domain, status: childResult.status, output });
-      childRuns.push({ id: childId, domain: child.domain_profile.domain, task_digest: child.task_digest, result: childResult, output_digest: rawOutput ? await digestJson({ output: rawOutput }) : null, output_bytes: bytes(rawOutput) });
+      childOutputsByIndex[index] = { id: childId, domain: child.domain_profile.domain, status: childResult.status, output };
+      childRunsByIndex[index] = { id: childId, domain: child.domain_profile.domain, task_digest: child.task_digest, result: childResult, output_digest: rawOutput ? await digestJson({ output: rawOutput }) : null, output_bytes: bytes(rawOutput) };
       if (options.learning && childResult.status === "completed") {
         const episodeId = `cross:${route.task_digest}:${childId}`;
         const episode = await options.learning.prepareRun(childResult, { episodeId, runId: episodeId, stageId: childId, parentJobId: `cross:${route.task_digest}` });
-        learningEpisodeIds.push(episode.episode_id);
+        learningEpisodeIdsByIndex[index] = episode.episode_id;
       }
-      if (childResult.status !== "completed" && !options.allowPartial) break;
-    }
+      if (childResult.status !== "completed" && !options.allowPartial) stopDispatch = true;
+    };
+
+    const worker = async (): Promise<void> => {
+      while (true) {
+        if (fatalChildFailure || (stopDispatch && !options.allowPartial)) return;
+        const index = nextChildIndex;
+        nextChildIndex += 1;
+        if (index >= totalChildren) return;
+        try {
+          await executeChild(index);
+        } catch (error) {
+          // A thrown child has no bounded result envelope. Stop scheduling new work and let the
+          // caller retain the original typed failure rather than synthesizing incomplete output.
+          fatalChildFailure = true;
+          stopDispatch = true;
+          throw error;
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: maxParallelChildren }, () => worker()));
+
+    const childRuns = childRunsByIndex.flatMap((child) => child ? [child] : []);
+    const learningEpisodeIds = learningEpisodeIdsByIndex.flatMap((episodeId) => episodeId ? [episodeId] : []);
+    const childOutputs = childOutputsByIndex.flatMap((output) => output ? [output] : []);
     const completedChildren = childRuns.filter((child) => child.result.status === "completed").length;
     const allChildrenCompleted = childRuns.length === blueprint.child_blueprints.length && completedChildren === blueprint.child_blueprints.length;
     const hasApproval = childRuns.some((child) => child.result.status === "approval_required");
