@@ -1742,6 +1742,16 @@ OpenAI Responses stream events for output text and function-call argument deltas
 projected into this same contract; other providers use their native event names but expose no
 secret-bearing raw event channel.
 
+Structured output is negotiated at the wire boundary rather than pretending that every provider
+shares one request field. OpenAI Responses uses `text.format` with either `json_object` or a strict
+`json_schema`; Chat Completions uses `response_format`, with generic compatible-provider presets
+defaulting to the broadly supported `json_object` mode. A gateway with verified JSON Schema support
+can opt into `structured_output_mode="json_schema"`, while `"disabled"` keeps provider hints off and
+retains the runtime's local bounded validation. Anthropic's adapter uses that local validation path
+without sending an unsupported OpenAI field. This distinction matters for autonomous routing:
+model discovery and provider configuration can describe capability support, but the runtime still
+owns schema validation and refuses malformed structured output.
+
 `ProviderTool` and `ProviderToolCall` implement the provider-native tool boundary for both
 collected and streamed responses. MCP `tools/list` schemas can be converted into OpenAI Responses, OpenAI-
 compatible Chat Completions, or Anthropic Messages wire shapes. Returned calls are parsed into
@@ -1755,6 +1765,10 @@ creating a hidden execution channel.
 translates it into native continuation history: Responses receives `function_call` and
 `function_call_output` items, Chat Completions receives an assistant `tool_calls` message followed
 by `tool` messages, and Anthropic receives `tool_use` followed by `tool_result` content blocks.
+For Responses, the runtime also retains the complete transient assistant output-item sequence
+returned with the tool call, including reasoning items, before appending each approved
+`function_call_output`. This preserves the provider's required context across stateless
+continuations without placing raw provider items in public response projections or learning state.
 `LLMRuntime.invoke_tool_loop(...)` bounds turns and total calls and requires a callback to return
 one `ProviderToolResult(approved=True)` for every intent in order. A missing, refused, or malformed
 result stops before the next provider request. `AutonomousBrain.run_tool_loop(...)` adds model

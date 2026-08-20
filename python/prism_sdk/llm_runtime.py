@@ -567,12 +567,17 @@ class ProviderConfig:
     circuit_breaker_failure_threshold: int = 3
     circuit_breaker_reset_seconds: float = 30.0
     models_path: str | None = None
+    structured_output_mode: str = "json_schema"
 
     def __post_init__(self) -> None:
         if not self.provider or "/" in self.provider or " " in self.provider:
             raise ProviderError("provider must be a non-empty path-safe identifier")
         if self.protocol not in SUPPORTED_PROTOCOLS:
             raise ProviderError(f"unsupported provider protocol {self.protocol!r}")
+        if self.structured_output_mode not in {"json_schema", "json_object", "disabled"}:
+            raise ProviderError(
+                "structured_output_mode must be json_schema, json_object, or disabled"
+            )
         parsed = urlsplit(self.base_url)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise ProviderError("base_url must be an absolute http(s) URL")
@@ -632,6 +637,7 @@ class ProviderConfig:
             "retry_backoff_seconds": self.retry_backoff_seconds,
             "circuit_breaker_failure_threshold": self.circuit_breaker_failure_threshold,
             "circuit_breaker_reset_seconds": self.circuit_breaker_reset_seconds,
+            "structured_output_mode": self.structured_output_mode,
         }
 
 
@@ -1582,6 +1588,8 @@ class ProviderRequest:
         self,
         tool_calls: Sequence[ProviderToolCall],
         results: Sequence[ProviderToolResult],
+        *,
+        provider_output_items: Sequence[Mapping[str, Any]] = (),
     ) -> "ProviderRequest":
         """Append a provider-neutral assistant/tool turn for an explicit continuation.
 
@@ -1601,6 +1609,17 @@ class ProviderRequest:
             raise ProviderError("tool results must contain ProviderToolResult values")
         if len(tool_calls) != len(results):
             raise ProviderError("every provider tool call requires exactly one result")
+        if not isinstance(provider_output_items, Sequence) or isinstance(
+            provider_output_items, (str, bytes)
+        ):
+            raise ProviderError("provider output items must be a sequence")
+        if any(not isinstance(item, Mapping) for item in provider_output_items):
+            raise ProviderError("provider output items must contain mappings")
+        _bounded_json_bytes(
+            [dict(item) for item in provider_output_items],
+            MAX_RESPONSE_BYTES,
+            "provider output items",
+        )
         expected_ids = [call.call_id for call in tool_calls]
         result_ids = [result.call_id for result in results]
         if result_ids != expected_ids or any(not result.approved for result in results):
@@ -1623,6 +1642,10 @@ class ProviderRequest:
                 "role": "assistant",
                 "content": "",
                 "tool_calls": assistant_tool_calls,
+                # Responses models may return reasoning items alongside a function call.  The
+                # item list is transient runtime state; it is consumed only by _wire_messages
+                # and is intentionally omitted from ProviderResponse.to_dict()/learning state.
+                "provider_output_items": tuple(dict(item) for item in provider_output_items),
             }
         ]
         continuation_messages.extend(
@@ -1651,6 +1674,12 @@ class ProviderResponse:
     raw: Mapping[str, Any]
     structured: Any = None
     tool_calls: tuple[ProviderToolCall, ...] = ()
+    # Some protocols require the complete assistant output item sequence for a valid
+    # continuation (for example Responses reasoning items plus a function_call).  This is
+    # deliberately process-local and never appears in the public projection.
+    provider_output_items: tuple[Mapping[str, Any], ...] = field(
+        default=(), repr=False, compare=False
+    )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -2312,7 +2341,11 @@ class LLMRuntime:
                     turns=len(responses),
                     tool_calls=total_tool_calls,
                 )
-            current = current.with_tool_results(response.tool_calls, returned)
+            current = current.with_tool_results(
+                response.tool_calls,
+                returned,
+                provider_output_items=response.provider_output_items,
+            )
             response = None
         return ProviderToolLoopResult(
             status="turn_limit_reached",
@@ -2496,12 +2529,41 @@ class LLMRuntime:
                 )
         if (
             (request.require_json or request.response_schema is not None)
-            and config.protocol in {"openai_responses", "openai_chat_completions"}
             and (not request.tools or request.tool_choice == "none")
         ):
-            # OpenAI-compatible protocols accept this hint. Anthropic has a different structured
-            # output surface, so it is validated locally without receiving an unsupported field.
-            body["response_format"] = {"type": "json_object"}
+            if config.protocol == "openai_responses" and config.structured_output_mode != "disabled":
+                # Responses structured output is configured under text.format.  Sending the
+                # Chat Completions response_format field here is accepted by neither the real
+                # Responses endpoint nor many compatible gateways.
+                if request.response_schema is not None and config.structured_output_mode == "json_schema":
+                    body["text"] = {
+                        "format": {
+                            "type": "json_schema",
+                            "name": "response",
+                            "schema": dict(request.response_schema),
+                            "strict": True,
+                        }
+                    }
+                else:
+                    body["text"] = {"format": {"type": "json_object"}}
+            elif config.protocol == "openai_chat_completions" and config.structured_output_mode != "disabled":
+                # Chat Completions nests JSON Schema under response_format.json_schema, while
+                # json_object remains the compatibility fallback for providers that do not
+                # implement Structured Outputs.
+                if request.response_schema is not None and config.structured_output_mode == "json_schema":
+                    body["response_format"] = {
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": "response",
+                            "schema": dict(request.response_schema),
+                            "strict": True,
+                        },
+                    }
+                else:
+                    body["response_format"] = {"type": "json_object"}
+            # Anthropic has no provider-neutral structured-output field in this adapter.  The
+            # response is still parsed and validated locally, but unsupported wire fields are
+            # never sent to the provider.
         return body
 
     def _get_models_with_retries(
@@ -2710,6 +2772,14 @@ class LLMRuntime:
             text = _extract_text(config.protocol, decoded)
             structured = _validate_structured_response(text, request)
         usage = decoded.get("usage")
+        provider_output_items: tuple[Mapping[str, Any], ...] = ()
+        if config.protocol == "openai_responses":
+            output = decoded.get("output")
+            if isinstance(output, list):
+                if any(not isinstance(item, Mapping) for item in output):
+                    raise ProviderError("provider Responses output items were malformed")
+                _bounded_json_bytes(output, MAX_RESPONSE_BYTES, "provider Responses output items")
+                provider_output_items = tuple(dict(item) for item in output)
         return ProviderResponse(
             provider=config.provider,
             model=str(decoded.get("model") or request.model),
@@ -2720,6 +2790,7 @@ class LLMRuntime:
             raw=dict(decoded),
             structured=structured,
             tool_calls=tool_calls,
+            provider_output_items=provider_output_items,
         )
 
 
@@ -3783,6 +3854,19 @@ def _validate_provider_message(message: Mapping[str, Any]) -> None:
             if not isinstance(arguments, str):
                 raise ProviderError("provider message tool call arguments must be a string")
             _bounded_json_bytes(arguments, MAX_TOOL_ARGUMENT_BYTES, "provider message tool arguments")
+    provider_output_items = message.get("provider_output_items")
+    if provider_output_items is not None:
+        if not isinstance(provider_output_items, Sequence) or isinstance(
+            provider_output_items, (str, bytes)
+        ):
+            raise ProviderError("provider message provider_output_items must be a sequence")
+        if any(not isinstance(item, Mapping) for item in provider_output_items):
+            raise ProviderError("provider message provider_output_items must contain objects")
+        _bounded_json_bytes(
+            [dict(item) for item in provider_output_items],
+            MAX_RESPONSE_BYTES,
+            "provider message provider_output_items",
+        )
 
 
 def _wire_messages(
@@ -3796,7 +3880,15 @@ def _wire_messages(
         message = dict(source)
         role = message.get("role")
         tool_calls = message.get("tool_calls")
+        provider_output_items = message.get("provider_output_items")
         if protocol == "openai_responses":
+            if provider_output_items:
+                if not isinstance(provider_output_items, Sequence) or isinstance(
+                    provider_output_items, (str, bytes)
+                ):
+                    raise ProviderError("provider continuation output items were malformed")
+                messages.extend(dict(item) for item in provider_output_items if isinstance(item, Mapping))
+                continue
             if role == "assistant" and tool_calls:
                 content = message.get("content")
                 if isinstance(content, str) and content:
@@ -3860,8 +3952,10 @@ def _wire_messages(
                     }
                 )
                 continue
+            message.pop("provider_output_items", None)
             messages.append(message)
             continue
+        message.pop("provider_output_items", None)
         if role == "assistant" and tool_calls:
             wire_calls = [
                 {
@@ -4423,6 +4517,7 @@ def openai_provider(
     retry_backoff_seconds: float = 0.0,
     circuit_breaker_failure_threshold: int = 3,
     circuit_breaker_reset_seconds: float = 30.0,
+    structured_output_mode: str = "json_schema",
 ) -> ProviderConfig:
     """Create a metadata-only OpenAI Responses provider configuration."""
 
@@ -4438,6 +4533,7 @@ def openai_provider(
         retry_backoff_seconds=retry_backoff_seconds,
         circuit_breaker_failure_threshold=circuit_breaker_failure_threshold,
         circuit_breaker_reset_seconds=circuit_breaker_reset_seconds,
+        structured_output_mode=structured_output_mode,
     )
 
 
@@ -4451,6 +4547,7 @@ def anthropic_provider(
     retry_backoff_seconds: float = 0.0,
     circuit_breaker_failure_threshold: int = 3,
     circuit_breaker_reset_seconds: float = 30.0,
+    structured_output_mode: str = "disabled",
 ) -> ProviderConfig:
     """Create a metadata-only Anthropic Messages provider configuration."""
 
@@ -4465,6 +4562,7 @@ def anthropic_provider(
         retry_backoff_seconds=retry_backoff_seconds,
         circuit_breaker_failure_threshold=circuit_breaker_failure_threshold,
         circuit_breaker_reset_seconds=circuit_breaker_reset_seconds,
+        structured_output_mode=structured_output_mode,
     )
 
 
@@ -4480,8 +4578,15 @@ def openai_compatible_provider(
     retry_backoff_seconds: float = 0.0,
     circuit_breaker_failure_threshold: int = 3,
     circuit_breaker_reset_seconds: float = 30.0,
+    structured_output_mode: str = "json_object",
 ) -> ProviderConfig:
-    """Configure a provider exposing the OpenAI Chat Completions wire shape."""
+    """Configure a provider exposing the OpenAI Chat Completions wire shape.
+
+    Generic gateways default to ``json_object`` because the older structured-output mode is
+    broadly compatible.  A provider with verified JSON Schema support can opt into
+    ``structured_output_mode="json_schema"``; callers can also disable provider-side hints and
+    retain the runtime's local schema validation.
+    """
 
     return ProviderConfig(
         provider=provider,
@@ -4495,6 +4600,7 @@ def openai_compatible_provider(
         retry_backoff_seconds=retry_backoff_seconds,
         circuit_breaker_failure_threshold=circuit_breaker_failure_threshold,
         circuit_breaker_reset_seconds=circuit_breaker_reset_seconds,
+        structured_output_mode=structured_output_mode,
     )
 
 
@@ -4510,6 +4616,7 @@ def _compatible_provider_preset(
     retry_backoff_seconds: float,
     circuit_breaker_failure_threshold: int,
     circuit_breaker_reset_seconds: float,
+    structured_output_mode: str,
 ) -> ProviderConfig:
     return openai_compatible_provider(
         provider,
@@ -4522,6 +4629,7 @@ def _compatible_provider_preset(
         retry_backoff_seconds=retry_backoff_seconds,
         circuit_breaker_failure_threshold=circuit_breaker_failure_threshold,
         circuit_breaker_reset_seconds=circuit_breaker_reset_seconds,
+        structured_output_mode=structured_output_mode,
     )
 
 
@@ -4536,6 +4644,7 @@ def deepseek_provider(
     retry_backoff_seconds: float = 0.0,
     circuit_breaker_failure_threshold: int = 3,
     circuit_breaker_reset_seconds: float = 30.0,
+    structured_output_mode: str = "json_object",
 ) -> ProviderConfig:
     """Create the official DeepSeek OpenAI-compatible Chat Completions configuration."""
 
@@ -4550,6 +4659,7 @@ def deepseek_provider(
         retry_backoff_seconds=retry_backoff_seconds,
         circuit_breaker_failure_threshold=circuit_breaker_failure_threshold,
         circuit_breaker_reset_seconds=circuit_breaker_reset_seconds,
+        structured_output_mode=structured_output_mode,
     )
 
 
@@ -4564,6 +4674,7 @@ def groq_provider(
     retry_backoff_seconds: float = 0.0,
     circuit_breaker_failure_threshold: int = 3,
     circuit_breaker_reset_seconds: float = 30.0,
+    structured_output_mode: str = "json_object",
 ) -> ProviderConfig:
     """Create the official Groq OpenAI-compatible Chat Completions configuration."""
 
@@ -4578,6 +4689,7 @@ def groq_provider(
         retry_backoff_seconds=retry_backoff_seconds,
         circuit_breaker_failure_threshold=circuit_breaker_failure_threshold,
         circuit_breaker_reset_seconds=circuit_breaker_reset_seconds,
+        structured_output_mode=structured_output_mode,
     )
 
 
@@ -4592,6 +4704,7 @@ def mistral_provider(
     retry_backoff_seconds: float = 0.0,
     circuit_breaker_failure_threshold: int = 3,
     circuit_breaker_reset_seconds: float = 30.0,
+    structured_output_mode: str = "json_object",
 ) -> ProviderConfig:
     """Create the official Mistral Chat Completions configuration."""
 
@@ -4606,6 +4719,7 @@ def mistral_provider(
         retry_backoff_seconds=retry_backoff_seconds,
         circuit_breaker_failure_threshold=circuit_breaker_failure_threshold,
         circuit_breaker_reset_seconds=circuit_breaker_reset_seconds,
+        structured_output_mode=structured_output_mode,
     )
 
 
@@ -4620,6 +4734,7 @@ def openrouter_provider(
     retry_backoff_seconds: float = 0.0,
     circuit_breaker_failure_threshold: int = 3,
     circuit_breaker_reset_seconds: float = 30.0,
+    structured_output_mode: str = "json_object",
 ) -> ProviderConfig:
     """Create the official OpenRouter OpenAI-compatible configuration."""
 
@@ -4634,6 +4749,7 @@ def openrouter_provider(
         retry_backoff_seconds=retry_backoff_seconds,
         circuit_breaker_failure_threshold=circuit_breaker_failure_threshold,
         circuit_breaker_reset_seconds=circuit_breaker_reset_seconds,
+        structured_output_mode=structured_output_mode,
     )
 
 
@@ -4648,6 +4764,7 @@ def xai_provider(
     retry_backoff_seconds: float = 0.0,
     circuit_breaker_failure_threshold: int = 3,
     circuit_breaker_reset_seconds: float = 30.0,
+    structured_output_mode: str = "json_object",
 ) -> ProviderConfig:
     """Create the official xAI OpenAI-compatible Chat Completions configuration."""
 
@@ -4662,4 +4779,5 @@ def xai_provider(
         retry_backoff_seconds=retry_backoff_seconds,
         circuit_breaker_failure_threshold=circuit_breaker_failure_threshold,
         circuit_breaker_reset_seconds=circuit_breaker_reset_seconds,
+        structured_output_mode=structured_output_mode,
     )

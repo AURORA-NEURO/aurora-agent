@@ -155,6 +155,11 @@ class _ProviderHandler(BaseHTTPRequestHandler):
                         "model": "test-model",
                         "output": [
                             {
+                                "type": "reasoning",
+                                "id": "reasoning-loop-1",
+                                "summary": [],
+                            },
+                            {
                                 "type": "function_call",
                                 "call_id": "call-loop-1",
                                 "name": "developer_platform_status",
@@ -847,6 +852,8 @@ class LlmRuntimeTests(unittest.TestCase):
         self.assertEqual(result.turns, 2)
         self.assertEqual(result.final_response.text, "continued")  # type: ignore[union-attr]
         continued_body = json.loads(self.server.seen_body)  # type: ignore[attr-defined]
+        self.assertEqual(continued_body["input"][-3]["type"], "reasoning")
+        self.assertEqual(continued_body["input"][-2]["type"], "function_call")
         self.assertEqual(continued_body["input"][-1]["type"], "function_call_output")
         refused = runtime.invoke_tool_loop(
             "openai",
@@ -1192,6 +1199,87 @@ class LlmRuntimeTests(unittest.TestCase):
             credential=handle,
         )
         self.assertEqual(response.structured, {"answer": "yes", "score": 1})
+
+    def test_structured_output_wire_contract_is_protocol_specific_and_configurable(self) -> None:
+        request = ProviderRequest(
+            model="test-model",
+            messages=({"role": "user", "content": "return a decision"},),
+            require_json=True,
+            response_schema={
+                "type": "object",
+                "required": ["decision"],
+                "properties": {"decision": {"type": "string"}},
+                "additionalProperties": False,
+            },
+        )
+        responses_body = LLMRuntime._body(
+            openai_provider(base_url=self.base_url, allow_insecure_http=True),
+            request,
+        )
+        self.assertEqual(responses_body["text"]["format"]["type"], "json_schema")
+        self.assertEqual(responses_body["text"]["format"]["name"], "response")
+        self.assertTrue(responses_body["text"]["format"]["strict"])
+        self.assertNotIn("response_format", responses_body)
+        tool_request = ProviderRequest(
+            model="test-model",
+            messages=request.messages,
+            tools=(ProviderTool("developer_platform_status"),),
+            require_json=True,
+            response_schema=request.response_schema,
+        )
+        tool_body = LLMRuntime._body(
+            openai_provider(base_url=self.base_url, allow_insecure_http=True),
+            tool_request,
+        )
+        self.assertNotIn("text", tool_body)
+
+        chat_body = LLMRuntime._body(
+            openai_compatible_provider("gateway", self.base_url, allow_insecure_http=True),
+            request,
+        )
+        self.assertEqual(chat_body["response_format"], {"type": "json_object"})
+        schema_chat_body = LLMRuntime._body(
+            openai_compatible_provider(
+                "schema-gateway",
+                self.base_url,
+                allow_insecure_http=True,
+                structured_output_mode="json_schema",
+            ),
+            request,
+        )
+        self.assertEqual(schema_chat_body["response_format"]["type"], "json_schema")
+        self.assertEqual(
+            schema_chat_body["response_format"]["json_schema"]["schema"],
+            request.response_schema,
+        )
+
+        anthropic_body = LLMRuntime._body(
+            anthropic_provider(base_url=self.base_url, allow_insecure_http=True),
+            request,
+        )
+        self.assertNotIn("response_format", anthropic_body)
+        self.assertNotIn("text", anthropic_body)
+        disabled_body = LLMRuntime._body(
+            openai_provider(
+                base_url=self.base_url,
+                allow_insecure_http=True,
+                structured_output_mode="disabled",
+            ),
+            request,
+        )
+        self.assertNotIn("text", disabled_body)
+        self.assertEqual(
+            openai_provider(base_url=self.base_url, allow_insecure_http=True).to_metadata()[
+                "structured_output_mode"
+            ],
+            "json_schema",
+        )
+        with self.assertRaisesRegex(ProviderError, "structured_output_mode"):
+            openai_provider(
+                base_url=self.base_url,
+                allow_insecure_http=True,
+                structured_output_mode="provider_magic",
+            )
 
     def test_autonomous_brain_routes_structured_decision_through_mission_approval(self) -> None:
         class Workspace:
