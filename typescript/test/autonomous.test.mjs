@@ -163,6 +163,53 @@ test("AutonomousAgent performs a real selected-provider tool loop with domain po
   assert.equal(bodies[1].messages.at(-1).content, JSON.stringify({ tool: "repository_catalog", files: ["README.md"] }));
 });
 
+test("cross-domain execution fans out to specialists, gates approval, and synthesizes bounded local outputs", async () => {
+  const bodies = [];
+  let calls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (url, init) => {
+      bodies.push(JSON.parse(String(init.body)));
+      calls += 1;
+      const text = calls === 1 ? "biomedical evidence finding" : calls === 2 ? "neuroscience signal finding" : "integrated biomedical-neuroscience conclusion";
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: text }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("cross", "https://cross.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  const capabilities = ["reasoning", "coordination", "code", "browser", "data", "science", "biomedical", "neuroscience", "operations", "enterprise", "multimodal", "evaluation"];
+  agent.registerModel(candidate("cross", "cross-model", capabilities));
+  const task = "Research a biomedical neuroscience experiment with EEG patient evidence";
+  const preview = await agent.blueprint(task);
+  assert.equal(preview.route.cross_domain, true);
+  assert.ok(preview.cross_domain_blueprint);
+  assert.equal(preview.cross_domain_blueprint.child_blueprints.length, preview.route.selected_domains.length);
+  assert.equal(preview.cross_domain_blueprint.execution, "not_started");
+  const gated = await agent.run(task, { candidates: agent.models() });
+  assert.equal(gated.status, "approval_required");
+  assert.equal(gated.cross_domain?.status, "approval_required");
+  assert.equal(calls, 0);
+
+  const result = await agent.runCrossDomain(task, {
+    candidates: agent.models(),
+    approveProviderCall: true,
+    subtasks: [
+      { id: "bio", domain: "biomedical", task: "Review the biomedical evidence and safety boundary." },
+      { id: "neuro", domain: "neuroscience", task: "Analyze the EEG neuroscience design and signal limits." },
+    ],
+  });
+  assert.equal(result.status, "completed");
+  assert.equal(result.route.cross_domain, true);
+  assert.deepEqual(result.blueprint.child_ids, ["bio", "neuro"]);
+  assert.equal(result.child_runs.length, 2);
+  assert.equal(result.completed_children, 2);
+  assert.equal(result.synthesis.response.text, "integrated biomedical-neuroscience conclusion");
+  assert.equal(calls, 3);
+  const synthesisBody = bodies[2];
+  assert.ok(synthesisBody.messages.some((message) => String(message.content).includes("biomedical evidence finding")));
+  assert.ok(synthesisBody.messages.some((message) => String(message.content).includes("neuroscience signal finding")));
+});
+
 test("online learner adapts only from explicit evaluator rewards", async () => {
   const learner = new AutonomousOnlineLearner();
   const request = {

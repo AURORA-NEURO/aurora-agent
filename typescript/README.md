@@ -122,6 +122,16 @@ explicit evaluator feedback and can optionally submit the same value-only update
 plane. This is adaptation infrastructure, not an automatic truth signal: feedback must be produced
 by a caller-owned evaluator, and provider health is kept separate from task quality.
 
+Ambiguous tasks now have a real fan-out/fan-in path. `blueprint()` returns a
+`cross_domain_blueprint` containing one child workflow per selected domain plus a cross-domain
+synthesis workflow. `runCrossDomain()` executes those children sequentially under the same provider
+approval, model selection, tool catalogue, and effect approval boundaries, then gives synthesis
+bounded local child outputs with child status and digests. A failed or approval-blocked child stops
+synthesis by default; `allowPartial: true` makes partial synthesis an explicit caller choice, and
+`synthesize: false` returns the specialist results without pretending that integration occurred.
+Calling `run()` without an explicit domain automatically uses this path when routing selects more
+than one domain.
+
 ## Contract boundaries
 
 - Requests and responses are bounded. The client enforces a request byte ceiling, incrementally

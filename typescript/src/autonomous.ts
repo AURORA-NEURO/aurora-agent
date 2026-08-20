@@ -44,6 +44,9 @@ export const AUTONOMOUS_DOMAIN_TOOL_SCHEMA = "bioprism-typescript-autonomous-dom
 export const AUTONOMOUS_DOMAIN_TOOL_REGISTRY_SCHEMA = "bioprism-typescript-autonomous-domain-tool-registry/0.1" as const;
 export const AUTONOMOUS_DOMAIN_TOOL_PLAN_SCHEMA = "bioprism-typescript-autonomous-domain-tool-plan/0.1" as const;
 export const AUTONOMOUS_LEARNING_SCHEMA = "bioprism-typescript-autonomous-online-learning/0.1" as const;
+export const AUTONOMOUS_CROSS_DOMAIN_SCHEMA = "bioprism-typescript-autonomous-cross-domain/0.1" as const;
+export const AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA = "bioprism-typescript-autonomous-cross-domain-result/0.1" as const;
+export const AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN = 8;
 
 export const AUTONOMOUS_DOMAIN_NAMES = [
   "coding",
@@ -313,10 +316,34 @@ export interface AutonomousTaskBlueprint extends JsonObject {
   credential_posture: "caller_supplied_opaque_handle_not_returned";
 }
 
-export interface AutonomousAutoBlueprint extends JsonObject {
+export interface AutonomousCrossDomainSubtask {
+  id?: string;
+  task: string;
+  domain: AutonomousDomainName;
+  capability?: string;
+  context?: AutonomousPromptChunk[];
+}
+
+export interface AutonomousCrossDomainBlueprint {
+  schema: typeof AUTONOMOUS_CROSS_DOMAIN_SCHEMA;
+  task_digest: string;
+  child_ids: string[];
+  child_blueprints: AutonomousTaskBlueprint[];
+  synthesis_blueprint: AutonomousTaskBlueprint;
+  dependency_graph: {
+    fan_out: Array<{ id: string; task_digest: string; domain: AutonomousDomainName }>;
+    fan_in: string;
+  };
+  plan_digest: string;
+  execution: "not_started";
+  authorization: "caller_approval_per_provider_or_effect_boundary";
+}
+
+export interface AutonomousAutoBlueprint {
   schema: "bioprism-python-autonomous-auto-blueprint/0.1";
   route: AutonomousRouteProposal;
   blueprint: AutonomousTaskBlueprint | null;
+  cross_domain_blueprint?: AutonomousCrossDomainBlueprint | null;
   execution: "not_started";
   authorization: "route_and_plan_only; no_provider_or_tool_effects_authorized";
 }
@@ -347,7 +374,7 @@ export interface AutonomousDomainToolPlan extends JsonObject {
   secret_material: "never_returned";
 }
 
-export type AutonomousRunStatus = "completed" | "route_review_required" | "approval_required" | "abstained";
+export type AutonomousRunStatus = "completed" | "route_review_required" | "approval_required" | "abstained" | "cross_domain_partial" | "child_failed";
 
 export interface AutonomousRunResult {
   schema: "bioprism-typescript-autonomous-run/0.1";
@@ -357,8 +384,34 @@ export interface AutonomousRunResult {
   selection: AutonomousSelectionDecision | null;
   response: ProviderResponse | null;
   tool_loop?: { status: string; turns: number; toolCalls: number } | null;
+  cross_domain?: AutonomousCrossDomainRunResult | null;
   learning: "provider_health_feedback_only" | "online_bandit_feedback_available";
   retention: "provider_response_local; value_only_learning_projection";
+}
+
+export interface AutonomousCrossDomainChildRun {
+  id: string;
+  domain: AutonomousDomainName;
+  task_digest: string;
+  result: AutonomousRunResult;
+  output_digest: string | null;
+  output_bytes: number;
+}
+
+export type AutonomousCrossDomainRunStatus = "completed" | "children_completed" | "children_partial" | "approval_required" | "child_failed" | "route_review_required";
+
+export interface AutonomousCrossDomainRunResult {
+  schema: typeof AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA;
+  status: AutonomousCrossDomainRunStatus;
+  route: AutonomousRouteProposal;
+  blueprint: AutonomousCrossDomainBlueprint | null;
+  child_runs: AutonomousCrossDomainChildRun[];
+  synthesis: AutonomousRunResult | null;
+  completed_children: number;
+  total_children: number;
+  partial: boolean;
+  learning: "provider_health_feedback_only" | "online_bandit_feedback_available";
+  retention: "provider_responses_local; child_digests_only_in_synthesis_metadata";
 }
 
 export interface AutonomousAgentOptions {
@@ -387,6 +440,12 @@ export interface AutonomousRunOptions {
   approveEffects?: boolean;
   signal?: AbortSignal;
   observer?: ProviderInvocationObserver;
+}
+
+export interface AutonomousCrossDomainRunOptions extends AutonomousRunOptions {
+  subtasks?: readonly AutonomousCrossDomainSubtask[];
+  allowPartial?: boolean;
+  synthesize?: boolean;
 }
 
 export interface DomainToolExecutor {
@@ -712,6 +771,53 @@ async function buildDomainPack(profile: AutonomousDomainProfile): Promise<Autono
     review_triggers: profile.tool_profile.bindings.filter((binding) => binding.approval_required).map((binding) => `${binding.name}:approval_required`),
   };
   return { ...descriptor, pack_digest: await digestJson(descriptor), execution: "planning_only; dispatch_requires_caller_approval", credential_posture: "caller_supplied_opaque_handle_not_returned" };
+}
+
+async function buildTaskBlueprint(
+  profile: AutonomousDomainProfile,
+  task: string,
+  options: {
+    taskDigest?: string;
+    capability?: string;
+    context?: readonly AutonomousPromptChunk[];
+    maxInputTokens?: number;
+    activeToolNames?: readonly string[];
+    selectedToolNames?: readonly string[];
+  } = {},
+): Promise<AutonomousTaskBlueprint> {
+  const taskText = boundedText("autonomous task blueprint objective", task, 32_000);
+  const taskDigest = options.taskDigest ?? await digestJson({ task: taskText });
+  const activeToolNames = [...new Set(options.activeToolNames ?? [])].sort();
+  const selectedToolNames = [...new Set(options.selectedToolNames ?? activeToolNames)].sort();
+  const pack = await buildDomainPack(profile);
+  const prompt = await assembleAutonomousPrompt(profile, taskText, {
+    context: options.context,
+    maxInputTokens: options.maxInputTokens,
+    stageIds: profile.workflow.stages.map((stage) => stage.id),
+  });
+  const plan = await compileAutonomousPlan(profile, taskText, {
+    taskDigest,
+    activeToolNames,
+    selectedToolNames,
+  });
+  return {
+    schema: "bioprism-python-autonomous-task/0.1",
+    task_digest: taskDigest,
+    domain_profile: profile,
+    domain_pack: pack,
+    workflow: profile.workflow,
+    selection_context: {
+      domain: profile.domain,
+      capability: options.capability ?? profile.default_capability,
+      risk_class: profile.risk_class,
+      task_family: profile.workflow.workflow_id,
+    },
+    required_capabilities: profile.required_model_capabilities,
+    prompt,
+    plan,
+    execution: "not_started",
+    credential_posture: "caller_supplied_opaque_handle_not_returned",
+  };
 }
 
 function assertSafeTransientValue(value: unknown, depth = 0): void {
@@ -1157,24 +1263,126 @@ export class AutonomousAgent {
   async blueprint(task: string, options: { domain?: AutonomousDomainName; capability?: string; context?: readonly AutonomousPromptChunk[]; hints?: readonly string[]; maxInputTokens?: number; tools?: readonly string[] } = {}): Promise<AutonomousAutoBlueprint> {
     const taskText = boundedText("autonomous task", task, 32_000);
     const route = await this.route(taskText, { domain: options.domain, hints: options.hints });
-    if (route.abstained || !route.primary_domain) return { schema: "bioprism-python-autonomous-auto-blueprint/0.1", route, blueprint: null, execution: "not_started", authorization: "route_and_plan_only; no_provider_or_tool_effects_authorized" };
+    if (route.abstained || !route.primary_domain) return { schema: "bioprism-python-autonomous-auto-blueprint/0.1", route, blueprint: null, cross_domain_blueprint: null, execution: "not_started", authorization: "route_and_plan_only; no_provider_or_tool_effects_authorized" };
+    if (route.cross_domain) {
+      const crossDomain = await this.buildCrossDomainBlueprint(taskText, route, options);
+      return { schema: "bioprism-python-autonomous-auto-blueprint/0.1", route, blueprint: crossDomain.child_blueprints[0] ?? null, cross_domain_blueprint: crossDomain, execution: "not_started", authorization: "route_and_plan_only; no_provider_or_tool_effects_authorized" };
+    }
     const profile = await profileFor(route.primary_domain);
-    const pack = await buildDomainPack(profile);
-    const selectedDomains = route.selected_domains.length ? route.selected_domains : [route.primary_domain];
-    const activeToolNames = options.tools ? [...options.tools] : await this.liveToolNames(selectedDomains);
-    const prompt = await assembleAutonomousPrompt(profile, taskText, { context: [...(options.context ?? []), ...(route.cross_domain ? [{ id: "routed-domains", content: `Selected domains: ${selectedDomains.join(", ")}`, required: true, priority: 100 }] : [])], maxInputTokens: options.maxInputTokens, stageIds: profile.workflow.stages.map((stage) => stage.id) });
-    const plan = await compileAutonomousPlan(profile, taskText, { taskDigest: route.task_digest, activeToolNames, selectedToolNames: activeToolNames });
-    return { schema: "bioprism-python-autonomous-auto-blueprint/0.1", route, blueprint: { schema: "bioprism-python-autonomous-task/0.1", task_digest: route.task_digest, domain_profile: profile, domain_pack: pack, workflow: profile.workflow, selection_context: { domain: profile.domain, capability: options.capability ?? profile.default_capability, risk_class: profile.risk_class, task_family: profile.workflow.workflow_id }, required_capabilities: profile.required_model_capabilities, prompt, plan, execution: "not_started", credential_posture: "caller_supplied_opaque_handle_not_returned" }, execution: "not_started", authorization: "route_and_plan_only; no_provider_or_tool_effects_authorized" };
+    const activeToolNames = options.tools ? [...options.tools] : await this.liveToolNames([route.primary_domain]);
+    const blueprint = await buildTaskBlueprint(profile, taskText, { taskDigest: route.task_digest, capability: options.capability, context: options.context, maxInputTokens: options.maxInputTokens, activeToolNames, selectedToolNames: activeToolNames });
+    return { schema: "bioprism-python-autonomous-auto-blueprint/0.1", route, blueprint, cross_domain_blueprint: null, execution: "not_started", authorization: "route_and_plan_only; no_provider_or_tool_effects_authorized" };
+  }
+
+  /** Build a bounded fan-out/fan-in plan without contacting a provider or executing a tool. */
+  private async buildCrossDomainBlueprint(
+    taskText: string,
+    route: AutonomousRouteProposal,
+    options: { capability?: string; context?: readonly AutonomousPromptChunk[]; hints?: readonly string[]; maxInputTokens?: number; tools?: readonly string[]; subtasks?: readonly AutonomousCrossDomainSubtask[] } = {},
+  ): Promise<AutonomousCrossDomainBlueprint> {
+    const selectedDomains = route.selected_domains.slice(0, AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN);
+    if (selectedDomains.length < 2) throw new ProviderRuntimeError("cross-domain blueprint requires at least two routed domains");
+    const parentDigest = route.task_digest;
+    const supplied: AutonomousCrossDomainSubtask[] = options.subtasks ? [...options.subtasks] : selectedDomains.map((domain, index) => ({
+      id: `child-${index + 1}`,
+      domain,
+      task: `Analyze the ${domain} aspects of: ${taskText}`,
+    } satisfies AutonomousCrossDomainSubtask));
+    if (!supplied.length || supplied.length > AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN) throw new ArgumentError("cross-domain subtasks must contain between 1 and 8 items");
+    const selectedSet = new Set(selectedDomains);
+    const childIds = new Set<string>();
+    const children: AutonomousTaskBlueprint[] = [];
+    const childMetadata: Array<{ id: string; domain: AutonomousDomainName; task_digest: string; workflow_id: string; workflow_digest: string }> = [];
+    for (let index = 0; index < supplied.length; index += 1) {
+      const subtask = supplied[index];
+      if (!isObject(subtask) || !AUTONOMOUS_DOMAIN_NAMES.includes(subtask.domain)) throw new ArgumentError("cross-domain subtask has an unsupported domain");
+      if (!selectedSet.has(subtask.domain)) throw new ArgumentError(`cross-domain subtask domain ${subtask.domain} was not selected by the route`);
+      const id = boundedIdentifier("cross-domain child id", subtask.id ?? `child-${index + 1}`);
+      if (childIds.has(id)) throw new ArgumentError(`cross-domain child id is duplicated: ${id}`);
+      childIds.add(id);
+      const childTask = boundedText(`cross-domain child ${id} task`, subtask.task, 32_000);
+      const profile = await profileFor(subtask.domain);
+      const childContext: AutonomousPromptChunk[] = [
+        ...(options.context ?? []),
+        { id: "cross-domain-parent", content: `Parent route digest: ${parentDigest}; child id: ${id}`, required: true, priority: 100 },
+        ...(subtask.context ?? []),
+      ];
+      const activeToolNames = options.tools ? [...options.tools] : await this.liveToolNames([subtask.domain]);
+      const child = await buildTaskBlueprint(profile, childTask, {
+        capability: subtask.capability,
+        context: childContext,
+        maxInputTokens: options.maxInputTokens,
+        activeToolNames,
+        selectedToolNames: activeToolNames,
+      });
+      children.push(child);
+      childMetadata.push({ id, domain: profile.domain, task_digest: child.task_digest, workflow_id: profile.workflow.workflow_id, workflow_digest: profile.workflow.workflow_digest });
+    }
+    const synthesisProfile = await profileFor("cross_domain");
+    const synthesisContext: AutonomousPromptChunk[] = [
+      ...(options.context ?? []),
+      {
+        id: "cross-domain-children",
+        content: JSON.stringify({ parent_task_digest: parentDigest, children: childMetadata }),
+        required: true,
+        priority: 100,
+      },
+    ];
+    const synthesisTask = `Synthesize the domain analyses for: ${taskText}`;
+    const synthesisTools = options.tools ? [...options.tools] : await this.liveToolNames([...selectedDomains, "cross_domain"]);
+    const synthesis = await buildTaskBlueprint(synthesisProfile, synthesisTask, {
+      capability: options.capability ?? synthesisProfile.default_capability,
+      context: synthesisContext,
+      maxInputTokens: options.maxInputTokens,
+      activeToolNames: synthesisTools,
+      selectedToolNames: synthesisTools,
+    });
+    const descriptor = {
+      schema: AUTONOMOUS_CROSS_DOMAIN_SCHEMA,
+      task_digest: parentDigest,
+      child_ids: [...childIds],
+      children: childMetadata,
+      synthesis_task_digest: synthesis.task_digest,
+      route_digest: route.route_digest,
+      execution: "not_started" as const,
+      authorization: "caller_approval_per_provider_or_effect_boundary" as const,
+    };
+    return {
+      schema: AUTONOMOUS_CROSS_DOMAIN_SCHEMA,
+      task_digest: parentDigest,
+      child_ids: [...childIds],
+      child_blueprints: children,
+      synthesis_blueprint: synthesis,
+      dependency_graph: { fan_out: childMetadata.map(({ id, domain, task_digest }) => ({ id, domain, task_digest })), fan_in: synthesis.task_digest },
+      plan_digest: await digestJson(descriptor),
+      execution: "not_started",
+      authorization: "caller_approval_per_provider_or_effect_boundary",
+    };
   }
 
   async run(task: string, options: AutonomousRunOptions = {}): Promise<AutonomousRunResult> {
     const taskText = boundedText("autonomous task", task, 32_000);
     const route = await this.route(taskText, { domain: options.domain, hints: options.hints });
-    if (route.abstained || !route.primary_domain) return { schema: "bioprism-typescript-autonomous-run/0.1", status: "route_review_required", route, blueprint: null, selection: null, response: null, tool_loop: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
+    if (route.cross_domain && options.domain === undefined) {
+      const cross = await this.runCrossDomain(taskText, options);
+      return {
+        schema: "bioprism-typescript-autonomous-run/0.1",
+        status: cross.status === "completed" ? "completed" : cross.status === "approval_required" ? "approval_required" : cross.status === "child_failed" ? "child_failed" : cross.status === "children_partial" ? "cross_domain_partial" : "route_review_required",
+        route,
+        blueprint: cross.blueprint?.synthesis_blueprint ?? null,
+        selection: cross.synthesis?.selection ?? null,
+        response: cross.synthesis?.response ?? null,
+        tool_loop: cross.synthesis?.tool_loop ?? null,
+        cross_domain: cross,
+        learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only",
+        retention: "provider_response_local; value_only_learning_projection",
+      };
+    }
+    if (route.abstained || !route.primary_domain) return { schema: "bioprism-typescript-autonomous-run/0.1", status: "route_review_required", route, blueprint: null, selection: null, response: null, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
     const blueprintEnvelope = await this.blueprint(taskText, { domain: route.primary_domain, capability: options.capability, context: options.context, maxInputTokens: options.maxInputTokens, tools: options.tools?.map((tool) => tool.name), hints: options.hints });
     const blueprint = blueprintEnvelope.blueprint;
-    if (!blueprint) return { schema: "bioprism-typescript-autonomous-run/0.1", status: "route_review_required", route, blueprint: null, selection: null, response: null, tool_loop: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
-    if (options.approveProviderCall !== true) return { schema: "bioprism-typescript-autonomous-run/0.1", status: "approval_required", route, blueprint, selection: null, response: null, tool_loop: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
+    if (!blueprint) return { schema: "bioprism-typescript-autonomous-run/0.1", status: "route_review_required", route, blueprint: null, selection: null, response: null, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
+    if (options.approveProviderCall !== true) return { schema: "bioprism-typescript-autonomous-run/0.1", status: "approval_required", route, blueprint, selection: null, response: null, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
     const candidates = options.candidates ? [...options.candidates] : this.models();
     if (!candidates.length) throw new ProviderRuntimeError("autonomous run requires at least one registered model candidate");
     const selectedDomains = route.selected_domains.length ? route.selected_domains : [route.primary_domain];
@@ -1187,10 +1395,108 @@ export class AutonomousAgent {
     if (tools.length || options.authorizeAndExecute || this.toolRuntimeForRun()) {
       const authorizeAndExecute = options.authorizeAndExecute ?? (this.toolRuntimeForRun() ? (calls: ProviderToolCall[]) => this.toolRuntimeForRun()!.authorizeAndExecute(calls, { domains: selectedDomains, approveEffects: options.approveEffects }) : async (calls: ProviderToolCall[]) => calls.map((call) => ({ callId: call.id, approved: false, isError: true, content: { status: "authorization_required", tool: call.name, secret_material: "never_returned" } })));
       const loop = await this.runtime.invokeToolLoop(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, authorizeAndExecute, signal: options.signal, observer: feedbackObserver });
-      return { schema: "bioprism-typescript-autonomous-run/0.1", status: "completed", route, blueprint, selection: loop.selection, response: loop.loop.finalResponse, tool_loop: { status: loop.loop.status, turns: loop.loop.turns, toolCalls: loop.loop.toolCalls }, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
+      return { schema: "bioprism-typescript-autonomous-run/0.1", status: "completed", route, blueprint, selection: loop.selection, response: loop.loop.finalResponse, tool_loop: { status: loop.loop.status, turns: loop.loop.turns, toolCalls: loop.loop.toolCalls }, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
     }
     const result = await this.runtime.invoke(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: feedbackObserver });
-    return { schema: "bioprism-typescript-autonomous-run/0.1", status: "completed", route, blueprint, selection: result.selection, response: result.response, tool_loop: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
+    return { schema: "bioprism-typescript-autonomous-run/0.1", status: "completed", route, blueprint, selection: result.selection, response: result.response, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
+  }
+
+  /** Execute routed specialist children sequentially, then hand bounded local outputs to synthesis. */
+  async runCrossDomain(task: string, options: AutonomousCrossDomainRunOptions = {}): Promise<AutonomousCrossDomainRunResult> {
+    const taskText = boundedText("cross-domain task", task, 32_000);
+    const route = await this.route(taskText, { hints: options.hints });
+    const learning = this.learner ? "online_bandit_feedback_available" as const : "provider_health_feedback_only" as const;
+    if (route.abstained || !route.cross_domain || route.selected_domains.length < 2) {
+      return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: "route_review_required", route, blueprint: null, child_runs: [], synthesis: null, completed_children: 0, total_children: route.selected_domains.length, partial: false, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
+    }
+    const blueprint = await this.buildCrossDomainBlueprint(taskText, route, {
+      capability: options.capability,
+      context: options.context,
+      maxInputTokens: options.maxInputTokens,
+      tools: options.tools?.map((tool) => tool.name),
+      subtasks: options.subtasks,
+    });
+    if (options.approveProviderCall !== true) {
+      return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: "approval_required", route, blueprint, child_runs: [], synthesis: null, completed_children: 0, total_children: blueprint.child_blueprints.length, partial: false, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
+    }
+    const candidates = options.candidates ? [...options.candidates] : this.models();
+    if (!candidates.length) throw new ProviderRuntimeError("cross-domain run requires at least one registered model candidate");
+    const childRuns: AutonomousCrossDomainChildRun[] = [];
+    const childOutputs: Array<{ id: string; domain: AutonomousDomainName; status: string; output: string }> = [];
+    for (let index = 0; index < blueprint.child_blueprints.length; index += 1) {
+      const child = blueprint.child_blueprints[index];
+      if (!child) throw new ProviderRuntimeError(`cross-domain child blueprint ${index + 1} is missing`);
+      const childId = blueprint.child_ids[index] ?? `child-${index + 1}`;
+      const taskMessage = child.prompt.messages.find((message) => message.source_id === "task");
+      if (!taskMessage) throw new ProviderRuntimeError(`cross-domain child ${childId} has no bounded task message`);
+      const childResult = await this.run(taskMessage.content, {
+        domain: child.domain_profile.domain,
+        capability: child.selection_context.capability,
+        candidates,
+        credential: options.credential,
+        credentialFor: options.credentialFor,
+        context: [
+          ...(options.context ?? []),
+          { id: "cross-domain-parent", content: `Parent route digest: ${route.route_digest}; child id: ${childId}`, required: true, priority: 100 },
+        ],
+        hints: [],
+        maxInputTokens: options.maxInputTokens,
+        maxOutputTokens: options.maxOutputTokens,
+        temperature: options.temperature,
+        tools: options.tools,
+        authorizeAndExecute: options.authorizeAndExecute,
+        approveProviderCall: true,
+        approveEffects: options.approveEffects,
+        signal: options.signal,
+        observer: options.observer,
+      });
+      const rawOutput = childResult.response?.text ?? (childResult.response?.structured === null || childResult.response?.structured === undefined ? "" : JSON.stringify(childResult.response.structured));
+      const boundedOutput = rawOutput.length > 48_000 ? `${rawOutput.slice(0, 48_000)}\n[child output bounded locally]` : rawOutput;
+      const output = boundedOutput.trim() || "[child returned no textual or structured output]";
+      childOutputs.push({ id: childId, domain: child.domain_profile.domain, status: childResult.status, output });
+      childRuns.push({ id: childId, domain: child.domain_profile.domain, task_digest: child.task_digest, result: childResult, output_digest: rawOutput ? await digestJson({ output: rawOutput }) : null, output_bytes: bytes(rawOutput) });
+      if (childResult.status !== "completed" && !options.allowPartial) break;
+    }
+    const completedChildren = childRuns.filter((child) => child.result.status === "completed").length;
+    const allChildrenCompleted = childRuns.length === blueprint.child_blueprints.length && completedChildren === blueprint.child_blueprints.length;
+    const hasApproval = childRuns.some((child) => child.result.status === "approval_required");
+    if (!allChildrenCompleted && !options.allowPartial) {
+      return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: hasApproval ? "approval_required" : "child_failed", route, blueprint, child_runs: childRuns, synthesis: null, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: completedChildren > 0, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
+    }
+    if (options.synthesize === false) {
+      return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: allChildrenCompleted ? "children_completed" : "children_partial", route, blueprint, child_runs: childRuns, synthesis: null, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: !allChildrenCompleted, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
+    }
+    const synthesisTaskMessage = blueprint.synthesis_blueprint.prompt.messages.find((message) => message.source_id === "task");
+    if (!synthesisTaskMessage) throw new ProviderRuntimeError("cross-domain synthesis has no bounded task message");
+    const synthesisContext: AutonomousPromptChunk[] = [
+      ...(options.context ?? []),
+      { id: "cross-domain-parent", content: `Parent route digest: ${route.route_digest}`, required: true, priority: 100 },
+      ...childOutputs.map((child) => ({
+        id: `cross-domain-output-${child.id}`,
+        content: JSON.stringify(child),
+        priority: 90,
+      })),
+    ];
+    const synthesis = await this.run(synthesisTaskMessage.content, {
+      domain: "cross_domain",
+      capability: "cross_domain_synthesis",
+      candidates,
+      credential: options.credential,
+      credentialFor: options.credentialFor,
+      context: synthesisContext,
+      hints: [],
+      maxInputTokens: options.maxInputTokens,
+      maxOutputTokens: options.maxOutputTokens,
+      temperature: options.temperature,
+      tools: options.tools,
+      authorizeAndExecute: options.authorizeAndExecute,
+      approveProviderCall: true,
+      approveEffects: options.approveEffects,
+      signal: options.signal,
+      observer: options.observer,
+    });
+    const status: AutonomousCrossDomainRunStatus = synthesis.status === "completed" ? (allChildrenCompleted ? "completed" : "children_partial") : synthesis.status === "approval_required" ? "approval_required" : "child_failed";
+    return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status, route, blueprint, child_runs: childRuns, synthesis, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: !allChildrenCompleted, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
   }
 
   /** Apply explicit evaluator feedback locally; optionally reconcile the same value-only update through the control plane. */

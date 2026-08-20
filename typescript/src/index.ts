@@ -127,6 +127,9 @@ export {
   AUTONOMOUS_DOMAIN_TOOL_PLAN_SCHEMA,
   AUTONOMOUS_DOMAIN_TOOL_REGISTRY_SCHEMA,
   AUTONOMOUS_DOMAIN_TOOL_SCHEMA,
+  AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN,
+  AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA,
+  AUTONOMOUS_CROSS_DOMAIN_SCHEMA,
   AUTONOMOUS_LEARNING_SCHEMA,
   AUTONOMOUS_PLAN_SCHEMA,
   AUTONOMOUS_PROMPT_SCHEMA,
@@ -145,6 +148,12 @@ export {
 } from "./autonomous.js";
 export type {
   AutonomousAutoBlueprint,
+  AutonomousCrossDomainBlueprint,
+  AutonomousCrossDomainChildRun,
+  AutonomousCrossDomainRunOptions,
+  AutonomousCrossDomainRunResult,
+  AutonomousCrossDomainRunStatus,
+  AutonomousCrossDomainSubtask,
   AutonomousDomainName,
   AutonomousDomainPack,
   AutonomousDomainProfile,

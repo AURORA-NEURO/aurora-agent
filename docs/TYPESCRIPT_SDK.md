@@ -1278,3 +1278,27 @@ only after an explicit evaluator reward, failed-outcome flag, or outcome digest 
 latency are separate from task quality; no provider health event is treated as reinforcement.
 This gives applications a safe loop for model-selection adaptation without pretending that an
 unverified response is scientific, clinical, operational, or release truth.
+
+### Cross-domain fan-out/fan-in
+
+Routing to multiple domains is executable at the application boundary rather than being a label
+attached to a single-domain prompt. `AutonomousAgent.blueprint()` returns a
+`cross_domain_blueprint` with one bounded child workflow per selected domain and a final
+`cross_domain` synthesis workflow. Each child retains its own domain profile, workflow digest,
+prompt budget, required model capabilities, exact tool allow-list, and task digest. The dependency
+graph is explicit: children fan out independently, then synthesis fans in after their results.
+
+`runCrossDomain()` runs children sequentially so provider selection, tool calls, effect approvals,
+failures, and evaluator observations remain attributable to a child. The synthesis prompt receives
+only bounded local output text plus child IDs, domains, statuses, and output digests. A child that is
+approval-blocked or fails prevents synthesis by default. `allowPartial: true` is an explicit choice
+to synthesize incomplete evidence; `synthesize: false` returns child results without claiming an
+integrated conclusion. `run()` automatically delegates to this path when it receives an ambiguous
+task with more than one selected domain and no explicit domain override.
+
+The result preserves `completed_children`, `total_children`, `partial`, child-local run results,
+and synthesis status. The returned provider responses stay application-local; the cross-domain
+metadata is suitable for caller-owned audit and evaluator code but is not sent to the value-only
+control plane. This keeps domain-specific standards intact while allowing biomedical, neuroscience,
+science, coding, evaluation, operations, enterprise, multimodal, browser, data, and multi-agent
+specialists to participate in one bounded workflow.
