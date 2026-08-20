@@ -1302,6 +1302,15 @@ missing/rejected signals, evaluator digest, and explicit expected-witness mismat
 offline metadata evaluation: it does not replay a provider call, execute a tool, mutate bandit
 state, or authorize a mission. Raw evidence remains outside the SDK and is represented only by a
 caller-supplied digest.
+`autonomousReplayEvidenceDigest()` and `AutonomousBrainControlPlaneBridge.replay()` use the
+shared `bioprism-brain-domain-evaluator/0.1` evidence object and its Python/Rust-compatible
+canonical number spelling. The bridge accepts an `ApiClient` structurally, maps local invocation
+and evaluator observations to the existing `brain_model_health` metadata contract, and forwards
+only normalized replay signals, reference digests, limitations, and evaluator overrides to
+`brain_replay_evaluate`. It never sends the local evaluator ID as an authority claim, task text,
+prompt, response, tool argument, credential handle, or key. Passing `modelHealthBridge` to
+`AutonomousAgent` automatically mirrors provider outcomes to the remote health ledger while the
+local selector and approval boundaries remain authoritative.
 The high-level `AutonomousAgent` accepts the same store through `modelHealthStore`; it then wires
 the persisted selector and metadata-only invocation observer into ordinary single- and
 cross-domain runs automatically. Explicit evaluator updates remain caller-controlled.
@@ -1317,6 +1326,30 @@ await controller.recordEvaluation({
   provider: "openai", model: "gpt-5", domain: "coding", capability: "reasoning",
   riskClass: "review_required", evaluatorId: "coding-reviewer", evaluatorVersion: "0.1",
   reward: 0.9, passed: true, evidenceDigest: callerOwnedEvidenceDigest,
+});
+```
+
+For a remote health/replay plane, use the same client that already exposes the typed brain tools:
+
+```typescript
+const bridge = new AutonomousBrainControlPlaneBridge(api);
+const agent = new AutonomousAgent(runtime, { modelHealthBridge: bridge });
+const evidenceDigest = await autonomousReplayEvidenceDigest({
+  domain: "engineering",
+  capability: "code_change",
+  risk_class: "reversible",
+  signals: { schema_valid: true, tests_passed: true, evidence_complete: true },
+});
+await bridge.replay({
+  run_id: "replay-001",
+  domain: "engineering",
+  capability: "code_change",
+  risk_class: "reversible",
+  evaluator_id: "engineering-quality",
+  evaluator_version: "1",
+  execution_status: "completed",
+  signals: { schema_valid: true, tests_passed: true, evidence_complete: true },
+  evidence_digest: evidenceDigest,
 });
 ```
 

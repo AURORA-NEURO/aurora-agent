@@ -1,6 +1,6 @@
 import { ArgumentError, ProviderRuntimeError, isObject } from "./errors.js";
 import type { ApiClient } from "./client.js";
-import { AutonomousModelHealthController, type AutonomousModelHealthStore } from "./autonomous-control.js";
+import { AutonomousBrainControlPlaneBridge, AutonomousModelHealthController, type AutonomousModelHealthStore } from "./autonomous-control.js";
 import type { AutonomousLearningController } from "./autonomous-learning.js";
 import {
   AutonomousRuntime,
@@ -421,6 +421,8 @@ export interface AutonomousAgentOptions {
   selector?: AutonomousModelSelector;
   /** Optional caller-owned persisted health ledger used for selection and invocation telemetry. */
   modelHealthStore?: AutonomousModelHealthStore;
+  /** Optional Rust/Python control-plane sink for restart-safe transport health observations. */
+  modelHealthBridge?: AutonomousBrainControlPlaneBridge;
   apiClient?: ApiClient;
   toolCatalogue?: ToolCatalogue;
   toolExecutor?: DomainToolExecutor;
@@ -1240,6 +1242,7 @@ export class AutonomousAgent {
   readonly llm: LLMRuntime;
   readonly runtime: AutonomousRuntime;
   readonly modelHealthController?: AutonomousModelHealthController;
+  readonly modelHealthBridge?: AutonomousBrainControlPlaneBridge;
   readonly learner?: AutonomousOnlineLearner;
   private readonly apiClient?: ApiClient;
   private readonly modelsById = new Map<string, AutonomousModelCandidate>();
@@ -1258,6 +1261,8 @@ export class AutonomousAgent {
     this.apiClient = options.apiClient;
     this.learner = options.learner;
     this.modelHealthController = options.modelHealthStore === undefined ? undefined : new AutonomousModelHealthController(options.modelHealthStore);
+    if (options.modelHealthBridge !== undefined && !(options.modelHealthBridge instanceof AutonomousBrainControlPlaneBridge)) throw new ArgumentError("AutonomousAgent modelHealthBridge must be an AutonomousBrainControlPlaneBridge");
+    this.modelHealthBridge = options.modelHealthBridge;
     this.toolCatalogue = options.toolCatalogue;
     this.toolExecutor = options.toolExecutor;
     this.toolApprover = options.toolApprover;
@@ -1430,7 +1435,8 @@ export class AutonomousAgent {
     const request: ProviderRequest = { model: "autonomous-selection-placeholder", messages, maxOutputTokens: options.maxOutputTokens ?? 1_024, temperature: options.temperature, tools: tools.length ? tools : undefined, toolChoice: tools.length ? "auto" : undefined };
     const executionPlan = { task: taskText, domain: blueprint.domain_profile.domain, capability: options.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class, requiredCapabilities: blueprint.required_capabilities, candidates, request };
     const healthObserver = this.modelHealthController?.observer({ domain: blueprint.domain_profile.domain, capability: executionPlan.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class });
-    const feedbackObserver = composeInvocationObservers(options.observer, healthObserver);
+    const remoteHealthObserver = this.modelHealthBridge?.observer({ domain: blueprint.domain_profile.domain, capability: executionPlan.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class });
+    const feedbackObserver = composeInvocationObservers(options.observer, healthObserver, remoteHealthObserver);
     if (tools.length || options.authorizeAndExecute || this.toolRuntimeForRun()) {
       const authorizeAndExecute = options.authorizeAndExecute ?? (this.toolRuntimeForRun() ? (calls: ProviderToolCall[]) => this.toolRuntimeForRun()!.authorizeAndExecute(calls, { domains: selectedDomains, approveEffects: options.approveEffects }) : async (calls: ProviderToolCall[]) => calls.map((call) => ({ callId: call.id, approved: false, isError: true, content: { status: "authorization_required", tool: call.name, secret_material: "never_returned" } })));
       const loop = await this.runtime.invokeToolLoop(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, authorizeAndExecute, signal: options.signal, observer: feedbackObserver });

@@ -10,8 +10,16 @@ import {
   type ProviderInvocationOutcome,
 } from "./llm.js";
 import type { AutonomousDomainName } from "./autonomous.js";
-import { digestJson } from "./tooling.js";
-import type { JsonObject } from "./types.js";
+import { canonicalJson, digestCanonicalJsonText, digestJson } from "./tooling.js";
+import type {
+  BrainHealthStatus,
+  BrainModelHealthArgs,
+  BrainModelHealthResult,
+  BrainReplayEvaluateArgs,
+  BrainReplayEvaluateResult,
+  JsonObject,
+  RestToolResponse,
+} from "./types.js";
 
 export const AUTONOMOUS_MODEL_OBSERVATION_SCHEMA = "bioprism-typescript-autonomous-model-observation/0.1" as const;
 export const AUTONOMOUS_MODEL_HEALTH_SCHEMA = "bioprism-typescript-autonomous-model-health/0.1" as const;
@@ -19,6 +27,7 @@ export const AUTONOMOUS_MODEL_HEALTH_EVENT_SCHEMA = "bioprism-typescript-autonom
 export const AUTONOMOUS_MODEL_HEALTH_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-model-health-snapshot/0.1" as const;
 export const AUTONOMOUS_REPLAY_CASE_SCHEMA = "bioprism-typescript-autonomous-replay-case/0.1" as const;
 export const AUTONOMOUS_REPLAY_REPORT_SCHEMA = "bioprism-typescript-autonomous-replay-report/0.1" as const;
+export const BRAIN_DOMAIN_EVALUATOR_SCHEMA = "bioprism-brain-domain-evaluator/0.1" as const;
 export const AUTONOMOUS_MODEL_HEALTH_MAX_EVENTS = 16_384;
 export const AUTONOMOUS_MODEL_HEALTH_MAX_QUERY_LIMIT = 256;
 export const AUTONOMOUS_REPLAY_MAX_CASES = 4_096;
@@ -32,6 +41,7 @@ const OBSERVATION_KINDS = ["invocation", "evaluation"] as const;
 
 type ObservationOutcome = typeof OUTCOMES[number];
 type ObservationKind = typeof OBSERVATION_KINDS[number];
+export type AutonomousReplaySignal = boolean | number;
 
 export interface AutonomousModelObservation extends JsonObject {
   schema: typeof AUTONOMOUS_MODEL_OBSERVATION_SCHEMA;
@@ -168,6 +178,11 @@ export interface AutonomousReplayCase extends JsonObject {
   evaluator_version: string;
   execution_status: "completed" | "failed" | "incomplete";
   signals: Record<string, number>;
+  references: string[];
+  limitations: string[];
+  required_signals: string[] | null;
+  signal_weights: Record<string, number> | null;
+  pass_threshold: number | null;
   evidence_digest: string;
   expected_reward: number | null;
   expected_passed: boolean | null;
@@ -184,8 +199,13 @@ export interface AutonomousReplayCaseInput {
   evaluator_id: string;
   evaluator_version: string;
   execution_status: AutonomousReplayCase["execution_status"];
-  signals: Record<string, number>;
-  evidence_digest: string;
+  signals: Record<string, AutonomousReplaySignal>;
+  evidence_digest?: string | null;
+  references?: readonly string[];
+  limitations?: readonly string[];
+  required_signals?: readonly string[];
+  signal_weights?: Record<string, number>;
+  pass_threshold?: number;
   expected_reward?: number | null;
   expected_passed?: boolean | null;
   expected_evaluation_digest?: string | null;
@@ -226,6 +246,12 @@ export interface AutonomousHealthSelectorContext {
   riskClass: string;
 }
 
+/** Minimal structural client required by the cross-runtime control-plane adapter. */
+export interface AutonomousBrainControlTransport {
+  brainModelHealth(args?: BrainModelHealthArgs): Promise<RestToolResponse<BrainModelHealthResult>>;
+  brainReplayEvaluate(args: BrainReplayEvaluateArgs): Promise<RestToolResponse<BrainReplayEvaluateResult>>;
+}
+
 function clone<T>(value: T): T {
   return structuredClone(value);
 }
@@ -249,6 +275,65 @@ function digest(name: string, value: unknown, nullable = false): string | null {
 function finite(name: string, value: unknown, minimum: number, maximum: number): number {
   if (typeof value !== "number" || !Number.isFinite(value) || value < minimum || value > maximum) throw new ArgumentError(`${name} must be finite and within [${minimum}, ${maximum}]`);
   return value;
+}
+
+function normalizeReplaySignals(value: unknown, maximum = AUTONOMOUS_REPLAY_MAX_SIGNALS): Record<string, number> {
+  if (!isObject(value) || Object.keys(value).length === 0 || Object.keys(value).length > maximum) throw new ArgumentError(`replay signals must contain 1..${maximum} entries`);
+  const normalized: Record<string, number> = {};
+  for (const [name, raw] of Object.entries(value)) {
+    identifier("replay signal", name, 128);
+    normalized[name] = typeof raw === "boolean" ? (raw ? 1 : 0) : finite(`replay signal ${name}`, raw, 0, 1);
+  }
+  return normalized;
+}
+
+function canonicalReplayEvidenceJson(evidence: { schema: string; domain: string; capability: string; risk_class: string; signals: Record<string, number>; references: string[]; limitations: string[]; retention: string }): string {
+  const entries = Object.keys(evidence).sort().map((key) => {
+    const value = evidence[key as keyof typeof evidence];
+    if (key !== "signals") return `${JSON.stringify(key)}:${canonicalJson(value)}`;
+    const signals = Object.keys(evidence.signals).sort().map((signal) => {
+      const encoded = canonicalJson(evidence.signals[signal]);
+      // Python and serde_json retain the integral float marker (1.0/0.0) after
+      // normalizing replay signals; preserve that spelling for cross-runtime IDs.
+      const number = Number.isInteger(evidence.signals[signal]) && !encoded.includes(".") && !encoded.includes("e") && !encoded.includes("E") ? `${encoded}.0` : encoded;
+      return `${JSON.stringify(signal)}:${number}`;
+    });
+    return `${JSON.stringify(key)}:{${signals.join(",")}}`;
+  });
+  return `{${entries.join(",")}}`;
+}
+
+interface AutonomousReplayEvidenceInput {
+  domain: string;
+  capability: string;
+  risk_class: string;
+  signals: Record<string, AutonomousReplaySignal>;
+  references?: readonly string[];
+  limitations?: readonly string[];
+}
+
+/** Compute the Rust/Python-compatible digest for value-only domain replay evidence. */
+export async function autonomousReplayEvidenceDigest(input: AutonomousReplayEvidenceInput): Promise<string> {
+  if (!isObject(input)) throw new ArgumentError("replay evidence must be an object");
+  identifier("replay evidence domain", input.domain);
+  identifier("replay evidence capability", input.capability);
+  identifier("replay evidence risk_class", input.risk_class);
+  const signals = normalizeReplaySignals(input.signals, 64);
+  const references = input.references === undefined ? [] : [...input.references];
+  if (references.length > 64 || references.some((reference) => typeof reference !== "string" || !DIGEST.test(reference))) throw new ArgumentError("replay evidence references must contain at most 64 lowercase SHA-256 digests");
+  const limitations = input.limitations === undefined ? [] : [...input.limitations];
+  if (limitations.length > 32 || limitations.some((limitation) => typeof limitation !== "string" || limitation.length > 2_048 || /[\u0000-\u001f]/.test(limitation))) throw new ArgumentError("replay evidence limitations must contain at most 32 bounded strings");
+  const evidence = {
+    schema: BRAIN_DOMAIN_EVALUATOR_SCHEMA,
+    domain: input.domain,
+    capability: input.capability,
+    risk_class: input.risk_class,
+    signals,
+    references,
+    limitations,
+    retention: "value_only_digests_and_signal_scores",
+  };
+  return digestCanonicalJsonText(canonicalReplayEvidenceJson(evidence));
 }
 
 function nonnegativeInteger(name: string, value: unknown): number | null {
@@ -549,7 +634,113 @@ export class AutonomousModelHealthController {
   }
 }
 
-function normalizeReplayCase(input: AutonomousReplayCaseInput): AutonomousReplayCase {
+function toBrainHealthStatus(observation: AutonomousModelObservation): BrainHealthStatus {
+  if (["success", "failure", "timeout", "rate_limited", "circuit_open", "unknown"].includes(observation.status)) return observation.status as BrainHealthStatus;
+  return observation.outcome === "success" ? "success" : observation.outcome === "failure" ? "failure" : "unknown";
+}
+
+function totalObservationTokens(observation: AutonomousModelObservation): number | undefined {
+  const tokens = [observation.input_tokens, observation.output_tokens].filter((value): value is number => value !== null);
+  if (tokens.length === 0) return undefined;
+  const total = tokens.reduce((sum, value) => sum + value, 0);
+  if (!Number.isSafeInteger(total) || total > 1_000_000_000) throw new ArgumentError("model observation token total exceeds the control-plane bound");
+  return total;
+}
+
+/** Translate local metadata-only learning signals to the Rust/Python brain control plane. */
+export class AutonomousBrainControlPlaneBridge {
+  constructor(readonly client: AutonomousBrainControlTransport) {
+    if (!client || typeof client.brainModelHealth !== "function" || typeof client.brainReplayEvaluate !== "function") throw new ArgumentError("brain control bridge requires model-health and replay client methods");
+  }
+
+  async recordObservation(input: AutonomousModelObservationInput): Promise<RestToolResponse<BrainModelHealthResult>> {
+    const observation = normalizeObservation(input);
+    const args: BrainModelHealthArgs = {
+      operation: "record",
+      provider: observation.provider,
+      model: observation.model,
+      status: toBrainHealthStatus(observation),
+      latency_ms: Math.round(observation.latency_ms),
+    };
+    const tokens = totalObservationTokens(observation);
+    if (tokens !== undefined) args.tokens = tokens;
+    if (observation.quality_reward !== null) args.quality = observation.quality_reward;
+    return this.client.brainModelHealth(args);
+  }
+
+  async recordEvaluation(input: { provider: string; model: string; domain: string; capability: string; risk_class: string; evaluator_id: string; evaluator_version: string; reward: number; passed: boolean; evidence_digest?: string | null }): Promise<RestToolResponse<BrainModelHealthResult>> {
+    const observation = normalizeObservation({
+      provider: input.provider,
+      model: input.model,
+      domain: input.domain,
+      capability: input.capability,
+      risk_class: input.risk_class,
+      status: "evaluated",
+      outcome: "unknown",
+      observation_kind: "evaluation",
+      latency_ms: 0,
+      quality_reward: input.reward,
+      quality_passed: input.passed,
+      evidence_digest: input.evidence_digest ?? null,
+      evaluator_id: input.evaluator_id,
+      evaluator_version: input.evaluator_version,
+    });
+    return this.recordObservation(observation);
+  }
+
+  snapshot(provider?: string, model?: string): Promise<RestToolResponse<BrainModelHealthResult>> {
+    return this.client.brainModelHealth({ operation: "snapshot", provider, model });
+  }
+
+  observer(context: AutonomousHealthSelectorContext): ProviderInvocationObserver {
+    identifier("remote health context domain", context.domain);
+    identifier("remote health context capability", context.capability);
+    identifier("remote health context riskClass", context.riskClass);
+    return {
+      after: async (metadata: ProviderInvocationMetadata, outcome: ProviderInvocationOutcome): Promise<void> => {
+        await this.recordObservation({
+          provider: metadata.provider,
+          model: metadata.model,
+          domain: context.domain,
+          capability: context.capability,
+          risk_class: context.riskClass,
+          status: outcome.status,
+          outcome: outcome.success ? "success" : "failure",
+          latency_ms: outcome.latencyMs,
+          input_tokens: outcome.inputTokens,
+          output_tokens: outcome.outputTokens,
+          failure_class: outcome.failureClass ?? null,
+        });
+      },
+    };
+  }
+
+  async replay(input: AutonomousReplayCaseInput): Promise<RestToolResponse<BrainReplayEvaluateResult>> {
+    const replayCase = await normalizeReplayCase(input);
+    return this.client.brainReplayEvaluate(autonomousReplayCaseToBrainArguments(replayCase));
+  }
+}
+
+/** Convert a normalized local replay case to the existing Rust/Python wire contract. */
+export function autonomousReplayCaseToBrainArguments(replayCase: AutonomousReplayCase): BrainReplayEvaluateArgs {
+  if (!DIGEST.test(replayCase.evidence_digest)) throw new ArgumentError("replay case evidence_digest must be a lowercase SHA-256 digest");
+  const result: BrainReplayEvaluateArgs = {
+    case_id: replayCase.run_id,
+    domain: replayCase.domain,
+    capability: replayCase.capability,
+    risk_class: replayCase.risk_class,
+    evidence_digest: replayCase.evidence_digest,
+    signals: replayCase.signals,
+    references: [...replayCase.references],
+    limitations: [...replayCase.limitations],
+  };
+  if (replayCase.required_signals !== null) result.required_signals = [...replayCase.required_signals];
+  if (replayCase.signal_weights !== null) result.signal_weights = { ...replayCase.signal_weights };
+  if (replayCase.pass_threshold !== null) result.pass_threshold = replayCase.pass_threshold;
+  return result;
+}
+
+async function normalizeReplayCase(input: AutonomousReplayCaseInput): Promise<AutonomousReplayCase> {
   if (!isObject(input)) throw new ArgumentError("replay case must be an object");
   safeMetadata(input);
   identifier("replay run_id", input.run_id);
@@ -559,12 +750,29 @@ function normalizeReplayCase(input: AutonomousReplayCaseInput): AutonomousReplay
   identifier("replay evaluator_id", input.evaluator_id);
   identifier("replay evaluator_version", input.evaluator_version);
   if (!["completed", "failed", "incomplete"].includes(input.execution_status)) throw new ArgumentError("replay execution_status is unsupported");
-  if (!isObject(input.signals) || Object.keys(input.signals).length > AUTONOMOUS_REPLAY_MAX_SIGNALS) throw new ArgumentError("replay signals are outside their bounds");
-  const signals: Record<string, number> = {};
-  for (const [name, value] of Object.entries(input.signals)) {
-    identifier("replay signal", name);
-    signals[name] = finite(`replay signal ${name}`, value, 0, 1);
+  const signals = normalizeReplaySignals(input.signals);
+  const references = input.references === undefined ? [] : [...input.references];
+  if (references.length > 64 || references.some((reference) => typeof reference !== "string" || !DIGEST.test(reference))) throw new ArgumentError("replay references must contain at most 64 lowercase SHA-256 digests");
+  const limitations = input.limitations === undefined ? [] : [...input.limitations];
+  if (limitations.length > 32 || limitations.some((limitation) => typeof limitation !== "string" || limitation.length > 2_048 || /[\u0000-\u001f]/.test(limitation))) throw new ArgumentError("replay limitations must contain at most 32 bounded strings");
+  let requiredSignals: string[] | null = null;
+  if (input.required_signals !== undefined) {
+    if (input.required_signals.length === 0 || input.required_signals.length > 64) throw new ArgumentError("replay required_signals must contain 1..64 entries");
+    requiredSignals = input.required_signals.map((signal) => identifier("replay required signal", signal, 128));
+    if (new Set(requiredSignals).size !== requiredSignals.length) throw new ArgumentError("replay required_signals must be unique");
   }
+  let signalWeights: Record<string, number> | null = null;
+  if (input.signal_weights !== undefined) {
+    if (!isObject(input.signal_weights) || Object.keys(input.signal_weights).length === 0 || Object.keys(input.signal_weights).length > 64) throw new ArgumentError("replay signal_weights must contain 1..64 entries");
+    signalWeights = {};
+    for (const [name, weight] of Object.entries(input.signal_weights)) {
+      identifier("replay signal weight", name, 128);
+      signalWeights[name] = finite(`replay signal weight ${name}`, weight, Number.MIN_VALUE, Number.MAX_SAFE_INTEGER);
+    }
+  }
+  const passThreshold = input.pass_threshold === undefined ? null : finite("replay pass_threshold", input.pass_threshold, 0, 1);
+  const computedEvidenceDigest = await autonomousReplayEvidenceDigest({ domain: input.domain, capability: input.capability, risk_class: input.risk_class, signals, references, limitations });
+  if (input.evidence_digest !== undefined && input.evidence_digest !== null && digest("replay evidence_digest", input.evidence_digest) !== computedEvidenceDigest) throw new ArgumentError("replay evidence_digest does not match normalized evidence");
   if (input.expected_passed !== undefined && input.expected_passed !== null && typeof input.expected_passed !== "boolean") throw new ArgumentError("replay expected_passed must be boolean or null");
   return {
     schema: AUTONOMOUS_REPLAY_CASE_SCHEMA,
@@ -576,7 +784,12 @@ function normalizeReplayCase(input: AutonomousReplayCaseInput): AutonomousReplay
     evaluator_version: input.evaluator_version,
     execution_status: input.execution_status,
     signals,
-    evidence_digest: digest("replay evidence_digest", input.evidence_digest)!,
+    references,
+    limitations,
+    required_signals: requiredSignals,
+    signal_weights: signalWeights,
+    pass_threshold: passThreshold,
+    evidence_digest: computedEvidenceDigest,
     expected_reward: input.expected_reward === undefined || input.expected_reward === null ? null : finite("replay expected_reward", input.expected_reward, 0, 1),
     expected_passed: input.expected_passed === undefined ? null : input.expected_passed,
     expected_evaluation_digest: input.expected_evaluation_digest === undefined || input.expected_evaluation_digest === null ? null : digest("replay expected_evaluation_digest", input.expected_evaluation_digest, true),
@@ -589,7 +802,7 @@ function normalizeReplayCase(input: AutonomousReplayCaseInput): AutonomousReplay
 export class AutonomousOfflineReplayEngine {
   async replay(inputs: readonly AutonomousReplayCaseInput[]): Promise<AutonomousReplayReport> {
     if (!Array.isArray(inputs) || inputs.length > AUTONOMOUS_REPLAY_MAX_CASES) throw new ArgumentError("replay cases are outside their bounds");
-    const cases = inputs.map(normalizeReplayCase);
+    const cases = await Promise.all(inputs.map(normalizeReplayCase));
     const { builtinAutonomousDomainEvaluatorProfiles } = await import("./autonomous-learning.js");
     const profiles = await builtinAutonomousDomainEvaluatorProfiles();
     const profilesByDomain = new Map(profiles.map((profile) => [profile.domain, profile]));
@@ -600,15 +813,19 @@ export class AutonomousOfflineReplayEngine {
         results.push({ run_id: replayCase.run_id, domain: replayCase.domain, status: "refused", reward: 0, passed: false, missing_signals: [], rejected_signals: [], expected_reward: replayCase.expected_reward, expected_passed: replayCase.expected_passed, expected_evaluation_digest: replayCase.expected_evaluation_digest, evaluation_digest: null, mismatch_codes: ["unsupported_domain"] });
         continue;
       }
-      const required = [...new Set(profile.required_signals)].sort();
+      const required = [...new Set(replayCase.required_signals ?? profile.required_signals)].sort();
       const missing = required.filter((signal) => replayCase.signals[signal] === undefined);
       const rejected = Object.keys(replayCase.signals).filter((signal) => !required.includes(signal)).sort();
-      const weighted = required.map((signal) => ({ score: replayCase.signals[signal] ?? 0, weight: profile.signal_weights[signal] ?? 1 }));
-      const weightTotal = weighted.reduce((sum, row) => sum + row.weight, 0);
-      const reward = weightTotal === 0 ? 0 : Number((weighted.reduce((sum, row) => sum + row.score * row.weight, 0) / weightTotal).toFixed(12));
-      const passed = replayCase.execution_status === "completed" && missing.length === 0 && rejected.length === 0 && required.every((signal) => (replayCase.signals[signal] ?? 0) >= profile.pass_threshold);
+      const weights = replayCase.signal_weights ?? profile.signal_weights;
+      const threshold = replayCase.pass_threshold ?? profile.pass_threshold;
+      const weighted = Object.entries(weights).map(([signal, weight]) => ({ score: replayCase.signals[signal] ?? 0, weight, observed: replayCase.signals[signal] !== undefined }));
+      const observedWeighted = weighted.filter((row) => row.observed);
+      const weightedTotal = observedWeighted.reduce((sum, row) => sum + row.score * row.weight, 0);
+      const weightTotal = observedWeighted.reduce((sum, row) => sum + row.weight, 0);
+      const reward = weightTotal === 0 ? 0 : Number((weightedTotal / weightTotal).toFixed(12));
+      const passed = replayCase.execution_status === "completed" && missing.length === 0 && required.every((signal) => (replayCase.signals[signal] ?? 0) >= threshold);
       const status: AutonomousReplayCaseResult["status"] = passed ? "passed" : replayCase.execution_status === "completed" && missing.length === 0 ? "failed" : "incomplete";
-      const descriptor = { schema: AUTONOMOUS_REPLAY_CASE_SCHEMA, run_id: replayCase.run_id, domain: replayCase.domain, evaluator_id: profile.evaluator_id, evaluator_version: profile.evaluator_version, execution_status: replayCase.execution_status, reward, passed, missing_signals: missing, rejected_signals: rejected, evidence_digest: replayCase.evidence_digest };
+      const descriptor = { schema: AUTONOMOUS_REPLAY_CASE_SCHEMA, run_id: replayCase.run_id, domain: replayCase.domain, evaluator_id: profile.evaluator_id, evaluator_version: profile.evaluator_version, execution_status: replayCase.execution_status, required_signals: required, signal_weights: weights, pass_threshold: threshold, reward, passed, missing_signals: missing, rejected_signals: rejected, evidence_digest: replayCase.evidence_digest };
       const evaluationDigest = await digestJson(descriptor);
       const mismatchCodes: string[] = [];
       if (replayCase.evaluator_id !== profile.evaluator_id) mismatchCodes.push("evaluator_id_mismatch");

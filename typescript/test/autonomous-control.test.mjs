@@ -3,13 +3,14 @@ import { test } from "node:test";
 
 import {
   AutonomousAgent,
+  AutonomousBrainControlPlaneBridge,
   AutonomousModelHealthController,
   AutonomousModelHealthPersistenceCoordinator,
   AutonomousOfflineReplayEngine,
   InMemoryAutonomousModelHealthStore,
   LLMRuntime,
   builtinAutonomousDomainEvaluatorProfiles,
-  digestJson,
+  autonomousReplayEvidenceDigest,
   openaiCompatibleProvider,
 } from "../dist/index.js";
 
@@ -127,7 +128,6 @@ test("offline replay evaluates all twelve domains and detects expected-evidence 
     evaluator_version: profile.evaluator_version,
     execution_status: "completed",
     signals: Object.fromEntries(profile.required_signals.map((signal) => [signal, 1])),
-    evidence_digest: digest,
   }));
   const first = await engine.replay(cases);
   assert.equal(first.status, "completed");
@@ -138,4 +138,85 @@ test("offline replay evaluates all twelve domains and detects expected-evidence 
   assert.equal(drifted.status, "mismatch");
   assert.equal(drifted.mismatch_count, 1);
   assert.equal(JSON.stringify(drifted).includes("bounded task"), false);
+});
+
+test("replay evidence digest matches the Python and Rust canonical contract", async () => {
+  const evidenceDigest = await autonomousReplayEvidenceDigest({
+    domain: "engineering",
+    capability: "code_change",
+    risk_class: "reversible",
+    signals: { schema_valid: true, tests_passed: true, evidence_complete: true },
+  });
+  assert.equal(evidenceDigest, "8456bae1d2a724352898c152ed09b4a9d2c0ffdd5442c83973914bf12fb2e1f4");
+});
+
+test("control-plane bridge sends health and replay metadata only", async () => {
+  let healthArgs;
+  let replayArgs;
+  const bridge = new AutonomousBrainControlPlaneBridge({
+    brainModelHealth: async (args) => { healthArgs = args; return { ok: true }; },
+    brainReplayEvaluate: async (args) => { replayArgs = args; return { ok: true }; },
+  });
+  await bridge.recordObservation({
+    provider: "provider-a",
+    model: "model-a",
+    domain: "coding",
+    capability: "reasoning",
+    risk_class: "review_required",
+    status: "completed",
+    outcome: "success",
+    latency_ms: 101.4,
+    input_tokens: 10,
+    output_tokens: 20,
+    outcome_digest: digest,
+  });
+  assert.deepEqual(healthArgs, { operation: "record", provider: "provider-a", model: "model-a", status: "success", latency_ms: 101, tokens: 30 });
+  assert.equal(Object.keys(healthArgs).some((key) => /prompt|response|credential|token/i.test(key) && key !== "tokens"), false);
+
+  await bridge.replay({
+    run_id: "remote-case",
+    domain: "engineering",
+    capability: "code_change",
+    risk_class: "reversible",
+    evaluator_id: "engineering-quality",
+    evaluator_version: "1",
+    execution_status: "completed",
+    signals: { schema_valid: true, tests_passed: true, evidence_complete: true },
+    references: ["b".repeat(64)],
+    limitations: ["caller declared numeric signals"],
+  });
+  assert.equal(replayArgs.case_id, "remote-case");
+  assert.equal(replayArgs.evidence_digest, await autonomousReplayEvidenceDigest({
+    domain: "engineering",
+    capability: "code_change",
+    risk_class: "reversible",
+    signals: { schema_valid: true, tests_passed: true, evidence_complete: true },
+    references: ["b".repeat(64)],
+    limitations: ["caller declared numeric signals"],
+  }));
+  assert.equal("evaluator_id" in replayArgs, false);
+  assert.equal("task" in replayArgs, false);
+  assert.equal("credential" in replayArgs, false);
+});
+
+test("AutonomousAgent can mirror invocation health to the remote control plane", async () => {
+  const healthCalls = [];
+  const bridge = new AutonomousBrainControlPlaneBridge({
+    brainModelHealth: async (args) => { healthCalls.push(args); return { ok: true }; },
+    brainReplayEvaluate: async () => ({ ok: true }),
+  });
+  const llm = new LLMRuntime({
+    fetch: async () => new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: "remote health answer" }, finish_reason: "stop" }] }), { status: 200, headers: { "content-type": "application/json" } }),
+  });
+  llm.registerProvider(openaiCompatibleProvider("remote-health-provider", "https://remote-health.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm, { modelHealthBridge: bridge });
+  agent.registerModel({ provider: "remote-health-provider", model: "remote-health-model", capabilities: ["reasoning", "code"], context_window_tokens: 32_000, max_output_tokens: 2_000, quality: 0.9, latency_ms: 100, cost_per_million_tokens: 1, reliability: 0.95 });
+  const result = await agent.run("Review this bounded code change.", { domain: "coding", approveProviderCall: true });
+  assert.equal(result.status, "completed");
+  assert.equal(healthCalls.length, 1);
+  assert.equal(healthCalls[0].provider, "remote-health-provider");
+  assert.equal(healthCalls[0].model, "remote-health-model");
+  assert.equal(healthCalls[0].status, "success");
+  assert.equal("response" in healthCalls[0], false);
+  assert.equal("prompt" in healthCalls[0], false);
 });

@@ -119,6 +119,7 @@ export {
   ToolCatalogue,
   ToolSchemaError,
   canonicalJson,
+  digestCanonicalJsonText,
   digestJson,
 } from "./tooling.js";
 export type * from "./types.js";
@@ -289,16 +290,21 @@ export {
   AUTONOMOUS_MODEL_HEALTH_SCHEMA,
   AUTONOMOUS_MODEL_HEALTH_SNAPSHOT_SCHEMA,
   AUTONOMOUS_MODEL_OBSERVATION_SCHEMA,
+  BRAIN_DOMAIN_EVALUATOR_SCHEMA,
   AUTONOMOUS_REPLAY_CASE_SCHEMA,
   AUTONOMOUS_REPLAY_MAX_CASES,
   AUTONOMOUS_REPLAY_MAX_SIGNALS,
   AUTONOMOUS_REPLAY_REPORT_SCHEMA,
   AutonomousModelHealthController,
   AutonomousModelHealthPersistenceCoordinator,
+  AutonomousBrainControlPlaneBridge,
   AutonomousOfflineReplayEngine,
   InMemoryAutonomousModelHealthStore,
+  autonomousReplayCaseToBrainArguments,
+  autonomousReplayEvidenceDigest,
 } from "./autonomous-control.js";
 export type {
+  AutonomousBrainControlTransport,
   AutonomousHealthSelectorContext,
   AutonomousModelHealth,
   AutonomousModelHealthEvent,
@@ -309,6 +315,7 @@ export type {
   AutonomousModelHealthStore,
   AutonomousModelObservation,
   AutonomousModelObservationInput,
+  AutonomousReplaySignal,
   AutonomousReplayCase,
   AutonomousReplayCaseInput,
   AutonomousReplayCaseResult,

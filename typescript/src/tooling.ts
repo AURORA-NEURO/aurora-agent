@@ -351,6 +351,12 @@ export async function digestJson(value: unknown): Promise<string> {
   return sha256Hex(canonicalJson(value));
 }
 
+/** Hash caller-produced canonical JSON when a cross-language number policy is required. */
+export async function digestCanonicalJsonText(value: string): Promise<string> {
+  if (typeof value !== "string" || value.length === 0) throw new ArgumentError("canonical JSON text must be non-empty");
+  return sha256Hex(value);
+}
+
 async function sha256Hex(value: string): Promise<string> {
   const subtle = globalThis.crypto?.subtle;
   if (!subtle) throw new ArgumentError("Web Crypto SHA-256 is required for tool catalogue digests");

@@ -96,6 +96,14 @@ is supplied, or accepts a value-only selector backed by the Rust/Python contextu
 Provider failures remain typed and credential failures are not silently converted into generic
 transport errors.
 
+For restart-safe cross-runtime feedback, construct `AutonomousBrainControlPlaneBridge` around the
+same `ApiClient` used for the Rust/Python brain tools and pass it as `modelHealthBridge` to
+`AutonomousAgent`. The bridge mirrors invocation outcomes to `brain_model_health`, converts
+caller-rehydrated replay cases to `brain_replay_evaluate`, and computes the shared evidence digest
+without sending prompts, responses, tool payloads, credential handles, or keys. Use
+`autonomousReplayEvidenceDigest()` when a replay artifact must be independently reproduced by
+Python or Rust; all twelve built-in domain evaluator profiles use the same bounded signal policy.
+
 ## Autonomous orchestration across all domains
 
 `AutonomousAgent` is the application-facing composition layer for the autonomous brain. It covers
