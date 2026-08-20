@@ -1261,6 +1261,23 @@ controller then applies discounted return-to-go to the completed specialist/synt
 `synthesize: false` is a supported specialists-only mode, and a partial run never receives a hidden
 synthesis reward.
 
+### Metadata-only episodic memory
+
+`InMemoryAutonomousEpisodicMemory` is the bounded reference implementation for TypeScript
+episodic recall. It accepts explicit episode packets containing route, model, workflow, prompt,
+plan, selection, and outcome digests plus caller-authored labels; it refuses raw task/prompt/
+response/tool fields, credentials, and secret-shaped strings. Evaluations are separate append-only
+events, so a provider completion is never silently converted into a lesson or reward.
+
+`retrieve()` ranks only deterministic metadata matches and returns rows with a content-addressed
+episode identity. When supplied to `runAutonomousDecisionCycle()` or
+`runAutonomousCrossDomainDecisionCycle()`, the cycle adds a bounded optional memory context and
+keeps the authority warning in the prompt. It cannot widen the route, model capabilities, tool
+allow-list, budget, approval state, or evaluator contract. `snapshot()` and `restore()` verify a
+SHA-256 snapshot digest plus the event hash chain. `AutonomousMemoryPersistenceCoordinator`
+bridges the store to an application-owned SQLite, Postgres, IndexedDB, or object-store adapter;
+the SDK does not select a filesystem or persist provider secrets.
+
 The live catalogue path is:
 
 ```text

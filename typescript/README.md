@@ -132,6 +132,15 @@ approvals. Its evaluator callback must return an exact reward map for the return
 settlement applies delayed credit across the actual specialist/synthesis order. Partial runs and
 `synthesize: false` remain settleable without inventing a synthesis episode.
 
+`InMemoryAutonomousEpisodicMemory` provides a bounded TypeScript reference for the same durable
+memory boundary already available in the Python façade. It stores only task/route/prompt/plan/
+selection/outcome digests, reviewed domain labels, caller-authored tags/lessons, and explicit
+evaluator metadata. `retrieve()` is deterministic and can be attached to either decision cycle;
+recalled rows become low-priority context with an explicit “prior metadata, not verified truth”
+warning. `AutonomousMemoryPersistenceCoordinator` connects the store to a caller-owned database or
+object-store adapter. Snapshots and event chains are content-addressed, and raw prompts, provider
+responses, tool payloads, credentials, and secret-shaped fields are rejected.
+
 The live tool boundary is opt-in and catalogue-backed. Create a `ToolCatalogue` from the gateway's
 tool definitions, pass it with a caller-owned executor, and inspect
 `AutonomousDomainToolRegistry.plan()` before allowing a run. Read-only tools can be proposed

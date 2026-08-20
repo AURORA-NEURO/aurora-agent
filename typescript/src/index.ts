@@ -243,6 +243,8 @@ export type {
   AutonomousCrossDomainDecisionCycleStatus,
   AutonomousDecisionCycleEvaluator,
   AutonomousDecisionCycleLearningOptions,
+  AutonomousDecisionCycleMemoryOptions,
+  AutonomousDecisionCycleMemoryProjection,
   AutonomousDecisionCycleOptions,
   AutonomousDecisionCycleResult,
   AutonomousDecisionCycleSemanticOptions,
@@ -268,3 +270,29 @@ export type {
   AutonomousWorkflowEvaluationInput,
   AutonomousWorkflowLearningSettlement,
 } from "./autonomous-learning.js";
+export {
+  AUTONOMOUS_MEMORY_EVENT_SCHEMA,
+  AUTONOMOUS_MEMORY_MAX_EPISODES,
+  AUTONOMOUS_MEMORY_MAX_EVENTS,
+  AUTONOMOUS_MEMORY_MAX_QUERY_LIMIT,
+  AUTONOMOUS_MEMORY_MAX_TAGS,
+  AUTONOMOUS_MEMORY_SCHEMA,
+  AUTONOMOUS_MEMORY_SNAPSHOT_SCHEMA,
+  AutonomousMemoryPersistenceCoordinator,
+  InMemoryAutonomousEpisodicMemory,
+} from "./autonomous-memory.js";
+export type {
+  AutonomousEpisodicMemoryStore,
+  AutonomousMemoryEpisode,
+  AutonomousMemoryEpisodeInput,
+  AutonomousMemoryEpisodeStatus,
+  AutonomousMemoryEvaluation,
+  AutonomousMemoryEvaluationInput,
+  AutonomousMemoryEvent,
+  AutonomousMemoryPersistence,
+  AutonomousMemoryQuery,
+  AutonomousMemoryReceipt,
+  AutonomousMemoryRouteProjection,
+  AutonomousMemorySnapshot,
+  AutonomousMemoryStats,
+} from "./autonomous-memory.js";
