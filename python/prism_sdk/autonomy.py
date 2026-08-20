@@ -115,6 +115,19 @@ AUTONOMOUS_WORKFLOW_TRAJECTORY_LEARNING_SCHEMA = "bioprism-python-autonomous-wor
 AUTONOMOUS_ROUTE_SCHEMA = "bioprism-python-autonomous-route/0.1"
 AUTONOMOUS_DOMAIN_PACK_SCHEMA = "bioprism-python-autonomous-domain-pack/0.1"
 AUTONOMOUS_EXECUTION_PLAN_SCHEMA = "bioprism-python-autonomous-execution-plan/0.1"
+AUTONOMOUS_CAPABILITY_CONTRACT_SCHEMA = "bioprism-python-autonomous-capability-contract/0.1"
+AUTONOMOUS_CAPABILITY_PLAN_SCHEMA = "bioprism-python-autonomous-capability-plan/0.1"
+AUTONOMOUS_CAPABILITY_PLAN_STATUSES = (
+    "ready",
+    "provider_only",
+    "approval_gated",
+    "provider_pending",
+    "activation_review_required",
+    "stale",
+    "revoked",
+    "model_gap",
+    "multi_domain",
+)
 AUTONOMOUS_EXECUTION_PLAN_STATUSES = (
     "ready",
     "degraded_tool_coverage",
@@ -137,6 +150,8 @@ MAX_AUTONOMOUS_ROUTE_DOMAINS = 4
 MAX_AUTONOMOUS_CROSS_DOMAIN_CHILDREN = 8
 MAX_AUTONOMOUS_DOMAIN_PACK_ITEMS = 64
 MAX_AUTONOMOUS_EXECUTION_PLAN_BYTES = 512_000
+MAX_AUTONOMOUS_CAPABILITY_CONTRACTS = 64
+MAX_AUTONOMOUS_CAPABILITY_PLAN_BYTES = 128_000
 AUTONOMOUS_SEMANTIC_ROUTE_SCHEMA = "bioprism-python-autonomous-semantic-route/0.1"
 AUTONOMOUS_PLAN_REFINEMENT_SCHEMA = "bioprism-python-autonomous-plan-refinement/0.1"
 AUTONOMOUS_ROUTE_EVIDENCE = {
@@ -145,6 +160,94 @@ AUTONOMOUS_ROUTE_EVIDENCE = {
 }
 _SAFE_IDENTIFIER_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-")
 _AUTONOMOUS_EXECUTION_PLAN_CONTEXT_KEY = "_aurora_execution_plan"
+_AUTONOMOUS_CAPABILITY_CONTRACT_CONTEXT_KEY = "_aurora_capability_contract"
+
+
+# A domain workflow uses a small, stable capability vocabulary while live tools often expose
+# a narrower adapter name.  These aliases are reviewed policy, not fuzzy matching: a tool is
+# bridged to a workflow stage only when its exact declared capability appears in this table.
+# An exact high-level capability always matches too, which preserves application-defined tools
+# such as an ``observability`` binding while making the curated built-ins useful immediately.
+_AUTONOMOUS_CAPABILITY_TOOL_ALIASES: dict[str, dict[str, tuple[str, ...]]] = {
+    "coding": {
+        "review": ("engineering_contract_audit", "delivery_audit", "delivery_receipt_verification", "conformance_verification", "stewardship_review"),
+        "debugging": ("repository_inspection", "repository_impact_analysis", "ci_evidence_audit", "ci_evidence_normalization", "sdk_registry_audit"),
+        "implementation": ("developer_workbench", "developer_workbench_verification", "engineering_planning", "engineering_execution_plan", "mission_execution"),
+        "testing": ("ci_execution_audit", "ci_evidence_audit", "conformance_verification", "release_readiness", "delivery_receipt_verification"),
+    },
+    "browser": {
+        "web_research": ("evidence_acquisition_discovery", "evidence_source_planning", "evidence_coverage", "hub_discovery", "lens_discovery"),
+        "navigation": ("capability_discovery", "capability_routing", "hub_resolution", "route_planning", "workspace_capability_discovery"),
+        "source_comparison": ("evidence_coverage", "route_plan_verification", "route_review", "evidence_source_planning"),
+    },
+    "data": {
+        "data_analysis": ("context_compilation", "context_comparison", "context_refinement", "projection_bundling", "tabular_ingestion", "world_validation"),
+        "schema_validation": ("world_claim_validation", "context_verification", "obligation_gate", "data_adapter_planning"),
+        "lineage": ("lineage_audit", "context_explanation", "context_verification", "evidence_coverage"),
+        "quality_control": ("quality_control", "world_validation", "world_claim_validation", "evidence_coverage", "obligation_gate"),
+    },
+    "science": {
+        "literature": ("literature_binding", "contradiction_review", "research_routing", "research_routing_replay", "epistemic_context_audit"),
+        "hypothesis": ("epistemic_selection_audit", "decision_quotient", "value_of_information", "influence_analysis"),
+        "experiment": ("laboratory_planning", "adaptive_acquisition_execution", "measurement_comparison", "value_of_information"),
+        "statistics": ("decision_quotient", "influence_analysis", "measurement_comparison", "laboratory_pareto_audit"),
+        "reproducibility": ("reproduction_check", "research_routing_replay", "laboratory_holdout_audit", "laboratory_branch_audit", "laboratory_evolution_audit"),
+    },
+    "biomedical": {
+        "biomedical_review": ("biomedical_grounding_audit", "biomedical_reference_audit", "biomedical_estimand_audit", "literature_binding", "contradiction_review"),
+        "provenance": ("biomedical_reference_audit", "literature_binding", "measurement_comparison", "world_validation", "representation_audit"),
+        "safety_boundary": ("medical_boundary", "dual_use_review", "bioethics_validation", "bioethics_action_review", "oncology_boundary"),
+        "human_review": ("human_subject_screening", "bioethics_action_review", "bioethics_validation", "medical_boundary"),
+    },
+    "neuroscience": {
+        "neuroscience_analysis": ("measurement_comparison", "influence_analysis", "trajectory_trace_analysis", "modality_catalogue"),
+        "signal_interpretation": ("modality_support", "modality_transport", "modality_comparability", "measurement_comparison"),
+        "study_design": ("value_of_information", "laboratory_holdout_audit", "measurement_comparison"),
+        "reproducibility": ("benchmark_trace_analysis", "laboratory_holdout_audit", "trajectory_evaluation", "trajectory_trace_analysis"),
+    },
+    "operations": {
+        "observability": ("telemetry_projection", "operations_catalogue", "ledger_ingestion", "runtime_tape_verification"),
+        "incident_response": ("runtime_effect_check", "operations_acceptance", "quality_gate", "artifact_registry_audit"),
+        "risk_review": ("operational_readiness", "registry_gate", "factory_authority_verification", "release_audit"),
+        "rollback": ("storage_lifecycle_simulation", "cache_invalidation_simulation", "registry_lifecycle_simulation", "factory_lifecycle_simulation"),
+        "approval": ("factory_authority_verification", "registry_gate", "operations_acceptance", "quality_gate"),
+        "runbook": ("operational_readiness", "operations_catalogue", "release_audit", "runtime_tape_verification"),
+    },
+    "enterprise": {
+        "workflow": ("governance_schema", "sandbox_runtime_simulation", "sandbox_admission", "provider_capability_verification"),
+        "governance": ("governance_schema", "stewardship_review", "security_program_audit", "security_privacy_audit", "hub_disclosure_review"),
+        "compliance": ("policy_screening", "release_audit", "safety_release_gate", "security_privacy_audit", "dual_use_review"),
+        "analytics": ("provider_capability_verification", "security_redteam_simulation", "safety_posture", "release_audit"),
+        "coordination": ("hub_submission_review", "hub_lock", "stewardship_review", "medical_boundary"),
+    },
+    "multi_agent": {
+        "delegation": ("protocol_compilation", "workflow_execution", "mission_execution", "mission_evidence_import"),
+        "coordination": ("protocol_catalogue", "workflow_catalogue", "choreography_validation", "multi_agent_synthesis"),
+        "consensus": ("mission_evaluator_review", "mission_evaluator_replay_comparison", "mission_evidence_verification", "multi_agent_synthesis"),
+        "conflict_resolution": ("mission_evaluator_replay", "mission_evaluator_replay_comparison", "mission_evidence_lookup", "choreography_validation"),
+        "handoff": ("mission_evidence_import", "mission_evidence_query", "mission_evidence_verification", "workflow_execution"),
+    },
+    "multimodal": {
+        "image": ("modality_catalogue", "modality_support", "modality_comparability", "projection_bundling", "hub_card_rendering"),
+        "audio": ("modality_catalogue", "modality_support", "modality_transport", "measurement_comparison"),
+        "video": ("modality_catalogue", "modality_support", "modality_transport", "measurement_comparison"),
+        "document": ("literature_binding", "context_comparison", "projection_bundling", "hub_card_rendering"),
+        "cross_modal_alignment": ("modality_comparability", "modality_transport", "modality_support", "measurement_comparison", "context_comparison"),
+    },
+    "cross_domain": {
+        "routing": ("capability_discovery", "capability_routing", "route_planning", "route_review", "workspace_capability_discovery"),
+        "synthesis": ("evidence_intake", "evidence_source_execution", "provider_normalization", "workflow_portfolio"),
+        "evidence_alignment": ("evidence_coverage", "evidence_source_planning", "route_plan_verification", "workflow_portfolio_verification"),
+        "workflow_composition": ("workflow_catalogue", "workflow_instantiation", "workflow_scaffolding", "workflow_verification"),
+    },
+    "evaluation": {
+        "benchmarking": ("benchmark_compilation", "benchmark_compilation_review", "benchmark_counterfactual", "benchmark_integrity_audit", "benchmark_oracle_review"),
+        "rubric": ("metrics_profile_audit", "metrics_analytics_audit", "evaluation_minimization", "posterior_gate"),
+        "replay": ("research_ci", "reproduction_check", "trajectory_evaluation", "benchmark_trace_analysis", "worldline_evaluation"),
+        "failure_analysis": ("benchmark_decision_audit", "benchmark_trace_analysis", "oracle_missingness", "oracle_combination"),
+        "reproducibility": ("reproduction_check", "research_ci", "adaptive_evaluation_panel", "benchmark_integrity_audit"),
+    },
+}
 
 
 # This is an intentionally small, reviewed routing vocabulary rather than a claim that a
@@ -1916,6 +2019,198 @@ class AutonomousDomainPackRegistry:
         return result
 
 
+@dataclass(frozen=True, slots=True)
+class AutonomousCapabilityContract:
+    """One executable bridge between a domain stage and registered adapter tools.
+
+    The contract is deliberately declarative.  It tells the planner which exact tool
+    capability labels may satisfy a domain capability, what evidence that capability must
+    produce, and which model abilities are required.  It grants neither provider access nor
+    effect authority.  A caller-owned tool only becomes visible after registration and the
+    activation filter is applied at runtime.
+    """
+
+    domain: str
+    capability: str
+    stage_ids: tuple[str, ...]
+    tool_capabilities: tuple[str, ...]
+    required_model_capabilities: tuple[str, ...]
+    evidence_outputs: tuple[str, ...]
+    evaluator_signals: tuple[str, ...]
+    read_only: bool = True
+    approval_required: bool = False
+    review_triggers: tuple[str, ...] = ()
+    fallback_policy: str = "provider_only_or_blocked"
+
+    def __post_init__(self) -> None:
+        _identifier("capability contract domain", self.domain)
+        if self.domain not in AUTONOMOUS_DOMAINS:
+            raise BrainRunError(f"unsupported capability contract domain: {self.domain!r}")
+        _identifier("capability contract capability", self.capability)
+        for name, values in (
+            ("stage_ids", self.stage_ids),
+            ("tool_capabilities", self.tool_capabilities),
+            ("required_model_capabilities", self.required_model_capabilities),
+            ("evidence_outputs", self.evidence_outputs),
+            ("evaluator_signals", self.evaluator_signals),
+            ("review_triggers", self.review_triggers),
+        ):
+            normalized = _sequence(
+                f"capability contract {name}",
+                values,
+                maximum=MAX_AUTONOMOUS_DOMAIN_PACK_ITEMS,
+            )
+            if name in {"tool_capabilities", "required_model_capabilities", "evidence_outputs", "evaluator_signals"} and not normalized:
+                raise BrainRunError(f"capability contract {name} must not be empty")
+            object.__setattr__(self, name, normalized)
+        if not isinstance(self.read_only, bool) or not isinstance(self.approval_required, bool):
+            raise BrainRunError("capability contract safety flags must be booleans")
+        if self.approval_required and self.read_only:
+            # A review checkpoint can be read-only (operations/approval), so this is allowed.
+            # The flag means human review is required, not that the tool itself is effectful.
+            pass
+        _identifier("capability contract fallback_policy", self.fallback_policy)
+
+    def descriptor(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_CAPABILITY_CONTRACT_SCHEMA,
+            "domain": self.domain,
+            "capability": self.capability,
+            "stage_ids": list(self.stage_ids),
+            "tool_capabilities": list(self.tool_capabilities),
+            "required_model_capabilities": list(self.required_model_capabilities),
+            "evidence_outputs": list(self.evidence_outputs),
+            "evaluator_signals": list(self.evaluator_signals),
+            "read_only": self.read_only,
+            "approval_required": self.approval_required,
+            "review_triggers": list(self.review_triggers),
+            "fallback_policy": self.fallback_policy,
+        }
+
+    @property
+    def contract_digest(self) -> str:
+        return content_digest(self.descriptor())
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            **self.descriptor(),
+            "contract_digest": self.contract_digest,
+            "adapter_posture": "exact_capability_aliases_only",
+            "credential_posture": "caller_supplied_opaque_handles",
+            "authority_posture": "metadata_only; no_provider_or_effect_authority",
+        }
+
+    def prompt_contract(self) -> dict[str, Any]:
+        return {
+            "contract_digest": self.contract_digest,
+            "domain": self.domain,
+            "capability": self.capability,
+            "stage_ids": list(self.stage_ids),
+            "tool_capabilities": list(self.tool_capabilities),
+            "required_model_capabilities": list(self.required_model_capabilities),
+            "evidence_outputs": list(self.evidence_outputs),
+            "evaluator_signals": list(self.evaluator_signals),
+            "read_only": self.read_only,
+            "approval_required": self.approval_required,
+            "fallback_policy": self.fallback_policy,
+            "does_not_authorize": [
+                "provider invocation without caller approval",
+                "tools whose exact capability is not listed",
+                "effects or human decisions",
+                "invented evidence for an uncompleted stage",
+            ],
+        }
+
+
+def _build_domain_capability_contracts(
+    profile: AutonomousDomainProfile,
+    pack: AutonomousDomainPack,
+    workflow: AutonomousWorkflowStrategy,
+) -> tuple[AutonomousCapabilityContract, ...]:
+    """Build the reviewed capability/evidence graph for one domain."""
+
+    evaluator_profile = _DOMAIN_AUTONOMOUS_EVALUATOR_PROFILES.get(profile.domain)
+    if evaluator_profile is None:
+        raise BrainRunError(f"no evaluator profile is registered for {profile.domain!r}")
+    ordered_capabilities = tuple(
+        dict.fromkeys(
+            (
+                *profile.capabilities,
+                *(capability for stage in workflow.stages for capability in stage.required_capabilities),
+            )
+        )
+    )
+    contracts: list[AutonomousCapabilityContract] = []
+    for capability in ordered_capabilities:
+        stages = tuple(
+            stage for stage in workflow.stages if capability in stage.required_capabilities
+        )
+        stage_ids = tuple(stage.id for stage in stages)
+        aliases = _AUTONOMOUS_CAPABILITY_TOOL_ALIASES.get(profile.domain, {}).get(capability, ())
+        tool_capabilities = tuple(dict.fromkeys((capability, *aliases)))
+        evidence_outputs = tuple(
+            dict.fromkeys(
+                output
+                for stage in stages
+                for output in stage.evidence_outputs
+            )
+        ) or (f"{capability}_result",)
+        evaluator_signals = tuple(
+            dict.fromkeys(
+                (
+                    *(signal for stage in stages for signal in stage.evaluator_signals),
+                    *evaluator_profile.required_signals,
+                )
+            )
+        )
+        contracts.append(
+            AutonomousCapabilityContract(
+                domain=profile.domain,
+                capability=capability,
+                stage_ids=stage_ids,
+                tool_capabilities=tool_capabilities,
+                required_model_capabilities=tuple(pack.model_capabilities),
+                evidence_outputs=evidence_outputs,
+                evaluator_signals=evaluator_signals,
+                read_only=all(stage.read_only for stage in stages) if stages else True,
+                approval_required=any(stage.approval_required for stage in stages),
+                review_triggers=tuple(pack.review_triggers),
+                fallback_policy="provider_only_or_blocked" if stages else "provider_only",
+            )
+        )
+    if len(contracts) > MAX_AUTONOMOUS_CAPABILITY_CONTRACTS:
+        raise BrainRunError("domain capability contract catalogue exceeds its bound")
+    return tuple(contracts)
+
+
+def _resolve_domain_capability_contract(
+    profile: AutonomousDomainProfile,
+    pack: AutonomousDomainPack,
+    workflow: AutonomousWorkflowStrategy,
+    capability: str,
+) -> AutonomousCapabilityContract:
+    """Resolve a built-in capability or create a safe caller-defined capability contract."""
+
+    resolved = _identifier("capability", capability)
+    for contract in _build_domain_capability_contracts(profile, pack, workflow):
+        if contract.capability == resolved:
+            return contract
+    evaluator_profile = _DOMAIN_AUTONOMOUS_EVALUATOR_PROFILES[profile.domain]
+    return AutonomousCapabilityContract(
+        domain=profile.domain,
+        capability=resolved,
+        stage_ids=(),
+        tool_capabilities=(resolved,),
+        required_model_capabilities=tuple(pack.model_capabilities),
+        evidence_outputs=(f"{resolved}_result",),
+        evaluator_signals=tuple(evaluator_profile.required_signals),
+        read_only=True,
+        approval_required=False,
+        review_triggers=tuple(pack.review_triggers),
+        fallback_policy="provider_only",
+    )
+
+
 def compile_autonomous_domain_execution_plan(
     domain: str,
     *,
@@ -2023,9 +2318,53 @@ def compile_autonomous_domain_execution_plan(
     )
     tool_rows = [tool_projection(tool, active=True) for tool in active_tools]
     withheld_rows = [tool_projection(tool, active=False) for tool in withheld_tools]
-    active_by_capability: dict[str, list[str]] = {}
-    for tool in active_tools:
-        active_by_capability.setdefault(tool.capability, []).append(tool.name)
+    capability_contracts = _build_domain_capability_contracts(profile, pack, workflow)
+    capability_rows: list[dict[str, Any]] = []
+    adapted_active_capabilities: set[str] = set()
+    adapted_withheld_capabilities: set[str] = set()
+    for contract in capability_contracts:
+        active_names = sorted(
+            tool.name
+            for tool in active_tools
+            if tool.capability in contract.tool_capabilities
+        )
+        withheld_names = sorted(
+            tool.name
+            for tool in withheld_tools
+            if tool.capability in contract.tool_capabilities
+        )
+        if active_names:
+            adapted_active_capabilities.add(contract.capability)
+        if withheld_names:
+            adapted_withheld_capabilities.add(contract.capability)
+        capability_rows.append(
+            {
+                **contract.to_dict(),
+                "contract": contract.to_dict(),
+                "active_tool_names": active_names,
+                "withheld_tool_names": withheld_names,
+                "matched_active_tool_capabilities": sorted(
+                    {
+                        tool.capability
+                        for tool in active_tools
+                        if tool.capability in contract.tool_capabilities
+                    }
+                ),
+                "matched_withheld_tool_capabilities": sorted(
+                    {
+                        tool.capability
+                        for tool in withheld_tools
+                        if tool.capability in contract.tool_capabilities
+                    }
+                ),
+                "tool_posture": "tool_backed" if active_names else "provider_only_or_blocked",
+                "execution_posture": "approval_gated" if contract.approval_required else "provider_or_tool",
+            }
+        )
+    capability_contract_digest = content_digest(capability_rows)
+    adapted_missing_capabilities = tuple(
+        sorted(set(required_tool_capabilities).difference(adapted_active_capabilities))
+    )
 
     status_by_provider: dict[str, Mapping[str, Any]] = {}
     for row in provider_statuses:
@@ -2084,8 +2423,24 @@ def compile_autonomous_domain_execution_plan(
     stage_rows: list[dict[str, Any]] = []
     for stage in workflow.stages:
         stage_capabilities = tuple(stage.required_capabilities)
+        stage_contracts = tuple(
+            contract
+            for contract in capability_contracts
+            if contract.capability in stage_capabilities
+        )
+        stage_tool_capabilities = tuple(
+            dict.fromkeys(
+                tool_capability
+                for contract in stage_contracts
+                for tool_capability in contract.tool_capabilities
+            )
+        )
         stage_available = tuple(
-            sorted(set(stage_capabilities).intersection(available_tool_capabilities))
+            sorted(
+                capability
+                for capability in stage_capabilities
+                if capability in adapted_active_capabilities
+            )
         )
         stage_missing = tuple(sorted(set(stage_capabilities).difference(stage_available)))
         stage_rows.append(
@@ -2094,14 +2449,18 @@ def compile_autonomous_domain_execution_plan(
                 "objective": stage.objective,
                 "depends_on": list(stage.depends_on),
                 "required_capabilities": list(stage_capabilities),
-                "required_tool_capabilities": list(stage_capabilities),
+                "required_tool_capabilities": list(stage_tool_capabilities),
                 "available_tool_capabilities": list(stage_available),
                 "missing_tool_capabilities": list(stage_missing),
                 "registered_tools": sorted(
                     {
                         name
-                        for capability in stage_capabilities
-                        for name in active_by_capability.get(capability, ())
+                        for contract in stage_contracts
+                        for name in (
+                            tool.name
+                            for tool in active_tools
+                            if tool.capability in contract.tool_capabilities
+                        )
                     }
                 ),
                 "evidence_outputs": list(stage.evidence_outputs),
@@ -2137,7 +2496,7 @@ def compile_autonomous_domain_execution_plan(
         plan_status = "provider_pending"
     elif activation_plan_recorded and not approved_tools:
         plan_status = "activation_review_required"
-    elif missing_tool_capabilities:
+    elif adapted_missing_capabilities:
         plan_status = "degraded_tool_coverage"
     else:
         plan_status = "ready"
@@ -2172,6 +2531,14 @@ def compile_autonomous_domain_execution_plan(
             "completion_contract": workflow.completion_contract,
             "stages": stage_rows,
         },
+        "capabilities": {
+            "default_capability": profile.default_capability,
+            "contract_digest": capability_contract_digest,
+            "contracts": capability_rows,
+            "adapted_active_capabilities": sorted(adapted_active_capabilities),
+            "adapted_withheld_capabilities": sorted(adapted_withheld_capabilities),
+            "adapter_posture": "reviewed_exact_aliases; no_fuzzy_matching",
+        },
         "activation": {
             "activation_id": state_value("activation_id"),
             "status": activation_status,
@@ -2192,13 +2559,15 @@ def compile_autonomous_domain_execution_plan(
             "required_capabilities": list(required_tool_capabilities),
             "available_capabilities": list(available_tool_capabilities),
             "missing_capabilities": list(missing_tool_capabilities),
+            "adapted_available_capabilities": sorted(adapted_active_capabilities),
+            "adapted_missing_capabilities": list(adapted_missing_capabilities),
             "registered": tool_rows,
             "withheld": withheld_rows,
             "registered_tool_count": len(sorted_tools),
             "active_tool_count": len(active_tools),
             "effectful_tools_requiring_review": list(effectful_tool_names),
             "coverage": round(
-                len(set(required_tool_capabilities).intersection(available_tool_capabilities))
+                len(set(required_tool_capabilities).intersection(adapted_active_capabilities))
                 / len(required_tool_capabilities),
                 6,
             )
@@ -3515,6 +3884,7 @@ class AutonomousPromptBuilder:
         *,
         domain_pack: AutonomousDomainPack | None = None,
         workflow: AutonomousWorkflowStrategy | None = None,
+        capability_contract: AutonomousCapabilityContract | None = None,
         max_input_tokens: int = 4_096,
         memory_episodes: Sequence[Mapping[str, Any]] = (),
     ) -> dict[str, Any]:
@@ -3579,6 +3949,33 @@ class AutonomousPromptBuilder:
                     "priority": 992,
                 }
             )
+        runtime_capability_contract = spec.context.get(_AUTONOMOUS_CAPABILITY_CONTRACT_CONTEXT_KEY)
+        if runtime_capability_contract is not None:
+            if not isinstance(runtime_capability_contract, Mapping):
+                raise BrainRunError("autonomous capability contract context must be a mapping")
+            context.append(
+                {
+                    "id": "autonomy-capability-contract",
+                    "role": "developer",
+                    "content": _json_text(runtime_capability_contract),
+                    "required": True,
+                    "priority": 994,
+                }
+            )
+        elif capability_contract is not None:
+            if not isinstance(capability_contract, AutonomousCapabilityContract):
+                raise BrainRunError("capability_contract must be an AutonomousCapabilityContract or None")
+            if capability_contract.domain != profile.domain or capability_contract.capability != spec.capability:
+                raise BrainRunError("capability_contract must align with the profile and task capability")
+            context.append(
+                {
+                    "id": "autonomy-capability-contract",
+                    "role": "developer",
+                    "content": _json_text(capability_contract.prompt_contract()),
+                    "required": True,
+                    "priority": 994,
+                }
+            )
         context.append(
             {
                 "id": "autonomy-workflow-contract",
@@ -3625,7 +4022,10 @@ class AutonomousPromptBuilder:
         user_context = {
             key: value
             for key, value in spec.context.items()
-            if key != _AUTONOMOUS_EXECUTION_PLAN_CONTEXT_KEY
+            if key not in {
+                _AUTONOMOUS_EXECUTION_PLAN_CONTEXT_KEY,
+                _AUTONOMOUS_CAPABILITY_CONTRACT_CONTEXT_KEY,
+            }
         }
         if user_context:
             context.append(
@@ -4661,6 +5061,12 @@ class AutonomousTaskOrchestrator:
             )
         resolved_capability = profile.default_capability if capability is None else _identifier("capability", capability)
         resolved_risk = profile.risk_class if risk_class is None else _identifier("risk_class", risk_class)
+        capability_contract = _resolve_domain_capability_contract(
+            profile,
+            domain_pack,
+            workflow,
+            resolved_capability,
+        )
         resolved_response_schema = response_schema
         if require_json and resolved_response_schema is None:
             resolved_response_schema = workflow.response_schema()
@@ -4710,6 +5116,11 @@ class AutonomousTaskOrchestrator:
             "user_context_digest": spec.context_digest,
             "context_keys": sorted(str(key) for key in spec.context),
             "required_model_capabilities": list(required),
+            "capability_contract_digest": capability_contract.contract_digest,
+            "capability_tool_capabilities": list(capability_contract.tool_capabilities),
+            "capability_stage_ids": list(capability_contract.stage_ids),
+            "capability_evidence_outputs": list(capability_contract.evidence_outputs),
+            "capability_evaluator_signals": list(capability_contract.evaluator_signals),
         }
         runtime_execution_plan = spec.context.get(_AUTONOMOUS_EXECUTION_PLAN_CONTEXT_KEY)
         if runtime_execution_plan is not None:
@@ -4726,6 +5137,7 @@ class AutonomousTaskOrchestrator:
             profile,
             domain_pack=domain_pack,
             workflow=workflow,
+            capability_contract=capability_contract,
             max_input_tokens=max_input_tokens,
             memory_episodes=memory_episodes,
         )
@@ -8161,6 +8573,16 @@ class AutonomousAgent:
         registered = [] if self.tool_registry is None else self.tool_registry.tools_for((domain,))
         available = sorted({tool.capability for tool in registered})
         required = set(pack.tool_capabilities)
+        profile = self.orchestrator.registry.resolve(domain)
+        workflow = self.orchestrator.workflow_registry.resolve(domain)
+        contracts = _build_domain_capability_contracts(profile, pack, workflow)
+        adapted_available = sorted(
+            {
+                contract.capability
+                for contract in contracts
+                if any(tool.capability in contract.tool_capabilities for tool in registered)
+            }
+        )
         return {
             "schema": AUTONOMOUS_DOMAIN_PACK_SCHEMA,
             "domain": domain,
@@ -8170,6 +8592,10 @@ class AutonomousAgent:
             "available_tool_capabilities": available,
             "covered_tool_capabilities": sorted(required.intersection(available)),
             "missing_tool_capabilities": sorted(required.difference(available)),
+            "capability_adapters": [contract.to_dict() for contract in contracts],
+            "adapted_covered_capabilities": adapted_available,
+            "adapted_missing_capabilities": sorted(required.difference(adapted_available)),
+            "adapter_posture": "reviewed_exact_aliases; no_fuzzy_matching",
             "registered_tool_count": len(registered),
             "execution": "metadata_only; registration_is_not_authorization",
         }
@@ -8213,6 +8639,187 @@ class AutonomousAgent:
             activation=self.activation,
             model_candidates=candidates,
             provider_statuses=self.onboarding.statuses(),
+        )
+
+    def domain_capabilities(self, domain: str) -> list[dict[str, Any]]:
+        """Return the reviewed capability/evidence adapters for one domain.
+
+        Each row identifies the domain-level capability, exact adapter capability labels,
+        evidence outputs, evaluator signals, and currently active tool names.  The rows are
+        planning metadata only; they do not authorize a provider call or tool effect.
+        """
+
+        plan = self.domain_execution_plan(domain)
+        capabilities = plan.get("capabilities", {}).get("contracts", [])
+        if not isinstance(capabilities, list):
+            raise BrainRunError("domain execution plan capability contracts are malformed")
+        return [dict(row) for row in capabilities if isinstance(row, Mapping)]
+
+    def domain_capability_plan(
+        self,
+        domain: str,
+        capability: str,
+        *,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Compile one focused capability into a non-executing dispatch plan."""
+
+        _identifier("capability plan domain", domain)
+        resolved_capability = _identifier("capability plan capability", capability)
+        plan = self.domain_execution_plan(domain, model_candidates=model_candidates)
+        rows = plan.get("capabilities", {}).get("contracts", [])
+        if not isinstance(rows, list):
+            raise BrainRunError("domain execution plan capability contracts are malformed")
+        row = next(
+            (
+                value for value in rows
+                if isinstance(value, Mapping) and value.get("capability") == resolved_capability
+            ),
+            None,
+        )
+        if not isinstance(row, Mapping):
+            raise BrainRunError(
+                f"no reviewed capability contract is registered for {domain!r}/{resolved_capability!r}"
+            )
+        base_status = plan.get("status")
+        if base_status in {"revoked", "stale", "model_gap", "provider_pending", "activation_review_required"}:
+            status = base_status
+        elif row.get("approval_required") is True:
+            status = "approval_gated"
+        elif row.get("active_tool_names"):
+            status = "ready"
+        else:
+            status = "provider_only"
+        result = {
+            "schema": AUTONOMOUS_CAPABILITY_PLAN_SCHEMA,
+            "domain": domain,
+            "capability": resolved_capability,
+            "status": status,
+            "domain_plan_digest": plan["plan_digest"],
+            "contract_digest": row.get("contract_digest"),
+            "contract": dict(row.get("contract", {})),
+            "stage_ids": list(row.get("stage_ids", [])),
+            "active_tool_names": list(row.get("active_tool_names", [])),
+            "withheld_tool_names": list(row.get("withheld_tool_names", [])),
+            "matched_active_tool_capabilities": list(row.get("matched_active_tool_capabilities", [])),
+            "tool_posture": row.get("tool_posture"),
+            "execution_posture": row.get("execution_posture"),
+            "evidence_outputs": list(row.get("evidence_outputs", [])),
+            "evaluator_signals": list(row.get("evaluator_signals", [])),
+            "review_gates": dict(plan.get("review_gates", {})),
+            "learning_context_digest": plan.get("learning", {}).get("context_digest"),
+            "execution": "planning_only; dispatch_requires_caller_credentials_and_approval",
+            "credential_posture": "caller_supplied_opaque_handles; no_keys_or_handles_in_plan",
+            "authority_posture": "metadata_only; plan_does_not_grant_authority",
+        }
+        return _safe_json(
+            "autonomous capability plan",
+            result,
+            maximum=MAX_AUTONOMOUS_CAPABILITY_PLAN_BYTES,
+        )
+
+    def capability_plans(
+        self,
+        domains: Sequence[str] | None = None,
+        *,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Compile every reviewed capability contract for selected domains."""
+
+        selected = tuple(AUTONOMOUS_DOMAINS) if domains is None else _sequence(
+            "capability plan domains", domains, maximum=len(AUTONOMOUS_DOMAINS)
+        )
+        unknown = sorted(set(selected).difference(AUTONOMOUS_DOMAINS))
+        if unknown:
+            raise BrainRunError("capability plan contains unknown domains: " + ", ".join(unknown))
+        plans = [
+            self.domain_capability_plan(domain, row["capability"], model_candidates=model_candidates)
+            for domain in selected
+            for row in self.domain_capabilities(domain)
+        ]
+        return {
+            "schema": AUTONOMOUS_CAPABILITY_PLAN_SCHEMA,
+            "status": "multi_domain" if len(selected) > 1 else (plans[0]["status"] if plans else "ready"),
+            "domains": list(selected),
+            "capability_count": len(plans),
+            "plans": plans,
+            "plan_digest": content_digest(plans),
+            "execution": "planning_only; no_provider_or_tool_invocation",
+            "authority_posture": "metadata_only; plans_do_not_grant_authority",
+            "secret_material": "never_returned",
+        }
+
+    def run_capability(
+        self,
+        *,
+        task: str,
+        domain: str,
+        capability: str,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        approve_capability: bool = False,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> Any:
+        """Run one reviewed capability with stage-scoped tools and evidence instructions.
+
+        This is the focused dispatch path used when an embedding application already knows
+        the domain and wants the brain to make a capability-level decision.  It narrows the
+        provider-visible tools to exact adapter aliases, adds the reviewed contract to the
+        developer prompt, and still delegates provider approval, tool approval, and credential
+        validation to the normal runtime boundary.
+        """
+
+        resolved_capability = _identifier("capability", capability)
+        capability_plan = self.domain_capability_plan(
+            domain,
+            resolved_capability,
+            model_candidates=model_candidates,
+        )
+        contract = capability_plan.get("contract")
+        if not isinstance(contract, Mapping) or contract.get("capability") != resolved_capability:
+            raise BrainRunError("capability dispatch contract is malformed")
+        if not isinstance(approve_capability, bool):
+            raise BrainRunError("approve_capability must be a boolean")
+        if contract.get("approval_required") is True and not approve_capability:
+            raise BrainRunError(
+                f"capability {domain!r}/{resolved_capability!r} requires explicit capability approval"
+            )
+        context = kwargs.pop("context", None)
+        if context is None:
+            dispatch_context: dict[str, Any] = {}
+        elif isinstance(context, Mapping):
+            dispatch_context = dict(context)
+        else:
+            raise BrainRunError("context must be a mapping or None")
+        if _AUTONOMOUS_CAPABILITY_CONTRACT_CONTEXT_KEY in dispatch_context:
+            raise BrainRunError("context cannot override the autonomous capability contract")
+        if _AUTONOMOUS_EXECUTION_PLAN_CONTEXT_KEY in dispatch_context:
+            raise BrainRunError("context cannot override the autonomous execution plan")
+        kwargs["context"] = dispatch_context
+        kwargs["capability"] = resolved_capability
+        required = kwargs.pop("required_model_capabilities", ())
+        if not isinstance(required, Sequence) or isinstance(required, (str, bytes)):
+            raise BrainRunError("required_model_capabilities must be a sequence")
+        kwargs["required_model_capabilities"] = tuple(
+            dict.fromkeys(
+                (
+                    *contract.get("required_model_capabilities", ()),
+                    *required,
+                )
+            )
+        )
+        kwargs["_aurora_capability_focus"] = resolved_capability
+        kwargs["_aurora_capability_contract"] = dict(contract)
+        return self.run(
+            task=task,
+            domain=domain,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            execution_id=execution_id,
+            resume_execution=resume_execution,
+            **kwargs,
         )
 
     def execution_plans(
@@ -8538,6 +9145,7 @@ class AutonomousAgent:
                 for domain in AUTONOMOUS_DOMAINS
             ],
             "domain_execution_plans": self.execution_plans()["plans"],
+            "domain_capability_plans": self.capability_plans()["plans"],
             "route_catalogue": self.orchestrator.router.catalogue(),
             "semantic_routing": {
                 "schema": AUTONOMOUS_SEMANTIC_ROUTE_SCHEMA,
@@ -8823,6 +9431,22 @@ class AutonomousAgent:
         resolved_credentials = self._credential_mapping(credentials)
         resolved_candidates = self._resolve_candidates(model_candidates)
         resolved_options = dict(options)
+        capability_focus = resolved_options.pop("_aurora_capability_focus", None)
+        capability_contract = resolved_options.pop("_aurora_capability_contract", None)
+        if capability_focus is not None:
+            capability_focus = _identifier("capability focus", capability_focus)
+            if not tool_domains:
+                raise BrainRunError("capability focus requires a domain execution scope")
+            if "provider_tools" in resolved_options:
+                raise BrainRunError(
+                    "provider_tools cannot override capability-scoped adapter selection"
+                )
+        if capability_contract is not None and not isinstance(capability_contract, Mapping):
+            raise BrainRunError("capability contract must be a mapping")
+        for reserved_key in (_AUTONOMOUS_EXECUTION_PLAN_CONTEXT_KEY, _AUTONOMOUS_CAPABILITY_CONTRACT_CONTEXT_KEY):
+            caller_context = resolved_options.get("context")
+            if isinstance(caller_context, Mapping) and reserved_key in caller_context:
+                raise BrainRunError("context cannot override an autonomous runtime contract")
         if not isinstance(resume_execution, bool):
             raise BrainRunError("resume_execution must be a boolean")
         resolved_options.setdefault("ledger", self.ledger)
@@ -8843,17 +9467,41 @@ class AutonomousAgent:
             pack_capabilities: set[str] = set()
             for domain in tool_domains:
                 if domain in AUTONOMOUS_DOMAINS:
-                    pack_capabilities.update(self.orchestrator.pack_registry.resolve(domain).tool_capabilities)
+                    profile = self.orchestrator.registry.resolve(domain)
+                    pack = self.orchestrator.pack_registry.resolve(domain)
+                    workflow = self.orchestrator.workflow_registry.resolve(domain)
+                    pack_capabilities.update(pack.tool_capabilities)
+                    for contract in _build_domain_capability_contracts(profile, pack, workflow):
+                        pack_capabilities.update(contract.tool_capabilities)
             pack_tools = tuple(
                 tool for tool in selected_tools
                 if tool.capability in pack_capabilities
             )
+            if capability_focus is not None:
+                focused_tools: list[AutonomousDomainTool] = []
+                for domain in tool_domains:
+                    if domain not in AUTONOMOUS_DOMAINS:
+                        continue
+                    profile = self.orchestrator.registry.resolve(domain)
+                    pack = self.orchestrator.pack_registry.resolve(domain)
+                    workflow = self.orchestrator.workflow_registry.resolve(domain)
+                    contract = _resolve_domain_capability_contract(
+                        profile,
+                        pack,
+                        workflow,
+                        capability_focus,
+                    )
+                    focused_tools.extend(
+                        tool for tool in selected_tools
+                        if tool.capability in contract.tool_capabilities
+                    )
+                pack_tools = tuple(focused_tools)
             # A caller may register an intentionally application-specific capability that is not
             # in the reviewed built-in pack. Keep it visible rather than silently dropping it;
             # pack matching is a narrowing aid when there is at least one reviewed match, never
             # an authorization mechanism or a way to hide caller-registered tools.
             resolved_options["provider_tools"] = tuple(
-                tool.to_provider_tool() for tool in (pack_tools or selected_tools)
+                tool.to_provider_tool() for tool in (pack_tools if capability_focus is not None else (pack_tools or selected_tools))
             )
         plan_domains = tuple(
             dict.fromkeys(domain for domain in tool_domains if domain in AUTONOMOUS_DOMAINS)
@@ -8877,6 +9525,23 @@ class AutonomousAgent:
                 resolved_options["context"] = merged_context
             else:
                 resolved_options["execution_plan_context"] = execution_plan_packet
+            if capability_focus is not None:
+                if not isinstance(capability_contract, Mapping):
+                    raise BrainRunError("capability focus requires its reviewed capability contract")
+                capability_rows = execution_plan_packet["plans"][0].get("capabilities", {}).get("contracts", [])
+                matching = next(
+                    (
+                        row for row in capability_rows
+                        if isinstance(row, Mapping) and row.get("capability") == capability_focus
+                    ),
+                    None,
+                )
+                if not isinstance(matching, Mapping) or dict(matching.get("contract", {})) != dict(capability_contract):
+                    raise BrainRunError("capability contract is stale or does not match the execution plan")
+                caller_context = resolved_options.get("context")
+                merged_context = {} if caller_context is None else dict(caller_context)
+                merged_context[_AUTONOMOUS_CAPABILITY_CONTRACT_CONTEXT_KEY] = dict(capability_contract)
+                resolved_options["context"] = merged_context
             selection_overrides = resolved_options.get("selection_overrides")
             if selection_overrides is None:
                 merged_overrides: dict[str, Any] = {}
@@ -8889,6 +9554,9 @@ class AutonomousAgent:
                 plan["domain"]: plan["status"]
                 for plan in execution_plan_packet["plans"]
             }
+            if capability_focus is not None:
+                merged_overrides["autonomy_capability_focus"] = capability_focus
+                merged_overrides["autonomy_capability_contract_digest"] = capability_contract.get("contract_digest")
             resolved_options["selection_overrides"] = merged_overrides
         execution_controller: AutonomousExecutionController | None = None
         session_runtime: AutonomousDomainToolRuntime | None = None
@@ -9680,6 +10348,11 @@ __all__ = [
     "AUTONOMOUS_EXECUTION_PLAN_SCHEMA",
     "AUTONOMOUS_EXECUTION_PLAN_STATUSES",
     "MAX_AUTONOMOUS_EXECUTION_PLAN_BYTES",
+    "AUTONOMOUS_CAPABILITY_CONTRACT_SCHEMA",
+    "AUTONOMOUS_CAPABILITY_PLAN_SCHEMA",
+    "AUTONOMOUS_CAPABILITY_PLAN_STATUSES",
+    "MAX_AUTONOMOUS_CAPABILITY_CONTRACTS",
+    "MAX_AUTONOMOUS_CAPABILITY_PLAN_BYTES",
     "AUTONOMOUS_ROUTE_REASONS",
     "MAX_AUTONOMOUS_ROUTE_CANDIDATES",
     "MAX_AUTONOMOUS_ROUTE_DOMAINS",
@@ -9695,6 +10368,7 @@ __all__ = [
     "AutonomousDomainRegistry",
     "AutonomousDomainPack",
     "AutonomousDomainPackRegistry",
+    "AutonomousCapabilityContract",
     "compile_autonomous_domain_execution_plan",
     "AutonomousRouteCandidate",
     "AutonomousRouteProposal",

@@ -868,6 +868,7 @@ def test_builtin_domain_registry_covers_every_autonomous_domain_and_blueprint_re
         assert public["prompt"]["context_ids"] == [
             "autonomy-domain-policy",
             "autonomy-domain-pack",
+            "autonomy-capability-contract",
             "autonomy-workflow-contract",
             "autonomy-constraints",
             "autonomy-desired-outputs",

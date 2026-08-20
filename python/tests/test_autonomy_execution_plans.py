@@ -147,3 +147,143 @@ def test_runtime_plan_context_cannot_be_spoofed_by_caller_context():
             options={"context": {"_aurora_execution_plan": {"status": "ready"}}},
             tool_domains=("coding",),
         )
+
+
+def test_capability_adapters_and_evidence_contracts_cover_every_domain():
+    agent = AutonomousAgent(
+        _Workspace(),
+        LLMRuntime(),
+        model_catalogue=ModelCatalogue([_model()]),
+    )
+
+    packet = agent.capability_plans()
+
+    assert packet["capability_count"] >= len(AUTONOMOUS_DOMAINS)
+    assert {plan["domain"] for plan in packet["plans"]} == set(AUTONOMOUS_DOMAINS)
+    for domain in AUTONOMOUS_DOMAINS:
+        domain_plan = agent.domain_execution_plan(domain)
+        contracts = domain_plan["capabilities"]["contracts"]
+        names = {row["capability"] for row in contracts}
+        assert set(domain_plan["profile"]["required_model_capabilities"])
+        assert set(domain_plan["domain_pack"]["tool_capabilities"]).issubset(names)
+        assert all(row["contract"]["contract_digest"] == row["contract_digest"] for row in contracts)
+        assert all(row["evidence_outputs"] for row in contracts)
+        assert all(row["evaluator_signals"] for row in contracts)
+        assert domain_plan["capabilities"]["adapter_posture"] == "reviewed_exact_aliases; no_fuzzy_matching"
+
+    coding_debug = agent.domain_capability_plan("coding", "debugging")
+    assert "repository_inspection" in coding_debug["contract"]["tool_capabilities"]
+    assert coding_debug["contract"]["evidence_outputs"]
+    assert coding_debug["contract"]["evaluator_signals"]
+
+
+def test_capability_dispatch_narrows_provider_tools_and_binds_the_reviewed_contract():
+    registry = AutonomousDomainToolRegistry(
+        [
+            AutonomousDomainTool(
+                name="repository_catalog",
+                domains=("coding",),
+                capability="repository_inspection",
+                description="Read bounded repository metadata.",
+                parameters={"type": "object"},
+            ),
+            AutonomousDomainTool(
+                name="developer_workbench",
+                domains=("coding",),
+                capability="developer_workbench",
+                description="Read bounded workbench metadata.",
+                parameters={"type": "object"},
+            ),
+        ]
+    )
+    agent = AutonomousAgent(
+        _Workspace(),
+        LLMRuntime(),
+        model_catalogue=ModelCatalogue([_model()]),
+        tool_registry=registry,
+    )
+    reviewed = agent.domain_capability_plan("coding", "debugging")
+
+    _, _, options, _ = agent._execution_inputs(
+        credentials={},
+        model_candidates=None,
+        options={
+            "_aurora_capability_focus": "debugging",
+            "_aurora_capability_contract": reviewed["contract"],
+        },
+        tool_domains=("coding",),
+    )
+
+    assert [tool.name for tool in options["provider_tools"]] == ["repository_catalog"]
+    assert options["context"]["_aurora_capability_contract"]["capability"] == "debugging"
+    assert options["selection_overrides"]["autonomy_capability_focus"] == "debugging"
+
+
+def test_capability_dispatch_rejects_caller_contract_spoofing():
+    agent = AutonomousAgent(
+        _Workspace(),
+        LLMRuntime(),
+        model_catalogue=ModelCatalogue([_model()]),
+    )
+    reviewed = agent.domain_capability_plan("operations", "observability")
+
+    with pytest.raises(BrainRunError, match="stale or does not match"):
+        agent._execution_inputs(
+            credentials={},
+            model_candidates=None,
+            options={
+                "_aurora_capability_focus": "observability",
+                "_aurora_capability_contract": {
+                    **reviewed["contract"],
+                    "evidence_outputs": ["invented_output"],
+                },
+            },
+            tool_domains=("operations",),
+        )
+
+
+def test_run_capability_uses_the_same_provider_invocation_boundary():
+    agent = AutonomousAgent(
+        _Workspace(),
+        LLMRuntime(),
+        model_catalogue=ModelCatalogue([_model()]),
+    )
+    captured: dict[str, object] = {}
+
+    def capture_run(**kwargs: object) -> str:
+        captured.update(kwargs)
+        return "capability-run-captured"
+
+    agent.orchestrator.run = capture_run  # type: ignore[method-assign]
+    result = agent.run_capability(
+        task="inspect bounded repository evidence",
+        domain="coding",
+        capability="debugging",
+        credentials={},
+        approve_provider_call=True,
+    )
+
+    assert result == "capability-run-captured"
+    assert captured["capability"] == "debugging"
+    context = captured["context"]
+    assert isinstance(context, dict)
+    assert context["_aurora_capability_contract"]["capability"] == "debugging"
+    assert context["_aurora_execution_plan"]["plans"][0]["domain"] == "coding"
+    assert "code" in captured["required_model_capabilities"]
+
+
+def test_approval_gated_capability_needs_capability_approval_separate_from_provider_approval():
+    agent = AutonomousAgent(
+        _Workspace(),
+        LLMRuntime(),
+        model_catalogue=ModelCatalogue([_model()]),
+    )
+
+    with pytest.raises(BrainRunError, match="requires explicit capability approval"):
+        agent.run_capability(
+            task="prepare the operational approval packet",
+            domain="operations",
+            capability="approval",
+            credentials={},
+            approve_provider_call=True,
+        )

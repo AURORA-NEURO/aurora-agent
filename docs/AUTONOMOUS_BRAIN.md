@@ -1791,9 +1791,43 @@ Each plan joins the selected domain profile, pack and digest, dependency-ordered
 stages, exact active/withheld tool names and schema digests, required and missing tool
 capabilities, compatible model arms, redacted provider readiness, evaluator signals, evidence
 outputs, review triggers, approval gates, and a stable bandit-learning scope. A stage is
-`tool_ready` only when its declared capabilities map to active registered tools; otherwise it is
-`provider_only_or_blocked`. Missing tools are reported as a degraded capability, never silently
-replaced with an unclassified tool.
+`tool_ready` only when its declared capabilities map to active registered tools; the mapping may
+use a reviewed exact adapter alias such as `repository_inspection -> debugging` or
+`telemetry_projection -> observability`. Otherwise it is `provider_only_or_blocked`. Missing
+tools are reported as a degraded capability, never silently replaced with an unclassified tool.
+
+The `capabilities` section is the stage-level evidence contract. It is available directly through
+`agent.domain_capabilities("coding")` or `agent.capability_plans()` and contains, for every
+built-in domain capability, the exact adapter labels, required model capabilities, stage IDs,
+evidence outputs, evaluator signals, review posture, active tool names, withheld tool names, and
+an immutable contract digest. Adapter resolution is exact and reviewed; there is no fuzzy match
+from a tool name or description. This makes the same runtime decision legible to a UI, a planner,
+an evaluator, and the delayed-credit learning ledger.
+
+When the application already knows the capability, use focused dispatch to narrow provider-visible
+tools and bind the evidence contract into the developer prompt:
+
+```python
+result = agent.run_capability(
+    task="inspect the repository for the failing test's likely impact",
+    domain="coding",
+    capability="debugging",
+    credentials=session,  # CredentialSession or opaque CredentialHandle values only
+    approve_provider_call=True,
+    execution_mode="tool_loop",
+    tool_loop_options={"max_turns": 4},
+)
+```
+
+`run_capability()` uses the same model selection, provider invocation, credential revalidation,
+tool schema validation, effect approval, execution journal, and evaluator/learning handoff as
+`run()`. It only narrows the tool set to exact aliases declared by the selected contract; it
+cannot widen a recorded activation allow-list. A capability with no active adapter remains
+`provider_only`, while a capability with a human checkpoint is `approval_gated`; neither state is
+silently upgraded by model output or bandit preference. For an approval-gated capability, the
+caller must pass `approve_capability=True`; this is intentionally separate from
+`approve_provider_call=True`, because provider transport approval is not operational or business
+approval.
 
 `execution_plans()` compiles all twelve built-in domains for readiness dashboards and startup
 diagnostics. The possible plan states are `ready`, `degraded_tool_coverage`, `provider_pending`,

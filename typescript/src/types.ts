@@ -392,6 +392,74 @@ export interface AutonomousDomainPack extends JsonObject {
   credential_posture: string;
 }
 
+/** Reviewed exact adapter/evidence contract for one autonomous domain capability. */
+export interface AutonomousCapabilityContract extends JsonObject {
+  schema: "bioprism-python-autonomous-capability-contract/0.1" | string;
+  domain: string;
+  capability: string;
+  stage_ids: string[];
+  tool_capabilities: string[];
+  required_model_capabilities: string[];
+  evidence_outputs: string[];
+  evaluator_signals: string[];
+  read_only: boolean;
+  approval_required: boolean;
+  review_triggers: string[];
+  fallback_policy: string;
+  contract_digest: string;
+  adapter_posture: string;
+  credential_posture: string;
+  authority_posture: string;
+}
+
+/** Dynamic capability row after activation, model, and tool readiness are projected. */
+export interface AutonomousCapabilityExecutionRow extends AutonomousCapabilityContract {
+  contract: AutonomousCapabilityContract;
+  active_tool_names: string[];
+  withheld_tool_names: string[];
+  matched_active_tool_capabilities: string[];
+  matched_withheld_tool_capabilities: string[];
+  tool_posture: "tool_backed" | "provider_only_or_blocked" | string;
+  execution_posture: "provider_or_tool" | "approval_gated" | string;
+}
+
+/** Focused, non-executing capability dispatch plan. */
+export interface AutonomousCapabilityPlan extends JsonObject {
+  schema: "bioprism-python-autonomous-capability-plan/0.1" | string;
+  domain: string;
+  capability: string;
+  status: "ready" | "provider_only" | "approval_gated" | "provider_pending" | "activation_review_required" | "stale" | "revoked" | "model_gap" | string;
+  domain_plan_digest: string;
+  contract_digest: string;
+  contract: AutonomousCapabilityContract;
+  stage_ids: string[];
+  active_tool_names: string[];
+  withheld_tool_names: string[];
+  matched_active_tool_capabilities: string[];
+  tool_posture: string;
+  execution_posture: string;
+  evidence_outputs: string[];
+  evaluator_signals: string[];
+  review_gates: JsonObject;
+  learning_context_digest: string | null;
+  execution: string;
+  credential_posture: string;
+  authority_posture: string;
+}
+
+/** Aggregate capability plans suitable for readiness dashboards. */
+export interface AutonomousCapabilityPlans extends JsonObject {
+  schema: "bioprism-python-autonomous-capability-plan/0.1" | string;
+  status: string;
+  domains: string[];
+  capability_count: number;
+  plans: AutonomousCapabilityPlan[];
+  plan_digest: string;
+  execution: string;
+  authority_posture: string;
+  secret_material: string;
+}
+
 /** Exact-domain held-out evaluator contract shared with the Python replay registry. */
 export interface AutonomousDomainEvaluatorProfile extends JsonObject {
   schema: "bioprism-brain-domain-evaluator/0.1" | string;
