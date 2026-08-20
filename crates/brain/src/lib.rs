@@ -16,8 +16,9 @@
 //! The learning implementation is an explicit-reward policy layer rather than a claim of
 //! reinforcement learning in the statistical sense. It supports deterministic UCB and seeded
 //! epsilon-greedy exploration, updates only from a bounded reward supplied by an evaluator,
-//! records failures separately, and never mutates hidden global state. A future contextual policy
-//! can consume the same state schema without invalidating existing ledgers.
+//! records failures separately, and never mutates hidden global state. Contextual state is nested
+//! under a canonical domain/capability/risk/task-family digest and remains compatible with the
+//! legacy global arm ledger as a cold-start prior.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -42,6 +43,7 @@ const MAX_TOOL_NAME_BYTES: usize = 256;
 const MAX_EVALUATOR_ID_BYTES: usize = 256;
 const MAX_CONTEXT_LABEL_BYTES: usize = 256;
 const MAX_CREDITED_OUTCOMES: usize = 4096;
+const MAX_CONTEXTUAL_STATES: usize = 64;
 
 #[derive(Debug, Error)]
 pub enum BrainError {
@@ -69,8 +71,14 @@ pub enum BrainError {
     UnknownArm(String),
     #[error("contextual observation digest does not match the selected context")]
     ContextDigestMismatch,
+    #[error("context digest does not match its context identity")]
+    ContextIdentityMismatch,
+    #[error("contextual bandit updates require context and context_digest together")]
+    ContextRequired,
     #[error("contextual observations contain duplicate arm {0:?}")]
     DuplicateContextObservation(String),
+    #[error("bandit state contains duplicate contextual state {0:?}")]
+    DuplicateContextState(String),
     #[error("bandit state contains duplicate arm {0:?}")]
     DuplicateArm(String),
     #[error("bandit state contains duplicate credited outcome {0:?}")]
@@ -693,6 +701,24 @@ impl ModelSelectionContext {
     }
 }
 
+fn validate_context_binding(
+    context_digest: Option<&String>,
+    context: Option<&ModelSelectionContext>,
+) -> Result<(), BrainError> {
+    match (context_digest, context) {
+        (None, None) => Ok(()),
+        (Some(_), None) | (None, Some(_)) => Err(BrainError::ContextRequired),
+        (Some(context_digest), Some(context)) => {
+            context.validate()?;
+            validate_digest_value(context_digest, "context_digest")?;
+            if digest(context)? != *context_digest {
+                return Err(BrainError::ContextIdentityMismatch);
+            }
+            Ok(())
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ContextualModelObservation {
     pub context_digest: String,
@@ -1292,6 +1318,22 @@ pub struct BanditArm {
     pub disabled: bool,
 }
 
+/// Caller-persisted bandit observations scoped to one stable model-selection context.
+///
+/// The context labels are bounded routing identity, not task text. Keeping the arms nested under
+/// the digest prevents evaluator feedback from one domain or risk posture from silently changing
+/// another domain's model policy while preserving the legacy global arm ledger for cold starts.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ContextualBanditState {
+    pub context_digest: String,
+    pub context: ModelSelectionContext,
+    #[serde(default)]
+    pub generation: u64,
+    pub arms: Vec<BanditArm>,
+    #[serde(default)]
+    pub observed: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CreditedOutcome {
     pub outcome_digest: String,
@@ -1303,6 +1345,9 @@ pub struct CreditedOutcome {
     /// bandit updates that do not carry an evaluator boundary.
     #[serde(default)]
     pub contract_digest: Option<String>,
+    /// Context identity that received this evaluator credit. Absent for legacy global updates.
+    #[serde(default)]
+    pub context_digest: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1318,6 +1363,10 @@ pub struct BanditState {
     /// process restarts without retaining prompts, responses, or credentials.
     #[serde(default)]
     pub credited_outcomes: Vec<CreditedOutcome>,
+    /// Bounded contextual ledgers. The top-level `arms` remain the legacy global cold-start
+    /// history, while each contextual row is independently replay-safe and evaluator-scoped.
+    #[serde(default)]
+    pub contextual_states: Vec<ContextualBanditState>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1356,6 +1405,12 @@ pub struct BanditUpdate {
     pub outcome_digest: Option<String>,
     #[serde(default)]
     pub contract_digest: Option<String>,
+    /// Optional contextual identity. Both fields must be supplied together and the digest must
+    /// equal the canonical digest of `context`.
+    #[serde(default)]
+    pub context_digest: Option<String>,
+    #[serde(default)]
+    pub context: Option<ModelSelectionContext>,
 }
 
 /// Value-only identity for one provider-backed brain run.
@@ -1400,6 +1455,11 @@ pub struct BrainOutcomeRecordRequest {
     pub assessment: BrainEvaluatorAssessment,
     pub bandit_state: BanditState,
     pub arm_id: String,
+    /// Optional contextual identity for evaluator credit. Legacy callers may omit both fields.
+    #[serde(default)]
+    pub context_digest: Option<String>,
+    #[serde(default)]
+    pub context: Option<ModelSelectionContext>,
     /// Optional caller-owned idempotency identity for transports that retain a replay cache.
     /// The outcome digest in `run` remains the durable learning identity.
     #[serde(default)]
@@ -1412,6 +1472,8 @@ pub struct BrainLearningEvidence {
     pub run: BrainRunIdentity,
     pub assessment: BrainEvaluatorAssessment,
     pub arm_id: String,
+    #[serde(default)]
+    pub context_digest: Option<String>,
     pub bandit_update: BanditUpdate,
     pub previous_generation: u64,
     pub next_generation: u64,
@@ -1500,6 +1562,7 @@ pub fn record_brain_outcome(
         }
     }
     validate_bandit_state(&request.bandit_state)?;
+    validate_context_binding(request.context_digest.as_ref(), request.context.as_ref())?;
     let credited_outcome_digest = digest(&json!({
         "run_id": request.run.run_id.clone(),
         "outcome_digest": request.run.outcome_digest.clone(),
@@ -1508,6 +1571,7 @@ pub fn record_brain_outcome(
         "run_id": request.run.run_id.clone(),
         "outcome_digest": request.run.outcome_digest.clone(),
         "arm_id": request.arm_id.clone(),
+        "context_digest": request.context_digest.clone(),
         "assessment": request.assessment.clone(),
     }))?;
     let bandit_update = BanditUpdate {
@@ -1516,6 +1580,8 @@ pub fn record_brain_outcome(
         failed: request.assessment.failed,
         outcome_digest: Some(credited_outcome_digest),
         contract_digest: Some(contract_digest),
+        context_digest: request.context_digest.clone(),
+        context: request.context.clone(),
     };
     let next_state = update_bandit(&request.bandit_state, &bandit_update)?;
     let next_state_digest = digest(&next_state)?;
@@ -1524,6 +1590,7 @@ pub fn record_brain_outcome(
         run: request.run.clone(),
         assessment: request.assessment.clone(),
         arm_id: request.arm_id.clone(),
+        context_digest: request.context_digest.clone(),
         bandit_update,
         previous_generation: request.bandit_state.generation,
         next_generation: next_state.generation,
@@ -1547,15 +1614,48 @@ pub fn record_brain_outcome(
     })
 }
 
-fn validate_bandit_state(state: &BanditState) -> Result<(), BrainError> {
-    state.policy.validate()?;
+fn validate_bandit_arms(arms: &[BanditArm], policy: &BanditPolicy) -> Result<(), BrainError> {
     let mut seen = BTreeSet::new();
-    for arm in &state.arms {
+    for arm in arms {
         non_empty(&arm.arm_id, "arm.arm_id")?;
-        finite_range(arm.reward_sum, "arm.reward_sum", -1e12, 1e12)?;
+        finite_range(
+            arm.reward_sum,
+            "arm.reward_sum",
+            policy.min_reward * arm.pulls as f64,
+            policy.max_reward * arm.pulls as f64,
+        )?;
+        if arm.failures > arm.pulls {
+            return Err(BrainError::OutOfRange {
+                field: "arm.failures",
+                min: 0.0,
+                max: arm.pulls as f64,
+            });
+        }
         if !seen.insert(arm.arm_id.clone()) {
             return Err(BrainError::DuplicateArm(arm.arm_id.clone()));
         }
+    }
+    Ok(())
+}
+
+fn validate_bandit_state(state: &BanditState) -> Result<(), BrainError> {
+    state.policy.validate()?;
+    validate_bandit_arms(&state.arms, &state.policy)?;
+    if state.contextual_states.len() > MAX_CONTEXTUAL_STATES {
+        return Err(BrainError::TooMany {
+            field: "bandit contextual states",
+            max: MAX_CONTEXTUAL_STATES,
+        });
+    }
+    let mut contextual_digests = BTreeSet::new();
+    for contextual in &state.contextual_states {
+        validate_context_binding(Some(&contextual.context_digest), Some(&contextual.context))?;
+        if !contextual_digests.insert(contextual.context_digest.clone()) {
+            return Err(BrainError::DuplicateContextState(
+                contextual.context_digest.clone(),
+            ));
+        }
+        validate_bandit_arms(&contextual.arms, &state.policy)?;
     }
     if state.credited_outcomes.len() > MAX_CREDITED_OUTCOMES {
         return Err(BrainError::TooMany {
@@ -1578,6 +1678,9 @@ fn validate_bandit_state(state: &BanditState) -> Result<(), BrainError> {
         )?;
         if let Some(contract_digest) = &outcome.contract_digest {
             validate_digest_value(contract_digest, "bandit.credited_outcomes.contract_digest")?;
+        }
+        if let Some(context_digest) = &outcome.context_digest {
+            validate_digest_value(context_digest, "bandit.credited_outcomes.context_digest")?;
         }
         if !credited.insert(&outcome.outcome_digest) {
             return Err(BrainError::DuplicateCreditedOutcome(
@@ -1705,6 +1808,38 @@ pub fn select_bandit_arm(state: &BanditState) -> Result<BanditSelectionReport, B
     })
 }
 
+/// Select from a context-scoped arm ledger with global history as a cold-start fallback.
+///
+/// The returned report keeps the existing value-only selection shape so old callers remain
+/// compatible. The caller supplies the context identity explicitly; no server-side learner state
+/// is consulted or mutated.
+pub fn select_bandit_arm_contextual(
+    state: &BanditState,
+    context_digest: &str,
+    context: &ModelSelectionContext,
+) -> Result<BanditSelectionReport, BrainError> {
+    let context_digest_owned = context_digest.to_string();
+    validate_context_binding(Some(&context_digest_owned), Some(context))?;
+    validate_bandit_state(state)?;
+    let mut effective = state.clone();
+    if let Some(contextual) = state
+        .contextual_states
+        .iter()
+        .find(|contextual| contextual.context_digest == context_digest)
+    {
+        let mut by_arm = effective
+            .arms
+            .into_iter()
+            .map(|arm| (arm.arm_id.clone(), arm))
+            .collect::<BTreeMap<_, _>>();
+        for arm in &contextual.arms {
+            by_arm.insert(arm.arm_id.clone(), arm.clone());
+        }
+        effective.arms = by_arm.into_values().collect();
+    }
+    select_bandit_arm(&effective)
+}
+
 /// Apply one explicit evaluator reward and return the new value-bearing state. The caller owns
 /// persistence and must supply a digest of the evaluated outcome when it wants a replay link.
 pub fn update_bandit(
@@ -1713,6 +1848,7 @@ pub fn update_bandit(
 ) -> Result<BanditState, BrainError> {
     validate_bandit_state(state)?;
     state.policy.validate()?;
+    validate_context_binding(update.context_digest.as_ref(), update.context.as_ref())?;
     finite_range(
         update.reward,
         "update.reward",
@@ -1733,6 +1869,7 @@ pub fn update_bandit(
                 || prior.reward != update.reward
                 || prior.failed != update.failed
                 || prior.contract_digest != update.contract_digest
+                || prior.context_digest != update.context_digest
             {
                 return Err(BrainError::ConflictingCreditedOutcome(
                     outcome_digest.clone(),
@@ -1742,8 +1879,41 @@ pub fn update_bandit(
         }
     }
     let mut next = state.clone();
-    let arm = next
-        .arms
+    let contextual_index = update.context_digest.as_ref().map(|context_digest| {
+        next.contextual_states
+            .iter()
+            .position(|contextual| contextual.context_digest == *context_digest)
+    });
+    let arm_collection = if let Some(Some(index)) = contextual_index {
+        &mut next.contextual_states[index].arms
+    } else if update.context_digest.is_some() {
+        let context = update.context.clone().ok_or(BrainError::ContextRequired)?;
+        let context_digest = update
+            .context_digest
+            .clone()
+            .ok_or(BrainError::ContextRequired)?;
+        if next.contextual_states.len() >= MAX_CONTEXTUAL_STATES {
+            return Err(BrainError::TooMany {
+                field: "bandit contextual states",
+                max: MAX_CONTEXTUAL_STATES,
+            });
+        }
+        next.contextual_states.push(ContextualBanditState {
+            context_digest,
+            context,
+            generation: 0,
+            arms: Vec::new(),
+            observed: false,
+        });
+        &mut next
+            .contextual_states
+            .last_mut()
+            .expect("contextual state was pushed")
+            .arms
+    } else {
+        &mut next.arms
+    };
+    let arm = arm_collection
         .iter_mut()
         .find(|arm| arm.arm_id == update.arm_id)
         .ok_or_else(|| BrainError::UnknownArm(update.arm_id.clone()))?;
@@ -1768,7 +1938,17 @@ pub fn update_bandit(
             reward: update.reward,
             failed: update.failed,
             contract_digest: update.contract_digest.clone(),
+            context_digest: update.context_digest.clone(),
         });
+    }
+    if let Some(context_digest) = &update.context_digest {
+        let contextual = next
+            .contextual_states
+            .iter_mut()
+            .find(|contextual| contextual.context_digest == *context_digest)
+            .ok_or(BrainError::ContextIdentityMismatch)?;
+        contextual.generation = contextual.generation.saturating_add(1);
+        contextual.observed = true;
     }
     next.generation = next.generation.saturating_add(1);
     Ok(next)
@@ -2109,6 +2289,7 @@ mod tests {
                 },
             ],
             credited_outcomes: Vec::new(),
+            contextual_states: Vec::new(),
         };
         let selected = select_bandit_arm(&state).unwrap();
         assert_eq!(selected.selected_arm_id.as_deref(), Some("new"));
@@ -2120,6 +2301,8 @@ mod tests {
                 failed: false,
                 outcome_digest: Some("a".repeat(64)),
                 contract_digest: None,
+                context_digest: None,
+                context: None,
             },
         )
         .unwrap();
@@ -2190,7 +2373,9 @@ mod tests {
                 reward: 0.9,
                 failed: false,
                 contract_digest: None,
+                context_digest: None,
             }],
+            contextual_states: Vec::new(),
         };
         let next = update_bandit(
             &state,
@@ -2200,10 +2385,88 @@ mod tests {
                 failed: false,
                 outcome_digest: Some("d".repeat(64)),
                 contract_digest: None,
+                context_digest: None,
+                context: None,
             },
         )
         .unwrap();
         assert_eq!(next, state);
+    }
+
+    #[test]
+    fn contextual_bandit_updates_are_isolated_and_replay_safe() {
+        let coding = ModelSelectionContext {
+            domain: "coding".into(),
+            capability: "implementation".into(),
+            risk_class: "engineering_change".into(),
+            task_family: Some("coding_delivery".into()),
+        };
+        let biomedical = ModelSelectionContext {
+            domain: "biomedical".into(),
+            capability: "biomedical_review".into(),
+            risk_class: "biomedical_safety".into(),
+            task_family: Some("biomedical_review".into()),
+        };
+        let arm = |arm_id: &str| BanditArm {
+            arm_id: arm_id.into(),
+            pulls: 1,
+            reward_sum: 0.2,
+            failures: 0,
+            disabled: false,
+        };
+        let coding_digest = digest(&coding).unwrap();
+        let biomedical_digest = digest(&biomedical).unwrap();
+        let state = BanditState {
+            schema: BANDIT_SCHEMA.into(),
+            generation: 0,
+            policy: BanditPolicy::default(),
+            arms: vec![arm("a/one"), arm("b/two")],
+            credited_outcomes: Vec::new(),
+            contextual_states: vec![
+                ContextualBanditState {
+                    context_digest: coding_digest.clone(),
+                    context: coding.clone(),
+                    generation: 0,
+                    arms: vec![arm("a/one"), arm("b/two")],
+                    observed: false,
+                },
+                ContextualBanditState {
+                    context_digest: biomedical_digest.clone(),
+                    context: biomedical.clone(),
+                    generation: 0,
+                    arms: vec![arm("a/one"), arm("b/two")],
+                    observed: false,
+                },
+            ],
+        };
+        let update = BanditUpdate {
+            arm_id: "a/one".into(),
+            reward: 1.0,
+            failed: false,
+            outcome_digest: Some("c".repeat(64)),
+            contract_digest: None,
+            context_digest: Some(coding_digest.clone()),
+            context: Some(coding.clone()),
+        };
+        let next = update_bandit(&state, &update).unwrap();
+        assert_eq!(next.arms[0].pulls, 1);
+        assert_eq!(next.contextual_states[0].arms[0].pulls, 2);
+        assert_eq!(next.contextual_states[1].arms[0].pulls, 1);
+        assert_eq!(next.contextual_states[0].generation, 1);
+        assert!(next.contextual_states[0].observed);
+        let selected = select_bandit_arm_contextual(&next, &coding_digest, &coding).unwrap();
+        assert_eq!(selected.selected_arm_id.as_deref(), Some("a/one"));
+        assert_eq!(update_bandit(&next, &update).unwrap(), next);
+        let contradictory = BanditUpdate {
+            context_digest: Some(biomedical_digest),
+            context: Some(biomedical),
+            reward: 0.1,
+            ..update
+        };
+        assert!(matches!(
+            update_bandit(&next, &contradictory),
+            Err(BrainError::ConflictingCreditedOutcome(_))
+        ));
     }
 
     #[test]
@@ -2220,6 +2483,7 @@ mod tests {
                 disabled: false,
             }],
             credited_outcomes: Vec::new(),
+            contextual_states: Vec::new(),
         };
         state.policy.strategy = "unbounded_random".into();
         let error = select_bandit_arm(&state).unwrap_err();
@@ -2240,6 +2504,7 @@ mod tests {
                 disabled: false,
             }],
             credited_outcomes: Vec::new(),
+            contextual_states: Vec::new(),
         };
         let report = record_brain_outcome(&BrainOutcomeRecordRequest {
             run: BrainRunIdentity {
@@ -2264,6 +2529,8 @@ mod tests {
             },
             bandit_state: state,
             arm_id: "openai/test-model".into(),
+            context_digest: None,
+            context: None,
             idempotency_key: Some("episode:run-1".into()),
         })
         .unwrap();
@@ -2313,8 +2580,11 @@ mod tests {
                     disabled: false,
                 }],
                 credited_outcomes: Vec::new(),
+                contextual_states: Vec::new(),
             },
             arm_id: "openai/test-model".into(),
+            context_digest: None,
+            context: None,
             idempotency_key: None,
         })
         .unwrap_err();

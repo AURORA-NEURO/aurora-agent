@@ -47,6 +47,13 @@ from prism_sdk.brain import (
 )
 
 
+def _context_digest(context: dict[str, object]) -> str:
+    identity = {field: context.get(field) for field in ("domain", "capability", "risk_class", "task_family")}
+    return hashlib.sha256(
+        json.dumps(identity, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
 class _ProviderHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 - stdlib handler protocol
         length = int(self.headers.get("Content-Length", "0"))
@@ -2007,10 +2014,11 @@ class LlmRuntimeTests(unittest.TestCase):
 
             def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
                 if name == "brain_model_select_contextual":
+                    assert arguments is not None
                     self.contextual_arguments = arguments
                     return {
                         "schema": "bioprism-brain-contextual-model-selection/0.1",
-                        "context_digest": "c" * 64,
+                        "context_digest": _context_digest(arguments["context"]),  # type: ignore[arg-type]
                         "selection_status": "contextual_selection_mixed_history",
                         "selection": {
                             "selected_model": {"provider": "openai", "model": "test-model"},
@@ -2052,7 +2060,7 @@ class LlmRuntimeTests(unittest.TestCase):
             ],
         )
         self.assertEqual(result.status, "completed_provider_call")
-        self.assertEqual(result.selection["context_digest"], "c" * 64)
+        self.assertEqual(result.selection["context_digest"], _context_digest(workspace.contextual_arguments["context"]))  # type: ignore[index]
         self.assertEqual(workspace.contextual_arguments["context"]["domain"], "engineering")  # type: ignore[index]
 
     def test_adaptive_brain_builds_selection_from_registered_providers_and_ledger(self) -> None:
@@ -2615,7 +2623,7 @@ class LlmRuntimeTests(unittest.TestCase):
                     assert arguments is not None
                     self.selection_context = arguments["context"]  # type: ignore[assignment]
                     return {
-                        "context_digest": "d" * 64,
+                        "context_digest": _context_digest(arguments["context"]),  # type: ignore[arg-type]
                         "selection_status": "contextual_selection_global_history_only",
                         "selection": {
                             "selected_model": {"provider": "openai", "model": "test-model"},
@@ -2737,7 +2745,7 @@ class LlmRuntimeTests(unittest.TestCase):
                     assert arguments is not None
                     self.selection_contexts.append(dict(arguments["context"]))  # type: ignore[arg-type]
                     return {
-                        "context_digest": "d" * 64,
+                        "context_digest": _context_digest(arguments["context"]),  # type: ignore[arg-type]
                         "selection_status": "contextual_selection_global_history_only",
                         "selection": {
                             "selected_model": {"provider": "openai", "model": "test-model"},

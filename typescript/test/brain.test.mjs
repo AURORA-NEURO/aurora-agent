@@ -87,6 +87,7 @@ test("client exposes the autonomous brain value-only kernel", async () => {
   });
   const state = { schema: "bioprism-brain-bandit/0.1", arms: [{ arm_id: "openai/test-model" }] };
   const bandit = await client.brainBanditSelect(state);
+  const contextualBandit = await client.brainBanditSelectContextual(state, "c".repeat(64), { domain: "engineering", capability: "platform_status", risk_class: "low" });
   const updated = await client.brainBanditUpdate(state, { arm_id: "openai/test-model", reward: 0.8 });
   const outcome = await client.brainOutcomeRecord({
     run: { run_id: "run-1", selection_digest: "a".repeat(64), prompt_digest: "b".repeat(64), plan_digest: "c".repeat(64), provider: "openai", model: "test-model", outcome_digest: "d".repeat(64) },
@@ -118,6 +119,7 @@ test("client exposes the autonomous brain value-only kernel", async () => {
   assert.equal(contextual.mcp.result.structuredContent.context_digest, "c".repeat(64));
   assert.equal(prompt.mcp.result.structuredContent.prompt_digest, "p");
   assert.equal(plan.mcp.result.structuredContent.ok, true);
+  assert.equal(contextualBandit.mcp.result.structuredContent.selected_arm_id, "openai/test-model");
   assert.equal(bandit.mcp.result.structuredContent.selected_arm_id, "openai/test-model");
   assert.equal(updated.mcp.result.structuredContent.generation, 1);
   assert.equal(outcome.mcp.result.structuredContent.status, "recorded_evaluator_reward");
@@ -133,7 +135,7 @@ test("client exposes the autonomous brain value-only kernel", async () => {
   assert.deepEqual(seen.find(({ path }) => path.endsWith("brain_model_select")).body.model_health, {
     "openai/test-model": { attempts: 12, successes: 11, failures: 1, success_rate: 11 / 12, last_latency_ms: 42 },
   });
-  assert.equal(seen.length, 13);
+  assert.equal(seen.length, 14);
   assert.ok(seen.every(({ body }) => !Object.prototype.hasOwnProperty.call(body, "api_key")));
   assert.ok(seen.every(({ body }) => !Object.prototype.hasOwnProperty.call(body, "prompt")));
 });

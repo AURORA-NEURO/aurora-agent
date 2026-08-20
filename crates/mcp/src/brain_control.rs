@@ -106,6 +106,8 @@ impl BrainControlState {
                 "assessment",
                 "bandit_state",
                 "arm_id",
+                "context_digest",
+                "context",
                 "idempotency_key",
             ],
         )?;
@@ -119,6 +121,8 @@ impl BrainControlState {
             "run": request.run.clone(),
             "assessment": request.assessment.clone(),
             "arm_id": request.arm_id.clone(),
+            "context_digest": request.context_digest.clone(),
+            "context": request.context.clone(),
         }))?;
         let idempotency_key_digest = idempotency_key
             .as_ref()

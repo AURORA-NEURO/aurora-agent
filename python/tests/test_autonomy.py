@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -226,8 +227,17 @@ class _Workspace:
         args = {} if arguments is None else dict(arguments)
         self.calls.append((name, args))
         if name == "brain_model_select_contextual":
+            raw_context = args.get("context")
+            assert isinstance(raw_context, dict)
+            context_identity = {
+                field: raw_context.get(field)
+                for field in ("domain", "capability", "risk_class", "task_family")
+            }
+            context_digest = hashlib.sha256(
+                json.dumps(context_identity, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            ).hexdigest()
             return {
-                "context_digest": "c" * 64,
+                "context_digest": context_digest,
                 "selection_status": "selected",
                 "selection": {
                     "selected_model": {"provider": "openai", "model": "test-model"},

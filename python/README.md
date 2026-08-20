@@ -60,6 +60,11 @@ events and explicit approval routing; `BrainWorker` renews leases across process
 can feed `BrainModelHealthStore` into future model selection. `BrainReplayEngine` re-evaluates
 caller-rehydrated evidence across every built-in domain and optionally advances a caller-owned
 bandit updater without replaying provider calls.
+Contextual model adaptation is shared with the Rust and TypeScript contracts: the canonical
+domain/capability/risk/task-family digest selects a nested contextual arm ledger, while global arms
+remain only a cold-start prior. Evaluator settlement sends the digest and bounded context identity
+through `brain_outcome_record`; replay receipts bind that identity, so reward from one domain cannot
+silently update another domain's model policy.
 
 Approval-required missions are never completed as proposals: the worker parks them in
 `waiting_approval`, records only a request digest and bounded scope, and requeues them only after

@@ -24,7 +24,7 @@ import {
   type AutonomousModelCandidateDefaults,
   type ProviderModelDiscovery,
 } from "./llm.js";
-import { ToolCatalogue, canonicalJson, digestJson } from "./tooling.js";
+import { ToolCatalogue, canonicalJson, digestCanonicalJsonText, digestJson } from "./tooling.js";
 import type {
   BrainBanditArm,
   BrainBanditContext,
@@ -941,13 +941,9 @@ async function buildTaskBlueprint(
     risk_class: profile.risk_class,
     task_family: profile.workflow.workflow_id,
   };
-  const learningContextDigest = await digestJson({
-    schema: "bioprism-typescript-autonomous-learning-context/0.1",
-    context: selectionContext,
-    workflow_digest: profile.workflow.workflow_digest,
-    domain_pack_digest: pack.pack_digest,
-    required_model_capabilities: profile.required_model_capabilities,
-  });
+  // Match the Rust/Python context identity byte-for-byte: field order is part of this
+  // cross-language value contract, while task text and provider payloads stay outside it.
+  const learningContextDigest = await digestCanonicalJsonText(JSON.stringify(selectionContext));
   return {
     schema: "bioprism-python-autonomous-task/0.1",
     task_digest: taskDigest,

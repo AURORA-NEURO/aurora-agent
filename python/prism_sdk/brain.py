@@ -542,7 +542,10 @@ class BrainLearningLedger:
             "schema": BRAIN_CONTEXT_LEARNING_STATE_SCHEMA,
             "context": normalized_context,
             "context_digest": context_digest,
-            "bandit_state": dict(state),
+            "bandit_state": {
+                **dict(state),
+                "arms": _bandit_observations(state, context_digest=context_digest),
+            },
             "observed": evaluation_count > 0,
             "evaluation_count": evaluation_count,
             "last_evaluator_id": last_evaluator_id,
@@ -659,15 +662,73 @@ def _context_identity_digest(context: Mapping[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _bandit_observations(state: Mapping[str, Any] | None) -> list[dict[str, Any]]:
-    """Project caller-persisted bandit state into the model selector's observation contract."""
+def _selection_context_binding(
+    selection: Mapping[str, Any],
+) -> tuple[str | None, dict[str, Any] | None]:
+    """Return a validated contextual binding while retaining legacy digest-only metadata."""
+
+    context_digest = selection.get("context_digest")
+    if context_digest is not None and not _valid_digest(context_digest):
+        raise BrainRunError("selection context_digest must be a lowercase SHA-256 digest")
+    raw_context = selection.get("context")
+    if raw_context is None:
+        return context_digest, None
+    if not isinstance(raw_context, Mapping):
+        raise BrainRunError("selection context must be a mapping")
+    context = _normalize_learning_context(raw_context)
+    expected = _context_identity_digest(context)
+    if context_digest != expected:
+        raise BrainRunError("selection context_digest does not match its context identity")
+    return context_digest, context
+
+
+def _bandit_observations(
+    state: Mapping[str, Any] | None,
+    *,
+    context_digest: str | None = None,
+) -> list[dict[str, Any]]:
+    """Project caller-persisted global or context-scoped state into model observations.
+
+    Contextual rows are nested in the canonical Rust state. A missing scoped row deliberately
+    falls back to the top-level global arms so first-run exploration remains possible without
+    allowing a different context's rewards to leak into this request.
+    """
 
     if state is None:
         return []
     if not isinstance(state, Mapping):
         raise BrainRunError("bandit state must be a mapping")
     BrainLearningLedger._assert_safe(state)
-    arms = state.get("arms", [])
+    if context_digest is not None:
+        if not _valid_digest(context_digest):
+            raise BrainRunError("context_digest must be a lowercase SHA-256 digest")
+        contextual_states = state.get("contextual_states", [])
+        if not isinstance(contextual_states, list):
+            raise BrainRunError("bandit state contextual_states must be a list")
+        matching: list[Mapping[str, Any]] = []
+        for row in contextual_states:
+            if not isinstance(row, Mapping):
+                raise BrainRunError("bandit state contextual_states must contain mappings")
+            row_digest = row.get("context_digest")
+            if row_digest == context_digest:
+                row_context = row.get("context")
+                if not isinstance(row_context, Mapping):
+                    raise BrainRunError("bandit state contextual state identity is malformed")
+                normalized_row_context = _normalize_learning_context(row_context)
+                if _context_identity_digest(normalized_row_context) != row_digest:
+                    raise BrainRunError("bandit state contextual state digest does not match its context")
+                matching.append(row)
+        if len(matching) > 1:
+            raise BrainRunError("bandit state contains duplicate contextual state")
+        global_observations = _bandit_observations({"arms": state.get("arms", [])})
+        if not matching:
+            return global_observations
+        contextual_observations = _bandit_observations({"arms": matching[0].get("arms", [])})
+        merged = {observation["arm_id"]: observation for observation in global_observations}
+        merged.update({observation["arm_id"]: observation for observation in contextual_observations})
+        return list(merged.values())
+    else:
+        arms = state.get("arms", [])
     if not isinstance(arms, list):
         raise BrainRunError("bandit state arms must be a list")
     observations: list[dict[str, Any]] = []
@@ -708,7 +769,72 @@ def _bandit_observations(state: Mapping[str, Any] | None) -> list[dict[str, Any]
     return observations
 
 
-def _ensure_bandit_arm(state: Mapping[str, Any], arm_id: str) -> dict[str, Any]:
+def _normalize_bandit_arm_collection(
+    raw_arms: Any,
+    *,
+    field: str,
+    ensure_arm_id: str | None = None,
+) -> list[dict[str, Any]]:
+    if not isinstance(raw_arms, list):
+        raise BrainRunError(f"{field} must be a list")
+    if len(raw_arms) > 512:
+        raise BrainRunError(f"{field} contains too many arms")
+    copied: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw_arm in raw_arms:
+        if not isinstance(raw_arm, Mapping):
+            raise BrainRunError(f"{field} must contain mappings")
+        current = dict(raw_arm)
+        current_id = current.get("arm_id")
+        current.setdefault("pulls", 0)
+        current.setdefault("reward_sum", 0.0)
+        current.setdefault("failures", 0)
+        current.setdefault("disabled", False)
+        pulls = current.get("pulls")
+        reward_sum = current.get("reward_sum")
+        failures = current.get("failures")
+        if (
+            not isinstance(current_id, str)
+            or not current_id.strip()
+            or not isinstance(pulls, int)
+            or isinstance(pulls, bool)
+            or pulls < 0
+            or not isinstance(reward_sum, (int, float))
+            or isinstance(reward_sum, bool)
+            or not math.isfinite(float(reward_sum))
+            or not -float(pulls) <= float(reward_sum) <= float(pulls)
+            or not isinstance(failures, int)
+            or isinstance(failures, bool)
+            or failures < 0
+            or failures > pulls
+            or not isinstance(current.get("disabled"), bool)
+        ):
+            raise BrainRunError(f"{field} contains malformed arm statistics")
+        if current_id in seen:
+            raise BrainRunError(f"{field} contains duplicate arm {current_id!r}")
+        seen.add(current_id)
+        current["reward_sum"] = float(reward_sum)
+        copied.append(current)
+    if ensure_arm_id is not None and ensure_arm_id not in seen:
+        copied.append(
+            {
+                "arm_id": ensure_arm_id,
+                "pulls": 0,
+                "reward_sum": 0.0,
+                "failures": 0,
+                "disabled": False,
+            }
+        )
+    return copied
+
+
+def _ensure_bandit_arm(
+    state: Mapping[str, Any],
+    arm_id: str,
+    *,
+    context_digest: str | None = None,
+    context: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     """Return a safe state that contains the selected arm for first-run learning.
 
     A brand-new application quite reasonably starts with ``arms=[]``.  Selection can explore
@@ -721,6 +847,13 @@ def _ensure_bandit_arm(state: Mapping[str, Any], arm_id: str) -> dict[str, Any]:
         raise BrainRunError("bandit_state must be a mapping")
     if not isinstance(arm_id, str) or not arm_id.strip() or len(arm_id.encode("utf-8")) > 512:
         raise BrainRunError("bandit arm_id must be a bounded non-empty string")
+    if (context_digest is None) != (context is None):
+        raise BrainRunError("context_digest and context must be supplied together")
+    normalized_context: dict[str, Any] | None = None
+    if context_digest is not None and context is not None:
+        normalized_context = _normalize_learning_context(context)
+        if _context_identity_digest(normalized_context) != context_digest:
+            raise BrainRunError("context_digest does not match its context identity")
     BrainLearningLedger._assert_safe(state)
     normalized = dict(state)
     normalized.setdefault("schema", "bioprism-brain-bandit/0.1")
@@ -744,6 +877,7 @@ def _ensure_bandit_arm(state: Mapping[str, Any], arm_id: str) -> dict[str, Any]:
         outcome_reward = outcome.get("reward")
         outcome_failed = outcome.get("failed", False)
         outcome_contract = outcome.get("contract_digest")
+        outcome_context = outcome.get("context_digest")
         if (
             not _valid_digest(outcome_digest)
             or not isinstance(outcome_arm, str)
@@ -754,6 +888,7 @@ def _ensure_bandit_arm(state: Mapping[str, Any], arm_id: str) -> dict[str, Any]:
             or not 0.0 <= float(outcome_reward) <= 1.0
             or not isinstance(outcome_failed, bool)
             or (outcome_contract is not None and not _valid_digest(outcome_contract))
+            or (outcome_context is not None and not _valid_digest(outcome_context))
         ):
             raise BrainRunError("bandit_state credited_outcomes contain malformed receipts")
         if outcome_digest in seen_outcomes:
@@ -766,44 +901,79 @@ def _ensure_bandit_arm(state: Mapping[str, Any], arm_id: str) -> dict[str, Any]:
                 "reward": float(outcome_reward),
                 "failed": outcome_failed,
                 "contract_digest": outcome_contract,
+                "context_digest": outcome_context,
             }
         )
     normalized["credited_outcomes"] = normalized_outcomes
-    arms = normalized.get("arms", [])
-    if not isinstance(arms, list):
-        raise BrainRunError("bandit_state arms must be a list")
-    if len(arms) > 512:
-        raise BrainRunError("bandit_state contains too many arms")
-    copied_arms: list[dict[str, Any]] = []
-    found = False
-    seen: set[str] = set()
-    for raw_arm in arms:
-        if not isinstance(raw_arm, Mapping):
-            raise BrainRunError("bandit_state arms must contain mappings")
-        current = dict(raw_arm)
-        current_id = current.get("arm_id")
-        if not isinstance(current_id, str) or not current_id.strip():
-            raise BrainRunError("bandit_state arms require non-empty arm_id")
-        if current_id in seen:
-            raise BrainRunError(f"bandit_state contains duplicate arm {current_id!r}")
-        seen.add(current_id)
-        current.setdefault("pulls", 0)
-        current.setdefault("reward_sum", 0.0)
-        current.setdefault("failures", 0)
-        current.setdefault("disabled", False)
-        copied_arms.append(current)
-        found = found or current_id == arm_id
-    if not found:
-        copied_arms.append(
+    normalized["arms"] = _normalize_bandit_arm_collection(
+        normalized.get("arms", []),
+        field="bandit_state arms",
+        ensure_arm_id=None if normalized_context is not None else arm_id,
+    )
+    raw_contextual_states = normalized.get("contextual_states", [])
+    if not isinstance(raw_contextual_states, list):
+        raise BrainRunError("bandit_state contextual_states must be a list")
+    if len(raw_contextual_states) > 64:
+        raise BrainRunError("bandit_state contains too many contextual states")
+    contextual_states: list[dict[str, Any]] = []
+    seen_contexts: set[str] = set()
+    for raw_contextual in raw_contextual_states:
+        if not isinstance(raw_contextual, Mapping):
+            raise BrainRunError("bandit_state contextual_states must contain mappings")
+        contextual = dict(raw_contextual)
+        row_digest = contextual.get("context_digest")
+        row_context = contextual.get("context")
+        if not isinstance(row_digest, str) or not _valid_digest(row_digest) or not isinstance(row_context, Mapping):
+            raise BrainRunError("bandit_state contextual state identity is malformed")
+        normalized_row_context = _normalize_learning_context(row_context)
+        if _context_identity_digest(normalized_row_context) != row_digest:
+            raise BrainRunError("bandit_state contextual state digest does not match its context")
+        if row_digest in seen_contexts:
+            raise BrainRunError("bandit_state contains duplicate contextual state")
+        seen_contexts.add(row_digest)
+        row_generation = contextual.get("generation", 0)
+        if not isinstance(row_generation, int) or isinstance(row_generation, bool) or row_generation < 0:
+            raise BrainRunError("bandit_state contextual generation must be a non-negative integer")
+        observed = contextual.get("observed", False)
+        if not isinstance(observed, bool):
+            raise BrainRunError("bandit_state contextual observed must be boolean")
+        contextual_states.append(
             {
-                "arm_id": arm_id,
-                "pulls": 0,
-                "reward_sum": 0.0,
-                "failures": 0,
-                "disabled": False,
+                "context_digest": row_digest,
+                "context": normalized_row_context,
+                "generation": row_generation,
+                "arms": _normalize_bandit_arm_collection(
+                    contextual.get("arms", []),
+                    field="bandit_state contextual arms",
+                ),
+                "observed": observed,
             }
         )
-    normalized["arms"] = copied_arms
+    if normalized_context is not None and context_digest is not None:
+        matching = [row for row in contextual_states if row["context_digest"] == context_digest]
+        if matching:
+            row_arms = matching[0]["arms"]
+            if not any(row["arm_id"] == arm_id for row in row_arms):
+                row_arms.append(
+                    {
+                        "arm_id": arm_id,
+                        "pulls": 0,
+                        "reward_sum": 0.0,
+                        "failures": 0,
+                        "disabled": False,
+                    }
+                )
+        else:
+            contextual_states.append(
+                {
+                    "context_digest": context_digest,
+                    "context": normalized_context,
+                    "generation": 0,
+                    "arms": _normalize_bandit_arm_collection([], field="bandit_state contextual arms", ensure_arm_id=arm_id),
+                    "observed": False,
+                }
+            )
+    normalized["contextual_states"] = contextual_states
     BrainLearningLedger._assert_safe(normalized)
     try:
         encoded = json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
@@ -2600,7 +2770,7 @@ class AutonomousBrain:
             )
             scoped_by_arm = {
                 observation["arm_id"]: observation
-                for observation in _bandit_observations(scoped_state)
+                for observation in _bandit_observations(scoped_state, context_digest=context_digest)
             }
             supplied = _bandit_observations({"arms": list(contextual_observations)})
             scoped_by_arm.update({observation["arm_id"]: observation for observation in supplied})
@@ -4852,8 +5022,18 @@ class AutonomousBrain:
             context_digest = contextual_report.get("context_digest")
             if not _valid_digest(context_digest):
                 raise BrainRunError("contextual model selection returned an invalid context digest")
+            normalized_context = _normalize_learning_context(context)
+            expected_context_digest = _context_identity_digest(normalized_context)
+            if context_digest != expected_context_digest:
+                raise BrainRunError(
+                    "contextual model selection returned a context digest that does not match its identity"
+                )
             selection = dict(nested_selection)
             selection["context_digest"] = context_digest
+            # The caller may provide a rich autonomy blueprint here, but the durable learning
+            # contract must carry only the canonical four-field identity. Rich metadata remains
+            # in the blueprint and is never allowed to become part of a replay key.
+            selection["context"] = normalized_context
             selection["contextual_selection_status"] = contextual_report.get("selection_status")
         selection = dict(selection)
         selection["selection_audit"] = build_model_selection_audit(selection)
@@ -5291,8 +5471,15 @@ class AutonomousBrain:
         for name, value in (("selection_digest", selection_digest), ("prompt_digest", prompt_digest), ("plan_digest", plan_digest)):
             if not isinstance(value, str) or len(value) != 64:
                 raise BrainRunError(f"{name} is missing or is not a SHA-256 digest")
+        context_digest, context = _selection_context_binding(brain_result.selection)
+        contextual_digest = context_digest if context is not None else None
         effective_arm_id = arm_id or f"{provider}/{model}"
-        normalized_bandit_state = _ensure_bandit_arm(bandit_state, effective_arm_id)
+        normalized_bandit_state = _ensure_bandit_arm(
+            bandit_state,
+            effective_arm_id,
+            context_digest=contextual_digest,
+            context=context,
+        )
         report = self.workspace.tool(
             "brain_outcome_record",
             {
@@ -5318,13 +5505,13 @@ class AutonomousBrain:
                 },
                 "bandit_state": normalized_bandit_state,
                 "arm_id": effective_arm_id,
+                **({"context_digest": contextual_digest, "context": context} if contextual_digest is not None else {}),
                 "idempotency_key": f"run:{brain_result.run_id}",
             },
         )
         if not isinstance(report, Mapping) or not report.get("ok"):
             raise BrainRunError("brain outcome recording returned a refusal")
         if ledger is not None:
-            context_digest = brain_result.selection.get("context_digest")
             ledger.append(
                 report,
                 context_digest=context_digest if isinstance(context_digest, str) else None,
@@ -5502,6 +5689,8 @@ class AutonomousBrain:
         model = selected.get("model")
         if not isinstance(provider, str) or not isinstance(model, str) or not provider or not model:
             raise BrainRunError("learning episode selected model metadata is malformed")
+        context_digest, context = _selection_context_binding(evaluation_input)
+        contextual_digest = context_digest if context is not None else None
         run_id = evaluation_input.get("run_id")
         selection_digest = evaluation_input.get("selection_digest")
         prompt_digest = evaluation_input.get("prompt_digest")
@@ -5523,7 +5712,12 @@ class AutonomousBrain:
             request_id = loop.get("final_request_id") if isinstance(loop, Mapping) else None
         if request_id is not None and (not isinstance(request_id, str) or not request_id.strip()):
             raise BrainRunError("learning episode request_id is malformed")
-        normalized_bandit_state = _ensure_bandit_arm(bandit_state, normalized_episode.arm_id)
+        normalized_bandit_state = _ensure_bandit_arm(
+            bandit_state,
+            normalized_episode.arm_id,
+            context_digest=contextual_digest,
+            context=context,
+        )
         report = self.workspace.tool(
             "brain_outcome_record",
             {
@@ -5549,6 +5743,7 @@ class AutonomousBrain:
                 },
                 "bandit_state": normalized_bandit_state,
                 "arm_id": normalized_episode.arm_id,
+                **({"context_digest": contextual_digest, "context": context} if contextual_digest is not None else {}),
                 "idempotency_key": f"episode:{normalized_episode.episode_id}",
             },
         )
@@ -6022,6 +6217,9 @@ def _evaluator_metadata_projection(result: BrainRunResult) -> dict[str, Any]:
         "selected_model": selected_model,
         "selection_digest": result.selection.get("decision_digest"),
         "context_digest": result.selection.get("context_digest"),
+        "context": dict(result.selection.get("context"))
+        if isinstance(result.selection.get("context"), Mapping)
+        else None,
         "selection_audit": dict(result.selection.get("selection_audit", {}))
         if isinstance(result.selection.get("selection_audit"), Mapping)
         else None,

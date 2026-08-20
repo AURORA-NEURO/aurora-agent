@@ -703,6 +703,7 @@ export interface BrainOutcomeRecordArgs extends JsonObject {
   bandit_state: BrainBanditState;
   arm_id: string;
   context_digest?: string | null;
+  context?: BrainBanditContext;
   idempotency_key?: string;
 }
 

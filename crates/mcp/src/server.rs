@@ -112,9 +112,9 @@ use bioprism_bioevalx::{OutputVerdict, Reexecution, Trajectory, Worldline as Eva
 use bioprism_biolang::{compile as compile_bioql, QuerySchema};
 use bioprism_bioworlds::SliceCatalog;
 use bioprism_brain::{
-    assemble_prompt, plan_autonomous, select_bandit_arm, select_model, select_model_contextual,
-    update_bandit, AutonomousPlanRequest, BanditState, BanditUpdate,
-    ContextualModelSelectionRequest, ModelSelectionRequest, PromptAssemblyRequest,
+    assemble_prompt, plan_autonomous, select_bandit_arm, select_bandit_arm_contextual,
+    select_model, select_model_contextual, update_bandit, AutonomousPlanRequest, BanditState,
+    BanditUpdate, ContextualModelSelectionRequest, ModelSelectionRequest, PromptAssemblyRequest,
 };
 use bioprism_bundle::{
     KeyRegistry, PubliclyAttestedBundle, ResultBundle, TrustPolicy, VerificationKey,
@@ -2003,8 +2003,20 @@ impl Server {
             .unwrap_or_else(|| arguments.clone());
         let state: BanditState = serde_json::from_value(state_value)
             .map_err(|error| format!("invalid brain bandit state: {error}"))?;
-        let report = select_bandit_arm(&state)
-            .map_err(|error| format!("brain bandit selection refused: {error}"))?;
+        let report = match (
+            arguments.get("context_digest").and_then(Value::as_str),
+            arguments.get("context"),
+        ) {
+            (None, None) => select_bandit_arm(&state),
+            (Some(context_digest), Some(context_value)) => {
+                let context: bioprism_brain::ModelSelectionContext =
+                    serde_json::from_value(context_value.clone())
+                        .map_err(|error| format!("invalid brain bandit context: {error}"))?;
+                select_bandit_arm_contextual(&state, context_digest, &context)
+            }
+            _ => Err(bioprism_brain::BrainError::ContextRequired),
+        }
+        .map_err(|error| format!("brain bandit selection refused: {error}"))?;
         serde_json::to_value(report)
             .map_err(|error| format!("cannot encode brain bandit selection: {error}"))
     }
@@ -35835,19 +35847,23 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "brain_bandit_select",
-            "description": "Select an arm from caller-persisted UCB-style online-learning state. Untested arms receive an explicit exploration bonus; disabled arms are excluded; the server keeps no hidden state.",
+            "description": "Select an arm from caller-persisted UCB-style online-learning state. Untested arms receive an explicit exploration bonus; disabled arms are excluded; optional context_digest/context selects a scoped ledger with global cold-start fallback; the server keeps no hidden state.",
             "inputSchema": {
                 "type": "object",
-                "properties": { "state": { "type": "object" } },
+                "properties": {
+                    "state": { "type": "object" },
+                    "context_digest": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+                    "context": { "type": ["object", "null"], "description": "Bounded domain/capability/risk/task-family identity matching context_digest." }
+                },
                 "required": ["state"]
             }
         }),
         json!({
             "name": "brain_bandit_update",
-            "description": "Apply one explicit bounded evaluator reward to caller-owned bandit state. Rewards outside policy bounds, disabled arms, and unknown arms are refused; provider responses never become rewards implicitly.",
+            "description": "Apply one explicit bounded evaluator reward to caller-owned bandit state. Rewards outside policy bounds, disabled arms, unknown arms, and mismatched contextual identities are refused; contextual credit is isolated by canonical domain/capability/risk/task-family identity; provider responses never become rewards implicitly.",
             "inputSchema": {
                 "type": "object",
-                "properties": { "state": { "type": "object" }, "update": { "type": "object" } },
+                "properties": { "state": { "type": "object" }, "update": { "type": "object", "description": "arm_id/reward plus optional context_digest and context; both contextual fields must be supplied together." } },
                 "required": ["state", "update"]
             }
         }),
@@ -35861,6 +35877,8 @@ pub fn tool_definitions() -> Vec<Value> {
                     "assessment": { "type": "object", "description": "Explicit evaluator ID/version, bounded reward, pass/fail state, and optional value-free evidence metadata." },
                     "bandit_state": { "type": "object" },
                     "arm_id": { "type": "string" },
+                    "context_digest": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$", "description": "Optional canonical digest of context; context and digest must agree." },
+                    "context": { "type": ["object", "null"], "description": "Optional bounded domain/capability/risk/task-family identity." },
                     "idempotency_key": { "type": "string", "maxLength": 256, "description": "Optional caller-owned retry identity. Reusing it with a different evaluator contract is refused." }
                 },
                 "required": ["run", "assessment", "bandit_state", "arm_id"]

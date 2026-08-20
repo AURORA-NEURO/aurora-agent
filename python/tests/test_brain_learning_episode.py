@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import replace
 
@@ -13,6 +14,7 @@ from prism_sdk.brain import (
     BrainOutcomeEvaluator,
     BrainRunError,
     BrainRunResult,
+    _bandit_observations,
 )
 from prism_sdk.llm_runtime import LLMRuntime, ProviderResponse
 
@@ -157,6 +159,86 @@ def test_immediate_learning_bootstraps_selected_arm_from_empty_state() -> None:
     sent_state = workspace.calls[-1][1]["bandit_state"]
     assert isinstance(sent_state, dict)
     assert sent_state["arms"][0]["arm_id"] == "openai/model-a"  # type: ignore[index]
+
+
+def test_contextual_learning_persists_scoped_arm_and_sends_canonical_identity(tmp_path) -> None:
+    context = {
+        "domain": "coding",
+        "capability": "implementation",
+        "risk_class": "engineering_change",
+        "task_family": "coding_delivery",
+    }
+    context_digest = hashlib.sha256(
+        json.dumps(context, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    result = replace(
+        _result(),
+        selection={
+            "selected_model": {"provider": "openai", "model": "model-a"},
+            "decision_digest": "a" * 64,
+            "context_digest": context_digest,
+            "context": context,
+        },
+    )
+    workspace = _Workspace()
+    ledger = BrainLearningLedger(tmp_path / "contextual.jsonl")
+    report = AutonomousBrain(workspace, LLMRuntime()).record_evaluator_outcome(
+        result,
+        bandit_state=_empty_state(),
+        evaluator_id="quality-evaluator",
+        evaluator_version="context-1",
+        reward=0.8,
+        passed=True,
+        ledger=ledger,
+    )
+    assert report["status"] == "recorded_evaluator_reward"
+    payload = workspace.calls[-1][1]
+    assert payload["context_digest"] == context_digest
+    assert payload["context"] == context
+    sent_state = payload["bandit_state"]
+    assert isinstance(sent_state, dict)
+    assert sent_state["arms"] == []
+    contextual = sent_state["contextual_states"][0]  # type: ignore[index]
+    assert contextual["context_digest"] == context_digest
+    assert contextual["arms"][0]["arm_id"] == "openai/model-a"
+    scoped = ledger.contextual_state(context)
+    assert scoped["context_digest"] == context_digest
+    assert scoped["bandit_state"]["arms"][0]["arm_id"] == "openai/model-a"  # type: ignore[index]
+
+
+def test_contextual_observations_overlay_global_cold_start_without_cross_context_leakage() -> None:
+    context = {
+        "domain": "coding",
+        "capability": "implementation",
+        "risk_class": "engineering_change",
+        "task_family": "coding_delivery",
+    }
+    context_digest = hashlib.sha256(
+        json.dumps(context, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    state = {
+        "arms": [
+            {"arm_id": "global-a", "pulls": 10, "reward_sum": 4.0, "failures": 0, "disabled": False},
+            {"arm_id": "global-b", "pulls": 8, "reward_sum": 3.0, "failures": 0, "disabled": False},
+        ],
+        "contextual_states": [
+            {
+                "context_digest": context_digest,
+                "context": context,
+                "generation": 1,
+                "observed": True,
+                "arms": [
+                    {"arm_id": "global-a", "pulls": 3, "reward_sum": 2.7, "failures": 0, "disabled": False},
+                    {"arm_id": "context-only", "pulls": 2, "reward_sum": 1.8, "failures": 0, "disabled": False},
+                ],
+            }
+        ],
+    }
+    observations = _bandit_observations(state, context_digest=context_digest)
+    by_arm = {row["arm_id"]: row for row in observations}
+    assert by_arm["global-a"]["reward_sum"] == 2.7
+    assert by_arm["global-b"]["reward_sum"] == 3.0
+    assert by_arm["context-only"]["reward_sum"] == 1.8
 
 
 def test_trajectory_credit_assignment_is_discounted_and_restart_safe(tmp_path) -> None:

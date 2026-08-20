@@ -171,8 +171,8 @@ workflow stage dependencies, bounded prompt assembly, exact tool binding, provid
 value-only online learning. `route()` and `blueprint()` are non-executing: they return digests,
 omissions, required capabilities, approval triggers, and a plan that explicitly has not started.
 Each generated blueprint includes a 64-character `learning_context_digest`. The digest scopes
-local evaluator feedback by domain, capability, risk class, task family, workflow, domain pack, and
-required capabilities. `AutonomousOnlineLearner` prefers the matching contextual arm, uses a
+local evaluator feedback by the canonical domain, capability, risk class, and task-family labels
+shared with Rust and Python. `AutonomousOnlineLearner` prefers the matching contextual arm, uses a
 global arm only as a cold-start prior, and keeps context-free updates compatible with the legacy
 global ledger. Contextual state is bounded and replay-safe; prompts, responses, credentials, and
 raw evaluator evidence are never placed in the digest or bandit snapshot. The remote value-only

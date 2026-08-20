@@ -475,6 +475,7 @@ import type {
   TraceOtelIngestResult,
 } from "./types.js";
 import type {
+  BrainBanditContext,
   BrainBanditSelectionResult,
   BrainBanditState,
   BrainBanditUpdate,
@@ -1759,6 +1760,19 @@ export class ApiClient {
     return this.callTool<BrainBanditSelectionResult>("brain_bandit_select", { state }, options);
   }
 
+  /** Select from a context-scoped bandit ledger with global history as a cold-start fallback. */
+  async brainBanditSelectContextual(
+    state: BrainBanditState,
+    contextDigest: string,
+    context: BrainBanditContext,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainBanditSelectionResult>> {
+    if (!isObject(state) || !Array.isArray(state.arms)) throw new ArgumentError("brain bandit state must contain arms");
+    if (typeof contextDigest !== "string" || !/^[0-9a-f]{64}$/.test(contextDigest)) throw new ArgumentError("brain bandit contextDigest must be a lowercase SHA-256 digest");
+    if (!isObject(context) || typeof context.domain !== "string" || typeof context.capability !== "string" || typeof context.risk_class !== "string") throw new ArgumentError("brain bandit context must contain domain, capability, and risk_class");
+    return this.callTool<BrainBanditSelectionResult>("brain_bandit_select", { state, context_digest: contextDigest, context }, options);
+  }
+
   /** Apply one explicit evaluator reward to caller-owned learning state. */
   async brainBanditUpdate(
     state: BrainBanditState,
@@ -1767,6 +1781,10 @@ export class ApiClient {
   ): Promise<RestToolResponse<BrainBanditState>> {
     if (!isObject(state) || !Array.isArray(state.arms)) throw new ArgumentError("brain bandit state must contain arms");
     if (!isObject(update) || typeof update.arm_id !== "string" || typeof update.reward !== "number") throw new ArgumentError("brain bandit update must contain arm_id and reward");
+    const hasContextDigest = update.context_digest !== undefined && update.context_digest !== null;
+    const hasContext = update.context !== undefined;
+    if (hasContextDigest !== hasContext) throw new ArgumentError("brain bandit contextual update requires context_digest and context together");
+    if (hasContextDigest && (typeof update.context_digest !== "string" || !/^[0-9a-f]{64}$/.test(update.context_digest) || !isObject(update.context) || typeof update.context.domain !== "string" || typeof update.context.capability !== "string" || typeof update.context.risk_class !== "string")) throw new ArgumentError("brain bandit contextual update identity is malformed");
     return this.callTool<BrainBanditState>("brain_bandit_update", { state, update }, options);
   }
 
@@ -1777,6 +1795,10 @@ export class ApiClient {
   ): Promise<RestToolResponse<BrainOutcomeRecordResult>> {
     if (!isObject(args) || !isObject(args.run) || !isObject(args.assessment) || !isObject(args.bandit_state) || !Array.isArray(args.bandit_state.arms)) throw new ArgumentError("brain outcome record must contain run, assessment, and bandit_state.arms");
     if (typeof args.arm_id !== "string" || !args.arm_id.trim()) throw new ArgumentError("brain outcome record arm_id must be a non-empty string");
+    const hasContextDigest = args.context_digest !== undefined && args.context_digest !== null;
+    const hasContext = args.context !== undefined;
+    if (hasContextDigest !== hasContext) throw new ArgumentError("brain outcome record contextual identity requires context_digest and context together");
+    if (hasContextDigest && (typeof args.context_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.context_digest) || !isObject(args.context) || typeof args.context.domain !== "string" || typeof args.context.capability !== "string" || typeof args.context.risk_class !== "string")) throw new ArgumentError("brain outcome record contextual identity is malformed");
     if (args.idempotency_key !== undefined && (typeof args.idempotency_key !== "string" || !args.idempotency_key.trim() || args.idempotency_key.length > 256)) throw new ArgumentError("brain outcome record idempotency_key must be a bounded non-empty string");
     if (typeof args.assessment.reward !== "number" || typeof args.assessment.passed !== "boolean") throw new ArgumentError("brain outcome assessment must contain reward and passed");
     return this.callTool<BrainOutcomeRecordResult>("brain_outcome_record", args, options);

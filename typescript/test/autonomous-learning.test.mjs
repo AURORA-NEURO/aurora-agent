@@ -256,6 +256,8 @@ test("remote learning settlement sends run identity and evaluator values only", 
   assert.equal(Object.prototype.hasOwnProperty.call(seen[0].run, "task"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(seen[0].run, "credentials"), false);
   assert.equal(seen[0].assessment.reward, 0.7);
+  assert.match(seen[0].context_digest, /^[0-9a-f]{64}$/);
+  assert.equal(seen[0].context.domain, "coding");
 });
 
 test("trajectory settlement resumes after a transient later-episode failure", async () => {
