@@ -1,5 +1,6 @@
 import { ArgumentError, ProviderRuntimeError, isObject } from "./errors.js";
 import type { ApiClient } from "./client.js";
+import type { AutonomousLearningController } from "./autonomous-learning.js";
 import {
   AutonomousRuntime,
   type AutonomousModelCandidate,
@@ -410,6 +411,7 @@ export interface AutonomousCrossDomainRunResult {
   completed_children: number;
   total_children: number;
   partial: boolean;
+  learning_episode_ids: string[];
   learning: "provider_health_feedback_only" | "online_bandit_feedback_available";
   retention: "provider_responses_local; child_digests_only_in_synthesis_metadata";
 }
@@ -446,6 +448,7 @@ export interface AutonomousCrossDomainRunOptions extends AutonomousRunOptions {
   subtasks?: readonly AutonomousCrossDomainSubtask[];
   allowPartial?: boolean;
   synthesize?: boolean;
+  learning?: AutonomousLearningController;
 }
 
 export interface DomainToolExecutor {
@@ -1407,7 +1410,7 @@ export class AutonomousAgent {
     const route = await this.route(taskText, { hints: options.hints });
     const learning = this.learner ? "online_bandit_feedback_available" as const : "provider_health_feedback_only" as const;
     if (route.abstained || !route.cross_domain || route.selected_domains.length < 2) {
-      return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: "route_review_required", route, blueprint: null, child_runs: [], synthesis: null, completed_children: 0, total_children: route.selected_domains.length, partial: false, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
+      return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: "route_review_required", route, blueprint: null, child_runs: [], synthesis: null, completed_children: 0, total_children: route.selected_domains.length, partial: false, learning_episode_ids: [], learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
     }
     const blueprint = await this.buildCrossDomainBlueprint(taskText, route, {
       capability: options.capability,
@@ -1417,11 +1420,12 @@ export class AutonomousAgent {
       subtasks: options.subtasks,
     });
     if (options.approveProviderCall !== true) {
-      return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: "approval_required", route, blueprint, child_runs: [], synthesis: null, completed_children: 0, total_children: blueprint.child_blueprints.length, partial: false, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
+      return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: "approval_required", route, blueprint, child_runs: [], synthesis: null, completed_children: 0, total_children: blueprint.child_blueprints.length, partial: false, learning_episode_ids: [], learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
     }
     const candidates = options.candidates ? [...options.candidates] : this.models();
     if (!candidates.length) throw new ProviderRuntimeError("cross-domain run requires at least one registered model candidate");
     const childRuns: AutonomousCrossDomainChildRun[] = [];
+    const learningEpisodeIds: string[] = [];
     const childOutputs: Array<{ id: string; domain: AutonomousDomainName; status: string; output: string }> = [];
     for (let index = 0; index < blueprint.child_blueprints.length; index += 1) {
       const child = blueprint.child_blueprints[index];
@@ -1455,16 +1459,21 @@ export class AutonomousAgent {
       const output = boundedOutput.trim() || "[child returned no textual or structured output]";
       childOutputs.push({ id: childId, domain: child.domain_profile.domain, status: childResult.status, output });
       childRuns.push({ id: childId, domain: child.domain_profile.domain, task_digest: child.task_digest, result: childResult, output_digest: rawOutput ? await digestJson({ output: rawOutput }) : null, output_bytes: bytes(rawOutput) });
+      if (options.learning && childResult.status === "completed") {
+        const episodeId = `cross:${route.task_digest}:${childId}`;
+        const episode = await options.learning.prepareRun(childResult, { episodeId, runId: episodeId, stageId: childId, parentJobId: `cross:${route.task_digest}` });
+        learningEpisodeIds.push(episode.episode_id);
+      }
       if (childResult.status !== "completed" && !options.allowPartial) break;
     }
     const completedChildren = childRuns.filter((child) => child.result.status === "completed").length;
     const allChildrenCompleted = childRuns.length === blueprint.child_blueprints.length && completedChildren === blueprint.child_blueprints.length;
     const hasApproval = childRuns.some((child) => child.result.status === "approval_required");
     if (!allChildrenCompleted && !options.allowPartial) {
-      return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: hasApproval ? "approval_required" : "child_failed", route, blueprint, child_runs: childRuns, synthesis: null, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: completedChildren > 0, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
+      return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: hasApproval ? "approval_required" : "child_failed", route, blueprint, child_runs: childRuns, synthesis: null, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: completedChildren > 0, learning_episode_ids: learningEpisodeIds, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
     }
     if (options.synthesize === false) {
-      return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: allChildrenCompleted ? "children_completed" : "children_partial", route, blueprint, child_runs: childRuns, synthesis: null, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: !allChildrenCompleted, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
+      return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: allChildrenCompleted ? "children_completed" : "children_partial", route, blueprint, child_runs: childRuns, synthesis: null, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: !allChildrenCompleted, learning_episode_ids: learningEpisodeIds, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
     }
     const synthesisTaskMessage = blueprint.synthesis_blueprint.prompt.messages.find((message) => message.source_id === "task");
     if (!synthesisTaskMessage) throw new ProviderRuntimeError("cross-domain synthesis has no bounded task message");
@@ -1495,8 +1504,13 @@ export class AutonomousAgent {
       signal: options.signal,
       observer: options.observer,
     });
+    if (options.learning && synthesis.status === "completed") {
+      const episodeId = `cross:${route.task_digest}:synthesis`;
+      const episode = await options.learning.prepareRun(synthesis, { episodeId, runId: episodeId, stageId: "synthesis", parentJobId: `cross:${route.task_digest}` });
+      learningEpisodeIds.push(episode.episode_id);
+    }
     const status: AutonomousCrossDomainRunStatus = synthesis.status === "completed" ? (allChildrenCompleted ? "completed" : "children_partial") : synthesis.status === "approval_required" ? "approval_required" : "child_failed";
-    return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status, route, blueprint, child_runs: childRuns, synthesis, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: !allChildrenCompleted, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
+    return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status, route, blueprint, child_runs: childRuns, synthesis, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: !allChildrenCompleted, learning_episode_ids: learningEpisodeIds, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
   }
 
   /** Apply explicit evaluator feedback locally; optionally reconcile the same value-only update through the control plane. */

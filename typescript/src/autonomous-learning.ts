@@ -4,6 +4,7 @@ import {
   AUTONOMOUS_DOMAIN_NAMES,
   builtinAutonomousDomainProfiles,
   type AutonomousAgent,
+  type AutonomousCrossDomainRunResult,
   type AutonomousDomainName,
   type AutonomousRunResult,
 } from "./autonomous.js";
@@ -22,6 +23,7 @@ import type {
 export const AUTONOMOUS_EVALUATION_SCHEMA = "bioprism-typescript-autonomous-workflow-evaluation/0.1" as const;
 export const AUTONOMOUS_LEARNING_EPISODE_SCHEMA = "bioprism-typescript-autonomous-learning-episode/0.1" as const;
 export const AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA = "bioprism-typescript-autonomous-learning-trajectory/0.1" as const;
+export const AUTONOMOUS_LEARNING_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-learning-snapshot/0.1" as const;
 export const AUTONOMOUS_LEARNING_MAX_STAGES = 64;
 export const AUTONOMOUS_LEARNING_MAX_TRAJECTORY_STEPS = 32;
 
@@ -136,6 +138,34 @@ export interface AutonomousLearningTrajectoryStore {
   markSettled(trajectoryId: string, settlementDigest: Digest): Promise<AutonomousLearningTrajectory> | AutonomousLearningTrajectory;
 }
 
+export interface AutonomousLearningStateSnapshot extends JsonObject {
+  schema: typeof AUTONOMOUS_LEARNING_SNAPSHOT_SCHEMA;
+  generation: number;
+  episodes: AutonomousLearningEpisode[];
+  trajectories: AutonomousLearningTrajectory[];
+  snapshot_digest: Digest;
+  retention: typeof PRIVATE_RETENTION;
+  secret_material: "never_returned";
+}
+
+/** Adapter contract for SQLite, Postgres, IndexedDB, object storage, or another caller-owned store. */
+export interface AutonomousLearningSnapshotPersistence {
+  read(): Promise<AutonomousLearningStateSnapshot | null> | AutonomousLearningStateSnapshot | null;
+  write(snapshot: AutonomousLearningStateSnapshot): Promise<void> | void;
+}
+
+export interface AutonomousLearningStateStore {
+  loadEpisode(episodeId: string): Promise<AutonomousLearningEpisode | null> | AutonomousLearningEpisode | null;
+  saveEpisode(episode: AutonomousLearningEpisode): Promise<void> | void;
+  markEpisodeSettled(episodeId: string, settlement: AutonomousLearningSettlementMetadata): Promise<AutonomousLearningEpisode> | AutonomousLearningEpisode;
+  pendingEpisodes(limit?: number): Promise<AutonomousLearningEpisode[]> | AutonomousLearningEpisode[];
+  loadTrajectory(trajectoryId: string): Promise<AutonomousLearningTrajectory | null> | AutonomousLearningTrajectory | null;
+  saveTrajectory(trajectory: AutonomousLearningTrajectory): Promise<void> | void;
+  markTrajectorySettled(trajectoryId: string, settlementDigest: Digest): Promise<AutonomousLearningTrajectory> | AutonomousLearningTrajectory;
+  snapshot(): Promise<AutonomousLearningStateSnapshot>;
+  restore(snapshot: AutonomousLearningStateSnapshot): Promise<void>;
+}
+
 export interface AutonomousEvaluatorRewardInput extends JsonObject {
   evaluator_id: string;
   evaluator_version: string;
@@ -168,6 +198,13 @@ export interface AutonomousTrajectorySettlement extends JsonObject {
 export interface AutonomousWorkflowLearningSettlement extends JsonObject {
   schema: typeof AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA;
   evaluation: AutonomousWorkflowEvaluation;
+  trajectory: AutonomousTrajectorySettlement;
+  retention: typeof PRIVATE_RETENTION;
+}
+
+export interface AutonomousCrossDomainLearningSettlement {
+  schema: typeof AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA;
+  result: AutonomousCrossDomainRunResult;
   trajectory: AutonomousTrajectorySettlement;
   retention: typeof PRIVATE_RETENTION;
 }
@@ -383,6 +420,23 @@ export class InMemoryAutonomousLearningEpisodeStore implements AutonomousLearnin
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 256) throw new ArgumentError("learning episode pending limit is outside its bounds");
     return [...this.episodes.values()].filter((episode) => episode.status === "pending").slice(0, limit).map((episode) => clone(episode));
   }
+
+  snapshotRows(): AutonomousLearningEpisode[] {
+    return [...this.episodes.values()].map((episode) => clone(episode));
+  }
+
+  restoreRows(rows: readonly AutonomousLearningEpisode[]): void {
+    if (!Array.isArray(rows) || rows.length > 4096) throw new ArgumentError("learning episode snapshot is outside its bounds");
+    for (const episode of rows) {
+      if (!isObject(episode) || typeof episode.episode_id !== "string" || typeof episode.episode_digest !== "string" || typeof episode.status !== "string" || !["pending", "settled"].includes(episode.status)) throw new ArgumentError("learning episode snapshot row is malformed");
+      const row = episode as unknown as AutonomousLearningEpisode;
+      boundedIdentifier("episode_id", row.episode_id);
+      boundedDigest("episode_digest", row.episode_digest);
+      const prior = this.episodes.get(row.episode_id);
+      if (prior && prior.episode_digest !== row.episode_digest) throw new ArgumentError(`learning episode ${row.episode_id} conflicts during restore`);
+      this.episodes.set(row.episode_id, clone(row));
+    }
+  }
 }
 
 export class InMemoryAutonomousLearningTrajectoryStore implements AutonomousLearningTrajectoryStore {
@@ -411,6 +465,110 @@ export class InMemoryAutonomousLearningTrajectoryStore implements AutonomousLear
     this.trajectories.set(id, clone(next));
     return clone(next);
   }
+
+  snapshotRows(): AutonomousLearningTrajectory[] {
+    return [...this.trajectories.values()].map((trajectory) => clone(trajectory));
+  }
+
+  restoreRows(rows: readonly AutonomousLearningTrajectory[]): void {
+    if (!Array.isArray(rows) || rows.length > 1024) throw new ArgumentError("learning trajectory snapshot is outside its bounds");
+    for (const trajectory of rows) {
+      if (!isObject(trajectory) || typeof trajectory.trajectory_id !== "string" || typeof trajectory.trajectory_digest !== "string" || typeof trajectory.status !== "string" || !["pending", "settled"].includes(trajectory.status)) throw new ArgumentError("learning trajectory snapshot row is malformed");
+      const row = trajectory as unknown as AutonomousLearningTrajectory;
+      boundedIdentifier("trajectory_id", row.trajectory_id);
+      boundedDigest("trajectory_digest", row.trajectory_digest);
+      const prior = this.trajectories.get(row.trajectory_id);
+      if (prior && prior.trajectory_digest !== row.trajectory_digest) throw new ArgumentError(`learning trajectory ${row.trajectory_id} conflicts during restore`);
+      this.trajectories.set(row.trajectory_id, clone(row));
+    }
+  }
+}
+
+/** Unified caller-owned state store with integrity-checked restart snapshots. */
+export class InMemoryAutonomousLearningStateStore implements AutonomousLearningStateStore {
+  private readonly episodeStore = new InMemoryAutonomousLearningEpisodeStore();
+  private readonly trajectoryStore = new InMemoryAutonomousLearningTrajectoryStore();
+  private generation = 0;
+
+  loadEpisode(episodeId: string): AutonomousLearningEpisode | null {
+    return this.episodeStore.load(episodeId);
+  }
+
+  saveEpisode(episode: AutonomousLearningEpisode): void {
+    this.episodeStore.save(episode);
+  }
+
+  markEpisodeSettled(episodeId: string, settlement: AutonomousLearningSettlementMetadata): AutonomousLearningEpisode {
+    return this.episodeStore.markSettled(episodeId, settlement);
+  }
+
+  pendingEpisodes(limit = 256): AutonomousLearningEpisode[] {
+    return this.episodeStore.pending(limit);
+  }
+
+  loadTrajectory(trajectoryId: string): AutonomousLearningTrajectory | null {
+    return this.trajectoryStore.load(trajectoryId);
+  }
+
+  saveTrajectory(trajectory: AutonomousLearningTrajectory): void {
+    this.trajectoryStore.save(trajectory);
+  }
+
+  markTrajectorySettled(trajectoryId: string, settlementDigest: Digest): AutonomousLearningTrajectory {
+    return this.trajectoryStore.markSettled(trajectoryId, settlementDigest);
+  }
+
+  async snapshot(): Promise<AutonomousLearningStateSnapshot> {
+    const descriptor = {
+      schema: AUTONOMOUS_LEARNING_SNAPSHOT_SCHEMA,
+      generation: this.generation + 1,
+      episodes: this.episodeStore.snapshotRows(),
+      trajectories: this.trajectoryStore.snapshotRows(),
+      retention: PRIVATE_RETENTION,
+      secret_material: "never_returned" as const,
+    };
+    const snapshot = { ...descriptor, snapshot_digest: await digestJson(descriptor) };
+    this.generation = snapshot.generation;
+    return clone(snapshot);
+  }
+
+  async restore(snapshot: AutonomousLearningStateSnapshot): Promise<void> {
+    if (!isObject(snapshot) || snapshot.schema !== AUTONOMOUS_LEARNING_SNAPSHOT_SCHEMA || !Array.isArray(snapshot.episodes) || !Array.isArray(snapshot.trajectories)) throw new ArgumentError("learning state snapshot is malformed");
+    boundedGeneration(snapshot.generation);
+    const { snapshot_digest: observed, ...descriptor } = snapshot;
+    boundedDigest("snapshot_digest", observed);
+    const expected = await digestJson(descriptor);
+    if (expected !== observed) throw new ArgumentError("learning state snapshot digest does not match");
+    if (snapshot.episodes.length > 4096 || snapshot.trajectories.length > 1024) throw new ArgumentError("learning state snapshot exceeds its bounds");
+    this.episodeStore.restoreRows(snapshot.episodes);
+    this.trajectoryStore.restoreRows(snapshot.trajectories);
+    this.generation = snapshot.generation;
+  }
+}
+
+/** Coordinates an integrity-checked state store with a caller-owned durable adapter. */
+export class AutonomousLearningPersistenceCoordinator {
+  readonly store: AutonomousLearningStateStore;
+  readonly persistence: AutonomousLearningSnapshotPersistence;
+
+  constructor(store: AutonomousLearningStateStore, persistence: AutonomousLearningSnapshotPersistence) {
+    if (!store || typeof store.snapshot !== "function" || typeof store.restore !== "function") throw new ArgumentError("learning persistence requires a state store");
+    if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new ArgumentError("learning persistence requires read and write functions");
+    this.store = store;
+    this.persistence = persistence;
+  }
+
+  async restore(): Promise<AutonomousLearningStateSnapshot | null> {
+    const snapshot = await this.persistence.read();
+    if (snapshot) await this.store.restore(snapshot);
+    return snapshot;
+  }
+
+  async flush(): Promise<AutonomousLearningStateSnapshot> {
+    const snapshot = await this.store.snapshot();
+    await this.persistence.write(snapshot);
+    return snapshot;
+  }
 }
 
 function projectOutcome(response: RestToolResponse<BrainOutcomeRecordResult>): BrainOutcomeRecordResult {
@@ -428,11 +586,21 @@ export class AutonomousLearningController {
   readonly evaluator: AutonomousWorkflowEvaluator;
   readonly apiClient?: ApiClient;
 
-  constructor(agent: AutonomousAgent, options: { episodes?: AutonomousLearningEpisodeStore; trajectories?: AutonomousLearningTrajectoryStore; evaluator?: AutonomousWorkflowEvaluator; apiClient?: ApiClient } = {}) {
+  constructor(agent: AutonomousAgent, options: { store?: AutonomousLearningStateStore; episodes?: AutonomousLearningEpisodeStore; trajectories?: AutonomousLearningTrajectoryStore; evaluator?: AutonomousWorkflowEvaluator; apiClient?: ApiClient } = {}) {
     if (!agent || typeof agent.recordEvaluatorReward !== "function") throw new ArgumentError("learning controller requires an AutonomousAgent");
     this.agent = agent;
-    this.episodes = options.episodes ?? new InMemoryAutonomousLearningEpisodeStore();
-    this.trajectories = options.trajectories ?? new InMemoryAutonomousLearningTrajectoryStore();
+    const stateStore = options.store;
+    this.episodes = options.episodes ?? (stateStore ? {
+      load: (episodeId: string) => stateStore.loadEpisode(episodeId),
+      save: (episode: AutonomousLearningEpisode) => stateStore.saveEpisode(episode),
+      markSettled: (episodeId: string, settlement: AutonomousLearningSettlementMetadata) => stateStore.markEpisodeSettled(episodeId, settlement),
+      pending: (limit?: number) => stateStore.pendingEpisodes(limit),
+    } : new InMemoryAutonomousLearningEpisodeStore());
+    this.trajectories = options.trajectories ?? (stateStore ? {
+      load: (trajectoryId: string) => stateStore.loadTrajectory(trajectoryId),
+      save: (trajectory: AutonomousLearningTrajectory) => stateStore.saveTrajectory(trajectory),
+      markSettled: (trajectoryId: string, settlementDigest: Digest) => stateStore.markTrajectorySettled(trajectoryId, settlementDigest),
+    } : new InMemoryAutonomousLearningTrajectoryStore());
     this.evaluator = options.evaluator ?? new AutonomousWorkflowEvaluator();
     this.apiClient = options.apiClient;
   }
@@ -513,6 +681,25 @@ export class AutonomousLearningController {
     }
     const settled = await this.settleTrajectory(trajectory.trajectory_id, rewards, { remote: options.remote });
     return { schema: AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA, evaluation, trajectory: settled, retention: PRIVATE_RETENTION };
+  }
+
+  /** Build a trajectory from completed specialist and synthesis episodes emitted by runCrossDomain. */
+  async prepareCrossDomainTrajectory(result: AutonomousCrossDomainRunResult, options: { trajectoryId: string; discount?: number }): Promise<AutonomousLearningTrajectory> {
+    const ids = [...new Set(result.learning_episode_ids ?? [])];
+    const pending: string[] = [];
+    for (const id of ids) {
+      const episode = await this.episodes.load(id);
+      if (episode?.status === "pending") pending.push(id);
+    }
+    if (!pending.length) throw new ArgumentError("cross-domain result has no pending learning episodes");
+    return this.prepareTrajectory(pending, options);
+  }
+
+  /** Settle child and synthesis episodes with exact caller-provided evaluator rewards. */
+  async settleCrossDomain(result: AutonomousCrossDomainRunResult, rewards: Record<string, AutonomousEvaluatorRewardInput>, options: { trajectoryId: string; discount?: number; remote?: boolean }): Promise<AutonomousCrossDomainLearningSettlement> {
+    const trajectory = await this.prepareCrossDomainTrajectory(result, options);
+    const settled = await this.settleTrajectory(trajectory.trajectory_id, rewards, { remote: options.remote });
+    return { schema: AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA, result, trajectory: settled, retention: PRIVATE_RETENTION };
   }
 
   async settleRun(episodeId: string, input: AutonomousEvaluatorRewardInput, options: { creditedReward?: number; remote?: boolean } = {}): Promise<AutonomousLearningSettlement> {

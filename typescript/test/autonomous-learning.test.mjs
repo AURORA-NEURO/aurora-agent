@@ -8,7 +8,9 @@ import {
   AutonomousWorkflowEvaluator,
   CredentialStore,
   InMemoryAutonomousLearningEpisodeStore,
+  InMemoryAutonomousLearningStateStore,
   InMemoryAutonomousLearningTrajectoryStore,
+  AutonomousLearningPersistenceCoordinator,
   InMemoryAutonomousWorkflowCheckpointStore,
   LLMRuntime,
   AutonomousWorkflowExecutor,
@@ -246,4 +248,61 @@ test("remote learning settlement sends run identity and evaluator values only", 
   assert.equal(Object.prototype.hasOwnProperty.call(seen[0].run, "task"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(seen[0].run, "credentials"), false);
   assert.equal(seen[0].assessment.reward, 0.7);
+});
+
+test("cross-domain learning tracks specialists and synthesis as one delayed-credit trajectory", async () => {
+  const agent = await learningAgent();
+  const state = new InMemoryAutonomousLearningStateStore();
+  const controller = new AutonomousLearningController(agent, { store: state });
+  const result = await agent.runCrossDomain("Research a biomedical neuroscience experiment with EEG patient evidence", {
+    candidates: agent.models(),
+    approveProviderCall: true,
+    learning: controller,
+    subtasks: [
+      { id: "bio", domain: "biomedical", task: "Review biomedical evidence and safety." },
+      { id: "neuro", domain: "neuroscience", task: "Analyze EEG study design and signal limits." },
+    ],
+  });
+  assert.equal(result.status, "completed");
+  assert.equal(result.learning_episode_ids.length, 3);
+  assert.equal(state.pendingEpisodes().length, 3);
+  const rewards = Object.fromEntries(result.learning_episode_ids.map((episodeId, index) => [episodeId, {
+    evaluator_id: "cross-domain-reviewer",
+    evaluator_version: "1",
+    reward: index === 2 ? 0.8 : 0.7,
+    passed: true,
+    evidence_digest: String.fromCharCode(100 + index).repeat(64),
+  }]));
+  const settled = await controller.settleCrossDomain(result, rewards, { trajectoryId: "cross-domain-trajectory", discount: 0.9 });
+  assert.equal(settled.trajectory.settlements.length, 3);
+  assert.equal(state.pendingEpisodes().length, 0);
+  assert.ok(settled.trajectory.settlements.every((row) => JSON.stringify(row.episode).includes("biomedical evidence") === false));
+  assert.equal(agent.learner.snapshot().generation, 3);
+});
+
+test("learning state snapshots restore pending/settled rows and refuse tampering", async () => {
+  const agent = await learningAgent();
+  const state = new InMemoryAutonomousLearningStateStore();
+  const controller = new AutonomousLearningController(agent, { store: state });
+  const run = await agent.run("Implement and verify persistence recovery.", { domain: "coding", approveProviderCall: true });
+  await controller.prepareRun(run, { episodeId: "persisted-episode" });
+  await controller.settleRun("persisted-episode", { evaluator_id: "persistence-reviewer", evaluator_version: "1", reward: 0.6, passed: true });
+  let persisted = null;
+  const coordinator = new AutonomousLearningPersistenceCoordinator(state, {
+    read: () => persisted,
+    write: (snapshot) => { persisted = structuredClone(snapshot); },
+  });
+  const snapshot = await coordinator.flush();
+  assert.equal(snapshot.snapshot_digest.length, 64);
+  assert.equal(snapshot.episodes[0].status, "settled");
+  const restoredState = new InMemoryAutonomousLearningStateStore();
+  const restoredCoordinator = new AutonomousLearningPersistenceCoordinator(restoredState, {
+    read: () => persisted,
+    write: () => {},
+  });
+  await restoredCoordinator.restore();
+  assert.equal(restoredState.loadEpisode("persisted-episode").status, "settled");
+  const tampered = structuredClone(persisted);
+  tampered.episodes[0].episode_id = "tampered-episode";
+  await assert.rejects(() => restoredState.restore(tampered), /snapshot digest does not match/);
 });

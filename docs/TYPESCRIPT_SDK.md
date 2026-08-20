@@ -1397,3 +1397,21 @@ the original evaluator reward and the credited reward remain distinguishable in 
 metadata. Trajectory records contain only episode IDs, arm IDs, outcome digests, and settlement
 digests. This supports staged DAGs and cross-domain fan-out while preserving evaluator independence,
 restart safety, and the rule that bandit adaptation is not a truth signal or execution authority.
+
+### Cross-domain learning and durable persistence
+
+`runCrossDomain()` accepts the same `AutonomousLearningController` through its `learning` option.
+Every completed specialist child and the completed `cross_domain` synthesis creates one pending
+episode. The result exposes `learning_episode_ids` in fan-out order. A partial or approval-blocked
+run exposes only episodes for children that actually completed; it never creates a reward row for a
+blocked or refused provider call. `settleCrossDomain()` requires an exact reward map keyed by those
+IDs and applies discounted return-to-go across the specialist-to-synthesis sequence.
+
+`InMemoryAutonomousLearningStateStore` combines the episode and trajectory stores behind a single
+restart boundary. `snapshot()` returns a bounded `autonomous-learning-snapshot/0.1` projection with
+settled and pending value-only rows plus a SHA-256 `snapshot_digest`; `restore()` recomputes that
+digest before accepting any row. `AutonomousLearningPersistenceCoordinator` connects the state
+store to an application-owned `read()`/`write()` adapter. The adapter can use a transactional SQL
+record, IndexedDB, or object store, but the SDK does not perform filesystem I/O or retain secrets.
+Restore preserves settled identities and rejects conflicting rows, so a restarted worker cannot
+silently replay or overwrite an already-settled evaluator episode.

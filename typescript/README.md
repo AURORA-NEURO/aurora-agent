@@ -192,6 +192,19 @@ outcome digests, and settlement digests—not prompts, responses, task text, cre
 evaluator evidence. This gives delayed credit assignment without allowing later stages or a model
 to rewrite earlier evaluator judgments.
 
+Pass the same controller to `runCrossDomain()` through its `learning` option to automatically create
+episodes for each completed specialist and the synthesis run. The returned
+`learning_episode_ids` preserve declaration order, so `settleCrossDomain()` can require an exact
+reward packet covering every pending child/synthesis episode. Partial or approval-blocked fan-out
+returns only episodes for specialists that actually completed; no blocked child is silently rewarded.
+
+For persistence, `InMemoryAutonomousLearningStateStore` is a bounded reference implementation that
+combines episode and trajectory rows. Its `snapshot()` is content-addressed and its `restore()`
+verifies the snapshot digest before accepting rows. Pair it with
+`AutonomousLearningPersistenceCoordinator` and an application adapter implementing `read()` and
+`write()` for SQLite, Postgres, IndexedDB, or object storage. The SDK never chooses a filesystem,
+stores a provider secret, or assumes that a serialized snapshot is authorization to execute.
+
 ## Contract boundaries
 
 - Requests and responses are bounded. The client enforces a request byte ceiling, incrementally
