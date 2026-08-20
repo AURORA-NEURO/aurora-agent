@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ApiClient, ArgumentError } from "../dist/index.js";
+import { ApiClient, ArgumentError, digestCanonicalJsonTextSync } from "../dist/index.js";
 
 const model = {
   provider: "openai",
@@ -14,6 +14,9 @@ const model = {
   reliability: 0.95,
 };
 
+const testContext = { domain: "engineering", capability: "platform_status", risk_class: "low", task_family: null };
+const testContextDigest = digestCanonicalJsonTextSync(JSON.stringify(testContext));
+
 test("client exposes the autonomous brain value-only kernel", async () => {
   const seen = [];
   const client = new ApiClient({
@@ -25,7 +28,7 @@ test("client exposes the autonomous brain value-only kernel", async () => {
         return new Response(JSON.stringify({ ok: true, tool: "brain_model_select", mcp: { result: { structuredContent: { selected_model_id: "openai/test-model" } } } }), { status: 200, headers: { "content-type": "application/json" } });
       }
       if (path.endsWith("brain_model_select_contextual")) {
-        return new Response(JSON.stringify({ ok: true, tool: "brain_model_select_contextual", mcp: { result: { structuredContent: { context_digest: "c".repeat(64), selection: { selected_model_id: "openai/test-model" }, selection_status: "contextual_selection_exact_history" } } } }), { status: 200, headers: { "content-type": "application/json" } });
+        return new Response(JSON.stringify({ ok: true, tool: "brain_model_select_contextual", mcp: { result: { structuredContent: { context_digest: testContextDigest, selection: { selected_model_id: "openai/test-model" }, selection_status: "contextual_selection_exact_history" } } } }), { status: 200, headers: { "content-type": "application/json" } });
       }
       if (path.endsWith("brain_prompt_assemble")) {
         return new Response(JSON.stringify({ ok: true, tool: "brain_prompt_assemble", mcp: { result: { structuredContent: { prompt_digest: "p" } } } }), { status: 200, headers: { "content-type": "application/json" } });
@@ -74,9 +77,9 @@ test("client exposes the autonomous brain value-only kernel", async () => {
     },
   });
   const contextual = await client.brainModelSelectContextual({
-    context: { domain: "engineering", capability: "platform_status", risk_class: "low" },
+    context: testContext,
     base: { task: "reason", input_tokens: 100, requested_output_tokens: 100, models: [model] },
-    observations: [{ context_digest: "c".repeat(64), arm_id: "openai/test-model", pulls: 2, reward_sum: 1.5 }],
+    observations: [{ context_digest: testContextDigest, arm_id: "openai/test-model", pulls: 2, reward_sum: 1.5 }],
   });
   const prompt = await client.brainPromptAssemble({ task: "reason", max_input_tokens: 100 });
   const plan = await client.brainPlan({
@@ -87,7 +90,7 @@ test("client exposes the autonomous brain value-only kernel", async () => {
   });
   const state = { schema: "bioprism-brain-bandit/0.1", arms: [{ arm_id: "openai/test-model" }] };
   const bandit = await client.brainBanditSelect(state);
-  const contextualBandit = await client.brainBanditSelectContextual(state, "c".repeat(64), { domain: "engineering", capability: "platform_status", risk_class: "low" });
+  const contextualBandit = await client.brainBanditSelectContextual(state, testContextDigest, testContext);
   const updated = await client.brainBanditUpdate(state, { arm_id: "openai/test-model", reward: 0.8 });
   const outcome = await client.brainOutcomeRecord({
     run: { run_id: "run-1", selection_digest: "a".repeat(64), prompt_digest: "b".repeat(64), plan_digest: "c".repeat(64), provider: "openai", model: "test-model", outcome_digest: "d".repeat(64) },
@@ -116,7 +119,7 @@ test("client exposes the autonomous brain value-only kernel", async () => {
   });
 
   assert.equal(selected.mcp.result.structuredContent.selected_model_id, "openai/test-model");
-  assert.equal(contextual.mcp.result.structuredContent.context_digest, "c".repeat(64));
+  assert.equal(contextual.mcp.result.structuredContent.context_digest, testContextDigest);
   assert.equal(prompt.mcp.result.structuredContent.prompt_digest, "p");
   assert.equal(plan.mcp.result.structuredContent.ok, true);
   assert.equal(contextualBandit.mcp.result.structuredContent.selected_arm_id, "openai/test-model");
@@ -165,6 +168,7 @@ test("brain client methods fail before transport on malformed input", async () =
     models: [model],
     provider_health: { openai: { circuit: "unknown" } },
   }), ArgumentError);
+  await assert.rejects(() => client.brainBanditSelectContextual({ schema: "test", arms: [] }, "0".repeat(64), testContext), /does not match its context identity/);
   await assert.rejects(() => client.brainJobSubmit({
     idempotency_key: "request-1",
     spec_digest: "a".repeat(64),

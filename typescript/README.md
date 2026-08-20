@@ -177,7 +177,10 @@ global arm only as a cold-start prior, and keeps context-free updates compatible
 global ledger. Contextual state is bounded and replay-safe; prompts, responses, credentials, and
 raw evaluator evidence are never placed in the digest or bandit snapshot. The remote value-only
 control-plane update remains backward-compatible, while the TypeScript runtime retains the
-contextual overlay locally when an older server does not persist it.
+contextual overlay locally when an older server does not persist it. Contextual calls now fail
+closed unless the digest is exactly the SHA-256 of the normalized `{domain, capability, risk_class,
+task_family}` identity (with an explicit `null` task family when absent), matching Rust and Python;
+the synchronous digest helper is browser-safe and does not require Node crypto or provider access.
 
 For ambiguous or novel intake, `semanticRouteAutonomousTask()` adds an explicit provider-assisted
 classification pass. It sends the private task only through the caller's approved local provider,

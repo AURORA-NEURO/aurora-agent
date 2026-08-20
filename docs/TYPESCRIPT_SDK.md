@@ -1646,6 +1646,11 @@ responses, credentials, or evaluator evidence. Remote value-only control-plane c
 compatible with older servers; current Rust/Python control planes persist the same contextual rows,
 while older servers that ignore the optional fields remain usable through the local compatibility
 overlay.
+TypeScript validates the binding before local learner mutation or remote bandit/outcome dispatch:
+the digest must equal the SHA-256 of the normalized context object, including `task_family: null`
+when no task family is supplied. `digestCanonicalJsonTextSync()` provides this small control-plane
+identity check without depending on Node crypto, while asynchronous Web Crypto remains available
+for general catalogue and evidence digests.
 Learning episodes can only be prepared from a completed autonomous run; approval pauses, provider
 refusals, child failures, and tool-loop limits cannot be converted into evaluator or bandit credit.
 Trajectory settlement is resumable after a later episode failure: matching already-settled reward

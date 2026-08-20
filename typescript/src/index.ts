@@ -134,7 +134,9 @@ export {
   ToolSchemaError,
   canonicalJson,
   digestCanonicalJsonText,
+  digestCanonicalJsonTextSync,
   digestJson,
+  digestJsonSync,
 } from "./tooling.js";
 export type * from "./types.js";
 export {

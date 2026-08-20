@@ -24,7 +24,7 @@ import {
   type AutonomousModelCandidateDefaults,
   type ProviderModelDiscovery,
 } from "./llm.js";
-import { ToolCatalogue, canonicalJson, digestCanonicalJsonText, digestJson } from "./tooling.js";
+import { ToolCatalogue, canonicalJson, digestCanonicalJsonText, digestCanonicalJsonTextSync, digestJson } from "./tooling.js";
 import type {
   BrainBanditArm,
   BrainBanditContext,
@@ -1237,15 +1237,28 @@ function validateOnlineSelectionConstraints(request: AutonomousSelectionRequest)
   if (request.require_json !== undefined && typeof request.require_json !== "boolean") throw new ArgumentError("online learner require_json must be boolean");
 }
 
+function normalizeLearningContext(context: Partial<BrainBanditContext>): BrainBanditContext {
+  if (!isObject(context)) throw new ArgumentError("online learner context must be an object");
+  return {
+    domain: boundedText("online learner context domain", context.domain, 256),
+    capability: boundedText("online learner context capability", context.capability, 256),
+    risk_class: boundedText("online learner context risk_class", context.risk_class, 256),
+    task_family: context.task_family === undefined || context.task_family === null ? null : boundedText("online learner context task_family", context.task_family, 256),
+  };
+}
+
+function assertLearningContextDigest(contextDigest: string, context: BrainBanditContext): void {
+  // Keep field order aligned with Rust serde and Python's normalized mapping. The
+  // explicit null is part of the shared identity when task_family is absent.
+  const expected = digestCanonicalJsonTextSync(JSON.stringify(context));
+  if (contextDigest !== expected) throw new ArgumentError("online learner context_digest does not match its context identity");
+}
+
 function learnerContext(request: AutonomousSelectionRequest): { context_digest: string; context: BrainBanditContext } | null {
   if (request.context_digest === undefined || request.context_digest === null) return null;
   if (typeof request.context_digest !== "string" || !/^[0-9a-f]{64}$/.test(request.context_digest)) throw new ArgumentError("online learner context_digest must be a lowercase SHA-256 digest");
-  const context: BrainBanditContext = {
-    domain: boundedText("online learner context domain", request.domain, 256),
-    capability: boundedText("online learner context capability", request.capability, 256),
-    risk_class: boundedText("online learner context risk_class", request.risk_class, 256),
-    ...(request.task_family === undefined || request.task_family === null ? {} : { task_family: boundedText("online learner context task_family", request.task_family, 256) }),
-  };
+  const context = normalizeLearningContext(request);
+  assertLearningContextDigest(request.context_digest, context);
   return { context_digest: request.context_digest, context };
 }
 
@@ -1314,9 +1327,9 @@ export class AutonomousOnlineLearner {
     if (contextDigest !== null && (typeof contextDigest !== "string" || !/^[0-9a-f]{64}$/.test(contextDigest))) throw new ArgumentError("online learner context_digest must be a lowercase SHA-256 digest");
     if (contextDigest !== null && (!update.context || !isObject(update.context))) throw new ArgumentError("contextual learner updates require their bounded context identity");
     if (contextDigest === null && update.context !== undefined) throw new ArgumentError("online learner context requires a context_digest");
-    if (update.context) {
-      learnerContext({ ...update.context, context_digest: contextDigest ?? undefined, task: "context", required_capabilities: [], estimated_input_tokens: 1, requested_output_tokens: 1, candidates: [], provider_health: {}, model_health: {} });
-    }
+    const context = contextDigest === null
+      ? null
+      : learnerContext({ ...(update.context as BrainBanditContext), context_digest: contextDigest, task: "context", required_capabilities: [], estimated_input_tokens: 1, requested_output_tokens: 1, candidates: [], provider_health: {}, model_health: {} })!.context;
     const creditedOutcomes = [...(this.stateValue.credited_outcomes ?? [])];
     if (update.outcome_digest !== undefined && update.outcome_digest !== null) {
       if (typeof update.outcome_digest !== "string" || !/^[0-9a-f]{64}$/.test(update.outcome_digest)) throw new ArgumentError("online learner outcome_digest must be a lowercase SHA-256 digest");
@@ -1334,7 +1347,7 @@ export class AutonomousOnlineLearner {
     const targetArms = contextDigest === null
       ? arms
       : (contextualStates.find((state) => state.context_digest === contextDigest)?.arms ?? (() => {
-        const contextState: BrainBanditContextState = { context_digest: contextDigest, context: { ...(update.context as BrainBanditContext) }, generation: 0, arms: [], observed: false };
+        const contextState: BrainBanditContextState = { context_digest: contextDigest, context: { ...context! }, generation: 0, arms: [], observed: false };
         contextualStates.push(contextState);
         return contextState.arms;
       })());
@@ -1419,7 +1432,7 @@ export function contextualSelector(client: ApiClient, options: { requestOptions?
       provider_health: Object.fromEntries(Object.entries(request.provider_health).map(([provider, health]) => [provider, { registered: true, circuit: health.circuit, credential_ready: health.credential_ready, eligible: health.eligible, attempts: health.attempts, successes: health.successes, failures: health.failures, success_rate: health.success_rate, mean_latency_ms: health.mean_latency_ms }] as [string, BrainProviderHealth])),
       model_health: Object.fromEntries(Object.entries(request.model_health).map(([arm, health]) => [arm, { attempts: health.attempts, successes: health.successes, failures: health.failures, success_rate: health.success_rate, mean_latency_ms: health.mean_latency_ms, last_latency_ms: health.last_latency_ms, circuit: health.circuit }])),
     };
-    const response = await client.brainModelSelectContextual({ context: { domain: request.domain, capability: request.capability, risk_class: request.risk_class, ...(request.task_family === undefined || request.task_family === null ? {} : { task_family: request.task_family }) }, base, observations: options.observations?.(request) }, options.requestOptions);
+    const response = await client.brainModelSelectContextual({ context: { domain: request.domain, capability: request.capability, risk_class: request.risk_class, task_family: request.task_family ?? null }, base, observations: options.observations?.(request) }, options.requestOptions);
     if (!response.ok || response.mcp.error || response.mcp.result?.isError) throw new ProviderRuntimeError("contextual brain selector returned a refusal");
     const projected = response.mcp.result?.structuredContent as BrainContextualModelSelectionResult | undefined;
     const selection = projected?.selection;

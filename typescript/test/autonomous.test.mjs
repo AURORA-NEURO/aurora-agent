@@ -13,6 +13,7 @@ import {
   builtinAutonomousDomainProfiles,
   assembleAutonomousPrompt,
   compileAutonomousPlan,
+  digestCanonicalJsonTextSync,
   openaiCompatibleProvider,
   routeAutonomousTask,
 } from "../dist/index.js";
@@ -34,6 +35,17 @@ const candidate = (provider, model, capabilities = ["reasoning", "code"]) => ({
   latency_ms: 100,
   cost_per_million_tokens: 10,
   reliability: 0.95,
+});
+
+const learningContextDigest = (context) => digestCanonicalJsonTextSync(JSON.stringify({
+  domain: context.domain,
+  capability: context.capability,
+  risk_class: context.risk_class,
+  task_family: context.task_family ?? null,
+}));
+
+test("synchronous control-plane SHA-256 matches the standard digest", () => {
+  assert.equal(digestCanonicalJsonTextSync("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
 });
 
 test("all twelve built-in domains expose profiles, workflows, tools, and deterministic routing", async () => {
@@ -408,8 +420,8 @@ test("online learner isolates evaluator rewards by domain learning context", asy
   };
   const codingContext = { domain: "coding", capability: "implementation", risk_class: "engineering_change", task_family: "coding_delivery" };
   const biomedicalContext = { domain: "biomedical", capability: "biomedical_review", risk_class: "biomedical_safety", task_family: "biomedical_review" };
-  const codingDigest = "c".repeat(64);
-  const biomedicalDigest = "d".repeat(64);
+  const codingDigest = learningContextDigest(codingContext);
+  const biomedicalDigest = learningContextDigest(biomedicalContext);
   learner.update({ arm_id: "a/one", reward: 1, context_digest: codingDigest, context: codingContext, outcome_digest: "1".repeat(64) });
   learner.update({ arm_id: "b/two", reward: 0, context_digest: codingDigest, context: codingContext, outcome_digest: "2".repeat(64) });
   learner.update({ arm_id: "a/one", reward: 0, context_digest: biomedicalDigest, context: biomedicalContext, outcome_digest: "3".repeat(64) });
@@ -427,6 +439,7 @@ test("online learner rejects malformed contextual snapshots with typed errors", 
   assert.throws(() => new AutonomousOnlineLearner({ state: { schema: "test", generation: 0, arms: [{ arm_id: "a/one", pulls: 1, reward_sum: 2 }] } }), /online learner arm is malformed/);
   const learner = new AutonomousOnlineLearner();
   assert.throws(() => learner.update({ arm_id: "a/one", reward: 0.5, context: { domain: "coding", capability: "implementation", risk_class: "engineering_change" } }), /context requires a context_digest/);
+  assert.throws(() => learner.update({ arm_id: "a/one", reward: 0.5, context_digest: "0".repeat(64), context: { domain: "coding", capability: "implementation", risk_class: "engineering_change" } }), /does not match its context identity/);
 });
 
 test("every built-in domain blueprint binds a distinct bounded learning context", async () => {

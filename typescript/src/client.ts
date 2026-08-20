@@ -1,7 +1,7 @@
 import { ApiError, ArgumentError, MissionWaitTimeoutError, ProtocolError, ResponseTooLargeError, ToolRefusalError, TransportError, isObject } from "./errors.js";
 import { missionFromRoute as assembleMissionFromRoute, preflightMission } from "./mission.js";
 import { parseSse } from "./sse.js";
-import { ToolCatalogue } from "./tooling.js";
+import { ToolCatalogue, digestCanonicalJsonTextSync } from "./tooling.js";
 import type {
   ApiClientOptions,
   ApiErrorBody,
@@ -527,6 +527,16 @@ const BRAIN_SECRET_FIELDS = new Set([
 function rejectBrainSecretFields(value: JsonObject, label: string): void {
   const forbidden = Object.keys(value).filter((key) => BRAIN_SECRET_FIELDS.has(key));
   if (forbidden.length > 0) throw new ArgumentError(`${label} cannot contain secret or private-work fields: ${forbidden.join(", ")}`);
+}
+
+function validateBrainContextIdentity(contextDigest: string, context: BrainBanditContext, label: string): void {
+  const normalized = {
+    domain: context.domain,
+    capability: context.capability,
+    risk_class: context.risk_class,
+    task_family: context.task_family ?? null,
+  };
+  if (digestCanonicalJsonTextSync(JSON.stringify(normalized)) !== contextDigest) throw new ArgumentError(`${label} context_digest does not match its context identity`);
 }
 
 function validateOptionalBoundedInteger(value: number | undefined, minimum: number, maximum: number, label: string): void {
@@ -1770,6 +1780,7 @@ export class ApiClient {
     if (!isObject(state) || !Array.isArray(state.arms)) throw new ArgumentError("brain bandit state must contain arms");
     if (typeof contextDigest !== "string" || !/^[0-9a-f]{64}$/.test(contextDigest)) throw new ArgumentError("brain bandit contextDigest must be a lowercase SHA-256 digest");
     if (!isObject(context) || typeof context.domain !== "string" || typeof context.capability !== "string" || typeof context.risk_class !== "string") throw new ArgumentError("brain bandit context must contain domain, capability, and risk_class");
+    validateBrainContextIdentity(contextDigest, context, "brain bandit contextual selection");
     return this.callTool<BrainBanditSelectionResult>("brain_bandit_select", { state, context_digest: contextDigest, context }, options);
   }
 
@@ -1785,6 +1796,7 @@ export class ApiClient {
     const hasContext = update.context !== undefined;
     if (hasContextDigest !== hasContext) throw new ArgumentError("brain bandit contextual update requires context_digest and context together");
     if (hasContextDigest && (typeof update.context_digest !== "string" || !/^[0-9a-f]{64}$/.test(update.context_digest) || !isObject(update.context) || typeof update.context.domain !== "string" || typeof update.context.capability !== "string" || typeof update.context.risk_class !== "string")) throw new ArgumentError("brain bandit contextual update identity is malformed");
+    if (hasContextDigest) validateBrainContextIdentity(update.context_digest as string, update.context as BrainBanditContext, "brain bandit contextual update");
     return this.callTool<BrainBanditState>("brain_bandit_update", { state, update }, options);
   }
 
@@ -1799,6 +1811,7 @@ export class ApiClient {
     const hasContext = args.context !== undefined;
     if (hasContextDigest !== hasContext) throw new ArgumentError("brain outcome record contextual identity requires context_digest and context together");
     if (hasContextDigest && (typeof args.context_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.context_digest) || !isObject(args.context) || typeof args.context.domain !== "string" || typeof args.context.capability !== "string" || typeof args.context.risk_class !== "string")) throw new ArgumentError("brain outcome record contextual identity is malformed");
+    if (hasContextDigest) validateBrainContextIdentity(args.context_digest as string, args.context as BrainBanditContext, "brain outcome record contextual identity");
     if (args.idempotency_key !== undefined && (typeof args.idempotency_key !== "string" || !args.idempotency_key.trim() || args.idempotency_key.length > 256)) throw new ArgumentError("brain outcome record idempotency_key must be a bounded non-empty string");
     if (typeof args.assessment.reward !== "number" || typeof args.assessment.passed !== "boolean") throw new ArgumentError("brain outcome assessment must contain reward and passed");
     return this.callTool<BrainOutcomeRecordResult>("brain_outcome_record", args, options);
