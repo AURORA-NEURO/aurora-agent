@@ -297,6 +297,12 @@ event predecessor digests, exact metadata-only field sets, job/event bounds, and
 digest before mutating the store. Event history may be retention-truncated, but a truncated first
 event must retain its predecessor digest; payload-bearing or recomputed snapshots are refused.
 
+If `execution` is supplied in workflow run options, every stage forwards that same controller to
+provider and tool admission, including bounded failover and custom read-only classification. The
+workflow uses `executionLifecycle: "observe_only"` for nested stage calls so a stage cannot
+silently complete the enclosing multi-stage execution; the caller owns final controller completion
+after workflow reconciliation.
+
 Pass an `AutonomousLearningController` to the executor when staged model outcomes should enter the
 learning lifecycle:
 

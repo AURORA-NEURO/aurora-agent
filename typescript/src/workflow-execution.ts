@@ -437,8 +437,15 @@ function runOptions(options: AutonomousWorkflowExecuteOptions, stage: Autonomous
     temperature: options.temperature,
     tools: options.tools,
     authorizeAndExecute: options.authorizeAndExecute,
+    toolReadOnly: options.toolReadOnly,
     approveProviderCall: options.approveProviderCall,
     approveEffects: options.approveEffects,
+    execution: options.execution,
+    executionAttempt: options.executionAttempt,
+    maxProviderFailovers: options.maxProviderFailovers,
+    // The workflow owns the enclosing lifecycle; each stage contributes observations and
+    // accounting without completing the shared controller independently.
+    executionLifecycle: "observe_only",
     signal: options.signal,
     observer: options.observer,
   };

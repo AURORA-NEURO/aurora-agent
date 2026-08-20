@@ -1604,6 +1604,12 @@ must be treated as untrusted storage: a caller cannot make a tampered or payload
 valid by merely recomputing an event digest because the outer snapshot and field allow-list are
 also checked.
 
+When `execution` is supplied to `start()` or `resume()`, the executor forwards the same controller
+through every stage invocation. Provider admissions, tool admissions, failover counts, and custom
+read-only classification therefore consume the shared execution budget and journal. Nested stage
+runs use `executionLifecycle: "observe_only"`; the workflow boundary, not an individual stage,
+owns terminal completion and reconciliation.
+
 The executor accepts an optional `AutonomousLearningController`. When present, each completed
 stage creates one pending episode through `prepareRun()` and writes only that episode ID into the
 metadata checkpoint. Approval-required and failed stages retain no reward episode. The returned

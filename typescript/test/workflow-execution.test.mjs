@@ -4,6 +4,8 @@ import { test } from "node:test";
 import {
   AutonomousAgent,
   AutonomousDurableJobController,
+  AutonomousExecutionController,
+  InMemoryAutonomousExecutionJournal,
   AutonomousWorkflowPersistenceCoordinator,
   AutonomousWorkflowExecutor,
   CredentialStore,
@@ -115,6 +117,36 @@ test("workflow checkpoint snapshots restore a paused job without admitting paylo
   assert.equal(resumed.status, "completed");
   assert.equal(resumed.completed_stage_count, 5);
   assert.equal(calls, 5);
+});
+
+test("workflow stages share the caller execution admission boundary", async () => {
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => jsonResponse({ choices: [{ message: { role: "assistant", content: "stage accounted" }, finish_reason: "stop" }] }),
+  });
+  llm.registerProvider(openaiCompatibleProvider("workflow", "https://workflow.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel(model());
+  const journal = new InMemoryAutonomousExecutionJournal();
+  const execution = await AutonomousExecutionController.create({
+    executionId: "workflow-execution-boundary-1",
+    domain: "coding",
+    capability: "coding_delivery",
+    riskClass: "engineering_change",
+    policy: { max_steps: 8, max_provider_calls: 2, max_provider_failovers: 1, max_cost_units: 8 },
+    journal,
+  });
+  const result = await new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore()).start("Account this workflow stage", {
+    domain: "coding",
+    jobId: "workflow-execution-boundary-job",
+    candidates: agent.models(),
+    approveProviderCall: true,
+    maxStages: 1,
+    execution,
+  });
+  assert.equal(result.status, "paused");
+  assert.equal(execution.state.provider_calls, 1);
+  assert.equal((await journal.events({ executionId: "workflow-execution-boundary-1" })).filter((row) => row.event.kind === "provider_call").length, 2);
 });
 
 test("workflow stage failures checkpoint typed redacted retry metadata", async () => {
