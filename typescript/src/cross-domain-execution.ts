@@ -30,8 +30,8 @@ export const AUTONOMOUS_CROSS_DOMAIN_MAX_JOBS = 1_024;
 export const AUTONOMOUS_CROSS_DOMAIN_MAX_SNAPSHOT_BYTES = 4 * 1024 * 1024;
 
 export type AutonomousCrossDomainCheckpointStatus = "children_pending" | "synthesis_pending" | "paused" | "completed" | "failed";
-export type AutonomousCrossDomainExecutionStatus = "completed" | "paused" | "approval_required" | "failed" | "route_review_required";
-export type AutonomousCrossDomainEventType = "started" | "child_completed" | "checkpointed" | "approval_required" | "synthesis_completed" | "failed" | "completed";
+export type AutonomousCrossDomainExecutionStatus = "completed" | "paused" | "approval_required" | "reconciliation_required" | "failed" | "route_review_required";
+export type AutonomousCrossDomainEventType = "started" | "child_completed" | "checkpointed" | "approval_required" | "reconciliation_required" | "synthesis_completed" | "failed" | "completed";
 
 export interface AutonomousCrossDomainCheckpoint {
   schema: typeof AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_SCHEMA;
@@ -267,7 +267,7 @@ async function validateEvent(value: unknown): Promise<AutonomousCrossDomainEvent
   const sequence = boundedInteger(value.sequence, "cross-domain event sequence", Number.MAX_SAFE_INTEGER, 1);
   const jobId = boundedId(value.job_id, "cross-domain event job_id");
   const eventType = value.event_type;
-  if (!["started", "child_completed", "checkpointed", "approval_required", "synthesis_completed", "failed", "completed"].includes(String(eventType))) throw new ArgumentError("cross-domain event type is invalid");
+  if (!["started", "child_completed", "checkpointed", "approval_required", "reconciliation_required", "synthesis_completed", "failed", "completed"].includes(String(eventType))) throw new ArgumentError("cross-domain event type is invalid");
   const itemId = value.item_id === null ? null : boundedId(value.item_id, "cross-domain event item_id");
   const phase = value.phase;
   if (phase !== "child" && phase !== "synthesis" && phase !== "lifecycle") throw new ArgumentError("cross-domain event phase is invalid");
@@ -645,7 +645,7 @@ export class AutonomousCrossDomainExecutor {
         ];
         let run: AutonomousRunResult;
         try {
-          run = await this.agent.run(childSpec.task, { domain: childSpec.domain, capability: childSpec.capability, candidates: options.candidates, credential: options.credential, credentialFor: options.credentialFor, context: childContext, hints: [], allowCrossDomain: false, maxInputTokens: options.maxInputTokens, maxOutputTokens: options.maxOutputTokens, maxCostPerMillionTokens: options.maxCostPerMillionTokens, maxLatencyMs: options.maxLatencyMs, minQuality: options.minQuality, requireJson: options.requireJson, responseSchema: options.responseSchema, temperature: options.temperature, tools: options.tools, authorizeAndExecute: options.authorizeAndExecute, toolReadOnly: options.toolReadOnly, approveProviderCall: true, approveEffects: options.approveEffects, execution: options.execution, costBudget, executionAttempt: checkpoint.generation, maxProviderFailovers: options.maxProviderFailovers, executionLifecycle: "observe_only", signal: options.signal, observer: options.observer });
+          run = await this.agent.run(childSpec.task, { domain: childSpec.domain, capability: childSpec.capability, candidates: options.candidates, credential: options.credential, credentialFor: options.credentialFor, context: childContext, hints: [], allowCrossDomain: false, maxInputTokens: options.maxInputTokens, maxOutputTokens: options.maxOutputTokens, maxCostPerMillionTokens: options.maxCostPerMillionTokens, maxLatencyMs: options.maxLatencyMs, minQuality: options.minQuality, requireJson: options.requireJson, responseSchema: options.responseSchema, temperature: options.temperature, tools: options.tools, authorizeAndExecute: options.authorizeAndExecute, toolReadOnly: options.toolReadOnly, approveProviderCall: true, approveEffects: options.approveEffects, execution: options.execution, effectBoundary: options.effectBoundary, costBudget, executionAttempt: checkpoint.generation, maxProviderFailovers: options.maxProviderFailovers, executionLifecycle: "observe_only", signal: options.signal, observer: options.observer });
         } catch (error) {
           const metadata = errorMetadata(error);
           checkpoint = await this.makeCheckpointFromExisting(checkpoint, "failed", contractDigest, planRefinementDigest, null);
@@ -665,6 +665,12 @@ export class AutonomousCrossDomainExecutor {
           await this.store.save(checkpoint);
           await this.appendEvent(checkpoint.job_id, "approval_required", childId, "child", checkpoint);
           return this.result("approval_required", route, blueprint, checkpoint, stepResults, learningEpisodeIds);
+        }
+        if (run.status === "reconciliation_required") {
+          checkpoint = await this.makeCheckpointFromExisting(checkpoint, "paused", contractDigest, planRefinementDigest, null);
+          await this.store.save(checkpoint);
+          await this.appendEvent(checkpoint.job_id, "reconciliation_required", childId, "child", checkpoint);
+          return this.result("reconciliation_required", route, blueprint, checkpoint, stepResults, learningEpisodeIds);
         }
         if (run.status !== "completed") {
           checkpoint = await this.makeCheckpointFromExisting(checkpoint, "failed", contractDigest, planRefinementDigest, null);
@@ -700,7 +706,7 @@ export class AutonomousCrossDomainExecutor {
       }
       let synthesis: AutonomousRunResult;
       try {
-        synthesis = await this.agent.run(synthesisMessage.content, { domain: "cross_domain", capability: "cross_domain_synthesis", candidates: options.candidates, credential: options.credential, credentialFor: options.credentialFor, context: synthesisContext, hints: [], allowCrossDomain: false, maxInputTokens: options.maxInputTokens, maxOutputTokens: options.maxOutputTokens, maxCostPerMillionTokens: options.maxCostPerMillionTokens, maxLatencyMs: options.maxLatencyMs, minQuality: options.minQuality, requireJson: options.requireJson, responseSchema: options.responseSchema, temperature: options.temperature, tools: options.tools, authorizeAndExecute: options.authorizeAndExecute, toolReadOnly: options.toolReadOnly, approveProviderCall: true, approveEffects: options.approveEffects, execution: options.execution, costBudget, executionAttempt: order.length + 1, maxProviderFailovers: options.maxProviderFailovers, executionLifecycle: "observe_only", signal: options.signal, observer: options.observer });
+        synthesis = await this.agent.run(synthesisMessage.content, { domain: "cross_domain", capability: "cross_domain_synthesis", candidates: options.candidates, credential: options.credential, credentialFor: options.credentialFor, context: synthesisContext, hints: [], allowCrossDomain: false, maxInputTokens: options.maxInputTokens, maxOutputTokens: options.maxOutputTokens, maxCostPerMillionTokens: options.maxCostPerMillionTokens, maxLatencyMs: options.maxLatencyMs, minQuality: options.minQuality, requireJson: options.requireJson, responseSchema: options.responseSchema, temperature: options.temperature, tools: options.tools, authorizeAndExecute: options.authorizeAndExecute, toolReadOnly: options.toolReadOnly, approveProviderCall: true, approveEffects: options.approveEffects, execution: options.execution, effectBoundary: options.effectBoundary, costBudget, executionAttempt: order.length + 1, maxProviderFailovers: options.maxProviderFailovers, executionLifecycle: "observe_only", signal: options.signal, observer: options.observer });
       } catch (error) {
         checkpoint = await this.makeCheckpointFromExisting(checkpoint, "failed", contractDigest, planRefinementDigest, null);
         await this.store.save(checkpoint);
@@ -717,6 +723,12 @@ export class AutonomousCrossDomainExecutor {
         await this.store.save(checkpoint);
         await this.appendEvent(checkpoint.job_id, "approval_required", "synthesis", "synthesis", checkpoint);
         return this.result("approval_required", route, blueprint, checkpoint, stepResults, learningEpisodeIds);
+      }
+      if (synthesis.status === "reconciliation_required") {
+        checkpoint = await this.makeCheckpointFromExisting(checkpoint, "paused", contractDigest, planRefinementDigest, null);
+        await this.store.save(checkpoint);
+        await this.appendEvent(checkpoint.job_id, "reconciliation_required", "synthesis", "synthesis", checkpoint);
+        return this.result("reconciliation_required", route, blueprint, checkpoint, stepResults, learningEpisodeIds, undefined, synthesis);
       }
       if (synthesis.status !== "completed") {
         checkpoint = await this.makeCheckpointFromExisting(checkpoint, "failed", contractDigest, planRefinementDigest, null);

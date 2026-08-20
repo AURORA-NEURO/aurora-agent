@@ -34,6 +34,7 @@ export const AUTONOMOUS_DECISION_CYCLE_SCHEMA = "bioprism-typescript-autonomous-
 export type AutonomousDecisionCycleStatus =
   | "completed"
   | "approval_required"
+  | "reconciliation_required"
   | "turn_limit_reached"
   | "route_review_required"
   | "provider_abstained"
@@ -176,6 +177,7 @@ async function recordMemoryEvaluation(memory: AutonomousDecisionCycleMemoryOptio
 function cycleStatusForRun(status: AutonomousRunResult["status"]): AutonomousDecisionCycleStatus {
   if (status === "completed") return "completed";
   if (status === "approval_required") return "approval_required";
+  if (status === "reconciliation_required") return "reconciliation_required";
   if (status === "turn_limit_reached") return "turn_limit_reached";
   return "route_review_required";
 }
@@ -710,7 +712,8 @@ export type AutonomousCrossDomainDecisionCycleStatus =
   | AutonomousDecisionCycleStatus
   | "children_completed"
   | "children_partial"
-  | "child_failed";
+  | "child_failed"
+  | "reconciliation_required";
 
 export type AutonomousCrossDomainDecisionCycleEvaluator = (
   result: AutonomousCrossDomainRunResult,
@@ -907,7 +910,7 @@ export async function runAutonomousCrossDomainDecisionCycle(
     }
     if (options.executionLifecycle !== "observe_only") {
       if (run.status === "completed" || run.status === "children_completed" || run.status === "children_partial") await options.execution?.complete(run.status);
-      else await options.execution?.checkpoint({ status: run.status, reason: `cross_domain_${run.status}` });
+      else if (run.status !== "reconciliation_required") await options.execution?.checkpoint({ status: run.status, reason: `cross_domain_${run.status}` });
     }
     return {
       schema: AUTONOMOUS_CROSS_DOMAIN_DECISION_CYCLE_SCHEMA,

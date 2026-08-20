@@ -328,7 +328,9 @@ Tool-loop outcomes are intentionally not collapsed into provider success. A loop
 final assistant response returns `status: "completed"`; a caller authorization callback that
 declines any requested tool returns `status: "approval_required"` with
 `tool_loop.status: "authorization_required"`; and a loop that reaches its bounded turn/tool-call
-budget returns `status: "turn_limit_reached"`. The public `AutonomousToolLoopStatus` and
+budget returns `status: "turn_limit_reached"`. An uncertain external effect returns
+`status: "reconciliation_required"` with `tool_loop.status: "reconciliation_required"` until
+the caller-owned effect resolver confirms the outcome. The public `AutonomousToolLoopStatus` and
 `AutonomousToolLoopSummary` types make this lifecycle explicit to workflow and evaluator code.
 
 Long-running callers can pass an `AutonomousExecutionController` through the same run options.
@@ -354,6 +356,53 @@ controller to a halted `error` projection until the caller explicitly fails the 
 provider failures remain resumable so the runtime can perform bounded failover. `pause_on_approval`
 controls whether an approval-required tool intent is projected as `approval_required`; it never
 authorizes the effect, which still requires the caller's approval callback.
+
+### Restart-safe external effects
+
+An execution journal records that a tool was intended, but that alone cannot make a network write
+safe across a process crash. For effectful domain tools, attach an `AutonomousEffectBoundary` to
+the agent (or pass one through `AutonomousRunOptions.effectBoundary`) and persist its
+`InMemoryAutonomousEffectJournal` snapshot through `AutonomousEffectPersistenceCoordinator`:
+
+```typescript
+const effectJournal = new InMemoryAutonomousEffectJournal();
+const effectBoundary = new AutonomousEffectBoundary({
+  journal: effectJournal,
+  resolver: {
+    async resolve(record) {
+      // Query the caller-owned system of record by effect_id or idempotency key.
+      return await applicationEffectStore.resolve(record);
+    },
+  },
+});
+const agent = new AutonomousAgent(runtime, {
+  toolCatalogue,
+  toolExecutor: async (tool, arguments_, effect) =>
+    applicationEffectStore.execute(tool.name, arguments_, effect?.idempotency_key),
+  effectBoundary,
+});
+```
+
+The boundary persists `prepared → dispatching → dispatched` before entering the caller's effect
+executor and records only digests, bounded identifiers, status, and a deterministic idempotency
+key digest. A successful call becomes `completed`; an exception after the dispatch marker becomes
+`uncertain`, and the next attempt returns `reconciliation_required` until the resolver confirms
+`completed`, `failed`, or an explicitly safe `not_found` retry. The resolver receives only the
+metadata record. Raw arguments, output, provider response, credentials, and thrown error bodies
+remain application-owned. This is not a promise of exactly-once execution: the external system
+must enforce the supplied idempotency key, and callers must reconcile uncertain outcomes before
+retrying. Read-only tools bypass the effect ledger while retaining ordinary authorization.
+For a caller-supplied `authorizeAndExecute` callback, use the boundary's
+`authorizeAndExecute()` adapter or call `effectBoundary.execute()` inside the callback after the
+caller has approved the specific call; the SDK does not guess whether an arbitrary callback has
+already crossed an external side-effect boundary.
+
+Effect snapshots are hash-chained and reject tampered rows, unsupported fields, secret-shaped
+metadata, oversized payloads, and altered head or snapshot digests. `AutonomousExecutionController`
+mirrors each transition as `effect_reconciliation` metadata; an uncertain effect places the
+execution in `reconciliation_required`, which can be resolved without replaying the operation.
+Tool-loop results preserve that status rather than misreporting an uncertain write as a normal
+approval pause or successful model turn.
 
 `AutonomousRuntime.invoke()` performs bounded provider failover when a selected provider returns a
 retryable `ProviderRuntimeError`: it removes that provider from the next ranking, selects again

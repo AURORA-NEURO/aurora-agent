@@ -2,6 +2,7 @@ import { ArgumentError, ProviderRuntimeError, isObject } from "./errors.js";
 import type { ApiClient } from "./client.js";
 import { AutonomousBrainControlPlaneBridge, AutonomousModelHealthController, type AutonomousModelHealthStore } from "./autonomous-control.js";
 import type { AutonomousExecutionController } from "./autonomous-execution.js";
+import { AutonomousEffectBoundary, AutonomousEffectReconciliationRequiredError, type AutonomousEffectExecutionContext } from "./autonomous-effects.js";
 import type { AutonomousLearningController } from "./autonomous-learning.js";
 import {
   AutonomousRuntime,
@@ -393,9 +394,9 @@ export interface AutonomousDomainToolPlan extends JsonObject {
   secret_material: "never_returned";
 }
 
-export type AutonomousRunStatus = "completed" | "route_review_required" | "approval_required" | "turn_limit_reached" | "abstained" | "cross_domain_partial" | "child_failed";
+export type AutonomousRunStatus = "completed" | "route_review_required" | "approval_required" | "reconciliation_required" | "turn_limit_reached" | "abstained" | "cross_domain_partial" | "child_failed";
 
-export type AutonomousToolLoopStatus = "completed" | "authorization_required" | "turn_limit_reached";
+export type AutonomousToolLoopStatus = "completed" | "authorization_required" | "reconciliation_required" | "turn_limit_reached";
 
 export interface AutonomousToolLoopSummary {
   status: AutonomousToolLoopStatus;
@@ -425,7 +426,7 @@ export interface AutonomousCrossDomainChildRun {
   output_bytes: number;
 }
 
-export type AutonomousCrossDomainRunStatus = "completed" | "children_completed" | "children_partial" | "approval_required" | "turn_limit_reached" | "child_failed" | "route_review_required";
+export type AutonomousCrossDomainRunStatus = "completed" | "children_completed" | "children_partial" | "approval_required" | "reconciliation_required" | "turn_limit_reached" | "child_failed" | "route_review_required";
 
 export interface AutonomousCrossDomainRunResult {
   schema: typeof AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA;
@@ -453,6 +454,8 @@ export interface AutonomousAgentOptions {
   toolCatalogue?: ToolCatalogue;
   toolExecutor?: DomainToolExecutor;
   toolApprover?: DomainToolApprover;
+  /** Optional caller-owned durable effect ledger used for idempotency and restart reconciliation. */
+  effectBoundary?: AutonomousEffectBoundary;
   learner?: AutonomousOnlineLearner;
 }
 
@@ -528,6 +531,8 @@ export interface AutonomousRunOptions {
   approveEffects?: boolean;
   /** Optional caller-owned policy/state controller enforced at provider and tool boundaries. */
   execution?: AutonomousExecutionController;
+  /** Optional caller-owned effect ledger; uncertain external effects must be reconciled before retry. */
+  effectBoundary?: AutonomousEffectBoundary;
   /** A completed, non-review provider proposal that may reorder existing cross-domain children. */
   acceptedCrossDomainPlanRefinement?: AutonomousCrossDomainPlanRefinementResult;
   /** Logical attempt number recorded in execution metadata; it never changes provider authority. */
@@ -550,7 +555,7 @@ export interface AutonomousCrossDomainRunOptions extends AutonomousRunOptions {
 }
 
 export interface DomainToolExecutor {
-  (tool: AutonomousDomainToolBinding, arguments_: JsonObject): JsonValue | Promise<JsonValue>;
+  (tool: AutonomousDomainToolBinding, arguments_: JsonObject, effect?: AutonomousEffectExecutionContext): JsonValue | Promise<JsonValue>;
 }
 
 export interface DomainToolApprover {
@@ -1351,17 +1356,20 @@ export class AutonomousDomainToolRuntime {
   readonly registry: AutonomousDomainToolRegistry;
   readonly executor: DomainToolExecutor;
   readonly approver?: DomainToolApprover;
+  readonly effectBoundary?: AutonomousEffectBoundary;
   private readonly receipts: JsonObject[] = [];
 
-  constructor(registry: AutonomousDomainToolRegistry, executor: DomainToolExecutor, options: { approver?: DomainToolApprover } = {}) {
+  constructor(registry: AutonomousDomainToolRegistry, executor: DomainToolExecutor, options: { approver?: DomainToolApprover; effectBoundary?: AutonomousEffectBoundary } = {}) {
     if (!(registry instanceof AutonomousDomainToolRegistry)) throw new ProviderRuntimeError("autonomous domain tool runtime requires a registry");
     if (typeof executor !== "function") throw new ProviderRuntimeError("autonomous domain tool executor must be callable");
+    if (options.effectBoundary !== undefined && !(options.effectBoundary instanceof AutonomousEffectBoundary)) throw new ProviderRuntimeError("autonomous domain tool effectBoundary is malformed");
     this.registry = registry;
     this.executor = executor;
     this.approver = options.approver;
+    this.effectBoundary = options.effectBoundary;
   }
 
-  async authorizeAndExecute(calls: readonly ProviderToolCall[], options: { domains: readonly string[]; approveEffects?: boolean } ): Promise<ProviderToolResult[]> {
+  async authorizeAndExecute(calls: readonly ProviderToolCall[], options: { domains: readonly string[]; approveEffects?: boolean; execution?: AutonomousExecutionController; effectBoundary?: AutonomousEffectBoundary } ): Promise<ProviderToolResult[]> {
     if (!Array.isArray(calls) || calls.length > 128) throw new ProviderRuntimeError("autonomous tool call count is outside its bounds");
     const results: ProviderToolResult[] = [];
     for (const call of calls) {
@@ -1377,7 +1385,10 @@ export class AutonomousDomainToolRuntime {
           results.push({ callId: call.id, approved: false, isError: true, content: { status: "approval_required", tool: call.name, receipt_digest: await digestJson(receipt) } });
           continue;
         }
-        const value = await this.executor(planned.binding, planned.arguments);
+        const effectBoundary = options.effectBoundary ?? this.effectBoundary;
+        const value = effectBoundary && !planned.binding.read_only
+          ? await effectBoundary.execute({ execution_id: options.execution?.state.execution_id ?? null, tool: call.name, call_id: call.id, risk_class: planned.binding.risk_class, arguments: planned.arguments }, async (effectContext) => this.executor(planned.binding, planned.arguments, effectContext), { execution: options.execution })
+          : await this.executor(planned.binding, planned.arguments);
         assertSafeToolArguments(value);
         const encoded = canonicalJson(value);
         if (bytes(encoded) > 1_000_000) throw new ProviderRuntimeError("autonomous tool result exceeds its bounded size");
@@ -1386,6 +1397,12 @@ export class AutonomousDomainToolRuntime {
         results.push({ callId: call.id, approved: true, content: value });
       } catch (unknownError) {
         const error = unknownError instanceof Error ? unknownError : new Error("tool execution failed");
+        if (unknownError instanceof AutonomousEffectReconciliationRequiredError) {
+          const receipt = { schema: AUTONOMOUS_DOMAIN_TOOL_REGISTRY_SCHEMA, tool: call.name, status: "reconciliation_required", effect_id: unknownError.effectId, idempotency_key: unknownError.idempotencyKey, duration_ms: Math.max(0, Date.now() - started), secret_material: "never_returned" as const };
+          this.receipts.push(receipt);
+          results.push({ callId: call.id, approved: false, isError: true, content: { status: "reconciliation_required", tool: call.name, effect_id: unknownError.effectId, idempotency_key: unknownError.idempotencyKey, receipt_digest: await digestJson(receipt), secret_material: "never_returned" } });
+          continue;
+        }
         const receipt = { schema: AUTONOMOUS_DOMAIN_TOOL_REGISTRY_SCHEMA, tool: call.name, status: "execution_failed", error_class: error.constructor.name, duration_ms: Math.max(0, Date.now() - started), secret_material: "never_returned" as const };
         this.receipts.push(receipt);
         results.push({ callId: call.id, approved: false, isError: true, content: { status: "execution_failed", tool: call.name, error_class: error.constructor.name, receipt_digest: await digestJson(receipt) } });
@@ -1708,6 +1725,7 @@ export class AutonomousAgent {
   private readonly toolCatalogue?: ToolCatalogue;
   private readonly toolExecutor?: DomainToolExecutor;
   private readonly toolApprover?: DomainToolApprover;
+  private readonly effectBoundary?: AutonomousEffectBoundary;
   private domainToolRegistry?: AutonomousDomainToolRegistry;
   private domainToolRuntime?: AutonomousDomainToolRuntime;
 
@@ -1716,6 +1734,7 @@ export class AutonomousAgent {
     if (options.apiClient && typeof options.apiClient.brainModelSelectContextual !== "function") throw new ArgumentError("AutonomousAgent apiClient is malformed");
     if (options.toolCatalogue !== undefined && !(options.toolCatalogue instanceof ToolCatalogue)) throw new ArgumentError("AutonomousAgent toolCatalogue must be a ToolCatalogue");
     if (options.toolExecutor !== undefined && typeof options.toolExecutor !== "function") throw new ArgumentError("AutonomousAgent toolExecutor must be callable");
+    if (options.effectBoundary !== undefined && !(options.effectBoundary instanceof AutonomousEffectBoundary)) throw new ArgumentError("AutonomousAgent effectBoundary must be an AutonomousEffectBoundary");
     this.llm = llm;
     this.apiClient = options.apiClient;
     this.learner = options.learner;
@@ -1725,6 +1744,7 @@ export class AutonomousAgent {
     this.toolCatalogue = options.toolCatalogue;
     this.toolExecutor = options.toolExecutor;
     this.toolApprover = options.toolApprover;
+    this.effectBoundary = options.effectBoundary;
     const selector = options.selector ?? (this.modelHealthController ? this.modelHealthController.selector() : options.learner ? (request: AutonomousSelectionRequest) => options.learner!.select(request) : options.apiClient ? contextualSelector(options.apiClient) : this.modelHealthBridge ? this.modelHealthBridge.selector() : undefined);
     this.runtime = new AutonomousRuntime(llm, { selector });
   }
@@ -2081,7 +2101,7 @@ export class AutonomousAgent {
       const cross = await this.runCrossDomain(taskText, { ...options, maxTotalCostUnits: undefined, costBudget });
       return {
         schema: "bioprism-typescript-autonomous-run/0.1",
-        status: cross.status === "completed" ? "completed" : cross.status === "approval_required" ? "approval_required" : cross.status === "turn_limit_reached" ? "turn_limit_reached" : cross.status === "child_failed" ? "child_failed" : cross.status === "children_partial" ? "cross_domain_partial" : "route_review_required",
+        status: cross.status === "completed" ? "completed" : cross.status === "approval_required" ? "approval_required" : cross.status === "reconciliation_required" ? "reconciliation_required" : cross.status === "turn_limit_reached" ? "turn_limit_reached" : cross.status === "child_failed" ? "child_failed" : cross.status === "children_partial" ? "cross_domain_partial" : "route_review_required",
         route,
         blueprint: cross.blueprint?.synthesis_blueprint ?? null,
         selection: cross.synthesis?.selection ?? null,
@@ -2120,10 +2140,11 @@ export class AutonomousAgent {
     const remoteHealthObserver = this.modelHealthBridge?.observer({ domain: blueprint.domain_profile.domain, capability: executionPlan.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class });
     const feedbackObserver = composeInvocationObservers(options.observer, healthObserver, remoteHealthObserver);
     if (tools.length || options.authorizeAndExecute || this.toolRuntimeForRun()) {
-      const authorizeAndExecute = options.authorizeAndExecute ?? (this.toolRuntimeForRun() ? (calls: ProviderToolCall[]) => this.toolRuntimeForRun()!.authorizeAndExecute(calls, { domains: selectedDomains, approveEffects: options.approveEffects }) : async (calls: ProviderToolCall[]) => calls.map((call) => ({ callId: call.id, approved: false, isError: true, content: { status: "authorization_required", tool: call.name, secret_material: "never_returned" } })));
+      const toolRuntime = this.toolRuntimeForRun();
+      const authorizeAndExecute = options.authorizeAndExecute ?? (toolRuntime ? (calls: ProviderToolCall[]) => toolRuntime.authorizeAndExecute(calls, { domains: selectedDomains, approveEffects: options.approveEffects, execution: options.execution, effectBoundary: options.effectBoundary ?? this.effectBoundary }) : async (calls: ProviderToolCall[]) => calls.map((call) => ({ callId: call.id, approved: false, isError: true, content: { status: "authorization_required", tool: call.name, secret_material: "never_returned" } })));
       const toolReadOnly = options.toolReadOnly ?? (async (call: ProviderToolCall): Promise<boolean> => this.domainToolRegistry?.binding(call.name, selectedDomains)?.risk_class === "read_only");
       const loop = await this.runtime.invokeToolLoop(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, authorizeAndExecute, signal: options.signal, observer: feedbackObserver, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined, toolReadOnly });
-      const status: AutonomousRunStatus = loop.loop.status === "completed" ? "completed" : loop.loop.status === "authorization_required" ? "approval_required" : "turn_limit_reached";
+      const status: AutonomousRunStatus = loop.loop.status === "completed" ? "completed" : loop.loop.status === "authorization_required" ? "approval_required" : loop.loop.status === "reconciliation_required" ? "reconciliation_required" : "turn_limit_reached";
       return { schema: "bioprism-typescript-autonomous-run/0.1", status, route, blueprint, selection: loop.selection, response: loop.loop.finalResponse, tool_loop: { status: loop.loop.status, turns: loop.loop.turns, toolCalls: loop.loop.toolCalls }, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
     }
     const result = await this.runtime.invoke(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: feedbackObserver, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined });
@@ -2199,6 +2220,7 @@ export class AutonomousAgent {
         approveProviderCall: true,
         approveEffects: options.approveEffects,
         execution: options.execution,
+        effectBoundary: options.effectBoundary ?? this.effectBoundary,
         maxTotalCostUnits: undefined,
         costBudget,
         executionAttempt: index + 1,
@@ -2253,7 +2275,8 @@ export class AutonomousAgent {
     const hasApproval = childRuns.some((child) => child.result.status === "approval_required");
     const hasTurnLimit = childRuns.some((child) => child.result.status === "turn_limit_reached");
     if (!allChildrenCompleted && !options.allowPartial) {
-      return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: hasApproval ? "approval_required" : hasTurnLimit ? "turn_limit_reached" : "child_failed", route, blueprint, child_runs: childRuns, synthesis: null, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: completedChildren > 0, plan_refinement_digest: planRefinementDigest, learning_episode_ids: learningEpisodeIds, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
+      const hasReconciliation = childRuns.some((child) => child.result.status === "reconciliation_required");
+      return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: hasReconciliation ? "reconciliation_required" : hasApproval ? "approval_required" : hasTurnLimit ? "turn_limit_reached" : "child_failed", route, blueprint, child_runs: childRuns, synthesis: null, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: completedChildren > 0, plan_refinement_digest: planRefinementDigest, learning_episode_ids: learningEpisodeIds, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
     }
     if (options.synthesize === false) {
       return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: allChildrenCompleted ? "children_completed" : "children_partial", route, blueprint, child_runs: childRuns, synthesis: null, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: !allChildrenCompleted, plan_refinement_digest: planRefinementDigest, learning_episode_ids: learningEpisodeIds, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
@@ -2292,6 +2315,7 @@ export class AutonomousAgent {
       approveProviderCall: true,
       approveEffects: options.approveEffects,
       execution: options.execution,
+      effectBoundary: options.effectBoundary ?? this.effectBoundary,
       maxTotalCostUnits: undefined,
       costBudget,
       executionAttempt: totalChildren + 1,
@@ -2304,7 +2328,7 @@ export class AutonomousAgent {
       const episode = await options.learning.prepareRun(synthesis, { episodeId, runId: episodeId, stageId: "synthesis", parentJobId: `cross:${route.task_digest}`, planRefinementDigest });
       learningEpisodeIds.push(episode.episode_id);
     }
-    const status: AutonomousCrossDomainRunStatus = synthesis.status === "completed" ? (allChildrenCompleted ? "completed" : "children_partial") : synthesis.status === "approval_required" ? "approval_required" : synthesis.status === "turn_limit_reached" ? "turn_limit_reached" : "child_failed";
+    const status: AutonomousCrossDomainRunStatus = synthesis.status === "completed" ? (allChildrenCompleted ? "completed" : "children_partial") : synthesis.status === "approval_required" ? "approval_required" : synthesis.status === "reconciliation_required" ? "reconciliation_required" : synthesis.status === "turn_limit_reached" ? "turn_limit_reached" : "child_failed";
     return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status, route, blueprint, child_runs: childRuns, synthesis, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: !allChildrenCompleted, plan_refinement_digest: planRefinementDigest, learning_episode_ids: learningEpisodeIds, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
   }
 
@@ -2339,7 +2363,7 @@ export class AutonomousAgent {
     if (this.domainToolRegistry) return this.domainToolRegistry;
     if (!this.toolCatalogue) return undefined;
     this.domainToolRegistry = await AutonomousDomainToolRegistry.create(this.toolCatalogue);
-    if (this.toolExecutor) this.domainToolRuntime = new AutonomousDomainToolRuntime(this.domainToolRegistry, this.toolExecutor, { approver: this.toolApprover });
+    if (this.toolExecutor) this.domainToolRuntime = new AutonomousDomainToolRuntime(this.domainToolRegistry, this.toolExecutor, { approver: this.toolApprover, effectBoundary: this.effectBoundary });
     return this.domainToolRegistry;
   }
 

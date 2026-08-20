@@ -786,8 +786,9 @@ caller-owned cache. The journal stores child IDs, result digests, accepted-plan 
 next child, and synthesis state—not task text, prompts, credentials, or provider output. Each
 rehydrated result is digest-checked before continuation. Provider approval parks the same item
 without advancing the checkpoint; restart therefore resumes the next exact child or synthesis
-step instead of replaying completed work. Durable cross-domain jobs currently reject mission
-effects until an effect-specific reconciliation protocol is available.
+step instead of replaying completed work. Effectful mission/tool work can be attached to the
+TypeScript `AutonomousEffectBoundary` described below; cross-domain continuation still requires
+the caller to persist and reconcile each effect ledger alongside its child-result cache.
 
 ### Held-out routing and planning evaluation
 
@@ -894,6 +895,45 @@ tools can run when the policy allows; effectful tools require all three independ
 the tool is declared effectful and approval-required, the execution policy explicitly enables a
 positive effect budget, and the caller approval callback returns true. A model-generated tool call
 never satisfies any of those conditions.
+
+The TypeScript façade adds a second, stricter boundary for the moment a caller's effect executor
+crosses into an external system. `AutonomousEffectBoundary` derives a deterministic effect
+identity and idempotency key from the execution id, tool, call id, and argument digest. It
+hash-chains `prepared`, `dispatching`, and `dispatched` metadata before entering the external
+executor, then records `completed` or conservatively `uncertain`. A crash, timeout, or thrown
+exception after the dispatch marker therefore cannot be retried blindly: the next invocation
+returns `reconciliation_required` until a caller-owned resolver confirms the effect as completed,
+failed, or explicitly safe to retry because it was not found. The resolver receives the redacted
+effect record only; task text, arguments, outputs, credentials, provider responses, and raw error
+bodies stay outside durable state. The executor receives the actual idempotency key so the external
+system can enforce its own idempotency semantics; exactly-once behavior is never claimed by the
+SDK alone.
+
+```typescript
+const effects = new InMemoryAutonomousEffectJournal();
+const boundary = new AutonomousEffectBoundary({
+  journal: effects,
+  resolver: { resolve: (record) => effectStore.resolveById(record.effect_id) },
+});
+const agent = new AutonomousAgent(llm, {
+  toolCatalogue,
+  effectBoundary: boundary,
+  toolExecutor: (tool, arguments_, effect) => effectStore.execute(
+    tool.name,
+    arguments_,
+    effect?.idempotency_key,
+  ),
+});
+```
+
+`AutonomousEffectPersistenceCoordinator` flushes/restores the hash-checked snapshot through a
+caller-owned database or object store. `AutonomousExecutionController` mirrors the effect state
+as metadata-only `effect_reconciliation` events and moves the enclosing run to
+`reconciliation_required` for an uncertain dispatch. Read-only domain tools do not create effect
+rows; they remain protected by the ordinary tool-intent and approval journal. This protocol is
+available for every built-in domain profile, including cross-domain specialist and synthesis runs,
+but a durable job must still persist the effect ledger and result resolver in the embedding
+application.
 
 Provider calls use the same controller rather than a separate transport-only counter. Before a
 request is sent, the selected provider/model, failover attempt, estimated token cost, and

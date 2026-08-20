@@ -21,7 +21,7 @@ export const AUTONOMOUS_EXECUTION_MAX_EVENT_BYTES = 256_000;
 export const AUTONOMOUS_EXECUTION_MAX_METADATA_DEPTH = 32;
 
 export const AUTONOMOUS_EXECUTION_TERMINAL_STATUSES = ["completed", "failed", "cancelled", "reconciliation_required"] as const;
-export const AUTONOMOUS_EXECUTION_EVENT_KINDS = ["started", "resumed", "provider_call", "tool_intent", "tool_outcome", "evaluation", "checkpoint", "replan", "completed", "failed"] as const;
+export const AUTONOMOUS_EXECUTION_EVENT_KINDS = ["started", "resumed", "provider_call", "tool_intent", "tool_outcome", "effect_reconciliation", "evaluation", "checkpoint", "replan", "completed", "failed"] as const;
 
 export type AutonomousExecutionTerminalStatus = typeof AUTONOMOUS_EXECUTION_TERMINAL_STATUSES[number];
 export type AutonomousExecutionEventKind = typeof AUTONOMOUS_EXECUTION_EVENT_KINDS[number];
@@ -310,7 +310,7 @@ function validateState(state: AutonomousExecutionState, policy: AutonomousExecut
 
 function validateEvent(event: AutonomousExecutionEvent, policy: AutonomousExecutionPolicy): AutonomousExecutionEvent {
   if (!isObject(event) || event.schema !== AUTONOMOUS_EXECUTION_EVENT_SCHEMA || !AUTONOMOUS_EXECUTION_EVENT_KINDS.includes(event.kind)) throw new AutonomousExecutionError("autonomous execution event is malformed");
-  const allowed = new Set(["schema", "execution_id", "kind", "domain", "capability", "risk_class", "status", "policy_digest", "state", "step_index", "provider_calls", "provider_failovers", "tool_calls", "effectful_calls", "replans", "attempt", "turn", "input_tokens", "output_tokens", "status_code", "latency_ms", "cost_units", "estimated_cost_units", "actual_cost_units", "selection_digest", "arguments_digest", "output_digest", "outcome_digest", "evaluation_digest", "request_id_digest", "instruction_digest", "provider", "model", "invocation_kind", "provider_outcome", "tool", "call_id", "evaluator_id", "evaluator_version", "failure_class", "reason", "read_only", "approval_required", "passed", "failover", "retryable", "reward", "metadata"]);
+  const allowed = new Set(["schema", "execution_id", "kind", "domain", "capability", "risk_class", "status", "policy_digest", "state", "step_index", "provider_calls", "provider_failovers", "tool_calls", "effectful_calls", "replans", "attempt", "turn", "input_tokens", "output_tokens", "status_code", "latency_ms", "cost_units", "estimated_cost_units", "actual_cost_units", "selection_digest", "arguments_digest", "output_digest", "outcome_digest", "evaluation_digest", "request_id_digest", "instruction_digest", "effect_id", "effect_status", "idempotency_key_digest", "dispatch_attempt", "reconciliation_digest", "provider", "model", "invocation_kind", "provider_outcome", "tool", "call_id", "evaluator_id", "evaluator_version", "failure_class", "reason", "read_only", "approval_required", "passed", "failover", "retryable", "reward", "metadata"]);
   if (Object.keys(event).some((key) => !allowed.has(key))) throw new AutonomousExecutionError("autonomous execution event contains unsupported fields");
   boundedIdentifier("event execution_id", event.execution_id, 256);
   boundedIdentifier("event domain", event.domain);
@@ -501,8 +501,8 @@ export class AutonomousExecutionController {
     if (prior) {
       if (options.resume !== true) throw new AutonomousExecutionPolicyError("execution id already exists; resume must be explicit");
       if (prior.policy_digest !== policyDigest) throw new AutonomousExecutionPolicyError("resume policy digest does not match persisted execution");
-      if (AUTONOMOUS_EXECUTION_TERMINAL_STATUSES.includes(prior.status as AutonomousExecutionTerminalStatus) || prior.last_event_kind === "completed" || prior.last_event_kind === "failed") throw new AutonomousExecutionPolicyError("terminal execution cannot be resumed");
-      state = { ...validateState(prior, policy), status: "resumed", last_event_kind: "resumed" };
+      if ((AUTONOMOUS_EXECUTION_TERMINAL_STATUSES.includes(prior.status as AutonomousExecutionTerminalStatus) && prior.status !== "reconciliation_required") || prior.last_event_kind === "completed" || prior.last_event_kind === "failed") throw new AutonomousExecutionPolicyError("terminal execution cannot be resumed");
+      state = { ...validateState(prior, policy), status: prior.status === "reconciliation_required" ? "reconciliation_required" : "resumed", last_event_kind: "resumed" };
       kind = "resumed";
     } else {
       if (options.resume === true && !options.journal) throw new AutonomousExecutionPolicyError("resume requires a journal");
@@ -626,17 +626,50 @@ export class AutonomousExecutionController {
   }
 
   private async recordToolOutcomeUnlocked(options: { tool: string; callId: string; status: string; outcomeDigest?: string | null; reason?: string | null }): Promise<AutonomousExecutionState> {
-    this.ensureActive();
+    const isReconciliationOutcome = this.stateValue.status === "reconciliation_required" && options.status === "reconciliation_required";
+    if (!isReconciliationOutcome) this.ensureActive();
     const tool = boundedIdentifier("tool", options.tool);
     const callId = boundedIdentifier("callId", options.callId, 512);
     const outcomeDigest = boundedDigest("tool outcomeDigest", options.outcomeDigest, true);
     const reason = options.reason === undefined || options.reason === null ? null : boundedIdentifier("tool reason", options.reason, 2_048);
     const outcomeStatus = boundedIdentifier("tool outcome status", options.status);
-    const lifecycleStatus = outcomeStatus === "authorization_required"
+    const lifecycleStatus = outcomeStatus === "reconciliation_required"
+      ? "reconciliation_required"
+      : outcomeStatus === "authorization_required"
       ? (this.policy.pause_on_approval ? "approval_required" : "running")
       : outcomeStatus === "failed" && this.policy.stop_on_error ? "error" : "running";
     this.stateValue = { ...this.stateValue, last_tool: tool, last_call_id: callId, last_outcome_digest: outcomeDigest, last_event_kind: "tool_outcome", status: lifecycleStatus };
     return this.persist("tool_outcome", outcomeStatus, { tool, call_id: callId, outcome_digest: outcomeDigest, reason });
+  }
+
+  /** Record the external-effect state machine without retaining effect arguments or outputs. */
+  async recordEffectReconciliation(options: { effectId: string; tool: string; callId: string; status: "prepared" | "dispatching" | "dispatched" | "completed" | "uncertain" | "reconciled" | "failed"; dispatchAttempt: number; resultDigest?: string | null; failureClass?: string | null; reason?: string | null }): Promise<AutonomousExecutionState> {
+    return this.enqueue(() => this.recordEffectReconciliationUnlocked(options));
+  }
+
+  private async recordEffectReconciliationUnlocked(options: { effectId: string; tool: string; callId: string; status: "prepared" | "dispatching" | "dispatched" | "completed" | "uncertain" | "reconciled" | "failed"; dispatchAttempt: number; resultDigest?: string | null; failureClass?: string | null; reason?: string | null }): Promise<AutonomousExecutionState> {
+    // An uncertain effect is a recoverable terminal boundary. It must be possible to
+    // reconcile it with the same controller after a restart, but no other terminal state
+    // may be reopened by an effect callback.
+    if (this.terminal && this.stateValue.status !== "reconciliation_required") throw new AutonomousExecutionPolicyError("execution is terminal");
+    if (AUTONOMOUS_EXECUTION_TERMINAL_STATUSES.includes(this.stateValue.status as AutonomousExecutionTerminalStatus) && this.stateValue.status !== "reconciliation_required") throw new AutonomousExecutionPolicyError("execution cannot record an effect after terminal completion");
+    const effectId = boundedIdentifier("effectId", options.effectId, 128);
+    const tool = boundedIdentifier("effect tool", options.tool);
+    const callId = boundedIdentifier("effect callId", options.callId, 512);
+    boundedInteger("effect dispatchAttempt", options.dispatchAttempt, 64);
+    if (!["prepared", "dispatching", "dispatched", "completed", "uncertain", "reconciled", "failed"].includes(options.status)) throw new AutonomousExecutionError("effect reconciliation status is unsupported");
+    const resultDigest = boundedDigest("effect resultDigest", options.resultDigest, true);
+    if (options.failureClass !== undefined && options.failureClass !== null) boundedIdentifier("effect failureClass", options.failureClass, 256);
+    const reason = options.reason === undefined || options.reason === null ? null : boundedIdentifier("effect reason", options.reason, 2_048);
+    const lifecycleStatus = options.status === "uncertain"
+      ? "reconciliation_required"
+      : options.status === "failed" && this.policy.stop_on_error
+        ? "error"
+        : "running";
+    this.stateValue = { ...this.stateValue, last_tool: tool, last_call_id: callId, last_outcome_digest: resultDigest, last_event_kind: "effect_reconciliation", status: lifecycleStatus };
+    if (options.status === "reconciled" || options.status === "completed" || options.status === "failed") this.terminal = false;
+    const reconciliationDigest = await digestJson({ effect_id: effectId, status: options.status, dispatch_attempt: options.dispatchAttempt, result_digest: resultDigest, failure_class: options.failureClass ?? null, reason });
+    return this.persist("effect_reconciliation", options.status, { effect_id: effectId, effect_status: options.status, tool, call_id: callId, dispatch_attempt: options.dispatchAttempt, reconciliation_digest: reconciliationDigest, outcome_digest: resultDigest, failure_class: options.failureClass, reason });
   }
 
   async recordEvaluation(options: { evaluatorId: string; evaluatorVersion: string; reward: number; passed: boolean; evaluationDigest: string; failureClass?: string | null }): Promise<AutonomousExecutionState> {

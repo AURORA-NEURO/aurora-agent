@@ -398,11 +398,16 @@ export interface ProviderStreamEvent {
 }
 
 export interface ProviderToolLoopResult {
-  status: "completed" | "authorization_required" | "turn_limit_reached";
+  status: "completed" | "authorization_required" | "reconciliation_required" | "turn_limit_reached";
   responses: ProviderResponse[];
   finalResponse: ProviderResponse | null;
   turns: number;
   toolCalls: number;
+}
+
+function providerToolResultStatus(result: ProviderToolResult): "completed" | "authorization_required" | "reconciliation_required" {
+  if (result.approved) return "completed";
+  return isObject(result.content) && result.content.status === "reconciliation_required" ? "reconciliation_required" : "authorization_required";
 }
 
 export interface ProviderInvocationMetadata {
@@ -1894,9 +1899,9 @@ export class LLMRuntime {
       if (returned.some((result) => !requestedCallIds.has(result.callId)) || new Set(returned.map((result) => result.callId)).size !== returned.length) throw new ProviderRuntimeError("authorization callback returned unbound or duplicate tool call ids");
       for (const result of returned) {
         const call = response.toolCalls.find((candidate) => candidate.id === result.callId)!;
-        await options.execution?.recordToolOutcome({ tool: call.name, callId: result.callId, status: result.approved ? "completed" : "authorization_required", outcomeDigest: await digestJson({ call_id: result.callId, approved: result.approved, is_error: result.isError ?? false, content: result.content }) });
+        await options.execution?.recordToolOutcome({ tool: call.name, callId: result.callId, status: providerToolResultStatus(result), outcomeDigest: await digestJson({ call_id: result.callId, approved: result.approved, is_error: result.isError ?? false, content: result.content }) });
       }
-      if (returned.some((result) => !result.approved)) return { status: "authorization_required", responses, finalResponse: response, turns: responses.length, toolCalls };
+      if (returned.some((result) => !result.approved)) return { status: returned.some((result) => providerToolResultStatus(result) === "reconciliation_required") ? "reconciliation_required" : "authorization_required", responses, finalResponse: response, turns: responses.length, toolCalls };
       const assistant: ProviderMessage = { role: "assistant", content: response.text, toolCalls: response.toolCalls };
       const resultMessages: ProviderMessage[] = returned.map((result) => ({ role: "tool", content: jsonText(result.content), toolCallId: result.callId }));
       current = { ...current, messages: [...current.messages, assistant, ...resultMessages] };
