@@ -152,6 +152,30 @@ matching domain workflow through `AutonomousWorkflowExecutor`. The controller va
 domain against the built-in catalogue and does not claim server completion; an external worker or
 reconciliation process must record that relationship in its own system.
 
+## Evaluator feedback and delayed-credit learning
+
+`AutonomousWorkflowEvaluator` is the explicit reward boundary for the TypeScript brain. It derives
+the signal contract from the selected workflow for all twelve built-in domains, accepts only
+caller-declared bounded scores for declared stage signals, reports missing and rejected signals,
+and produces a digest-bound reward. A provider response, HTTP success, model self-report, or
+checkpoint status never becomes reward on its own. `builtinAutonomousDomainEvaluatorProfiles()`
+exposes the evaluator ID, version, signal vocabulary, equal-weight defaults, and pass threshold for
+readiness or review tooling.
+
+`AutonomousLearningController.prepareRun()` converts a completed local run into a restart-safe
+episode containing only run identity digests, selected provider/model, domain, capability, and
+workflow identity. `settleRun()` applies an evaluator assessment to the caller-owned
+`AutonomousOnlineLearner`, or sends the same value-only run identity and assessment through
+`brain_outcome_record` when `remote: true`. `InMemoryAutonomousLearningEpisodeStore` is a bounded
+reference store; a production worker should replace it with a durable store and rehydrate pending
+episodes after restart. Settled episode identities cannot be reused.
+
+For staged workflows or cross-domain fan-out, `prepareTrajectory()` and `settleTrajectory()` apply
+bounded discounted return-to-go in reverse order. The trajectory persists episode IDs, arm IDs,
+outcome digests, and settlement digests—not prompts, responses, task text, credentials, or raw
+evaluator evidence. This gives delayed credit assignment without allowing later stages or a model
+to rewrite earlier evaluator judgments.
+
 ## Contract boundaries
 
 - Requests and responses are bounded. The client enforces a request byte ceiling, incrementally

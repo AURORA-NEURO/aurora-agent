@@ -1342,3 +1342,45 @@ fresh local credential handle through its provider/runtime boundary. No task tex
 credential, tool argument/result, or provider response enters the brain job request or durable job
 projection. Local completion is returned together with the refreshed server metadata, while
 reconciliation remains an explicit responsibility of the worker deployment.
+
+### Evaluator-bound online learning
+
+The TypeScript autonomous runtime now has an explicit evaluator-to-bandit lifecycle rather than a
+bare reward mutator. `builtinAutonomousDomainEvaluatorProfiles()` exposes a reviewed evaluator
+profile for each built-in domain. `AutonomousWorkflowEvaluator.evaluate()` takes a local workflow
+execution plus caller-owned signal scores keyed by stage and declared evaluator signal. It refuses
+unknown stages, duplicate stages, undeclared signals, malformed scores, and unbounded evidence
+metadata. Missing signals are retained as missing and lower the reward; a completed provider call
+does not fill them in. The returned evaluation binds task, workflow, plan, signal, evidence, and
+evaluator identity through digests and explicitly states that its authority is
+`caller_declared_signal_scoring_only`.
+
+The learning controller keeps raw work outside the control plane:
+
+```typescript
+const learning = new AutonomousLearningController(agent, {
+  episodes: new InMemoryAutonomousLearningEpisodeStore(),
+});
+const episode = await learning.prepareRun(run, { episodeId: "coding-run-42" });
+const settlement = await learning.settleRun(episode.episode_id, {
+  evaluator_id: "coding-reviewer",
+  evaluator_version: "1",
+  reward: 0.9,
+  passed: true,
+  evidence_digest: callerOwnedEvidenceDigest,
+});
+```
+
+An episode stores only the selected arm, run/selection/prompt/plan/outcome digests, domain,
+capability, and settlement metadata. It never stores the task, prompt, provider response, tool
+payload, credential handle, or evaluator evidence packet. Local settlement updates the process-local
+`AutonomousOnlineLearner`; `remote: true` calls `brain_outcome_record`, verifies the returned
+value-only projection, and then reconciles the same explicit reward into local state. Remote
+settlement requires an `ApiClient` and never sends the private specification.
+
+`prepareTrajectory()` and `settleTrajectory()` provide delayed credit for a bounded sequence of
+episodes. Rewards are scored in reverse order as `clamp(reward + discount * next_return, 0, 1)`;
+the original evaluator reward and the credited reward remain distinguishable in settlement
+metadata. Trajectory records contain only episode IDs, arm IDs, outcome digests, and settlement
+digests. This supports staged DAGs and cross-domain fan-out while preserving evaluator independence,
+restart safety, and the rule that bandit adaptation is not a truth signal or execution authority.

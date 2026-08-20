@@ -204,3 +204,30 @@ export type {
   AutonomousWorkflowStageOutcome,
   AutonomousWorkflowStageResult,
 } from "./workflow-execution.js";
+export {
+  AUTONOMOUS_EVALUATION_SCHEMA,
+  AUTONOMOUS_LEARNING_EPISODE_SCHEMA,
+  AUTONOMOUS_LEARNING_MAX_STAGES,
+  AUTONOMOUS_LEARNING_MAX_TRAJECTORY_STEPS,
+  AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA,
+  AutonomousLearningController,
+  AutonomousWorkflowEvaluator,
+  InMemoryAutonomousLearningEpisodeStore,
+  InMemoryAutonomousLearningTrajectoryStore,
+  builtinAutonomousDomainEvaluatorProfiles,
+} from "./autonomous-learning.js";
+export type {
+  AutonomousDomainEvaluatorProfile,
+  AutonomousEvaluatorRewardInput,
+  AutonomousLearningEpisode,
+  AutonomousLearningEpisodeStore,
+  AutonomousLearningSettlement,
+  AutonomousLearningSettlementMetadata,
+  AutonomousLearningTrajectory,
+  AutonomousLearningTrajectoryStep,
+  AutonomousLearningTrajectoryStore,
+  AutonomousStageSignalEvidence,
+  AutonomousTrajectorySettlement,
+  AutonomousWorkflowEvaluation,
+  AutonomousWorkflowEvaluationInput,
+} from "./autonomous-learning.js";
