@@ -170,6 +170,14 @@ the twelve reviewed domains (`coding`, `browser`, `data`, `science`, `biomedical
 workflow stage dependencies, bounded prompt assembly, exact tool binding, provider selection, and
 value-only online learning. `route()` and `blueprint()` are non-executing: they return digests,
 omissions, required capabilities, approval triggers, and a plan that explicitly has not started.
+Each generated blueprint includes a 64-character `learning_context_digest`. The digest scopes
+local evaluator feedback by domain, capability, risk class, task family, workflow, domain pack, and
+required capabilities. `AutonomousOnlineLearner` prefers the matching contextual arm, uses a
+global arm only as a cold-start prior, and keeps context-free updates compatible with the legacy
+global ledger. Contextual state is bounded and replay-safe; prompts, responses, credentials, and
+raw evaluator evidence are never placed in the digest or bandit snapshot. The remote value-only
+control-plane update remains backward-compatible, while the TypeScript runtime retains the
+contextual overlay locally when an older server does not persist it.
 
 For ambiguous or novel intake, `semanticRouteAutonomousTask()` adds an explicit provider-assisted
 classification pass. It sends the private task only through the caller's approved local provider,

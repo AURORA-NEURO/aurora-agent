@@ -619,12 +619,30 @@ export interface BrainBanditArm extends JsonObject {
   disabled?: boolean;
 }
 
+/** Stable non-secret identity used to isolate evaluator feedback by execution context. */
+export interface BrainBanditContext extends JsonObject {
+  domain: string;
+  capability: string;
+  risk_class: string;
+  task_family?: string | null;
+}
+
+/** Persisted local contextual bandit projection; provider/model arm IDs remain unchanged. */
+export interface BrainBanditContextState extends JsonObject {
+  context_digest: string;
+  context: BrainBanditContext;
+  generation?: number;
+  arms: BrainBanditArm[];
+  observed?: boolean;
+}
+
 export interface BrainCreditedOutcome extends JsonObject {
   outcome_digest: string;
   arm_id: string;
   reward: number;
   failed?: boolean;
   contract_digest?: string | null;
+  context_digest?: string | null;
 }
 
 export interface BrainBanditState extends JsonObject {
@@ -633,6 +651,7 @@ export interface BrainBanditState extends JsonObject {
   policy?: BrainBanditPolicy;
   arms: BrainBanditArm[];
   credited_outcomes?: BrainCreditedOutcome[];
+  contextual_states?: BrainBanditContextState[];
 }
 
 export interface BrainBanditSelectionResult extends JsonObject {
@@ -652,6 +671,8 @@ export interface BrainBanditUpdate extends JsonObject {
   failed?: boolean;
   outcome_digest?: string | null;
   contract_digest?: string | null;
+  context_digest?: string | null;
+  context?: BrainBanditContext;
 }
 
 export interface BrainRunIdentity extends JsonObject {
@@ -681,6 +702,7 @@ export interface BrainOutcomeRecordArgs extends JsonObject {
   assessment: BrainEvaluatorAssessment;
   bandit_state: BrainBanditState;
   arm_id: string;
+  context_digest?: string | null;
   idempotency_key?: string;
 }
 
@@ -689,6 +711,7 @@ export interface BrainLearningEvidence extends JsonObject {
   run: BrainRunIdentity;
   assessment: BrainEvaluatorAssessment;
   arm_id: string;
+  context_digest?: string | null;
   bandit_update: BrainBanditUpdate;
   previous_generation: number;
   next_generation: number;

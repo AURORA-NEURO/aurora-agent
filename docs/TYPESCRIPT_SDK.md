@@ -1635,6 +1635,16 @@ only after an explicit evaluator reward, failed-outcome flag, or outcome digest 
 `recordEvaluatorReward()`. Remote reconciliation sends the value-only update to
 `brainBanditUpdate()` and then applies the same validated update locally. Provider success and
 latency are separate from task quality; no provider health event is treated as reinforcement.
+Every generated autonomous blueprint also carries a bounded `learning_context_digest` derived from
+the domain, capability, risk class, task family, workflow, domain-pack, and required model
+capabilities. Local contextual rewards are stored under that digest, so a coding evaluator cannot
+change biomedical or neuroscience selection. A contextual selection first uses the matching
+contextual arm, then a global arm as a cold-start prior, and finally deterministic prior ranking;
+legacy context-free `update()` calls remain supported and continue to populate the global ledger.
+The digest is an identity boundary rather than a secret: it does not contain prompts, provider
+responses, credentials, or evaluator evidence. Remote value-only control-plane calls remain
+compatible with older servers; the TypeScript learner preserves the contextual overlay locally
+until the remote state contract exposes equivalent contextual persistence.
 Learning episodes can only be prepared from a completed autonomous run; approval pauses, provider
 refusals, child failures, and tool-loop limits cannot be converted into evaluator or bandit credit.
 Trajectory settlement is resumable after a later episode failure: matching already-settled reward

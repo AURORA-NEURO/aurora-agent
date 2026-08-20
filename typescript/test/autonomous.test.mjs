@@ -388,6 +388,58 @@ test("online learner adapts only from explicit evaluator rewards", async () => {
   assert.throws(() => learner.select({ ...request, min_quality: 2 }), /min_quality is outside its bounds/);
 });
 
+test("online learner isolates evaluator rewards by domain learning context", async () => {
+  const learner = new AutonomousOnlineLearner();
+  const request = {
+    task: "choose a reasoning model",
+    domain: "coding",
+    capability: "implementation",
+    risk_class: "engineering_change",
+    task_family: "coding_delivery",
+    required_capabilities: ["reasoning"],
+    estimated_input_tokens: 10,
+    requested_output_tokens: 50,
+    candidates: [candidate("a", "one"), candidate("b", "two")],
+    provider_health: {
+      a: { provider: "a", circuit: "closed", credential_required: false, credential_ready: true },
+      b: { provider: "b", circuit: "closed", credential_required: false, credential_ready: true },
+    },
+    model_health: {},
+  };
+  const codingContext = { domain: "coding", capability: "implementation", risk_class: "engineering_change", task_family: "coding_delivery" };
+  const biomedicalContext = { domain: "biomedical", capability: "biomedical_review", risk_class: "biomedical_safety", task_family: "biomedical_review" };
+  const codingDigest = "c".repeat(64);
+  const biomedicalDigest = "d".repeat(64);
+  learner.update({ arm_id: "a/one", reward: 1, context_digest: codingDigest, context: codingContext, outcome_digest: "1".repeat(64) });
+  learner.update({ arm_id: "b/two", reward: 0, context_digest: codingDigest, context: codingContext, outcome_digest: "2".repeat(64) });
+  learner.update({ arm_id: "a/one", reward: 0, context_digest: biomedicalDigest, context: biomedicalContext, outcome_digest: "3".repeat(64) });
+  learner.update({ arm_id: "b/two", reward: 1, context_digest: biomedicalDigest, context: biomedicalContext, outcome_digest: "4".repeat(64) });
+  const state = learner.snapshot();
+  assert.equal(state.arms.length, 0, "contextual rewards must not pollute the legacy global arm ledger");
+  assert.deepEqual(state.contextual_states.map((row) => row.context_digest), [codingDigest, biomedicalDigest]);
+  assert.equal(learner.select({ ...request, context_digest: codingDigest }).selected_model.provider, "a");
+  assert.equal(learner.select({ ...request, domain: "biomedical", capability: "biomedical_review", risk_class: "biomedical_safety", task_family: "biomedical_review", context_digest: biomedicalDigest }).selected_model.provider, "b");
+  assert.throws(() => learner.update({ arm_id: "a/one", reward: 0.2, context_digest: codingDigest, context: codingContext, outcome_digest: "1".repeat(64) }), /contradictory evaluator evidence/);
+});
+
+test("online learner rejects malformed contextual snapshots with typed errors", () => {
+  assert.throws(() => new AutonomousOnlineLearner({ state: { schema: "test", generation: 0, arms: [], contextual_states: [null] } }), /bandit contextual state must contain context and arms/);
+  assert.throws(() => new AutonomousOnlineLearner({ state: { schema: "test", generation: 0, arms: [{ arm_id: "a/one", pulls: 1, reward_sum: 2 }] } }), /online learner arm is malformed/);
+  const learner = new AutonomousOnlineLearner();
+  assert.throws(() => learner.update({ arm_id: "a/one", reward: 0.5, context: { domain: "coding", capability: "implementation", risk_class: "engineering_change" } }), /context requires a context_digest/);
+});
+
+test("every built-in domain blueprint binds a distinct bounded learning context", async () => {
+  const runtime = new LLMRuntime({ fetch: async () => { throw new Error("blueprint must not invoke a provider"); } });
+  const agent = new AutonomousAgent(runtime);
+  const profiles = await builtinAutonomousDomainProfiles();
+  const blueprints = await Promise.all(profiles.map((profile) => agent.blueprint(`Review the ${profile.domain} workflow.`, { domain: profile.domain })));
+  const digests = blueprints.map((row) => row.blueprint.learning_context_digest);
+  assert.equal(new Set(digests).size, profiles.length);
+  assert.ok(digests.every((digest) => /^[0-9a-f]{64}$/.test(digest)));
+  assert.deepEqual(blueprints.map((row) => row.blueprint.selection_context.domain).sort(), profiles.map((profile) => profile.domain).sort());
+});
+
 test("online learner does not double-credit a replayed evaluator outcome", async () => {
   const learner = new AutonomousOnlineLearner();
   const outcomeDigest = "a".repeat(64);

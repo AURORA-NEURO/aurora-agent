@@ -12,6 +12,7 @@ import type { AutonomousWorkflowExecutionResult } from "./workflow-execution.js"
 import { digestJson } from "./tooling.js";
 import type {
   BrainBanditState,
+  BrainBanditContext,
   BrainEvaluatorAssessment,
   BrainLearningEvidence,
   BrainOutcomeRecordResult,
@@ -61,6 +62,9 @@ export interface AutonomousWorkflowEvaluation extends JsonObject {
   domain: AutonomousDomainName;
   task_digest: Digest;
   workflow_digest: Digest;
+  /** Stable context identity used to isolate evaluator credit; absent only on legacy episodes. */
+  context_digest?: Digest | null;
+  learning_context?: BrainBanditContext;
   plan_digest: Digest;
   execution_status: AutonomousWorkflowExecutionResult["status"];
   stage_scores: Record<string, number>;
@@ -115,6 +119,7 @@ export interface AutonomousLearningTrajectoryStep extends JsonObject {
   index: number;
   episode_id: string;
   arm_id: string;
+  context_digest?: Digest | null;
   run_digest: Digest;
   raw_reward: number | null;
   credited_reward: number | null;
@@ -636,6 +641,8 @@ export class AutonomousLearningController {
       stage_id: options.stageId === undefined ? null : boundedIdentifier("stageId", options.stageId),
       parent_job_id: options.parentJobId === undefined ? null : boundedIdentifier("parentJobId", options.parentJobId),
       workflow_digest: result.blueprint.workflow.workflow_digest,
+      context_digest: result.blueprint.learning_context_digest ?? null,
+      learning_context: { ...result.blueprint.selection_context },
       status: "pending" as const,
       settlement: null,
       retention: PRIVATE_RETENTION,
@@ -724,16 +731,22 @@ export class AutonomousLearningController {
     let learningEvidence: BrainLearningEvidence | null = null;
     let remote = false;
     const armId = `${episode.run.provider}/${episode.run.model}`;
+    const contextDigest = typeof episode.context_digest === "string" ? episode.context_digest : null;
+    const learningContext = isObject(episode.learning_context) ? episode.learning_context as unknown as BrainBanditContext : undefined;
+    if (contextDigest !== null) {
+      if (!/^[0-9a-f]{64}$/.test(contextDigest)) throw new ArgumentError("learning episode context_digest is malformed");
+      if (!learningContext) throw new ArgumentError("contextual learning episode is missing its bounded context");
+    }
     if (options.remote === true) {
       if (!this.apiClient || typeof this.apiClient.brainOutcomeRecord !== "function") throw new ArgumentError("remote learning settlement requires an ApiClient with brainOutcomeRecord");
-      const projected = projectOutcome(await this.apiClient.brainOutcomeRecord({ run: episode.run, assessment, bandit_state: this.agent.learner.snapshot(), arm_id: armId, idempotency_key: `episode:${episode.episode_id}` }));
+      const projected = projectOutcome(await this.apiClient.brainOutcomeRecord({ run: episode.run, assessment, bandit_state: this.agent.learner.snapshot(), arm_id: armId, ...(contextDigest === null ? {} : { context_digest: contextDigest }), idempotency_key: `episode:${episode.episode_id}` }));
       if (!projected.next_state || !Array.isArray(projected.next_state.arms) || !projected.learning_evidence) throw new ProviderRuntimeError("brain outcome record returned an incomplete learning projection");
       nextState = projected.next_state;
       learningEvidence = projected.learning_evidence;
-      this.agent.learner.update({ arm_id: armId, reward: creditedReward, failed: assessment.failed, outcome_digest: projected.learning_evidence.bandit_update?.outcome_digest ?? creditedOutcomeDigest, contract_digest: projected.learning_evidence.bandit_update?.contract_digest ?? null });
+      this.agent.learner.update({ arm_id: armId, reward: creditedReward, failed: assessment.failed, outcome_digest: projected.learning_evidence.bandit_update?.outcome_digest ?? creditedOutcomeDigest, contract_digest: projected.learning_evidence.bandit_update?.contract_digest ?? null, ...(contextDigest === null ? {} : { context_digest: contextDigest, context: learningContext }) });
       remote = true;
     } else {
-      nextState = await this.agent.recordEvaluatorReward(armId, creditedReward, { failed: assessment.failed, outcomeDigest: creditedOutcomeDigest });
+      nextState = await this.agent.recordEvaluatorReward(armId, creditedReward, { failed: assessment.failed, outcomeDigest: creditedOutcomeDigest, contextDigest, context: learningContext });
     }
     const settlementBase = { evaluation_digest: input.evidence_digest ?? null, reward: input.reward, credited_reward: creditedReward, next_generation: boundedGeneration(nextState.generation ?? 0), settled_at: Date.now() };
     const settlement: AutonomousLearningSettlementMetadata = { ...settlementBase, settlement_digest: await digestJson(settlementBase) };
@@ -751,7 +764,7 @@ export class AutonomousLearningController {
     const episodes = await Promise.all(ids.map((id) => this.episodes.load(id)));
     if (episodes.some((episode) => !episode)) throw new ArgumentError("learning trajectory references a missing episode");
     if (episodes.some((episode) => episode?.status !== "pending")) throw new ArgumentError("learning trajectory can only contain pending episodes");
-    const steps = episodes.map((episode, index) => ({ index, episode_id: episode!.episode_id, arm_id: `${episode!.run.provider}/${episode!.run.model}`, run_digest: episode!.run.outcome_digest, raw_reward: null, credited_reward: null }));
+    const steps = episodes.map((episode, index) => ({ index, episode_id: episode!.episode_id, arm_id: `${episode!.run.provider}/${episode!.run.model}`, context_digest: typeof episode!.context_digest === "string" ? episode!.context_digest : null, run_digest: episode!.run.outcome_digest, raw_reward: null, credited_reward: null }));
     const descriptor = { schema: AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA, trajectory_id: trajectoryId, discount, steps, status: "pending" as const, settlement_digest: null, retention: PRIVATE_RETENTION, secret_material: "never_returned" as const };
     const trajectory = { ...descriptor, trajectory_digest: await digestJson(descriptor) };
     this.trajectories.save(trajectory);

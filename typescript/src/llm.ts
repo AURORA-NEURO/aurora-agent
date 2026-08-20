@@ -570,6 +570,9 @@ export interface AutonomousSelectionRequest extends JsonObject {
   domain: string;
   capability: string;
   risk_class: string;
+  task_family?: string | null;
+  /** Digest of the bounded domain/capability/risk/workflow learning context. */
+  context_digest?: string | null;
   required_capabilities: string[];
   estimated_input_tokens: number;
   requested_output_tokens: number;
@@ -606,6 +609,8 @@ export interface AutonomousExecutionPlan {
   domain?: string;
   capability?: string;
   riskClass?: string;
+  taskFamily?: string;
+  learningContextDigest?: string;
   requiredCapabilities?: readonly string[];
   maxCostPerMillionTokens?: number;
   maxLatencyMs?: number;
@@ -2191,6 +2196,8 @@ export class AutonomousRuntime {
     validateRequest(plan.request);
     if (!Array.isArray(plan.candidates) || plan.candidates.length === 0 || plan.candidates.length > MAX_PROVIDER_TOOLS) throw new ProviderRuntimeError("autonomous model candidates are outside their bounds");
     if (plan.requiredCapabilities !== undefined && (!Array.isArray(plan.requiredCapabilities) || plan.requiredCapabilities.length > 64 || plan.requiredCapabilities.some((capability) => typeof capability !== "string" || capability.trim().length === 0 || capability.length > 256))) throw new ProviderRuntimeError("autonomous required capabilities are outside their bounds");
+    if (plan.taskFamily !== undefined && (typeof plan.taskFamily !== "string" || !plan.taskFamily.trim() || bytes(plan.taskFamily) > 256)) throw new ProviderRuntimeError("autonomous task family is outside its bounds");
+    if (plan.learningContextDigest !== undefined && (typeof plan.learningContextDigest !== "string" || !/^[0-9a-f]{64}$/.test(plan.learningContextDigest))) throw new ProviderRuntimeError("autonomous learning context digest is malformed");
     validateSelectionConstraints({
       max_cost_per_million_tokens: plan.maxCostPerMillionTokens,
       max_latency_ms: plan.maxLatencyMs,
@@ -2231,6 +2238,8 @@ export class AutonomousRuntime {
       domain: plan.domain ?? "general",
       capability: plan.capability ?? "general_reasoning",
       risk_class: plan.riskClass ?? "review_required",
+      ...(plan.taskFamily !== undefined ? { task_family: plan.taskFamily } : {}),
+      ...(plan.learningContextDigest !== undefined ? { context_digest: plan.learningContextDigest } : {}),
       required_capabilities: [...(plan.requiredCapabilities ?? [])],
       estimated_input_tokens: Math.max(1, Math.ceil(plan.request.messages.reduce((sum, message) => sum + bytes(message.content), 0) / 4)),
       requested_output_tokens: plan.request.maxOutputTokens,

@@ -27,6 +27,8 @@ import {
 import { ToolCatalogue, canonicalJson, digestJson } from "./tooling.js";
 import type {
   BrainBanditArm,
+  BrainBanditContext,
+  BrainBanditContextState,
   BrainBanditPolicy,
   BrainBanditState,
   BrainBanditUpdate,
@@ -319,6 +321,7 @@ export interface AutonomousTaskBlueprint extends JsonObject {
   domain_pack: AutonomousDomainPack;
   workflow: AutonomousWorkflow;
   selection_context: BrainModelSelectionContext;
+  learning_context_digest: string;
   required_capabilities: string[];
   prompt: AutonomousPromptResult;
   plan: AutonomousPlan;
@@ -932,18 +935,27 @@ async function buildTaskBlueprint(
     activeToolNames,
     selectedToolNames,
   });
+  const selectionContext: BrainModelSelectionContext = {
+    domain: profile.domain,
+    capability: options.capability ?? profile.default_capability,
+    risk_class: profile.risk_class,
+    task_family: profile.workflow.workflow_id,
+  };
+  const learningContextDigest = await digestJson({
+    schema: "bioprism-typescript-autonomous-learning-context/0.1",
+    context: selectionContext,
+    workflow_digest: profile.workflow.workflow_digest,
+    domain_pack_digest: pack.pack_digest,
+    required_model_capabilities: profile.required_model_capabilities,
+  });
   return {
     schema: "bioprism-python-autonomous-task/0.1",
     task_digest: taskDigest,
     domain_profile: profile,
     domain_pack: pack,
     workflow: profile.workflow,
-    selection_context: {
-      domain: profile.domain,
-      capability: options.capability ?? profile.default_capability,
-      risk_class: profile.risk_class,
-      task_family: profile.workflow.workflow_id,
-    },
+    selection_context: selectionContext,
+    learning_context_digest: learningContextDigest,
     required_capabilities: profile.required_model_capabilities,
     prompt,
     plan,
@@ -1229,6 +1241,23 @@ function validateOnlineSelectionConstraints(request: AutonomousSelectionRequest)
   if (request.require_json !== undefined && typeof request.require_json !== "boolean") throw new ArgumentError("online learner require_json must be boolean");
 }
 
+function learnerContext(request: AutonomousSelectionRequest): { context_digest: string; context: BrainBanditContext } | null {
+  if (request.context_digest === undefined || request.context_digest === null) return null;
+  if (typeof request.context_digest !== "string" || !/^[0-9a-f]{64}$/.test(request.context_digest)) throw new ArgumentError("online learner context_digest must be a lowercase SHA-256 digest");
+  const context: BrainBanditContext = {
+    domain: boundedText("online learner context domain", request.domain, 256),
+    capability: boundedText("online learner context capability", request.capability, 256),
+    risk_class: boundedText("online learner context risk_class", request.risk_class, 256),
+    ...(request.task_family === undefined || request.task_family === null ? {} : { task_family: boundedText("online learner context task_family", request.task_family, 256) }),
+  };
+  return { context_digest: request.context_digest, context };
+}
+
+function validateContextState(state: BrainBanditContextState): void {
+  if (!isObject(state) || typeof state.context_digest !== "string" || !/^[0-9a-f]{64}$/.test(state.context_digest) || !isObject(state.context) || !Array.isArray(state.arms)) throw new ArgumentError("online learner contextual state is malformed");
+  learnerContext({ ...state.context, context_digest: state.context_digest, task: "context", required_capabilities: [], estimated_input_tokens: 1, requested_output_tokens: 1, candidates: [], provider_health: {}, model_health: {} });
+}
+
 /** Caller-owned bounded UCB1 state for online model adaptation. No hidden server state is used. */
 export class AutonomousOnlineLearner {
   private stateValue: BrainBanditState;
@@ -1250,18 +1279,28 @@ export class AutonomousOnlineLearner {
     validateOnlineSelectionConstraints(request);
     const canonicalRanking = rankAutonomousModels(request);
     const eligible = canonicalRanking.filter((row) => row.eligible);
-    const totalPulls = Math.max(1, this.stateValue.arms.reduce((sum, arm) => sum + (arm.pulls ?? 0), 0));
+    const context = learnerContext(request);
+    const contextualState = context ? this.stateValue.contextual_states?.find((state) => state.context_digest === context.context_digest) : undefined;
+    const observationFor = (armId: string): { arm: BrainBanditArm | undefined; source: "contextual" | "global" | "prior" } => {
+      const contextualArm = contextualState?.arms.find((arm) => arm.arm_id === armId);
+      if (contextualArm) return { arm: contextualArm, source: "contextual" };
+      const globalArm = this.stateValue.arms.find((arm) => arm.arm_id === armId);
+      if (globalArm) return { arm: globalArm, source: context ? "global" : "prior" };
+      return { arm: undefined, source: "prior" };
+    };
+    const totalPulls = Math.max(1, eligible.reduce((sum, row) => sum + (observationFor(`${row.provider}/${row.model}`).arm?.pulls ?? 0), 0));
     const scoredEligible = eligible.map((row) => {
       const candidate = request.candidates.find((item) => item.provider === row.provider && item.model === row.model)!;
       const armId = `${candidate.provider}/${candidate.model}`;
-      const arm = this.stateValue.arms.find((row) => row.arm_id === armId);
+      const observation = observationFor(armId);
+      const arm = observation.arm;
       const pulls = arm?.pulls ?? 0;
       const mean = pulls ? (arm?.reward_sum ?? 0) / pulls : 0;
       const bonus = pulls ? Math.sqrt((2 * Math.log(totalPulls + 1)) / pulls) * (this.policy.exploration ?? 1) : Number.POSITIVE_INFINITY;
-      return { candidate, armId, pulls, score: pulls ? mean + bonus : Number.POSITIVE_INFINITY, mean, bonus };
+      return { candidate, armId, pulls, source: observation.source, score: pulls ? mean + bonus : Number.POSITIVE_INFINITY, mean, bonus };
     }).sort((left, right) => (Number(right.score === Number.POSITIVE_INFINITY) - Number(left.score === Number.POSITIVE_INFINITY)) || right.score - left.score || left.armId.localeCompare(right.armId));
     const ranking = [
-      ...scoredEligible.map((row) => ({ provider: row.candidate.provider, model: row.candidate.model, score: Number((Number.isFinite(row.score) ? row.score : 1_000_000).toFixed(12)), eligible: true, reasons: [`arm_id=${row.armId}`, `pulls=${row.pulls}`] })),
+      ...scoredEligible.map((row) => ({ provider: row.candidate.provider, model: row.candidate.model, score: Number((Number.isFinite(row.score) ? row.score : 1_000_000).toFixed(12)), eligible: true, reasons: [`arm_id=${row.armId}`, `pulls=${row.pulls}`, `history=${row.source}`, ...(context ? [`context_digest=${context.context_digest}`] : [])] })),
       ...canonicalRanking.filter((row) => !row.eligible),
     ];
     const selected = scoredEligible[0];
@@ -1275,28 +1314,49 @@ export class AutonomousOnlineLearner {
   /** Apply an explicit evaluator reward. Provider success alone is not treated as task quality. */
   update(update: BrainBanditUpdate): BrainBanditState {
     if (!isObject(update) || typeof update.arm_id !== "string" || !update.arm_id.trim() || typeof update.reward !== "number" || !Number.isFinite(update.reward) || update.reward < 0 || update.reward > 1) throw new ArgumentError("online learner update requires an arm_id and reward within [0, 1]");
+    const contextDigest = update.context_digest ?? null;
+    if (contextDigest !== null && (typeof contextDigest !== "string" || !/^[0-9a-f]{64}$/.test(contextDigest))) throw new ArgumentError("online learner context_digest must be a lowercase SHA-256 digest");
+    if (contextDigest !== null && (!update.context || !isObject(update.context))) throw new ArgumentError("contextual learner updates require their bounded context identity");
+    if (contextDigest === null && update.context !== undefined) throw new ArgumentError("online learner context requires a context_digest");
+    if (update.context) {
+      learnerContext({ ...update.context, context_digest: contextDigest ?? undefined, task: "context", required_capabilities: [], estimated_input_tokens: 1, requested_output_tokens: 1, candidates: [], provider_health: {}, model_health: {} });
+    }
     const creditedOutcomes = [...(this.stateValue.credited_outcomes ?? [])];
     if (update.outcome_digest !== undefined && update.outcome_digest !== null) {
       if (typeof update.outcome_digest !== "string" || !/^[0-9a-f]{64}$/.test(update.outcome_digest)) throw new ArgumentError("online learner outcome_digest must be a lowercase SHA-256 digest");
       const prior = creditedOutcomes.find((receipt) => receipt.outcome_digest === update.outcome_digest);
       if (prior) {
-        if (prior.arm_id !== update.arm_id || prior.reward !== update.reward || Boolean(prior.failed) !== Boolean(update.failed) || (prior.contract_digest ?? null) !== (update.contract_digest ?? null)) throw new ArgumentError("online learner replayed outcome has contradictory evaluator evidence");
+        if (prior.arm_id !== update.arm_id || prior.reward !== update.reward || Boolean(prior.failed) !== Boolean(update.failed) || (prior.contract_digest ?? null) !== (update.contract_digest ?? null) || (prior.context_digest ?? null) !== contextDigest) throw new ArgumentError("online learner replayed outcome has contradictory evaluator evidence");
         return this.snapshot();
       }
       if (creditedOutcomes.length >= 4096) throw new ArgumentError("online learner credited outcome ledger is full");
       if (update.contract_digest !== undefined && update.contract_digest !== null && (typeof update.contract_digest !== "string" || !/^[0-9a-f]{64}$/.test(update.contract_digest))) throw new ArgumentError("online learner contract_digest must be a lowercase SHA-256 digest");
-      creditedOutcomes.push({ outcome_digest: update.outcome_digest, arm_id: update.arm_id, reward: update.reward, failed: update.failed ?? false, contract_digest: update.contract_digest ?? null });
+      creditedOutcomes.push({ outcome_digest: update.outcome_digest, arm_id: update.arm_id, reward: update.reward, failed: update.failed ?? false, contract_digest: update.contract_digest ?? null, ...(contextDigest === null ? {} : { context_digest: contextDigest }) });
     }
     const arms = this.stateValue.arms.map((arm) => ({ ...arm }));
-    const existing = arms.find((arm) => arm.arm_id === update.arm_id);
+    const contextualStates = (this.stateValue.contextual_states ?? []).map((state) => ({ ...state, context: { ...state.context }, arms: state.arms.map((arm) => ({ ...arm })) }));
+    const targetArms = contextDigest === null
+      ? arms
+      : (contextualStates.find((state) => state.context_digest === contextDigest)?.arms ?? (() => {
+        const contextState: BrainBanditContextState = { context_digest: contextDigest, context: { ...(update.context as BrainBanditContext) }, generation: 0, arms: [], observed: false };
+        contextualStates.push(contextState);
+        return contextState.arms;
+      })());
+    const existing = targetArms.find((arm) => arm.arm_id === update.arm_id);
     if (existing) {
       existing.pulls = (existing.pulls ?? 0) + 1;
       existing.reward_sum = (existing.reward_sum ?? 0) + update.reward;
       if (update.failed) existing.failures = (existing.failures ?? 0) + 1;
     } else {
-      arms.push({ arm_id: update.arm_id, pulls: 1, reward_sum: update.reward, failures: update.failed ? 1 : 0 });
+      targetArms.push({ arm_id: update.arm_id, pulls: 1, reward_sum: update.reward, failures: update.failed ? 1 : 0 });
     }
-    this.stateValue = { ...this.stateValue, generation: (this.stateValue.generation ?? 0) + 1, policy: this.policy, arms: arms.sort((left, right) => left.arm_id.localeCompare(right.arm_id)), credited_outcomes: creditedOutcomes };
+    if (contextDigest !== null) {
+      const contextual = contextualStates.find((state) => state.context_digest === contextDigest)!;
+      contextual.generation = (contextual.generation ?? 0) + 1;
+      contextual.observed = true;
+      contextual.arms = targetArms.sort((left, right) => left.arm_id.localeCompare(right.arm_id));
+    }
+    this.stateValue = { ...this.stateValue, generation: (this.stateValue.generation ?? 0) + 1, policy: this.policy, arms: arms.sort((left, right) => left.arm_id.localeCompare(right.arm_id)), credited_outcomes: creditedOutcomes, ...(contextualStates.length ? { contextual_states: contextualStates.sort((left, right) => left.context_digest.localeCompare(right.context_digest)) } : {}) };
     this.assertState();
     return this.snapshot();
   }
@@ -1304,16 +1364,33 @@ export class AutonomousOnlineLearner {
   private assertState(): void {
     if (!isObject(this.stateValue) || !Array.isArray(this.stateValue.arms) || this.stateValue.arms.length > 128) throw new ArgumentError("online learner state is malformed");
     const creditedOutcomes = this.stateValue.credited_outcomes ?? [];
-    if (!Array.isArray(creditedOutcomes) || creditedOutcomes.length > 4096 || creditedOutcomes.some((receipt) => !isObject(receipt) || typeof receipt.outcome_digest !== "string" || !/^[0-9a-f]{64}$/.test(receipt.outcome_digest) || typeof receipt.arm_id !== "string" || !receipt.arm_id.trim() || typeof receipt.reward !== "number" || !Number.isFinite(receipt.reward) || receipt.reward < 0 || receipt.reward > 1 || (receipt.failed !== undefined && typeof receipt.failed !== "boolean") || (receipt.contract_digest !== undefined && receipt.contract_digest !== null && (typeof receipt.contract_digest !== "string" || !/^[0-9a-f]{64}$/.test(receipt.contract_digest)))) || new Set(creditedOutcomes.map((receipt) => receipt.outcome_digest)).size !== creditedOutcomes.length) throw new ArgumentError("online learner credited outcome ledger is malformed");
-    for (const arm of this.stateValue.arms) {
-      if (typeof arm.arm_id !== "string" || !arm.arm_id.trim() || !Number.isSafeInteger(arm.pulls ?? 0) || (arm.pulls ?? 0) < 0 || typeof (arm.reward_sum ?? 0) !== "number" || !Number.isFinite(arm.reward_sum ?? 0)) throw new ArgumentError("online learner arm is malformed");
+    if (!Array.isArray(creditedOutcomes) || creditedOutcomes.length > 4096 || creditedOutcomes.some((receipt) => !isObject(receipt) || typeof receipt.outcome_digest !== "string" || !/^[0-9a-f]{64}$/.test(receipt.outcome_digest) || typeof receipt.arm_id !== "string" || !receipt.arm_id.trim() || typeof receipt.reward !== "number" || !Number.isFinite(receipt.reward) || receipt.reward < 0 || receipt.reward > 1 || (receipt.failed !== undefined && typeof receipt.failed !== "boolean") || (receipt.contract_digest !== undefined && receipt.contract_digest !== null && (typeof receipt.contract_digest !== "string" || !/^[0-9a-f]{64}$/.test(receipt.contract_digest))) || (receipt.context_digest !== undefined && receipt.context_digest !== null && (typeof receipt.context_digest !== "string" || !/^[0-9a-f]{64}$/.test(receipt.context_digest)))) || new Set(creditedOutcomes.map((receipt) => receipt.outcome_digest)).size !== creditedOutcomes.length) throw new ArgumentError("online learner credited outcome ledger is malformed");
+    const validateArms = (arms: BrainBanditArm[]): void => {
+      if (!Array.isArray(arms) || arms.length > 128) throw new ArgumentError("online learner arm collection is malformed");
+      for (const arm of arms) {
+        const pulls = arm?.pulls ?? 0;
+        const rewardSum = arm?.reward_sum ?? 0;
+        const failures = arm?.failures ?? 0;
+        if (!isObject(arm) || typeof arm.arm_id !== "string" || !arm.arm_id.trim() || !Number.isSafeInteger(pulls) || pulls < 0 || typeof rewardSum !== "number" || !Number.isFinite(rewardSum) || rewardSum < 0 || rewardSum > pulls || !Number.isSafeInteger(failures) || failures < 0 || failures > pulls) throw new ArgumentError("online learner arm is malformed");
+      }
+    };
+    validateArms(this.stateValue.arms);
+    const contextualStates = this.stateValue.contextual_states ?? [];
+    if (!Array.isArray(contextualStates) || contextualStates.length > 64 || contextualStates.some((state) => !isObject(state) || typeof state.context_digest !== "string") || new Set(contextualStates.map((state) => state.context_digest)).size !== contextualStates.length) throw new ArgumentError("online learner contextual states are malformed");
+    for (const state of contextualStates) {
+      validateContextState(state);
+      validateArms(state.arms);
     }
   }
 }
 
 function cloneBanditState(state: BrainBanditState): BrainBanditState {
   if (!isObject(state) || !Array.isArray(state.arms)) throw new ArgumentError("bandit state must contain arms");
-  return { schema: typeof state.schema === "string" ? state.schema : "bioprism-brain-bandit-state/0.1", generation: state.generation ?? 0, policy: state.policy ? { ...state.policy } : undefined, arms: state.arms.map((arm) => ({ ...arm })), credited_outcomes: (state.credited_outcomes ?? []).map((receipt) => ({ ...receipt })) };
+  if (state.credited_outcomes !== undefined && !Array.isArray(state.credited_outcomes)) throw new ArgumentError("bandit credited_outcomes must be an array");
+  if (state.contextual_states !== undefined && !Array.isArray(state.contextual_states)) throw new ArgumentError("bandit contextual_states must be an array");
+  const contextualStates = state.contextual_states ?? [];
+  if (contextualStates.some((contextState) => !isObject(contextState) || !isObject(contextState.context) || !Array.isArray(contextState.arms))) throw new ArgumentError("bandit contextual state must contain context and arms");
+  return { schema: typeof state.schema === "string" ? state.schema : "bioprism-brain-bandit-state/0.1", generation: state.generation ?? 0, policy: state.policy ? { ...state.policy } : undefined, arms: state.arms.map((arm) => ({ ...arm })), credited_outcomes: (state.credited_outcomes ?? []).map((receipt) => ({ ...receipt })), ...(contextualStates.length ? { contextual_states: contextualStates.map((contextState) => ({ ...contextState, context: { ...contextState.context }, arms: contextState.arms.map((arm) => ({ ...arm })) })) } : {}) };
 }
 
 /** Adapt the TypeScript runtime to the value-only Rust/Python contextual selector. */
@@ -1346,7 +1423,7 @@ export function contextualSelector(client: ApiClient, options: { requestOptions?
       provider_health: Object.fromEntries(Object.entries(request.provider_health).map(([provider, health]) => [provider, { registered: true, circuit: health.circuit, credential_ready: health.credential_ready, eligible: health.eligible, attempts: health.attempts, successes: health.successes, failures: health.failures, success_rate: health.success_rate, mean_latency_ms: health.mean_latency_ms }] as [string, BrainProviderHealth])),
       model_health: Object.fromEntries(Object.entries(request.model_health).map(([arm, health]) => [arm, { attempts: health.attempts, successes: health.successes, failures: health.failures, success_rate: health.success_rate, mean_latency_ms: health.mean_latency_ms, last_latency_ms: health.last_latency_ms, circuit: health.circuit }])),
     };
-    const response = await client.brainModelSelectContextual({ context: { domain: request.domain, capability: request.capability, risk_class: request.risk_class }, base, observations: options.observations?.(request) }, options.requestOptions);
+    const response = await client.brainModelSelectContextual({ context: { domain: request.domain, capability: request.capability, risk_class: request.risk_class, ...(request.task_family === undefined || request.task_family === null ? {} : { task_family: request.task_family }) }, base, observations: options.observations?.(request) }, options.requestOptions);
     if (!response.ok || response.mcp.error || response.mcp.result?.isError) throw new ProviderRuntimeError("contextual brain selector returned a refusal");
     const projected = response.mcp.result?.structuredContent as BrainContextualModelSelectionResult | undefined;
     const selection = projected?.selection;
@@ -1613,7 +1690,7 @@ export class AutonomousAgent {
       tools: tools.length ? tools : undefined,
       toolChoice: tools.length ? "auto" : undefined,
     };
-    const executionPlan = { task: taskText, domain: blueprint.domain_profile.domain, capability: options.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class, requiredCapabilities, maxCostPerMillionTokens: options.maxCostPerMillionTokens, maxLatencyMs: options.maxLatencyMs, minQuality: options.minQuality, candidates, request };
+    const executionPlan = { task: taskText, domain: blueprint.domain_profile.domain, capability: options.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class, taskFamily: blueprint.selection_context.task_family ?? undefined, learningContextDigest: blueprint.learning_context_digest, requiredCapabilities, maxCostPerMillionTokens: options.maxCostPerMillionTokens, maxLatencyMs: options.maxLatencyMs, minQuality: options.minQuality, candidates, request };
     const healthObserver = this.modelHealthController?.observer({ domain: blueprint.domain_profile.domain, capability: executionPlan.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class });
     const remoteHealthObserver = this.modelHealthBridge?.observer({ domain: blueprint.domain_profile.domain, capability: executionPlan.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class });
     const feedbackObserver = composeInvocationObservers(options.observer, healthObserver, remoteHealthObserver);
@@ -1792,9 +1869,12 @@ export class AutonomousAgent {
   }
 
   /** Apply explicit evaluator feedback locally; optionally reconcile the same value-only update through the control plane. */
-  async recordEvaluatorReward(armId: string, reward: number, options: { failed?: boolean; outcomeDigest?: string | null; remote?: boolean } = {}): Promise<BrainBanditState> {
+  async recordEvaluatorReward(armId: string, reward: number, options: { failed?: boolean; outcomeDigest?: string | null; remote?: boolean; contextDigest?: string | null; context?: BrainBanditContext } = {}): Promise<BrainBanditState> {
     if (!this.learner) throw new ArgumentError("AutonomousAgent has no AutonomousOnlineLearner");
-    const update: BrainBanditUpdate = { arm_id: boundedText("armId", armId, 512), reward, failed: options.failed ?? false, outcome_digest: options.outcomeDigest ?? null };
+    const contextDigest = options.contextDigest ?? null;
+    if (contextDigest !== null && (typeof contextDigest !== "string" || !/^[0-9a-f]{64}$/.test(contextDigest) || !options.context)) throw new ArgumentError("contextual evaluator rewards require a valid context digest and context");
+    if (contextDigest === null && options.context !== undefined) throw new ArgumentError("contextual evaluator rewards require a context digest");
+    const update: BrainBanditUpdate = { arm_id: boundedText("armId", armId, 512), reward, failed: options.failed ?? false, outcome_digest: options.outcomeDigest ?? null, ...(contextDigest === null ? {} : { context_digest: contextDigest, context: options.context }) };
     if (options.remote === true && this.apiClient) {
       const response = await this.apiClient.brainBanditUpdate(this.learner.snapshot(), update);
       if (!response.ok || response.mcp.error || response.mcp.result?.isError) throw new ProviderRuntimeError("remote bandit update returned a refusal");
