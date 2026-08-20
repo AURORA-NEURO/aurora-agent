@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   AutonomousAgent,
   AutonomousDurableJobController,
+  AutonomousWorkflowPersistenceCoordinator,
   AutonomousWorkflowExecutor,
   CredentialStore,
   InMemoryAutonomousWorkflowCheckpointStore,
@@ -69,6 +70,51 @@ test("workflow executor checkpoints stages, pauses at a bounded budget, and resu
     assert.equal(resumed.events[index].sequence, resumed.events[index - 1].sequence + 1);
   }
   await assert.rejects(() => executor.resume("workflow-job-1", "A different task", { candidates: agent.models(), approveProviderCall: true }), /digest/);
+});
+
+test("workflow checkpoint snapshots restore a paused job without admitting payloads", async () => {
+  let calls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      calls += 1;
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: `checkpoint-output-${calls}` }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("workflow", "https://workflow.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel(model());
+  const task = "Persist and resume this bounded workflow";
+  const sourceStore = new InMemoryAutonomousWorkflowCheckpointStore();
+  const sourceExecutor = new AutonomousWorkflowExecutor(agent, sourceStore);
+  const first = await sourceExecutor.start(task, { domain: "coding", jobId: "workflow-snapshot-1", candidates: agent.models(), approveProviderCall: true, maxStages: 1 });
+  assert.equal(first.status, "paused");
+  const snapshot = await sourceStore.snapshot();
+  assert.equal(snapshot.checkpoints.length, 1);
+  assert.equal(snapshot.event_rows.length, 1);
+  assert.doesNotMatch(JSON.stringify(snapshot), /Persist and resume this bounded workflow/);
+
+  let durableSnapshot = null;
+  const persistence = new AutonomousWorkflowPersistenceCoordinator(sourceStore, {
+    read: () => durableSnapshot,
+    write: (value) => { durableSnapshot = structuredClone(value); },
+  });
+  await persistence.flush();
+  assert.equal(durableSnapshot.snapshot_digest, snapshot.snapshot_digest);
+
+  const tampered = structuredClone(durableSnapshot);
+  tampered.event_rows[0].events[0].event_type = "completed";
+  const restoredStore = new InMemoryAutonomousWorkflowCheckpointStore();
+  await assert.rejects(restoredStore.restore(tampered), /snapshot digest does not match/);
+  const restoredPersistence = new AutonomousWorkflowPersistenceCoordinator(restoredStore, { read: () => durableSnapshot, write: () => {} });
+  await restoredPersistence.restore();
+  assert.equal((await restoredStore.verifyIntegrity()).verified, true);
+  await assert.rejects(restoredStore.appendEvent({ ...durableSnapshot.event_rows[0].events[0], prompt: "private payload" }), /unsupported fields/);
+
+  const resumed = await new AutonomousWorkflowExecutor(agent, restoredStore).resume("workflow-snapshot-1", task, { candidates: agent.models(), approveProviderCall: true, maxStages: 32 });
+  assert.equal(resumed.status, "completed");
+  assert.equal(resumed.completed_stage_count, 5);
+  assert.equal(calls, 5);
 });
 
 test("workflow stage failures checkpoint typed redacted retry metadata", async () => {

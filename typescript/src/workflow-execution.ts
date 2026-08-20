@@ -25,9 +25,12 @@ import type {
 export const AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA = "bioprism-typescript-autonomous-workflow-execution/0.1" as const;
 export const AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA = "bioprism-typescript-autonomous-workflow-checkpoint/0.1" as const;
 export const AUTONOMOUS_WORKFLOW_EVENT_SCHEMA = "bioprism-typescript-autonomous-workflow-event/0.1" as const;
+export const AUTONOMOUS_WORKFLOW_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-workflow-snapshot/0.1" as const;
 export const AUTONOMOUS_DURABLE_JOB_SCHEMA = "bioprism-typescript-autonomous-durable-job/0.1" as const;
 export const AUTONOMOUS_WORKFLOW_MAX_STAGES_PER_CALL = 32;
 export const AUTONOMOUS_WORKFLOW_MAX_EVENTS = 256;
+export const AUTONOMOUS_WORKFLOW_MAX_JOBS = 1_024;
+export const AUTONOMOUS_WORKFLOW_MAX_SNAPSHOT_BYTES = 4 * 1024 * 1024;
 
 export type AutonomousWorkflowCheckpointStatus = "running" | "paused" | "completed" | "failed";
 export type AutonomousWorkflowExecutionStatus = "completed" | "paused" | "approval_required" | "failed" | "route_review_required";
@@ -85,6 +88,26 @@ export interface AutonomousWorkflowCheckpointStore {
   save(checkpoint: AutonomousWorkflowCheckpoint): Promise<void> | void;
   appendEvent(event: AutonomousWorkflowEvent): Promise<void> | void;
   events(jobId: string, after?: number, limit?: number): Promise<AutonomousWorkflowEvent[]> | AutonomousWorkflowEvent[];
+}
+
+export interface AutonomousWorkflowCheckpointStoreSnapshot {
+  schema: typeof AUTONOMOUS_WORKFLOW_SNAPSHOT_SCHEMA;
+  checkpoints: AutonomousWorkflowCheckpoint[];
+  event_rows: Array<{ job_id: string; events: AutonomousWorkflowEvent[] }>;
+  retention: "metadata_only;task_prompt_response_credentials_and_provider_payloads_not_retained";
+  secret_material: "never_returned";
+  snapshot_digest: string;
+}
+
+export interface AutonomousWorkflowSnapshotStore extends AutonomousWorkflowCheckpointStore {
+  snapshot(): Promise<AutonomousWorkflowCheckpointStoreSnapshot>;
+  restore(snapshot: AutonomousWorkflowCheckpointStoreSnapshot): Promise<void>;
+  verifyIntegrity(): Promise<{ schema: typeof AUTONOMOUS_WORKFLOW_SNAPSHOT_SCHEMA; verified: true; jobs: number; events: number; snapshot_digest: string; retention: "metadata_only" }>;
+}
+
+export interface AutonomousWorkflowSnapshotPersistence {
+  read(): Promise<AutonomousWorkflowCheckpointStoreSnapshot | null> | AutonomousWorkflowCheckpointStoreSnapshot | null;
+  write(snapshot: AutonomousWorkflowCheckpointStoreSnapshot): Promise<void> | void;
 }
 
 export interface AutonomousWorkflowStageResult {
@@ -145,33 +168,230 @@ export interface AutonomousDurableJobExecutionResult {
   private_spec: "caller_owned;task_prompt_response_and_credentials_not_sent_to_control_plane";
 }
 
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function exactKeys(value: Record<string, unknown>, allowed: readonly string[], label: string): void {
+  const allowedKeys = new Set(allowed);
+  if (Object.keys(value).some((key) => !allowedKeys.has(key))) throw new ArgumentError(`${label} contains unsupported fields`);
+}
+
+function workflowDigest(value: unknown, label: string, allowNull = false): string | null {
+  if (allowNull && value === null) return null;
+  if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new ArgumentError(`${label} must be a lowercase SHA-256 digest`);
+  return value;
+}
+
+function workflowLabel(value: unknown, label: string, maximum = 512): string {
+  if (typeof value !== "string" || !value || value.length > maximum || !/^[A-Za-z0-9_.:-]+$/.test(value)) throw new ArgumentError(`${label} must be a bounded identifier`);
+  return value;
+}
+
+function workflowBoundedInteger(value: unknown, label: string, maximum: number, minimum = 0): number {
+  if (!Number.isSafeInteger(value) || (value as number) < minimum || (value as number) > maximum) throw new ArgumentError(`${label} is outside its bounded integer contract`);
+  return value as number;
+}
+
+async function validateWorkflowCheckpoint(value: unknown): Promise<AutonomousWorkflowCheckpoint> {
+  if (!isObject(value)) throw new ArgumentError("workflow checkpoint must be an object");
+  exactKeys(value, ["schema", "job_id", "task_digest", "domain", "workflow_id", "workflow_digest", "plan_digest", "completed_stage_ids", "next_stage_id", "stage_outcomes", "generation", "status", "previous_checkpoint_digest", "checkpoint_digest", "retention", "secret_material"], "workflow checkpoint");
+  if (value.schema !== AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA || value.retention !== "metadata_only;task_prompt_response_and_credentials_not_retained" || value.secret_material !== "never_returned") throw new ArgumentError("workflow checkpoint metadata markers are invalid");
+  const jobId = boundedJobId(value.job_id);
+  const taskDigest = workflowDigest(value.task_digest, "workflow task_digest")!;
+  if (!AUTONOMOUS_DOMAIN_NAMES.includes(value.domain as AutonomousDomainName)) throw new ArgumentError("workflow checkpoint domain is not supported");
+  const workflowId = workflowLabel(value.workflow_id, "workflow workflow_id");
+  const workflowDigestValue = workflowDigest(value.workflow_digest, "workflow workflow_digest")!;
+  const planDigest = workflowDigest(value.plan_digest, "workflow plan_digest")!;
+  if (!Array.isArray(value.completed_stage_ids) || value.completed_stage_ids.length > AUTONOMOUS_WORKFLOW_MAX_STAGES_PER_CALL) throw new ArgumentError("workflow completed_stage_ids exceed their bound");
+  const completedStageIds = value.completed_stage_ids.map((stageId) => workflowLabel(stageId, "workflow completed stage id", 256));
+  if (new Set(completedStageIds).size !== completedStageIds.length) throw new ArgumentError("workflow completed_stage_ids must be unique");
+  const nextStageId = value.next_stage_id === null ? null : workflowLabel(value.next_stage_id, "workflow next_stage_id", 256);
+  if (!Array.isArray(value.stage_outcomes) || value.stage_outcomes.length > AUTONOMOUS_WORKFLOW_MAX_STAGES_PER_CALL) throw new ArgumentError("workflow stage_outcomes exceed their bound");
+  const stageOutcomes: AutonomousWorkflowStageOutcome[] = value.stage_outcomes.map((candidate) => {
+    if (!isObject(candidate)) throw new ArgumentError("workflow stage outcome must be an object");
+    exactKeys(candidate, ["stage_id", "status", "run_status", "selection_digest", "response_digest", "output_bytes", "error_class", "error_code", "retryable", "status_code", "learning_episode_id"], "workflow stage outcome");
+    const status = candidate.status;
+    if (status !== "completed" && status !== "approval_required" && status !== "failed") throw new ArgumentError("workflow stage outcome status is invalid");
+    const errorCode = candidate.error_code === undefined || candidate.error_code === null ? null : workflowLabel(candidate.error_code, "workflow error_code", 128) as ProviderErrorCode;
+    if (candidate.retryable !== undefined && candidate.retryable !== null && typeof candidate.retryable !== "boolean") throw new ArgumentError("workflow retryable must be boolean or null");
+    if (candidate.status_code !== undefined && candidate.status_code !== null) workflowBoundedInteger(candidate.status_code, "workflow status_code", 999, 100);
+    const hasErrorCode = Object.prototype.hasOwnProperty.call(candidate, "error_code");
+    return {
+      stage_id: workflowLabel(candidate.stage_id, "workflow stage_id", 256),
+      status,
+      run_status: workflowLabel(candidate.run_status, "workflow run_status", 128),
+      selection_digest: workflowDigest(candidate.selection_digest, "workflow selection_digest", true),
+      response_digest: workflowDigest(candidate.response_digest, "workflow response_digest", true),
+      output_bytes: workflowBoundedInteger(candidate.output_bytes, "workflow output_bytes", 64 * 1024 * 1024),
+      error_class: candidate.error_class === undefined || candidate.error_class === null ? null : workflowLabel(candidate.error_class, "workflow error_class", 128),
+      ...(hasErrorCode ? { error_code: errorCode } : {}),
+      ...(candidate.retryable === undefined ? {} : { retryable: candidate.retryable as boolean | null }),
+      ...(candidate.status_code === undefined ? {} : { status_code: candidate.status_code as number | null }),
+      learning_episode_id: candidate.learning_episode_id === null ? null : workflowLabel(candidate.learning_episode_id, "workflow learning_episode_id", 512),
+    };
+  });
+  const generation = workflowBoundedInteger(value.generation, "workflow generation", Number.MAX_SAFE_INTEGER, 1);
+  const status = value.status;
+  if (status !== "running" && status !== "paused" && status !== "completed" && status !== "failed") throw new ArgumentError("workflow checkpoint status is invalid");
+  const previousCheckpointDigest = workflowDigest(value.previous_checkpoint_digest, "workflow previous_checkpoint_digest", true);
+  const checkpointDigest = workflowDigest(value.checkpoint_digest, "workflow checkpoint_digest")!;
+  const descriptor = { schema: value.schema, job_id: jobId, task_digest: taskDigest, domain: value.domain, workflow_id: workflowId, workflow_digest: workflowDigestValue, plan_digest: planDigest, completed_stage_ids: completedStageIds, next_stage_id: nextStageId, stage_outcomes: stageOutcomes, generation, status, previous_checkpoint_digest: previousCheckpointDigest, retention: value.retention, secret_material: value.secret_material };
+  if (await digestJson(descriptor) !== checkpointDigest) throw new ArgumentError("workflow checkpoint digest does not match its metadata");
+  return { ...descriptor, checkpoint_digest: checkpointDigest } as AutonomousWorkflowCheckpoint;
+}
+
+async function validateWorkflowEvent(value: unknown): Promise<AutonomousWorkflowEvent> {
+  if (!isObject(value)) throw new ArgumentError("workflow event must be an object");
+  exactKeys(value, ["schema", "sequence", "job_id", "event_type", "stage_id", "checkpoint_digest", "previous_event_digest", "event_digest", "retention", "secret_material"], "workflow event");
+  if (value.schema !== AUTONOMOUS_WORKFLOW_EVENT_SCHEMA || value.retention !== "metadata_only;provider_payloads_not_retained" || value.secret_material !== "never_returned") throw new ArgumentError("workflow event metadata markers are invalid");
+  const sequence = workflowBoundedInteger(value.sequence, "workflow event sequence", Number.MAX_SAFE_INTEGER, 1);
+  const jobId = boundedJobId(value.job_id);
+  const eventType = value.event_type;
+  if (eventType !== "started" && eventType !== "stage_completed" && eventType !== "checkpointed" && eventType !== "approval_required" && eventType !== "stage_failed" && eventType !== "completed") throw new ArgumentError("workflow event type is invalid");
+  const stageId = value.stage_id === null ? null : workflowLabel(value.stage_id, "workflow event stage_id", 256);
+  const checkpointDigest = workflowDigest(value.checkpoint_digest, "workflow event checkpoint_digest")!;
+  const previousEventDigest = workflowDigest(value.previous_event_digest, "workflow event previous_event_digest", true);
+  const eventDigest = workflowDigest(value.event_digest, "workflow event event_digest")!;
+  const descriptor = { schema: value.schema, sequence, job_id: jobId, event_type: eventType, stage_id: stageId, checkpoint_digest: checkpointDigest, previous_event_digest: previousEventDigest, retention: value.retention, secret_material: value.secret_material };
+  if (await digestJson(descriptor) !== eventDigest) throw new ArgumentError("workflow event digest does not match its metadata");
+  return { ...descriptor, event_digest: eventDigest } as AutonomousWorkflowEvent;
+}
+
+async function validateWorkflowSnapshot(value: unknown): Promise<{ snapshot: AutonomousWorkflowCheckpointStoreSnapshot; eventCount: number }> {
+  if (!isObject(value)) throw new ArgumentError("workflow snapshot must be an object");
+  exactKeys(value, ["schema", "checkpoints", "event_rows", "retention", "secret_material", "snapshot_digest"], "workflow snapshot");
+  if (value.schema !== AUTONOMOUS_WORKFLOW_SNAPSHOT_SCHEMA || value.retention !== "metadata_only;task_prompt_response_credentials_and_provider_payloads_not_retained" || value.secret_material !== "never_returned") throw new ArgumentError("workflow snapshot metadata markers are invalid");
+  if (!Array.isArray(value.checkpoints) || !Array.isArray(value.event_rows) || value.checkpoints.length > AUTONOMOUS_WORKFLOW_MAX_JOBS || value.event_rows.length > AUTONOMOUS_WORKFLOW_MAX_JOBS) throw new ArgumentError("workflow snapshot job capacity is exhausted");
+  const snapshotDigest = workflowDigest(value.snapshot_digest, "workflow snapshot_digest")!;
+  const { snapshot_digest: observed, ...descriptor } = value;
+  if (await digestJson(descriptor) !== observed) throw new ArgumentError("workflow snapshot digest does not match");
+  const checkpoints: AutonomousWorkflowCheckpoint[] = [];
+  const checkpointIds = new Set<string>();
+  for (const candidate of value.checkpoints) {
+    const checkpoint = await validateWorkflowCheckpoint(candidate);
+    if (checkpointIds.has(checkpoint.job_id)) throw new ArgumentError("workflow snapshot contains duplicate checkpoints");
+    checkpointIds.add(checkpoint.job_id);
+    checkpoints.push(checkpoint);
+  }
+  const eventRows: Array<{ job_id: string; events: AutonomousWorkflowEvent[] }> = [];
+  const eventJobIds = new Set<string>();
+  let eventCount = 0;
+  for (const candidate of value.event_rows) {
+    if (!isObject(candidate)) throw new ArgumentError("workflow snapshot event row must be an object");
+    exactKeys(candidate, ["job_id", "events"], "workflow snapshot event row");
+    const jobId = boundedJobId(candidate.job_id);
+    if (eventJobIds.has(jobId)) throw new ArgumentError("workflow snapshot contains duplicate event rows");
+    if (!checkpointIds.has(jobId)) throw new ArgumentError("workflow snapshot event row has no checkpoint");
+    if (!Array.isArray(candidate.events) || candidate.events.length > AUTONOMOUS_WORKFLOW_MAX_EVENTS) throw new ArgumentError("workflow snapshot event capacity is exhausted");
+    const events: AutonomousWorkflowEvent[] = [];
+    let prior: AutonomousWorkflowEvent | null = null;
+    for (const eventCandidate of candidate.events) {
+      const event = await validateWorkflowEvent(eventCandidate);
+      if (event.job_id !== jobId) throw new ArgumentError("workflow event job_id does not match its row");
+      if (prior === null) {
+        if (event.sequence === 1 && event.previous_event_digest !== null) throw new ArgumentError("workflow first event must not have a predecessor");
+        if (event.sequence > 1 && event.previous_event_digest === null) throw new ArgumentError("workflow truncated event history must retain its predecessor digest");
+      } else if (event.sequence !== prior.sequence + 1 || event.previous_event_digest !== prior.event_digest) {
+        throw new ArgumentError("workflow event hash chain is not contiguous");
+      }
+      events.push(event);
+      prior = event;
+      eventCount += 1;
+    }
+    eventJobIds.add(jobId);
+    eventRows.push({ job_id: jobId, events });
+  }
+  const bytes = new TextEncoder().encode(JSON.stringify(value)).byteLength;
+  if (bytes > AUTONOMOUS_WORKFLOW_MAX_SNAPSHOT_BYTES) throw new ArgumentError("workflow snapshot exceeds its byte capacity");
+  return { snapshot: { ...descriptor, snapshot_digest: snapshotDigest, checkpoints, event_rows: eventRows } as AutonomousWorkflowCheckpointStoreSnapshot, eventCount };
+}
+
 /** A bounded process-local store useful for tests and small workers; production callers can replace it with SQLite/Redis/etc. */
-export class InMemoryAutonomousWorkflowCheckpointStore implements AutonomousWorkflowCheckpointStore {
+export class InMemoryAutonomousWorkflowCheckpointStore implements AutonomousWorkflowSnapshotStore {
   private readonly checkpoints = new Map<string, AutonomousWorkflowCheckpoint>();
   private readonly eventRows = new Map<string, AutonomousWorkflowEvent[]>();
 
   load(jobId: string): AutonomousWorkflowCheckpoint | null {
-    const checkpoint = this.checkpoints.get(jobId);
+    const checkpoint = this.checkpoints.get(boundedJobId(jobId));
     return checkpoint ? structuredClone(checkpoint) : null;
   }
 
-  save(checkpoint: AutonomousWorkflowCheckpoint): void {
-    this.checkpoints.set(checkpoint.job_id, structuredClone(checkpoint));
+  async save(checkpoint: AutonomousWorkflowCheckpoint): Promise<void> {
+    const normalized = await validateWorkflowCheckpoint(checkpoint);
+    const previous = this.checkpoints.get(normalized.job_id);
+    if (!previous) {
+      if (normalized.generation !== 1 || normalized.previous_checkpoint_digest !== null) throw new ArgumentError("workflow initial checkpoint must start at generation one");
+    } else if (previous.checkpoint_digest !== normalized.checkpoint_digest && (normalized.generation !== previous.generation + 1 || normalized.previous_checkpoint_digest !== previous.checkpoint_digest)) {
+      throw new ArgumentError("workflow checkpoint generation is not contiguous");
+    }
+    if (this.checkpoints.size >= AUTONOMOUS_WORKFLOW_MAX_JOBS && !previous) throw new ArgumentError("workflow job capacity is exhausted");
+    this.checkpoints.set(normalized.job_id, structuredClone(normalized));
   }
 
-  appendEvent(event: AutonomousWorkflowEvent): void {
-    const rows = this.eventRows.get(event.job_id) ?? [];
-    if (rows.length && event.sequence !== rows[rows.length - 1]!.sequence + 1) throw new ArgumentError("workflow event sequence must be contiguous");
-    if (!rows.length && event.sequence !== 1) throw new ArgumentError("workflow event sequence must start at one");
-    rows.push(structuredClone(event));
+  async appendEvent(event: AutonomousWorkflowEvent): Promise<void> {
+    const normalized = await validateWorkflowEvent(event);
+    if (!this.checkpoints.has(normalized.job_id)) throw new ArgumentError("workflow event requires an existing checkpoint");
+    const rows = this.eventRows.get(normalized.job_id) ?? [];
+    const prior = rows.at(-1);
+    if (prior && normalized.sequence === prior.sequence && normalized.event_digest === prior.event_digest) return;
+    if (prior && (normalized.sequence !== prior.sequence + 1 || normalized.previous_event_digest !== prior.event_digest)) throw new ArgumentError("workflow event sequence or predecessor digest is invalid");
+    if (!prior && normalized.sequence !== 1) throw new ArgumentError("workflow event sequence must start at one");
+    rows.push(structuredClone(normalized));
     if (rows.length > AUTONOMOUS_WORKFLOW_MAX_EVENTS) rows.splice(0, rows.length - AUTONOMOUS_WORKFLOW_MAX_EVENTS);
-    this.eventRows.set(event.job_id, rows);
+    this.eventRows.set(normalized.job_id, rows);
   }
 
   events(jobId: string, after = 0, limit = AUTONOMOUS_WORKFLOW_MAX_EVENTS): AutonomousWorkflowEvent[] {
+    const normalizedJobId = boundedJobId(jobId);
     if (!Number.isSafeInteger(after) || after < 0) throw new ArgumentError("workflow event after must be a non-negative integer");
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > AUTONOMOUS_WORKFLOW_MAX_EVENTS) throw new ArgumentError("workflow event limit is outside its bounds");
-    return (this.eventRows.get(jobId) ?? []).filter((event) => event.sequence > after).slice(0, limit).map((event) => structuredClone(event));
+    return (this.eventRows.get(normalizedJobId) ?? []).filter((event) => event.sequence > after).slice(0, limit).map((event) => structuredClone(event));
+  }
+
+  async snapshot(): Promise<AutonomousWorkflowCheckpointStoreSnapshot> {
+    const descriptor = {
+      schema: AUTONOMOUS_WORKFLOW_SNAPSHOT_SCHEMA,
+      checkpoints: [...this.checkpoints.values()].sort((left, right) => left.job_id.localeCompare(right.job_id)).map((checkpoint) => structuredClone(checkpoint)),
+      event_rows: [...this.eventRows.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([job_id, events]) => ({ job_id, events: events.map((event) => structuredClone(event)) })),
+      retention: "metadata_only;task_prompt_response_credentials_and_provider_payloads_not_retained" as const,
+      secret_material: "never_returned" as const,
+    };
+    const snapshot = { ...descriptor, snapshot_digest: await digestJson(descriptor) };
+    return (await validateWorkflowSnapshot(snapshot)).snapshot;
+  }
+
+  async restore(snapshot: AutonomousWorkflowCheckpointStoreSnapshot): Promise<void> {
+    const validated = (await validateWorkflowSnapshot(snapshot)).snapshot;
+    this.checkpoints.clear();
+    this.eventRows.clear();
+    for (const checkpoint of validated.checkpoints) this.checkpoints.set(checkpoint.job_id, structuredClone(checkpoint));
+    for (const row of validated.event_rows) this.eventRows.set(row.job_id, row.events.map((event) => structuredClone(event)));
+  }
+
+  async verifyIntegrity(): Promise<{ schema: typeof AUTONOMOUS_WORKFLOW_SNAPSHOT_SCHEMA; verified: true; jobs: number; events: number; snapshot_digest: string; retention: "metadata_only" }> {
+    const snapshot = await this.snapshot();
+    return { schema: AUTONOMOUS_WORKFLOW_SNAPSHOT_SCHEMA, verified: true, jobs: snapshot.checkpoints.length, events: snapshot.event_rows.reduce((total, row) => total + row.events.length, 0), snapshot_digest: snapshot.snapshot_digest, retention: "metadata_only" };
+  }
+}
+
+/** Coordinates workflow checkpoint snapshots with a caller-owned durable adapter. */
+export class AutonomousWorkflowPersistenceCoordinator {
+  constructor(readonly store: AutonomousWorkflowSnapshotStore, readonly persistence: AutonomousWorkflowSnapshotPersistence) {
+    if (!store || typeof store.snapshot !== "function" || typeof store.restore !== "function") throw new ArgumentError("workflow persistence requires a snapshot-capable store");
+    if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new ArgumentError("workflow persistence adapter is malformed");
+  }
+
+  async restore(): Promise<AutonomousWorkflowCheckpointStoreSnapshot | null> {
+    const snapshot = await this.persistence.read();
+    if (snapshot) await this.store.restore(snapshot);
+    return snapshot;
+  }
+
+  async flush(): Promise<AutonomousWorkflowCheckpointStoreSnapshot> {
+    const snapshot = await this.store.snapshot();
+    await this.persistence.write(snapshot);
+    return snapshot;
   }
 }
 

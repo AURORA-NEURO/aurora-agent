@@ -290,6 +290,13 @@ provider message or response body. A failed stage remains terminal until the cal
 rehydrates and chooses a new execution policy.
 requires caller-owned task and credential rehydration.
 
+`InMemoryAutonomousWorkflowCheckpointStore.snapshot()` and `restore()` provide an integrity-checked
+multi-job restart boundary. `AutonomousWorkflowPersistenceCoordinator` connects it to a
+caller-owned `read()`/`write()` adapter. Restore verifies checkpoint digests, generation metadata,
+event predecessor digests, exact metadata-only field sets, job/event bounds, and the bounded snapshot
+digest before mutating the store. Event history may be retention-truncated, but a truncated first
+event must retain its predecessor digest; payload-bearing or recomputed snapshots are refused.
+
 Pass an `AutonomousLearningController` to the executor when staged model outcomes should enter the
 learning lifecycle:
 

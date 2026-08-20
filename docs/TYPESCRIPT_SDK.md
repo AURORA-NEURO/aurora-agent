@@ -1593,6 +1593,17 @@ then refuses if the task, workflow, or plan digest has changed. This is the loca
 the existing value-only `brain_job_*` APIs can retain a separate server-side job projection without
 receiving the private specification.
 
+`InMemoryAutonomousWorkflowCheckpointStore.snapshot()` and `restore()` provide the reference
+multi-job restart boundary. `AutonomousWorkflowPersistenceCoordinator` bridges the store to a
+caller-owned SQLite, Redis, IndexedDB, or object-store adapter. The snapshot contains only sorted
+checkpoint metadata and bounded event rows; restore recomputes the snapshot digest, validates exact
+metadata-only field sets, checkpoint digests and generation links, event digests and predecessor
+links, retention-truncated chain heads, job/event capacities, and snapshot bytes before replacing
+local state. `verifyIntegrity()` gives a worker a post-restore audit result. A persistence adapter
+must be treated as untrusted storage: a caller cannot make a tampered or payload-bearing snapshot
+valid by merely recomputing an event digest because the outer snapshot and field allow-list are
+also checked.
+
 The executor accepts an optional `AutonomousLearningController`. When present, each completed
 stage creates one pending episode through `prepareRun()` and writes only that episode ID into the
 metadata checkpoint. Approval-required and failed stages retain no reward episode. The returned
