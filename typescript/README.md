@@ -309,8 +309,10 @@ cycle fails the shared execution controller before rethrowing, unless the caller
 
 `InMemoryAutonomousEpisodicMemory` provides a bounded TypeScript reference for the same durable
 memory boundary already available in the Python façade. It stores only task/route/prompt/plan/
-selection/outcome digests, reviewed domain labels, caller-authored tags/lessons, and explicit
-evaluator metadata. `retrieve()` is deterministic and can be attached to either decision cycle;
+selection/outcome digests, reviewed domain/capability/risk/workflow labels, the verified
+`context_digest` for that learning identity, caller-authored tags/lessons, and explicit evaluator
+metadata. `retrieve()` can match the exact context digest or task family and is deterministic;
+it can be attached to either decision cycle;
 recalled rows become low-priority context with an explicit “prior metadata, not verified truth”
 warning. `AutonomousMemoryPersistenceCoordinator` connects the store to a caller-owned database or
 object-store adapter. Snapshots and event chains are content-addressed, and raw prompts, provider

@@ -1432,7 +1432,10 @@ response/tool fields, credentials, and secret-shaped strings. Evaluations are se
 events, so a provider completion is never silently converted into a lesson or reward.
 
 `retrieve()` ranks only deterministic metadata matches and returns rows with a content-addressed
-episode identity. When supplied to `runAutonomousDecisionCycle()` or
+episode identity. Every newly recorded row normalizes `task_family` and stores a
+`context_digest`; a caller-supplied digest must match the normalized context exactly. Queries can
+therefore select the exact routing/learning context instead of matching only a broad domain. When
+supplied to `runAutonomousDecisionCycle()` or
 `runAutonomousCrossDomainDecisionCycle()`, the cycle adds a bounded optional memory context and
 keeps the authority warning in the prompt. It cannot widen the route, model capabilities, tool
 allow-list, budget, approval state, or evaluator contract. `snapshot()` and `restore()` verify a

@@ -75,6 +75,8 @@ test("episodic memory records value-only episodes, evaluates them, queries every
   const coding = await memory.retrieve({ domain: "coding", tags: ["domain-review"], limit: 4 });
   assert.equal(coding.length, 1);
   assert.equal(coding[0].context.domain, "coding");
+  assert.equal(coding[0].context.task_family, null);
+  assert.match(coding[0].context_digest, /^[0-9a-f]{64}$/);
   assert.equal(coding[0].episode_digest.length, 64);
   await memory.recordEvaluation(coding[0].episode_id, { evaluator_id: "reviewer", evaluator_version: "1", reward: 0.9, passed: true, evidence_digest: "a".repeat(64) });
   assert.equal((await memory.stats()).evaluated, 1);
@@ -85,6 +87,10 @@ test("episodic memory records value-only episodes, evaluates them, queries every
   await assert.rejects(memory.recordEpisode({ ...(await episodeInput("coding", "secret-episode")), prompt: "private prompt" }), /forbidden/);
   await assert.rejects(memory.recordEpisode({ ...(await episodeInput("coding", "secret-episode-2")), provenance: { api_key: "sk-secret-value" } }), /forbidden/);
   await assert.rejects(memory.recordEpisode({ ...(await episodeInput("coding", "secret-episode-3")), lesson: "authorization: top-secret-value" }), /secret material/);
+  const codingContextDigest = coding[0].context_digest;
+  assert.equal((await memory.retrieve({ context_digest: codingContextDigest })).length, 1);
+  assert.equal((await memory.retrieve({ task_family: "unmatched_family" })).length, 0);
+  await assert.rejects(memory.recordEpisode({ ...(await episodeInput("coding", "context-mismatch")), context_digest: "0".repeat(64) }), /does not match its context identity/);
 });
 
 test("episodic memory snapshots restore integrity and refuse tampering", async () => {

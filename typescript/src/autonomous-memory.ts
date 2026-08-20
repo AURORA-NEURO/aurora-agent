@@ -1,5 +1,5 @@
 import { ArgumentError } from "./errors.js";
-import { digestJson } from "./tooling.js";
+import { digestCanonicalJsonText, digestJson } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
 export const AUTONOMOUS_MEMORY_SCHEMA = "bioprism-typescript-autonomous-episodic-memory/0.1" as const;
@@ -41,7 +41,8 @@ export interface AutonomousMemoryEpisode extends JsonObject {
   result_kind: string;
   status: AutonomousMemoryEpisodeStatus;
   task_digest: string;
-  context: { domain: string; capability: string; risk_class: string };
+  context: { domain: string; capability: string; risk_class: string; task_family: string | null };
+  context_digest: string;
   selected_model: { provider: string; model: string } | null;
   digests: Record<string, string | null>;
   route: AutonomousMemoryRouteProjection | null;
@@ -62,7 +63,9 @@ export interface AutonomousMemoryEpisodeInput {
   result_kind: string;
   status: AutonomousMemoryEpisodeStatus;
   task_digest: string;
-  context: { domain: string; capability: string; risk_class: string };
+  context: { domain: string; capability: string; risk_class: string; task_family?: string | null };
+  /** Optional caller-supplied identity; when omitted it is derived and retained. */
+  context_digest?: string | null;
   selected_model?: { provider: string; model: string } | null;
   digests: Record<string, string | null>;
   route?: AutonomousMemoryRouteProjection | null;
@@ -86,6 +89,8 @@ export interface AutonomousMemoryQuery {
   domain?: string;
   capability?: string;
   risk_class?: string;
+  task_family?: string | null;
+  context_digest?: string;
   task_digest?: string;
   tags?: readonly string[];
   statuses?: readonly AutonomousMemoryEpisodeStatus[];
@@ -181,6 +186,16 @@ function boundedDigest(name: string, value: unknown, allowNull = false): string 
   if (value === null && allowNull) return null;
   if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new ArgumentError(`${name} must be a lowercase SHA-256 digest`);
   return value;
+}
+
+function normalizeMemoryContext(context: AutonomousMemoryEpisodeInput["context"]): { domain: string; capability: string; risk_class: string; task_family: string | null } {
+  if (!context || typeof context !== "object") throw new ArgumentError("memory context is required");
+  return {
+    domain: boundedIdentifier("memory context domain", context.domain),
+    capability: boundedIdentifier("memory context capability", context.capability),
+    risk_class: boundedIdentifier("memory context risk_class", context.risk_class),
+    task_family: context.task_family === undefined || context.task_family === null ? null : boundedIdentifier("memory context task_family", context.task_family),
+  };
 }
 
 function boundedProbability(name: string, value: unknown): number {
@@ -284,9 +299,10 @@ export class InMemoryAutonomousEpisodicMemory implements AutonomousEpisodicMemor
     safeMetadata(input);
     const episodeId = boundedIdentifier("memory episode_id", input.episode_id);
     const taskDigest = boundedDigest("memory task_digest", input.task_digest)!;
-    const context = input.context;
-    if (!context || typeof context !== "object") throw new ArgumentError("memory context is required");
-    const normalizedContext = { domain: boundedIdentifier("memory context domain", context.domain), capability: boundedIdentifier("memory context capability", context.capability), risk_class: boundedIdentifier("memory context risk_class", context.risk_class) };
+    const normalizedContext = normalizeMemoryContext(input.context);
+    const contextDigest = await digestCanonicalJsonText(JSON.stringify(normalizedContext));
+    const suppliedContextDigest = boundedDigest("memory context_digest", input.context_digest ?? null, true);
+    if (suppliedContextDigest !== null && suppliedContextDigest !== contextDigest) throw new ArgumentError("memory context_digest does not match its context identity");
     if (!["completed", "failed", "partial", "approval_required"].includes(input.status)) throw new ArgumentError("memory episode status is unsupported");
     const selectedModel = input.selected_model === null || input.selected_model === undefined ? null : { provider: boundedIdentifier("memory selected provider", input.selected_model.provider), model: boundedIdentifier("memory selected model", input.selected_model.model) };
     const tags = [...new Set((input.tags ?? []).map((tag) => boundedString("memory tag", tag, 128)))].slice(0, AUTONOMOUS_MEMORY_MAX_TAGS);
@@ -296,7 +312,7 @@ export class InMemoryAutonomousEpisodicMemory implements AutonomousEpisodicMemor
     const normalizedProvenance = Object.fromEntries(Object.entries(provenance).map(([key, value]) => [boundedIdentifier("memory provenance key", key), boundedString("memory provenance value", value, 512)]));
     const route = normalizeRoute(input.route);
     const digests = normalizeDigests(input.digests);
-    const core = { schema: AUTONOMOUS_MEMORY_SCHEMA, episode_id: episodeId, run_id: boundedIdentifier("memory run_id", input.run_id), result_kind: boundedIdentifier("memory result_kind", input.result_kind), status: input.status, task_digest: taskDigest, context: normalizedContext, selected_model: selectedModel, digests, route, tags, lesson, provenance: normalizedProvenance, retention: PRIVATE_RETENTION, secret_material: "never_returned" as const };
+    const core = { schema: AUTONOMOUS_MEMORY_SCHEMA, episode_id: episodeId, run_id: boundedIdentifier("memory run_id", input.run_id), result_kind: boundedIdentifier("memory result_kind", input.result_kind), status: input.status, task_digest: taskDigest, context: normalizedContext, context_digest: contextDigest, selected_model: selectedModel, digests, route, tags, lesson, provenance: normalizedProvenance, retention: PRIVATE_RETENTION, secret_material: "never_returned" as const };
     const episodeDigest = await digestJson(core);
     const existing = this.episodes.get(episodeId);
     if (existing) {
@@ -349,16 +365,20 @@ export class InMemoryAutonomousEpisodicMemory implements AutonomousEpisodicMemor
     const statuses = new Set(query.statuses ?? []);
     for (const status of statuses) if (!["completed", "failed", "partial", "approval_required"].includes(status)) throw new ArgumentError("memory query contains an unsupported status");
     const taskDigest = query.task_digest === undefined ? undefined : boundedDigest("memory query task_digest", query.task_digest)!;
+    const contextDigest = query.context_digest === undefined ? undefined : boundedDigest("memory query context_digest", query.context_digest)!;
+    const taskFamily = query.task_family === undefined || query.task_family === null ? query.task_family : boundedIdentifier("memory query task_family", query.task_family);
     const matches = [...this.episodes.values()].filter((episode) => {
       if (query.domain !== undefined && episode.context.domain !== boundedIdentifier("memory query domain", query.domain)) return false;
       if (query.capability !== undefined && episode.context.capability !== boundedIdentifier("memory query capability", query.capability)) return false;
       if (query.risk_class !== undefined && episode.context.risk_class !== boundedIdentifier("memory query risk_class", query.risk_class)) return false;
+      if (taskFamily !== undefined && episode.context.task_family !== taskFamily) return false;
+      if (contextDigest !== undefined && episode.context_digest !== contextDigest) return false;
       if (taskDigest !== undefined && episode.task_digest !== taskDigest) return false;
       if (statuses.size && !statuses.has(episode.status)) return false;
       if (query.includeFailed === false && (episode.status === "failed" || episode.evaluation?.failed === true)) return false;
       if (tags.size && ![...tags].some((tag) => episode.tags.includes(tag))) return false;
       return true;
-    }).map((episode) => ({ score: (query.domain ? 20 : 0) + (query.capability ? 20 : 0) + (query.risk_class ? 10 : 0) + (query.task_digest ? 100 : 0) + [...tags].filter((tag) => episode.tags.includes(tag)).length * 5 + (episode.evaluation?.passed ? 2 : 0), episode }));
+    }).map((episode) => ({ score: (query.domain ? 20 : 0) + (query.capability ? 20 : 0) + (query.risk_class ? 10 : 0) + (query.task_family ? 20 : 0) + (query.context_digest ? 100 : 0) + (query.task_digest ? 100 : 0) + [...tags].filter((tag) => episode.tags.includes(tag)).length * 5 + (episode.evaluation?.passed ? 2 : 0), episode }));
     matches.sort((left, right) => right.score - left.score || right.episode.updated_at - left.episode.updated_at || left.episode.episode_id.localeCompare(right.episode.episode_id));
     return matches.slice(0, limit).map(({ episode }) => clone(episode));
   }
