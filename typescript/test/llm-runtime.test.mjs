@@ -5,6 +5,7 @@ import {
   CredentialError,
   CredentialProvisioner,
   CredentialStore,
+  AutonomousAgent,
   AutonomousRuntime,
   AutonomousExecutionController,
   InMemoryAutonomousExecutionJournal,
@@ -542,6 +543,35 @@ test("autonomous selection applies caller budget, latency, and quality gates bef
   assert.equal(refused.selected_model, null);
   assert.match(refused.abstention_reason, /latency exceeds the caller bound/);
   await assert.rejects(agent.invoke({ ...plan, maxLatencyMs: 10 }), /autonomous selection abstained/);
+});
+
+test("AutonomousAgent refreshes live model metadata with atomic catalogue reconciliation", async () => {
+  let discoveryCalls = 0;
+  const runtime = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      assert.equal(init.method, "GET");
+      discoveryCalls += 1;
+      const data = discoveryCalls === 1
+        ? [{ id: "model-a", context_window: 16_000, max_completion_tokens: 1_000, active: true }, { id: "model-b", context_window: 32_000, max_completion_tokens: 2_000, active: true }]
+        : [{ id: "model-a", context_window: 64_000, max_completion_tokens: 4_000, active: true }, { id: "model-c", context_window: 32_000, max_completion_tokens: 2_000, active: true }];
+      return jsonResponse({ data });
+    },
+  });
+  runtime.registerProvider(openaiCompatibleProvider("catalog", "https://catalog.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(runtime);
+  const defaults = { context_window_tokens: 8_000, max_output_tokens: 512, quality: 0.8, latency_ms: 500, cost_per_million_tokens: 30, reliability: 0.9 };
+  const first = await agent.refreshModels("catalog", defaults);
+  assert.equal(first.execution, "not_started;catalogue_registration_only");
+  assert.deepEqual(first.registered_model_ids, ["catalog/model-a", "catalog/model-b"]);
+  assert.deepEqual(agent.models().map((model) => model.model), ["model-a", "model-b"]);
+  await assert.rejects(agent.refreshModels("catalog", defaults), /already registered/);
+  assert.deepEqual(agent.models().map((model) => model.model), ["model-a", "model-b"], "a conflicting refresh must not partially register new models");
+  const replaced = await agent.refreshModels("catalog", defaults, { replaceExisting: true });
+  assert.deepEqual(replaced.replaced_model_ids, ["catalog/model-a"]);
+  assert.deepEqual(replaced.registered_model_ids, ["catalog/model-c"]);
+  assert.equal(agent.models().find((model) => model.model === "model-a").context_window_tokens, 64_000);
+  assert.equal(discoveryCalls, 3);
 });
 
 test("autonomous runtime performs bounded provider failover and journals the admission", async () => {

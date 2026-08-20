@@ -18,6 +18,9 @@ import {
   type ProviderToolCall,
   type ProviderToolResult,
   LLMRuntime,
+  providerModelsToCandidates,
+  type AutonomousModelCandidateDefaults,
+  type ProviderModelDiscovery,
 } from "./llm.js";
 import { ToolCatalogue, canonicalJson, digestJson } from "./tooling.js";
 import type {
@@ -49,6 +52,7 @@ export const AUTONOMOUS_DOMAIN_TOOL_PLAN_SCHEMA = "bioprism-typescript-autonomou
 export const AUTONOMOUS_LEARNING_SCHEMA = "bioprism-typescript-autonomous-online-learning/0.1" as const;
 export const AUTONOMOUS_CROSS_DOMAIN_SCHEMA = "bioprism-typescript-autonomous-cross-domain/0.1" as const;
 export const AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA = "bioprism-typescript-autonomous-cross-domain-result/0.1" as const;
+export const AUTONOMOUS_MODEL_REFRESH_SCHEMA = "bioprism-typescript-autonomous-model-refresh/0.1" as const;
 export const AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN = 8;
 export const AUTONOMOUS_CROSS_DOMAIN_MAX_CONCURRENCY = 4;
 
@@ -440,6 +444,20 @@ export interface AutonomousAgentOptions {
   learner?: AutonomousOnlineLearner;
 }
 
+export interface AutonomousModelRefreshResult {
+  schema: typeof AUTONOMOUS_MODEL_REFRESH_SCHEMA;
+  provider: string;
+  discovered_model_count: number;
+  candidate_count: number;
+  candidates: AutonomousModelCandidate[];
+  registered_model_ids: string[];
+  replaced_model_ids: string[];
+  discovery: ProviderModelDiscovery;
+  execution: "not_started;catalogue_registration_only";
+  retention: "model_metadata_only;credentials_and_raw_catalogue_not_retained";
+  secret_material: "never_returned";
+}
+
 export interface AutonomousRunOptions {
   domain?: AutonomousDomainName;
   /** Reuse a route already approved by a caller-owned semantic router. */
@@ -632,6 +650,19 @@ function boundedIdentifier(name: string, value: unknown): string {
   const text = boundedText(name, value, 256);
   if (!/^[A-Za-z0-9_.-]+$/.test(text)) throw new ArgumentError(`${name} must be a bounded identifier`);
   return text;
+}
+
+function normalizeAutonomousModelCandidate(candidate: AutonomousModelCandidate): AutonomousModelCandidate {
+  if (!isObject(candidate)) throw new ArgumentError("autonomous model candidate must be an object");
+  const provider = boundedText("autonomous model provider", candidate.provider, 128);
+  const model = boundedText("autonomous model id", candidate.model, 512);
+  let capabilities: string[] | undefined;
+  if (candidate.capabilities !== undefined) {
+    if (!Array.isArray(candidate.capabilities) || candidate.capabilities.length > 128) throw new ArgumentError("autonomous model capabilities are outside their bounds");
+    capabilities = candidate.capabilities.map((capability) => boundedText("autonomous model capability", capability, 128));
+    if (new Set(capabilities).size !== capabilities.length) throw new ArgumentError("autonomous model capabilities contain duplicates");
+  }
+  return { ...candidate, provider, model, ...(capabilities ? { capabilities } : {}) };
 }
 
 function normalizedCrossDomainConcurrency(value: number | undefined, totalChildren: number): number {
@@ -1340,21 +1371,54 @@ export class AutonomousAgent {
   }
 
   registerModel(candidate: AutonomousModelCandidate, options: { replaceExisting?: boolean } = {}): AutonomousModelCandidate {
-    if (!isObject(candidate) || typeof candidate.provider !== "string" || typeof candidate.model !== "string") throw new ArgumentError("autonomous model candidate must contain provider and model");
-    const normalized: AutonomousModelCandidate = { ...candidate };
-    const id = `${normalized.provider}/${normalized.model}`;
-    if (this.modelsById.has(id) && options.replaceExisting !== true) throw new ArgumentError(`autonomous model ${id} is already registered`);
-    this.modelsById.set(id, normalized);
-    return { ...normalized };
+    return this.registerModels([candidate], options)[0]!;
   }
 
   registerModels(candidates: readonly AutonomousModelCandidate[], options: { replaceExisting?: boolean } = {}): AutonomousModelCandidate[] {
     if (!Array.isArray(candidates) || !candidates.length || candidates.length > 128) throw new ArgumentError("autonomous model catalogue must contain 1..=128 candidates");
-    return candidates.map((candidate) => this.registerModel(candidate, options));
+    const normalized = candidates.map((candidate) => normalizeAutonomousModelCandidate(candidate));
+    const batchIds = new Set<string>();
+    for (const candidate of normalized) {
+      const id = `${candidate.provider}/${candidate.model}`;
+      if (!batchIds.add(id)) throw new ArgumentError(`autonomous model ${id} is duplicated in the registration batch`);
+      if (this.modelsById.has(id) && options.replaceExisting !== true) throw new ArgumentError(`autonomous model ${id} is already registered`);
+    }
+    for (const candidate of normalized) this.modelsById.set(`${candidate.provider}/${candidate.model}`, candidate);
+    return normalized.map((candidate) => ({ ...candidate, capabilities: candidate.capabilities ? [...candidate.capabilities] : undefined }));
   }
 
   models(): AutonomousModelCandidate[] {
     return [...this.modelsById.values()].sort((left, right) => `${left.provider}/${left.model}`.localeCompare(`${right.provider}/${right.model}`)).map((candidate) => ({ ...candidate, capabilities: candidate.capabilities ? [...candidate.capabilities] : undefined }));
+  }
+
+  /** Discover live provider model metadata and atomically reconcile it into this agent's catalogue. */
+  async refreshModels(
+    provider: string,
+    defaults: AutonomousModelCandidateDefaults,
+    options: { credential?: CredentialHandle; signal?: AbortSignal; replaceExisting?: boolean } = {},
+  ): Promise<AutonomousModelRefreshResult> {
+    const normalizedProvider = boundedText("autonomous model refresh provider", provider, 128);
+    const discovery = await this.llm.discoverModels(normalizedProvider, { credential: options.credential, signal: options.signal });
+    const candidates = providerModelsToCandidates(discovery.models, defaults);
+    if (candidates.some((candidate) => candidate.provider !== normalizedProvider)) throw new ProviderRuntimeError("provider model discovery returned a candidate for a different provider");
+    const ids = candidates.map((candidate) => `${candidate.provider}/${candidate.model}`);
+    const existing = new Set(this.modelsById.keys());
+    const replaced = options.replaceExisting === true ? ids.filter((id) => existing.has(id)) : [];
+    const registered = ids.filter((id) => !existing.has(id));
+    const reconciled = this.registerModels(candidates, { replaceExisting: options.replaceExisting === true });
+    return {
+      schema: AUTONOMOUS_MODEL_REFRESH_SCHEMA,
+      provider: normalizedProvider,
+      discovered_model_count: discovery.model_count,
+      candidate_count: reconciled.length,
+      candidates: reconciled,
+      registered_model_ids: registered,
+      replaced_model_ids: replaced,
+      discovery,
+      execution: "not_started;catalogue_registration_only",
+      retention: "model_metadata_only;credentials_and_raw_catalogue_not_retained",
+      secret_material: "never_returned",
+    };
   }
 
   async profiles(): Promise<AutonomousDomainProfile[]> {

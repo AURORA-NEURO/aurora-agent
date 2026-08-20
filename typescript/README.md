@@ -125,6 +125,23 @@ const candidates = setup.modelCandidates(discovery, {
 agent.registerModels(candidates);
 ```
 
+For an atomic live-catalog reconciliation, the agent can perform discovery and registration as one
+bounded operation:
+
+```typescript
+const refresh = await agent.refreshModels("groq", {
+  context_window_tokens: 8_000,
+  max_output_tokens: 512,
+  quality: 0.8,
+  latency_ms: 500,
+  cost_per_million_tokens: 30,
+  reliability: 0.9,
+}, { credential: session.handle("groq"), replaceExisting: true });
+```
+
+Discovery is completed and every candidate is validated before the in-memory catalogue changes.
+Non-replacing conflicts fail the full batch rather than partially registering new models.
+
 Discovery uses the same short-lived credential handle, calls the provider's bounded `/models`
 endpoint, and returns only ids, capacity metadata, active state, ownership, and two derived
 capability labels. The raw catalog, authorization header, and key are discarded. Capacity comes

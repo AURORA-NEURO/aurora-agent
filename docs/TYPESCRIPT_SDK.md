@@ -94,6 +94,20 @@ and reliability priors explicitly; it does not fabricate those values from a mod
 keeps model selection current without making model availability, provider authentication, or
 scientific validity claims, and the next approved invocation remains the live access check.
 
+When the live catalog should be the agent's source of truth, `AutonomousAgent.refreshModels()`
+combines discovery, caller-supplied priors, and registration:
+
+```typescript
+const refresh = await agent.refreshModels("groq", priors, {
+  credential: session.handle("groq"),
+  replaceExisting: true,
+});
+```
+
+The refresh validates every candidate before mutation. A non-replacing conflict refuses the whole
+batch, so a newly discovered model is never registered alongside a conflicting stale model. The
+returned receipt contains only redacted model metadata and registration/replacement IDs.
+
 ### Provider failure and retry contract
 
 `ProviderRuntimeError` is the stable boundary for provider transport and protocol failures. Its

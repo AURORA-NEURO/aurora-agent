@@ -140,6 +140,7 @@ export {
   AUTONOMOUS_CROSS_DOMAIN_MAX_CONCURRENCY,
   AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA,
   AUTONOMOUS_CROSS_DOMAIN_SCHEMA,
+  AUTONOMOUS_MODEL_REFRESH_SCHEMA,
   AUTONOMOUS_LEARNING_SCHEMA,
   AUTONOMOUS_PLAN_SCHEMA,
   AUTONOMOUS_PROMPT_SCHEMA,
@@ -187,6 +188,7 @@ export type {
   AutonomousWorkflow,
   AutonomousWorkflowStage,
   AutonomousAgentOptions,
+  AutonomousModelRefreshResult,
   DomainToolApprover,
   DomainToolExecutor,
 } from "./autonomous.js";
