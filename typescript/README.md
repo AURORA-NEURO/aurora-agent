@@ -96,6 +96,29 @@ is supplied, or accepts a value-only selector backed by the Rust/Python contextu
 Provider failures remain typed and credential failures are not silently converted into generic
 transport errors.
 
+Model ids can be refreshed from the provider instead of being copied from stale configuration:
+
+```typescript
+const discovery = await setup.discoverModels(session, "groq");
+const candidates = setup.modelCandidates(discovery, {
+  context_window_tokens: 8_000,
+  max_output_tokens: 512,
+  quality: 0.8,
+  latency_ms: 500,
+  cost_per_million_tokens: 30,
+  reliability: 0.9,
+});
+agent.registerModels(candidates);
+```
+
+Discovery uses the same short-lived credential handle, calls the provider's bounded `/models`
+endpoint, and returns only ids, capacity metadata, active state, ownership, and two derived
+capability labels. The raw catalog, authorization header, and key are discarded. Capacity comes
+from the provider when available; quality, latency, cost, and reliability remain explicit
+caller-owned priors rather than invented provider claims. A discovered model is not by itself
+evidence that the provider will accept a future request, so invocation remains the live access
+check and selection still applies credential, capability, capacity, approval, and health gates.
+
 For restart-safe cross-runtime feedback, construct `AutonomousBrainControlPlaneBridge` around the
 same `ApiClient` used for the Rust/Python brain tools and pass it as `modelHealthBridge` to
 `AutonomousAgent`. The bridge mirrors invocation outcomes to `brain_model_health`, converts

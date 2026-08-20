@@ -5,6 +5,7 @@ import type { JsonObject, JsonValue } from "./types.js";
 export const LLM_RUNTIME_SCHEMA = "bioprism-typescript-llm-runtime/0.1" as const;
 export const PROVIDER_OBSERVATION_SCHEMA = "bioprism-typescript-llm-provider-observation/0.1" as const;
 export const CREDENTIAL_ONBOARDING_SCHEMA = "bioprism-typescript-llm-credential-onboarding/0.1" as const;
+export const PROVIDER_MODEL_DISCOVERY_SCHEMA = "bioprism-typescript-llm-provider-model-discovery/0.1" as const;
 
 export const MAX_PROVIDER_MESSAGE_BYTES = 2_000_000;
 export const MAX_PROVIDER_REQUEST_BYTES = 8_000_000;
@@ -15,6 +16,7 @@ export const MAX_PROVIDER_STREAM_EVENTS = 100_000;
 export const MAX_PROVIDER_STREAM_TEXT_BYTES = 20_000_000;
 export const MAX_PROVIDER_TURNS = 32;
 export const MAX_PROVIDER_CREDENTIAL_BYTES = 16_384;
+export const MAX_PROVIDER_MODELS = 512;
 export const MAX_CREDENTIAL_PROVISIONING_SOURCES = 128;
 export const MAX_CREDENTIAL_PROVISIONING_PROVIDERS = 128;
 export const MAX_CREDENTIAL_SOURCE_LABEL_BYTES = 256;
@@ -27,6 +29,7 @@ export interface ProviderConfig {
   baseUrl: string;
   protocol: ProviderProtocol;
   path?: string;
+  modelsPath?: string;
   requiresCredential?: boolean;
   apiKeyHeader?: string;
   timeoutMs?: number;
@@ -44,6 +47,7 @@ interface NormalizedProviderConfig {
   readonly baseUrl: string;
   readonly protocol: ProviderProtocol;
   readonly path: string;
+  readonly modelsPath: string;
   readonly requiresCredential: boolean;
   readonly apiKeyHeader: string;
   readonly timeoutMs: number;
@@ -349,6 +353,32 @@ export interface ProviderResponse {
   stopReason: string | null;
 }
 
+/** Bounded provider model metadata; raw catalog rows and credential material are never returned. */
+export interface ProviderModelRecord extends JsonObject {
+  schema: typeof PROVIDER_MODEL_DISCOVERY_SCHEMA;
+  provider: string;
+  model: string;
+  active: boolean | null;
+  created_at: number | null;
+  owned_by: string | null;
+  context_window_tokens: number | null;
+  max_output_tokens: number | null;
+  capabilities: string[];
+  metadata_only: true;
+}
+
+export interface ProviderModelDiscovery extends JsonObject {
+  schema: typeof PROVIDER_MODEL_DISCOVERY_SCHEMA;
+  provider: string;
+  status_code: number;
+  request_id: string | null;
+  models_path: string;
+  models: ProviderModelRecord[];
+  model_count: number;
+  retention: "metadata_only;credential_and_raw_provider_response_not_retained";
+  secret_material: "never_returned";
+}
+
 export interface ProviderStreamEvent {
   provider: string;
   model: string;
@@ -406,6 +436,17 @@ export interface AutonomousModelCandidate extends JsonObject {
   reliability: number;
   requires_credential?: boolean;
   enabled?: boolean;
+}
+
+/** Explicit caller-supplied priors needed to turn provider metadata into selection candidates. */
+export interface AutonomousModelCandidateDefaults extends JsonObject {
+  context_window_tokens: number;
+  max_output_tokens: number;
+  quality: number;
+  latency_ms: number;
+  cost_per_million_tokens: number;
+  reliability: number;
+  capabilities?: string[];
 }
 
 export interface AutonomousSelectionRequest extends JsonObject {
@@ -609,6 +650,7 @@ function normalizeConfig(config: ProviderConfig): NormalizedProviderConfig {
   if (url.username || url.password || url.search || url.hash) throw new ProviderRuntimeError("provider baseUrl cannot contain credentials, query, or fragment");
   if (!Number.isFinite(url.port ? Number(url.port) : 0)) throw new ProviderRuntimeError("provider baseUrl port is invalid");
   const path = boundedPath("provider path", config.path ?? DEFAULT_PATHS[config.protocol]);
+  const modelsPath = boundedPath("provider modelsPath", config.modelsPath ?? "/models");
   const requiresCredential = config.requiresCredential ?? true;
   const timeoutMs = config.timeoutMs ?? 60_000;
   const maxAttempts = config.maxAttempts ?? 1;
@@ -630,6 +672,7 @@ function normalizeConfig(config: ProviderConfig): NormalizedProviderConfig {
     baseUrl: url.toString().replace(/\/$/, ""),
     protocol: config.protocol,
     path,
+    modelsPath,
     requiresCredential,
     apiKeyHeader,
     timeoutMs,
@@ -854,6 +897,142 @@ function parseResponse(config: NormalizedProviderConfig, payload: JsonObject, st
   return { provider: config.provider, model, text, statusCode, requestId, usage, structured, toolCalls, stopReason };
 }
 
+function projectModelCatalog(config: NormalizedProviderConfig, payload: JsonObject, statusCode: number, requestId: string | null): ProviderModelDiscovery {
+  if (!Array.isArray(payload.data) || payload.data.length > MAX_PROVIDER_MODELS) {
+    throw new ProviderRuntimeError("provider model catalog data is outside its bounded contract", { statusCode });
+  }
+  const seen = new Set<string>();
+  const models: ProviderModelRecord[] = [];
+  for (const item of payload.data) {
+    if (!isObject(item) || typeof item.id !== "string") throw new ProviderRuntimeError("provider model catalog contains a malformed model row", { statusCode });
+    const model = boundedIdentifier("provider model id", item.id, 512);
+    if (seen.has(model)) throw new ProviderRuntimeError("provider model catalog contains duplicate model ids", { statusCode });
+    seen.add(model);
+    const active = typeof item.active === "boolean" ? item.active : null;
+    const created = item.created ?? item.created_at;
+    const createdAt = created === undefined ? null : boundedOptionalInteger("provider model created timestamp", created, 0, Number.MAX_SAFE_INTEGER, statusCode);
+    const ownedBy = item.owned_by === undefined || item.owned_by === null
+      ? null
+      : boundedIdentifier("provider model owner", item.owned_by, 256);
+    const contextWindow = firstBoundedInteger(
+      "provider model context window",
+      [item.context_window, item.context_length, item.context_window_tokens],
+      1,
+      100_000_000,
+      statusCode,
+    );
+    const maxOutput = firstBoundedInteger(
+      "provider model output capacity",
+      [item.max_completion_tokens, item.max_output_tokens, item.max_tokens],
+      1,
+      10_000_000,
+      statusCode,
+    );
+    const capabilities = modelCapabilities(item);
+    models.push({
+      schema: PROVIDER_MODEL_DISCOVERY_SCHEMA,
+      provider: config.provider,
+      model,
+      active,
+      created_at: createdAt,
+      owned_by: ownedBy,
+      context_window_tokens: contextWindow,
+      max_output_tokens: maxOutput,
+      capabilities,
+      metadata_only: true,
+    });
+  }
+  return {
+    schema: PROVIDER_MODEL_DISCOVERY_SCHEMA,
+    provider: config.provider,
+    status_code: statusCode,
+    request_id: requestId,
+    models_path: config.modelsPath,
+    models,
+    model_count: models.length,
+    retention: "metadata_only;credential_and_raw_provider_response_not_retained",
+    secret_material: "never_returned",
+  };
+}
+
+function modelCapabilities(row: Record<string, unknown>): string[] {
+  const parameters = Array.isArray(row.supported_parameters)
+    ? row.supported_parameters.filter((value): value is string => typeof value === "string").map((value) => value.toLowerCase())
+    : [];
+  const capabilities: string[] = [];
+  if (parameters.some((value) => ["tools", "tool_choice", "functions", "function_call"].includes(value))) capabilities.push("tool_use");
+  if (parameters.some((value) => ["response_format", "json_object", "json_schema", "structured_outputs"].includes(value))) capabilities.push("structured_output");
+  return capabilities.sort();
+}
+
+function boundedOptionalInteger(name: string, value: unknown, minimum: number, maximum: number, statusCode: number): number | null {
+  if (!Number.isSafeInteger(value) || (value as number) < minimum || (value as number) > maximum) {
+    throw new ProviderRuntimeError(`${name} is outside its bounded contract`, { statusCode });
+  }
+  return value as number;
+}
+
+function firstBoundedInteger(name: string, values: unknown[], minimum: number, maximum: number, statusCode: number): number | null {
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+    return boundedOptionalInteger(name, value, minimum, maximum, statusCode);
+  }
+  return null;
+}
+
+/** Convert discovered metadata into selectable candidates while keeping quality and cost caller-owned. */
+export function providerModelsToCandidates(
+  models: readonly ProviderModelRecord[],
+  defaults: AutonomousModelCandidateDefaults,
+): AutonomousModelCandidate[] {
+  if (!Array.isArray(models) || models.length === 0 || models.length > MAX_PROVIDER_MODELS) throw new ProviderRuntimeError("provider model candidates are outside their bound");
+  const contextWindow = boundedCandidateMetric("context_window_tokens", defaults.context_window_tokens, 1, 100_000_000);
+  const maxOutput = boundedCandidateMetric("max_output_tokens", defaults.max_output_tokens, 1, 10_000_000);
+  const quality = boundedCandidateMetric("quality", defaults.quality, 0, 1);
+  const latency = boundedCandidateMetric("latency_ms", defaults.latency_ms, 0, 10 * 60_000);
+  const cost = boundedCandidateMetric("cost_per_million_tokens", defaults.cost_per_million_tokens, 0, 1_000_000_000);
+  const reliability = boundedCandidateMetric("reliability", defaults.reliability, 0, 1);
+  const defaultCapabilities = normalizeCandidateCapabilities(defaults.capabilities ?? []);
+  const seen = new Set<string>();
+  return models.map((row) => {
+    const raw = row as unknown as Record<string, unknown>;
+    if (typeof raw.provider !== "string" || typeof raw.model !== "string") throw new ProviderRuntimeError("provider model candidate metadata is malformed");
+    const provider = boundedIdentifier("provider model candidate provider", raw.provider, 128);
+    const model = boundedIdentifier("provider model candidate model", raw.model, 512);
+    const id = `${provider}/${model}`;
+    if (seen.has(id)) throw new ProviderRuntimeError("provider model candidates contain duplicate arms");
+    seen.add(id);
+    const discoveredContext = typeof raw.context_window_tokens === "number" ? raw.context_window_tokens : contextWindow;
+    const discoveredOutput = typeof raw.max_output_tokens === "number" ? raw.max_output_tokens : maxOutput;
+    if (!Number.isSafeInteger(discoveredContext) || discoveredContext < 1 || discoveredContext > 100_000_000) throw new ProviderRuntimeError("discovered model context window is invalid");
+    if (!Number.isSafeInteger(discoveredOutput) || discoveredOutput < 1 || discoveredOutput > 10_000_000) throw new ProviderRuntimeError("discovered model output capacity is invalid");
+    const capabilities = normalizeCandidateCapabilities([...(Array.isArray(raw.capabilities) ? raw.capabilities : []), ...defaultCapabilities]);
+    return {
+      provider,
+      model,
+      capabilities,
+      context_window_tokens: discoveredContext,
+      max_output_tokens: discoveredOutput,
+      quality,
+      latency_ms: latency,
+      cost_per_million_tokens: cost,
+      reliability,
+      enabled: raw.active !== false,
+    };
+  });
+}
+
+function boundedCandidateMetric(name: string, value: unknown, minimum: number, maximum: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < minimum || value > maximum) throw new ProviderRuntimeError(`${name} is outside its bounded candidate contract`);
+  return value;
+}
+
+function normalizeCandidateCapabilities(values: readonly unknown[]): string[] {
+  const result = new Set<string>();
+  for (const value of values) result.add(boundedIdentifier("provider model capability", value, 128));
+  return [...result].sort();
+}
+
 async function readBoundedBody(response: Response, maximum: number): Promise<string> {
   if (!response.body) {
     const text = await response.text();
@@ -907,6 +1086,13 @@ function endpointUrl(config: NormalizedProviderConfig): string {
   const url = new URL(config.baseUrl);
   const basePath = url.pathname.replace(/\/+$/, "");
   url.pathname = `${basePath}${config.path}` || "/";
+  return url.toString();
+}
+
+function modelsEndpointUrl(config: NormalizedProviderConfig): string {
+  const url = new URL(config.baseUrl);
+  const basePath = url.pathname.replace(/\/+$/, "");
+  url.pathname = `${basePath}${config.modelsPath}` || "/";
   return url.toString();
 }
 
@@ -1089,10 +1275,38 @@ export class LLMRuntime {
       protocol: config.protocol,
       base_url: config.baseUrl,
       path: config.path,
+      models_path: config.modelsPath,
       requires_credential: config.requiresCredential,
       credential_posture: "caller_supplied_opaque_handle_not_returned",
       secret_material: "never_returned",
     }));
+  }
+
+  /**
+   * Discover currently available models through a provider's bounded catalog endpoint.
+   *
+   * The credential is resolved only while constructing the request. The response is reduced to
+   * stable model metadata, and neither the raw catalog nor authorization material enters runtime
+   * health, selection, telemetry, or persistence surfaces.
+   */
+  async discoverModels(
+    provider: string,
+    options: { credential?: CredentialHandle; signal?: AbortSignal } = {},
+  ): Promise<ProviderModelDiscovery> {
+    const config = this.requireProvider(provider);
+    let response: Response;
+    try {
+      response = await this.fetchModelCatalog(config, options.credential, options.signal);
+    } catch (unknownError) {
+      const error = errorFromUnknown(unknownError);
+      throw error;
+    }
+    const body = await readBoundedBody(response, config.maxResponseBytes);
+    if (response.status >= 400) throw providerHttpError(response.status);
+    let payload: unknown;
+    try { payload = JSON.parse(body); } catch { throw new ProviderRuntimeError("provider model catalog returned non-JSON data", { statusCode: response.status }); }
+    if (!isObject(payload)) throw new ProviderRuntimeError("provider model catalog must be a JSON object", { statusCode: response.status });
+    return projectModelCatalog(config, payload as JsonObject, response.status, requestIdFromHeaders(response.headers));
   }
 
   providerStatus(provider: string): ProviderHealth {
@@ -1362,6 +1576,27 @@ export class LLMRuntime {
     }
   }
 
+  private async fetchModelCatalog(config: NormalizedProviderConfig, credential: CredentialHandle | undefined, callerSignal: AbortSignal | undefined): Promise<Response> {
+    if (config.requiresCredential && credential === undefined) throw new CredentialError(`provider ${config.provider} requires a user credential handle`);
+    if (!config.requiresCredential && credential !== undefined) throw new CredentialError(`provider ${config.provider} does not accept a credential handle`);
+    const secret = credential === undefined ? null : this.credentials.resolve(credential, config.provider);
+    const headers: Record<string, string> = { Accept: "application/json" };
+    if (secret !== null) headers[config.apiKeyHeader] = config.protocol === "anthropic_messages" ? secret : `Bearer ${secret}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), config.timeoutMs);
+    const abort = (): void => controller.abort();
+    callerSignal?.addEventListener("abort", abort, { once: true });
+    try {
+      return await this.fetchImplementation(modelsEndpointUrl(config), { method: "GET", headers, signal: controller.signal });
+    } catch (unknownError) {
+      if (unknownError instanceof CredentialError || unknownError instanceof ProviderRuntimeError) throw unknownError;
+      throw new ProviderRuntimeError("provider model discovery transport failed; credential material was discarded", { retryable: true });
+    } finally {
+      clearTimeout(timer);
+      callerSignal?.removeEventListener("abort", abort);
+    }
+  }
+
   private record(provider: string, model: string, success: boolean, latencyMs: number, statusCode: number | null, response?: ProviderResponse): void {
     const record = (state: HealthState): void => {
       state.attempts += 1;
@@ -1588,12 +1823,12 @@ export type ProviderFactoryOptions = Omit<ProviderConfig, "provider" | "protocol
 
 export function openaiProvider(options: ProviderFactoryOptions = {}): ProviderConfig {
   const { baseUrl, ...rest } = options;
-  return { ...rest, provider: "openai", protocol: "openai_responses", baseUrl: baseUrl ?? "https://api.openai.com" };
+  return { ...rest, provider: "openai", protocol: "openai_responses", baseUrl: baseUrl ?? "https://api.openai.com", modelsPath: rest.modelsPath ?? "/v1/models" };
 }
 
 export function anthropicProvider(options: ProviderFactoryOptions = {}): ProviderConfig {
   const { baseUrl, ...rest } = options;
-  return { ...rest, provider: "anthropic", protocol: "anthropic_messages", baseUrl: baseUrl ?? "https://api.anthropic.com", structuredOutputMode: rest.structuredOutputMode ?? "disabled" };
+  return { ...rest, provider: "anthropic", protocol: "anthropic_messages", baseUrl: baseUrl ?? "https://api.anthropic.com", modelsPath: rest.modelsPath ?? "/v1/models", structuredOutputMode: rest.structuredOutputMode ?? "disabled" };
 }
 
 export function openaiCompatibleProvider(provider: string, baseUrl: string, options: Omit<ProviderConfig, "provider" | "protocol" | "baseUrl"> = {}): ProviderConfig {
@@ -1606,6 +1841,7 @@ export function deepseekProvider(options: ProviderFactoryOptions = {}): Provider
   return openaiCompatibleProvider("deepseek", baseUrl ?? "https://api.deepseek.com", {
     ...rest,
     path: rest.path ?? "/chat/completions",
+    modelsPath: rest.modelsPath ?? "/models",
     structuredOutputMode: rest.structuredOutputMode ?? "json_object",
   });
 }
@@ -1615,6 +1851,7 @@ export function groqProvider(options: ProviderFactoryOptions = {}): ProviderConf
   return openaiCompatibleProvider("groq", baseUrl ?? "https://api.groq.com/openai/v1", {
     ...rest,
     path: rest.path ?? "/chat/completions",
+    modelsPath: rest.modelsPath ?? "/models",
     structuredOutputMode: rest.structuredOutputMode ?? "json_object",
   });
 }
@@ -1624,6 +1861,7 @@ export function mistralProvider(options: ProviderFactoryOptions = {}): ProviderC
   return openaiCompatibleProvider("mistral", baseUrl ?? "https://api.mistral.ai", {
     ...rest,
     path: rest.path ?? "/v1/chat/completions",
+    modelsPath: rest.modelsPath ?? "/v1/models",
     structuredOutputMode: rest.structuredOutputMode ?? "json_object",
   });
 }
@@ -1633,6 +1871,7 @@ export function openrouterProvider(options: ProviderFactoryOptions = {}): Provid
   return openaiCompatibleProvider("openrouter", baseUrl ?? "https://openrouter.ai/api/v1", {
     ...rest,
     path: rest.path ?? "/chat/completions",
+    modelsPath: rest.modelsPath ?? "/models",
     structuredOutputMode: rest.structuredOutputMode ?? "json_object",
   });
 }
@@ -1642,6 +1881,7 @@ export function xaiProvider(options: ProviderFactoryOptions = {}): ProviderConfi
   return openaiCompatibleProvider("xai", baseUrl ?? "https://api.x.ai", {
     ...rest,
     path: rest.path ?? "/v1/chat/completions",
+    modelsPath: rest.modelsPath ?? "/v1/models",
     structuredOutputMode: rest.structuredOutputMode ?? "json_object",
   });
 }

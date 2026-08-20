@@ -9,12 +9,16 @@ import {
   ProviderCredentialInstructions,
   ProviderFactoryOptions,
   ProviderOnboarding,
+  AutonomousModelCandidate,
+  AutonomousModelCandidateDefaults,
+  ProviderModelDiscovery,
   anthropicProvider,
   deepseekProvider,
   groqProvider,
   mistralProvider,
   openaiProvider,
   openrouterProvider,
+  providerModelsToCandidates,
   xaiProvider,
 } from "./llm.js";
 import type { JsonObject } from "./types.js";
@@ -48,6 +52,7 @@ export interface ProviderPreset extends JsonObject {
   protocol: ProviderConfig["protocol"];
   default_base_url: string;
   default_path: string;
+  default_models_path: string;
   default_structured_output_mode: NonNullable<ProviderConfig["structuredOutputMode"]>;
   environment_variable: string;
   requires_credential: true;
@@ -89,6 +94,7 @@ interface ProviderPresetRecord {
   readonly protocol: ProviderConfig["protocol"];
   readonly baseUrl: string;
   readonly path: string;
+  readonly modelsPath: string;
   readonly structuredOutputMode: NonNullable<ProviderConfig["structuredOutputMode"]>;
   readonly environmentVariable: string;
 }
@@ -100,6 +106,7 @@ const PRESET_RECORDS: Readonly<Record<SupportedProviderName, ProviderPresetRecor
     protocol: "openai_responses",
     baseUrl: "https://api.openai.com",
     path: "/v1/responses",
+    modelsPath: "/v1/models",
     structuredOutputMode: "json_schema",
     environmentVariable: "OPENAI_API_KEY",
   },
@@ -109,6 +116,7 @@ const PRESET_RECORDS: Readonly<Record<SupportedProviderName, ProviderPresetRecor
     protocol: "anthropic_messages",
     baseUrl: "https://api.anthropic.com",
     path: "/v1/messages",
+    modelsPath: "/v1/models",
     structuredOutputMode: "disabled",
     environmentVariable: "ANTHROPIC_API_KEY",
   },
@@ -118,6 +126,7 @@ const PRESET_RECORDS: Readonly<Record<SupportedProviderName, ProviderPresetRecor
     protocol: "openai_chat_completions",
     baseUrl: "https://api.deepseek.com",
     path: "/chat/completions",
+    modelsPath: "/models",
     structuredOutputMode: "json_object",
     environmentVariable: "DEEPSEEK_API_KEY",
   },
@@ -127,6 +136,7 @@ const PRESET_RECORDS: Readonly<Record<SupportedProviderName, ProviderPresetRecor
     protocol: "openai_chat_completions",
     baseUrl: "https://api.groq.com/openai/v1",
     path: "/chat/completions",
+    modelsPath: "/models",
     structuredOutputMode: "json_object",
     environmentVariable: "GROQ_API_KEY",
   },
@@ -136,6 +146,7 @@ const PRESET_RECORDS: Readonly<Record<SupportedProviderName, ProviderPresetRecor
     protocol: "openai_chat_completions",
     baseUrl: "https://api.mistral.ai",
     path: "/v1/chat/completions",
+    modelsPath: "/v1/models",
     structuredOutputMode: "json_object",
     environmentVariable: "MISTRAL_API_KEY",
   },
@@ -145,6 +156,7 @@ const PRESET_RECORDS: Readonly<Record<SupportedProviderName, ProviderPresetRecor
     protocol: "openai_chat_completions",
     baseUrl: "https://openrouter.ai/api/v1",
     path: "/chat/completions",
+    modelsPath: "/models",
     structuredOutputMode: "json_object",
     environmentVariable: "OPENROUTER_API_KEY",
   },
@@ -154,6 +166,7 @@ const PRESET_RECORDS: Readonly<Record<SupportedProviderName, ProviderPresetRecor
     protocol: "openai_chat_completions",
     baseUrl: "https://api.x.ai",
     path: "/v1/chat/completions",
+    modelsPath: "/v1/models",
     structuredOutputMode: "json_object",
     environmentVariable: "XAI_API_KEY",
   },
@@ -174,6 +187,7 @@ function presetFromRecord(record: ProviderPresetRecord): ProviderPreset {
     protocol: record.protocol,
     default_base_url: record.baseUrl,
     default_path: record.path,
+    default_models_path: record.modelsPath,
     default_structured_output_mode: record.structuredOutputMode,
     environment_variable: record.environmentVariable,
     requires_credential: true,
@@ -199,6 +213,7 @@ export function providerConfig(provider: string, options: ProviderFactoryOptions
     ...options,
     baseUrl: options.baseUrl ?? record.baseUrl,
     path: options.path ?? record.path,
+    modelsPath: options.modelsPath ?? record.modelsPath,
     structuredOutputMode: options.structuredOutputMode ?? record.structuredOutputMode,
   } satisfies ProviderFactoryOptions;
   switch (record.provider) {
@@ -305,6 +320,18 @@ export class ProviderSetup {
   async provision(session: CredentialSession, options: { providers?: readonly string[]; environment?: Record<string, string | undefined> } = {}): Promise<CredentialProvisioningResult> {
     this.assertSession(session);
     return this.provisioner.provision(session, options);
+  }
+
+  /** Discover live model ids through a short-lived session without returning raw provider data. */
+  async discoverModels(session: CredentialSession, provider: string, options: { signal?: AbortSignal } = {}): Promise<ProviderModelDiscovery> {
+    this.assertSession(session);
+    return this.runtime.discoverModels(provider, { credential: session.handle(provider), signal: options.signal });
+  }
+
+  /** Apply explicit caller-owned quality, cost, and reliability priors to discovered rows. */
+  modelCandidates(discovery: ProviderModelDiscovery, defaults: AutonomousModelCandidateDefaults): AutonomousModelCandidate[] {
+    if (!discovery || typeof discovery !== "object" || !Array.isArray(discovery.models)) throw new CredentialError("provider model discovery is malformed");
+    return providerModelsToCandidates(discovery.models, defaults);
   }
 
   /** Safe setup snapshot for a UI, operator dashboard, or readiness gate. */

@@ -11,6 +11,7 @@ import {
   anthropicProvider,
   openaiCompatibleProvider,
   openaiProvider,
+  providerModelsToCandidates,
 } from "../dist/index.js";
 
 function jsonResponse(payload, status = 200, headers = {}) {
@@ -21,7 +22,7 @@ function jsonResponse(payload, status = 200, headers = {}) {
 }
 
 function requestRecord(url, init) {
-  return { url: String(url), method: init?.method, headers: new Headers(init?.headers), body: JSON.parse(String(init?.body)) };
+  return { url: String(url), method: init?.method, headers: new Headers(init?.headers), body: init?.body === undefined ? undefined : JSON.parse(String(init.body)) };
 }
 
 function request(model = "test-model", overrides = {}) {
@@ -86,6 +87,87 @@ test("non-interactive provisioning resolves deployment sources into a short-live
 
   session.close();
   assert.throws(() => session.handle("openai"), CredentialError);
+});
+
+test("model discovery projects bounded metadata and feeds explicit selection priors", async () => {
+  let captured;
+  const runtime = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (url, init) => {
+      captured = requestRecord(url, init);
+      return jsonResponse({
+        data: [{
+          id: "qwen/qwen3.6-27b",
+          created: 1_725_000_000,
+          owned_by: "groq",
+          active: true,
+          context_window: 131_072,
+          max_completion_tokens: 8_192,
+          supported_parameters: ["tools", "response_format", "private_internal_field"],
+          private_prompt: "must not cross the projection boundary",
+        }],
+        raw_provider_secret: "must not cross the projection boundary",
+      });
+    },
+  });
+  runtime.registerProvider(openaiCompatibleProvider("groq", "https://api.groq.test/openai/v1", { modelsPath: "/models" }));
+  const handle = runtime.credentials.register("groq", "groq-secret");
+  const discovery = await runtime.discoverModels("groq", { credential: handle });
+
+  assert.equal(captured.method, "GET");
+  assert.equal(captured.url, "https://api.groq.test/openai/v1/models");
+  assert.equal(captured.headers.get("authorization"), "Bearer groq-secret");
+  assert.equal(discovery.model_count, 1);
+  assert.deepEqual(discovery.models[0], {
+    schema: "bioprism-typescript-llm-provider-model-discovery/0.1",
+    provider: "groq",
+    model: "qwen/qwen3.6-27b",
+    active: true,
+    created_at: 1_725_000_000,
+    owned_by: "groq",
+    context_window_tokens: 131_072,
+    max_output_tokens: 8_192,
+    capabilities: ["structured_output", "tool_use"],
+    metadata_only: true,
+  });
+  assert.doesNotMatch(JSON.stringify(discovery), /private_internal_field|raw_provider_secret|groq-secret/);
+
+  const candidates = providerModelsToCandidates(discovery.models, {
+    context_window_tokens: 8_000,
+    max_output_tokens: 512,
+    quality: 0.8,
+    latency_ms: 400,
+    cost_per_million_tokens: 25,
+    reliability: 0.9,
+  });
+  assert.deepEqual(candidates[0], {
+    provider: "groq",
+    model: "qwen/qwen3.6-27b",
+    capabilities: ["structured_output", "tool_use"],
+    context_window_tokens: 131_072,
+    max_output_tokens: 8_192,
+    quality: 0.8,
+    latency_ms: 400,
+    cost_per_million_tokens: 25,
+    reliability: 0.9,
+    enabled: true,
+  });
+});
+
+test("model discovery fails closed on malformed rows and missing credentials", async () => {
+  let calls = 0;
+  const runtime = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      calls += 1;
+      return jsonResponse({ data: [{ id: "duplicate" }, { id: "duplicate" }] });
+    },
+  });
+  runtime.registerProvider(openaiCompatibleProvider("groq", "https://groq.test/openai/v1"));
+  await assert.rejects(runtime.discoverModels("groq"), CredentialError);
+  const handle = runtime.credentials.register("groq", "groq-secret");
+  await assert.rejects(runtime.discoverModels("groq", { credential: handle }), ProviderRuntimeError);
+  assert.equal(calls, 1);
 });
 
 test("OpenAI Responses parsing preserves structured output and tool calls", async () => {

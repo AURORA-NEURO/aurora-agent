@@ -84,6 +84,16 @@ responses, tool arguments, or authorization headers. A restart must re-register 
 resolve fresh handles, which makes rotation and revocation explicit. The runtime refuses a
 missing, expired, revoked, or provider-mismatched handle before network dispatch.
 
+The provider setup layer also supports bounded live model discovery. After a protected credential
+has been attached to a short-lived session, `await setup.discoverModels(session, provider)` calls
+the provider's model catalog endpoint and returns only redacted ids, capacity metadata, active
+state, ownership, and derived tool/structured-output capability labels. It never returns the raw
+catalog, authorization header, or key. `setup.modelCandidates(discovery, priors)` converts those
+rows into autonomous candidates while requiring the application to supply quality, latency, cost,
+and reliability priors explicitly; it does not fabricate those values from a model name. Discovery
+keeps model selection current without making model availability, provider authentication, or
+scientific validity claims, and the next approved invocation remains the live access check.
+
 The provider boundary is deliberately separate from autonomous planning. `ApiClient` exposes the
 value-only `brainModelSelect`, contextual selection, prompt assembly, plan validation, bandit
 selection/update, trajectory recording, model-health, and replay routes. A caller can feed the
