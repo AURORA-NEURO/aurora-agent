@@ -1212,3 +1212,69 @@ finding/remediation closure, incident timelines, disclosure sequencing, publicat
 regression witnesses, counts, and seven independent audit row families. `security_program_ready`
 is declaration-derived, not proof that scanners ran, containment occurred, disclosures were sent,
 or controls are live. See SECURITY_PROGRAM_AUDIT.md.
+
+## Autonomous brain orchestration
+
+The TypeScript autonomous layer is the application-owned execution boundary around the value-only
+Rust/Python brain services. `builtinAutonomousDomainProfiles()` exposes the twelve reviewed domain
+profiles and their workflow DAGs: coding, browser, data, science, biomedical, neuroscience,
+operations, enterprise, multi-agent, multimodal, cross-domain, and evaluation. Each profile binds a
+stable domain intent to model capabilities, risk class, guardrails, evaluator signals, exact tool
+names, and stage-level approval requirements. The profile is policy metadata; it is not a claim that
+the gateway currently has every listed tool.
+
+`routeAutonomousTask()` is intentionally deterministic and provider-free. It scores only reviewed
+catalogue vocabulary, preserves matched terms and a route digest, abstains when evidence,
+confidence, or score margin is insufficient, and can return multiple domains for explicit
+cross-domain review. An explicit `domain` supplied by the caller is recorded as caller input, not
+semantic proof. `assembleAutonomousPrompt()` adds system/developer/task messages, sorts context by
+requiredness and priority, rejects secret-shaped keys, and reports included/omitted context plus a
+content digest under a token budget. `compileAutonomousPlan()` produces dependency-closed workflow
+steps with reviewed workflow-to-adapter aliases, exact active tool names, effect classes, and an
+explicit `execution: "not_started"` boundary.
+
+The live catalogue path is:
+
+```text
+gateway tools/list
+       │
+       ▼
+ToolCatalogue snapshot + catalogue digest
+       │
+       ▼
+AutonomousDomainToolRegistry.plan()
+       │  coverage, missing tools, review rows, proposed bindings
+       ▼
+caller review / approval
+       │
+       ▼
+AutonomousDomainToolRuntime
+       │  schema preflight → argument safety → approval → executor
+       ▼
+bounded result + metadata-only receipt
+```
+
+`AutonomousDomainToolRegistry` resolves live definitions against exact reviewed bindings. A
+registration does not authorize execution. Read-only bindings may be proposed; reversible,
+external-effect, and high-impact bindings remain approval-gated. The runtime checks catalogue
+schemas before calling the caller-owned executor, rejects secret-shaped arguments and results,
+bounds returned JSON, and retains only receipt metadata and digests for audit. The provider call is
+also independently gated: `AutonomousAgent.run()` returns `approval_required` unless the caller
+sets `approveProviderCall: true`.
+
+`AutonomousAgent` composes routing, prompt assembly, plan construction, model selection, provider
+invocation, and optional tool loops. Its default selection uses `AutonomousRuntime` health-aware
+fallback ranking; callers can provide a selector, a local `AutonomousOnlineLearner`, or
+`contextualSelector(apiClient)`. The contextual bridge sends model descriptors, provider/model
+health, task digest/context, required capabilities, and domain risk metadata to
+`brainModelSelectContextual`; credentials, provider request bodies, prompts, tool arguments,
+responses, and secret material remain in the application process. A remote refusal or malformed
+selection never silently becomes a local authorization.
+
+The online learner uses bounded UCB-style exploration over caller-registered model arms. It updates
+only after an explicit evaluator reward, failed-outcome flag, or outcome digest supplied through
+`recordEvaluatorReward()`. Remote reconciliation sends the value-only update to
+`brainBanditUpdate()` and then applies the same validated update locally. Provider success and
+latency are separate from task quality; no provider health event is treated as reinforcement.
+This gives applications a safe loop for model-selection adaptation without pretending that an
+unverified response is scientific, clinical, operational, or release truth.

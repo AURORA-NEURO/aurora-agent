@@ -1377,6 +1377,12 @@ class BrainWorker:
                     )
                 )
         if heartbeat_errors and result.status == "succeeded":
+            current = self.store.get(job_id)
+            if current is not None and current.state == "succeeded":
+                # A heartbeat can wake in the narrow window between the durable terminal
+                # transition and ``stop.set()``. The terminal store state is authoritative;
+                # expose an anomaly only when the lease failure leaves reconciliation unresolved.
+                return result
             # The job result is retained, but make the lease anomaly visible to the caller. A
             # later reconciliation query can decide whether the external state is trustworthy.
             return BrainJobRunResult(

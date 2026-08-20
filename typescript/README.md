@@ -96,6 +96,32 @@ is supplied, or accepts a value-only selector backed by the Rust/Python contextu
 Provider failures remain typed and credential failures are not silently converted into generic
 transport errors.
 
+## Autonomous orchestration across all domains
+
+`AutonomousAgent` is the application-facing composition layer for the autonomous brain. It covers
+the twelve reviewed domains (`coding`, `browser`, `data`, `science`, `biomedical`,
+`neuroscience`, `operations`, `enterprise`, `multi_agent`, `multimodal`, `cross_domain`, and
+`evaluation`) with deterministic vocabulary routing, explicit abstention, cross-domain review,
+workflow stage dependencies, bounded prompt assembly, exact tool binding, provider selection, and
+value-only online learning. `route()` and `blueprint()` are non-executing: they return digests,
+omissions, required capabilities, approval triggers, and a plan that explicitly has not started.
+
+The live tool boundary is opt-in and catalogue-backed. Create a `ToolCatalogue` from the gateway's
+tool definitions, pass it with a caller-owned executor, and inspect
+`AutonomousDomainToolRegistry.plan()` before allowing a run. Read-only tools can be proposed
+automatically; reversible or external-effect tools remain review rows and
+`AutonomousDomainToolRuntime` requires explicit approval for each call. Registration is never
+authorization, tool arguments/results are bounded and secret-shaped values are refused, and
+receipts retain metadata and digests rather than hidden payloads.
+
+The selector can be supplied directly, backed by `AutonomousOnlineLearner`, or bridged to
+`ApiClient.brainModelSelectContextual()`. The bridge sends only model descriptors, health,
+domain/capability/risk context, and bounded digests—not credentials, prompt transcripts, tool
+arguments, or provider responses. `recordEvaluatorReward()` updates a local UCB learner only from
+explicit evaluator feedback and can optionally submit the same value-only update to the control
+plane. This is adaptation infrastructure, not an automatic truth signal: feedback must be produced
+by a caller-owned evaluator, and provider health is kept separate from task quality.
+
 ## Contract boundaries
 
 - Requests and responses are bounded. The client enforces a request byte ceiling, incrementally
