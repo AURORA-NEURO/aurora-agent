@@ -26,6 +26,7 @@ from prism_sdk import (
     AutonomousCrossDomainPlanRefinementResult,
     AutonomousCrossDomainCheckpoint,
     AutonomousCrossDomainResult,
+    AutonomousCrossDomainReplanResult,
     AutonomousRoutingHoldoutCase,
     AutonomousRoutingHoldoutEvaluator,
     AutonomousTaskRouter,
@@ -2210,6 +2211,164 @@ def test_cross_domain_trajectory_learning_credits_children_and_synthesis(tmp_pat
         server.shutdown()
         thread.join(timeout=2)
         server.server_close()
+
+
+def test_cross_domain_replan_learning_settles_attempts_and_keeps_feedback_transient(tmp_path: Path):
+    runtime, store, server, thread = _runtime()
+    workspace = _Workspace()
+    memory = BrainEpisodicMemory(tmp_path / "cross-domain-replan.sqlite3")
+    handle = store.register("openai", "cross-domain-replan-secret")
+    callback_count = 0
+
+    def evaluate(_input: object) -> dict[str, object]:
+        nonlocal callback_count
+        callback_count += 1
+        requested = callback_count <= 3
+        return {
+            "reward": -0.25 if requested else 0.9,
+            "passed": not requested,
+            "failed": requested,
+            "failure_class": "insufficient_evidence" if requested else None,
+            "replan_requested": requested,
+            "replan_instruction": (
+                "Re-check the evidence boundary and reconcile the specialist findings."
+                if requested
+                else None
+            ),
+        }
+
+    evaluator = BrainOutcomeEvaluator(
+        evaluate,
+        evaluator_id="cross-domain-replan-quality",
+        evaluator_version="1",
+    )
+    try:
+        agent = AutonomousAgent(workspace, runtime, memory=memory)
+        result = agent.run_cross_domain_replan_learning(
+            task="coordinate an engineering and data review with bounded retry",
+            subtasks=[
+                {"id": "engineering", "task": "review implementation risks", "domain": "coding"},
+                {"id": "data", "task": "review lineage risks", "domain": "data"},
+            ],
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            context={"repository": "aurora", "environment": "staging"},
+            approve_provider_call=True,
+            evaluator=evaluator,
+            evidence={
+                "engineering": {"signals": {"tests": False}},
+                "data": {"signals": {"lineage": False}},
+                "synthesis": {"signals": {"reconciled": True}},
+            },
+            max_replans=1,
+            trajectory_discount=0.5,
+            trajectory_terminal_reward=0.25,
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+        )
+        assert isinstance(result, AutonomousCrossDomainReplanResult)
+        assert result.status == "completed"
+        assert result.replan_count == 1
+        assert len(result.attempts) == 2
+        assert result.final is result.attempts[-1]
+        assert result.attempts[0].replan_requested is True
+        assert result.attempts[1].replan_requested is False
+        assert len(result.attempts[0].evaluations) == 3
+        assert len(result.attempts[1].evaluations) == 3
+        assert len({episode_id for attempt in result.attempts for episode_id in attempt.learning_episode_ids}) == 6
+        assert result.attempts[0].replan_instruction_digest is not None
+        public = json.dumps(result.to_dict())
+        assert "Re-check the evidence boundary" not in public
+        assert "cross-domain-replan-secret" not in public
+        assert b"Re-check the evidence boundary" not in (tmp_path / "cross-domain-replan.sqlite3").read_bytes()
+        assert b"cross-domain-replan-secret" not in (tmp_path / "cross-domain-replan.sqlite3").read_bytes()
+        assert callback_count == 6
+    finally:
+        memory.close()
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_run_auto_routes_cross_domain_replan_learning_with_explicit_limits(tmp_path: Path):
+    runtime, store, server, thread = _runtime()
+    memory = BrainEpisodicMemory(tmp_path / "auto-cross-domain-replan.sqlite3")
+    handle = store.register("openai", "auto-cross-domain-replan-secret")
+    evaluator = BrainOutcomeEvaluator(
+        lambda _input: {"reward": 0.8, "passed": True, "failed": False},
+        evaluator_id="auto-cross-domain-replan-quality",
+        evaluator_version="1",
+    )
+    try:
+        agent = AutonomousAgent(_Workspace(), runtime, memory=memory)
+        result = agent.run_auto(
+            task="write python code for the dataset pipeline",
+            credentials={"openai": handle},
+            model_candidates=_model(),
+            min_confidence=0.20,
+            min_margin=0.10,
+            cross_domain_replan_learning=True,
+            cross_domain_replan_max_replans=0,
+            cross_domain_evaluator=evaluator,
+            cross_domain_evidence={
+                "route-coding": {"signals": {"tests": True}},
+                "route-data": {"signals": {"lineage": True}},
+                "synthesis": {"signals": {"reconciled": True}},
+            },
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+            approve_provider_call=True,
+        )
+        assert result.status == "completed"
+        assert result.result is not None
+        assert result.result.status == "completed"
+        assert result.result.replan_count == 0
+        assert len(result.result.attempts) == 1
+        assert "auto-cross-domain-replan-secret" not in json.dumps(result.to_dict())
+    finally:
+        memory.close()
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_cross_domain_replan_prompt_boundary_covers_every_builtin_domain():
+    brain = AutonomousBrain(_Workspace(), LLMRuntime())
+    replan_packet = {
+        "schema": "bioprism-python-autonomous-cross-domain-replan-context/0.1",
+        "workflow": "cross_domain_replan_context",
+        "attempt": 2,
+        "previous": {"plan_digest": "a" * 64, "outcome_digest": "b" * 64},
+        "evaluator": {
+            "evaluator_id": "all-domain-quality",
+            "evaluator_version": "1",
+            "reward": -0.2,
+            "passed": False,
+            "failed": True,
+            "feedback_digest": None,
+            "failure_class": "insufficient_evidence",
+            "evidence_digest": None,
+        },
+        "instruction": "Reconcile bounded evidence before retrying the same reviewed route.",
+        "bounded_replan": True,
+        "does_not_authorize": ["new tools", "new credentials", "external effects"],
+    }
+    for index, domain in enumerate(AUTONOMOUS_DOMAINS):
+        next_domain = AUTONOMOUS_DOMAINS[(index + 1) % len(AUTONOMOUS_DOMAINS)]
+        prepared = brain.prepare_cross_domain(
+            task=f"coordinate {domain} and {next_domain} review",
+            subtasks=(
+                {"id": "primary", "domain": domain, "task": f"review the {domain} boundary"},
+                {"id": "secondary", "domain": next_domain, "task": f"review the {next_domain} boundary"},
+            ),
+            context={"_aurora_cross_domain_replan": replan_packet, "request_id": f"domain-{index}"},
+        )
+        for blueprint in (*prepared.child_blueprints, prepared.synthesis_blueprint):
+            chunks = blueprint.prompt["context"]
+            replan_chunks = [item for item in chunks if item.get("id") == "autonomy-cross-domain-replan"]
+            assert len(replan_chunks) == 1
+            assert replan_chunks[0]["role"] == "developer"
+            assert "Reconcile bounded evidence" in replan_chunks[0]["content"]
+            user_chunks = [item for item in chunks if item.get("id") == "autonomy-user-context"]
+            assert all("Reconcile bounded evidence" not in item["content"] for item in user_chunks)
 
 
 def test_run_workflow_executes_stage_dag_and_resumes_only_unfinished_stages():

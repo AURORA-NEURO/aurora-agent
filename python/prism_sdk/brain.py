@@ -2250,6 +2250,13 @@ class AutonomousBrain:
 
         return AutonomousTaskOrchestrator(self).run_cross_domain_trajectory_learning(**kwargs)
 
+    def run_cross_domain_replan_learning(self, **kwargs: Any) -> Any:
+        """Run bounded cross-domain replan attempts with evaluator-guided delayed credit."""
+
+        from .autonomy import AutonomousTaskOrchestrator
+
+        return AutonomousTaskOrchestrator(self).run_cross_domain_replan_learning(**kwargs)
+
     def recall_memory(
         self,
         query: MemoryQuery | Mapping[str, Any] | None = None,

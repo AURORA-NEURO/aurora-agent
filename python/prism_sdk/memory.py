@@ -302,6 +302,7 @@ class BrainEpisodicMemory:
         "decision_digest",
         "replan_requested",
         "replan_instruction",
+        "replan_instruction_digest",
     }
 
     def __init__(
@@ -749,7 +750,12 @@ class BrainEpisodicMemory:
         for field in ("passed", "failed", "replan_requested"):
             if field in normalized and not isinstance(normalized[field], bool):
                 raise BrainMemoryError(f"evaluation.{field} must be boolean")
-        for field in ("feedback_digest", "evidence_digest", "decision_digest"):
+        for field in (
+            "feedback_digest",
+            "evidence_digest",
+            "decision_digest",
+            "replan_instruction_digest",
+        ):
             if field in normalized and normalized[field] is not None and not _valid_digest(normalized[field]):
                 raise BrainMemoryError(f"evaluation.{field} must be a lowercase SHA-256 digest")
         if "replan_instruction" in normalized and normalized["replan_instruction"] is not None:

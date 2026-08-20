@@ -1265,6 +1265,51 @@ bounded evaluation receipts and bandit metadata; provider output, task text, cre
 evidence remain outside the learning stores. Trajectory mode requires one evaluator identity so
 delayed credit has stable semantics across every child and the final synthesis.
 
+For evaluator-guided recovery, use the bounded replan mode. It executes a complete fan-out/fan-in
+attempt, settles every child and synthesis episode through the delayed trajectory learner, and
+only then allows a new attempt. The projected bandit state from attempt `n` is therefore the input
+to model selection for attempt `n + 1`; no attempt can bypass the selector, approval boundary,
+credential resolution, tool policy, or caller-owned effect callbacks. `max_replans` is bounded to
+three, so the total number of provider attempts is at most four. A replan is not inferred from a
+transport success or a low-quality-looking response: the caller's `BrainOutcomeEvaluator` must
+explicitly return `replan_requested=True` and a bounded instruction.
+
+The live result retains the caller-visible trajectory objects for local inspection, but
+`to_dict()` and the replan memory path retain only evaluator values, digests, credited rewards,
+episode identities, and execution metadata. The raw replan instruction is inserted into the next
+attempt through one reserved developer prompt chunk, never as user context, and is not persisted
+as an episodic lesson or evaluation field. It cannot introduce a domain, model, credential, tool,
+approval, or external effect:
+
+```python
+replanned = agent.run_cross_domain_replan_learning(
+    task="Coordinate engineering and data review with bounded recovery.",
+    subtasks=(
+        {"id": "engineering", "domain": "coding", "task": "Review implementation risk."},
+        {"id": "data", "domain": "data", "task": "Review schema and lineage risk."},
+    ),
+    model_candidates=model_catalogue,
+    credentials=session,
+    evaluator=quality_evaluator,
+    evidence={
+        "engineering": {"signals": {"tests_passed": 1.0}},
+        "data": {"signals": {"lineage_checked": 1.0}},
+        "synthesis": {"signals": {"decision_traceable": 1.0}},
+    },
+    bandit_state=caller_owned_bandit_state,
+    max_replans=2,
+    trajectory_discount=0.75,
+    approve_provider_call=True,
+)
+```
+
+The same contract is available through automatic routing with
+`cross_domain_replan_learning=True` and `cross_domain_replan_max_replans`. That flag is mutually
+exclusive with the sequential and one-trajectory cross-domain modes, requires an explicit
+`cross_domain_evaluator`, and refuses to run when the route is single-domain or abstained. A
+terminal `completed` result means every settled decision passed and no further replan was
+requested; `replan_limit_reached` is an explicit bounded stop, not an implicit success.
+
 For example, a route-aware tool loop across any supported domain can be entered through the same
 facade:
 
