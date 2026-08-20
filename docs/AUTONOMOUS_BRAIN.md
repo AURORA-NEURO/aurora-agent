@@ -944,6 +944,75 @@ streaming and every continuation turn in a tool loop are accounted separately. A
 therefore becomes durable failover evidence without retaining the prompt, response, tool
 arguments, credential handle, or upstream error body.
 
+### TypeScript mission execution as a durable dependency runtime
+
+The TypeScript SDK now has a local mission executor for applications that need an explicit
+dependency graph to run inside the embedding process. This is distinct from the Rust-owned
+`agent_mission` queue: the queue remains authoritative for remote jobs, while
+`AutonomousMissionExecutor` is the caller-owned orchestration layer for a live TypeScript brain.
+It is useful when a UI, worker, notebook, or service needs bounded continuation, local tool
+adapters, or a durable handoff without giving the SDK ownership of the application's database.
+
+The execution contract is:
+
+```mermaid
+flowchart LR
+  A[AgentMissionArgs] --> B[missionPreflight]
+  B -->|invalid| R[planned refusal]
+  B -->|catalogue + graph + policy valid| C[metadata checkpoint]
+  C --> D[dependency wave]
+  D --> E{step adapter}
+  E -->|read-only or deterministic| F[caller tool result]
+  E -->|provider-backed| G[AutonomousAgent.run]
+  E -->|external effect| H[AutonomousEffectBoundary]
+  H -->|completed| F
+  H -->|uncertain| I[reconciliation_required]
+  F --> J[caller-owned result store]
+  J --> K[hash-chained checkpoint]
+  K -->|next wave| D
+  K -->|terminal| L[bounded mission report]
+```
+
+`missionPreflight()` remains the first gate. The local executor additionally binds the live tool
+catalogue digest to the checkpoint, validates every step domain against the twelve built-in
+profiles, and rejects a changed graph, policy, or catalogue during resume. A serial mission runs
+one step at a time. `parallel_waves` runs only dependency-independent steps and caps concurrency
+at the caller's `max_parallelism` and the SDK's hard ceiling. Parallel completion timing cannot
+change checkpoint ordering: step state is merged in declaration order and every persisted merge
+advances the generation and digest chain contiguously.
+
+Bindings are resolved only after prerequisite results are available. The resolver reads a value
+from the caller-owned `AutonomousMissionResultStore`, verifies its result digest, extracts the
+RFC 6901 source pointer, and writes it into the preflight-validated target pointer. The raw value
+is passed transiently to the step adapter and is never serialized into the checkpoint, event
+trace, snapshot, or error message. If the caller has not rehydrated the value after a restart,
+the mission pauses with `recovery_required`; it does not call a tool with a placeholder.
+
+Every step outcome is explicit: `succeeded`, `refused`, `failed`, `blocked`, `cancelled`,
+`approval_required`, `reconciliation_required`, or `recovery_required`. The last three are
+resumable states and retain the current wave. An approval pause therefore cannot be mistaken for
+a successful provider call, and an uncertain external effect cannot be retried merely because a
+worker restarted. The effect boundary's deterministic idempotency key remains the authority for
+external retry safety.
+
+For model-backed steps, `agentMissionStepExecutor()` composes this scheduler with
+`AutonomousAgent.run()`. The provider still performs model selection and invocation, but the
+adapter screens every tool call against the exact mission tool name and the digest of the
+resolved arguments. This keeps planning and model choice flexible while preventing a provider
+from adding a tool, changing a bound argument, or turning a mission proposal into new authority.
+For deterministic adapters, applications can provide `executeStep` directly. The optional
+`onStepOutcome` callback is the correct place to connect explicit evaluator signals to the online
+bandit or trajectory learner; network success, latency, or a completed HTTP request is never
+treated as an implicit reward.
+
+The durable surface is intentionally metadata-only. Checkpoints and hash-chained events retain
+mission/step IDs, contract digests, statuses, attempt numbers, bounded failure classes, result
+digests, output byte counts, and the next wave. They do not retain task text, prompt messages,
+credentials, provider responses, tool arguments, or raw tool outputs. Production deployments
+should use a transactional checkpoint store and a separately access-controlled result store, flush
+snapshots through `AutonomousMissionPersistenceCoordinator`, and rehydrate both the credential
+session and required result values before resuming.
+
 `BrainRunResult.to_dict()` and `build_brain_evaluation_input()` expose these redacted provider
 receipts to an explicit evaluator. Transport health continues to flow through
 `ProviderHealthLedger`; task quality still requires the caller-owned evaluator and bandit update.

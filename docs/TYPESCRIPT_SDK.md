@@ -1737,8 +1737,8 @@ attached to a single-domain prompt. `AutonomousAgent.blueprint()` returns a
 prompt budget, required model capabilities, exact tool allow-list, and task digest. The dependency
 graph is explicit: children fan out independently, then synthesis fans in after their results.
 
-`runCrossDomain()` uses a bounded worker pool for specialist calls (four in flight by default;
-`maxParallelChildren` may request 1 through 4), then projects results back into blueprint order so
+`runCrossDomain()` uses deterministic serial specialist dispatch by default; callers may opt into
+a bounded worker pool with `maxParallelChildren` from 1 through 4. It then projects results back into blueprint order so
 provider selection, tool calls, effect approvals, failures, and evaluator observations remain
 attributable to a child. The synthesis prompt receives only bounded local output text plus child
 IDs, domains, statuses, and output digests. A child that is approval-blocked or fails prevents

@@ -732,7 +732,10 @@ function normalizeAutonomousModelCandidate(candidate: AutonomousModelCandidate):
 }
 
 function normalizedCrossDomainConcurrency(value: number | undefined, totalChildren: number): number {
-  const requested = value ?? AUTONOMOUS_CROSS_DOMAIN_MAX_CONCURRENCY;
+  // Deterministic serial fan-out is the safe default for providers whose response does not carry
+  // an application-level child id. Callers can explicitly opt into bounded parallelism once their
+  // provider adapter associates each response with its child contract.
+  const requested = value ?? 1;
   if (!Number.isSafeInteger(requested) || requested < 1 || requested > AUTONOMOUS_CROSS_DOMAIN_MAX_CONCURRENCY) {
     throw new ArgumentError(`cross-domain maxParallelChildren must be an integer within [1, ${AUTONOMOUS_CROSS_DOMAIN_MAX_CONCURRENCY}]`);
   }
@@ -1768,6 +1771,39 @@ export class AutonomousAgent {
 
   models(): AutonomousModelCandidate[] {
     return [...this.modelsById.values()].sort((left, right) => `${left.provider}/${left.model}`.localeCompare(`${right.provider}/${right.model}`)).map((candidate) => ({ ...candidate, capabilities: candidate.capabilities ? [...candidate.capabilities] : undefined }));
+  }
+
+  /**
+   * Execute an already-bound set of domain tool calls through the same registry, approval, and
+   * effect boundary used by provider tool loops. Higher-level durable orchestrators use this
+   * narrow method when a caller has resolved a mission step and wants the brain's exact tool
+   * admission semantics without reaching into private runtime state.
+   */
+  async executeToolCalls(
+    calls: readonly ProviderToolCall[],
+    options: {
+      domains: readonly string[];
+      approveEffects?: boolean;
+      execution?: AutonomousExecutionController;
+      effectBoundary?: AutonomousEffectBoundary;
+    },
+  ): Promise<ProviderToolResult[]> {
+    if (!Array.isArray(calls) || calls.length > 128) throw new ArgumentError("autonomous tool call count is outside its bounds");
+    const runtime = this.toolRuntimeForRun() ?? (await this.ensureToolRegistry(), this.toolRuntimeForRun());
+    if (!runtime) {
+      return calls.map((call) => ({
+        callId: call.id,
+        approved: false,
+        isError: true,
+        content: { status: "authorization_required", tool: call.name, secret_material: "never_returned" },
+      }));
+    }
+    return runtime.authorizeAndExecute(calls, {
+      domains: options.domains,
+      approveEffects: options.approveEffects,
+      execution: options.execution,
+      effectBoundary: options.effectBoundary ?? this.effectBoundary,
+    });
   }
 
   /** Discover live provider model metadata and atomically reconcile it into this agent's catalogue. */

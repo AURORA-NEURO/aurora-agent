@@ -485,8 +485,9 @@ Ambiguous tasks now have a real fan-out/fan-in path. `blueprint()` returns a
 `cross_domain_blueprint` containing one child workflow per selected domain plus a cross-domain
 synthesis workflow. `runCrossDomain()` executes those children under the same provider approval,
 model selection, tool catalogue, and effect approval boundaries, then gives synthesis
-bounded local child outputs with child status and digests. Fan-out uses a bounded worker pool
-(default four, configurable with `maxParallelChildren` from 1 through 4) while preserving child
+bounded local child outputs with child status and digests. Fan-out uses deterministic serial
+dispatch by default and a bounded worker pool when `maxParallelChildren` is explicitly set from
+1 through 4, while preserving child
 declaration order in results and learning episode IDs. A failed or approval-blocked child stops
 synthesis by default; already in-flight children may finish, but no new child is scheduled after a
 bounded failure. `allowPartial: true` makes partial synthesis an explicit caller choice, and
@@ -781,6 +782,52 @@ stores a provider secret, or assumes that a serialized snapshot is authorization
 - The Rust mission executor performs the final authoritative JSON Schema check against the live
   `tools/list` definitions, including a second check after bindings are materialized; schema
   refusals carry bounded JSON-pointer diagnostics and a schema digest before nested dispatch.
+- `AutonomousMissionExecutor` is the local application-owned execution path when a TypeScript
+  embedding needs to run the same reviewed mission contract without delegating lifecycle state to
+  the remote queue. It reuses `missionPreflight()`, binds the live catalogue digest into every
+  checkpoint, validates all twelve built-in domains, executes dependency waves with serial or
+  bounded parallel scheduling, resolves RFC 6901 bindings from caller-owned result storage, and
+  emits a hash-chained metadata-only trace. The checkpoint stores step status, output byte counts,
+  result digests, retry state, and the next wave; it never stores task arguments, raw outputs,
+  prompts, credentials, or provider bodies.
+- `InMemoryAutonomousMissionCheckpointStore` is a deterministic reference store; production
+  callers should implement `AutonomousMissionCheckpointStore` over their own transactional storage
+  and pair it with `AutonomousMissionPersistenceCoordinator` for snapshot flush/restore. Raw step
+  values belong in an `AutonomousMissionResultStore`, which must be rehydrated before a binding
+  step resumes. Missing or digest-mismatched values produce `recovery_required`, not an invented
+  input. `approval_required` and `reconciliation_required` likewise retain the current wave so a
+  later call can continue without silently replaying or finalizing the unresolved step.
+- `agentMissionStepExecutor(agent, ...)` composes the local executor with the full autonomous
+  brain: routing/blueprinting and model selection remain in `AutonomousAgent.run()`, while the
+  adapter requires the provider to invoke exactly the declared mission tool with exactly the
+  resolved argument digest. Tool admission, caller approval, execution budgets, and the durable
+  `AutonomousEffectBoundary` are reused at the final dispatch boundary. For deterministic local
+  adapters, supply `executeStep` directly and keep model invocation outside the mission callback.
+
+```typescript
+const missionExecutor = new AutonomousMissionExecutor({
+  catalogue: liveCatalogue,
+  checkpointStore: durableMissionStore,
+  resultStore: callerOwnedResultStore,
+  executeStep: agentMissionStepExecutor(agent, {
+    toolsForStep: (step) => toolsFor(step.tool),
+    approveEffects: false,
+  }),
+});
+
+const first = await missionExecutor.start(mission, {
+  approveProviderCall: true,
+  max_waves: 2, // bounded continuation; persist first.checkpoint through the store
+});
+const next = first.next_wave === null
+  ? first
+  : await missionExecutor.resume(mission, { approveProviderCall: true });
+```
+
+The local executor is an orchestration boundary, not a claim of exactly-once delivery: effectful
+steps must still use an idempotency-aware effect adapter, and an uncertain effect must be resolved
+before the mission can progress. `onStepOutcome` is an optional caller-owned hook for evaluator
+signals or online-learning settlement; the executor never invents rewards from transport success.
 - `eventStream` parses the gateway's bounded SSE snapshot and returns the `x-next-after` cursor;
   it is deliberately not a long-lived socket or an implicit reconnect loop.
 - Webhook delivery is poll/send/acknowledge: `deliveries`, `retry`, `replay`, and `acknowledge` operate on
