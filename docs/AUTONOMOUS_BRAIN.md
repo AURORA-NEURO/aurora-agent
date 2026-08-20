@@ -366,6 +366,23 @@ fields and never stores API keys, request messages, response text, headers, cred
 model prompts. This is complementary to `BrainLearningLedger`: provider health describes
 transport reliability, while evaluator rewards describe task quality and drive bandit adaptation.
 
+The runtime also keeps a process-local value-only counter for immediate adaptation. Each completed
+or refused invocation updates attempts, successes, failures, success rate, last/mean latency, last
+model, and bounded token totals in `LLMRuntime.provider_status()`. When the brain builds its next
+selection, durable ledger evidence is preferred when available; otherwise the live process
+evidence is used. A capped-confidence blend nudges each provider's model-arm reliability and
+latency priors toward observed transport behavior. Twelve observations are enough to reach the
+maximum 0.75 evidence weight, so a single transient failure cannot erase an application-supplied
+prior. This update is transport evidence only: it never becomes evaluator reward and cannot
+override capability, credential, cost, approval, or circuit gates.
+
+Failover refreshes the same live gate after every provider refusal. A model-specific refusal
+disables only that arm. If the runtime circuit opens, or the error is explicitly marked
+`circuit_open`, all remaining arms for that provider are disabled for the bounded retry sequence
+and the receipt records the post-failure circuit, consecutive failures, evidence count, success
+rate, and gate decision. This prevents a circuit outage from being retried once per model while
+still allowing a different healthy provider to continue when the caller's failover budget allows.
+
 The same façade covers the long-horizon forms of autonomy. `prepare_cross_domain()` creates a
 bounded specialist fan-out and synthesis blueprint; `run_cross_domain()` resolves catalogue
 candidates and credential-session handles once, then applies the same provider-health overlay to
@@ -990,11 +1007,12 @@ transport control plane above adds the job, approval, health, and replay lifecyc
   accepts provider response text, API keys, or credentials.
 
 `provider_health` is a value-only map generated from the live runtime. For each registered provider
-it carries circuit state, consecutive failure count, and whether the caller supplied a live
-credential handle. The Rust selector treats an open circuit, missing/revoked/expired credential,
-unregistered provider, or caller-ineligible provider as a hard gate and keeps the refusal reason in
-the candidate ranking. Health is not a credential transport and cannot be used to smuggle a key into
-the kernel.
+it carries circuit state, consecutive failure count, credential readiness, and (when observed)
+bounded attempts, success rate, and latency evidence. The Python boundary uses that evidence to
+adjust model priors before sending the request; the Rust selector treats an open circuit,
+missing/revoked/expired credential, unregistered provider, or caller-ineligible provider as a hard
+gate and keeps the refusal reason in the candidate ranking. Health is not a credential transport
+and cannot be used to smuggle a key into the kernel.
 
 The state is caller-owned so a restart, replay, or audit can identify the exact model observations,
 prompt digest, plan digest, response metadata, and reward that produced a decision. The current

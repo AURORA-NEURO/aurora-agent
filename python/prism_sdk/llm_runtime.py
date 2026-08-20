@@ -1843,6 +1843,22 @@ class _CircuitState:
     opened_until: float | None = None
 
 
+@dataclass(slots=True)
+class _ProviderObservationState:
+    """Process-local, value-only transport evidence used by adaptive routing."""
+
+    attempts: int = 0
+    successes: int = 0
+    failures: int = 0
+    total_latency_ms: float = 0.0
+    last_latency_ms: float | None = None
+    last_model: str | None = None
+    last_outcome: str | None = None
+    observed_at: float | None = None
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+
+
 class LLMRuntime:
     """Invoke configured providers while resolving secrets only at the header boundary."""
 
@@ -1857,6 +1873,7 @@ class LLMRuntime:
         self.credentials = credentials or CredentialStore()
         self._providers: dict[str, ProviderConfig] = {}
         self._circuits: dict[str, _CircuitState] = {}
+        self._provider_observations: dict[str, _ProviderObservationState] = {}
         self._clock = clock
         self._sleeper = sleeper
         self._observation_lock = threading.RLock()
@@ -1895,14 +1912,40 @@ class LLMRuntime:
         response: ProviderResponse | None = None,
         error: ProviderError | None = None,
     ) -> None:
+        observed_at = float(self._clock())
+        normalized_latency = max(0.0, float(latency_ms))
+        input_tokens = 0
+        output_tokens = 0
+        if response is not None:
+            for key in ("input_tokens", "output_tokens"):
+                value = response.usage.get(key)
+                if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                    if key == "input_tokens":
+                        input_tokens = value
+                    else:
+                        output_tokens = value
+        with self._observation_lock:
+            observed = self._provider_observations.setdefault(config.provider, _ProviderObservationState())
+            observed.attempts += 1
+            if outcome == "success":
+                observed.successes += 1
+            elif outcome == "failure":
+                observed.failures += 1
+            observed.total_latency_ms += normalized_latency
+            observed.last_latency_ms = normalized_latency
+            observed.last_model = request.model
+            observed.last_outcome = outcome
+            observed.observed_at = observed_at
+            observed.total_input_tokens += input_tokens
+            observed.total_output_tokens += output_tokens
         payload: dict[str, Any] = {
             "schema": PROVIDER_OBSERVATION_SCHEMA,
             "provider": config.provider,
             "model": request.model,
             "status": status,
             "outcome": outcome,
-            "latency_ms": max(0.0, float(latency_ms)),
-            "observed_at": float(self._clock()),
+            "latency_ms": normalized_latency,
+            "observed_at": observed_at,
             "retention": "metadata_only_no_provider_payloads",
         }
         circuit_state = self._circuits.get(config.provider)
@@ -1935,18 +1978,44 @@ class LLMRuntime:
     def register_provider(self, config: ProviderConfig) -> None:
         self._providers[config.provider] = config
         self._circuits.setdefault(config.provider, _CircuitState())
+        with self._observation_lock:
+            self._provider_observations.setdefault(config.provider, _ProviderObservationState())
 
     def provider_metadata(self) -> list[dict[str, Any]]:
         return [self._providers[name].to_metadata() for name in sorted(self._providers)]
 
     def provider_status(self, provider: str) -> dict[str, Any]:
-        """Return value-only circuit state; no credential or provider response is retained."""
+        """Return value-only circuit and transport evidence.
+
+        The counters are process-local and intentionally do not replace the optional durable
+        :class:`ProviderHealthLedger`. They let a long-lived brain react immediately to the
+        runtime's own outcomes, while the ledger can carry the same bounded evidence across
+        restarts. No credential, prompt, response text, or provider payload is retained.
+        """
 
         config = self._providers.get(provider)
         if config is None:
             raise ProviderError(f"provider {provider!r} is not configured")
         state = self._circuits.setdefault(provider, _CircuitState())
         open_now = state.opened_until is not None and self._clock() < state.opened_until
+        with self._observation_lock:
+            observed = self._provider_observations.setdefault(provider, _ProviderObservationState())
+            attempts = observed.attempts
+            observation = {
+                "attempts": attempts,
+                "successes": observed.successes,
+                "failures": observed.failures,
+                "success_rate": observed.successes / attempts if attempts else 0.0,
+                "mean_latency_ms": (
+                    observed.total_latency_ms / attempts if attempts else None
+                ),
+                "last_latency_ms": observed.last_latency_ms,
+                "last_model": observed.last_model,
+                "last_outcome": observed.last_outcome,
+                "observed_at": observed.observed_at,
+                "total_input_tokens": observed.total_input_tokens,
+                "total_output_tokens": observed.total_output_tokens,
+            }
         return {
             "provider": provider,
             "configured": True,
@@ -1955,6 +2024,7 @@ class LLMRuntime:
             "opened_until": state.opened_until,
             "max_attempts": config.max_attempts,
             "credential_posture": "caller_supplied_in_memory_handle",
+            **observation,
         }
 
     def provider_requires_credential(self, provider: str) -> bool:

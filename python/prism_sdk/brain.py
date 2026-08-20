@@ -1312,6 +1312,108 @@ def _selection_attempt_metadata(audit: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _provider_health_evidence(provider: str, health: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Validate and project bounded transport evidence for one routing provider.
+
+    Historical health is preferred when present because it can represent more attempts than the
+    current process. A small confidence cap below prevents a short outage or a tiny sample from
+    completely overriding the caller's model prior.
+    """
+
+    historical = health.get("historical")
+    source: Mapping[str, Any] = historical if isinstance(historical, Mapping) else health
+    attempts = source.get("attempts", 0)
+    if not isinstance(attempts, int) or isinstance(attempts, bool) or attempts < 0:
+        raise BrainRunError(f"provider health attempts are invalid for {provider!r}")
+    if attempts == 0:
+        return None
+    success_rate = source.get("success_rate")
+    if (
+        isinstance(success_rate, bool)
+        or not isinstance(success_rate, (int, float))
+        or not math.isfinite(float(success_rate))
+        or not 0.0 <= float(success_rate) <= 1.0
+    ):
+        raise BrainRunError(f"provider health success_rate is invalid for {provider!r}")
+    latency = source.get("last_latency_ms")
+    if (
+        isinstance(latency, bool)
+        or not isinstance(latency, (int, float))
+        or not math.isfinite(float(latency))
+        or float(latency) < 0.0
+    ):
+        raise BrainRunError(f"provider health last_latency_ms is invalid for {provider!r}")
+    return {
+        "attempts": attempts,
+        "success_rate": float(success_rate),
+        "last_latency_ms": float(latency),
+        "confidence": min(0.75, attempts / 12.0),
+    }
+
+
+def _refresh_failover_provider_health(
+    runtime: LLMRuntime,
+    attempt_selection: dict[str, Any],
+    *,
+    provider: str,
+    error: ProviderError,
+    failed_providers: set[str],
+) -> dict[str, Any]:
+    """Refresh the live provider gate after a failed arm before the next selection.
+
+    A model-level refusal only disables that arm. Once the runtime reports an open circuit (or
+    the provider error explicitly carries ``circuit_open``), every remaining arm for that
+    provider is disabled for this bounded failover sequence. The returned receipt is scalar
+    metadata only and never contains provider payloads or credential material.
+    """
+
+    raw_health = attempt_selection.get("provider_health", {})
+    if not isinstance(raw_health, Mapping):
+        raise BrainRunError("adaptive failover provider health must be a mapping")
+    provider_health = {
+        key: dict(value)
+        for key, value in raw_health.items()
+        if isinstance(key, str) and isinstance(value, Mapping)
+    }
+    current = dict(provider_health.get(provider, {}))
+    try:
+        status = runtime.provider_status(provider)
+    except ProviderError:
+        status = {}
+    for field in (
+        "circuit",
+        "consecutive_failures",
+        "opened_until",
+        "attempts",
+        "successes",
+        "failures",
+        "success_rate",
+        "mean_latency_ms",
+        "last_latency_ms",
+        "last_model",
+        "last_outcome",
+        "observed_at",
+    ):
+        if field in status:
+            current[field] = status[field]
+    circuit = current.get("circuit", "closed")
+    provider_circuit_open = error.circuit_open or circuit == "open"
+    if provider_circuit_open:
+        circuit = "open"
+        current["circuit"] = "open"
+        current["eligible"] = False
+        failed_providers.add(provider)
+    provider_health[provider] = current
+    attempt_selection["provider_health"] = provider_health
+    return {
+        "provider_circuit_after_failure": circuit,
+        "provider_consecutive_failures": current.get("consecutive_failures", 0),
+        "provider_health_attempts": current.get("attempts", 0),
+        "provider_health_success_rate": current.get("success_rate", 0.0),
+        "provider_health_gate": "closed" if not provider_circuit_open else "provider_disabled",
+    }
+
+
 def _mission_wire_output(value: Any) -> Any:
     """Extract structured tool output while dropping opaque wire envelopes."""
 
@@ -2167,6 +2269,15 @@ class AutonomousBrain:
                 "registered": True,
                 "circuit": status.get("circuit"),
                 "consecutive_failures": status.get("consecutive_failures", 0),
+                "attempts": status.get("attempts", 0),
+                "successes": status.get("successes", 0),
+                "failures": status.get("failures", 0),
+                "success_rate": status.get("success_rate", 0.0),
+                "mean_latency_ms": status.get("mean_latency_ms"),
+                "last_latency_ms": status.get("last_latency_ms"),
+                "last_model": status.get("last_model"),
+                "last_outcome": status.get("last_outcome"),
+                "observed_at": status.get("observed_at"),
                 "credential_ready": (
                     not bool(metadata.get("requires_credential", True))
                     or (
@@ -2269,6 +2380,49 @@ class AutonomousBrain:
                     if model.get("provider") == provider:
                         model["enabled"] = False
                         current["eligible"] = False
+
+        # Transport outcomes are a bounded prior update, not task reward. Blend provider-level
+        # success and latency evidence into each candidate's static reliability/latency priors so
+        # the Rust selector can use its normal deterministic score without widening its wire
+        # contract. A capped confidence keeps sparse evidence from making routing brittle.
+        for model in normalized_models:
+            provider = model.get("provider")
+            if not isinstance(provider, str):
+                continue
+            health = provider_health.get(provider)
+            if not isinstance(health, Mapping):
+                continue
+            evidence = _provider_health_evidence(provider, health)
+            if evidence is None:
+                continue
+            confidence = float(evidence["confidence"])
+            prior_reliability = model.get("reliability", 0.5)
+            if (
+                isinstance(prior_reliability, (int, float))
+                and not isinstance(prior_reliability, bool)
+                and math.isfinite(float(prior_reliability))
+                and 0.0 <= float(prior_reliability) <= 1.0
+            ):
+                model["reliability"] = round(
+                    (1.0 - confidence) * float(prior_reliability)
+                    + confidence * float(evidence["success_rate"]),
+                    6,
+                )
+            prior_latency = model.get("latency_ms")
+            if (
+                isinstance(prior_latency, int)
+                and not isinstance(prior_latency, bool)
+                and prior_latency >= 0
+            ):
+                model["latency_ms"] = max(
+                    0,
+                    int(
+                        round(
+                            (1.0 - confidence) * prior_latency
+                            + confidence * float(evidence["last_latency_ms"])
+                        )
+                    ),
+                )
 
         global_state = (
             dict(bandit_state)
@@ -2455,6 +2609,7 @@ class AutonomousBrain:
         )
         attempt_selection = dict(selection)
         failed_ids: set[str] = set()
+        failed_providers: set[str] = set()
         failover_attempts: list[dict[str, Any]] = []
         invocation_receipts: list[Mapping[str, Any]] = []
         for attempt in range(max_provider_failovers + 1):
@@ -2463,7 +2618,10 @@ class AutonomousBrain:
                     {
                         **dict(candidate),
                         "enabled": False
-                        if f"{candidate.get('provider')}/{candidate.get('model')}" in failed_ids
+                        if (
+                            f"{candidate.get('provider')}/{candidate.get('model')}" in failed_ids
+                            or candidate.get("provider") in failed_providers
+                        )
                         else candidate.get("enabled", True),
                     }
                     for candidate in selection.get("models", [])
@@ -2543,6 +2701,13 @@ class AutonomousBrain:
                 if invocation_observer is not None:
                     invocation_receipts.extend(invocation_observer.evidence())
                 failed_ids.add(selected_id)
+                health_after_failure = _refresh_failover_provider_health(
+                    self.runtime,
+                    attempt_selection,
+                    provider=provider,
+                    error=error,
+                    failed_providers=failed_providers,
+                )
                 failover_attempts.append(
                     {
                         "attempt": attempt,
@@ -2552,6 +2717,7 @@ class AutonomousBrain:
                         "status": "provider_refused",
                         "reason": "circuit_open" if error.circuit_open else "provider_error",
                         "status_code": error.status_code,
+                        **health_after_failure,
                         **_selection_attempt_metadata(attempt_audit),
                     }
                 )
@@ -2659,6 +2825,7 @@ class AutonomousBrain:
         )
         attempt_selection = dict(selection)
         failed_ids: set[str] = set()
+        failed_providers: set[str] = set()
         failover_attempts: list[dict[str, Any]] = []
         invocation_receipts: list[Mapping[str, Any]] = []
         for attempt in range(max_provider_failovers + 1):
@@ -2667,7 +2834,10 @@ class AutonomousBrain:
                     {
                         **dict(candidate),
                         "enabled": False
-                        if f"{candidate.get('provider')}/{candidate.get('model')}" in failed_ids
+                        if (
+                            f"{candidate.get('provider')}/{candidate.get('model')}" in failed_ids
+                            or candidate.get("provider") in failed_providers
+                        )
                         else candidate.get("enabled", True),
                     }
                     for candidate in selection.get("models", [])
@@ -2753,6 +2923,13 @@ class AutonomousBrain:
                 if invocation_observer is not None:
                     invocation_receipts.extend(invocation_observer.evidence())
                 failed_ids.add(selected_id)
+                health_after_failure = _refresh_failover_provider_health(
+                    self.runtime,
+                    attempt_selection,
+                    provider=provider,
+                    error=error,
+                    failed_providers=failed_providers,
+                )
                 failover_attempts.append(
                     {
                         "attempt": attempt,
@@ -2762,6 +2939,7 @@ class AutonomousBrain:
                         "status": "provider_refused",
                         "reason": "circuit_open" if error.circuit_open else "provider_error",
                         "status_code": error.status_code,
+                        **health_after_failure,
                         **_selection_attempt_metadata(attempt_audit),
                     }
                 )
@@ -2859,6 +3037,7 @@ class AutonomousBrain:
         )
         attempt_selection = dict(selection)
         failed_ids: set[str] = set()
+        failed_providers: set[str] = set()
         failover_attempts: list[dict[str, Any]] = []
         invocation_receipts: list[Mapping[str, Any]] = []
         for attempt in range(max_provider_failovers + 1):
@@ -2867,7 +3046,10 @@ class AutonomousBrain:
                     {
                         **dict(candidate),
                         "enabled": False
-                        if f"{candidate.get('provider')}/{candidate.get('model')}" in failed_ids
+                        if (
+                            f"{candidate.get('provider')}/{candidate.get('model')}" in failed_ids
+                            or candidate.get("provider") in failed_providers
+                        )
                         else candidate.get("enabled", True),
                     }
                     for candidate in selection.get("models", [])
@@ -2970,6 +3152,13 @@ class AutonomousBrain:
                 if invocation_observer is not None:
                     invocation_receipts.extend(invocation_observer.evidence())
                 failed_ids.add(selected_id)
+                health_after_failure = _refresh_failover_provider_health(
+                    self.runtime,
+                    attempt_selection,
+                    provider=provider,
+                    error=error,
+                    failed_providers=failed_providers,
+                )
                 failover_attempts.append(
                     {
                         "attempt": attempt,
@@ -2979,6 +3168,7 @@ class AutonomousBrain:
                         "status": "provider_refused",
                         "reason": "circuit_open" if error.circuit_open else "provider_error",
                         "status_code": error.status_code,
+                        **health_after_failure,
                         **_selection_attempt_metadata(attempt_audit),
                     }
                 )

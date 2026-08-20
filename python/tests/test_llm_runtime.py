@@ -517,6 +517,155 @@ class LlmRuntimeTests(unittest.TestCase):
         self.assertFalse(selection["provider_health"]["openai"]["eligible"])  # type: ignore[index]
         self.assertNotIn("revoked-secret", json.dumps(selection))
 
+    def test_adaptive_selection_blends_durable_transport_health_into_model_priors(self) -> None:
+        store = CredentialStore()
+        runtime = LLMRuntime(store)
+        runtime.register_provider(openai_provider(base_url=self.base_url, allow_insecure_http=True))
+        handle = store.register("openai", "health-routing-secret")
+
+        selection = AutonomousBrain(object(), runtime).build_adaptive_model_selection(
+            task="choose a reliable model",
+            model_candidates=[
+                {
+                    "provider": "openai",
+                    "model": "test-model",
+                    "context_window_tokens": 16_000,
+                    "max_output_tokens": 2_048,
+                    "quality": 0.9,
+                    "latency_ms": 100,
+                    "cost_per_million_tokens": 1,
+                    "reliability": 0.9,
+                }
+            ],
+            credentials={"openai": handle},
+            selection_overrides={
+                "provider_health": {
+                    "openai": {
+                        "attempts": 12,
+                        "successes": 3,
+                        "failures": 9,
+                        "success_rate": 0.25,
+                        "last_latency_ms": 1_000,
+                        "circuit": "closed",
+                    }
+                }
+            },
+        )
+
+        model = selection["models"][0]  # type: ignore[index]
+        self.assertEqual(model["reliability"], 0.4125)
+        self.assertEqual(model["latency_ms"], 775)
+        self.assertEqual(selection["provider_health"]["openai"]["historical"]["attempts"], 12)  # type: ignore[index]
+        self.assertNotIn("health-routing-secret", json.dumps(selection))
+
+    def test_adaptive_failover_disables_all_arms_after_provider_circuit_opens(self) -> None:
+        selections: list[list[dict[str, object]]] = []
+
+        class Workspace:
+            def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+                if name == "brain_model_select":
+                    assert arguments is not None
+                    models = [dict(model) for model in arguments["models"]]  # type: ignore[index]
+                    selections.append(models)
+                    selected = next(model for model in models if model.get("enabled", True))
+                    return {
+                        "selected_model": {
+                            "provider": selected["provider"],
+                            "model": selected["model"],
+                        },
+                        "decision_digest": "d" * 64,
+                        "ranking": [],
+                    }
+                if name == "brain_prompt_assemble":
+                    return {"messages": [{"role": "user", "content": "hello"}], "prompt_digest": "e" * 64}
+                if name == "brain_plan":
+                    return {
+                        "ok": True,
+                        "plan": {
+                            "requires_approval": True,
+                            "steps": [{"effect": "provider_call"}],
+                            "plan_digest": "f" * 64,
+                        },
+                    }
+                raise AssertionError(f"unexpected tool {name}")
+
+        store = CredentialStore()
+        runtime = LLMRuntime(store)
+        runtime.register_provider(
+            openai_provider(
+                base_url=self.base_url,
+                path="/unavailable",
+                allow_insecure_http=True,
+                max_attempts=1,
+                circuit_breaker_failure_threshold=1,
+            )
+        )
+        runtime.register_provider(
+            ProviderConfig(
+                provider="fallback",
+                base_url=self.base_url,
+                path="/fallback",
+                allow_insecure_http=True,
+            )
+        )
+        openai_handle = store.register("openai", "openai-circuit-secret")
+        fallback_handle = store.register("fallback", "fallback-circuit-secret")
+        result = AutonomousBrain(Workspace(), runtime).run_adaptive(
+            task="hello",
+            model_candidates=[
+                {
+                    "provider": "openai",
+                    "model": "primary",
+                    "context_window_tokens": 16_000,
+                    "max_output_tokens": 2_048,
+                    "quality": 0.99,
+                    "latency_ms": 10,
+                    "cost_per_million_tokens": 1,
+                    "reliability": 0.99,
+                },
+                {
+                    "provider": "openai",
+                    "model": "secondary",
+                    "context_window_tokens": 16_000,
+                    "max_output_tokens": 2_048,
+                    "quality": 0.98,
+                    "latency_ms": 11,
+                    "cost_per_million_tokens": 1,
+                    "reliability": 0.98,
+                },
+                {
+                    "provider": "fallback",
+                    "model": "backup",
+                    "context_window_tokens": 16_000,
+                    "max_output_tokens": 2_048,
+                    "quality": 0.8,
+                    "latency_ms": 20,
+                    "cost_per_million_tokens": 2,
+                    "reliability": 0.9,
+                },
+            ],
+            prompt={"max_input_tokens": 100},
+            plan={"allowed_tools": ["provider.invoke"], "max_cost": 10},
+            credentials={"openai": openai_handle, "fallback": fallback_handle},
+            approve_provider_call=True,
+            max_provider_failovers=1,
+        )
+
+        self.assertEqual(result.response.provider, "fallback")  # type: ignore[union-attr]
+        self.assertGreaterEqual(len(selections), 4)
+        for retry_selection in selections[2:]:
+            retry_enabled = {
+                f"{model['provider']}/{model['model']}"
+                for model in retry_selection
+                if model.get("enabled", True)
+            }
+            self.assertEqual(retry_enabled, {"fallback/backup"})
+        attempt = result.provider_failover["attempts"][0]  # type: ignore[index]
+        self.assertEqual(attempt["provider_circuit_after_failure"], "open")
+        self.assertEqual(attempt["provider_health_gate"], "provider_disabled")
+        self.assertNotIn("openai-circuit-secret", json.dumps(result.to_dict()))
+        self.assertNotIn("fallback-circuit-secret", json.dumps(result.to_dict()))
+
     def test_credential_session_groups_handles_and_revokes_on_expiry(self) -> None:
         store = CredentialStore()
         runtime = LLMRuntime(store)
@@ -607,6 +756,12 @@ class LlmRuntimeTests(unittest.TestCase):
         self.assertEqual([event["outcome"] for event in observations], ["success", "failure"])
         self.assertEqual(observations[0]["provider"], "openai")
         self.assertEqual(observations[1]["failure_class"], "provider_error")
+        status = runtime.provider_status("openai")
+        self.assertEqual(status["attempts"], 2)
+        self.assertEqual(status["successes"], 1)
+        self.assertEqual(status["failures"], 1)
+        self.assertEqual(status["success_rate"], 0.5)
+        self.assertIsInstance(status["last_latency_ms"], float)
         serialized = json.dumps(observations)
         self.assertNotIn("super-secret", serialized)
         self.assertNotIn("hello", serialized)
