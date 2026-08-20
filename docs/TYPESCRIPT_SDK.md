@@ -1542,6 +1542,9 @@ health, task digest/context, required capabilities, and domain risk metadata to
 responses, and secret material remain in the application process. A remote refusal or malformed
 selection never silently becomes a local authorization.
 
+Contextual model selections resolve exact `provider/model` IDs. A model-only ID is accepted only
+when it matches one registered candidate; duplicate matches abstain before provider dispatch.
+
 Tool-loop lifecycle is preserved at the high-level result boundary. A loop is `completed` only
 when the provider returns a final response without more tool calls. If the authorization callback
 declines a requested call, `AutonomousAgent.run()` returns `status: "approval_required"` and

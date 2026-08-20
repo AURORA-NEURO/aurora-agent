@@ -163,6 +163,9 @@ deterministic route remains the safety baseline: provider/deterministic disagree
 malformed output remain explicit refusals. Routing still requires `approveProviderCall: true` and
 never authorizes a tool, effect, or domain claim.
 
+Contextual model selections resolve exact `provider/model` IDs. A model-only ID is accepted only
+when it matches one registered candidate; duplicate matches abstain before provider dispatch.
+
 `runAutonomousDecisionCycle()` composes the single-domain path into one caller-controlled loop:
 optional semantic routing, task-digest-validated route handoff, prompt and plan construction,
 health/bandit model selection, provider invocation, and optional evaluator settlement. Semantic

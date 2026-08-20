@@ -1251,12 +1251,15 @@ export function contextualSelector(client: ApiClient, options: { requestOptions?
     const selection = projected?.selection;
     if (!selection || !isObject(selection)) throw new ProviderRuntimeError("contextual brain selector returned no selection projection");
     const selectedId = typeof selection.selected_model_id === "string" ? selection.selected_model_id : null;
-    const selected = selectedId ? request.candidates.find((candidate) => `${candidate.provider}/${candidate.model}` === selectedId || candidate.model === selectedId) : null;
+    const exactMatches = selectedId ? request.candidates.filter((candidate) => `${candidate.provider}/${candidate.model}` === selectedId) : [];
+    const modelMatches = selectedId && exactMatches.length === 0 ? request.candidates.filter((candidate) => candidate.model === selectedId) : [];
+    const matches = exactMatches.length > 0 ? exactMatches : modelMatches;
+    const selected = matches.length === 1 ? matches[0] : null;
     return {
       selected_model: selected ? { provider: selected.provider, model: selected.model } : null,
       strategy: "caller_selector",
       ranking: [],
-      abstention_reason: selected ? null : selection.selection_status || "contextual selector abstained",
+      abstention_reason: selected ? null : matches.length > 1 ? "contextual selector returned an ambiguous model id" : selection.selection_status || "contextual selector abstained",
     };
   };
 }

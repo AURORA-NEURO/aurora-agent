@@ -356,3 +356,26 @@ test("contextual selector bridge sends only model and health metadata to the con
   assert.equal(received.base.models[0].provider, "remote");
   assert.equal(received.base.models[0].authorization, undefined);
 });
+
+test("contextual selector abstains on an ambiguous model-only id without dispatch", async () => {
+  let calls = 0;
+  const apiClient = {
+    async brainModelSelectContextual() {
+      return { ok: true, mcp: { result: { structuredContent: { selection: { selected_model_id: "shared-model", selection_status: "selected" } } } } };
+    },
+  };
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      calls += 1;
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: "must not dispatch" }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("provider-a", "https://provider-a.test", { requiresCredential: false }));
+  llm.registerProvider(openaiCompatibleProvider("provider-b", "https://provider-b.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm, { apiClient });
+  agent.registerModel(candidate("provider-a", "shared-model"));
+  agent.registerModel(candidate("provider-b", "shared-model"));
+  await assert.rejects(agent.run("Implement this code change", { domain: "coding", approveProviderCall: true }), /ambiguous model id/);
+  assert.equal(calls, 0);
+});
