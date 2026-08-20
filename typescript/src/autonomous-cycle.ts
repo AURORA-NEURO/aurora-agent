@@ -298,47 +298,52 @@ export async function runAutonomousDecisionCycle(
     return { ...reviewResult(cycleStatus, route, semanticRoute), run, memory: recalledMemory.projection };
   }
 
-  let learningEpisodeId: string | null = null;
-  let settlement: AutonomousLearningSettlement | null = null;
-  if (options.learning) {
-    const controller = options.learning.controller;
-    if (!controller || typeof controller.prepareRun !== "function" || typeof controller.settleRun !== "function") throw new ArgumentError("decision cycle learning controller is malformed");
-    const episode = await controller.prepareRun(run, { episodeId: options.learning.episodeId });
-    learningEpisodeId = episode.episode_id;
-    if (options.learning.evaluate) {
-      const reward = await options.learning.evaluate(run);
-      settlement = await controller.settleRun(episode.episode_id, reward, { remote: options.learning.remote });
-    }
-  }
-
-  const memoryProjection = recalledMemory.projection;
-  if (options.memory) {
-    const memoryEpisodeId = options.memory.episodeId ?? `memory:${learningEpisodeId ?? `${run.blueprint!.task_digest}:${run.blueprint!.prompt.prompt_digest}`}`;
-    const memoryEpisode = await memoryPacketForRun(options.memory, run, memoryEpisodeId);
-    if (memoryEpisode) {
-      memoryProjection.recorded_episode_ids.push(memoryEpisode.episode_id);
-      if (settlement) {
-        await recordMemoryEvaluation(options.memory, memoryEpisode.episode_id, settlement.assessment);
-        memoryProjection.evaluation_recorded_episode_ids.push(memoryEpisode.episode_id);
+  try {
+    let learningEpisodeId: string | null = null;
+    let settlement: AutonomousLearningSettlement | null = null;
+    if (options.learning) {
+      const controller = options.learning.controller;
+      if (!controller || typeof controller.prepareRun !== "function" || typeof controller.settleRun !== "function") throw new ArgumentError("decision cycle learning controller is malformed");
+      const episode = await controller.prepareRun(run, { episodeId: options.learning.episodeId });
+      learningEpisodeId = episode.episode_id;
+      if (options.learning.evaluate) {
+        const reward = await options.learning.evaluate(run);
+        settlement = await controller.settleRun(episode.episode_id, reward, { remote: options.learning.remote });
       }
     }
+
+    const memoryProjection = recalledMemory.projection;
+    if (options.memory) {
+      const memoryEpisodeId = options.memory.episodeId ?? `memory:${learningEpisodeId ?? `${run.blueprint!.task_digest}:${run.blueprint!.prompt.prompt_digest}`}`;
+      const memoryEpisode = await memoryPacketForRun(options.memory, run, memoryEpisodeId);
+      if (memoryEpisode) {
+        memoryProjection.recorded_episode_ids.push(memoryEpisode.episode_id);
+        if (settlement) {
+          await recordMemoryEvaluation(options.memory, memoryEpisode.episode_id, settlement.assessment);
+          memoryProjection.evaluation_recorded_episode_ids.push(memoryEpisode.episode_id);
+        }
+      }
+    }
+
+    if (options.executionLifecycle !== "observe_only") await options.execution?.complete("completed");
+
+    return {
+      schema: AUTONOMOUS_DECISION_CYCLE_SCHEMA,
+      status: "completed",
+      route,
+      semantic_route: semanticRoute,
+      run,
+      learning_episode_id: learningEpisodeId,
+      evaluation: settlement?.assessment ?? null,
+      settlement,
+      memory: memoryProjection,
+      retention: RETENTION,
+      authorization: AUTHORIZATION,
+    };
+  } catch (error) {
+    if (options.executionLifecycle !== "observe_only") await failExecutionIfActive(options.execution, error);
+    throw error;
   }
-
-  if (options.executionLifecycle !== "observe_only") await options.execution?.complete("completed");
-
-  return {
-    schema: AUTONOMOUS_DECISION_CYCLE_SCHEMA,
-    status: "completed",
-    route,
-    semantic_route: semanticRoute,
-    run,
-    learning_episode_id: learningEpisodeId,
-    evaluation: settlement?.assessment ?? null,
-    settlement,
-    memory: memoryProjection,
-    retention: RETENTION,
-    authorization: AUTHORIZATION,
-  };
 }
 
 export const AUTONOMOUS_REPLAN_CYCLE_SCHEMA = "bioprism-typescript-autonomous-replan-cycle/0.1" as const;
@@ -802,52 +807,57 @@ export async function runAutonomousCrossDomainDecisionCycle(
     if (options.executionLifecycle !== "observe_only") await failExecutionIfActive(options.execution, error);
     throw error;
   }
-  let settlement: AutonomousCrossDomainLearningSettlement | null = null;
-  if (options.learning?.evaluate && run.learning_episode_ids.length > 0) {
-    const rewards = await options.learning.evaluate(run);
-    settlement = await options.learning.controller.settleCrossDomain(run, rewards, {
-      trajectoryId: options.learning.trajectoryId,
-      discount: options.learning.discount,
-      remote: options.learning.remote,
-    });
-  }
-  const memoryProjection = recalledMemory.projection;
-  if (options.memory) {
-    const completedRuns = [
-      ...run.child_runs.filter((child) => child.result.status === "completed").map((child) => child.result),
-      ...(run.synthesis?.status === "completed" ? [run.synthesis] : []),
-    ];
-    for (let index = 0; index < completedRuns.length; index += 1) {
-      const childRun = completedRuns[index]!;
-      const learningEpisodeId = run.learning_episode_ids[index] ?? null;
-      const explicitSingleId = options.memory.episodeId && completedRuns.length === 1 ? options.memory.episodeId : null;
-      const prefix = options.memory.episodePrefix ?? options.memory.episodeId ?? "memory:cross";
-      const memoryEpisodeId = explicitSingleId ?? `${prefix}:${learningEpisodeId ?? `${childRun.blueprint?.task_digest ?? index}:${childRun.blueprint?.prompt.prompt_digest ?? index}`}`;
-      const memoryEpisode = await memoryPacketForRun(options.memory, childRun, memoryEpisodeId);
-      if (!memoryEpisode) continue;
-      memoryProjection.recorded_episode_ids.push(memoryEpisode.episode_id);
-      const settlementItem = settlement?.trajectory.settlements.find((item) => item.episode.episode_id === learningEpisodeId);
-      if (settlementItem) {
-        await recordMemoryEvaluation(options.memory, memoryEpisode.episode_id, settlementItem.assessment);
-        memoryProjection.evaluation_recorded_episode_ids.push(memoryEpisode.episode_id);
+  try {
+    let settlement: AutonomousCrossDomainLearningSettlement | null = null;
+    if (options.learning?.evaluate && run.learning_episode_ids.length > 0) {
+      const rewards = await options.learning.evaluate(run);
+      settlement = await options.learning.controller.settleCrossDomain(run, rewards, {
+        trajectoryId: options.learning.trajectoryId,
+        discount: options.learning.discount,
+        remote: options.learning.remote,
+      });
+    }
+    const memoryProjection = recalledMemory.projection;
+    if (options.memory) {
+      const completedRuns = [
+        ...run.child_runs.filter((child) => child.result.status === "completed").map((child) => child.result),
+        ...(run.synthesis?.status === "completed" ? [run.synthesis] : []),
+      ];
+      for (let index = 0; index < completedRuns.length; index += 1) {
+        const childRun = completedRuns[index]!;
+        const learningEpisodeId = run.learning_episode_ids[index] ?? null;
+        const explicitSingleId = options.memory.episodeId && completedRuns.length === 1 ? options.memory.episodeId : null;
+        const prefix = options.memory.episodePrefix ?? options.memory.episodeId ?? "memory:cross";
+        const memoryEpisodeId = explicitSingleId ?? `${prefix}:${learningEpisodeId ?? `${childRun.blueprint?.task_digest ?? index}:${childRun.blueprint?.prompt.prompt_digest ?? index}`}`;
+        const memoryEpisode = await memoryPacketForRun(options.memory, childRun, memoryEpisodeId);
+        if (!memoryEpisode) continue;
+        memoryProjection.recorded_episode_ids.push(memoryEpisode.episode_id);
+        const settlementItem = settlement?.trajectory.settlements.find((item) => item.episode.episode_id === learningEpisodeId);
+        if (settlementItem) {
+          await recordMemoryEvaluation(options.memory, memoryEpisode.episode_id, settlementItem.assessment);
+          memoryProjection.evaluation_recorded_episode_ids.push(memoryEpisode.episode_id);
+        }
       }
     }
+    if (options.executionLifecycle !== "observe_only") {
+      if (run.status === "completed" || run.status === "children_completed" || run.status === "children_partial") await options.execution?.complete(run.status);
+      else await options.execution?.checkpoint({ status: run.status, reason: `cross_domain_${run.status}` });
+    }
+    return {
+      schema: AUTONOMOUS_CROSS_DOMAIN_DECISION_CYCLE_SCHEMA,
+      status: run.status,
+      route,
+      semantic_route: semanticRoute,
+      run,
+      learning_episode_ids: [...run.learning_episode_ids],
+      evaluation: settlement ? projectedEvaluations(settlement) : null,
+      settlement,
+      memory: memoryProjection,
+      retention: CROSS_RETENTION,
+      authorization: CROSS_AUTHORIZATION,
+    };
+  } catch (error) {
+    if (options.executionLifecycle !== "observe_only") await failExecutionIfActive(options.execution, error);
+    throw error;
   }
-  if (options.executionLifecycle !== "observe_only") {
-    if (run.status === "completed" || run.status === "children_completed" || run.status === "children_partial") await options.execution?.complete(run.status);
-    else await options.execution?.checkpoint({ status: run.status, reason: `cross_domain_${run.status}` });
-  }
-  return {
-    schema: AUTONOMOUS_CROSS_DOMAIN_DECISION_CYCLE_SCHEMA,
-    status: run.status,
-    route,
-    semantic_route: semanticRoute,
-    run,
-    learning_episode_ids: [...run.learning_episode_ids],
-    evaluation: settlement ? projectedEvaluations(settlement) : null,
-    settlement,
-    memory: memoryProjection,
-    retention: CROSS_RETENTION,
-    authorization: CROSS_AUTHORIZATION,
-  };
 }

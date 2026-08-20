@@ -226,6 +226,9 @@ domains, then runs bounded specialists and optional synthesis under the same pro
 approvals. Its evaluator callback must return an exact reward map for the returned episode IDs;
 settlement applies delayed credit across the actual specialist/synthesis order. Partial runs and
 `synthesize: false` remain settleable without inventing a synthesis episode.
+If provider execution succeeds but evaluator settlement or memory projection fails afterward, the
+cycle fails the shared execution controller before rethrowing, unless the caller explicitly selected
+`executionLifecycle: "observe_only"` for a larger composition.
 
 `InMemoryAutonomousEpisodicMemory` provides a bounded TypeScript reference for the same durable
 memory boundary already available in the Python façade. It stores only task/route/prompt/plan/

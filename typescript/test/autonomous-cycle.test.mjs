@@ -77,6 +77,24 @@ test("decision cycle connects approval, invocation, evaluator settlement, and ba
   assert.equal(JSON.stringify(result.settlement).includes(task), false);
 });
 
+test("decision cycle fails the shared execution when post-run evaluation throws", async () => {
+  const { agent, calls } = cycleAgent();
+  const execution = await AutonomousExecutionController.create({ executionId: "cycle-post-run-failure-1", domain: "coding", capability: "code_review", riskClass: "read_only", journal: new InMemoryAutonomousExecutionJournal() });
+  const learning = new AutonomousLearningController(agent);
+  await assert.rejects(
+    runAutonomousDecisionCycle(agent, "Review this coding change", {
+      domain: "coding",
+      approveProviderCall: true,
+      execution,
+      learning: { controller: learning, episodeId: "cycle-post-run-failure-episode", evaluate: async () => { throw new Error("post-run evaluator unavailable"); } },
+    }),
+    /post-run evaluator unavailable/,
+  );
+  assert.equal(calls(), 1);
+  assert.equal(execution.state.status, "failed");
+  assert.equal(execution.state.last_event_kind, "failed");
+});
+
 test("replan cycle feeds bounded evaluator guidance into the next attempt and settles each attempt", async () => {
   const { agent, bodies, calls } = cycleAgent([{ text: "first answer" }, { text: "verified answer" }]);
   const learning = new AutonomousLearningController(agent);
@@ -298,6 +316,31 @@ test("cross-domain decision cycle settles specialist and synthesis credit as one
   assert.equal(execution.state.status, "completed");
   assert.equal(execution.state.provider_calls, 3);
   assert.equal(calls(), 3);
+});
+
+test("cross-domain decision cycle fails the shared execution when settlement throws", async () => {
+  const { agent, calls } = cycleAgent();
+  const execution = await AutonomousExecutionController.create({ executionId: "cross-post-run-failure-1", domain: "cross_domain", capability: "cross_domain_synthesis", riskClass: "review_required", policy: { max_provider_calls: 4 }, journal: new InMemoryAutonomousExecutionJournal() });
+  const learning = new AutonomousLearningController(agent);
+  await assert.rejects(
+    runAutonomousCrossDomainDecisionCycle(agent, "Research a biomedical neuroscience experiment with EEG patient evidence", {
+      approveProviderCall: true,
+      execution,
+      subtasks: [
+        { id: "bio", domain: "biomedical", task: "Review biomedical evidence." },
+        { id: "neuro", domain: "neuroscience", task: "Review neuroscience evidence." },
+      ],
+      learning: {
+        controller: learning,
+        trajectoryId: "cross-post-run-failure",
+        evaluate: async () => { throw new Error("cross-domain evaluator unavailable"); },
+      },
+    }),
+    /cross-domain evaluator unavailable/,
+  );
+  assert.equal(calls(), 3);
+  assert.equal(execution.state.status, "failed");
+  assert.equal(execution.state.last_event_kind, "failed");
 });
 
 test("cross-domain decision cycle applies semantic routing before fan-out and preserves both gates", async () => {

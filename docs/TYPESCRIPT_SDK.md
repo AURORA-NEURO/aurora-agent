@@ -1399,6 +1399,9 @@ enabled, its evaluator callback must cover exactly the returned `learning_episod
 controller then applies discounted return-to-go to the completed specialist/synthesis sequence.
 `synthesize: false` is a supported specialists-only mode, and a partial run never receives a hidden
 synthesis reward.
+Post-run evaluator settlement and memory projection are part of the controlled lifecycle: if either
+throws after provider work has completed, the cycle fails the shared execution controller before
+rethrowing, unless the caller chose `executionLifecycle: "observe_only"` for an enclosing manager.
 
 ### Metadata-only episodic memory
 
