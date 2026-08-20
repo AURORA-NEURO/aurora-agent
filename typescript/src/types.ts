@@ -125,6 +125,30 @@ export interface BrainProviderHealth extends JsonObject {
   consecutive_failures?: number;
   credential_ready?: boolean;
   eligible?: boolean;
+  attempts?: number;
+  successes?: number;
+  failures?: number;
+  success_rate?: number;
+  mean_latency_ms?: number | null;
+  last_latency_ms?: number | null;
+}
+
+/** Process-local or durable value-only evidence for one provider/model arm. */
+export interface BrainModelHealthEvidence extends JsonObject {
+  provider?: string;
+  model?: string;
+  attempts?: number;
+  successes?: number;
+  failures?: number;
+  success_rate?: number;
+  mean_latency_ms?: number | null;
+  last_latency_ms?: number | null;
+  last_status?: string | null;
+  last_status_code?: number | null;
+  circuit?: "closed" | "open" | string;
+  opened_until?: number | null;
+  observed_at?: number | null;
+  historical?: JsonObject;
 }
 
 export interface BrainModelSelectionArgs extends JsonObject {
@@ -139,6 +163,7 @@ export interface BrainModelSelectionArgs extends JsonObject {
   observations?: BrainModelObservation[];
   weights?: JsonObject;
   provider_health?: Record<string, BrainProviderHealth>;
+  model_health?: Record<string, BrainModelHealthEvidence>;
 }
 
 export interface BrainModelCandidateScore extends JsonObject {

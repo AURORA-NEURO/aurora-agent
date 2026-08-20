@@ -1685,6 +1685,24 @@ export class ApiClient {
         if (health.consecutive_failures !== undefined && (!Number.isSafeInteger(health.consecutive_failures) || health.consecutive_failures < 0)) throw new ArgumentError("provider_health.consecutive_failures must be a non-negative safe integer");
       }
     }
+    if (args.model_health !== undefined) {
+      if (!isObject(args.model_health)) throw new ArgumentError("brain model_health must be an object");
+      for (const [armId, health] of Object.entries(args.model_health)) {
+        const armParts = armId.split("/", 2);
+        if (!armId.includes("/") || !armParts[0]?.trim() || !armParts[1]?.trim() || !isObject(health)) {
+          throw new ArgumentError("brain model_health entries must be named provider/model objects");
+        }
+        for (const field of ["attempts", "successes", "failures"] as const) {
+          const value = health[field];
+          if (value !== undefined && (!Number.isSafeInteger(value) || value < 0)) throw new ArgumentError(`model_health.${field} must be a non-negative safe integer`);
+        }
+        if (health.success_rate !== undefined && (typeof health.success_rate !== "number" || !Number.isFinite(health.success_rate) || health.success_rate < 0 || health.success_rate > 1)) throw new ArgumentError("model_health.success_rate must be within [0, 1]");
+        for (const field of ["mean_latency_ms", "last_latency_ms", "opened_until", "observed_at"] as const) {
+          const value = health[field];
+          if (value !== undefined && value !== null && (typeof value !== "number" || !Number.isFinite(value) || value < 0)) throw new ArgumentError(`model_health.${field} must be a finite non-negative number or null`);
+        }
+      }
+    }
     return this.callTool<BrainModelSelectionResult>("brain_model_select", args, options);
   }
 

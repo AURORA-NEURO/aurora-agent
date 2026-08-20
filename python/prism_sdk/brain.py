@@ -1312,8 +1312,8 @@ def _selection_attempt_metadata(audit: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _provider_health_evidence(provider: str, health: Mapping[str, Any]) -> dict[str, Any] | None:
-    """Validate and project bounded transport evidence for one routing provider.
+def _routing_health_evidence(subject: str, health: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Validate and project bounded transport evidence for one routing subject.
 
     Historical health is preferred when present because it can represent more attempts than the
     current process. A small confidence cap below prevents a short outage or a tiny sample from
@@ -1324,7 +1324,7 @@ def _provider_health_evidence(provider: str, health: Mapping[str, Any]) -> dict[
     source: Mapping[str, Any] = historical if isinstance(historical, Mapping) else health
     attempts = source.get("attempts", 0)
     if not isinstance(attempts, int) or isinstance(attempts, bool) or attempts < 0:
-        raise BrainRunError(f"provider health attempts are invalid for {provider!r}")
+        raise BrainRunError(f"routing health attempts are invalid for {subject!r}")
     if attempts == 0:
         return None
     success_rate = source.get("success_rate")
@@ -1334,7 +1334,7 @@ def _provider_health_evidence(provider: str, health: Mapping[str, Any]) -> dict[
         or not math.isfinite(float(success_rate))
         or not 0.0 <= float(success_rate) <= 1.0
     ):
-        raise BrainRunError(f"provider health success_rate is invalid for {provider!r}")
+        raise BrainRunError(f"routing health success_rate is invalid for {subject!r}")
     latency = source.get("last_latency_ms")
     if (
         isinstance(latency, bool)
@@ -1342,13 +1342,19 @@ def _provider_health_evidence(provider: str, health: Mapping[str, Any]) -> dict[
         or not math.isfinite(float(latency))
         or float(latency) < 0.0
     ):
-        raise BrainRunError(f"provider health last_latency_ms is invalid for {provider!r}")
+        raise BrainRunError(f"routing health last_latency_ms is invalid for {subject!r}")
     return {
         "attempts": attempts,
         "success_rate": float(success_rate),
         "last_latency_ms": float(latency),
         "confidence": min(0.75, attempts / 12.0),
     }
+
+
+def _provider_health_evidence(provider: str, health: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Compatibility wrapper for provider-level routing evidence."""
+
+    return _routing_health_evidence(provider, health)
 
 
 def _refresh_failover_provider_health(
@@ -2256,6 +2262,12 @@ class AutonomousBrain:
             if not isinstance(raw_health_overrides, Mapping):
                 raise BrainRunError("selection_overrides.provider_health must be a mapping")
             health_overrides = raw_health_overrides
+        model_health_overrides: Mapping[str, Any] = {}
+        if selection_overrides is not None and selection_overrides.get("model_health") is not None:
+            raw_model_health_overrides = selection_overrides.get("model_health")
+            if not isinstance(raw_model_health_overrides, Mapping):
+                raise BrainRunError("selection_overrides.model_health must be a mapping")
+            model_health_overrides = raw_model_health_overrides
 
         provider_metadata = {
             row.get("provider"): row
@@ -2286,6 +2298,13 @@ class AutonomousBrain:
                     )
                 ),
             }
+        # Process-local model observations are an immediate routing prior. They deliberately do
+        # not become independent hard gates: only the provider circuit can disable every arm on
+        # that transport.
+        model_health: dict[str, dict[str, Any]] = {
+            arm_id: dict(health)
+            for arm_id, health in self.runtime.model_health_snapshot().items()
+        }
         normalized_models: list[dict[str, Any]] = []
         for candidate in model_candidates:
             if not isinstance(candidate, Mapping):
@@ -2381,20 +2400,57 @@ class AutonomousBrain:
                         model["enabled"] = False
                         current["eligible"] = False
 
-        # Transport outcomes are a bounded prior update, not task reward. Blend provider-level
-        # success and latency evidence into each candidate's static reliability/latency priors so
-        # the Rust selector can use its normal deterministic score without widening its wire
-        # contract. A capped confidence keeps sparse evidence from making routing brittle.
+        # Durable model evidence is joined by the unambiguous provider/model arm id. It can
+        # influence reliability and latency but cannot override provider registration,
+        # credential, capability, or circuit gates.
+        for arm_id, historical in model_health_overrides.items():
+            if (
+                not isinstance(arm_id, str)
+                or "/" not in arm_id
+                or not arm_id.split("/", 1)[0].strip()
+                or not arm_id.split("/", 1)[1].strip()
+                or not isinstance(historical, Mapping)
+            ):
+                raise BrainRunError("selection_overrides.model_health must map provider/model ids to objects")
+            provider, model_name = arm_id.split("/", 1)
+            current = model_health.setdefault(
+                arm_id,
+                {
+                    "provider": provider,
+                    "model": model_name,
+                    "attempts": 0,
+                    "successes": 0,
+                    "failures": 0,
+                    "success_rate": 0.0,
+                    "last_latency_ms": None,
+                    "circuit": "closed",
+                },
+            )
+            current["historical"] = dict(historical)
+
+        # Transport outcomes are a bounded prior update, not task reward. Prefer model-level
+        # evidence when an arm has it, then fall back to provider-level evidence. A capped
+        # confidence keeps sparse evidence from making routing brittle.
         for model in normalized_models:
             provider = model.get("provider")
-            if not isinstance(provider, str):
+            model_name = model.get("model")
+            if not isinstance(provider, str) or not isinstance(model_name, str):
                 continue
             health = provider_health.get(provider)
-            if not isinstance(health, Mapping):
-                continue
-            evidence = _provider_health_evidence(provider, health)
+            arm_id = f"{provider}/{model_name}"
+            model_evidence = model_health.get(arm_id)
+            evidence = (
+                _routing_health_evidence(arm_id, model_evidence)
+                if isinstance(model_evidence, Mapping)
+                else None
+            )
+            evidence_source = "model"
+            if evidence is None and isinstance(health, Mapping):
+                evidence = _provider_health_evidence(provider, health)
+                evidence_source = "provider"
             if evidence is None:
                 continue
+            model["health_evidence"] = evidence_source
             confidence = float(evidence["confidence"])
             prior_reliability = model.get("reliability", 0.5)
             if (
@@ -2461,6 +2517,7 @@ class AutonomousBrain:
                 "models": normalized_models,
                 "observations": observations,
                 "provider_health": provider_health,
+                "model_health": model_health,
             }
         )
         if max_cost_per_million_tokens is not None:
@@ -3188,6 +3245,7 @@ class AutonomousBrain:
         evaluator: "BrainOutcomeEvaluator",
         bandit_state: Mapping[str, Any],
         provider_health: Mapping[str, Any] | None = None,
+        model_health: Mapping[str, Any] | None = None,
         ledger: BrainLearningLedger | None = None,
         memory: BrainEpisodicMemory | None = None,
         memory_query: MemoryQuery | Mapping[str, Any] | None = None,
@@ -3221,6 +3279,10 @@ class AutonomousBrain:
             if not isinstance(provider_health, Mapping):
                 raise BrainRunError("provider_health must be a mapping or None")
             BrainLearningLedger._assert_safe(provider_health)
+        if model_health is not None:
+            if not isinstance(model_health, Mapping):
+                raise BrainRunError("model_health must be a mapping or None")
+            BrainLearningLedger._assert_safe(model_health)
         BrainLearningLedger._assert_safe(bandit_state)
         if not isinstance(max_replans, int) or isinstance(max_replans, bool) or not 0 <= max_replans <= 3:
             raise BrainRunError("max_replans must be within [0, 3]")
@@ -3271,6 +3333,21 @@ class AutonomousBrain:
                     raise BrainRunError("provider_health must map provider names to objects")
                 merged_health[provider] = dict(snapshot)
             overrides["provider_health"] = merged_health
+            options["selection_overrides"] = overrides
+        if model_health is not None:
+            overrides = options.get("selection_overrides", {})
+            if not isinstance(overrides, Mapping):
+                raise BrainRunError("mission_options.selection_overrides must be a mapping")
+            overrides = dict(overrides)
+            prior_health = overrides.get("model_health", {})
+            if not isinstance(prior_health, Mapping):
+                raise BrainRunError("mission_options.model_health must be a mapping")
+            merged_health = dict(prior_health)
+            for arm_id, snapshot in model_health.items():
+                if not isinstance(arm_id, str) or not isinstance(snapshot, Mapping):
+                    raise BrainRunError("model_health must map provider/model ids to objects")
+                merged_health[arm_id] = dict(snapshot)
+            overrides["model_health"] = merged_health
             options["selection_overrides"] = overrides
         allowed_options = {
             "context",
@@ -3501,6 +3578,7 @@ class AutonomousBrain:
         evaluator: "BrainOutcomeEvaluator",
         bandit_state: Mapping[str, Any],
         provider_health: Mapping[str, Any] | None = None,
+        model_health: Mapping[str, Any] | None = None,
         lease_seconds: float = 60.0,
         ledger: BrainLearningLedger | None = None,
         memory: BrainEpisodicMemory | None = None,
@@ -3534,6 +3612,10 @@ class AutonomousBrain:
             if not isinstance(provider_health, Mapping):
                 raise BrainRunError("provider_health must be a mapping or None")
             BrainLearningLedger._assert_safe(provider_health)
+        if model_health is not None:
+            if not isinstance(model_health, Mapping):
+                raise BrainRunError("model_health must be a mapping or None")
+            BrainLearningLedger._assert_safe(model_health)
         if not isinstance(lease_seconds, (int, float)) or isinstance(lease_seconds, bool) or not 1 <= lease_seconds <= 86_400:
             raise BrainRunError("lease_seconds must be within [1, 86400]")
         if approval_router is None:
@@ -3642,6 +3724,36 @@ class AutonomousBrain:
                         raise BrainRunError("provider_health must map provider names to objects")
                     merged_health[provider] = dict(snapshot)
                 overrides["provider_health"] = merged_health
+                if model_health is not None:
+                    prior_model_health = overrides.get("model_health", {})
+                    if not isinstance(prior_model_health, Mapping):
+                        raise BrainRunError("job mission_options.model_health must be a mapping")
+                    merged_model_health = dict(prior_model_health)
+                    for arm_id, snapshot in model_health.items():
+                        if not isinstance(arm_id, str) or not isinstance(snapshot, Mapping):
+                            raise BrainRunError("model_health must map provider/model ids to objects")
+                        merged_model_health[arm_id] = dict(snapshot)
+                    overrides["model_health"] = merged_model_health
+                options["selection_overrides"] = overrides
+                resolved_for_cycle["mission_options"] = options
+            elif model_health is not None:
+                options = resolved_for_cycle.get("mission_options", {})
+                if not isinstance(options, Mapping):
+                    raise BrainRunError("job mission_options must be a mapping")
+                options = dict(options)
+                overrides = options.get("selection_overrides", {})
+                if not isinstance(overrides, Mapping):
+                    raise BrainRunError("job mission_options.selection_overrides must be a mapping")
+                overrides = dict(overrides)
+                prior_model_health = overrides.get("model_health", {})
+                if not isinstance(prior_model_health, Mapping):
+                    raise BrainRunError("job mission_options.model_health must be a mapping")
+                merged_model_health = dict(prior_model_health)
+                for arm_id, snapshot in model_health.items():
+                    if not isinstance(arm_id, str) or not isinstance(snapshot, Mapping):
+                        raise BrainRunError("model_health must map provider/model ids to objects")
+                    merged_model_health[arm_id] = dict(snapshot)
+                overrides["model_health"] = merged_model_health
                 options["selection_overrides"] = overrides
                 resolved_for_cycle["mission_options"] = options
             cycle = self.run_adaptive_mission_learning_cycle(
@@ -3746,6 +3858,7 @@ class AutonomousBrain:
         evaluator: "BrainOutcomeEvaluator | None" = None,
         bandit_state: Mapping[str, Any],
         provider_health: Mapping[str, Any] | None = None,
+        model_health: Mapping[str, Any] | None = None,
         lease_seconds: float = 60.0,
         ledger: BrainLearningLedger | None = None,
         memory: BrainEpisodicMemory | None = None,
@@ -3791,6 +3904,10 @@ class AutonomousBrain:
             if not isinstance(provider_health, Mapping):
                 raise BrainRunError("provider_health must be a mapping or None")
             BrainLearningLedger._assert_safe(provider_health)
+        if model_health is not None:
+            if not isinstance(model_health, Mapping):
+                raise BrainRunError("model_health must be a mapping or None")
+            BrainLearningLedger._assert_safe(model_health)
         if not isinstance(lease_seconds, (int, float)) or isinstance(lease_seconds, bool) or not 1 <= lease_seconds <= 86_400:
             raise BrainRunError("lease_seconds must be within [1, 86400]")
         if approval_router is None:
@@ -3976,6 +4093,28 @@ class AutonomousBrain:
                         raise BrainRunError("provider_health must map provider names to objects")
                     merged_health[provider] = dict(snapshot)
                 merged_overrides["provider_health"] = merged_health
+                if model_health is not None:
+                    prior_model_health = merged_overrides.get("model_health", {})
+                    if not isinstance(prior_model_health, Mapping):
+                        raise BrainRunError("workflow_options.model_health must be a mapping")
+                    merged_model_health = dict(prior_model_health)
+                    for arm_id, snapshot in model_health.items():
+                        if not isinstance(arm_id, str) or not isinstance(snapshot, Mapping):
+                            raise BrainRunError("model_health must map provider/model ids to objects")
+                        merged_model_health[arm_id] = dict(snapshot)
+                    merged_overrides["model_health"] = merged_model_health
+                options["selection_overrides"] = merged_overrides
+            elif model_health is not None:
+                merged_overrides = dict(options.get("selection_overrides", {}))
+                prior_model_health = merged_overrides.get("model_health", {})
+                if not isinstance(prior_model_health, Mapping):
+                    raise BrainRunError("workflow_options.model_health must be a mapping")
+                merged_model_health = dict(prior_model_health)
+                for arm_id, snapshot in model_health.items():
+                    if not isinstance(arm_id, str) or not isinstance(snapshot, Mapping):
+                        raise BrainRunError("model_health must map provider/model ids to objects")
+                    merged_model_health[arm_id] = dict(snapshot)
+                merged_overrides["model_health"] = merged_model_health
                 options["selection_overrides"] = merged_overrides
             store.checkpoint(
                 job.job_id,
@@ -4124,6 +4263,7 @@ class AutonomousBrain:
         evaluator: "BrainOutcomeEvaluator | None" = None,
         bandit_state: Mapping[str, Any],
         provider_health: Mapping[str, Any] | None = None,
+        model_health: Mapping[str, Any] | None = None,
         lease_seconds: float = 60.0,
         ledger: BrainLearningLedger | None = None,
         memory: BrainEpisodicMemory | None = None,
@@ -4165,6 +4305,10 @@ class AutonomousBrain:
             if not isinstance(provider_health, Mapping):
                 raise BrainRunError("provider_health must be a mapping or None")
             BrainLearningLedger._assert_safe(provider_health)
+        if model_health is not None:
+            if not isinstance(model_health, Mapping):
+                raise BrainRunError("model_health must be a mapping or None")
+            BrainLearningLedger._assert_safe(model_health)
         if not isinstance(lease_seconds, (int, float)) or isinstance(lease_seconds, bool) or not 1 <= lease_seconds <= 86_400:
             raise BrainRunError("lease_seconds must be within [1, 86400]")
         if approval_router is None:
@@ -4364,6 +4508,28 @@ class AutonomousBrain:
                         raise BrainRunError("provider_health must map provider names to objects")
                     merged_health[provider] = dict(snapshot)
                 merged_overrides["provider_health"] = merged_health
+                if model_health is not None:
+                    prior_model_health = merged_overrides.get("model_health", {})
+                    if not isinstance(prior_model_health, Mapping):
+                        raise BrainRunError("cross_domain_options.model_health must be a mapping")
+                    merged_model_health = dict(prior_model_health)
+                    for arm_id, snapshot in model_health.items():
+                        if not isinstance(arm_id, str) or not isinstance(snapshot, Mapping):
+                            raise BrainRunError("model_health must map provider/model ids to objects")
+                        merged_model_health[arm_id] = dict(snapshot)
+                    merged_overrides["model_health"] = merged_model_health
+                options["selection_overrides"] = merged_overrides
+            elif model_health is not None:
+                merged_overrides = dict(options.get("selection_overrides", {}))
+                prior_model_health = merged_overrides.get("model_health", {})
+                if not isinstance(prior_model_health, Mapping):
+                    raise BrainRunError("cross_domain_options.model_health must be a mapping")
+                merged_model_health = dict(prior_model_health)
+                for arm_id, snapshot in model_health.items():
+                    if not isinstance(arm_id, str) or not isinstance(snapshot, Mapping):
+                        raise BrainRunError("model_health must map provider/model ids to objects")
+                    merged_model_health[arm_id] = dict(snapshot)
+                merged_overrides["model_health"] = merged_model_health
                 options["selection_overrides"] = merged_overrides
             store.checkpoint(
                 job.job_id,

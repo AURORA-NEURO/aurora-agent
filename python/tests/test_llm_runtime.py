@@ -474,6 +474,12 @@ class LlmRuntimeTests(unittest.TestCase):
         self.assertEqual(candidates[0].arm_id, "local/test-model")
         self.assertEqual(catalogue.candidates()[0]["context_window_tokens"], 16_000)
         self.assertEqual(catalogue.candidates()[0]["cost_per_million_tokens"], 1)
+        coverage = catalogue.compatibility_report(("tool_calling", "structured_output"))
+        self.assertEqual(coverage["compatible_count"], 1)
+        self.assertEqual(coverage["candidates"][0]["missing_capabilities"], [])
+        semantic_gap = catalogue.compatibility_report(("science",))
+        self.assertEqual(semantic_gap["compatible_count"], 0)
+        self.assertEqual(semantic_gap["evidence_posture"], "static_caller_declared_capabilities_only")
 
     def test_model_discovery_rejects_missing_credential_before_network(self) -> None:
         runtime = LLMRuntime(CredentialStore())
@@ -762,6 +768,11 @@ class LlmRuntimeTests(unittest.TestCase):
         self.assertEqual(status["failures"], 1)
         self.assertEqual(status["success_rate"], 0.5)
         self.assertIsInstance(status["last_latency_ms"], float)
+        model_snapshot = runtime.model_health_snapshot()
+        self.assertEqual(set(model_snapshot), {"openai/test-model"})
+        self.assertEqual(model_snapshot["openai/test-model"]["attempts"], 2)
+        self.assertEqual(model_snapshot["openai/test-model"]["success_rate"], 0.5)
+        self.assertEqual(runtime.model_status("openai", "test-model")["failures"], 1)
         serialized = json.dumps(observations)
         self.assertNotIn("super-secret", serialized)
         self.assertNotIn("hello", serialized)
@@ -803,7 +814,12 @@ class LlmRuntimeTests(unittest.TestCase):
             self.assertEqual(snapshot["openai"]["circuit"], "open")
             self.assertEqual(snapshot["openai"]["consecutive_failures"], 3)
             self.assertGreaterEqual(snapshot["openai"]["attempts"], 2)
+            model_snapshot = restored.model_health_snapshot(now=150.0)
+            self.assertEqual(model_snapshot["openai/test-model"]["attempts"], snapshot["openai"]["attempts"])
+            self.assertEqual(model_snapshot["openai/test-model"]["circuit"], "open")
+            self.assertIn("model_health", restored.selection_overrides(now=150.0))
             self.assertEqual(restored.health_snapshot(now=250.0)["openai"]["circuit"], "closed")
+            self.assertEqual(restored.model_health_snapshot(now=250.0)["openai/test-model"]["circuit"], "closed")
             serialized = json.dumps(restored.to_dict())
             self.assertNotIn("health-secret", serialized)
             self.assertNotIn("hello", serialized)
@@ -819,6 +835,134 @@ class LlmRuntimeTests(unittest.TestCase):
                         "api_key": "must-never-be-accepted",
                     }
                 )
+
+    def test_model_specific_transport_evidence_beats_provider_fallback_for_sibling_arms(self) -> None:
+        store = CredentialStore()
+        runtime = LLMRuntime(store)
+        runtime.register_provider(openai_provider(base_url=self.base_url, allow_insecure_http=True))
+        handle = store.register("openai", "model-routing-secret")
+        selection = AutonomousBrain(object(), runtime).build_adaptive_model_selection(
+            task="choose the healthier sibling model",
+            model_candidates=[
+                {
+                    "provider": "openai",
+                    "model": "slow-model",
+                    "context_window_tokens": 16_000,
+                    "max_output_tokens": 2_048,
+                    "quality": 0.9,
+                    "latency_ms": 100,
+                    "cost_per_million_tokens": 1,
+                    "reliability": 0.9,
+                },
+                {
+                    "provider": "openai",
+                    "model": "healthy-model",
+                    "context_window_tokens": 16_000,
+                    "max_output_tokens": 2_048,
+                    "quality": 0.9,
+                    "latency_ms": 100,
+                    "cost_per_million_tokens": 1,
+                    "reliability": 0.9,
+                },
+            ],
+            credentials={"openai": handle},
+            selection_overrides={
+                "provider_health": {
+                    "openai": {
+                        "attempts": 12,
+                        "success_rate": 0.5,
+                        "last_latency_ms": 200,
+                        "circuit": "closed",
+                    }
+                },
+                "model_health": {
+                    "openai/slow-model": {
+                        "attempts": 12,
+                        "success_rate": 0.0,
+                        "last_latency_ms": 1_000,
+                    },
+                    "openai/healthy-model": {
+                        "attempts": 12,
+                        "success_rate": 1.0,
+                        "last_latency_ms": 10,
+                    },
+                },
+            },
+        )
+        models = {model["model"]: model for model in selection["models"]}  # type: ignore[index]
+        self.assertEqual(models["slow-model"]["health_evidence"], "model")
+        self.assertEqual(models["healthy-model"]["health_evidence"], "model")
+        self.assertEqual(models["slow-model"]["reliability"], 0.225)
+        self.assertEqual(models["healthy-model"]["reliability"], 0.975)
+        self.assertEqual(models["slow-model"]["latency_ms"], 775)
+        self.assertEqual(models["healthy-model"]["latency_ms"], 32)
+        self.assertNotIn("model-routing-secret", json.dumps(selection))
+
+    def test_process_local_model_evidence_adapts_live_sibling_routing(self) -> None:
+        store = CredentialStore()
+        runtime = LLMRuntime(store)
+        runtime.register_provider(
+            openai_provider(
+                base_url=self.base_url,
+                path="/failure",
+                allow_insecure_http=True,
+                max_attempts=1,
+                circuit_breaker_failure_threshold=5,
+            )
+        )
+        handle = store.register("openai", "live-model-health-secret")
+        with self.assertRaises(ProviderError):
+            runtime.invoke(
+                "openai",
+                ProviderRequest(model="slow-model", messages=({"role": "user", "content": "fail"},)),
+                credential=handle,
+            )
+        runtime.register_provider(
+            openai_provider(
+                base_url=self.base_url,
+                allow_insecure_http=True,
+                max_attempts=1,
+                circuit_breaker_failure_threshold=5,
+            )
+        )
+        runtime.invoke(
+            "openai",
+            ProviderRequest(model="healthy-model", messages=({"role": "user", "content": "pass"},)),
+            credential=handle,
+        )
+        selection = AutonomousBrain(object(), runtime).build_adaptive_model_selection(
+            task="use live model evidence",
+            model_candidates=[
+                {
+                    "provider": "openai",
+                    "model": "slow-model",
+                    "context_window_tokens": 16_000,
+                    "max_output_tokens": 2_048,
+                    "quality": 0.9,
+                    "latency_ms": 100,
+                    "cost_per_million_tokens": 1,
+                    "reliability": 0.9,
+                },
+                {
+                    "provider": "openai",
+                    "model": "healthy-model",
+                    "context_window_tokens": 16_000,
+                    "max_output_tokens": 2_048,
+                    "quality": 0.9,
+                    "latency_ms": 100,
+                    "cost_per_million_tokens": 1,
+                    "reliability": 0.9,
+                },
+            ],
+            credentials={"openai": handle},
+        )
+        models = {model["model"]: model for model in selection["models"]}  # type: ignore[index]
+        self.assertEqual(models["slow-model"]["health_evidence"], "model")
+        self.assertEqual(models["healthy-model"]["health_evidence"], "model")
+        self.assertLess(models["slow-model"]["reliability"], models["healthy-model"]["reliability"])
+        self.assertEqual(selection["model_health"]["openai/slow-model"]["failures"], 1)  # type: ignore[index]
+        self.assertEqual(selection["model_health"]["openai/healthy-model"]["successes"], 1)  # type: ignore[index]
+        self.assertNotIn("live-model-health-secret", json.dumps(selection))
 
     def test_provider_native_tool_calls_are_typed_and_never_executed(self) -> None:
         store = CredentialStore()

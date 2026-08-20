@@ -9241,7 +9241,29 @@ class AutonomousAgent:
         resolved = dict(kwargs)
         if "provider_health" not in resolved and self.health_ledger is not None:
             resolved["provider_health"] = self.health_ledger.health_snapshot()
+        if "model_health" not in resolved and self.health_ledger is not None:
+            resolved["model_health"] = self.health_ledger.model_health_snapshot()
         return resolved
+
+    @staticmethod
+    def _merge_selection_overrides(
+        historical: Mapping[str, Any],
+        supplied: Mapping[str, Any] | None,
+    ) -> Mapping[str, Any] | None:
+        """Merge durable provider/model health while preserving caller-owned overlay values."""
+
+        if supplied is None:
+            return historical or None
+        if not isinstance(supplied, Mapping):
+            return supplied
+        merged = dict(historical)
+        merged.update(dict(supplied))
+        for field in ("provider_health", "model_health"):
+            historical_rows = historical.get(field)
+            supplied_rows = supplied.get(field)
+            if isinstance(historical_rows, Mapping) and isinstance(supplied_rows, Mapping):
+                merged[field] = {**dict(historical_rows), **dict(supplied_rows)}
+        return merged
 
     def credential_status(self, provider: str) -> dict[str, Any]:
         """Return one redacted provider onboarding state for a UI or request gate."""
@@ -9505,6 +9527,42 @@ class AutonomousAgent:
             "plan_digest": content_digest(plans),
             "execution": "planning_only; no_provider_or_tool_invocation",
             "authority_posture": "metadata_only; plans_do_not_grant_authority",
+            "secret_material": "never_returned",
+        }
+
+    def model_capability_coverage(self, domains: Sequence[str] | None = None) -> dict[str, Any]:
+        """Project static model-arm coverage for every selected autonomous domain.
+
+        This joins reviewed domain requirements with caller-declared catalogue capabilities. It
+        is intentionally separate from readiness: an arm can be capability-compatible while its
+        provider still needs a credential, has an open circuit, or is blocked by another live
+        gate.
+        """
+
+        selected = tuple(AUTONOMOUS_DOMAINS) if domains is None else _sequence(
+            "model capability coverage domains", domains, maximum=len(AUTONOMOUS_DOMAINS)
+        )
+        unknown = sorted(set(selected).difference(AUTONOMOUS_DOMAINS))
+        if unknown:
+            raise BrainRunError("model capability coverage contains unknown domains: " + ", ".join(unknown))
+        rows: list[dict[str, Any]] = []
+        for domain in selected:
+            profile = self.orchestrator.registry.resolve(domain)
+            report = self.catalogue.compatibility_report(profile.required_model_capabilities)
+            rows.append(
+                {
+                    "domain": domain,
+                    "required_model_capabilities": list(profile.required_model_capabilities),
+                    "catalogue": report,
+                }
+            )
+        return {
+            "schema": "bioprism-autonomous-model-capability-coverage/0.1",
+            "domains": list(selected),
+            "domain_count": len(rows),
+            "rows": rows,
+            "evidence_posture": "static_caller_declared_capabilities_only",
+            "runtime_gates": "not_projected; readiness and selection apply live provider gates",
             "secret_material": "never_returned",
         }
 
@@ -9899,6 +9957,7 @@ class AutonomousAgent:
             ),
             "provider_health": health,
             "domains": self.domains(),
+            "model_capability_coverage": self.model_capability_coverage(),
             "workflows": self.workflows(),
             "domain_packs": self.domain_packs(),
             "domain_pack_registry_digest": self.orchestrator.pack_registry.digest,
@@ -9985,17 +10044,9 @@ class AutonomousAgent:
         resolved_credentials = self._credential_mapping(credentials)
         resolved_overrides = None if selection_overrides is None else dict(selection_overrides)
         if self.health_ledger is not None:
-            historical = self.health_ledger.selection_overrides()
-            if resolved_overrides is None:
-                resolved_overrides = historical or None
-            elif isinstance(resolved_overrides, Mapping):
-                merged = dict(historical)
-                merged.update(resolved_overrides)
-                historical_health = historical.get("provider_health")
-                supplied_health = resolved_overrides.get("provider_health")
-                if isinstance(historical_health, Mapping) and isinstance(supplied_health, Mapping):
-                    merged["provider_health"] = {**dict(historical_health), **dict(supplied_health)}
-                resolved_overrides = merged
+            resolved_overrides = self._merge_selection_overrides(
+                self.health_ledger.selection_overrides(), resolved_overrides
+            )
         return self.orchestrator.route_with_provider(
             task=task,
             model_candidates=candidates,
@@ -10040,17 +10091,9 @@ class AutonomousAgent:
         resolved_credentials = self._credential_mapping(credentials)
         selection_overrides = kwargs.pop("selection_overrides", None)
         if self.health_ledger is not None:
-            historical = self.health_ledger.selection_overrides()
-            if selection_overrides is None:
-                selection_overrides = historical or None
-            elif isinstance(selection_overrides, Mapping):
-                merged = dict(historical)
-                merged.update(selection_overrides)
-                historical_health = historical.get("provider_health")
-                supplied_health = selection_overrides.get("provider_health")
-                if isinstance(historical_health, Mapping) and isinstance(supplied_health, Mapping):
-                    merged["provider_health"] = {**dict(historical_health), **dict(supplied_health)}
-                selection_overrides = merged
+            selection_overrides = self._merge_selection_overrides(
+                self.health_ledger.selection_overrides(), selection_overrides
+            )
         return self.orchestrator.prepare_auto_with_provider(
             task=task,
             model_candidates=candidates,
@@ -10073,17 +10116,9 @@ class AutonomousAgent:
         resolved_credentials = self._credential_mapping(credentials)
         selection_overrides = kwargs.pop("selection_overrides", None)
         if self.health_ledger is not None:
-            historical = self.health_ledger.selection_overrides()
-            if selection_overrides is None:
-                selection_overrides = historical or None
-            elif isinstance(selection_overrides, Mapping):
-                merged = dict(historical)
-                merged.update(selection_overrides)
-                historical_health = historical.get("provider_health")
-                supplied_health = selection_overrides.get("provider_health")
-                if isinstance(historical_health, Mapping) and isinstance(supplied_health, Mapping):
-                    merged["provider_health"] = {**dict(historical_health), **dict(supplied_health)}
-                selection_overrides = merged
+            selection_overrides = self._merge_selection_overrides(
+                self.health_ledger.selection_overrides(), selection_overrides
+            )
         return self.orchestrator.plan_with_provider(
             blueprint=blueprint,
             model_candidates=candidates,
@@ -10106,17 +10141,9 @@ class AutonomousAgent:
         resolved_credentials = self._credential_mapping(credentials)
         selection_overrides = kwargs.pop("selection_overrides", None)
         if self.health_ledger is not None:
-            historical = self.health_ledger.selection_overrides()
-            if selection_overrides is None:
-                selection_overrides = historical or None
-            elif isinstance(selection_overrides, Mapping):
-                merged = dict(historical)
-                merged.update(selection_overrides)
-                historical_health = historical.get("provider_health")
-                supplied_health = selection_overrides.get("provider_health")
-                if isinstance(historical_health, Mapping) and isinstance(supplied_health, Mapping):
-                    merged["provider_health"] = {**dict(historical_health), **dict(supplied_health)}
-                selection_overrides = merged
+            selection_overrides = self._merge_selection_overrides(
+                self.health_ledger.selection_overrides(), selection_overrides
+            )
         return self.orchestrator.plan_cross_domain_with_provider(
             blueprint=blueprint,
             model_candidates=candidates,
@@ -10534,16 +10561,9 @@ class AutonomousAgent:
         if self.health_ledger is not None:
             historical = self.health_ledger.selection_overrides()
             supplied = resolved_options.get("selection_overrides")
-            if supplied is None:
-                resolved_options["selection_overrides"] = historical or None
-            elif isinstance(supplied, Mapping):
-                merged = dict(historical)
-                merged.update(dict(supplied))
-                historical_health = historical.get("provider_health")
-                supplied_health = supplied.get("provider_health")
-                if isinstance(historical_health, Mapping) and isinstance(supplied_health, Mapping):
-                    merged["provider_health"] = {**dict(historical_health), **dict(supplied_health)}
-                resolved_options["selection_overrides"] = merged
+            resolved_options["selection_overrides"] = self._merge_selection_overrides(
+                historical, supplied
+            )
         if resume_learning and resolved_options.get("bandit_state") is None:
             resolved_options["bandit_state"] = self.learning_state()
         return resolved_candidates, resolved_credentials, resolved_options, execution_controller

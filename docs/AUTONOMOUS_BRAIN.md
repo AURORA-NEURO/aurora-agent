@@ -358,7 +358,7 @@ agent = AutonomousAgent(
 
 The agent registers a value-only runtime observer that appends provider/model, success or
 failure, latency, status code, circuit state, and bounded usage metadata. On every subsequent
-`run()` it merges the latest historical `provider_health` overlay into model selection, while
+`run()` it merges the latest historical `provider_health` and `model_health` overlays into model selection, while
 preserving explicit caller overrides. Open circuits remain a hard gate until their recorded
 expiry; expired historical circuits become closed and can be probed again. `health.to_dict()` and
 `agent.readiness()` expose only this redacted operational summary. The ledger rejects secret-shaped
@@ -367,14 +367,18 @@ model prompts. This is complementary to `BrainLearningLedger`: provider health d
 transport reliability, while evaluator rewards describe task quality and drive bandit adaptation.
 
 The runtime also keeps a process-local value-only counter for immediate adaptation. Each completed
-or refused invocation updates attempts, successes, failures, success rate, last/mean latency, last
-model, and bounded token totals in `LLMRuntime.provider_status()`. When the brain builds its next
-selection, durable ledger evidence is preferred when available; otherwise the live process
-evidence is used. A capped-confidence blend nudges each provider's model-arm reliability and
-latency priors toward observed transport behavior. Twelve observations are enough to reach the
-maximum 0.75 evidence weight, so a single transient failure cannot erase an application-supplied
-prior. This update is transport evidence only: it never becomes evaluator reward and cannot
-override capability, credential, cost, approval, or circuit gates.
+or refused invocation updates provider-level and provider/model-level attempts, successes,
+failures, success rate, last/mean latency, status, circuit projection, and bounded token totals.
+The provider view is available through `LLMRuntime.provider_status()` and the arm view through
+`LLMRuntime.model_health_snapshot()` / `model_status()`. When the brain builds its next selection,
+durable model evidence is preferred for an observed arm, then durable provider evidence, then the
+live process equivalent. A capped-confidence blend nudges the specific model arm's reliability
+and latency priors toward observed transport behavior. Twelve observations are enough to reach
+the maximum 0.75 evidence weight, so a single transient failure cannot erase an
+application-supplied prior. Model evidence is not an independent circuit: only the provider
+circuit can hard-disable all sibling models. This update is transport evidence only: it never
+becomes evaluator reward and cannot override capability, credential, cost, approval, or circuit
+gates.
 
 Failover refreshes the same live gate after every provider refusal. A model-specific refusal
 disables only that arm. If the runtime circuit opens, or the error is explicitly marked
@@ -1740,7 +1744,14 @@ agent.register_discovered_models(
 
 Rows without an explicit `provider/model` prior are rejected instead of becoming silent routing
 arms. This makes live availability useful to model selection while preserving the separation
-between provider claims, local benchmarks, and autonomous decisions. The provider docs expose
+between provider claims, local benchmarks, and autonomous decisions. Inventory-derived
+capabilities are similarly limited to provider-visible facts such as tool calling, structured
+output, modalities, and embeddings. Domain strengths such as `science`, `operations`, or
+`coordination` must be explicitly declared by the application in the routing prior; the runtime
+does not infer them from a model name. `catalogue.compatibility_report(...)` and the
+`agent.readiness()["model_capability_coverage"]` projection show deterministic coverage for all
+twelve domains without pretending that a compatible arm is credential-ready or correct. The
+provider docs expose
 these inventory surfaces as OpenAI-compatible model-list operations for [DeepSeek](https://api-docs.deepseek.com/api/list-models),
 [Mistral](https://docs.mistral.ai/api/endpoint/models), and [OpenRouter](https://openrouter.ai/docs/api/api-reference/models/get-models);
 the runtime keeps the route configurable for proxies and compatible gateways.

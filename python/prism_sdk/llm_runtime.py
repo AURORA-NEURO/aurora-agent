@@ -1128,6 +1128,58 @@ class ModelCatalogue:
             and (not enabled_only or candidate.enabled)
         ]
 
+    def compatibility_report(self, required_capabilities: Sequence[str]) -> dict[str, Any]:
+        """Report static model-capability coverage without declaring runtime readiness.
+
+        Provider discovery can establish transport-visible facts such as tool calling,
+        structured output, modalities, and embeddings. It cannot establish semantic strengths
+        such as ``science`` or ``operations``. Those labels must be supplied by the caller when
+        registering a candidate, and this report makes the resulting coverage auditable.
+        Credential, registration, circuit, cost, and context-window gates are intentionally not
+        inferred here; this is a catalogue-only compatibility projection.
+        """
+
+        if not isinstance(required_capabilities, Sequence) or isinstance(
+            required_capabilities, (str, bytes)
+        ):
+            raise ProviderError("required model capabilities must be a sequence")
+        normalized: list[str] = []
+        for capability in required_capabilities:
+            if not isinstance(capability, str) or not capability.strip():
+                raise ProviderError("required model capabilities must contain non-empty strings")
+            if len(capability.encode("utf-8")) > 128 or any(ord(character) < 32 for character in capability):
+                raise ProviderError("required model capabilities must contain bounded strings")
+            if capability not in normalized:
+                normalized.append(capability)
+        with self._lock:
+            values = tuple(self._candidates.values())
+        rows: list[dict[str, Any]] = []
+        for candidate in sorted(values, key=lambda item: item.arm_id):
+            declared = set(candidate.capabilities)
+            missing = [capability for capability in normalized if capability not in declared]
+            rows.append(
+                {
+                    "provider": candidate.provider,
+                    "model": candidate.model,
+                    "arm_id": candidate.arm_id,
+                    "declared_capabilities": list(candidate.capabilities),
+                    "required_capabilities": list(normalized),
+                    "missing_capabilities": missing,
+                    "enabled": candidate.enabled,
+                    "compatible": candidate.enabled and not missing,
+                }
+            )
+        compatible_count = sum(1 for row in rows if row["compatible"])
+        return {
+            "required_capabilities": normalized,
+            "candidate_count": len(rows),
+            "compatible_count": compatible_count,
+            "coverage": compatible_count / len(rows) if rows else 0.0,
+            "candidates": rows,
+            "evidence_posture": "static_caller_declared_capabilities_only",
+            "runtime_gates": "not_projected; check provider registration, credentials, circuit, cost, and context separately",
+        }
+
     def to_dict(self) -> dict[str, Any]:
         values = self.candidates()
         return {
@@ -1323,18 +1375,99 @@ class ProviderHealthLedger:
                 state["opened_until"] = None
         return {provider: aggregate[provider] for provider in sorted(aggregate)}
 
-    def selection_overrides(self, *, now: float | None = None) -> dict[str, Any]:
-        """Return the brain selector's safe historical provider-health overlay."""
+    def model_health_snapshot(
+        self,
+        *,
+        provider: str | None = None,
+        now: float | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        """Aggregate restart-safe transport evidence for each observed provider/model arm.
 
-        snapshot = self.health_snapshot(now=now)
-        return {} if not snapshot else {"provider_health": snapshot}
+        The model row is a routing prior, not an independent transport gate. Provider circuit
+        state remains authoritative because a transport failure can affect every model served by
+        that provider. Keeping the rows separate still lets the selector demote one poor arm
+        while preserving a healthy sibling as a bounded fallback.
+        """
+
+        if provider is not None:
+            self._validate_provider(provider)
+        current_time = self._clock() if now is None else now
+        if not isinstance(current_time, (int, float)) or isinstance(current_time, bool) or not math.isfinite(float(current_time)):
+            raise ProviderError("provider health snapshot time must be finite")
+        aggregate: dict[tuple[str, str], dict[str, Any]] = {}
+        for observation in self.records(provider=provider):
+            key = (observation["provider"], observation["model"])
+            state = aggregate.setdefault(
+                key,
+                {
+                    "provider": key[0],
+                    "model": key[1],
+                    "attempts": 0,
+                    "successes": 0,
+                    "failures": 0,
+                    "total_latency_ms": 0.0,
+                    "total_input_tokens": 0,
+                    "total_output_tokens": 0,
+                },
+            )
+            state["attempts"] += 1
+            state["successes"] += int(observation["outcome"] == "success")
+            state["failures"] += int(observation["outcome"] == "failure")
+            state["total_latency_ms"] += float(observation["latency_ms"])
+            state["total_input_tokens"] += int(observation.get("input_tokens", 0))
+            state["total_output_tokens"] += int(observation.get("output_tokens", 0))
+            state.update(
+                {
+                    "last_outcome": observation["outcome"],
+                    "last_status": observation["status"],
+                    "last_latency_ms": observation["latency_ms"],
+                    "circuit": observation.get("circuit", "closed"),
+                    "consecutive_failures": observation.get("consecutive_failures", 0),
+                    "opened_until": observation.get("opened_until"),
+                    "observed_at": observation["observed_at"],
+                }
+            )
+            if "status_code" in observation:
+                state["last_status_code"] = observation["status_code"]
+        for state in aggregate.values():
+            attempts = state["attempts"]
+            state["success_rate"] = state["successes"] / attempts if attempts else 0.0
+            state["mean_latency_ms"] = state["total_latency_ms"] / attempts if attempts else None
+            state.pop("total_latency_ms", None)
+            opened_until = state.get("opened_until")
+            if state.get("circuit") == "open" and (
+                opened_until is None or float(opened_until) > float(current_time)
+            ):
+                state["circuit"] = "open"
+            else:
+                state["circuit"] = "closed"
+                state["opened_until"] = None
+        return {
+            f"{row_provider}/{model}": aggregate[(row_provider, model)]
+            for row_provider, model in sorted(aggregate)
+        }
+
+    def selection_overrides(self, *, now: float | None = None) -> dict[str, Any]:
+        """Return safe historical provider and model health overlays for the brain selector."""
+
+        provider_snapshot = self.health_snapshot(now=now)
+        model_snapshot = self.model_health_snapshot(now=now)
+        result: dict[str, Any] = {}
+        if provider_snapshot:
+            result["provider_health"] = provider_snapshot
+        if model_snapshot:
+            result["model_health"] = model_snapshot
+        return result
 
     def to_dict(self, *, now: float | None = None) -> dict[str, Any]:
         snapshot = self.health_snapshot(now=now)
+        models = self.model_health_snapshot(now=now)
         return {
             "schema": PROVIDER_HEALTH_LEDGER_SCHEMA,
             "provider_count": len(snapshot),
             "providers": snapshot,
+            "model_count": len(models),
+            "models": models,
             "record_count": len(self.records()),
             "retention": "value_only_provider_outcomes_no_payloads_or_credentials",
         }
@@ -1854,6 +1987,10 @@ class _ProviderObservationState:
     last_latency_ms: float | None = None
     last_model: str | None = None
     last_outcome: str | None = None
+    last_status: str | None = None
+    last_status_code: int | None = None
+    last_circuit: str | None = None
+    opened_until: float | None = None
     observed_at: float | None = None
     total_input_tokens: int = 0
     total_output_tokens: int = 0
@@ -1874,6 +2011,7 @@ class LLMRuntime:
         self._providers: dict[str, ProviderConfig] = {}
         self._circuits: dict[str, _CircuitState] = {}
         self._provider_observations: dict[str, _ProviderObservationState] = {}
+        self._model_observations: dict[tuple[str, str], _ProviderObservationState] = {}
         self._clock = clock
         self._sleeper = sleeper
         self._observation_lock = threading.RLock()
@@ -1924,20 +2062,41 @@ class LLMRuntime:
                         input_tokens = value
                     else:
                         output_tokens = value
+        circuit_state = self._circuits.get(config.provider)
+        circuit_label = "closed"
+        opened_until = None
+        if circuit_state is not None:
+            now = self._clock()
+            circuit_label = (
+                "open"
+                if circuit_state.opened_until is not None and now < circuit_state.opened_until
+                else "closed"
+            )
+            opened_until = circuit_state.opened_until
         with self._observation_lock:
-            observed = self._provider_observations.setdefault(config.provider, _ProviderObservationState())
-            observed.attempts += 1
-            if outcome == "success":
-                observed.successes += 1
-            elif outcome == "failure":
-                observed.failures += 1
-            observed.total_latency_ms += normalized_latency
-            observed.last_latency_ms = normalized_latency
-            observed.last_model = request.model
-            observed.last_outcome = outcome
-            observed.observed_at = observed_at
-            observed.total_input_tokens += input_tokens
-            observed.total_output_tokens += output_tokens
+            observations = (
+                self._provider_observations.setdefault(config.provider, _ProviderObservationState()),
+                self._model_observations.setdefault(
+                    (config.provider, request.model), _ProviderObservationState()
+                ),
+            )
+            for observed in observations:
+                observed.attempts += 1
+                if outcome == "success":
+                    observed.successes += 1
+                elif outcome == "failure":
+                    observed.failures += 1
+                observed.total_latency_ms += normalized_latency
+                observed.last_latency_ms = normalized_latency
+                observed.last_model = request.model
+                observed.last_outcome = outcome
+                observed.last_status = status
+                observed.last_status_code = None if error is None else error.status_code
+                observed.last_circuit = circuit_label
+                observed.opened_until = opened_until
+                observed.observed_at = observed_at
+                observed.total_input_tokens += input_tokens
+                observed.total_output_tokens += output_tokens
         payload: dict[str, Any] = {
             "schema": PROVIDER_OBSERVATION_SCHEMA,
             "provider": config.provider,
@@ -1948,11 +2107,8 @@ class LLMRuntime:
             "observed_at": observed_at,
             "retention": "metadata_only_no_provider_payloads",
         }
-        circuit_state = self._circuits.get(config.provider)
         if circuit_state is not None:
-            now = self._clock()
-            circuit_open = circuit_state.opened_until is not None and now < circuit_state.opened_until
-            payload["circuit"] = "open" if circuit_open else "closed"
+            payload["circuit"] = circuit_label
             payload["consecutive_failures"] = circuit_state.consecutive_failures
             if circuit_state.opened_until is not None:
                 payload["opened_until"] = circuit_state.opened_until
@@ -2012,6 +2168,9 @@ class LLMRuntime:
                 "last_latency_ms": observed.last_latency_ms,
                 "last_model": observed.last_model,
                 "last_outcome": observed.last_outcome,
+                "last_status": observed.last_status,
+                "last_status_code": observed.last_status_code,
+                "last_circuit": observed.last_circuit,
                 "observed_at": observed.observed_at,
                 "total_input_tokens": observed.total_input_tokens,
                 "total_output_tokens": observed.total_output_tokens,
@@ -2026,6 +2185,76 @@ class LLMRuntime:
             "credential_posture": "caller_supplied_in_memory_handle",
             **observation,
         }
+
+    def model_health_snapshot(self, provider: str | None = None) -> dict[str, dict[str, Any]]:
+        """Return process-local, value-only health evidence keyed by ``provider/model``.
+
+        Model observations are intentionally separate from provider circuit state. A model's
+        observed reliability and latency can influence routing, but only the provider circuit
+        remains an authoritative transport gate. This lets a healthy sibling model remain a
+        viable fallback when the provider itself has not opened its circuit.
+        """
+
+        if provider is not None:
+            config = self._providers.get(provider)
+            if config is None:
+                raise ProviderError(f"provider {provider!r} is not configured")
+        with self._observation_lock:
+            rows = tuple(
+                (key, observed)
+                for key, observed in self._model_observations.items()
+                if provider is None or key[0] == provider
+            )
+        result: dict[str, dict[str, Any]] = {}
+        for (row_provider, model), observed in sorted(rows):
+            attempts = observed.attempts
+            result[f"{row_provider}/{model}"] = {
+                "provider": row_provider,
+                "model": model,
+                "attempts": attempts,
+                "successes": observed.successes,
+                "failures": observed.failures,
+                "success_rate": observed.successes / attempts if attempts else 0.0,
+                "mean_latency_ms": observed.total_latency_ms / attempts if attempts else None,
+                "last_latency_ms": observed.last_latency_ms,
+                "last_outcome": observed.last_outcome,
+                "last_status": observed.last_status,
+                "last_status_code": observed.last_status_code,
+                "circuit": observed.last_circuit or "closed",
+                "opened_until": observed.opened_until,
+                "observed_at": observed.observed_at,
+                "total_input_tokens": observed.total_input_tokens,
+                "total_output_tokens": observed.total_output_tokens,
+            }
+        return result
+
+    def model_status(self, provider: str, model: str) -> dict[str, Any]:
+        """Return one redacted model-health projection for configuration and operator UIs."""
+
+        if not isinstance(model, str) or not model.strip():
+            raise ProviderError("model status model must be a non-empty string")
+        snapshot = self.model_health_snapshot(provider)
+        return snapshot.get(
+            f"{provider}/{model}",
+            {
+                "provider": provider,
+                "model": model,
+                "attempts": 0,
+                "successes": 0,
+                "failures": 0,
+                "success_rate": 0.0,
+                "mean_latency_ms": None,
+                "last_latency_ms": None,
+                "last_outcome": None,
+                "last_status": None,
+                "last_status_code": None,
+                "circuit": "closed",
+                "opened_until": None,
+                "observed_at": None,
+                "total_input_tokens": 0,
+                "total_output_tokens": 0,
+            },
+        )
 
     def provider_requires_credential(self, provider: str) -> bool:
         """Return whether this registered transport requires a caller-owned credential handle."""

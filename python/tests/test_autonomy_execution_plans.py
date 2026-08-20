@@ -179,6 +179,23 @@ def test_capability_adapters_and_evidence_contracts_cover_every_domain():
     assert coding_debug["contract"]["evaluator_signals"]
 
 
+def test_model_capability_coverage_is_projected_for_every_domain_without_claiming_readiness():
+    agent = AutonomousAgent(
+        _Workspace(),
+        LLMRuntime(),
+        model_catalogue=ModelCatalogue([_model()]),
+    )
+
+    coverage = agent.model_capability_coverage()
+
+    assert coverage["domain_count"] == len(AUTONOMOUS_DOMAINS)
+    assert {row["domain"] for row in coverage["rows"]} == set(AUTONOMOUS_DOMAINS)
+    assert all(row["catalogue"]["compatible_count"] == 1 for row in coverage["rows"])
+    assert coverage["runtime_gates"].startswith("not_projected")
+    readiness = agent.readiness()
+    assert readiness["model_capability_coverage"]["domain_count"] == len(AUTONOMOUS_DOMAINS)
+
+
 def test_capability_dispatch_narrows_provider_tools_and_binds_the_reviewed_contract():
     registry = AutonomousDomainToolRegistry(
         [
