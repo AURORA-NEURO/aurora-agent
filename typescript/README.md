@@ -173,6 +173,20 @@ self-report never become reinforcement automatically. Cross-domain cycles contin
 `runCrossDomain()` and `settleCrossDomain()` so specialist and synthesis episodes retain delayed
 credit separately.
 
+`runAutonomousReplanCycle()` adds the bounded adaptive control loop for callers that want the
+evaluator to decide whether one answer deserves another attempt. Each completed attempt is sent
+to a caller-owned evaluator that returns reward/pass/failure metadata plus `replan_requested` and,
+when requested, a bounded instruction. The SDK caps additional attempts at three, reuses the
+task-digest-validated route, and inserts only a required transient replan context chunk; it cannot
+change the reviewed domain, capability requirements, tool allow-list, budgets, or approval state.
+Approval-required, abstained, disagreement, invalid, and route-review outcomes terminate without
+being evaluated as successful work. With `learning`, every completed attempt gets a distinct
+pending episode and immediate value-only settlement, so later replanning cannot overwrite earlier
+evidence. Attempt metadata contains evaluator fields and digests, while the final local cycle
+result retains the normal local prompt/response boundary. Use a unique `episodePrefix` for each
+logical cycle when persistence is enabled; no provider response or raw evaluator instruction is
+sent to the remote learning plane.
+
 `runAutonomousCrossDomainDecisionCycle()` composes the corresponding fan-out/fan-in path. It can
 semantically review an ambiguous task, requires a cross-domain route with at least two reviewed
 domains, then runs bounded specialists and optional synthesis under the same provider and effect

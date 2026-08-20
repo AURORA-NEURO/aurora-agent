@@ -10,6 +10,7 @@ import {
   openaiCompatibleProvider,
   runAutonomousCrossDomainDecisionCycle,
   runAutonomousDecisionCycle,
+  runAutonomousReplanCycle,
 } from "../dist/index.js";
 
 function jsonResponse(payload) {
@@ -72,6 +73,93 @@ test("decision cycle connects approval, invocation, evaluator settlement, and ba
   assert.equal(result.settlement.next_state.generation, 1);
   assert.equal(calls(), 1);
   assert.equal(JSON.stringify(result.settlement).includes(task), false);
+});
+
+test("replan cycle feeds bounded evaluator guidance into the next attempt and settles each attempt", async () => {
+  const { agent, bodies, calls } = cycleAgent([{ text: "first answer" }, { text: "verified answer" }]);
+  const learning = new AutonomousLearningController(agent);
+  let evaluations = 0;
+  const result = await runAutonomousReplanCycle(agent, "Debug this coding repository and report the verified tests.", {
+    domain: "coding",
+    approveProviderCall: true,
+    maxReplans: 1,
+    evaluate: () => {
+      evaluations += 1;
+      return evaluations === 1
+        ? { evaluator_id: "coding-reviewer", evaluator_version: "2", reward: 0.25, passed: false, failed: true, replan_requested: true, replan_instruction: "Add explicit verification evidence before concluding.", evidence_digest: "a".repeat(64) }
+        : { evaluator_id: "coding-reviewer", evaluator_version: "2", reward: 0.95, passed: true, failed: false, replan_requested: false, evidence_digest: "b".repeat(64) };
+    },
+    learning: { controller: learning, episodePrefix: "cycle-replan" },
+  });
+  assert.equal(result.status, "completed");
+  assert.equal(result.replan_count, 1);
+  assert.equal(result.attempts.length, 2);
+  assert.equal(result.attempts[0].evaluation.replan_requested, true);
+  assert.equal(result.attempts[1].evaluation.replan_requested, false);
+  assert.equal(result.learning_episode_ids.length, 2);
+  assert.equal(result.settlements.length, 2);
+  assert.equal(result.settlements.at(-1).next_state.generation, 2);
+  assert.equal(calls(), 2);
+  assert.match(JSON.stringify(bodies[1]), /autonomous-replan-2/);
+  assert.match(JSON.stringify(bodies[1]), /Add explicit verification evidence/);
+  assert.equal(JSON.stringify(result.attempts).includes("Add explicit verification evidence"), false);
+});
+
+test("replan cycle preserves one-shot completion and enforces the replan ceiling", async () => {
+  const oneShot = cycleAgent();
+  const completed = await runAutonomousReplanCycle(oneShot.agent, "Review this coding change.", {
+    domain: "coding",
+    approveProviderCall: true,
+    maxReplans: 0,
+    evaluate: () => ({ evaluator_id: "reviewer", evaluator_version: "1", reward: 0.8, passed: true, replan_requested: false }),
+  });
+  assert.equal(completed.status, "completed");
+  assert.equal(completed.replan_count, 0);
+  assert.equal(oneShot.calls(), 1);
+
+  const limited = cycleAgent();
+  const result = await runAutonomousReplanCycle(limited.agent, "Review this coding change.", {
+    domain: "coding",
+    approveProviderCall: true,
+    maxReplans: 0,
+    evaluate: () => ({ evaluator_id: "reviewer", evaluator_version: "1", reward: 0.2, passed: false, replan_requested: true, replan_instruction: "Collect an independent verification witness." }),
+  });
+  assert.equal(result.status, "replan_limit_reached");
+  assert.equal(result.replan_count, 0);
+  assert.equal(limited.calls(), 1);
+  await assert.rejects(
+    runAutonomousReplanCycle(limited.agent, "Review this coding change.", { domain: "coding", maxReplans: 4, evaluate: () => ({ evaluator_id: "reviewer", evaluator_version: "1", reward: 0, passed: false, replan_requested: false }) }),
+    /maxReplans/,
+  );
+});
+
+test("replan cycle refuses credential-shaped evaluator instructions", async () => {
+  const { agent } = cycleAgent();
+  await assert.rejects(
+    runAutonomousReplanCycle(agent, "Review this coding change.", {
+      domain: "coding",
+      approveProviderCall: true,
+      maxReplans: 0,
+      evaluate: () => ({ evaluator_id: "reviewer", evaluator_version: "1", reward: 0, passed: false, replan_requested: true, replan_instruction: "Use the api_key from the task." }),
+    }),
+    /credential material/,
+  );
+});
+
+test("replan cycle runs the same reviewed path for every built-in domain", async () => {
+  const domains = ["coding", "browser", "data", "science", "biomedical", "neuroscience", "operations", "enterprise", "multi_agent", "multimodal", "cross_domain", "evaluation"];
+  const { agent, calls } = cycleAgent();
+  for (const domain of domains) {
+    const result = await runAutonomousReplanCycle(agent, `${domain} review`, {
+      domain,
+      approveProviderCall: true,
+      maxReplans: 0,
+      evaluate: () => ({ evaluator_id: `${domain}-reviewer`, evaluator_version: "1", reward: 0.75, passed: true, replan_requested: false }),
+    });
+    assert.equal(result.status, "completed", domain);
+    assert.equal(result.final.run.blueprint.domain_profile.domain, domain);
+  }
+  assert.equal(calls(), domains.length);
 });
 
 test("decision cycle keeps semantic routing, provider approval, and disagreement as separate gates", async () => {

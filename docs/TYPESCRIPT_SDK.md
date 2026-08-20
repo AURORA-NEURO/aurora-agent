@@ -1292,6 +1292,41 @@ or model self-report is treated as reward. The cycle deliberately refuses cross-
 `runCrossDomain()` can preserve child/synthesis identity and delayed credit through
 `settleCrossDomain()`.
 
+`runAutonomousReplanCycle()` is the bounded evaluator-guided continuation path for a reviewed
+single-domain task:
+
+```ts
+const result = await runAutonomousReplanCycle(agent, task, {
+  domain: "coding",
+  approveProviderCall: true,
+  maxReplans: 2,
+  evaluate: async (run) => reviewLocally(run),
+  learning: {
+    controller: learning,
+    episodePrefix: "job-2026-08-20-42",
+  },
+});
+```
+
+The evaluator must return the ordinary bounded reward packet plus `replan_requested`. A requested
+replan must include a non-empty instruction no longer than 8,000 characters; control characters
+and credential-shaped material are refused. The instruction is used only as a transient required
+prompt chunk together with prior route/selection/outcome digests and explicit guardrails. The
+reviewed route is reused on subsequent attempts, preventing evaluator text from silently widening
+domain authority, model capabilities, tools, budgets, or effect approvals. `maxReplans` defaults to
+one and is capped at three. A successful evaluator ends with `completed`; a failing evaluator that
+does not request another attempt ends with `completed_without_replan`; a still-requested attempt at
+the ceiling ends with `replan_limit_reached`. Provider approval, semantic routing approval,
+abstention, disagreement, malformed routing, and route review remain terminating gates.
+
+When learning is supplied, each completed attempt calls `prepareRun()` and `settleRun()` with a
+unique `episodePrefix:task_digest:attempt-N` identity. Settlement is immediate and value-only,
+which gives the local UCB learner one explicit reward per attempt and preserves earlier evidence if
+a later provider call fails. The returned attempt/evaluator projections contain no raw response or
+raw replan instruction; only digests, bounded evaluator fields, and local final-cycle data are
+retained. A caller-owned evaluator remains the truth authority: provider completion, latency,
+transport success, and model self-report never produce reward automatically.
+
 `runAutonomousCrossDomainDecisionCycle()` is the fan-out/fan-in counterpart. It accepts the same
 optional semantic-routing gate, validates that the route actually selects multiple reviewed
 domains, and delegates child/synthesis identity creation to `runCrossDomain()`. When learning is

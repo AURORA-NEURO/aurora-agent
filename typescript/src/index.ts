@@ -242,8 +242,12 @@ export type {
 export {
   AUTONOMOUS_CROSS_DOMAIN_DECISION_CYCLE_SCHEMA,
   AUTONOMOUS_DECISION_CYCLE_SCHEMA,
+  AUTONOMOUS_REPLAN_CONTEXT_SCHEMA,
+  AUTONOMOUS_REPLAN_CYCLE_SCHEMA,
+  AUTONOMOUS_REPLAN_MAX_REPLANS,
   runAutonomousCrossDomainDecisionCycle,
   runAutonomousDecisionCycle,
+  runAutonomousReplanCycle,
 } from "./autonomous-cycle.js";
 export type {
   AutonomousCrossDomainDecisionCycleEvaluator,
@@ -259,6 +263,14 @@ export type {
   AutonomousDecisionCycleResult,
   AutonomousDecisionCycleSemanticOptions,
   AutonomousDecisionCycleStatus,
+  AutonomousReplanAttempt,
+  AutonomousReplanCycleOptions,
+  AutonomousReplanCycleResult,
+  AutonomousReplanCycleStatus,
+  AutonomousReplanEvaluation,
+  AutonomousReplanEvaluationProjection,
+  AutonomousReplanEvaluator,
+  AutonomousReplanLearningOptions,
 } from "./autonomous-cycle.js";
 export type {
   AutonomousDomainEvaluatorProfile,
