@@ -133,6 +133,7 @@ export {
   ToolCatalogue,
   ToolSchemaError,
   canonicalJson,
+  digestBytesSync,
   digestCanonicalJsonText,
   digestCanonicalJsonTextSync,
   digestJson,

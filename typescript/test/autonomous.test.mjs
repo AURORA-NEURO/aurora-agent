@@ -400,6 +400,36 @@ test("online learner adapts only from explicit evaluator rewards", async () => {
   assert.throws(() => learner.select({ ...request, min_quality: 2 }), /min_quality is outside its bounds/);
 });
 
+test("online learner honors seeded epsilon exploration, failure penalties, and signed rewards", () => {
+  const request = {
+    task: "choose a reasoning model",
+    domain: "coding",
+    capability: "implementation",
+    risk_class: "engineering_change",
+    required_capabilities: ["reasoning"],
+    estimated_input_tokens: 10,
+    requested_output_tokens: 50,
+    candidates: [candidate("a", "one"), candidate("b", "two")],
+    provider_health: {
+      a: { provider: "a", circuit: "closed", credential_required: false, credential_ready: true },
+      b: { provider: "b", circuit: "closed", credential_required: false, credential_ready: true },
+    },
+    model_health: {},
+  };
+  const learner = new AutonomousOnlineLearner({ policy: { strategy: "epsilon_greedy", epsilon: 1, seed: 7, failure_penalty: 1 } });
+  learner.update({ arm_id: "a/one", reward: -0.5, failed: true, outcome_digest: "5".repeat(64) });
+  learner.update({ arm_id: "b/two", reward: 0.8, outcome_digest: "6".repeat(64) });
+  const decision = learner.select(request);
+  assert.equal(decision.exploration_taken, true);
+  assert.match(String(decision.exploration_draw), /^0\./);
+  assert.equal(learner.snapshot().policy.strategy, "epsilon_greedy");
+  assert.ok(decision.ranking.find((row) => row.provider === "a").reasons.some((reason) => reason.startsWith("failure_rate=")));
+  const disabled = new AutonomousOnlineLearner({ state: { schema: "test", generation: 0, policy: { strategy: "ucb1" }, arms: [{ arm_id: "a/one", disabled: true }] } });
+  const disabledDecision = disabled.select(request);
+  assert.deepEqual(disabledDecision.selected_model, { provider: "b", model: "two" });
+  assert.match(disabledDecision.ranking.find((row) => row.provider === "a").reasons.join(";"), /bandit arm is disabled/);
+});
+
 test("online learner isolates evaluator rewards by domain learning context", async () => {
   const learner = new AutonomousOnlineLearner();
   const request = {

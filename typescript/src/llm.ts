@@ -602,6 +602,8 @@ export interface AutonomousSelectionDecision extends JsonObject {
   strategy: "deterministic_health_utility" | "caller_selector";
   ranking: AutonomousModelRanking[];
   abstention_reason: string | null;
+  exploration_draw?: number | null;
+  exploration_taken?: boolean;
 }
 
 export interface AutonomousExecutionPlan {

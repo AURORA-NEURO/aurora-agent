@@ -24,7 +24,7 @@ import {
   type AutonomousModelCandidateDefaults,
   type ProviderModelDiscovery,
 } from "./llm.js";
-import { ToolCatalogue, canonicalJson, digestCanonicalJsonText, digestCanonicalJsonTextSync, digestJson } from "./tooling.js";
+import { ToolCatalogue, canonicalJson, digestBytesSync, digestCanonicalJsonText, digestCanonicalJsonTextSync, digestJson } from "./tooling.js";
 import type {
   BrainBanditArm,
   BrainBanditContext,
@@ -1254,6 +1254,17 @@ function assertLearningContextDigest(contextDigest: string, context: BrainBandit
   if (contextDigest !== expected) throw new ArgumentError("online learner context_digest does not match its context identity");
 }
 
+function deterministicBanditDraw(seed: number, generation: number, label: string): number {
+  const labelBytes = new TextEncoder().encode(label);
+  const payload = new Uint8Array(16 + labelBytes.length);
+  const view = new DataView(payload.buffer);
+  view.setBigUint64(0, BigInt(seed), false);
+  view.setBigUint64(8, BigInt(Math.max(0, Math.floor(generation))), false);
+  payload.set(labelBytes, 16);
+  const firstWord = BigInt(`0x${digestBytesSync(payload).slice(0, 16)}`);
+  return Number(firstWord) / Number(0xffff_ffff_ffff_ffffn);
+}
+
 function learnerContext(request: AutonomousSelectionRequest): { context_digest: string; context: BrainBanditContext } | null {
   if (request.context_digest === undefined || request.context_digest === null) return null;
   if (typeof request.context_digest !== "string" || !/^[0-9a-f]{64}$/.test(request.context_digest)) throw new ArgumentError("online learner context_digest must be a lowercase SHA-256 digest");
@@ -1273,9 +1284,21 @@ export class AutonomousOnlineLearner {
   private readonly policy: BrainBanditPolicy;
 
   constructor(options: { state?: BrainBanditState; policy?: BrainBanditPolicy } = {}) {
-    this.policy = { strategy: "ucb1", exploration: 1, min_reward: 0, max_reward: 1, failure_penalty: 0, ...(options.policy ?? {}) };
+    this.policy = { strategy: "ucb1", exploration: 0.5, epsilon: 0.1, min_reward: -1, max_reward: 1, failure_penalty: 0.25, seed: 0, ...(options.state?.policy ?? {}), ...(options.policy ?? {}) };
     if (this.policy.strategy !== "ucb1" && this.policy.strategy !== "epsilon_greedy") throw new ArgumentError("online learner strategy must be ucb1 or epsilon_greedy");
-    this.stateValue = options.state ? cloneBanditState(options.state) : { schema: "bioprism-brain-bandit-state/0.1", generation: 0, policy: this.policy, arms: [] };
+    for (const [name, value, minimum, maximum] of [
+      ["exploration", this.policy.exploration, 0, 100],
+      ["epsilon", this.policy.epsilon, 0, 1],
+      ["min_reward", this.policy.min_reward, -100, 100],
+      ["max_reward", this.policy.max_reward, -100, 100],
+      ["failure_penalty", this.policy.failure_penalty, 0, 100],
+    ] as const) {
+      if (typeof value !== "number" || !Number.isFinite(value) || value < minimum || value > maximum) throw new ArgumentError(`online learner policy ${name} is outside its bounds`);
+    }
+    if ((this.policy.min_reward ?? 0) >= (this.policy.max_reward ?? 0)) throw new ArgumentError("online learner policy min_reward must be below max_reward");
+    if (typeof this.policy.seed !== "number" || !Number.isSafeInteger(this.policy.seed) || this.policy.seed < 0) throw new ArgumentError("online learner policy seed must be a non-negative safe integer");
+    const restoredState = options.state ? cloneBanditState(options.state) : { schema: "bioprism-brain-bandit-state/0.1", generation: 0, policy: this.policy, arms: [] };
+    this.stateValue = { ...restoredState, policy: this.policy };
     this.assertState();
   }
 
@@ -1287,7 +1310,6 @@ export class AutonomousOnlineLearner {
   select(request: AutonomousSelectionRequest): AutonomousSelectionDecision {
     validateOnlineSelectionConstraints(request);
     const canonicalRanking = rankAutonomousModels(request);
-    const eligible = canonicalRanking.filter((row) => row.eligible);
     const context = learnerContext(request);
     const contextualState = context ? this.stateValue.contextual_states?.find((state) => state.context_digest === context.context_digest) : undefined;
     const observationFor = (armId: string): { arm: BrainBanditArm | undefined; source: "contextual" | "global" | "prior" } => {
@@ -1297,6 +1319,7 @@ export class AutonomousOnlineLearner {
       if (globalArm) return { arm: globalArm, source: context ? "global" : "prior" };
       return { arm: undefined, source: "prior" };
     };
+    const eligible = canonicalRanking.filter((row) => row.eligible && !observationFor(`${row.provider}/${row.model}`).arm?.disabled);
     const totalPulls = Math.max(1, eligible.reduce((sum, row) => sum + (observationFor(`${row.provider}/${row.model}`).arm?.pulls ?? 0), 0));
     const scoredEligible = eligible.map((row) => {
       const candidate = request.candidates.find((item) => item.provider === row.provider && item.model === row.model)!;
@@ -1305,24 +1328,36 @@ export class AutonomousOnlineLearner {
       const arm = observation.arm;
       const pulls = arm?.pulls ?? 0;
       const mean = pulls ? (arm?.reward_sum ?? 0) / pulls : 0;
-      const bonus = pulls ? Math.sqrt((2 * Math.log(totalPulls + 1)) / pulls) * (this.policy.exploration ?? 1) : Number.POSITIVE_INFINITY;
-      return { candidate, armId, pulls, source: observation.source, score: pulls ? mean + bonus : Number.POSITIVE_INFINITY, mean, bonus };
-    }).sort((left, right) => (Number(right.score === Number.POSITIVE_INFINITY) - Number(left.score === Number.POSITIVE_INFINITY)) || right.score - left.score || left.armId.localeCompare(right.armId));
+      const failureRate = pulls ? (arm?.failures ?? 0) / pulls : 0;
+      const bonus = this.policy.strategy === "ucb1" ? (pulls ? Math.sqrt(Math.log(totalPulls + 1) / pulls) * (this.policy.exploration ?? 0.5) : (this.policy.exploration ?? 0.5)) : 0;
+      const score = mean + bonus - (this.policy.failure_penalty ?? 0.25) * failureRate;
+      return { candidate, armId, pulls, source: observation.source, score, mean, bonus, failureRate };
+    }).sort((left, right) => right.score - left.score || left.armId.localeCompare(right.armId));
+    const explorationDraw = this.policy.strategy === "epsilon_greedy" ? deterministicBanditDraw(this.policy.seed ?? 0, this.stateValue.generation ?? 0, "epsilon") : null;
+    const explorationTaken = explorationDraw !== null && explorationDraw < (this.policy.epsilon ?? 0.1);
+    const selected = explorationTaken
+      ? scoredEligible[Math.min(Math.floor(deterministicBanditDraw(this.policy.seed ?? 0, this.stateValue.generation ?? 0, "epsilon-arm") * scoredEligible.length), Math.max(0, scoredEligible.length - 1))]
+      : scoredEligible[0];
+    const disabledRanking = canonicalRanking
+      .filter((row) => row.eligible && observationFor(`${row.provider}/${row.model}`).arm?.disabled)
+      .map((row) => ({ ...row, eligible: false, reasons: [...row.reasons, "bandit arm is disabled"] }));
     const ranking = [
-      ...scoredEligible.map((row) => ({ provider: row.candidate.provider, model: row.candidate.model, score: Number((Number.isFinite(row.score) ? row.score : 1_000_000).toFixed(12)), eligible: true, reasons: [`arm_id=${row.armId}`, `pulls=${row.pulls}`, `history=${row.source}`, ...(context ? [`context_digest=${context.context_digest}`] : [])] })),
+      ...scoredEligible.map((row) => ({ provider: row.candidate.provider, model: row.candidate.model, score: Number(row.score.toFixed(12)), eligible: true, reasons: [`arm_id=${row.armId}`, `pulls=${row.pulls}`, `mean_reward=${row.mean.toFixed(6)}`, `failure_rate=${row.failureRate.toFixed(6)}`, `exploration_bonus=${row.bonus.toFixed(6)}`, `history=${row.source}`, ...(context ? [`context_digest=${context.context_digest}`] : [])] })),
+      ...disabledRanking,
       ...canonicalRanking.filter((row) => !row.eligible),
     ];
-    const selected = scoredEligible[0];
     if (!selected) {
       const reasons = ranking.flatMap((row) => row.reasons).join("; ");
-      return { selected_model: null, strategy: "caller_selector", ranking, abstention_reason: `online learner found no eligible candidate${reasons ? `: ${reasons}` : ""}` };
+      return { selected_model: null, strategy: "caller_selector", ranking, abstention_reason: `online learner found no eligible candidate${reasons ? `: ${reasons}` : ""}`, exploration_draw: explorationDraw, exploration_taken: false };
     }
-    return { selected_model: { provider: selected.candidate.provider, model: selected.candidate.model }, strategy: "caller_selector", ranking, abstention_reason: null };
+    return { selected_model: { provider: selected.candidate.provider, model: selected.candidate.model }, strategy: "caller_selector", ranking, abstention_reason: null, exploration_draw: explorationDraw, exploration_taken: explorationTaken };
   }
 
   /** Apply an explicit evaluator reward. Provider success alone is not treated as task quality. */
   update(update: BrainBanditUpdate): BrainBanditState {
-    if (!isObject(update) || typeof update.arm_id !== "string" || !update.arm_id.trim() || typeof update.reward !== "number" || !Number.isFinite(update.reward) || update.reward < 0 || update.reward > 1) throw new ArgumentError("online learner update requires an arm_id and reward within [0, 1]");
+    const minimumReward = this.policy.min_reward ?? -1;
+    const maximumReward = this.policy.max_reward ?? 1;
+    if (!isObject(update) || typeof update.arm_id !== "string" || !update.arm_id.trim() || typeof update.reward !== "number" || !Number.isFinite(update.reward) || update.reward < minimumReward || update.reward > maximumReward) throw new ArgumentError(`online learner update requires an arm_id and reward within [${minimumReward}, ${maximumReward}]`);
     const contextDigest = update.context_digest ?? null;
     if (contextDigest !== null && (typeof contextDigest !== "string" || !/^[0-9a-f]{64}$/.test(contextDigest))) throw new ArgumentError("online learner context_digest must be a lowercase SHA-256 digest");
     if (contextDigest !== null && (!update.context || !isObject(update.context))) throw new ArgumentError("contextual learner updates require their bounded context identity");
@@ -1352,6 +1387,7 @@ export class AutonomousOnlineLearner {
         return contextState.arms;
       })());
     const existing = targetArms.find((arm) => arm.arm_id === update.arm_id);
+    if (existing?.disabled) throw new ArgumentError("online learner cannot update a disabled arm");
     if (existing) {
       existing.pulls = (existing.pulls ?? 0) + 1;
       existing.reward_sum = (existing.reward_sum ?? 0) + update.reward;
@@ -1373,14 +1409,14 @@ export class AutonomousOnlineLearner {
   private assertState(): void {
     if (!isObject(this.stateValue) || !Array.isArray(this.stateValue.arms) || this.stateValue.arms.length > 128) throw new ArgumentError("online learner state is malformed");
     const creditedOutcomes = this.stateValue.credited_outcomes ?? [];
-    if (!Array.isArray(creditedOutcomes) || creditedOutcomes.length > 4096 || creditedOutcomes.some((receipt) => !isObject(receipt) || typeof receipt.outcome_digest !== "string" || !/^[0-9a-f]{64}$/.test(receipt.outcome_digest) || typeof receipt.arm_id !== "string" || !receipt.arm_id.trim() || typeof receipt.reward !== "number" || !Number.isFinite(receipt.reward) || receipt.reward < 0 || receipt.reward > 1 || (receipt.failed !== undefined && typeof receipt.failed !== "boolean") || (receipt.contract_digest !== undefined && receipt.contract_digest !== null && (typeof receipt.contract_digest !== "string" || !/^[0-9a-f]{64}$/.test(receipt.contract_digest))) || (receipt.context_digest !== undefined && receipt.context_digest !== null && (typeof receipt.context_digest !== "string" || !/^[0-9a-f]{64}$/.test(receipt.context_digest)))) || new Set(creditedOutcomes.map((receipt) => receipt.outcome_digest)).size !== creditedOutcomes.length) throw new ArgumentError("online learner credited outcome ledger is malformed");
+    if (!Array.isArray(creditedOutcomes) || creditedOutcomes.length > 4096 || creditedOutcomes.some((receipt) => !isObject(receipt) || typeof receipt.outcome_digest !== "string" || !/^[0-9a-f]{64}$/.test(receipt.outcome_digest) || typeof receipt.arm_id !== "string" || !receipt.arm_id.trim() || typeof receipt.reward !== "number" || !Number.isFinite(receipt.reward) || receipt.reward < (this.policy.min_reward ?? -1) || receipt.reward > (this.policy.max_reward ?? 1) || (receipt.failed !== undefined && typeof receipt.failed !== "boolean") || (receipt.contract_digest !== undefined && receipt.contract_digest !== null && (typeof receipt.contract_digest !== "string" || !/^[0-9a-f]{64}$/.test(receipt.contract_digest))) || (receipt.context_digest !== undefined && receipt.context_digest !== null && (typeof receipt.context_digest !== "string" || !/^[0-9a-f]{64}$/.test(receipt.context_digest)))) || new Set(creditedOutcomes.map((receipt) => receipt.outcome_digest)).size !== creditedOutcomes.length) throw new ArgumentError("online learner credited outcome ledger is malformed");
     const validateArms = (arms: BrainBanditArm[]): void => {
       if (!Array.isArray(arms) || arms.length > 128) throw new ArgumentError("online learner arm collection is malformed");
       for (const arm of arms) {
         const pulls = arm?.pulls ?? 0;
         const rewardSum = arm?.reward_sum ?? 0;
         const failures = arm?.failures ?? 0;
-        if (!isObject(arm) || typeof arm.arm_id !== "string" || !arm.arm_id.trim() || !Number.isSafeInteger(pulls) || pulls < 0 || typeof rewardSum !== "number" || !Number.isFinite(rewardSum) || rewardSum < 0 || rewardSum > pulls || !Number.isSafeInteger(failures) || failures < 0 || failures > pulls) throw new ArgumentError("online learner arm is malformed");
+        if (!isObject(arm) || typeof arm.arm_id !== "string" || !arm.arm_id.trim() || !Number.isSafeInteger(pulls) || pulls < 0 || typeof rewardSum !== "number" || !Number.isFinite(rewardSum) || rewardSum < pulls * (this.policy.min_reward ?? -1) || rewardSum > pulls * (this.policy.max_reward ?? 1) || !Number.isSafeInteger(failures) || failures < 0 || failures > pulls || (arm.disabled !== undefined && typeof arm.disabled !== "boolean")) throw new ArgumentError("online learner arm is malformed");
       }
     };
     validateArms(this.stateValue.arms);

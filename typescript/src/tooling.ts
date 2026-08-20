@@ -377,6 +377,12 @@ export function digestJsonSync(value: unknown): string {
   return sha256HexSync(canonicalJson(value));
 }
 
+/** Hash bounded caller-owned bytes without requiring Node crypto. */
+export function digestBytesSync(value: Uint8Array): string {
+  if (!(value instanceof Uint8Array)) throw new ArgumentError("SHA-256 input must be a byte array");
+  return sha256BytesHexSync(value);
+}
+
 async function sha256Hex(value: string): Promise<string> {
   const subtle = globalThis.crypto?.subtle;
   if (!subtle) throw new ArgumentError("Web Crypto SHA-256 is required for tool catalogue digests");
@@ -413,7 +419,10 @@ function rotateRight(value: number, amount: number): number {
 }
 
 function sha256HexSync(value: string): string {
-  const source = new TextEncoder().encode(value);
+  return sha256BytesHexSync(new TextEncoder().encode(value));
+}
+
+function sha256BytesHexSync(source: Uint8Array): string {
   const paddedLength = Math.ceil((source.length + 9) / 64) * 64;
   const padded = new Uint8Array(paddedLength);
   padded.set(source);
