@@ -37,6 +37,7 @@ from .brain import (
     BrainLearningLedger,
     BrainLearningTrajectory,
     BrainLearningTrajectoryResult,
+    BrainJobRunResult,
     BrainMissionResult,
     BrainOutcomeEvaluator,
     BrainRunError,
@@ -71,6 +72,9 @@ from .autonomy_evaluation import (
 )
 from .llm_runtime import (
     CredentialHandle,
+    CredentialProvisioner,
+    CredentialProvisioningResult,
+    CredentialSourceSpec,
     CredentialSession,
     LLMRuntime,
     MAX_PROVIDER_DISCOVERED_MODELS,
@@ -8844,6 +8848,7 @@ class AutonomousAgent:
         activation: AutonomousCapabilityActivation | None = None,
         execution_journal: AutonomousExecutionJournal | None = None,
         execution_policy: AutonomousExecutionPolicy | Mapping[str, Any] | None = None,
+        credential_provisioner: CredentialProvisioner | None = None,
     ) -> None:
         if not isinstance(runtime, LLMRuntime):
             raise BrainRunError("runtime must be an LLMRuntime")
@@ -8871,6 +8876,8 @@ class AutonomousAgent:
             raise BrainRunError("pack_registry must be an AutonomousDomainPackRegistry or None")
         if execution_journal is not None and not isinstance(execution_journal, AutonomousExecutionJournal):
             raise BrainRunError("execution_journal must be an AutonomousExecutionJournal or None")
+        if credential_provisioner is not None and not isinstance(credential_provisioner, CredentialProvisioner):
+            raise BrainRunError("credential_provisioner must be a CredentialProvisioner or None")
         if execution_policy is None:
             resolved_execution_policy = None
         elif isinstance(execution_policy, AutonomousExecutionPolicy):
@@ -8883,7 +8890,14 @@ class AutonomousAgent:
         else:
             raise BrainRunError("execution_policy must be an AutonomousExecutionPolicy, mapping, or None")
         self.runtime = runtime
-        self.onboarding = ProviderOnboarding(runtime)
+        if credential_provisioner is not None and credential_provisioner.onboarding.runtime is not runtime:
+            raise BrainRunError("credential_provisioner must use the agent's runtime")
+        self.onboarding = (
+            credential_provisioner.onboarding
+            if credential_provisioner is not None
+            else ProviderOnboarding(runtime)
+        )
+        self.credential_provisioner = credential_provisioner or CredentialProvisioner(self.onboarding)
         self.catalogue = model_catalogue or ModelCatalogue()
         self.brain = brain or AutonomousBrain(workspace, runtime)
         self.ledger = ledger
@@ -8983,6 +8997,251 @@ class AutonomousAgent:
         """Register non-secret provider transport metadata for the key-entry flow."""
 
         self.onboarding.register_provider(config)
+
+    def register_environment_credential_source(
+        self,
+        provider: str,
+        *,
+        variable: str | None = None,
+        ttl_seconds: float | None = None,
+        required: bool = True,
+        source_label: str | None = None,
+        replace_existing: bool = False,
+    ) -> CredentialSourceSpec:
+        """Register deployment-managed environment resolution without accepting a raw key."""
+
+        return self.credential_provisioner.register_environment(
+            provider,
+            variable=variable,
+            ttl_seconds=ttl_seconds,
+            required=required,
+            source_label=source_label,
+            replace_existing=replace_existing,
+        )
+
+    def register_secret_manager_credential_source(
+        self,
+        provider: str,
+        reference: str,
+        resolver: Callable[[str], str],
+        *,
+        ttl_seconds: float | None = None,
+        required: bool = True,
+        source_label: str | None = None,
+        replace_existing: bool = False,
+    ) -> CredentialSourceSpec:
+        """Register a process-local secret-manager resolver; only its digest is projectable."""
+
+        return self.credential_provisioner.register_resolver(
+            provider,
+            reference,
+            resolver,
+            ttl_seconds=ttl_seconds,
+            required=required,
+            source_label=source_label,
+            replace_existing=replace_existing,
+        )
+
+    def credential_provisioning_plan(
+        self,
+        providers: Sequence[str] | None = None,
+    ) -> dict[str, Any]:
+        """Return the non-secret deployment credential bootstrap plan."""
+
+        return self.credential_provisioner.plan(providers)
+
+    def provision_credentials(
+        self,
+        session: CredentialSession,
+        *,
+        providers: Sequence[str] | None = None,
+        environ: Mapping[str, str] | None = None,
+    ) -> CredentialProvisioningResult:
+        """Resolve configured deployment sources into a live short-lived credential session."""
+
+        return self.credential_provisioner.provision(
+            session,
+            providers=providers,
+            environ=environ,
+        )
+
+    def start_provisioned_credential_session(
+        self,
+        *,
+        providers: Sequence[str] | None = None,
+        ttl_seconds: float | None = None,
+        session_id: str | None = None,
+        environ: Mapping[str, str] | None = None,
+        require_ready: bool = True,
+    ) -> tuple[CredentialSession, CredentialProvisioningResult]:
+        """Start and populate a fresh session from deployment sources without human key entry.
+
+        The returned session is caller-owned and must be closed after the execution scope.  If
+        ``require_ready`` is true, a failed bootstrap closes the session before raising, so a
+        caller cannot accidentally dispatch with a partial credential set.
+        """
+
+        session = self.start_credential_session(ttl_seconds=ttl_seconds, session_id=session_id)
+        try:
+            result = self.provision_credentials(session, providers=providers, environ=environ)
+            if require_ready and not result.ready:
+                session.close()
+                raise BrainRunError(
+                    "credential provisioning is incomplete for providers: "
+                    + ", ".join(result.required_failures)
+                )
+            return session, result
+        except Exception:
+            session.close()
+            raise
+
+    def unregister_credential_source(self, provider: str, source_id: str) -> bool:
+        """Remove deployment wiring; active sessions remain caller-owned and independently revocable."""
+
+        return self.credential_provisioner.unregister(provider, source_id)
+
+    def run_resumable_learning_job(
+        self,
+        store: Any,
+        *,
+        job_id: str,
+        worker_id: str,
+        resolver: Callable[[Mapping[str, Any]], Mapping[str, Any]],
+        evaluator: BrainOutcomeEvaluator,
+        bandit_state: Mapping[str, Any],
+        credential_providers: Sequence[str] | None = None,
+        credential_ttl_seconds: float | None = None,
+        provision_environ: Mapping[str, str] | None = None,
+        **kwargs: Any,
+    ) -> BrainJobRunResult:
+        """Run a mission-learning job while resolving deployment credentials per attempt."""
+
+        return self._run_resumable_with_provisioned_credentials(
+            resolver,
+            credential_providers=credential_providers,
+            credential_ttl_seconds=credential_ttl_seconds,
+            provision_environ=provision_environ,
+            runner=lambda managed: self.brain.run_resumable_learning_job(
+                store,
+                job_id=job_id,
+                worker_id=worker_id,
+                resolver=managed,
+                evaluator=evaluator,
+                bandit_state=bandit_state,
+                **self._job_kwargs(kwargs),
+            ),
+        )
+
+    def run_resumable_workflow_job(
+        self,
+        store: Any,
+        *,
+        job_id: str,
+        worker_id: str,
+        resolver: Callable[[Mapping[str, Any]], Mapping[str, Any]],
+        evaluator: BrainOutcomeEvaluator | None,
+        bandit_state: Mapping[str, Any],
+        credential_providers: Sequence[str] | None = None,
+        credential_ttl_seconds: float | None = None,
+        provision_environ: Mapping[str, str] | None = None,
+        **kwargs: Any,
+    ) -> BrainJobRunResult:
+        """Run one bounded workflow continuation with fresh deployment credentials."""
+
+        return self._run_resumable_with_provisioned_credentials(
+            resolver,
+            credential_providers=credential_providers,
+            credential_ttl_seconds=credential_ttl_seconds,
+            provision_environ=provision_environ,
+            runner=lambda managed: self.brain.run_resumable_workflow_job(
+                store,
+                job_id=job_id,
+                worker_id=worker_id,
+                resolver=managed,
+                evaluator=evaluator,
+                bandit_state=bandit_state,
+                **self._job_kwargs(kwargs),
+            ),
+        )
+
+    def run_resumable_cross_domain_job(
+        self,
+        store: Any,
+        *,
+        job_id: str,
+        worker_id: str,
+        resolver: Callable[[Mapping[str, Any]], Mapping[str, Any]],
+        evaluator: BrainOutcomeEvaluator | None,
+        bandit_state: Mapping[str, Any],
+        credential_providers: Sequence[str] | None = None,
+        credential_ttl_seconds: float | None = None,
+        provision_environ: Mapping[str, str] | None = None,
+        **kwargs: Any,
+    ) -> BrainJobRunResult:
+        """Run one cross-domain child/synthesis continuation with fresh credentials."""
+
+        return self._run_resumable_with_provisioned_credentials(
+            resolver,
+            credential_providers=credential_providers,
+            credential_ttl_seconds=credential_ttl_seconds,
+            provision_environ=provision_environ,
+            runner=lambda managed: self.brain.run_resumable_cross_domain_job(
+                store,
+                job_id=job_id,
+                worker_id=worker_id,
+                resolver=managed,
+                evaluator=evaluator,
+                bandit_state=bandit_state,
+                **self._job_kwargs(kwargs),
+            ),
+        )
+
+    def _run_resumable_with_provisioned_credentials(
+        self,
+        resolver: Callable[[Mapping[str, Any]], Mapping[str, Any]],
+        *,
+        credential_providers: Sequence[str] | None,
+        credential_ttl_seconds: float | None,
+        provision_environ: Mapping[str, str] | None,
+        runner: Callable[[Callable[[Mapping[str, Any]], Mapping[str, Any]]], BrainJobRunResult],
+    ) -> BrainJobRunResult:
+        if not callable(resolver):
+            raise BrainRunError("resumable job resolver must be callable")
+        if credential_providers is None:
+            configured = tuple(sorted({spec.provider for spec in self.credential_provisioner.source_specs()}))
+        else:
+            configured = credential_providers
+        should_provision = credential_providers is not None or bool(configured)
+        if not should_provision:
+            return runner(resolver)
+        active_sessions: list[CredentialSession] = []
+
+        def managed(job_metadata: Mapping[str, Any]) -> Mapping[str, Any]:
+            resolved = resolver(job_metadata)
+            if not isinstance(resolved, Mapping):
+                raise BrainRunError("resumable job resolver must return a mapping")
+            session, _provisioning = self.start_provisioned_credential_session(
+                providers=configured,
+                ttl_seconds=credential_ttl_seconds,
+                environ=provision_environ,
+                require_ready=True,
+            )
+            active_sessions.append(session)
+            # The mapping is transient and consumed only by the brain call. The durable job
+            # receives only its public metadata/checkpoint, never this credential snapshot.
+            return {**dict(resolved), "credentials": session.handles()}
+
+        try:
+            return runner(managed)
+        finally:
+            for session in active_sessions:
+                session.close()
+
+    def _job_kwargs(self, kwargs: Mapping[str, Any]) -> dict[str, Any]:
+        resolved = dict(kwargs)
+        if "provider_health" not in resolved and self.health_ledger is not None:
+            resolved["provider_health"] = self.health_ledger.health_snapshot()
+        return resolved
 
     def credential_status(self, provider: str) -> dict[str, Any]:
         """Return one redacted provider onboarding state for a UI or request gate."""
@@ -9635,6 +9894,9 @@ class AutonomousAgent:
             "schema": "bioprism-autonomous-agent-readiness/0.1",
             "providers": providers,
             "models": models,
+            "credential_provisioning": self.credential_provisioning_plan(
+                tuple(sorted(provider_names))
+            ),
             "provider_health": health,
             "domains": self.domains(),
             "workflows": self.workflows(),

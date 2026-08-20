@@ -55,6 +55,7 @@ PROVIDER_OBSERVATION_SCHEMA = "bioprism-llm-provider-observation/0.1"
 MODEL_CATALOGUE_SCHEMA = "bioprism-llm-model-catalogue/0.1"
 PROVIDER_HEALTH_LEDGER_SCHEMA = "bioprism-llm-provider-health-ledger/0.1"
 CREDENTIAL_ONBOARDING_SCHEMA = "bioprism-llm-credential-onboarding/0.1"
+CREDENTIAL_PROVISIONING_SCHEMA = "bioprism-llm-credential-provisioning/0.1"
 PROVIDER_MODEL_DISCOVERY_SCHEMA = "bioprism-llm-provider-model-discovery/0.1"
 MAX_MODEL_CANDIDATES = 512
 MAX_MODEL_METADATA_BYTES = 256_000
@@ -62,6 +63,10 @@ MAX_PROVIDER_HEALTH_RECORDS = 16_384
 MAX_PROVIDER_HEALTH_BYTES = 32_000_000
 MAX_PROVIDER_DISCOVERED_MODELS = 512
 MAX_PROVIDER_MODEL_DISCOVERY_BYTES = 8_000_000
+MAX_CREDENTIAL_PROVISIONING_SOURCES = 128
+MAX_CREDENTIAL_PROVISIONING_PROVIDERS = 128
+MAX_CREDENTIAL_SOURCE_LABEL_BYTES = 256
+CREDENTIAL_SOURCE_KINDS = ("environment_variable", "external_secret_resolver")
 _MODEL_CANDIDATE_FIELDS = frozenset(
     {
         "provider",
@@ -128,6 +133,36 @@ def _assert_secret_safe_json(value: Any, *, label: str, depth: int = 0) -> None:
         raise ProviderError(f"{label} contains a non-finite number")
     if not isinstance(value, (str, int, float, bool)) and value is not None:
         raise ProviderError(f"{label} must be JSON-safe")
+
+
+def _validate_environment_variable(variable: str) -> str:
+    if (
+        not isinstance(variable, str)
+        or not variable
+        or not variable.replace("_", "").isalnum()
+        or any(ord(character) < 32 for character in variable)
+    ):
+        raise CredentialError("environment variable name must be alphanumeric with underscores")
+    return variable
+
+
+def _validate_credential_reference(reference: str) -> str:
+    if not isinstance(reference, str) or not reference.strip() or len(reference) > 512:
+        raise CredentialError("external credential reference must be a bounded non-empty string")
+    if any(ord(character) < 32 for character in reference):
+        raise CredentialError("external credential reference contains a control character")
+    return reference
+
+
+def _validate_credential_source_label(label: str) -> str:
+    if (
+        not isinstance(label, str)
+        or not label.strip()
+        or len(label.encode("utf-8")) > MAX_CREDENTIAL_SOURCE_LABEL_BYTES
+        or any(ord(character) < 32 for character in label)
+    ):
+        raise CredentialError("credential source label is outside its bounded contract")
+    return label.strip()
 
 
 class CredentialError(ValueError):
@@ -382,8 +417,7 @@ class CredentialStore:
     ) -> CredentialHandle:
         """Load a named environment variable without including its value in any metadata."""
 
-        if not isinstance(variable, str) or not variable or not variable.replace("_", "").isalnum():
-            raise CredentialError("environment variable name must be alphanumeric with underscores")
+        variable = _validate_environment_variable(variable)
         source = os.environ if environ is None else environ
         value = source.get(variable)
         if value is None:
@@ -419,10 +453,7 @@ class CredentialStore:
         """
 
         self._validate_provider(provider)
-        if not isinstance(reference, str) or not reference.strip() or len(reference) > 512:
-            raise CredentialError("external credential reference must be a bounded non-empty string")
-        if any(ord(character) < 32 for character in reference):
-            raise CredentialError("external credential reference contains a control character")
+        reference = _validate_credential_reference(reference)
         if not callable(resolver):
             raise CredentialError("external credential resolver must be callable")
         try:
@@ -2725,8 +2756,7 @@ class ProviderOnboarding:
         if environment_variables is not None:
             for provider, variable in environment_variables.items():
                 CredentialStore._validate_provider(provider)
-                if not isinstance(variable, str) or not variable or not variable.replace("_", "").isalnum():
-                    raise CredentialError("environment variable name must be alphanumeric with underscores")
+                variable = _validate_environment_variable(variable)
                 self._environment_variables[provider] = variable
 
     def register_provider(self, config: ProviderConfig) -> None:
@@ -3184,6 +3214,531 @@ class CredentialSession:
     def _assert_active(self) -> None:
         if not self._is_active():
             raise CredentialError("credential session is closed or expired")
+
+
+@dataclass(frozen=True, slots=True)
+class CredentialSourceSpec:
+    """Public, redacted configuration for one deployment-managed credential source.
+
+    A source spec is safe to put in configuration UI state and readiness responses.  It carries
+    an environment variable name or a digest of an external reference, never the reference
+    itself and never a resolver callback.  The live resolver remains owned by the process-local
+    :class:`CredentialProvisioner`.
+    """
+
+    provider: str
+    source_kind: str
+    source_id: str
+    source_label: str
+    environment_variable: str | None = None
+    reference_digest: str | None = None
+    ttl_seconds: float | None = None
+    required: bool = True
+    enabled: bool = True
+
+    def __post_init__(self) -> None:
+        CredentialStore._validate_provider(self.provider)
+        if self.source_kind not in CREDENTIAL_SOURCE_KINDS:
+            raise CredentialError("credential source kind is unsupported")
+        for name, value in (("source_id", self.source_id), ("source_label", self.source_label)):
+            if not isinstance(value, str) or not value.strip() or len(value.encode("utf-8")) > MAX_CREDENTIAL_SOURCE_LABEL_BYTES:
+                raise CredentialError(f"credential {name} is outside its bounded contract")
+            if any(ord(character) < 32 for character in value):
+                raise CredentialError(f"credential {name} contains a control character")
+        if self.source_kind == "environment_variable":
+            if self.environment_variable is None:
+                raise CredentialError("environment credential source requires an environment variable")
+            _validate_environment_variable(self.environment_variable)
+            if self.reference_digest is not None:
+                raise CredentialError("environment credential source cannot contain a reference digest")
+        else:
+            if self.environment_variable is not None:
+                raise CredentialError("resolver credential source cannot contain an environment variable")
+            if (
+                not isinstance(self.reference_digest, str)
+                or len(self.reference_digest) != 64
+                or any(character not in "0123456789abcdef" for character in self.reference_digest)
+            ):
+                raise CredentialError("resolver credential source reference digest is invalid")
+        if self.ttl_seconds is not None and (
+            not isinstance(self.ttl_seconds, (int, float))
+            or isinstance(self.ttl_seconds, bool)
+            or not math.isfinite(float(self.ttl_seconds))
+            or self.ttl_seconds <= 0
+        ):
+            raise CredentialError("credential source ttl_seconds must be positive or None")
+        if not isinstance(self.required, bool) or not isinstance(self.enabled, bool):
+            raise CredentialError("credential source required and enabled must be boolean")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": CREDENTIAL_PROVISIONING_SCHEMA,
+            "provider": self.provider,
+            "source_kind": self.source_kind,
+            "source_id": self.source_id,
+            "source_label": self.source_label,
+            "environment_variable": self.environment_variable,
+            "reference_digest": self.reference_digest,
+            "ttl_seconds": self.ttl_seconds,
+            "required": self.required,
+            "enabled": self.enabled,
+            "secret_persistence": "in_memory_only",
+            "secret_material": "never_returned",
+        }
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "CredentialSourceSpec":
+        if not isinstance(value, Mapping):
+            raise CredentialError("credential source spec must be a mapping")
+        allowed = {
+            "schema",
+            "provider",
+            "source_kind",
+            "source_id",
+            "source_label",
+            "environment_variable",
+            "reference_digest",
+            "ttl_seconds",
+            "required",
+            "enabled",
+            "secret_persistence",
+            "secret_material",
+        }
+        unknown = set(value).difference(allowed)
+        if unknown:
+            raise CredentialError("credential source spec contains unsupported fields")
+        if value.get("schema") not in (None, CREDENTIAL_PROVISIONING_SCHEMA):
+            raise CredentialError("credential source spec schema is unsupported")
+        return cls(
+            provider=value.get("provider"),
+            source_kind=value.get("source_kind"),
+            source_id=value.get("source_id"),
+            source_label=value.get("source_label"),
+            environment_variable=value.get("environment_variable"),
+            reference_digest=value.get("reference_digest"),
+            ttl_seconds=value.get("ttl_seconds"),
+            required=value.get("required", True),
+            enabled=value.get("enabled", True),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class CredentialProvisioningReceipt:
+    """Value-only result for one automatic credential resolution attempt."""
+
+    provider: str
+    status: str
+    credential_ready: bool
+    source_kind: str | None = None
+    source_id: str | None = None
+    source_attempts: int = 0
+    error_class: str | None = None
+
+    _STATUSES = frozenset(
+        {
+            "provisioned",
+            "already_present",
+            "not_required",
+            "missing_provider",
+            "missing_source",
+            "source_failed",
+        }
+    )
+
+    def __post_init__(self) -> None:
+        CredentialStore._validate_provider(self.provider)
+        if self.status not in self._STATUSES:
+            raise CredentialError("credential provisioning status is unsupported")
+        if not isinstance(self.credential_ready, bool):
+            raise CredentialError("credential provisioning readiness must be boolean")
+        if self.source_kind is not None and self.source_kind not in CREDENTIAL_SOURCE_KINDS:
+            raise CredentialError("credential provisioning source kind is unsupported")
+        for name, value in (("source_id", self.source_id), ("error_class", self.error_class)):
+            if value is not None and (
+                not isinstance(value, str)
+                or not value.strip()
+                or len(value.encode("utf-8")) > MAX_CREDENTIAL_SOURCE_LABEL_BYTES
+                or any(ord(character) < 32 for character in value)
+            ):
+                raise CredentialError(f"credential provisioning {name} is outside its bounds")
+        if not isinstance(self.source_attempts, int) or isinstance(self.source_attempts, bool) or not 0 <= self.source_attempts <= MAX_CREDENTIAL_PROVISIONING_SOURCES:
+            raise CredentialError("credential provisioning source attempts are outside their bounds")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": CREDENTIAL_PROVISIONING_SCHEMA,
+            "provider": self.provider,
+            "status": self.status,
+            "credential_ready": self.credential_ready,
+            "source_kind": self.source_kind,
+            "source_id": self.source_id,
+            "source_attempts": self.source_attempts,
+            "error_class": self.error_class,
+            "secret_persistence": "in_memory_only",
+            "secret_material": "never_returned",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CredentialProvisioningResult:
+    """Aggregate result for one session bootstrap across deployment-managed sources."""
+
+    session_id: str
+    ready: bool
+    receipts: tuple[CredentialProvisioningReceipt, ...]
+    required_failures: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.session_id, str) or not self.session_id.strip() or len(self.session_id) > 256:
+            raise CredentialError("credential provisioning session_id is invalid")
+        if not isinstance(self.ready, bool):
+            raise CredentialError("credential provisioning ready must be boolean")
+        if not isinstance(self.receipts, Sequence) or isinstance(self.receipts, (str, bytes)) or len(self.receipts) > MAX_CREDENTIAL_PROVISIONING_PROVIDERS:
+            raise CredentialError("credential provisioning receipts exceed their bound")
+        if any(not isinstance(receipt, CredentialProvisioningReceipt) for receipt in self.receipts):
+            raise CredentialError("credential provisioning receipts are invalid")
+        if not isinstance(self.required_failures, Sequence) or isinstance(self.required_failures, (str, bytes)) or len(self.required_failures) > MAX_CREDENTIAL_PROVISIONING_PROVIDERS:
+            raise CredentialError("credential provisioning required failures exceed their bound")
+        for provider in self.required_failures:
+            CredentialStore._validate_provider(provider)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": CREDENTIAL_PROVISIONING_SCHEMA,
+            "session_id": self.session_id,
+            "ready": self.ready,
+            "receipts": [receipt.to_dict() for receipt in self.receipts],
+            "required_failures": list(self.required_failures),
+            "credential_posture": "opaque_handles_only; sources_resolved_in_process",
+            "secret_material": "never_returned",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class _CredentialSource:
+    spec: CredentialSourceSpec
+    reference: str | None = None
+    resolver: Callable[[str], str] | None = None
+
+    def resolve(
+        self,
+        session: CredentialSession,
+        *,
+        environ: Mapping[str, str] | None = None,
+    ) -> CredentialHandle:
+        if self.spec.source_kind == "environment_variable":
+            return session.configure_from_environment(
+                self.spec.provider,
+                variable=self.spec.environment_variable,
+                ttl_seconds=self.spec.ttl_seconds,
+                environ=environ,
+            )
+        if self.reference is None or self.resolver is None:
+            raise CredentialError("resolver credential source is not operational")
+        return session.configure_from_resolver(
+            self.spec.provider,
+            self.reference,
+            self.resolver,
+            ttl_seconds=self.spec.ttl_seconds,
+        )
+
+
+class CredentialProvisioner:
+    """Process-local resolver registry for non-interactive BYOK deployments.
+
+    Embedding applications register only deployment wiring here: an environment variable name or
+    a secret-manager reference plus its resolver callback.  The reference and callback stay in
+    this process-local object, while the public plan contains only source metadata and a digest.
+    ``provision`` creates or refreshes opaque handles inside a caller-owned
+    :class:`CredentialSession`; it never writes credentials to disk and never returns raw values.
+
+    This is the intended path when no person types a key into the agent.  A deployment injects
+    the environment or secret-manager resolver, then every worker process calls ``provision`` at
+    startup or before a restart-safe job attempt.  A restarted process must register its sources
+    again, which makes secret rotation and revocation explicit instead of restoring stale handles.
+    """
+
+    def __init__(
+        self,
+        onboarding: ProviderOnboarding,
+        *,
+        max_sources: int = MAX_CREDENTIAL_PROVISIONING_SOURCES,
+    ) -> None:
+        if not isinstance(onboarding, ProviderOnboarding):
+            raise CredentialError("CredentialProvisioner requires ProviderOnboarding")
+        if not isinstance(max_sources, int) or isinstance(max_sources, bool) or not 1 <= max_sources <= MAX_CREDENTIAL_PROVISIONING_SOURCES:
+            raise CredentialError("max_sources is outside its bounds")
+        self.onboarding = onboarding
+        self.max_sources = max_sources
+        self._sources: dict[str, list[_CredentialSource]] = {}
+        self._lock = threading.RLock()
+
+    def register_environment(
+        self,
+        provider: str,
+        *,
+        variable: str | None = None,
+        ttl_seconds: float | None = None,
+        required: bool = True,
+        source_label: str | None = None,
+        replace_existing: bool = False,
+    ) -> CredentialSourceSpec:
+        self.onboarding._require_provider(provider)
+        selected = _validate_environment_variable(
+            variable or self.onboarding._environment_variables.get(provider, "")
+        )
+        label = _validate_credential_source_label(source_label or f"environment:{selected}")
+        spec = CredentialSourceSpec(
+            provider=provider,
+            source_kind="environment_variable",
+            source_id=f"environment:{selected}",
+            source_label=label,
+            environment_variable=selected,
+            ttl_seconds=ttl_seconds,
+            required=required,
+        )
+        return self._register(
+            _CredentialSource(spec=spec),
+            key=(spec.source_kind, selected),
+            replace_existing=replace_existing,
+        )
+
+    def register_resolver(
+        self,
+        provider: str,
+        reference: str,
+        resolver: Callable[[str], str],
+        *,
+        ttl_seconds: float | None = None,
+        required: bool = True,
+        source_label: str | None = None,
+        replace_existing: bool = False,
+    ) -> CredentialSourceSpec:
+        self.onboarding._require_provider(provider)
+        reference = _validate_credential_reference(reference)
+        if not callable(resolver):
+            raise CredentialError("external credential resolver must be callable")
+        digest = hashlib.sha256(reference.encode("utf-8")).hexdigest()
+        spec = CredentialSourceSpec(
+            provider=provider,
+            source_kind="external_secret_resolver",
+            source_id=f"resolver:{digest[:16]}",
+            source_label=_validate_credential_source_label(source_label or "external secret resolver"),
+            reference_digest=digest,
+            ttl_seconds=ttl_seconds,
+            required=required,
+        )
+        return self._register(
+            _CredentialSource(spec=spec, reference=reference, resolver=resolver),
+            key=(spec.source_kind, digest),
+            replace_existing=replace_existing,
+        )
+
+    def unregister(self, provider: str, source_id: str) -> bool:
+        CredentialStore._validate_provider(provider)
+        source_id = _validate_credential_source_label(source_id)
+        with self._lock:
+            sources = self._sources.get(provider, [])
+            retained = [source for source in sources if source.spec.source_id != source_id]
+            if len(retained) == len(sources):
+                return False
+            if retained:
+                self._sources[provider] = retained
+            else:
+                self._sources.pop(provider, None)
+            return True
+
+    def source_specs(self, provider: str | None = None) -> tuple[CredentialSourceSpec, ...]:
+        if provider is not None:
+            CredentialStore._validate_provider(provider)
+        with self._lock:
+            sources = [
+                source
+                for name, rows in self._sources.items()
+                if provider is None or name == provider
+                for source in rows
+            ]
+        return tuple(source.spec for source in sorted(sources, key=lambda item: (item.spec.provider, item.spec.source_id)))
+
+    def plan(self, providers: Sequence[str] | None = None) -> dict[str, Any]:
+        selected = self._providers(providers)
+        rows: list[dict[str, Any]] = []
+        with self._lock:
+            source_map = {provider: tuple(self._sources.get(provider, ())) for provider in selected}
+        for provider in selected:
+            current = self.onboarding.status(provider)
+            metadata = next(
+                (row for row in self.onboarding.runtime.provider_metadata() if row.get("provider") == provider),
+                None,
+            )
+            requires = metadata.get("requires_credential") if isinstance(metadata, Mapping) else None
+            ready = bool(current.get("ready", False))
+            required = bool(source_map[provider]) and any(
+                source.spec.required for source in source_map[provider]
+            )
+            if metadata is None:
+                next_action = "register_provider"
+            elif requires is False or ready:
+                next_action = "ready"
+            elif not source_map[provider]:
+                next_action = "register_credential_source"
+            else:
+                next_action = "provision_session"
+            rows.append(
+                {
+                    "provider": provider,
+                    "provider_registered": metadata is not None,
+                    "requires_credential": requires,
+                    "credential_ready": ready,
+                    "required": required,
+                    "source_count": len(source_map[provider]),
+                    "sources": [source.spec.to_dict() for source in source_map[provider]],
+                    "next_action": next_action,
+                }
+            )
+        return {
+            "schema": CREDENTIAL_PROVISIONING_SCHEMA,
+            "providers": rows,
+            "provider_count": len(rows),
+            "execution": "process_local_resolution_into_short_lived_session",
+            "restart_posture": "re-register_sources_and_resolve_fresh_handles",
+            "retention": "metadata_only_no_keys_references_or_callbacks",
+            "secret_material": "never_returned",
+        }
+
+    def provision(
+        self,
+        session: CredentialSession,
+        *,
+        providers: Sequence[str] | None = None,
+        environ: Mapping[str, str] | None = None,
+    ) -> CredentialProvisioningResult:
+        if not isinstance(session, CredentialSession) or session.onboarding is not self.onboarding:
+            raise CredentialError("credential session belongs to a different onboarding runtime")
+        selected = self._providers(providers)
+        if environ is not None and not isinstance(environ, Mapping):
+            raise CredentialError("credential provisioning environ must be a mapping or None")
+        receipts: list[CredentialProvisioningReceipt] = []
+        failures: list[str] = []
+        with self._lock:
+            source_map = {provider: tuple(self._sources.get(provider, ())) for provider in selected}
+        for provider in selected:
+            metadata = next(
+                (row for row in self.onboarding.runtime.provider_metadata() if row.get("provider") == provider),
+                None,
+            )
+            if metadata is None:
+                receipts.append(CredentialProvisioningReceipt(provider, "missing_provider", False))
+                failures.append(provider)
+                continue
+            if metadata.get("requires_credential") is False:
+                receipts.append(CredentialProvisioningReceipt(provider, "not_required", True))
+                continue
+            try:
+                session.handle(provider)
+            except CredentialError:
+                pass
+            else:
+                receipts.append(CredentialProvisioningReceipt(provider, "already_present", True))
+                continue
+            sources = tuple(source for source in source_map[provider] if source.spec.enabled)
+            required = bool(sources) and any(source.spec.required for source in sources)
+            if not sources:
+                receipts.append(CredentialProvisioningReceipt(provider, "missing_source", False))
+                failures.append(provider)
+                continue
+            last_error: str | None = None
+            success: CredentialProvisioningReceipt | None = None
+            for source in sources:
+                try:
+                    source.resolve(session, environ=environ)
+                except CredentialError as error:
+                    last_error = type(error).__name__
+                    continue
+                success = CredentialProvisioningReceipt(
+                    provider=provider,
+                    status="provisioned",
+                    credential_ready=True,
+                    source_kind=source.spec.source_kind,
+                    source_id=source.spec.source_id,
+                    source_attempts=sources.index(source) + 1,
+                )
+                break
+            if success is None:
+                receipts.append(
+                    CredentialProvisioningReceipt(
+                        provider=provider,
+                        status="source_failed",
+                        credential_ready=False,
+                        source_attempts=len(sources),
+                        error_class=last_error or "CredentialError",
+                    )
+                )
+                if required:
+                    failures.append(provider)
+            else:
+                receipts.append(success)
+        return CredentialProvisioningResult(
+            session_id=session.session_id,
+            ready=not failures,
+            receipts=tuple(receipts),
+            required_failures=tuple(sorted(set(failures))),
+        )
+
+    def _register(
+        self,
+        source: _CredentialSource,
+        *,
+        key: tuple[str, str],
+        replace_existing: bool,
+    ) -> CredentialSourceSpec:
+        if not isinstance(replace_existing, bool):
+            raise CredentialError("replace_existing must be boolean")
+        with self._lock:
+            count = sum(len(rows) for rows in self._sources.values())
+            current = self._sources.setdefault(source.spec.provider, [])
+            # The key is intentionally compared against the non-secret source identity.  The
+            # resolver reference itself is never exposed by this registry.
+            existing_index = next(
+                (
+                    index
+                    for index, row in enumerate(current)
+                    if (row.spec.source_kind, row.spec.environment_variable or row.spec.reference_digest) == key
+                ),
+                None,
+            )
+            if existing_index is not None:
+                if not replace_existing:
+                    raise CredentialError("credential source is already registered")
+                current[existing_index] = source
+                return source.spec
+            if count >= self.max_sources:
+                raise CredentialError("credential provisioning source capacity is exhausted")
+            current.append(source)
+            return source.spec
+
+    def _providers(self, providers: Sequence[str] | None) -> tuple[str, ...]:
+        if providers is None:
+            configured = {
+                row.get("provider")
+                for row in self.onboarding.runtime.provider_metadata()
+                if isinstance(row.get("provider"), str)
+            }
+            with self._lock:
+                configured.update(self._sources)
+            selected = sorted(configured)
+        else:
+            if not isinstance(providers, Sequence) or isinstance(providers, (str, bytes)):
+                raise CredentialError("credential provisioning providers must be a sequence")
+            raw_providers = list(providers)
+            for provider in raw_providers:
+                CredentialStore._validate_provider(provider)
+            selected = sorted(set(raw_providers))
+        if len(selected) > MAX_CREDENTIAL_PROVISIONING_PROVIDERS:
+            raise CredentialError("credential provisioning providers exceed their bound")
+        for provider in selected:
+            CredentialStore._validate_provider(provider)
+        return tuple(selected)
 
 
 def _bounded_json_bytes(value: Any, limit: int, label: str) -> int:

@@ -5,7 +5,9 @@ provider runtime.
 
 ```mermaid
 flowchart LR
-    U[User key entry] --> CS[In-memory CredentialStore]
+    U[Protected UI or no-echo entry] --> CS[In-memory CredentialStore]
+    D[Deployment environment or secret manager] --> CP[CredentialProvisioner]
+    CP --> CS
     CS --> H[Opaque credential handle]
     H --> RT[LLMRuntime]
     RT --> P[Provider API]
@@ -115,6 +117,77 @@ This means the SDK deliberately does not create a universal key-upload HTTP endp
 application owns authentication, TLS, CSRF protection, tenancy, rate limits, and secret-manager
 permissions. The SDK owns the sensitive part after intake—non-echo collection helpers, bounded
 in-memory lifetime, opaque handles, provider matching, expiry/revocation, and redacted readiness.
+
+### Non-interactive deployment bootstrap
+
+When no person enters a key, the deployment should register a source resolver during service
+startup and let each process create fresh handles. `CredentialProvisioner` is the process-local
+registry for that wiring. It accepts an environment variable name or a secret-manager reference
+and callback, but its plan exposes only source labels and a reference digest. The reference and
+callback are never placed in activation state, learning state, job metadata, or the provider
+prompt.
+
+```python
+agent.register_provider(openai_provider())
+agent.register_environment_credential_source("openai")
+
+session, bootstrap = agent.start_provisioned_credential_session(
+    providers=("openai",),
+    ttl_seconds=3_600,
+)
+try:
+    if not bootstrap.ready:
+        raise RuntimeError(bootstrap.to_dict()["required_failures"])
+    result = agent.run(
+        task="review the next bounded implementation step",
+        domain="coding",
+        credentials=session,
+        approve_provider_call=True,
+    )
+finally:
+    session.close()
+```
+
+For a secret manager, replace the environment registration with the deployment's resolver
+callback. The callback is invoked only inside the process that owns the session:
+
+```python
+agent.register_secret_manager_credential_source(
+    "openai",
+    "secret-manager://prod/aurora/openai",
+    secret_manager.read,
+    source_label="production provider credential",
+)
+session, bootstrap = agent.start_provisioned_credential_session(
+    providers=("openai",),
+    require_ready=True,
+)
+try:
+    # The brain receives only session.handles(), never the reference or returned value.
+    result = agent.run(
+        task="produce a bounded implementation review",
+        domain="coding",
+        credentials=session,
+        approve_provider_call=True,
+    )
+finally:
+    session.close()
+```
+
+`agent.credential_provisioning_plan()` is the safe readiness contract for an operator or
+deployment controller. `start_provisioned_credential_session()` fails closed on missing required
+providers and returns a value-only receipt for each source attempt. Multiple sources are tried in
+registration order, so an environment source can be a local-development path with a secret-manager
+fallback; failed resolver messages are reduced to an error class. Re-registering a source with
+`replace_existing=True` is the rotation path, while unregistering it does not silently revoke an
+already-issued session.
+
+The three agent-level `run_resumable_learning_job`, `run_resumable_workflow_job`, and
+`run_resumable_cross_domain_job` wrappers apply the same bootstrap at each worker attempt. They
+create a fresh session, inject only a transient handle mapping into the caller resolver result,
+feed the current provider-health snapshot to the durable brain job, and close the session after
+the attempt. A restarted worker therefore re-registers its deployment source and re-resolves a
+fresh credential instead of restoring an expired handle from the job journal.
 
 For a protected UI, the minimal request lifecycle is:
 

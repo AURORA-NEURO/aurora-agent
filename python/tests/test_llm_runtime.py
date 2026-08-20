@@ -10,6 +10,7 @@ import unittest
 
 from prism_sdk.llm_runtime import (
     CredentialError,
+    CredentialProvisioner,
     CredentialStore,
     LLMRuntime,
     ModelCatalogue,
@@ -344,6 +345,57 @@ class LlmRuntimeTests(unittest.TestCase):
         self.assertEqual(references, ["secret-manager://workspace/openai"])
         self.assertEqual(store.metadata(resolver_handle)["source"], "external_resolver")
         self.assertNotIn("resolver-secret", json.dumps(onboarding.status("openai")))
+
+    def test_noninteractive_credential_provisioner_bootstraps_and_falls_back_without_leaks(self) -> None:
+        store = CredentialStore()
+        runtime = LLMRuntime(store)
+        onboarding = ProviderOnboarding(runtime)
+        onboarding.register_provider(
+            openai_provider(base_url=self.base_url, allow_insecure_http=True)
+        )
+        provisioner = CredentialProvisioner(onboarding)
+        provisioner.register_environment("openai", source_label="deployment environment")
+        references: list[str] = []
+        provisioner.register_resolver(
+            "openai",
+            "secret-manager://prod/aurora/openai",
+            lambda reference: references.append(reference) or "managed-secret",
+            source_label="production secret manager",
+            replace_existing=False,
+        )
+        plan = provisioner.plan().copy()
+        encoded_plan = json.dumps(plan)
+        self.assertNotIn("secret-manager://prod/aurora/openai", encoded_plan)
+        self.assertNotIn("managed-secret", encoded_plan)
+        self.assertIn("reference_digest", encoded_plan)
+
+        with onboarding.start_session(session_id="bootstrap-session") as session:
+            result = provisioner.provision(
+                session,
+                environ={"OPENAI_API_KEY": "environment-managed-secret"},
+            )
+            self.assertTrue(result.ready)
+            self.assertEqual(result.receipts[0].status, "provisioned")
+            self.assertEqual(result.receipts[0].source_kind, "environment_variable")
+            self.assertEqual(references, [])
+            self.assertEqual(session.handle("openai").provider, "openai")
+            self.assertNotIn("environment-managed-secret", json.dumps(result.to_dict()))
+
+        with onboarding.start_session(session_id="fallback-session") as session:
+            result = provisioner.provision(session, environ={})
+            self.assertTrue(result.ready)
+            self.assertEqual(result.receipts[0].source_kind, "external_secret_resolver")
+            self.assertEqual(references, ["secret-manager://prod/aurora/openai"])
+            self.assertNotIn("managed-secret", json.dumps(result.to_dict()))
+
+        replacement = provisioner.register_resolver(
+            "openai",
+            "secret-manager://prod/aurora/openai-v2",
+            lambda _reference: "rotated-secret",
+            source_label="rotated production secret manager",
+        )
+        self.assertNotIn("secret-manager://prod/aurora/openai-v2", json.dumps(replacement.to_dict()))
+        self.assertTrue(provisioner.unregister("openai", replacement.source_id))
 
     def test_reviewed_provider_presets_bind_wire_paths_and_default_key_inputs(self) -> None:
         presets = (

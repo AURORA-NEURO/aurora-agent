@@ -34,10 +34,12 @@ from prism_sdk import (
     BrainLearningLedger,
     BrainOutcomeEvaluator,
     BrainApprovalRouter,
+    BrainEvaluatorDecision,
     BrainJobStore,
     BrainWorker,
     build_brain_evaluation_input,
     CredentialStore,
+    CredentialError,
     LLMRuntime,
     ModelCandidate,
     ModelCatalogue,
@@ -519,6 +521,130 @@ def test_model_catalogue_and_agent_facade_connect_readiness_session_and_executio
             )
             assert result.status == "completed_provider_call"
             assert result.response.text == "bounded answer"
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_agent_bootstraps_deployment_credentials_without_interactive_key_entry():
+    runtime, _store, server, thread = _runtime()
+    try:
+        agent = AutonomousAgent(
+            _Workspace(),
+            runtime,
+            model_catalogue=ModelCatalogue(_model()),
+        )
+        source = agent.register_environment_credential_source("openai")
+        assert source.source_kind == "environment_variable"
+        plan = agent.credential_provisioning_plan()
+        assert plan["providers"][0]["next_action"] == "provision_session"
+        assert "deployment-secret" not in json.dumps(plan)
+        session, result = agent.start_provisioned_credential_session(
+            session_id="deployment-session",
+            environ={"OPENAI_API_KEY": "deployment-secret"},
+        )
+        try:
+            assert result.ready is True
+            assert session.handle("openai").provider == "openai"
+            assert "deployment-secret" not in json.dumps(result.to_dict())
+        finally:
+            session.close()
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_agent_resumable_job_wrapper_refreshes_credentials_per_process_attempt():
+    runtime, store, server, thread = _runtime()
+    try:
+        agent = AutonomousAgent(
+            _Workspace(),
+            runtime,
+            model_catalogue=ModelCatalogue(_model()),
+        )
+        agent.register_environment_credential_source("openai")
+        observed: dict[str, object] = {}
+
+        def fake_job_runner(_store: object, **kwargs: object) -> dict[str, object]:
+            resolver = kwargs["resolver"]
+            resolved = resolver({"job_id": "restart-safe-job"})  # type: ignore[operator]
+            observed.update(resolved)
+            return resolved
+
+        # The real brain owns the durable job state machine; this narrow seam verifies that the
+        # agent wrapper supplies fresh handles transiently and closes them after the attempt.
+        agent.brain.run_resumable_learning_job = fake_job_runner  # type: ignore[method-assign]
+        evaluator = BrainOutcomeEvaluator(
+            lambda _input: BrainEvaluatorDecision(
+                evaluator_id="job-wrapper-evaluator",
+                evaluator_version="1",
+                reward=0.0,
+                passed=False,
+            ),
+            evaluator_id="job-wrapper-evaluator",
+            evaluator_version="1",
+        )
+        result = agent.run_resumable_learning_job(
+            store,
+            job_id="restart-safe-job",
+            worker_id="worker-a",
+            resolver=lambda _metadata: {
+                "task": "private task",
+                "credentials": {},
+            },
+            evaluator=evaluator,
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "arms": []},
+            provision_environ={"OPENAI_API_KEY": "transient-deployment-secret"},
+        )
+        assert result["credentials"]["openai"].provider == "openai"  # type: ignore[index]
+        handle = result["credentials"]["openai"]  # type: ignore[index]
+        with pytest.raises(CredentialError):
+            store.metadata(handle)
+        assert "transient-deployment-secret" not in json.dumps(
+            {key: value for key, value in observed.items() if key != "credentials"},
+            default=str,
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_agent_resumable_workflow_and_cross_domain_wrappers_share_bootstrap_boundary():
+    runtime, store, server, thread = _runtime()
+    try:
+        agent = AutonomousAgent(
+            _Workspace(),
+            runtime,
+            model_catalogue=ModelCatalogue(_model()),
+        )
+        agent.register_environment_credential_source("openai")
+        for method_name in ("run_resumable_workflow_job", "run_resumable_cross_domain_job"):
+            observed: dict[str, object] = {}
+
+            def fake_job_runner(_store: object, **kwargs: object) -> dict[str, object]:
+                resolver = kwargs["resolver"]
+                resolved = resolver({"job_id": method_name})  # type: ignore[operator]
+                observed.update(resolved)
+                return resolved
+
+            setattr(agent.brain, method_name, fake_job_runner)
+            result = getattr(agent, method_name)(
+                store,
+                job_id=method_name,
+                worker_id="worker-a",
+                resolver=lambda _metadata: {"task": "private task", "credentials": {}},
+                evaluator=None,
+                bandit_state={"schema": "bioprism-brain-bandit/0.1", "arms": []},
+                provision_environ={"OPENAI_API_KEY": "workflow-transient-secret"},
+            )
+            assert result["credentials"]["openai"].provider == "openai"  # type: ignore[index]
+            assert "workflow-transient-secret" not in json.dumps(
+                {key: value for key, value in observed.items() if key != "credentials"},
+                default=str,
+            )
     finally:
         server.shutdown()
         thread.join(timeout=2)
