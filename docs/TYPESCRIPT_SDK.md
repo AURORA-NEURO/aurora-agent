@@ -1636,7 +1636,9 @@ without treating an unexecuted or incomplete plan as evidence of task success.
 The online learner uses bounded UCB-style exploration over caller-registered model arms. It updates
 only after an explicit evaluator reward, failed-outcome flag, or outcome digest supplied through
 `recordEvaluatorReward()`. Remote reconciliation sends the value-only update to
-`brainBanditUpdate()` and then applies the same validated update locally. Provider success and
+`brainBanditUpdate()` and adopts the server's returned value-only projection locally. This keeps
+server-normalized generations, contextual rows, replay receipts, and first-run arm hydration
+authoritative instead of assuming that a local replay is equivalent. Provider success and
 latency are separate from task quality; no provider health event is treated as reinforcement.
 The local policy supports both UCB1 and seeded epsilon-greedy exploration, including explicit
 failure-rate penalties and the signed reward range declared by the policy. Epsilon draws are
@@ -1653,6 +1655,9 @@ responses, credentials, or evaluator evidence. Remote value-only control-plane c
 compatible with older servers; current Rust/Python control planes persist the same contextual rows,
 while older servers that ignore the optional fields remain usable through the local compatibility
 overlay.
+An evaluator may settle a newly explored model even when the persisted bandit state has no arm for
+it yet: the outcome boundary materializes the selected global or contextual arm before crediting
+it, while low-level direct bandit updates remain strict about unknown arms.
 TypeScript validates the binding before local learner mutation or remote bandit/outcome dispatch:
 the digest must equal the SHA-256 of the normalized context object, including `task_family: null`
 when no task family is supplied. `digestCanonicalJsonTextSync()` provides this small control-plane

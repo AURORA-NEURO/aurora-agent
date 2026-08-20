@@ -495,6 +495,38 @@ test("online learner does not double-credit a replayed evaluator outcome", async
   assert.throws(() => learner.update({ arm_id: "a/one", reward: 0.1, outcome_digest: outcomeDigest }), /contradictory evaluator evidence/);
 });
 
+test("remote evaluator reward adopts the projected state instead of replaying local credit", async () => {
+  const apiClient = {
+    async brainModelSelectContextual() {
+      throw new Error("remote state test must not select a model");
+    },
+    async brainBanditUpdate(state, update) {
+      assert.equal(state.generation, 0);
+      assert.equal(update.arm_id, "remote/model");
+      return {
+        ok: true,
+        mcp: {
+          result: {
+            structuredContent: {
+              schema: "bioprism-brain-bandit/0.1",
+              generation: 12,
+              arms: [{ arm_id: "remote/model", pulls: 4, reward_sum: -0.2, failures: 2 }],
+              credited_outcomes: [],
+            },
+          },
+        },
+      };
+    },
+  };
+  const agent = new AutonomousAgent(new LLMRuntime({ fetch: async () => { throw new Error("remote state test must not invoke a provider"); } }), {
+    apiClient,
+    learner: new AutonomousOnlineLearner(),
+  });
+  const projected = await agent.recordEvaluatorReward("remote/model", 0.9, { remote: true });
+  assert.equal(projected.generation, 12);
+  assert.deepEqual(agent.learner.snapshot().arms, [{ arm_id: "remote/model", pulls: 4, reward_sum: -0.2, failures: 2 }]);
+});
+
 test("contextual selector bridge sends only model and health metadata to the control plane", async () => {
   let received;
   const apiClient = {

@@ -349,6 +349,11 @@ explicit evaluator feedback and can optionally submit the same value-only update
 plane. This is adaptation infrastructure, not an automatic truth signal: feedback must be produced
 by a caller-owned evaluator, and provider health is kept separate from task quality.
 
+Remote settlement adopts the control plane's returned bandit projection, including normalized
+generations, replay receipts, contextual rows, and first-run arm hydration. A selected model may be
+credited even when the caller's persisted state began with no arm for it; direct low-level updates
+remain strict about unknown arms.
+
 Learning episodes can only be prepared from a completed autonomous run; approval pauses, provider
 refusals, child failures, and tool-loop limits cannot be converted into evaluator or bandit credit.
 Trajectory settlement is resumable after a later episode failure: matching already-settled reward

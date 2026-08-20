@@ -1578,12 +1578,32 @@ pub fn record_brain_outcome(
         arm_id: request.arm_id.clone(),
         reward: request.assessment.reward,
         failed: request.assessment.failed,
-        outcome_digest: Some(credited_outcome_digest),
+        outcome_digest: Some(credited_outcome_digest.clone()),
         contract_digest: Some(contract_digest),
         context_digest: request.context_digest.clone(),
         context: request.context.clone(),
     };
-    let next_state = update_bandit(&request.bandit_state, &bandit_update)?;
+    // Selection may be allowed to explore an unseen candidate, so an empty caller-owned state
+    // is a valid first-run input to this evaluator boundary. Direct `update_bandit` remains
+    // strict for callers that want to validate an already-materialized arm ledger; only this
+    // higher-level outcome contract hydrates the selected arm before applying credit. Preserve an
+    // exact replay, including its state shape, rather than adding an arm to a replay response.
+    let state_for_update = if request
+        .bandit_state
+        .credited_outcomes
+        .iter()
+        .any(|known| known.outcome_digest == credited_outcome_digest)
+    {
+        request.bandit_state.clone()
+    } else {
+        hydrate_outcome_arm(
+            &request.bandit_state,
+            &request.arm_id,
+            request.context_digest.as_ref(),
+            request.context.as_ref(),
+        )?
+    };
+    let next_state = update_bandit(&state_for_update, &bandit_update)?;
     let next_state_digest = digest(&next_state)?;
     let mut learning_evidence = BrainLearningEvidence {
         schema: LEARNING_EVIDENCE_SCHEMA.into(),
@@ -1612,6 +1632,70 @@ pub fn record_brain_outcome(
         next_state,
         learning_evidence,
     })
+}
+
+/// Add the selected arm to the caller-owned ledger for the first evaluator settlement.
+///
+/// Model selection intentionally supports candidates that have no historical arm yet. The
+/// outcome-recording boundary is the first place where that candidate must become persistent.
+/// Contextual arms are hydrated inside their matching context row so the first credit cannot
+/// accidentally leak into the global prior. This helper is deliberately not part of
+/// `update_bandit`: direct low-level updates continue to reject unknown arms and therefore catch
+/// malformed state transitions early.
+fn hydrate_outcome_arm(
+    state: &BanditState,
+    arm_id: &str,
+    context_digest: Option<&String>,
+    context: Option<&ModelSelectionContext>,
+) -> Result<BanditState, BrainError> {
+    let mut hydrated = state.clone();
+    if let Some(context_digest) = context_digest {
+        let context = context.ok_or(BrainError::ContextRequired)?;
+        if let Some(contextual) = hydrated
+            .contextual_states
+            .iter_mut()
+            .find(|contextual| contextual.context_digest == *context_digest)
+        {
+            if contextual.arms.iter().all(|arm| arm.arm_id != arm_id) {
+                contextual.arms.push(BanditArm {
+                    arm_id: arm_id.into(),
+                    pulls: 0,
+                    reward_sum: 0.0,
+                    failures: 0,
+                    disabled: false,
+                });
+            }
+        } else {
+            if hydrated.contextual_states.len() >= MAX_CONTEXTUAL_STATES {
+                return Err(BrainError::TooMany {
+                    field: "bandit contextual states",
+                    max: MAX_CONTEXTUAL_STATES,
+                });
+            }
+            hydrated.contextual_states.push(ContextualBanditState {
+                context_digest: context_digest.clone(),
+                context: context.clone(),
+                generation: 0,
+                arms: vec![BanditArm {
+                    arm_id: arm_id.into(),
+                    pulls: 0,
+                    reward_sum: 0.0,
+                    failures: 0,
+                    disabled: false,
+                }],
+                observed: false,
+            });
+        }
+    } else if hydrated.arms.iter().all(|arm| arm.arm_id != arm_id) {
+        hydrated.arms.push(BanditArm {
+            arm_id: arm_id.into(),
+            pulls: 0,
+            reward_sum: 0.0,
+            failures: 0,
+            disabled: false,
+        });
+    }
+    Ok(hydrated)
 }
 
 fn validate_bandit_arms(arms: &[BanditArm], policy: &BanditPolicy) -> Result<(), BrainError> {
@@ -1972,6 +2056,43 @@ mod tests {
             reliability: 0.9,
             requires_credential: true,
             enabled: true,
+        }
+    }
+
+    fn outcome_request(
+        state: BanditState,
+        arm_id: &str,
+        context: Option<ModelSelectionContext>,
+    ) -> BrainOutcomeRecordRequest {
+        let context_digest = context
+            .as_ref()
+            .map(|value| digest(value).expect("test context digest"));
+        BrainOutcomeRecordRequest {
+            run: BrainRunIdentity {
+                run_id: "first-run".into(),
+                selection_digest: "a".repeat(64),
+                prompt_digest: "b".repeat(64),
+                plan_digest: "c".repeat(64),
+                provider: "provider".into(),
+                model: "model".into(),
+                outcome_digest: "d".repeat(64),
+                request_id: None,
+            },
+            assessment: BrainEvaluatorAssessment {
+                evaluator_id: "test-evaluator".into(),
+                evaluator_version: "1".into(),
+                reward: 0.7,
+                passed: true,
+                failed: false,
+                feedback_digest: None,
+                failure_class: None,
+                evidence_digest: None,
+            },
+            bandit_state: state,
+            arm_id: arm_id.into(),
+            context_digest,
+            context,
+            idempotency_key: Some("episode:first-run".into()),
         }
     }
 
@@ -2543,6 +2664,82 @@ mod tests {
         let encoded = serde_json::to_string(&report.learning_evidence).unwrap();
         assert!(!encoded.contains("provider response"));
         assert!(!encoded.contains("api_key"));
+    }
+
+    #[test]
+    fn outcome_record_hydrates_an_unseen_global_arm_on_first_run() {
+        let state = BanditState {
+            schema: BANDIT_SCHEMA.into(),
+            generation: 0,
+            policy: BanditPolicy::default(),
+            arms: Vec::new(),
+            credited_outcomes: Vec::new(),
+            contextual_states: Vec::new(),
+        };
+        let report = record_brain_outcome(&outcome_request(state, "provider/model", None)).unwrap();
+        assert_eq!(report.next_state.generation, 1);
+        assert_eq!(report.next_state.arms.len(), 1);
+        assert_eq!(report.next_state.arms[0].arm_id, "provider/model");
+        assert_eq!(report.next_state.arms[0].pulls, 1);
+        assert_eq!(report.next_state.arms[0].reward_sum, 0.7);
+        let replay = record_brain_outcome(&outcome_request(
+            report.next_state.clone(),
+            "provider/model",
+            None,
+        ))
+        .unwrap();
+        assert_eq!(replay.next_state, report.next_state);
+    }
+
+    #[test]
+    fn outcome_record_hydrates_an_unseen_contextual_arm_without_global_leakage() {
+        let context = ModelSelectionContext {
+            domain: "coding".into(),
+            capability: "implementation".into(),
+            risk_class: "engineering_change".into(),
+            task_family: Some("coding_delivery".into()),
+        };
+        let state = BanditState {
+            schema: BANDIT_SCHEMA.into(),
+            generation: 0,
+            policy: BanditPolicy::default(),
+            arms: Vec::new(),
+            credited_outcomes: Vec::new(),
+            contextual_states: Vec::new(),
+        };
+        let report = record_brain_outcome(&outcome_request(
+            state,
+            "provider/model",
+            Some(context.clone()),
+        ))
+        .unwrap();
+        assert!(report.next_state.arms.is_empty());
+        assert_eq!(report.next_state.contextual_states.len(), 1);
+        assert_eq!(report.next_state.contextual_states[0].context, context);
+        assert_eq!(report.next_state.contextual_states[0].arms[0].pulls, 1);
+        assert!(report.next_state.contextual_states[0].observed);
+    }
+
+    #[test]
+    fn outcome_record_does_not_reenable_a_disabled_arm_during_hydration() {
+        let state = BanditState {
+            schema: BANDIT_SCHEMA.into(),
+            generation: 0,
+            policy: BanditPolicy::default(),
+            arms: vec![BanditArm {
+                arm_id: "provider/model".into(),
+                pulls: 0,
+                reward_sum: 0.0,
+                failures: 0,
+                disabled: true,
+            }],
+            credited_outcomes: Vec::new(),
+            contextual_states: Vec::new(),
+        };
+        assert!(matches!(
+            record_brain_outcome(&outcome_request(state, "provider/model", None)),
+            Err(BrainError::UnknownArm(_))
+        ));
     }
 
     #[test]

@@ -741,9 +741,8 @@ export class AutonomousLearningController {
       if (!this.apiClient || typeof this.apiClient.brainOutcomeRecord !== "function") throw new ArgumentError("remote learning settlement requires an ApiClient with brainOutcomeRecord");
       const projected = projectOutcome(await this.apiClient.brainOutcomeRecord({ run: episode.run, assessment, bandit_state: this.agent.learner.snapshot(), arm_id: armId, ...(contextDigest === null ? {} : { context_digest: contextDigest, context: learningContext }), idempotency_key: `episode:${episode.episode_id}` }));
       if (!projected.next_state || !Array.isArray(projected.next_state.arms) || !projected.learning_evidence) throw new ProviderRuntimeError("brain outcome record returned an incomplete learning projection");
-      nextState = projected.next_state;
+      nextState = this.agent.learner.restore(projected.next_state);
       learningEvidence = projected.learning_evidence;
-      this.agent.learner.update({ arm_id: armId, reward: creditedReward, failed: assessment.failed, outcome_digest: projected.learning_evidence.bandit_update?.outcome_digest ?? creditedOutcomeDigest, contract_digest: projected.learning_evidence.bandit_update?.contract_digest ?? null, ...(contextDigest === null ? {} : { context_digest: contextDigest, context: learningContext }) });
       remote = true;
     } else {
       nextState = await this.agent.recordEvaluatorReward(armId, creditedReward, { failed: assessment.failed, outcomeDigest: creditedOutcomeDigest, contextDigest, context: learningContext });

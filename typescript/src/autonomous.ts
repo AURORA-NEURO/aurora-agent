@@ -1306,6 +1306,22 @@ export class AutonomousOnlineLearner {
     return cloneBanditState(this.stateValue);
   }
 
+  /**
+   * Adopt a value-only projection produced by the remote control plane.
+   *
+   * Remote settlement may normalize first-run arms, contextual rows, replay receipts, or
+   * generation numbers. Replaying the request locally is not equivalent to adopting that
+   * projection: a server can legitimately reject, deduplicate, or enrich the transition. Keep
+   * the local policy as the runtime's configured policy when older transports omit it, then
+   * validate the complete state before making it observable to selection.
+   */
+  restore(state: BrainBanditState): BrainBanditState {
+    const restoredState = cloneBanditState(state);
+    this.stateValue = { ...restoredState, policy: this.policy };
+    this.assertState();
+    return this.snapshot();
+  }
+
   /** Select the best eligible model using persisted pulls/rewards; deterministic ties are by arm id. */
   select(request: AutonomousSelectionRequest): AutonomousSelectionDecision {
     validateOnlineSelectionConstraints(request);
@@ -1925,9 +1941,7 @@ export class AutonomousAgent {
       if (!response.ok || response.mcp.error || response.mcp.result?.isError) throw new ProviderRuntimeError("remote bandit update returned a refusal");
       const projected = response.mcp.result?.structuredContent as BrainBanditState | undefined;
       if (!projected) throw new ProviderRuntimeError("remote bandit update returned no state");
-      // Keep the local learner aligned by applying the same explicit reward after server validation.
-      this.learner.update(update);
-      return projected;
+      return this.learner.restore(projected);
     }
     return this.learner.update(update);
   }

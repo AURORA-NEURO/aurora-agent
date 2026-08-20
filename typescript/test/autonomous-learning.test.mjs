@@ -231,7 +231,7 @@ test("remote learning settlement sends run identity and evaluator values only", 
             structuredContent: {
               ok: true,
               status: "recorded_evaluator_reward",
-              next_state: { schema: "bandit", generation: 1, arms: [{ arm_id: "learning-provider/learning-model", pulls: 1, reward_sum: 0.7, failures: 0 }] },
+              next_state: { schema: "bandit", generation: 9, arms: [{ arm_id: "learning-provider/learning-model", pulls: 3, reward_sum: 0.2, failures: 1 }] },
               learning_evidence: { schema: "evidence", evidence_digest: "b".repeat(64) },
             },
           },
@@ -250,6 +250,8 @@ test("remote learning settlement sends run identity and evaluator values only", 
     evidence_digest: "c".repeat(64),
   }, { remote: true });
   assert.equal(settlement.remote, true);
+  assert.equal(agent.learner.snapshot().generation, 9);
+  assert.deepEqual(agent.learner.snapshot().arms, [{ arm_id: "learning-provider/learning-model", pulls: 3, reward_sum: 0.2, failures: 1 }]);
   assert.equal(seen.length, 1);
   assert.equal(Object.prototype.hasOwnProperty.call(seen[0], "prompt"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(seen[0], "response"), false);
