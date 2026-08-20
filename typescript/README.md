@@ -365,6 +365,12 @@ dispatch, and `requireJson`/`responseSchema` are validated for each stage result
 previous stage admission does not authorize a later stage; readiness, capacity, approval, and output
 validation are repeated at the stage boundary.
 
+New checkpoints persist only an `execution_contract_digest` for the effective candidates, selection
+limits, structured-output/schema requirement, tool definitions, failover limit, and enclosing
+execution policy. `resume()` refuses a changed digest before provider dispatch. Older checkpoints
+remain readable but are intentionally unbound; pass `rebindLegacyExecutionContract: true` to perform
+an explicit one-time migration that creates a new linked checkpoint.
+
 `InMemoryAutonomousWorkflowCheckpointStore.snapshot()` and `restore()` provide an integrity-checked
 multi-job restart boundary. `AutonomousWorkflowPersistenceCoordinator` connects it to a
 caller-owned `read()`/`write()` adapter. Restore verifies checkpoint digests, generation metadata,

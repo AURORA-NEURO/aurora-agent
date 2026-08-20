@@ -1679,6 +1679,13 @@ while `requireJson` and `responseSchema` are re-applied to each stage response. 
 cache a prior model admission as permission for later stages: every stage performs readiness,
 capacity, approval, budget, and structured-output checks before transport.
 
+Every new checkpoint also carries `execution_contract_digest`, a digest-only projection of the
+effective candidate metadata, selection limits, output/schema requirement, tool definitions,
+failover limit, and enclosing execution-policy digest. `resume()` and an idempotent `start()` reject
+a changed contract before invoking a stage. Checkpoints created before this field existed remain
+readable as legacy metadata, but require the explicit `rebindLegacyExecutionContract: true` option
+for a one-time caller-authorized migration; the migration itself creates a new hash-linked checkpoint.
+
 `AutonomousWorkflowCheckpointStore` is deliberately caller-owned. The included
 `InMemoryAutonomousWorkflowCheckpointStore` is a bounded reference implementation; applications
 can replace it with SQLite, a queue-backed record, or another durable store. Checkpoints contain

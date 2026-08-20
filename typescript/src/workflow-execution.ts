@@ -27,6 +27,7 @@ export const AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA = "bioprism-typescript-autono
 export const AUTONOMOUS_WORKFLOW_EVENT_SCHEMA = "bioprism-typescript-autonomous-workflow-event/0.1" as const;
 export const AUTONOMOUS_WORKFLOW_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-workflow-snapshot/0.1" as const;
 export const AUTONOMOUS_DURABLE_JOB_SCHEMA = "bioprism-typescript-autonomous-durable-job/0.1" as const;
+export const AUTONOMOUS_WORKFLOW_EXECUTION_CONTRACT_SCHEMA = "bioprism-typescript-autonomous-workflow-execution-contract/0.1" as const;
 export const AUTONOMOUS_WORKFLOW_MAX_STAGES_PER_CALL = 32;
 export const AUTONOMOUS_WORKFLOW_MAX_EVENTS = 256;
 export const AUTONOMOUS_WORKFLOW_MAX_JOBS = 1_024;
@@ -64,6 +65,8 @@ export interface AutonomousWorkflowCheckpoint {
   stage_outcomes: AutonomousWorkflowStageOutcome[];
   generation: number;
   status: AutonomousWorkflowCheckpointStatus;
+  /** Digest of the caller-owned model-selection/output contract; null only for legacy unbound checkpoints. */
+  execution_contract_digest?: string | null;
   previous_checkpoint_digest: string | null;
   checkpoint_digest: string;
   retention: "metadata_only;task_prompt_response_and_credentials_not_retained";
@@ -136,6 +139,8 @@ export interface AutonomousWorkflowExecutionResult {
 export interface AutonomousWorkflowExecuteOptions extends AutonomousRunOptions {
   jobId?: string;
   maxStages?: number;
+  /** Explicitly bind a legacy checkpoint that predates execution-contract digests before continuing it. */
+  rebindLegacyExecutionContract?: boolean;
 }
 
 export interface AutonomousWorkflowExecutorOptions {
@@ -195,7 +200,7 @@ function workflowBoundedInteger(value: unknown, label: string, maximum: number, 
 
 async function validateWorkflowCheckpoint(value: unknown): Promise<AutonomousWorkflowCheckpoint> {
   if (!isObject(value)) throw new ArgumentError("workflow checkpoint must be an object");
-  exactKeys(value, ["schema", "job_id", "task_digest", "domain", "workflow_id", "workflow_digest", "plan_digest", "completed_stage_ids", "next_stage_id", "stage_outcomes", "generation", "status", "previous_checkpoint_digest", "checkpoint_digest", "retention", "secret_material"], "workflow checkpoint");
+  exactKeys(value, ["schema", "job_id", "task_digest", "domain", "workflow_id", "workflow_digest", "plan_digest", "completed_stage_ids", "next_stage_id", "stage_outcomes", "generation", "status", "execution_contract_digest", "previous_checkpoint_digest", "checkpoint_digest", "retention", "secret_material"], "workflow checkpoint");
   if (value.schema !== AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA || value.retention !== "metadata_only;task_prompt_response_and_credentials_not_retained" || value.secret_material !== "never_returned") throw new ArgumentError("workflow checkpoint metadata markers are invalid");
   const jobId = boundedJobId(value.job_id);
   const taskDigest = workflowDigest(value.task_digest, "workflow task_digest")!;
@@ -234,11 +239,34 @@ async function validateWorkflowCheckpoint(value: unknown): Promise<AutonomousWor
   const generation = workflowBoundedInteger(value.generation, "workflow generation", Number.MAX_SAFE_INTEGER, 1);
   const status = value.status;
   if (status !== "running" && status !== "paused" && status !== "completed" && status !== "failed") throw new ArgumentError("workflow checkpoint status is invalid");
+  const hasExecutionContractDigest = Object.prototype.hasOwnProperty.call(value, "execution_contract_digest");
+  const executionContractDigest = hasExecutionContractDigest
+    ? workflowDigest(value.execution_contract_digest, "workflow execution_contract_digest", true)
+    : null;
   const previousCheckpointDigest = workflowDigest(value.previous_checkpoint_digest, "workflow previous_checkpoint_digest", true);
   const checkpointDigest = workflowDigest(value.checkpoint_digest, "workflow checkpoint_digest")!;
-  const descriptor = { schema: value.schema, job_id: jobId, task_digest: taskDigest, domain: value.domain, workflow_id: workflowId, workflow_digest: workflowDigestValue, plan_digest: planDigest, completed_stage_ids: completedStageIds, next_stage_id: nextStageId, stage_outcomes: stageOutcomes, generation, status, previous_checkpoint_digest: previousCheckpointDigest, retention: value.retention, secret_material: value.secret_material };
+  const descriptor = {
+    schema: value.schema,
+    job_id: jobId,
+    task_digest: taskDigest,
+    domain: value.domain,
+    workflow_id: workflowId,
+    workflow_digest: workflowDigestValue,
+    plan_digest: planDigest,
+    completed_stage_ids: completedStageIds,
+    next_stage_id: nextStageId,
+    stage_outcomes: stageOutcomes,
+    generation,
+    status,
+    ...(hasExecutionContractDigest ? { execution_contract_digest: executionContractDigest } : {}),
+    previous_checkpoint_digest: previousCheckpointDigest,
+    retention: value.retention,
+    secret_material: value.secret_material,
+  };
   if (await digestJson(descriptor) !== checkpointDigest) throw new ArgumentError("workflow checkpoint digest does not match its metadata");
-  return { ...descriptor, checkpoint_digest: checkpointDigest } as AutonomousWorkflowCheckpoint;
+  return (hasExecutionContractDigest
+    ? { ...descriptor, execution_contract_digest: executionContractDigest, checkpoint_digest: checkpointDigest }
+    : { ...descriptor, checkpoint_digest: checkpointDigest }) as AutonomousWorkflowCheckpoint;
 }
 
 async function validateWorkflowEvent(value: unknown): Promise<AutonomousWorkflowEvent> {
@@ -423,6 +451,45 @@ function stageFailure(error: unknown): { error_class: string; error_code: Provid
   return { error_class: safeErrorClass(error), error_code: null, retryable: null, status_code: null };
 }
 
+function workflowCandidateContract(candidate: NonNullable<AutonomousRunOptions["candidates"]>[number]): Record<string, unknown> {
+  return {
+    provider: candidate.provider,
+    model: candidate.model,
+    capabilities: [...(candidate.capabilities ?? [])],
+    context_window_tokens: candidate.context_window_tokens,
+    max_output_tokens: candidate.max_output_tokens,
+    quality: candidate.quality,
+    latency_ms: candidate.latency_ms,
+    cost_per_million_tokens: candidate.cost_per_million_tokens,
+    reliability: candidate.reliability,
+    requires_credential: candidate.requires_credential ?? null,
+    enabled: candidate.enabled ?? null,
+  };
+}
+
+async function workflowExecutionContractDigest(agent: AutonomousAgent, options: AutonomousWorkflowExecuteOptions): Promise<string> {
+  const candidates = options.candidates ? [...options.candidates] : agent.models();
+  const responseSchemaDigest = options.responseSchema === undefined ? null : await digestJson(options.responseSchema);
+  const toolsDigest = options.tools === undefined ? null : await digestJson(options.tools.map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters })));
+  const executionPolicyDigest = options.execution ? await options.execution.policy.digest() : null;
+  return digestJson({
+    schema: AUTONOMOUS_WORKFLOW_EXECUTION_CONTRACT_SCHEMA,
+    candidates_digest: await digestJson(candidates.map((candidate) => workflowCandidateContract(candidate))),
+    max_input_tokens: options.maxInputTokens ?? null,
+    max_output_tokens: options.maxOutputTokens ?? null,
+    max_cost_per_million_tokens: options.maxCostPerMillionTokens ?? null,
+    max_latency_ms: options.maxLatencyMs ?? null,
+    min_quality: options.minQuality ?? null,
+    require_json: options.requireJson === true,
+    response_schema_digest: responseSchemaDigest,
+    temperature: options.temperature ?? null,
+    tools_digest: toolsDigest,
+    approve_effects: options.approveEffects === true,
+    max_provider_failovers: options.maxProviderFailovers ?? null,
+    execution_policy_digest: executionPolicyDigest,
+  });
+}
+
 function runOptions(options: AutonomousWorkflowExecuteOptions, stage: AutonomousWorkflowStage, domain: AutonomousDomainName, context: AutonomousRunOptions["context"]): AutonomousRunOptions {
   return {
     domain,
@@ -475,16 +542,18 @@ export class AutonomousWorkflowExecutor {
     const blueprintEnvelope = await this.agent.blueprint(task, { domain: route.primary_domain, capability: options.capability, context: options.context, hints: options.hints, maxInputTokens: options.maxInputTokens, tools: options.tools?.map((tool) => tool.name) });
     const blueprint = blueprintEnvelope.blueprint;
     if (!blueprint) return this.routeReviewResult();
+    const contractDigest = await workflowExecutionContractDigest(this.agent, options);
     const jobId = boundedJobId(options.jobId ?? `workflow-${route.task_digest.slice(0, 24)}`);
     const existing = await this.store.load(jobId);
     if (existing) {
       if (existing.task_digest !== blueprint.task_digest || existing.workflow_digest !== blueprint.workflow.workflow_digest) throw new ArgumentError("workflow job already exists with a different task or workflow");
-      return this.drive(task, blueprint, existing, options);
+      const bound = await this.bindExecutionContract(existing, blueprint, options, contractDigest);
+      return this.drive(task, blueprint, bound, options, contractDigest);
     }
-    const initial = await this.makeCheckpoint(jobId, blueprint, [], [], "running", null);
+    const initial = await this.makeCheckpoint(jobId, blueprint, [], [], "running", contractDigest, null);
     await this.store.save(initial);
     await this.appendEvent(jobId, "started", null, initial);
-    return this.drive(task, blueprint, initial, options);
+    return this.drive(task, blueprint, initial, options, contractDigest);
   }
 
   async resume(jobId: string, task: string, options: Omit<AutonomousWorkflowExecuteOptions, "jobId"> = {}): Promise<AutonomousWorkflowExecutionResult> {
@@ -497,7 +566,10 @@ export class AutonomousWorkflowExecutor {
     const blueprintEnvelope = await this.agent.blueprint(task, { domain: checkpoint.domain, capability: options.capability, context: options.context, hints: options.hints, maxInputTokens: options.maxInputTokens, tools: options.tools?.map((tool) => tool.name) });
     const blueprint = blueprintEnvelope.blueprint;
     if (!blueprint || blueprint.workflow.workflow_digest !== checkpoint.workflow_digest || blueprint.plan.plan_digest !== checkpoint.plan_digest) throw new ProviderRuntimeError("workflow rehydration blueprint digest does not match the checkpoint");
-    return this.drive(task, blueprint, checkpoint, { ...options, jobId: normalizedJobId });
+    const contractOptions = { ...options, jobId: normalizedJobId };
+    const contractDigest = await workflowExecutionContractDigest(this.agent, contractOptions);
+    const bound = await this.bindExecutionContract(checkpoint, blueprint, contractOptions, contractDigest);
+    return this.drive(task, blueprint, bound, contractOptions, contractDigest);
   }
 
   async events(jobId: string, after = 0, limit = AUTONOMOUS_WORKFLOW_MAX_EVENTS): Promise<AutonomousWorkflowEvent[]> {
@@ -508,10 +580,20 @@ export class AutonomousWorkflowExecutor {
     return { schema: AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA, status: "route_review_required", job_id: null, blueprint: null, checkpoint: null, events: [], stage_results: [], completed_stage_count: 0, total_stage_count: 0, learning_episode_ids: [], recovery: "caller_rehydrates_task_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only" };
   }
 
-  private async makeCheckpoint(jobId: string, blueprint: AutonomousTaskBlueprint, completed: string[], outcomes: AutonomousWorkflowStageOutcome[], status: AutonomousWorkflowCheckpointStatus, previous: AutonomousWorkflowCheckpoint | null): Promise<AutonomousWorkflowCheckpoint> {
+  private async makeCheckpoint(jobId: string, blueprint: AutonomousTaskBlueprint, completed: string[], outcomes: AutonomousWorkflowStageOutcome[], status: AutonomousWorkflowCheckpointStatus, executionContractDigest: string, previous: AutonomousWorkflowCheckpoint | null): Promise<AutonomousWorkflowCheckpoint> {
     const next = blueprint.workflow.stages.find((stage) => !completed.includes(stage.id))?.id ?? null;
-    const descriptor = { schema: AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA, job_id: jobId, task_digest: blueprint.task_digest, domain: blueprint.domain_profile.domain, workflow_id: blueprint.workflow.workflow_id, workflow_digest: blueprint.workflow.workflow_digest, plan_digest: blueprint.plan.plan_digest, completed_stage_ids: completed, next_stage_id: next, stage_outcomes: outcomes, generation: (previous?.generation ?? 0) + 1, status, previous_checkpoint_digest: previous?.checkpoint_digest ?? null, retention: "metadata_only;task_prompt_response_and_credentials_not_retained" as const, secret_material: "never_returned" as const };
+    const descriptor = { schema: AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA, job_id: jobId, task_digest: blueprint.task_digest, domain: blueprint.domain_profile.domain, workflow_id: blueprint.workflow.workflow_id, workflow_digest: blueprint.workflow.workflow_digest, plan_digest: blueprint.plan.plan_digest, completed_stage_ids: completed, next_stage_id: next, stage_outcomes: outcomes, generation: (previous?.generation ?? 0) + 1, status, execution_contract_digest: executionContractDigest, previous_checkpoint_digest: previous?.checkpoint_digest ?? null, retention: "metadata_only;task_prompt_response_and_credentials_not_retained" as const, secret_material: "never_returned" as const };
     return { ...descriptor, checkpoint_digest: await digestJson(descriptor) };
+  }
+
+  private async bindExecutionContract(checkpoint: AutonomousWorkflowCheckpoint, blueprint: AutonomousTaskBlueprint, options: AutonomousWorkflowExecuteOptions, contractDigest: string): Promise<AutonomousWorkflowCheckpoint> {
+    if (checkpoint.execution_contract_digest === contractDigest) return checkpoint;
+    if (checkpoint.execution_contract_digest !== undefined && checkpoint.execution_contract_digest !== null) throw new ProviderRuntimeError("workflow execution contract does not match the checkpoint");
+    if (options.rebindLegacyExecutionContract !== true) throw new ProviderRuntimeError("workflow checkpoint predates execution-contract binding; set rebindLegacyExecutionContract: true for an explicit migration");
+    const migrated = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, checkpoint.stage_outcomes, checkpoint.status, contractDigest, checkpoint);
+    await this.store.save(migrated);
+    await this.appendEvent(migrated.job_id, "checkpointed", migrated.next_stage_id, migrated);
+    return migrated;
   }
 
   private async appendEvent(jobId: string, eventType: AutonomousWorkflowEventType, stageId: string | null, checkpoint: AutonomousWorkflowCheckpoint): Promise<AutonomousWorkflowEvent> {
@@ -523,7 +605,7 @@ export class AutonomousWorkflowExecutor {
     return event;
   }
 
-  private async drive(task: string, blueprint: AutonomousTaskBlueprint, initial: AutonomousWorkflowCheckpoint, options: AutonomousWorkflowExecuteOptions): Promise<AutonomousWorkflowExecutionResult> {
+  private async drive(task: string, blueprint: AutonomousTaskBlueprint, initial: AutonomousWorkflowCheckpoint, options: AutonomousWorkflowExecuteOptions, contractDigest: string): Promise<AutonomousWorkflowExecutionResult> {
     const maxStages = boundedStageCount(options.maxStages);
     let checkpoint = initial;
     const stageResults: AutonomousWorkflowStageResult[] = [];
@@ -531,7 +613,7 @@ export class AutonomousWorkflowExecutor {
     let consumed = 0;
     if (checkpoint.status === "completed") return this.result("completed", checkpoint, blueprint, stageResults);
     if (options.approveProviderCall !== true) {
-      checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, checkpoint.stage_outcomes, "paused", checkpoint);
+      checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, checkpoint.stage_outcomes, "paused", contractDigest, checkpoint);
       await this.store.save(checkpoint);
       await this.appendEvent(checkpoint.job_id, "approval_required", checkpoint.next_stage_id, checkpoint);
       return this.result("approval_required", checkpoint, blueprint, stageResults);
@@ -552,7 +634,7 @@ export class AutonomousWorkflowExecutor {
         run = await this.agent.run(`Execute workflow stage ${stage.id} for task: ${task}`, runOptions(options, stage, blueprint.domain_profile.domain, context));
       } catch (error) {
         const failure = stageFailure(error);
-        checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "failed", run_status: "exception", selection_digest: null, response_digest: null, output_bytes: 0, error_class: failure.error_class, error_code: failure.error_code, retryable: failure.retryable, status_code: failure.status_code, learning_episode_id: null }], "failed", checkpoint);
+        checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "failed", run_status: "exception", selection_digest: null, response_digest: null, output_bytes: 0, error_class: failure.error_class, error_code: failure.error_code, retryable: failure.retryable, status_code: failure.status_code, learning_episode_id: null }], "failed", contractDigest, checkpoint);
         await this.store.save(checkpoint);
         await this.appendEvent(checkpoint.job_id, "stage_failed", stage.id, checkpoint);
         return this.result("failed", checkpoint, blueprint, stageResults);
@@ -569,13 +651,13 @@ export class AutonomousWorkflowExecutor {
       }
       stageResults.push({ stage, run, output_digest: outputDigest, output_bytes: outputBytes, learning_episode_id: learningEpisodeId });
       if (run.status === "approval_required") {
-        checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "approval_required", run_status: run.status, selection_digest: selectionDigest, response_digest: null, output_bytes: 0, error_class: null, learning_episode_id: null }], "paused", checkpoint);
+        checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "approval_required", run_status: run.status, selection_digest: selectionDigest, response_digest: null, output_bytes: 0, error_class: null, learning_episode_id: null }], "paused", contractDigest, checkpoint);
         await this.store.save(checkpoint);
         await this.appendEvent(checkpoint.job_id, "approval_required", stage.id, checkpoint);
         return this.result("approval_required", checkpoint, blueprint, stageResults);
       }
       if (run.status !== "completed") {
-        checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "failed", run_status: run.status, selection_digest: selectionDigest, response_digest: outputDigest, output_bytes: outputBytes, error_class: null, learning_episode_id: null }], "failed", checkpoint);
+        checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "failed", run_status: run.status, selection_digest: selectionDigest, response_digest: outputDigest, output_bytes: outputBytes, error_class: null, learning_episode_id: null }], "failed", contractDigest, checkpoint);
         await this.store.save(checkpoint);
         await this.appendEvent(checkpoint.job_id, "stage_failed", stage.id, checkpoint);
         return this.result("failed", checkpoint, blueprint, stageResults);
@@ -583,12 +665,12 @@ export class AutonomousWorkflowExecutor {
       const completed = [...checkpoint.completed_stage_ids, stage.id];
       const outcomes = [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "completed" as const, run_status: run.status, selection_digest: selectionDigest, response_digest: outputDigest, output_bytes: outputBytes, error_class: null, learning_episode_id: learningEpisodeId }];
       const nextStatus: AutonomousWorkflowCheckpointStatus = completed.length === stages.length ? "completed" : "running";
-      checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, completed, outcomes, nextStatus, checkpoint);
+      checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, completed, outcomes, nextStatus, contractDigest, checkpoint);
       await this.store.save(checkpoint);
       await this.appendEvent(checkpoint.job_id, nextStatus === "completed" ? "completed" : "stage_completed", stage.id, checkpoint);
     }
     if (checkpoint.status === "completed") return this.result("completed", checkpoint, blueprint, stageResults);
-    checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, checkpoint.stage_outcomes, "paused", checkpoint);
+    checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, checkpoint.stage_outcomes, "paused", contractDigest, checkpoint);
     await this.store.save(checkpoint);
     await this.appendEvent(checkpoint.job_id, "checkpointed", checkpoint.next_stage_id, checkpoint);
     return this.result("paused", checkpoint, blueprint, stageResults);

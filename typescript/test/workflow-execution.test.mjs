@@ -12,6 +12,7 @@ import {
   InMemoryAutonomousWorkflowCheckpointStore,
   LLMRuntime,
   builtinAutonomousDomainProfiles,
+  digestJson,
   openaiCompatibleProvider,
 } from "../dist/index.js";
 
@@ -74,6 +75,73 @@ test("workflow executor checkpoints stages, pauses at a bounded budget, and resu
   await assert.rejects(() => executor.resume("workflow-job-1", "A different task", { candidates: agent.models(), approveProviderCall: true }), /digest/);
 });
 
+test("workflow resume refuses a changed selection contract before provider dispatch", async () => {
+  let calls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      calls += 1;
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: `contract-output-${calls}` }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("workflow", "https://workflow.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel(model());
+  const executor = new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore());
+  const task = "Resume only with the same model-selection contract";
+  const first = await executor.start(task, { domain: "coding", jobId: "workflow-contract-1", candidates: agent.models(), approveProviderCall: true, maxStages: 1, maxCostPerMillionTokens: 10 });
+  assert.equal(first.status, "paused");
+  assert.equal(typeof first.checkpoint.execution_contract_digest, "string");
+  await assert.rejects(
+    () => executor.resume("workflow-contract-1", task, { candidates: agent.models(), approveProviderCall: true, maxStages: 32, maxCostPerMillionTokens: 1 }),
+    /execution contract/,
+  );
+  assert.equal(calls, 1, "contract mismatch must be rejected before the next stage dispatch");
+});
+
+test("legacy workflow checkpoints require explicit contract rebinding", async () => {
+  let calls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      calls += 1;
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: `legacy-output-${calls}` }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("workflow", "https://workflow.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel(model());
+  const source = await new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore()).start("Migrate this legacy workflow checkpoint", { domain: "coding", jobId: "workflow-legacy-1", candidates: agent.models(), approveProviderCall: true, maxStages: 1 });
+  const { execution_contract_digest: _contract, checkpoint_digest: _digest, ...legacyDescriptor } = source.checkpoint;
+  const legacyCheckpoint = { ...legacyDescriptor, checkpoint_digest: await digestJson(legacyDescriptor) };
+  let checkpoint = structuredClone(legacyCheckpoint);
+  let eventRows = [];
+  let previousEventDigest = null;
+  for (const event of source.events) {
+    const { event_digest: _eventDigest, ...eventDescriptor } = event;
+    const descriptor = { ...eventDescriptor, checkpoint_digest: checkpoint.checkpoint_digest, previous_event_digest: previousEventDigest };
+    const legacyEvent = { ...descriptor, event_digest: await digestJson(descriptor) };
+    eventRows.push(legacyEvent);
+    previousEventDigest = legacyEvent.event_digest;
+  }
+  const legacyStore = {
+    load: () => structuredClone(checkpoint),
+    save: (value) => { checkpoint = structuredClone(value); },
+    appendEvent: (value) => { eventRows.push(structuredClone(value)); },
+    events: (_jobId, after = 0, limit = 256) => eventRows.filter((event) => event.sequence > after).slice(0, limit).map((event) => structuredClone(event)),
+  };
+  const executor = new AutonomousWorkflowExecutor(agent, legacyStore);
+  await assert.rejects(
+    () => executor.resume("workflow-legacy-1", "Migrate this legacy workflow checkpoint", { candidates: agent.models(), approveProviderCall: true }),
+    /predates execution-contract binding/,
+  );
+  const resumed = await executor.resume("workflow-legacy-1", "Migrate this legacy workflow checkpoint", { candidates: agent.models(), approveProviderCall: true, rebindLegacyExecutionContract: true, maxStages: 32 });
+  assert.equal(resumed.status, "completed");
+  assert.equal(typeof resumed.checkpoint.execution_contract_digest, "string");
+  assert.equal(resumed.checkpoint.generation > source.checkpoint.generation, true);
+  assert.equal(calls, 5);
+});
+
 test("workflow stages preserve structured output and selection constraints", async () => {
   const bodies = [];
   let calls = 0;
@@ -106,6 +174,11 @@ test("workflow stages preserve structured output and selection constraints", asy
   assert.equal(result.status, "paused");
   assert.deepEqual(result.stage_results[0].run.response.structured, { answer: "stage-1" });
   assert.deepEqual(bodies[0].response_format, { type: "json_object" });
+  await assert.rejects(
+    () => executor.resume("workflow-structured-1", "Implement this structured workflow.", { candidates: [structuredModel], approveProviderCall: true, maxStages: 32 }),
+    /execution contract/,
+  );
+  assert.equal(calls, 1, "structured-output contract mismatch must not dispatch a later stage");
 
   const refusedCalls = [];
   const refusedRuntime = new LLMRuntime({ credentials: new CredentialStore(), fetch: async (_url, init) => { refusedCalls.push(init); return jsonResponse({ choices: [{ message: { role: "assistant", content: "must not dispatch" }, finish_reason: "stop" }] }); } });
