@@ -168,8 +168,10 @@ export {
   compileAutonomousPlan,
   contextualSelector,
   routeAutonomousTask,
+  acceptedCrossDomainPlan,
 } from "./autonomous.js";
 export type {
+  AutonomousAcceptedCrossDomainPlan,
   AutonomousAutoBlueprint,
   AutonomousCrossDomainBlueprint,
   AutonomousCrossDomainChildRun,
@@ -205,6 +207,38 @@ export type {
   DomainToolApprover,
   DomainToolExecutor,
 } from "./autonomous.js";
+export {
+  AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_SCHEMA,
+  AUTONOMOUS_CROSS_DOMAIN_EVENT_SCHEMA,
+  AUTONOMOUS_CROSS_DOMAIN_EXECUTION_CONTRACT_SCHEMA,
+  AUTONOMOUS_CROSS_DOMAIN_EXECUTION_SCHEMA,
+  AUTONOMOUS_CROSS_DOMAIN_MAX_EVENTS,
+  AUTONOMOUS_CROSS_DOMAIN_MAX_JOBS,
+  AUTONOMOUS_CROSS_DOMAIN_MAX_SNAPSHOT_BYTES,
+  AUTONOMOUS_CROSS_DOMAIN_MAX_STEPS_PER_CALL,
+  AUTONOMOUS_CROSS_DOMAIN_SNAPSHOT_SCHEMA,
+  AutonomousCrossDomainExecutor,
+  AutonomousCrossDomainPersistenceCoordinator,
+  InMemoryAutonomousCrossDomainCheckpointStore,
+} from "./cross-domain-execution.js";
+export type {
+  AutonomousCrossDomainCheckpoint,
+  AutonomousCrossDomainCheckpointStatus,
+  AutonomousCrossDomainCheckpointStore,
+  AutonomousCrossDomainCheckpointStoreSnapshot,
+  AutonomousCrossDomainChildResultResolver,
+  AutonomousCrossDomainExecuteOptions,
+  AutonomousCrossDomainExecutionResult,
+  AutonomousCrossDomainExecutionStatus,
+  AutonomousCrossDomainErrorMetadata,
+  AutonomousCrossDomainEvent,
+  AutonomousCrossDomainEventType,
+  AutonomousCrossDomainExecutorOptions,
+  AutonomousCrossDomainRehydratableChild,
+  AutonomousCrossDomainSnapshotPersistence,
+  AutonomousCrossDomainSnapshotStore,
+  AutonomousCrossDomainStepResult,
+} from "./cross-domain-execution.js";
 export {
   AUTONOMOUS_EXECUTION_EVENT_KINDS,
   AUTONOMOUS_EXECUTION_EVENT_SCHEMA,

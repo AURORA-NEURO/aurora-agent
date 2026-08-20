@@ -1112,17 +1112,17 @@ async function planningProviderFailureDigest(error: ProviderRuntimeError): Promi
   });
 }
 
-interface AcceptedCrossDomainPlan {
+export interface AutonomousAcceptedCrossDomainPlan {
   priority_child_ids: string[];
   focus_child_ids: string[];
   refinement_digest: string;
 }
 
 /** Validate an accepted cross-domain proposal before it can alter fan-out scheduling. */
-async function acceptedCrossDomainPlan(
+export async function acceptedCrossDomainPlan(
   blueprint: AutonomousCrossDomainBlueprint,
   refinement: AutonomousCrossDomainPlanRefinementResult | undefined,
-): Promise<AcceptedCrossDomainPlan | null> {
+): Promise<AutonomousAcceptedCrossDomainPlan | null> {
   if (refinement === undefined) return null;
   if (!isObject(refinement) || refinement.status !== "completed" || refinement.review_required !== false) throw new ProviderRuntimeError("only a completed, non-review cross-domain plan refinement may be accepted");
   if (refinement.task_digest !== blueprint.task_digest) throw new ProviderRuntimeError("accepted cross-domain plan task does not match the blueprint");
@@ -1803,7 +1803,7 @@ export class AutonomousAgent {
     return routeAutonomousTask(taskText, options);
   }
 
-  async blueprint(task: string, options: { domain?: AutonomousDomainName; capability?: string; context?: readonly AutonomousPromptChunk[]; hints?: readonly string[]; maxInputTokens?: number; tools?: readonly string[] } = {}): Promise<AutonomousAutoBlueprint> {
+  async blueprint(task: string, options: { domain?: AutonomousDomainName; capability?: string; context?: readonly AutonomousPromptChunk[]; hints?: readonly string[]; maxInputTokens?: number; tools?: readonly string[]; subtasks?: readonly AutonomousCrossDomainSubtask[] } = {}): Promise<AutonomousAutoBlueprint> {
     const taskText = boundedText("autonomous task", task, 32_000);
     const route = await this.route(taskText, { domain: options.domain, hints: options.hints });
     if (route.abstained || !route.primary_domain) return { schema: "bioprism-python-autonomous-auto-blueprint/0.1", route, blueprint: null, cross_domain_blueprint: null, execution: "not_started", authorization: "route_and_plan_only; no_provider_or_tool_effects_authorized" };

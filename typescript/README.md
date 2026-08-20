@@ -450,6 +450,49 @@ fan-in synthesis stage. It is not rewritten as a successful partial result or as
 failure, so a caller can distinguish a bounded retry/escalation decision from an authorization
 pause or an unexpected child exception.
 
+For long-running fan-out, `AutonomousCrossDomainExecutor` provides the restart-safe counterpart
+to `runCrossDomain()`. It dispatches at most `maxSteps` calls per invocation (one child or the
+final synthesis step), persists a metadata-only checkpoint after every completed child, and
+emits a bounded predecessor-linked event chain. The checkpoint binds the task digest, route
+digest, base cross-domain plan digest, accepted-plan digest, ordered child prefix, child result
+digests, synthesis digest, execution-contract digest, and generation. It never stores task text,
+prompts, credentials, provider responses, tool payloads, or raw error messages.
+
+```typescript
+const store = new InMemoryAutonomousCrossDomainCheckpointStore();
+const executor = new AutonomousCrossDomainExecutor(agent, store, { learning });
+const first = await executor.start(task, {
+  jobId: "research-2026-01",
+  subtasks,
+  candidates: agent.models(),
+  acceptedCrossDomainPlanRefinement: acceptedPlan,
+  approveProviderCall: true,
+  maxSteps: 1,
+});
+
+// Keep this in caller-owned storage. The checkpoint contains only its digest.
+const childCache = new Map(first.step_results.map((step) => [step.item_id, step.run]));
+const next = await executor.resume("research-2026-01", task, {
+  subtasks,
+  candidates: agent.models(),
+  acceptedCrossDomainPlanRefinement: acceptedPlan,
+  approveProviderCall: true,
+  maxSteps: 1,
+  resolveChildResult: (childId) => childCache.get(childId) ?? null,
+});
+```
+
+Before continuation, the executor rehydrates exactly the checkpointed ordered prefix and checks
+each result digest, child task digest, and optional output digest. A mismatch fails before the
+next provider dispatch. Approval pauses preserve the same `next_child_id`; they do not advance
+the checkpoint. Once all children are complete, `synthesize: false` leaves a `synthesis_pending`
+checkpoint, while a later approved call can perform only the synthesis step. Provider failures
+return redacted typed error metadata (`error_class`, `error_code`, `retryable`, and `status_code`)
+without retaining the provider message. `InMemoryAutonomousCrossDomainCheckpointStore` supports
+integrity-checked snapshots and a caller-owned persistence adapter through
+`AutonomousCrossDomainPersistenceCoordinator`; production workers can implement the same store
+interface over their durable database or queue.
+
 For resumable single-domain workflows, `AutonomousWorkflowExecutor` turns the reviewed workflow
 DAG into bounded stage calls. It checkpoints after each completed stage, pauses after
 `maxStages`, records a metadata-only event chain, and resumes only when the caller supplies the

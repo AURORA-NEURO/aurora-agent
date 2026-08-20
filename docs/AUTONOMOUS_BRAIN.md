@@ -725,6 +725,29 @@ requires the same identity; omitting it or substituting a different proposal fai
 provider dispatch. Without explicit acceptance, TypeScript retains declaration order and no plan
 digest is persisted.
 
+The TypeScript façade also exposes a restart-safe cross-domain executor for work that cannot fit
+inside one process call. `AutonomousCrossDomainExecutor` is intentionally separate from the
+one-shot `runCrossDomain()` convenience method. Each invocation consumes a bounded step budget:
+one specialist child or, after the ordered child prefix is complete, one synthesis call. Its
+`AutonomousCrossDomainCheckpoint` is metadata-only and binds task, route, base-plan, accepted-plan,
+execution-contract, ordered-child, result-digest, synthesis, and generation identities. Its event
+chain is predecessor-linked and snapshot-verifiable. Prompts, task text, BYOK handles, provider
+responses, tool arguments, evaluator evidence, and raw provider errors remain in the application
+process or a caller-owned result resolver.
+
+The continuation boundary is deliberately strict. Before dispatching another child, the executor
+requires the caller to rehydrate exactly the completed ordered prefix and verifies each result
+digest against the checkpoint; optional child-envelope task/output digests are checked as a second
+line of defense. It refuses a changed route, blueprint, accepted plan, model-selection/output
+contract, or rehydrated result before provider dispatch. Approval pauses preserve the same next
+child or synthesis item. Child failures are projected as bounded error metadata and a failed
+checkpoint; the worker never upgrades a turn limit, authorization refusal, or provider exception
+into a successful partial synthesis. After fan-out, `synthesize: false` leaves an explicit
+`synthesis_pending` checkpoint, so a later process can perform only the fan-in step after restoring
+caller-owned child results. This gives TypeScript and Python the same operational shape: bounded
+steps, digest-bound replay, caller-owned payload retention, and no claim that a checkpoint itself
+authorizes external effects.
+
 For long-running fan-out, `BrainWorker` can execute one provider or tool-loop child per lease and
 then one synthesis call. Submit a normal `BrainJobStore` packet with a caller-owned resolver and
 select `execution_kind="cross_domain"`:
