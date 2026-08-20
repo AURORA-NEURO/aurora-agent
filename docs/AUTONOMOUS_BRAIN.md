@@ -1578,6 +1578,38 @@ The environment-variable path is only a convenience for the embedding applicatio
 is immediately converted into an opaque in-memory handle and never enters model selection,
 prompts, plans, tools, health records, or learning state.
 
+Provider inventory discovery is available after the same protected key-entry step. It performs a
+bounded authenticated `GET` against the provider's models endpoint (`/v1/models` by default, with
+reviewed presets selecting their documented route), projects each row into a
+`ProviderModelDescriptor`, and discards the raw body immediately. The descriptor can report model
+identity, context/output limits, capabilities, modalities, and safe provider metadata; it never
+contains the key or a raw authorization response. Discovery does not auto-register models and it
+does not guess task quality, latency, or cost. Those are application-owned priors because only the
+embedding application can benchmark its workload and choose its economic policy:
+
+```python
+descriptors = agent.discover_provider_model_descriptors("openrouter", session)
+agent.register_discovered_models(
+    descriptors,
+    priors={
+        "openrouter/openai/gpt-4o-mini": {
+            "quality": 0.86,
+            "latency_ms": 900,
+            "cost_per_million_tokens": 150,
+            # Provider metadata supplies these when available; explicit overrides are allowed.
+            "reliability": 0.80,
+        }
+    },
+)
+```
+
+Rows without an explicit `provider/model` prior are rejected instead of becoming silent routing
+arms. This makes live availability useful to model selection while preserving the separation
+between provider claims, local benchmarks, and autonomous decisions. The provider docs expose
+these inventory surfaces as OpenAI-compatible model-list operations for [DeepSeek](https://api-docs.deepseek.com/api/list-models),
+[Mistral](https://docs.mistral.ai/api/endpoint/models), and [OpenRouter](https://openrouter.ai/docs/api/api-reference/models/get-models);
+the runtime keeps the route configurable for proxies and compatible gateways.
+
 All use the same `ProviderRequest` and `ProviderResponse` contract. The runtime does not follow
 redirects, does not allow plain HTTP unless explicitly enabled for local/test use, bounds response
 bytes, retries only classified transient failures, opens a per-provider circuit after repeated

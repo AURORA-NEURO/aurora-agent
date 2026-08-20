@@ -55,10 +55,13 @@ PROVIDER_OBSERVATION_SCHEMA = "bioprism-llm-provider-observation/0.1"
 MODEL_CATALOGUE_SCHEMA = "bioprism-llm-model-catalogue/0.1"
 PROVIDER_HEALTH_LEDGER_SCHEMA = "bioprism-llm-provider-health-ledger/0.1"
 CREDENTIAL_ONBOARDING_SCHEMA = "bioprism-llm-credential-onboarding/0.1"
+PROVIDER_MODEL_DISCOVERY_SCHEMA = "bioprism-llm-provider-model-discovery/0.1"
 MAX_MODEL_CANDIDATES = 512
 MAX_MODEL_METADATA_BYTES = 256_000
 MAX_PROVIDER_HEALTH_RECORDS = 16_384
 MAX_PROVIDER_HEALTH_BYTES = 32_000_000
+MAX_PROVIDER_DISCOVERED_MODELS = 512
+MAX_PROVIDER_MODEL_DISCOVERY_BYTES = 8_000_000
 _MODEL_CANDIDATE_FIELDS = frozenset(
     {
         "provider",
@@ -85,8 +88,46 @@ _MODEL_SECRET_METADATA_KEYS = frozenset(
         "password",
         "secret",
         "token",
+        "access_token",
+        "refresh_token",
     }
 )
+
+
+def _normalize_provider_path(value: str, field_name: str) -> str:
+    """Validate a relative HTTP path without allowing query/fragment injection."""
+
+    if not isinstance(value, str) or not value.strip():
+        raise ProviderError(f"{field_name} must be a non-empty path")
+    if len(value.encode("utf-8")) > 2048 or "\x00" in value or "?" in value or "#" in value:
+        raise ProviderError(f"{field_name} is outside its bounded path contract")
+    if any(character.isspace() or ord(character) < 32 for character in value):
+        raise ProviderError(f"{field_name} cannot contain whitespace or control characters")
+    return value if value.startswith("/") else "/" + value
+
+
+def _assert_secret_safe_json(value: Any, *, label: str, depth: int = 0) -> None:
+    if depth > 8:
+        raise ProviderError(f"{label} is too deeply nested")
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            if not isinstance(key, str) or not key.strip() or len(key.encode("utf-8")) > 128:
+                raise ProviderError(f"{label} contains an invalid metadata key")
+            normalized_key = key.lower().replace("-", "_")
+            if normalized_key in _MODEL_SECRET_METADATA_KEYS:
+                raise ProviderError(f"{label} contains credential-shaped metadata")
+            _assert_secret_safe_json(child, label=label, depth=depth + 1)
+        return
+    if isinstance(value, (list, tuple)):
+        if len(value) > 256:
+            raise ProviderError(f"{label} contains too many metadata items")
+        for child in value:
+            _assert_secret_safe_json(child, label=label, depth=depth + 1)
+        return
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ProviderError(f"{label} contains a non-finite number")
+    if not isinstance(value, (str, int, float, bool)) and value is not None:
+        raise ProviderError(f"{label} must be JSON-safe")
 
 
 class CredentialError(ValueError):
@@ -494,6 +535,7 @@ class ProviderConfig:
     retry_backoff_seconds: float = 0.0
     circuit_breaker_failure_threshold: int = 3
     circuit_breaker_reset_seconds: float = 30.0
+    models_path: str | None = None
 
     def __post_init__(self) -> None:
         if not self.provider or "/" in self.provider or " " in self.provider:
@@ -517,6 +559,10 @@ class ProviderConfig:
             raise ProviderError("circuit_breaker_reset_seconds must be positive")
         if parsed.scheme == "http" and not self.allow_insecure_http:
             raise ProviderError("plain HTTP requires allow_insecure_http=True for local/test use")
+        if self.path is not None:
+            _normalize_provider_path(self.path, "provider path")
+        if self.models_path is not None:
+            _normalize_provider_path(self.models_path, "provider models_path")
 
     @property
     def endpoint(self) -> tuple[str, int | None, str, str]:
@@ -528,8 +574,17 @@ class ProviderConfig:
             "openai_chat_completions": "/v1/chat/completions",
             "anthropic_messages": "/v1/messages",
         }[self.protocol]
-        if not path.startswith("/"):
-            path = "/" + path
+        path = _normalize_provider_path(path, "provider path")
+        return parsed.hostname or "", parsed.port or default_port, prefix + path, parsed.scheme
+
+    @property
+    def models_endpoint(self) -> tuple[str, int | None, str, str]:
+        """Return the bounded model-inventory endpoint for this provider."""
+
+        parsed = urlsplit(self.base_url)
+        default_port = 443 if parsed.scheme == "https" else 80
+        prefix = parsed.path.rstrip("/")
+        path = _normalize_provider_path(self.models_path or "/v1/models", "provider models_path")
         return parsed.hostname or "", parsed.port or default_port, prefix + path, parsed.scheme
 
     def to_metadata(self) -> dict[str, Any]:
@@ -538,6 +593,7 @@ class ProviderConfig:
             "base_url": self.base_url,
             "protocol": self.protocol,
             "path": self.endpoint[2],
+            "models_path": self.models_endpoint[2],
             "requires_credential": self.requires_credential,
             "credential_transport": "caller_supplied_in_memory_handle",
             "secret_logging": "redacted",
@@ -545,6 +601,241 @@ class ProviderConfig:
             "retry_backoff_seconds": self.retry_backoff_seconds,
             "circuit_breaker_failure_threshold": self.circuit_breaker_failure_threshold,
             "circuit_breaker_reset_seconds": self.circuit_breaker_reset_seconds,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderModelDescriptor:
+    """Secret-free projection of one model returned by a provider inventory endpoint.
+
+    Inventory endpoints usually expose availability and capabilities, but not trustworthy
+    quality, latency, or current economics for a caller's workload.  Those routing priors are
+    therefore required explicitly by :meth:`to_candidate` instead of being guessed here.
+    """
+
+    provider: str
+    model: str
+    capabilities: tuple[str, ...] = ()
+    context_window_tokens: int | None = None
+    max_output_tokens: int | None = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.provider, str)
+            or not self.provider.strip()
+            or "/" in self.provider
+            or " " in self.provider
+        ):
+            raise ProviderError("provider model descriptor provider must be path-safe")
+        if not isinstance(self.model, str) or not self.model.strip() or len(self.model.encode("utf-8")) > 512:
+            raise ProviderError("provider model descriptor model must be bounded")
+        if not isinstance(self.capabilities, Sequence) or isinstance(self.capabilities, (str, bytes)):
+            raise ProviderError("provider model descriptor capabilities must be a string sequence")
+        normalized_capabilities: list[str] = []
+        for capability in self.capabilities:
+            if (
+                not isinstance(capability, str)
+                or not capability.strip()
+                or len(capability.encode("utf-8")) > 128
+                or any(ord(character) < 32 for character in capability)
+            ):
+                raise ProviderError("provider model descriptor capabilities are invalid")
+            if capability not in normalized_capabilities:
+                normalized_capabilities.append(capability)
+        object.__setattr__(self, "capabilities", tuple(normalized_capabilities))
+        for name, value in (
+            ("context_window_tokens", self.context_window_tokens),
+            ("max_output_tokens", self.max_output_tokens),
+        ):
+            if value is not None and (
+                not isinstance(value, int) or isinstance(value, bool) or value <= 0
+            ):
+                raise ProviderError(f"provider model descriptor {name} must be positive when present")
+        if (
+            self.context_window_tokens is not None
+            and self.max_output_tokens is not None
+            and self.max_output_tokens > self.context_window_tokens
+        ):
+            raise ProviderError("provider model descriptor max output cannot exceed context")
+        if not isinstance(self.metadata, Mapping):
+            raise ProviderError("provider model descriptor metadata must be an object")
+        _assert_secret_safe_json(self.metadata, label="provider model descriptor metadata")
+        try:
+            encoded = json.dumps(self.metadata, ensure_ascii=False, allow_nan=False).encode("utf-8")
+        except (TypeError, ValueError) as error:
+            raise ProviderError("provider model descriptor metadata must be JSON-safe") from error
+        if len(encoded) > MAX_MODEL_METADATA_BYTES:
+            raise ProviderError("provider model descriptor metadata exceeds its bounded size")
+        object.__setattr__(self, "metadata", dict(self.metadata))
+
+    @property
+    def arm_id(self) -> str:
+        return f"{self.provider}/{self.model}"
+
+    @classmethod
+    def from_mapping(cls, provider: str, value: Mapping[str, Any]) -> "ProviderModelDescriptor":
+        """Project a provider row through a small allowlist; never retain the raw response."""
+
+        if not isinstance(value, Mapping):
+            raise ProviderError("provider model inventory rows must be objects")
+        model = value.get("id", value.get("model"))
+        if not isinstance(model, str) or not model.strip():
+            raise ProviderError("provider model inventory row has no bounded model id")
+        top_provider = value.get("top_provider")
+        top_provider = top_provider if isinstance(top_provider, Mapping) else {}
+
+        def first_positive(*items: Any) -> int | None:
+            for item in items:
+                if isinstance(item, int) and not isinstance(item, bool) and item > 0:
+                    return item
+            return None
+
+        context_window = first_positive(
+            value.get("context_window_tokens"),
+            value.get("context_length"),
+            value.get("max_context_length"),
+            top_provider.get("context_length"),
+        )
+        max_output = first_positive(
+            value.get("max_output_tokens"),
+            value.get("max_completion_tokens"),
+            top_provider.get("max_completion_tokens"),
+        )
+        capabilities: list[str] = []
+
+        def add_capability(capability: str) -> None:
+            normalized = capability.lower().replace("-", "_")
+            if normalized not in _MODEL_SECRET_METADATA_KEYS and capability not in capabilities:
+                capabilities.append(capability)
+
+        raw_capabilities = value.get("capabilities")
+        if isinstance(raw_capabilities, Mapping):
+            for capability, supported in raw_capabilities.items():
+                if isinstance(capability, str) and supported:
+                    add_capability(capability)
+        elif isinstance(raw_capabilities, Sequence) and not isinstance(raw_capabilities, (str, bytes)):
+            for capability in raw_capabilities:
+                if isinstance(capability, str) and capability.strip():
+                    add_capability(capability)
+        supported_parameters = value.get("supported_parameters")
+        if isinstance(supported_parameters, Sequence) and not isinstance(supported_parameters, (str, bytes)):
+            normalized_parameters = {
+                parameter.lower() for parameter in supported_parameters if isinstance(parameter, str)
+            }
+            if normalized_parameters.intersection({"tools", "tool_choice", "functions"}):
+                add_capability("tool_calling")
+            if normalized_parameters.intersection({"response_format", "structured_outputs"}):
+                add_capability("structured_output")
+        architecture = value.get("architecture")
+        architecture = architecture if isinstance(architecture, Mapping) else {}
+        input_modalities = architecture.get("input_modalities", value.get("input_modalities", ()))
+        output_modalities = architecture.get("output_modalities", value.get("output_modalities", ()))
+        input_modalities = tuple(item for item in input_modalities if isinstance(item, str)) if isinstance(input_modalities, Sequence) and not isinstance(input_modalities, (str, bytes)) else ()
+        output_modalities = tuple(item for item in output_modalities if isinstance(item, str)) if isinstance(output_modalities, Sequence) and not isinstance(output_modalities, (str, bytes)) else ()
+        if any(modality.lower() not in {"text"} for modality in (*input_modalities, *output_modalities)):
+            add_capability("multimodal")
+        if "embeddings" in output_modalities or "embed" in model.lower():
+            add_capability("embeddings")
+
+        metadata: dict[str, Any] = {}
+        for key in ("object", "owned_by", "name", "canonical_slug"):
+            item = value.get(key)
+            if isinstance(item, str) and item.strip() and len(item.encode("utf-8")) <= 512:
+                metadata[key] = item
+        created = value.get("created")
+        if isinstance(created, int) and not isinstance(created, bool) and created >= 0:
+            metadata["created"] = created
+        if isinstance(value.get("archived"), bool):
+            metadata["archived"] = value["archived"]
+        if isinstance(value.get("pricing"), Mapping):
+            pricing: dict[str, str | int | float] = {}
+            for key in ("prompt", "completion", "request", "image", "input_cache_read", "input_cache_write"):
+                item = value["pricing"].get(key)
+                if isinstance(item, (str, int, float)) and not isinstance(item, bool):
+                    if not isinstance(item, float) or math.isfinite(item):
+                        pricing[key] = item
+            if pricing:
+                metadata["pricing"] = pricing
+        if isinstance(supported_parameters, Sequence) and not isinstance(supported_parameters, (str, bytes)):
+            metadata["supported_parameters"] = [
+                parameter for parameter in supported_parameters
+                if isinstance(parameter, str)
+                and parameter.strip()
+                and len(parameter.encode("utf-8")) <= 128
+                and parameter.lower().replace("-", "_") not in _MODEL_SECRET_METADATA_KEYS
+            ]
+        if input_modalities:
+            metadata["input_modalities"] = list(input_modalities)
+        if output_modalities:
+            metadata["output_modalities"] = list(output_modalities)
+        return cls(
+            provider=provider,
+            model=model,
+            capabilities=tuple(capabilities),
+            context_window_tokens=context_window,
+            max_output_tokens=max_output,
+            metadata=metadata,
+        )
+
+    def to_candidate(
+        self,
+        *,
+        quality: float,
+        latency_ms: int,
+        cost_per_million_tokens: int,
+        context_window_tokens: int | None = None,
+        max_output_tokens: int | None = None,
+        reliability: float = 0.5,
+        capabilities: Sequence[str] | None = None,
+        requires_credential: bool = True,
+        enabled: bool = True,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> "ModelCandidate":
+        resolved_capabilities = list(self.capabilities)
+        if capabilities is not None:
+            if not isinstance(capabilities, Sequence) or isinstance(capabilities, (str, bytes)):
+                raise ProviderError("additional model candidate capabilities must be a sequence")
+            for capability in capabilities:
+                if capability not in resolved_capabilities:
+                    resolved_capabilities.append(capability)
+        resolved_metadata = dict(self.metadata)
+        if metadata is not None:
+            if not isinstance(metadata, Mapping):
+                raise ProviderError("additional model candidate metadata must be an object")
+            resolved_metadata.update(metadata)
+        resolved_context = self.context_window_tokens if context_window_tokens is None else context_window_tokens
+        resolved_output = self.max_output_tokens if max_output_tokens is None else max_output_tokens
+        if resolved_context is None or resolved_output is None:
+            raise ProviderError(
+                "provider model descriptor requires explicit context_window_tokens and max_output_tokens"
+            )
+        return ModelCandidate(
+            provider=self.provider,
+            model=self.model,
+            context_window_tokens=resolved_context,
+            max_output_tokens=resolved_output,
+            quality=quality,
+            latency_ms=latency_ms,
+            cost_per_million_tokens=cost_per_million_tokens,
+            reliability=reliability,
+            capabilities=tuple(resolved_capabilities),
+            requires_credential=requires_credential,
+            enabled=enabled,
+            metadata=resolved_metadata,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": PROVIDER_MODEL_DISCOVERY_SCHEMA,
+            "provider": self.provider,
+            "model": self.model,
+            "capabilities": list(self.capabilities),
+            "context_window_tokens": self.context_window_tokens,
+            "max_output_tokens": self.max_output_tokens,
+            "metadata": dict(self.metadata),
+            "credential_posture": "caller_supplied_opaque_handle_not_returned",
+            "secret_material": "never_returned",
         }
 
 
@@ -717,6 +1008,53 @@ class ModelCatalogue:
             if len(self._candidates) >= MAX_MODEL_CANDIDATES and key not in self._candidates:
                 raise ProviderError("model catalogue capacity is exhausted")
             self._candidates[key] = resolved
+        return resolved
+
+    def register_discovered(
+        self,
+        descriptors: Sequence[ProviderModelDescriptor],
+        *,
+        priors: Mapping[str, Mapping[str, Any]],
+        replace_existing: bool = False,
+    ) -> list[ModelCandidate]:
+        """Turn live inventory rows into selectable candidates using explicit caller priors.
+
+        ``priors`` is keyed by the unambiguous ``provider/model`` arm id.  The provider cannot
+        author quality, latency, or economics through its inventory response, and rows without
+        a caller-supplied prior are rejected instead of being silently routed.
+        """
+
+        if not isinstance(descriptors, Sequence) or isinstance(descriptors, (str, bytes)):
+            raise ProviderError("discovered model descriptors must be a sequence")
+        if any(not isinstance(descriptor, ProviderModelDescriptor) for descriptor in descriptors):
+            raise ProviderError("discovered model descriptors must contain ProviderModelDescriptor values")
+        if not isinstance(priors, Mapping):
+            raise ProviderError("discovered model priors must be an object keyed by provider/model")
+        if not isinstance(replace_existing, bool):
+            raise ProviderError("replace_existing must be a boolean")
+        resolved: list[ModelCandidate] = []
+        seen: set[tuple[str, str]] = set()
+        for descriptor in descriptors:
+            key = (descriptor.provider, descriptor.model)
+            if key in seen:
+                raise ProviderError(f"discovered model descriptor is duplicated: {descriptor.arm_id}")
+            seen.add(key)
+            prior = priors.get(descriptor.arm_id)
+            if not isinstance(prior, Mapping):
+                raise ProviderError(f"missing explicit routing prior for {descriptor.arm_id}")
+            try:
+                resolved.append(descriptor.to_candidate(**dict(prior)))
+            except TypeError as error:
+                raise ProviderError(f"routing prior is malformed for {descriptor.arm_id}") from error
+        with self._lock:
+            for candidate in resolved:
+                key = (candidate.provider, candidate.model)
+                if key in self._candidates and not replace_existing:
+                    raise ProviderError(f"model candidate is already registered: {candidate.arm_id}")
+                if len(self._candidates) >= MAX_MODEL_CANDIDATES and key not in self._candidates:
+                    raise ProviderError("model catalogue capacity is exhausted")
+            for candidate in resolved:
+                self._candidates[(candidate.provider, candidate.model)] = candidate
         return resolved
 
     def remove(self, provider: str, model: str) -> ModelCandidate:
@@ -1567,6 +1905,67 @@ class LLMRuntime:
             raise ProviderError(f"provider {provider!r} is not configured")
         return config.requires_credential
 
+    def discover_models(
+        self,
+        provider: str,
+        *,
+        credential: CredentialHandle | None = None,
+        path: str | None = None,
+        limit: int = MAX_PROVIDER_DISCOVERED_MODELS,
+    ) -> tuple[ProviderModelDescriptor, ...]:
+        """Fetch a bounded, secret-free model inventory through a caller-owned credential.
+
+        The response is projected to :class:`ProviderModelDescriptor` values immediately. Raw
+        provider rows, response bodies, authorization headers, and credential material are not
+        returned or retained. Discovery establishes availability metadata only; it does not
+        auto-register a routing arm or invent quality/cost/latency priors.
+        """
+
+        config = self._providers.get(provider)
+        if config is None:
+            raise ProviderError(f"provider {provider!r} is not configured")
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= MAX_PROVIDER_DISCOVERED_MODELS:
+            raise ProviderError("model discovery limit is outside its bounds")
+        secret: SecretValue | None = None
+        if config.requires_credential:
+            if credential is None:
+                raise CredentialError(f"provider {provider!r} requires a user credential handle")
+            if credential.provider != provider:
+                raise CredentialError("credential provider does not match model discovery provider")
+            secret = self.credentials._resolve(credential)
+        headers = {"Accept": "application/json"}
+        if secret is not None:
+            if config.protocol == "anthropic_messages":
+                headers[config.api_key_header or "x-api-key"] = secret.expose()
+                headers["anthropic-version"] = "2023-06-01"
+            else:
+                headers[config.api_key_header or "Authorization"] = "Bearer " + secret.expose()
+        if path is None:
+            endpoint = config.models_endpoint
+        else:
+            normalized_path = _normalize_provider_path(path, "model discovery path")
+            parsed = urlsplit(config.base_url)
+            default_port = 443 if parsed.scheme == "https" else 80
+            endpoint = (parsed.hostname or "", parsed.port or default_port, parsed.path.rstrip("/") + normalized_path, parsed.scheme)
+        payload = self._get_models_with_retries(config, endpoint, headers)
+        rows = payload.get("data")
+        if not isinstance(rows, list):
+            raise ProviderError("provider model inventory must contain a data array")
+        descriptors: list[ProviderModelDescriptor] = []
+        seen: set[str] = set()
+        for row in rows[:limit]:
+            try:
+                descriptor = ProviderModelDescriptor.from_mapping(provider, row)
+            except ProviderError:
+                continue
+            if descriptor.model in seen:
+                continue
+            seen.add(descriptor.model)
+            descriptors.append(descriptor)
+        if rows and not descriptors:
+            raise ProviderError("provider model inventory contained no valid model rows")
+        return tuple(sorted(descriptors, key=lambda descriptor: descriptor.arm_id))
+
     @staticmethod
     def _invocation_metadata(
         provider: str,
@@ -2073,6 +2472,84 @@ class LLMRuntime:
             # output surface, so it is validated locally without receiving an unsupported field.
             body["response_format"] = {"type": "json_object"}
         return body
+
+    def _get_models_with_retries(
+        self,
+        config: ProviderConfig,
+        endpoint: tuple[str, int | None, str, str],
+        headers: Mapping[str, str],
+    ) -> Mapping[str, Any]:
+        state = self._circuits.setdefault(config.provider, _CircuitState())
+        now = self._clock()
+        if state.opened_until is not None:
+            if now < state.opened_until:
+                raise ProviderError(
+                    "provider circuit is open; model discovery is temporarily refused",
+                    circuit_open=True,
+                )
+            state.opened_until = None
+            state.consecutive_failures = 0
+        last_error: ProviderError | None = None
+        for attempt in range(config.max_attempts):
+            try:
+                payload = self._get_models_once(config, endpoint, headers)
+                state.consecutive_failures = 0
+                state.opened_until = None
+                return payload
+            except ProviderError as error:
+                last_error = error
+                if not error.retryable or attempt + 1 >= config.max_attempts:
+                    break
+                delay = min(config.retry_backoff_seconds * (2**attempt), 60.0)
+                if delay:
+                    self._sleeper(delay)
+        assert last_error is not None
+        if last_error.retryable:
+            state.consecutive_failures += 1
+            if state.consecutive_failures >= config.circuit_breaker_failure_threshold:
+                state.opened_until = self._clock() + config.circuit_breaker_reset_seconds
+        raise last_error
+
+    @staticmethod
+    def _get_models_once(
+        config: ProviderConfig,
+        endpoint: tuple[str, int | None, str, str],
+        headers: Mapping[str, str],
+    ) -> Mapping[str, Any]:
+        host, port, path, scheme = endpoint
+        connection: http.client.HTTPConnection | http.client.HTTPSConnection = (
+            http.client.HTTPSConnection(host, port, timeout=config.timeout_seconds)
+            if scheme == "https"
+            else http.client.HTTPConnection(host, port, timeout=config.timeout_seconds)
+        )
+        try:
+            connection.request("GET", path, headers=dict(headers))
+            response = connection.getresponse()
+            status = response.status
+            max_bytes = min(config.max_response_bytes, MAX_PROVIDER_MODEL_DISCOVERY_BYTES)
+            raw = response.read(max_bytes + 1)
+        except (OSError, http.client.HTTPException) as error:
+            raise ProviderError(
+                "provider model discovery transport failed; credential material was discarded",
+                retryable=True,
+            ) from error
+        finally:
+            connection.close()
+        if len(raw) > max_bytes:
+            raise ProviderError("provider model discovery exceeded its bounded response size")
+        if status >= 400:
+            raise ProviderError(
+                f"provider returned HTTP status {status}",
+                retryable=status == 408 or status == 429 or status >= 500,
+                status_code=status,
+            )
+        try:
+            decoded = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ProviderError("provider model discovery returned non-JSON data") from error
+        if not isinstance(decoded, Mapping):
+            raise ProviderError("provider model discovery response must be a JSON object")
+        return decoded
 
     def _post(
         self,
@@ -3384,6 +3861,7 @@ def openai_provider(
     *,
     base_url: str = "https://api.openai.com",
     path: str | None = None,
+    models_path: str | None = None,
     timeout_seconds: float = 60.0,
     allow_insecure_http: bool = False,
     max_attempts: int = 1,
@@ -3398,6 +3876,7 @@ def openai_provider(
         base_url=base_url,
         protocol="openai_responses",
         path=path,
+        models_path=models_path,
         timeout_seconds=timeout_seconds,
         allow_insecure_http=allow_insecure_http,
         max_attempts=max_attempts,
@@ -3410,6 +3889,7 @@ def openai_provider(
 def anthropic_provider(
     *,
     base_url: str = "https://api.anthropic.com",
+    models_path: str | None = None,
     timeout_seconds: float = 60.0,
     allow_insecure_http: bool = False,
     max_attempts: int = 1,
@@ -3423,6 +3903,7 @@ def anthropic_provider(
         provider="anthropic",
         base_url=base_url,
         protocol="anthropic_messages",
+        models_path=models_path,
         timeout_seconds=timeout_seconds,
         allow_insecure_http=allow_insecure_http,
         max_attempts=max_attempts,
@@ -3437,6 +3918,7 @@ def openai_compatible_provider(
     base_url: str,
     *,
     path: str | None = None,
+    models_path: str | None = None,
     timeout_seconds: float = 60.0,
     allow_insecure_http: bool = False,
     max_attempts: int = 1,
@@ -3451,6 +3933,7 @@ def openai_compatible_provider(
         base_url=base_url,
         protocol="openai_chat_completions",
         path=path,
+        models_path=models_path,
         timeout_seconds=timeout_seconds,
         allow_insecure_http=allow_insecure_http,
         max_attempts=max_attempts,
@@ -3465,6 +3948,7 @@ def _compatible_provider_preset(
     base_url: str,
     path: str,
     *,
+    models_path: str,
     timeout_seconds: float,
     allow_insecure_http: bool,
     max_attempts: int,
@@ -3476,6 +3960,7 @@ def _compatible_provider_preset(
         provider,
         base_url,
         path=path,
+        models_path=models_path,
         timeout_seconds=timeout_seconds,
         allow_insecure_http=allow_insecure_http,
         max_attempts=max_attempts,
@@ -3489,6 +3974,7 @@ def deepseek_provider(
     *,
     base_url: str = "https://api.deepseek.com",
     path: str = "/chat/completions",
+    models_path: str = "/models",
     timeout_seconds: float = 60.0,
     allow_insecure_http: bool = False,
     max_attempts: int = 1,
@@ -3502,6 +3988,7 @@ def deepseek_provider(
         "deepseek",
         base_url,
         path,
+        models_path=models_path,
         timeout_seconds=timeout_seconds,
         allow_insecure_http=allow_insecure_http,
         max_attempts=max_attempts,
@@ -3515,6 +4002,7 @@ def groq_provider(
     *,
     base_url: str = "https://api.groq.com/openai/v1",
     path: str = "/chat/completions",
+    models_path: str = "/models",
     timeout_seconds: float = 60.0,
     allow_insecure_http: bool = False,
     max_attempts: int = 1,
@@ -3528,6 +4016,7 @@ def groq_provider(
         "groq",
         base_url,
         path,
+        models_path=models_path,
         timeout_seconds=timeout_seconds,
         allow_insecure_http=allow_insecure_http,
         max_attempts=max_attempts,
@@ -3541,6 +4030,7 @@ def mistral_provider(
     *,
     base_url: str = "https://api.mistral.ai",
     path: str = "/v1/chat/completions",
+    models_path: str = "/v1/models",
     timeout_seconds: float = 60.0,
     allow_insecure_http: bool = False,
     max_attempts: int = 1,
@@ -3554,6 +4044,7 @@ def mistral_provider(
         "mistral",
         base_url,
         path,
+        models_path=models_path,
         timeout_seconds=timeout_seconds,
         allow_insecure_http=allow_insecure_http,
         max_attempts=max_attempts,
@@ -3567,6 +4058,7 @@ def openrouter_provider(
     *,
     base_url: str = "https://openrouter.ai/api/v1",
     path: str = "/chat/completions",
+    models_path: str = "/models",
     timeout_seconds: float = 60.0,
     allow_insecure_http: bool = False,
     max_attempts: int = 1,
@@ -3580,6 +4072,7 @@ def openrouter_provider(
         "openrouter",
         base_url,
         path,
+        models_path=models_path,
         timeout_seconds=timeout_seconds,
         allow_insecure_http=allow_insecure_http,
         max_attempts=max_attempts,
@@ -3593,6 +4086,7 @@ def xai_provider(
     *,
     base_url: str = "https://api.x.ai",
     path: str = "/v1/chat/completions",
+    models_path: str = "/v1/models",
     timeout_seconds: float = 60.0,
     allow_insecure_http: bool = False,
     max_attempts: int = 1,
@@ -3606,6 +4100,7 @@ def xai_provider(
         "xai",
         base_url,
         path,
+        models_path=models_path,
         timeout_seconds=timeout_seconds,
         allow_insecure_http=allow_insecure_http,
         max_attempts=max_attempts,

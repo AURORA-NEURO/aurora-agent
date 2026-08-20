@@ -97,6 +97,19 @@ export interface BrainModelDescriptor extends JsonObject {
   enabled?: boolean;
 }
 
+/** Secret-free projection returned by the Python runtime's authenticated model inventory path. */
+export interface ProviderModelDescriptor extends JsonObject {
+  schema: string;
+  provider: string;
+  model: string;
+  capabilities: string[];
+  context_window_tokens: number | null;
+  max_output_tokens: number | null;
+  metadata: JsonObject;
+  credential_posture: "caller_supplied_opaque_handle_not_returned" | string;
+  secret_material: "never_returned" | string;
+}
+
 export interface BrainModelObservation extends JsonObject {
   arm_id: string;
   pulls?: number;

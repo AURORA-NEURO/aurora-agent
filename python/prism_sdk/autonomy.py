@@ -71,8 +71,10 @@ from .llm_runtime import (
     CredentialHandle,
     CredentialSession,
     LLMRuntime,
+    MAX_PROVIDER_DISCOVERED_MODELS,
     ModelCandidate,
     ModelCatalogue,
+    ProviderModelDescriptor,
     ProviderHealthLedger,
     ProviderOnboarding,
     ProviderConfig,
@@ -8909,6 +8911,63 @@ class AutonomousAgent:
         """Add one non-secret model route to the application-owned inventory."""
 
         return self.catalogue.register(candidate, replace_existing=replace_existing)
+
+    def discover_provider_models(
+        self,
+        provider: str,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        *,
+        path: str | None = None,
+        limit: int = MAX_PROVIDER_DISCOVERED_MODELS,
+    ) -> list[dict[str, Any]]:
+        """Discover provider inventory through the active opaque credential session.
+
+        Discovery is intentionally separate from registration. The returned rows are bounded,
+        safe projections and remain caller-owned until explicit routing priors are supplied.
+        """
+
+        return [
+            descriptor.to_dict()
+            for descriptor in self.discover_provider_model_descriptors(
+                provider,
+                credentials,
+                path=path,
+                limit=limit,
+            )
+        ]
+
+    def discover_provider_model_descriptors(
+        self,
+        provider: str,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        *,
+        path: str | None = None,
+        limit: int = MAX_PROVIDER_DISCOVERED_MODELS,
+    ) -> tuple[ProviderModelDescriptor, ...]:
+        """Return typed inventory rows for direct, explicit catalogue registration."""
+
+        resolved_credentials = self._credential_mapping(credentials)
+        return self.runtime.discover_models(
+            provider,
+            credential=resolved_credentials.get(provider),
+            path=path,
+            limit=limit,
+        )
+
+    def register_discovered_models(
+        self,
+        descriptors: Sequence[ProviderModelDescriptor],
+        *,
+        priors: Mapping[str, Mapping[str, Any]],
+        replace_existing: bool = False,
+    ) -> list[ModelCandidate]:
+        """Promote discovered rows only after the application supplies explicit routing priors."""
+
+        return self.catalogue.register_discovered(
+            descriptors,
+            priors=priors,
+            replace_existing=replace_existing,
+        )
 
     def register_provider(self, config: ProviderConfig) -> None:
         """Register non-secret provider transport metadata for the key-entry flow."""

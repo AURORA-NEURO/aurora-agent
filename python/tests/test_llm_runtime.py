@@ -12,6 +12,7 @@ from prism_sdk.llm_runtime import (
     CredentialError,
     CredentialStore,
     LLMRuntime,
+    ModelCatalogue,
     ProviderHealthLedger,
     ProviderError,
     ProviderOnboarding,
@@ -212,6 +213,48 @@ class _ProviderHandler(BaseHTTPRequestHandler):
     def log_message(self, *_args: object) -> None:
         return
 
+    def do_GET(self) -> None:  # noqa: N802 - stdlib handler protocol
+        self.server.request_paths = getattr(self.server, "request_paths", []) + [self.path]  # type: ignore[attr-defined]
+        self.server.discovery_headers = {key.lower(): value for key, value in self.headers.items()}  # type: ignore[attr-defined]
+        if self.path in {"/models", "/v1/models"}:
+            payload = json.dumps(
+                {
+                    "object": "list",
+                    "data": [
+                        {
+                            "id": "test-model",
+                            "object": "model",
+                            "owned_by": "test-provider",
+                            "context_length": 16_000,
+                            "max_completion_tokens": 2_048,
+                            "supported_parameters": ["tools", "response_format"],
+                            "architecture": {
+                                "input_modalities": ["text", "image"],
+                                "output_modalities": ["text"],
+                            },
+                            "pricing": {"prompt": "0.10", "completion": "0.20"},
+                            "api_key": "inventory-secret-must-not-survive-projection",
+                        },
+                        {
+                            "id": "embedding-model",
+                            "object": "model",
+                            "context_length": 8_192,
+                            "max_output_tokens": 1_024,
+                            "output_modalities": ["embeddings"],
+                        },
+                    ],
+                },
+                separators=(",", ":"),
+            ).encode()
+            self.send_response(200)
+        else:
+            payload = b'{"error":"not found"}'
+            self.send_response(404)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
 
 class LlmRuntimeTests(unittest.TestCase):
     @classmethod
@@ -304,17 +347,18 @@ class LlmRuntimeTests(unittest.TestCase):
 
     def test_reviewed_provider_presets_bind_wire_paths_and_default_key_inputs(self) -> None:
         presets = (
-            (deepseek_provider(), "/chat/completions", "DEEPSEEK_API_KEY"),
-            (groq_provider(), "/openai/v1/chat/completions", "GROQ_API_KEY"),
-            (mistral_provider(), "/v1/chat/completions", "MISTRAL_API_KEY"),
-            (openrouter_provider(), "/api/v1/chat/completions", "OPENROUTER_API_KEY"),
-            (xai_provider(), "/v1/chat/completions", "XAI_API_KEY"),
+            (deepseek_provider(), "/chat/completions", "/models", "DEEPSEEK_API_KEY"),
+            (groq_provider(), "/openai/v1/chat/completions", "/openai/v1/models", "GROQ_API_KEY"),
+            (mistral_provider(), "/v1/chat/completions", "/v1/models", "MISTRAL_API_KEY"),
+            (openrouter_provider(), "/api/v1/chat/completions", "/api/v1/models", "OPENROUTER_API_KEY"),
+            (xai_provider(), "/v1/chat/completions", "/v1/models", "XAI_API_KEY"),
         )
         runtime = LLMRuntime(CredentialStore())
         onboarding = ProviderOnboarding(runtime)
-        for config, expected_path, expected_environment_variable in presets:
+        for config, expected_path, expected_models_path, expected_environment_variable in presets:
             runtime.register_provider(config)
             self.assertEqual(config.endpoint[2], expected_path)
+            self.assertEqual(config.models_endpoint[2], expected_models_path)
             instructions = onboarding.instructions(config.provider).to_dict()
             self.assertEqual(instructions["environment_variable"], expected_environment_variable)
             self.assertFalse(instructions["ready"])
@@ -325,9 +369,67 @@ class LlmRuntimeTests(unittest.TestCase):
                 "local",
                 "https://example.test/api/v1",
                 path="/chat/completions",
+                models_path="/models",
             ).endpoint[2],
             "/api/v1/chat/completions",
         )
+
+    def test_model_discovery_projects_inventory_and_requires_explicit_routing_priors(self) -> None:
+        store = CredentialStore()
+        runtime = LLMRuntime(store)
+        runtime.register_provider(
+            openai_compatible_provider(
+                "local",
+                self.base_url,
+                path="/chat/completions",
+                models_path="/models",
+                allow_insecure_http=True,
+            )
+        )
+        handle = store.register("local", "inventory-secret")
+        descriptors = runtime.discover_models("local", credential=handle)
+
+        self.assertEqual([descriptor.arm_id for descriptor in descriptors], ["local/embedding-model", "local/test-model"])
+        self.assertEqual(descriptors[1].context_window_tokens, 16_000)
+        self.assertEqual(descriptors[1].max_output_tokens, 2_048)
+        self.assertIn("tool_calling", descriptors[1].capabilities)
+        self.assertIn("structured_output", descriptors[1].capabilities)
+        self.assertIn("multimodal", descriptors[1].capabilities)
+        serialized = json.dumps([descriptor.to_dict() for descriptor in descriptors])
+        self.assertNotIn("inventory-secret", serialized)
+        self.assertNotIn("api_key", serialized)
+        self.assertEqual(self.server.request_paths[-1], "/models")  # type: ignore[attr-defined]
+        self.assertEqual(self.server.discovery_headers["authorization"], "Bearer inventory-secret")  # type: ignore[attr-defined]
+
+        catalogue = ModelCatalogue()
+        with self.assertRaises(ProviderError):
+            catalogue.register_discovered([descriptors[1]], priors={})
+        candidates = catalogue.register_discovered(
+            [descriptors[1]],
+            priors={
+                "local/test-model": {
+                    "quality": 0.9,
+                    "latency_ms": 20,
+                    "cost_per_million_tokens": 1,
+                }
+            },
+        )
+        self.assertEqual(candidates[0].arm_id, "local/test-model")
+        self.assertEqual(catalogue.candidates()[0]["context_window_tokens"], 16_000)
+        self.assertEqual(catalogue.candidates()[0]["cost_per_million_tokens"], 1)
+
+    def test_model_discovery_rejects_missing_credential_before_network(self) -> None:
+        runtime = LLMRuntime(CredentialStore())
+        runtime.register_provider(
+            openai_compatible_provider(
+                "local",
+                self.base_url,
+                allow_insecure_http=True,
+                models_path="/models",
+            )
+        )
+        with self.assertRaises(CredentialError):
+            runtime.discover_models("local")
 
     def test_adaptive_selection_rejects_revoked_handles_before_provider_invocation(self) -> None:
         store = CredentialStore()
