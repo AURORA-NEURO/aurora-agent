@@ -94,6 +94,23 @@ test("decision cycle connects approval, invocation, evaluator settlement, and ba
   assert.equal(JSON.stringify(result.settlement).includes(task), false);
 });
 
+test("decision cycle preserves structured output and caller selection policy", async () => {
+  const cycle = cycleAgent([{ text: JSON.stringify({ answer: "cycle-structured" }) }]);
+  const responseSchema = { type: "object", additionalProperties: false, properties: { answer: { type: "string" } }, required: ["answer"] };
+  const result = await runAutonomousDecisionCycle(cycle.agent, "Return a structured coding result.", {
+    domain: "coding",
+    approveProviderCall: true,
+    maxCostPerMillionTokens: 5,
+    maxLatencyMs: 100,
+    minQuality: 0.9,
+    requireJson: true,
+    responseSchema,
+  });
+  assert.equal(result.status, "completed");
+  assert.deepEqual(result.run.response.structured, { answer: "cycle-structured" });
+  assert.deepEqual(cycle.bodies[0].response_format, { type: "json_object" });
+});
+
 test("decision cycle preserves bounded tool-loop exhaustion without evaluator settlement", async () => {
   const { agent, calls } = toolLoopAgent();
   const learning = new AutonomousLearningController(agent);
@@ -374,6 +391,24 @@ test("cross-domain decision cycle settles specialist and synthesis credit as one
   assert.equal(execution.state.status, "completed");
   assert.equal(execution.state.provider_calls, 3);
   assert.equal(calls(), 3);
+});
+
+test("cross-domain decision cycle propagates structured output through fan-out and synthesis", async () => {
+  const cycle = cycleAgent([{ text: JSON.stringify({ answer: "specialist-1" }) }, { text: JSON.stringify({ answer: "specialist-2" }) }, { text: JSON.stringify({ answer: "synthesis" }) }]);
+  const responseSchema = { type: "object", additionalProperties: false, properties: { answer: { type: "string" } }, required: ["answer"] };
+  const result = await runAutonomousCrossDomainDecisionCycle(cycle.agent, "Return a structured biomedical neuroscience synthesis.", {
+    approveProviderCall: true,
+    requireJson: true,
+    responseSchema,
+    subtasks: [
+      { id: "bio", domain: "biomedical", task: "Review biomedical evidence." },
+      { id: "neuro", domain: "neuroscience", task: "Review neuroscience evidence." },
+    ],
+  });
+  assert.equal(result.status, "completed");
+  assert.deepEqual(result.run.child_runs.map((child) => child.result.response.structured), [{ answer: "specialist-1" }, { answer: "specialist-2" }]);
+  assert.deepEqual(result.run.synthesis.response.structured, { answer: "synthesis" });
+  assert.deepEqual(cycle.bodies.map((body) => body.response_format), [{ type: "json_object" }, { type: "json_object" }, { type: "json_object" }]);
 });
 
 test("cross-domain decision cycle preserves synthesis tool-loop exhaustion", async () => {

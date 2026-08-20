@@ -74,6 +74,50 @@ test("workflow executor checkpoints stages, pauses at a bounded budget, and resu
   await assert.rejects(() => executor.resume("workflow-job-1", "A different task", { candidates: agent.models(), approveProviderCall: true }), /digest/);
 });
 
+test("workflow stages preserve structured output and selection constraints", async () => {
+  const bodies = [];
+  let calls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      bodies.push(JSON.parse(String(init.body)));
+      calls += 1;
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify({ answer: `stage-${calls}` }) }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("workflow-structured", "https://workflow-structured.test", { requiresCredential: false, structuredOutputMode: "json_object" }));
+  const agent = new AutonomousAgent(llm);
+  const structuredModel = { ...model(), provider: "workflow-structured", model: "workflow-structured-model", capabilities: [...model().capabilities, "structured_output"] };
+  agent.registerModel(structuredModel);
+  const responseSchema = { type: "object", additionalProperties: false, properties: { answer: { type: "string" } }, required: ["answer"] };
+  const executor = new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore());
+  const result = await executor.start("Implement this structured workflow.", {
+    domain: "coding",
+    jobId: "workflow-structured-1",
+    candidates: [structuredModel],
+    approveProviderCall: true,
+    maxStages: 1,
+    maxCostPerMillionTokens: 10,
+    maxLatencyMs: 50,
+    minQuality: 0.9,
+    requireJson: true,
+    responseSchema,
+  });
+  assert.equal(result.status, "paused");
+  assert.deepEqual(result.stage_results[0].run.response.structured, { answer: "stage-1" });
+  assert.deepEqual(bodies[0].response_format, { type: "json_object" });
+
+  const refusedCalls = [];
+  const refusedRuntime = new LLMRuntime({ credentials: new CredentialStore(), fetch: async (_url, init) => { refusedCalls.push(init); return jsonResponse({ choices: [{ message: { role: "assistant", content: "must not dispatch" }, finish_reason: "stop" }] }); } });
+  refusedRuntime.registerProvider(openaiCompatibleProvider("workflow-budget", "https://workflow-budget.test", { requiresCredential: false }));
+  const refusedAgent = new AutonomousAgent(refusedRuntime);
+  const refusedModel = { ...model(), provider: "workflow-budget", model: "workflow-budget-model", cost_per_million_tokens: 10 };
+  refusedAgent.registerModel(refusedModel);
+  const refused = await new AutonomousWorkflowExecutor(refusedAgent, new InMemoryAutonomousWorkflowCheckpointStore()).start("Budget must be enforced at the workflow stage.", { domain: "coding", jobId: "workflow-budget-1", candidates: [refusedModel], approveProviderCall: true, maxStages: 1, maxCostPerMillionTokens: 1 });
+  assert.equal(refused.status, "failed");
+  assert.equal(refusedCalls.length, 0, "workflow budget refusal must happen before provider dispatch");
+});
+
 test("workflow checkpoint snapshots restore a paused job without admitting payloads", async () => {
   let calls = 0;
   const llm = new LLMRuntime({

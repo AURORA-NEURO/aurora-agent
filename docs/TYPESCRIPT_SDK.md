@@ -1597,6 +1597,13 @@ structured and unstructured stages by accident. Malformed JSON or a schema misma
 `ProviderRuntimeError` with `code: "invalid_response"`; semantic routing converts that bounded
 provider-output failure into its explicit `provider_invalid` result.
 
+These execution contracts are preserved by the composed boundaries as well. `runAutonomousDecisionCycle()`
+and `runAutonomousReplanCycle()` forward the caller's cost, latency, quality, JSON, and schema policy
+to every attempt; `runAutonomousCrossDomainDecisionCycle()` forwards it to every specialist and the
+fan-in call; and `AutonomousWorkflowExecutor` forwards it to every stage. A retry, replan, or workflow
+resume therefore cannot accidentally bypass a selection gate or silently downgrade a structured-output
+requirement. The policy remains caller-owned and is evaluated again at each fresh provider selection.
+
 Contextual model selections resolve exact `provider/model` IDs. A model-only ID is accepted only
 when it matches one registered candidate; duplicate matches abstain before provider dispatch.
 
@@ -1665,6 +1672,12 @@ messages, response bodies, prompts, credentials, and arbitrary thrown objects ne
 checkpoint boundary. `transport` and `timeout` can therefore be routed to a caller-owned retry
 policy, while `credential`, `aborted`, configuration, and protocol failures remain visible as
 distinct escalation signals without claiming that a retry is safe.
+
+Stage options are composed from the same `AutonomousRunOptions` contract as direct runs. In particular,
+`maxCostPerMillionTokens`, `maxLatencyMs`, and `minQuality` are hard selection gates for each stage,
+while `requireJson` and `responseSchema` are re-applied to each stage response. The executor does not
+cache a prior model admission as permission for later stages: every stage performs readiness,
+capacity, approval, budget, and structured-output checks before transport.
 
 `AutonomousWorkflowCheckpointStore` is deliberately caller-owned. The included
 `InMemoryAutonomousWorkflowCheckpointStore` is a bounded reference implementation; applications

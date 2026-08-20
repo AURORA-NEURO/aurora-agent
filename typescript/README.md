@@ -198,6 +198,12 @@ metadata. The parsed value is returned as `response.structured`, and malformed o
 provider output is classified as `invalid_response`. Cross-domain children and synthesis inherit the
 same contract, preventing a partial structured run from being mistaken for a fully structured one.
 
+The composed execution wrappers preserve these options instead of rebuilding a weaker request:
+decision-cycle attempts and replans forward the cost, latency, quality, JSON, and schema policy;
+cross-domain cycles apply it to every specialist and synthesis call; and workflow stages apply it
+again on every stage invocation. Each new provider selection is independently gated, so retries,
+fan-out, and resume cannot silently bypass the caller's policy or downgrade structured output.
+
 `runAutonomousDecisionCycle()` composes the single-domain path into one caller-controlled loop:
 optional semantic routing, task-digest-validated route handoff, prompt and plan construction,
 health/bandit model selection, provider invocation, and optional evaluator settlement. Semantic
@@ -352,6 +358,12 @@ projects thrown provider failures as redacted `error_code`, `retryable`, `status
 provider message or response body. A failed stage remains terminal until the caller explicitly
 rehydrates and chooses a new execution policy.
 requires caller-owned task and credential rehydration.
+
+Workflow stage options use the same hard selection and output contract as direct agent runs:
+`maxCostPerMillionTokens`, `maxLatencyMs`, and `minQuality` are enforced before each provider
+dispatch, and `requireJson`/`responseSchema` are validated for each stage result. A checkpoint or
+previous stage admission does not authorize a later stage; readiness, capacity, approval, and output
+validation are repeated at the stage boundary.
 
 `InMemoryAutonomousWorkflowCheckpointStore.snapshot()` and `restore()` provide an integrity-checked
 multi-job restart boundary. `AutonomousWorkflowPersistenceCoordinator` connects it to a
