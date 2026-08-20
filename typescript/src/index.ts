@@ -199,6 +199,7 @@ export type {
   AutonomousWorkflowEvent,
   AutonomousWorkflowEventType,
   AutonomousWorkflowExecuteOptions,
+  AutonomousWorkflowExecutorOptions,
   AutonomousWorkflowExecutionResult,
   AutonomousWorkflowExecutionStatus,
   AutonomousWorkflowStageOutcome,
@@ -230,4 +231,5 @@ export type {
   AutonomousTrajectorySettlement,
   AutonomousWorkflowEvaluation,
   AutonomousWorkflowEvaluationInput,
+  AutonomousWorkflowLearningSettlement,
 } from "./autonomous-learning.js";

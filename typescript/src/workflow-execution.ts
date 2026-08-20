@@ -1,6 +1,7 @@
 import { ArgumentError, ProviderRuntimeError } from "./errors.js";
 import type { ApiClient } from "./client.js";
 import { AUTONOMOUS_DOMAIN_NAMES } from "./autonomous.js";
+import type { AutonomousLearningController } from "./autonomous-learning.js";
 import type {
   AutonomousAgent,
   AutonomousDomainName,
@@ -39,6 +40,7 @@ export interface AutonomousWorkflowStageOutcome {
   response_digest: string | null;
   output_bytes: number;
   error_class: string | null;
+  learning_episode_id: string | null;
 }
 
 /** Metadata-only restart checkpoint. Task text, prompts, credentials, and provider responses are never persisted here. */
@@ -86,6 +88,7 @@ export interface AutonomousWorkflowStageResult {
   run: AutonomousRunResult | null;
   output_digest: string | null;
   output_bytes: number;
+  learning_episode_id: string | null;
 }
 
 export interface AutonomousWorkflowExecutionResult {
@@ -98,6 +101,7 @@ export interface AutonomousWorkflowExecutionResult {
   stage_results: AutonomousWorkflowStageResult[];
   completed_stage_count: number;
   total_stage_count: number;
+  learning_episode_ids: string[];
   recovery: "caller_rehydrates_task_and_credentials";
   retention: "provider_responses_local;checkpoint_metadata_only";
 }
@@ -105,6 +109,10 @@ export interface AutonomousWorkflowExecutionResult {
 export interface AutonomousWorkflowExecuteOptions extends AutonomousRunOptions {
   jobId?: string;
   maxStages?: number;
+}
+
+export interface AutonomousWorkflowExecutorOptions {
+  learning?: AutonomousLearningController;
 }
 
 export interface AutonomousDurableJobSubmitOptions extends AutonomousWorkflowExecuteOptions {
@@ -204,12 +212,14 @@ function runOptions(options: AutonomousWorkflowExecuteOptions, stage: Autonomous
 export class AutonomousWorkflowExecutor {
   readonly agent: AutonomousAgent;
   readonly store: AutonomousWorkflowCheckpointStore;
+  readonly learning?: AutonomousLearningController;
 
-  constructor(agent: AutonomousAgent, store: AutonomousWorkflowCheckpointStore) {
+  constructor(agent: AutonomousAgent, store: AutonomousWorkflowCheckpointStore, options: AutonomousWorkflowExecutorOptions = {}) {
     if (!agent || typeof agent.blueprint !== "function" || typeof agent.run !== "function") throw new ArgumentError("workflow executor requires an AutonomousAgent");
     if (!store || typeof store.load !== "function" || typeof store.save !== "function" || typeof store.appendEvent !== "function" || typeof store.events !== "function") throw new ArgumentError("workflow executor requires a checkpoint store");
     this.agent = agent;
     this.store = store;
+    this.learning = options.learning;
   }
 
   async start(task: string, options: AutonomousWorkflowExecuteOptions = {}): Promise<AutonomousWorkflowExecutionResult> {
@@ -248,7 +258,7 @@ export class AutonomousWorkflowExecutor {
   }
 
   private routeReviewResult(): AutonomousWorkflowExecutionResult {
-    return { schema: AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA, status: "route_review_required", job_id: null, blueprint: null, checkpoint: null, events: [], stage_results: [], completed_stage_count: 0, total_stage_count: 0, recovery: "caller_rehydrates_task_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only" };
+    return { schema: AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA, status: "route_review_required", job_id: null, blueprint: null, checkpoint: null, events: [], stage_results: [], completed_stage_count: 0, total_stage_count: 0, learning_episode_ids: [], recovery: "caller_rehydrates_task_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only" };
   }
 
   private async makeCheckpoint(jobId: string, blueprint: AutonomousTaskBlueprint, completed: string[], outcomes: AutonomousWorkflowStageOutcome[], status: AutonomousWorkflowCheckpointStatus, previous: AutonomousWorkflowCheckpoint | null): Promise<AutonomousWorkflowCheckpoint> {
@@ -294,7 +304,7 @@ export class AutonomousWorkflowExecutor {
       try {
         run = await this.agent.run(`Execute workflow stage ${stage.id} for task: ${task}`, runOptions(options, stage, blueprint.domain_profile.domain, context));
       } catch (error) {
-        checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "failed", run_status: "exception", selection_digest: null, response_digest: null, output_bytes: 0, error_class: error instanceof Error ? error.constructor.name : "UnknownError" }], "failed", checkpoint);
+        checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "failed", run_status: "exception", selection_digest: null, response_digest: null, output_bytes: 0, error_class: error instanceof Error ? error.constructor.name : "UnknownError", learning_episode_id: null }], "failed", checkpoint);
         await this.store.save(checkpoint);
         await this.appendEvent(checkpoint.job_id, "stage_failed", stage.id, checkpoint);
         return this.result("failed", checkpoint, blueprint, stageResults);
@@ -303,21 +313,27 @@ export class AutonomousWorkflowExecutor {
       const outputDigest = text ? await digestJson({ stage_id: stage.id, output: text }) : null;
       const selectionDigest = run.selection ? await digestJson(run.selection) : null;
       const outputBytes = new TextEncoder().encode(text).byteLength;
-      stageResults.push({ stage, run, output_digest: outputDigest, output_bytes: outputBytes });
+      let learningEpisodeId: string | null = null;
+      if (run.status === "completed" && this.learning) {
+        const episodeId = `workflow:${checkpoint.job_id}:${stage.id}:g${checkpoint.generation + 1}`;
+        const episode = await this.learning.prepareRun(run, { episodeId, runId: episodeId, stageId: stage.id, parentJobId: checkpoint.job_id });
+        learningEpisodeId = episode.episode_id;
+      }
+      stageResults.push({ stage, run, output_digest: outputDigest, output_bytes: outputBytes, learning_episode_id: learningEpisodeId });
       if (run.status === "approval_required") {
-        checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "approval_required", run_status: run.status, selection_digest: selectionDigest, response_digest: null, output_bytes: 0, error_class: null }], "paused", checkpoint);
+        checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "approval_required", run_status: run.status, selection_digest: selectionDigest, response_digest: null, output_bytes: 0, error_class: null, learning_episode_id: null }], "paused", checkpoint);
         await this.store.save(checkpoint);
         await this.appendEvent(checkpoint.job_id, "approval_required", stage.id, checkpoint);
         return this.result("approval_required", checkpoint, blueprint, stageResults);
       }
       if (run.status !== "completed") {
-        checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "failed", run_status: run.status, selection_digest: selectionDigest, response_digest: outputDigest, output_bytes: outputBytes, error_class: null }], "failed", checkpoint);
+        checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "failed", run_status: run.status, selection_digest: selectionDigest, response_digest: outputDigest, output_bytes: outputBytes, error_class: null, learning_episode_id: null }], "failed", checkpoint);
         await this.store.save(checkpoint);
         await this.appendEvent(checkpoint.job_id, "stage_failed", stage.id, checkpoint);
         return this.result("failed", checkpoint, blueprint, stageResults);
       }
       const completed = [...checkpoint.completed_stage_ids, stage.id];
-      const outcomes = [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "completed" as const, run_status: run.status, selection_digest: selectionDigest, response_digest: outputDigest, output_bytes: outputBytes, error_class: null }];
+      const outcomes = [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "completed" as const, run_status: run.status, selection_digest: selectionDigest, response_digest: outputDigest, output_bytes: outputBytes, error_class: null, learning_episode_id: learningEpisodeId }];
       const nextStatus: AutonomousWorkflowCheckpointStatus = completed.length === stages.length ? "completed" : "running";
       checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, completed, outcomes, nextStatus, checkpoint);
       await this.store.save(checkpoint);
@@ -331,7 +347,7 @@ export class AutonomousWorkflowExecutor {
   }
 
   private async result(status: AutonomousWorkflowExecutionStatus, checkpoint: AutonomousWorkflowCheckpoint, blueprint: AutonomousTaskBlueprint, stageResults: AutonomousWorkflowStageResult[]): Promise<AutonomousWorkflowExecutionResult> {
-    return { schema: AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA, status, job_id: checkpoint.job_id, blueprint, checkpoint, events: await this.store.events(checkpoint.job_id, 0, AUTONOMOUS_WORKFLOW_MAX_EVENTS), stage_results: stageResults, completed_stage_count: checkpoint.completed_stage_ids.length, total_stage_count: blueprint.workflow.stages.length, recovery: "caller_rehydrates_task_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only" };
+    return { schema: AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA, status, job_id: checkpoint.job_id, blueprint, checkpoint, events: await this.store.events(checkpoint.job_id, 0, AUTONOMOUS_WORKFLOW_MAX_EVENTS), stage_results: stageResults, completed_stage_count: checkpoint.completed_stage_ids.length, total_stage_count: blueprint.workflow.stages.length, learning_episode_ids: checkpoint.stage_outcomes.flatMap((outcome) => outcome.learning_episode_id ? [outcome.learning_episode_id] : []), recovery: "caller_rehydrates_task_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only" };
   }
 }
 
@@ -395,7 +411,7 @@ export class AutonomousDurableJobController {
     const normalizedJobId = boundedJobId(jobId);
     const server = await this.status(normalizedJobId);
     if (server.job.state === "waiting_approval") {
-      return { schema: AUTONOMOUS_DURABLE_JOB_SCHEMA, job: server.job, local: { schema: AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA, status: "approval_required", job_id: normalizedJobId, blueprint: null, checkpoint: null, events: [], stage_results: [], completed_stage_count: 0, total_stage_count: 0, recovery: "caller_rehydrates_task_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only" }, server_job_posture: "control_plane_projection;completion_requires_external_worker_reconciliation", private_spec: "caller_owned;task_prompt_response_and_credentials_not_sent_to_control_plane" };
+      return { schema: AUTONOMOUS_DURABLE_JOB_SCHEMA, job: server.job, local: { schema: AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA, status: "approval_required", job_id: normalizedJobId, blueprint: null, checkpoint: null, events: [], stage_results: [], completed_stage_count: 0, total_stage_count: 0, learning_episode_ids: [], recovery: "caller_rehydrates_task_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only" }, server_job_posture: "control_plane_projection;completion_requires_external_worker_reconciliation", private_spec: "caller_owned;task_prompt_response_and_credentials_not_sent_to_control_plane" };
     }
     if (server.job.state !== "queued") throw new ProviderRuntimeError(`brain job ${normalizedJobId} is not executable in state ${server.job.state}`);
     if (!AUTONOMOUS_DOMAIN_NAMES.includes(server.job.domain as AutonomousDomainName)) throw new ProviderRuntimeError(`brain job ${normalizedJobId} has an unsupported autonomous domain`);

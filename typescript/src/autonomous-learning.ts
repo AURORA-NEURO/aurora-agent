@@ -83,6 +83,8 @@ export interface AutonomousLearningEpisode extends JsonObject {
   domain: AutonomousDomainName;
   capability: string;
   workflow_id: string;
+  stage_id: string | null;
+  parent_job_id: string | null;
   workflow_digest: Digest;
   status: "pending" | "settled";
   settlement: AutonomousLearningSettlementMetadata | null;
@@ -160,6 +162,13 @@ export interface AutonomousTrajectorySettlement extends JsonObject {
   trajectory: AutonomousLearningTrajectory;
   settlements: AutonomousLearningSettlement[];
   return_to_go: Record<string, number>;
+  retention: typeof PRIVATE_RETENTION;
+}
+
+export interface AutonomousWorkflowLearningSettlement extends JsonObject {
+  schema: typeof AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA;
+  evaluation: AutonomousWorkflowEvaluation;
+  trajectory: AutonomousTrajectorySettlement;
   retention: typeof PRIVATE_RETENTION;
 }
 
@@ -432,7 +441,7 @@ export class AutonomousLearningController {
     return this.evaluator.evaluate(execution, input);
   }
 
-  async prepareRun(result: AutonomousRunResult, options: { episodeId: string; runId?: string }): Promise<AutonomousLearningEpisode> {
+  async prepareRun(result: AutonomousRunResult, options: { episodeId: string; runId?: string; stageId?: string; parentJobId?: string }): Promise<AutonomousLearningEpisode> {
     if (!isObject(options)) throw new ArgumentError("learning episode options must be an object");
     const episodeId = boundedIdentifier("episodeId", options.episodeId);
     if (!result.blueprint || !result.selection?.selected_model) throw new ArgumentError("learning episode requires a provider-completed or selected autonomous run");
@@ -456,6 +465,8 @@ export class AutonomousLearningController {
       domain: result.blueprint.domain_profile.domain,
       capability: result.blueprint.selection_context.capability,
       workflow_id: result.blueprint.workflow.workflow_id,
+      stage_id: options.stageId === undefined ? null : boundedIdentifier("stageId", options.stageId),
+      parent_job_id: options.parentJobId === undefined ? null : boundedIdentifier("parentJobId", options.parentJobId),
       workflow_digest: result.blueprint.workflow.workflow_digest,
       status: "pending" as const,
       settlement: null,
@@ -465,6 +476,43 @@ export class AutonomousLearningController {
     const episode = { ...descriptor, episode_digest: await digestJson(descriptor) };
     this.episodes.save(episode);
     return clone(episode);
+  }
+
+  /** Build a trajectory from the pending stage episodes emitted by AutonomousWorkflowExecutor. */
+  async prepareWorkflowTrajectory(execution: AutonomousWorkflowExecutionResult, options: { trajectoryId: string; discount?: number }): Promise<AutonomousLearningTrajectory> {
+    const ids = [...new Set((execution.learning_episode_ids ?? []))];
+    const pending: string[] = [];
+    for (const id of ids) {
+      const episode = await this.episodes.load(id);
+      if (episode?.status === "pending") pending.push(id);
+    }
+    if (!pending.length) throw new ArgumentError("workflow execution has no pending learning episodes");
+    return this.prepareTrajectory(pending, options);
+  }
+
+  /** Evaluate and settle the pending workflow stages with one explicit signal packet. */
+  async settleWorkflow(execution: AutonomousWorkflowExecutionResult, input: AutonomousWorkflowEvaluationInput, options: { trajectoryId: string; discount?: number; remote?: boolean }): Promise<AutonomousWorkflowLearningSettlement> {
+    const evaluation = await this.evaluateWorkflow(execution, input);
+    const trajectory = await this.prepareWorkflowTrajectory(execution, options);
+    const rewards: Record<string, AutonomousEvaluatorRewardInput> = {};
+    for (const step of trajectory.steps) {
+      const episode = await this.episodes.load(step.episode_id);
+      if (!episode) throw new ArgumentError(`workflow learning episode ${step.episode_id} disappeared during settlement`);
+      const stageId = episode.stage_id;
+      const score = stageId === null ? 0 : evaluation.stage_scores[stageId] ?? 0;
+      const stage = execution.blueprint?.workflow.stages.find((candidate) => candidate.id === stageId);
+      const evidence = input.stages.find((candidate) => candidate.stage_id === stageId);
+      const missing = stage ? stage.evaluator_signals.some((signal) => evidence?.signals[signal] === undefined) : true;
+      rewards[step.episode_id] = {
+        evaluator_id: evaluation.evaluator_id,
+        evaluator_version: evaluation.evaluator_version,
+        reward: score,
+        passed: !missing && score >= evaluation.pass_threshold,
+        evidence_digest: evidence?.evidence_digest ?? evaluation.evidence_digest,
+      };
+    }
+    const settled = await this.settleTrajectory(trajectory.trajectory_id, rewards, { remote: options.remote });
+    return { schema: AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA, evaluation, trajectory: settled, retention: PRIVATE_RETENTION };
   }
 
   async settleRun(episodeId: string, input: AutonomousEvaluatorRewardInput, options: { creditedReward?: number; remote?: boolean } = {}): Promise<AutonomousLearningSettlement> {

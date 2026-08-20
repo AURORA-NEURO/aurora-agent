@@ -9,7 +9,9 @@ import {
   CredentialStore,
   InMemoryAutonomousLearningEpisodeStore,
   InMemoryAutonomousLearningTrajectoryStore,
+  InMemoryAutonomousWorkflowCheckpointStore,
   LLMRuntime,
+  AutonomousWorkflowExecutor,
   builtinAutonomousDomainEvaluatorProfiles,
   builtinAutonomousDomainProfiles,
   openaiCompatibleProvider,
@@ -159,6 +161,51 @@ test("trajectory settlement assigns bounded discounted return-to-go across episo
   assert.equal(settled.return_to_go["trajectory-episode-1"], 1);
   assert.equal(settled.settlements.length, 2);
   assert.equal(agent.learner.snapshot().generation, 2);
+});
+
+test("workflow executor emits pending stage episodes and controller settles them from explicit signals", async () => {
+  const agent = await learningAgent();
+  const episodes = new InMemoryAutonomousLearningEpisodeStore();
+  const trajectories = new InMemoryAutonomousLearningTrajectoryStore();
+  const controller = new AutonomousLearningController(agent, { episodes, trajectories });
+  const executor = new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore(), { learning: controller });
+  const execution = await executor.start("Implement and verify this staged learning workflow.", {
+    domain: "coding",
+    candidates: agent.models(),
+    approveProviderCall: true,
+    maxStages: 2,
+    jobId: "learning-workflow-1",
+  });
+  assert.equal(execution.status, "paused");
+  assert.equal(execution.learning_episode_ids.length, 2);
+  assert.ok(execution.stage_results.every((stage) => stage.learning_episode_id));
+  const settled = await controller.settleWorkflow(execution, {
+    stages: execution.stage_results.map((stage) => ({
+      stage_id: stage.stage.id,
+      signals: Object.fromEntries(stage.stage.evaluator_signals.map((signal) => [signal, 1])),
+    })),
+  }, { trajectoryId: "learning-workflow-trajectory", discount: 0.9 });
+  assert.equal(settled.evaluation.status, "incomplete");
+  assert.equal(settled.trajectory.settlements.length, 2);
+  assert.ok(settled.trajectory.settlements.every((row) => row.assessment.passed));
+  assert.equal(episodes.pending().length, 0);
+
+  const resumed = await executor.resume("learning-workflow-1", "Implement and verify this staged learning workflow.", {
+    candidates: agent.models(),
+    approveProviderCall: true,
+    maxStages: 1,
+  });
+  assert.equal(resumed.status, "paused");
+  assert.equal(resumed.learning_episode_ids.length, 3);
+  assert.equal(episodes.pending().length, 1);
+  const resumedSettlement = await controller.settleWorkflow(resumed, {
+    stages: resumed.stage_results.map((stage) => ({
+      stage_id: stage.stage.id,
+      signals: Object.fromEntries(stage.stage.evaluator_signals.map((signal) => [signal, 1])),
+    })),
+  }, { trajectoryId: "learning-workflow-trajectory-2" });
+  assert.equal(resumedSettlement.trajectory.settlements.length, 1);
+  assert.equal(episodes.pending().length, 0);
 });
 
 test("remote learning settlement sends run identity and evaluator values only", async () => {

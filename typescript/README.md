@@ -141,6 +141,22 @@ is suitable for tests and small workers; production applications should implemen
 prompts, provider responses, credentials, or tool payloads, and restart recovery explicitly
 requires caller-owned task and credential rehydration.
 
+Pass an `AutonomousLearningController` to the executor when staged model outcomes should enter the
+learning lifecycle:
+
+```typescript
+const learning = new AutonomousLearningController(agent, { episodes: durableEpisodeStore });
+const executor = new AutonomousWorkflowExecutor(agent, durableCheckpointStore, { learning });
+const execution = await executor.start(task, { domain: "coding", approveProviderCall: true, maxStages: 2 });
+```
+
+Each completed stage then creates a pending, digest-only episode and the checkpoint retains its
+episode ID. After the caller-owned evaluator has produced signal scores, `settleWorkflow()` builds
+the pending stage trajectory and applies delayed credit. Approval pauses, failed stages, and
+provider refusals never create reward episodes. On restart, the caller rehydrates the task and
+credential, reloads the checkpoint and episode store, and can continue the same value-only learning
+trajectory without replaying private payloads.
+
 When a deployment also needs a server-visible queue, `AutonomousDurableJobController` bridges that
 local worker to the value-only `brain_job_submit`, `brain_job_status`, `brain_job_events`, and
 `brain_job_approval` operations. Submission sends only an idempotency key, task/spec digest,

@@ -1323,6 +1323,19 @@ then refuses if the task, workflow, or plan digest has changed. This is the loca
 the existing value-only `brain_job_*` APIs can retain a separate server-side job projection without
 receiving the private specification.
 
+The executor accepts an optional `AutonomousLearningController`. When present, each completed
+stage creates one pending episode through `prepareRun()` and writes only that episode ID into the
+metadata checkpoint. Approval-required and failed stages retain no reward episode. The returned
+`learning_episode_ids` projection is the handoff for delayed evaluator settlement; it is safe to
+persist alongside the checkpoint because it contains no task text or provider payload.
+
+`AutonomousLearningController.settleWorkflow()` evaluates the caller-supplied stage signal packet,
+selects the still-pending episodes from the execution result, and settles their discounted
+trajectory. A paused execution can therefore receive credit for completed stages without being
+declared a completed workflow; the evaluator result remains `incomplete` until the workflow itself
+finishes. Restart recovery reloads both caller-owned stores, verifies the original task/workflow
+digests through the executor, and does not silently recreate or overwrite a settled episode.
+
 ### Durable job-controller handoff
 
 `AutonomousDurableJobController` provides the concrete handoff between those two planes. Its
