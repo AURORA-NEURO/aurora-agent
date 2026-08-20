@@ -437,6 +437,7 @@ export interface AutonomousCrossDomainRunResult {
   completed_children: number;
   total_children: number;
   partial: boolean;
+  plan_refinement_digest: string | null;
   learning_episode_ids: string[];
   learning: "provider_health_feedback_only" | "online_bandit_feedback_available";
   retention: "provider_responses_local; child_digests_only_in_synthesis_metadata";
@@ -527,6 +528,8 @@ export interface AutonomousRunOptions {
   approveEffects?: boolean;
   /** Optional caller-owned policy/state controller enforced at provider and tool boundaries. */
   execution?: AutonomousExecutionController;
+  /** A completed, non-review provider proposal that may reorder existing cross-domain children. */
+  acceptedCrossDomainPlanRefinement?: AutonomousCrossDomainPlanRefinementResult;
   /** Logical attempt number recorded in execution metadata; it never changes provider authority. */
   executionAttempt?: number;
   /** Maximum number of retryable provider failures that may trigger a new provider selection. */
@@ -1107,6 +1110,29 @@ async function planningProviderFailureDigest(error: ProviderRuntimeError): Promi
     provider: error.provider ?? null,
     status_code: error.statusCode ?? null,
   });
+}
+
+interface AcceptedCrossDomainPlan {
+  priority_child_ids: string[];
+  focus_child_ids: string[];
+  refinement_digest: string;
+}
+
+/** Validate an accepted cross-domain proposal before it can alter fan-out scheduling. */
+async function acceptedCrossDomainPlan(
+  blueprint: AutonomousCrossDomainBlueprint,
+  refinement: AutonomousCrossDomainPlanRefinementResult | undefined,
+): Promise<AcceptedCrossDomainPlan | null> {
+  if (refinement === undefined) return null;
+  if (!isObject(refinement) || refinement.status !== "completed" || refinement.review_required !== false) throw new ProviderRuntimeError("only a completed, non-review cross-domain plan refinement may be accepted");
+  if (refinement.task_digest !== blueprint.task_digest) throw new ProviderRuntimeError("accepted cross-domain plan task does not match the blueprint");
+  if (refinement.base_plan_digest !== blueprint.plan_digest) throw new ProviderRuntimeError("accepted cross-domain plan base does not match the blueprint");
+  const childIds = [...blueprint.child_ids];
+  if (!Array.isArray(refinement.priority_child_ids) || !Array.isArray(refinement.focus_child_ids)) throw new ProviderRuntimeError("accepted cross-domain plan child identifiers are malformed");
+  const priority = refinement.priority_child_ids.filter((childId): childId is string => typeof childId === "string");
+  const focus = refinement.focus_child_ids.filter((childId): childId is string => typeof childId === "string");
+  if (priority.length !== refinement.priority_child_ids.length || focus.length !== refinement.focus_child_ids.length || priority.length !== childIds.length || new Set(priority).size !== priority.length || new Set(focus).size !== focus.length || priority.some((childId) => !childIds.includes(childId)) || focus.some((childId) => !childIds.includes(childId))) throw new ProviderRuntimeError("accepted cross-domain plan must contain an exact child permutation and valid focus subset");
+  return { priority_child_ids: [...priority], focus_child_ids: [...focus], refinement_digest: await digestJson(refinement) };
 }
 
 function assertSafeTransientValue(value: unknown, depth = 0): void {
@@ -2112,7 +2138,7 @@ export class AutonomousAgent {
     const route = options.routeOverride ? await assertRouteOverride(taskText, options.routeOverride) : await this.route(taskText, { hints: options.hints, allowCrossDomain: options.allowCrossDomain });
     const learning = this.learner ? "online_bandit_feedback_available" as const : "provider_health_feedback_only" as const;
     if (route.abstained || !route.cross_domain || route.selected_domains.length < 2) {
-      return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: "route_review_required", route, blueprint: null, child_runs: [], synthesis: null, completed_children: 0, total_children: route.selected_domains.length, partial: false, learning_episode_ids: [], learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
+      return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: "route_review_required", route, blueprint: null, child_runs: [], synthesis: null, completed_children: 0, total_children: route.selected_domains.length, partial: false, plan_refinement_digest: null, learning_episode_ids: [], learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
     }
     const blueprint = await this.buildCrossDomainBlueprint(taskText, route, {
       capability: options.capability,
@@ -2121,8 +2147,10 @@ export class AutonomousAgent {
       tools: options.tools?.map((tool) => tool.name),
       subtasks: options.subtasks,
     });
+    const acceptedPlan = await acceptedCrossDomainPlan(blueprint, options.acceptedCrossDomainPlanRefinement);
+    const planRefinementDigest = acceptedPlan?.refinement_digest ?? null;
     if (options.approveProviderCall !== true) {
-      return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: "approval_required", route, blueprint, child_runs: [], synthesis: null, completed_children: 0, total_children: blueprint.child_blueprints.length, partial: false, learning_episode_ids: [], learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
+      return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: "approval_required", route, blueprint, child_runs: [], synthesis: null, completed_children: 0, total_children: blueprint.child_blueprints.length, partial: false, plan_refinement_digest: planRefinementDigest, learning_episode_ids: [], learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
     }
     const candidates = options.candidates ? [...options.candidates] : this.models();
     if (!candidates.length) throw new ProviderRuntimeError("cross-domain run requires at least one registered model candidate");
@@ -2131,6 +2159,10 @@ export class AutonomousAgent {
     const childRunsByIndex: Array<AutonomousCrossDomainChildRun | undefined> = new Array(totalChildren);
     const childOutputsByIndex: Array<{ id: string; domain: AutonomousDomainName; status: string; output: string } | undefined> = new Array(totalChildren);
     const learningEpisodeIdsByIndex: Array<string | null> = new Array(totalChildren).fill(null);
+    const declarationOrder = blueprint.child_blueprints.map((_, index) => index);
+    const executionOrder = acceptedPlan
+      ? acceptedPlan.priority_child_ids.map((childId) => blueprint.child_ids.indexOf(childId))
+      : declarationOrder;
     let nextChildIndex = 0;
     let stopDispatch = false;
     let fatalChildFailure = false;
@@ -2150,6 +2182,7 @@ export class AutonomousAgent {
         context: [
           ...(options.context ?? []),
           { id: "cross-domain-parent", content: `Parent route digest: ${route.route_digest}; child id: ${childId}`, required: true, priority: 100 },
+          ...(acceptedPlan ? [{ id: "accepted-cross-domain-plan", content: JSON.stringify({ refinement_digest: acceptedPlan.refinement_digest, child_id: childId, priority_rank: acceptedPlan.priority_child_ids.indexOf(childId), focus: acceptedPlan.focus_child_ids.includes(childId) }), required: true, priority: 95 }] : []),
         ],
         hints: [],
         maxInputTokens: options.maxInputTokens,
@@ -2180,7 +2213,7 @@ export class AutonomousAgent {
       childRunsByIndex[index] = { id: childId, domain: child.domain_profile.domain, task_digest: child.task_digest, result: childResult, output_digest: rawOutput ? await digestJson({ output: rawOutput }) : null, output_bytes: bytes(rawOutput) };
       if (options.learning && childResult.status === "completed") {
         const episodeId = `cross:${route.task_digest}:${childId}`;
-        const episode = await options.learning.prepareRun(childResult, { episodeId, runId: episodeId, stageId: childId, parentJobId: `cross:${route.task_digest}` });
+        const episode = await options.learning.prepareRun(childResult, { episodeId, runId: episodeId, stageId: childId, parentJobId: `cross:${route.task_digest}`, planRefinementDigest });
         learningEpisodeIdsByIndex[index] = episode.episode_id;
       }
       if (childResult.status !== "completed" && !options.allowPartial) stopDispatch = true;
@@ -2189,9 +2222,10 @@ export class AutonomousAgent {
     const worker = async (): Promise<void> => {
       while (true) {
         if (fatalChildFailure || (stopDispatch && !options.allowPartial)) return;
-        const index = nextChildIndex;
+        const sequenceIndex = nextChildIndex;
         nextChildIndex += 1;
-        if (index >= totalChildren) return;
+        const index = executionOrder[sequenceIndex];
+        if (index === undefined) return;
         try {
           await executeChild(index);
         } catch (error) {
@@ -2205,24 +2239,31 @@ export class AutonomousAgent {
     };
     await Promise.all(Array.from({ length: maxParallelChildren }, () => worker()));
 
-    const childRuns = childRunsByIndex.flatMap((child) => child ? [child] : []);
+    const childRuns = executionOrder.flatMap((index) => {
+      const child = childRunsByIndex[index];
+      return child ? [child] : [];
+    });
     const learningEpisodeIds = learningEpisodeIdsByIndex.flatMap((episodeId) => episodeId ? [episodeId] : []);
-    const childOutputs = childOutputsByIndex.flatMap((output) => output ? [output] : []);
+    const childOutputs = executionOrder.flatMap((index) => {
+      const output = childOutputsByIndex[index];
+      return output ? [output] : [];
+    });
     const completedChildren = childRuns.filter((child) => child.result.status === "completed").length;
     const allChildrenCompleted = childRuns.length === blueprint.child_blueprints.length && completedChildren === blueprint.child_blueprints.length;
     const hasApproval = childRuns.some((child) => child.result.status === "approval_required");
     const hasTurnLimit = childRuns.some((child) => child.result.status === "turn_limit_reached");
     if (!allChildrenCompleted && !options.allowPartial) {
-      return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: hasApproval ? "approval_required" : hasTurnLimit ? "turn_limit_reached" : "child_failed", route, blueprint, child_runs: childRuns, synthesis: null, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: completedChildren > 0, learning_episode_ids: learningEpisodeIds, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
+      return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: hasApproval ? "approval_required" : hasTurnLimit ? "turn_limit_reached" : "child_failed", route, blueprint, child_runs: childRuns, synthesis: null, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: completedChildren > 0, plan_refinement_digest: planRefinementDigest, learning_episode_ids: learningEpisodeIds, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
     }
     if (options.synthesize === false) {
-      return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: allChildrenCompleted ? "children_completed" : "children_partial", route, blueprint, child_runs: childRuns, synthesis: null, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: !allChildrenCompleted, learning_episode_ids: learningEpisodeIds, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
+      return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: allChildrenCompleted ? "children_completed" : "children_partial", route, blueprint, child_runs: childRuns, synthesis: null, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: !allChildrenCompleted, plan_refinement_digest: planRefinementDigest, learning_episode_ids: learningEpisodeIds, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
     }
     const synthesisTaskMessage = blueprint.synthesis_blueprint.prompt.messages.find((message) => message.source_id === "task");
     if (!synthesisTaskMessage) throw new ProviderRuntimeError("cross-domain synthesis has no bounded task message");
     const synthesisContext: AutonomousPromptChunk[] = [
       ...(options.context ?? []),
       { id: "cross-domain-parent", content: `Parent route digest: ${route.route_digest}`, required: true, priority: 100 },
+      ...(acceptedPlan ? [{ id: "accepted-cross-domain-plan", content: JSON.stringify({ refinement_digest: acceptedPlan.refinement_digest, priority_child_ids: acceptedPlan.priority_child_ids, focus_child_ids: acceptedPlan.focus_child_ids }), required: true, priority: 95 }] : []),
       ...childOutputs.map((child) => ({
         id: `cross-domain-output-${child.id}`,
         content: JSON.stringify(child),
@@ -2260,11 +2301,11 @@ export class AutonomousAgent {
     });
     if (options.learning && synthesis.status === "completed") {
       const episodeId = `cross:${route.task_digest}:synthesis`;
-      const episode = await options.learning.prepareRun(synthesis, { episodeId, runId: episodeId, stageId: "synthesis", parentJobId: `cross:${route.task_digest}` });
+      const episode = await options.learning.prepareRun(synthesis, { episodeId, runId: episodeId, stageId: "synthesis", parentJobId: `cross:${route.task_digest}`, planRefinementDigest });
       learningEpisodeIds.push(episode.episode_id);
     }
     const status: AutonomousCrossDomainRunStatus = synthesis.status === "completed" ? (allChildrenCompleted ? "completed" : "children_partial") : synthesis.status === "approval_required" ? "approval_required" : synthesis.status === "turn_limit_reached" ? "turn_limit_reached" : "child_failed";
-    return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status, route, blueprint, child_runs: childRuns, synthesis, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: !allChildrenCompleted, learning_episode_ids: learningEpisodeIds, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
+    return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status, route, blueprint, child_runs: childRuns, synthesis, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: !allChildrenCompleted, plan_refinement_digest: planRefinementDigest, learning_episode_ids: learningEpisodeIds, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
   }
 
   /** Apply explicit evaluator feedback locally; optionally reconcile the same value-only update through the control plane. */

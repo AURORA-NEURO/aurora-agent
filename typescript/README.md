@@ -249,7 +249,35 @@ These methods produce proposals, never authorization or execution. The returned 
 only existing ids, bounded confidence, selected-model metadata, and SHA-256 digests. They do not
 retain the original task, prompt transcript, provider response, tool names, credentials, effects,
 or new domain authority. A caller that accepts a completed proposal must still apply it through
-its own workflow executor and re-check the task/blueprint digests at that boundary.
+its own workflow executor and re-check the task/blueprint digests at that boundary. The executor
+then binds the accepted proposal digest into every checkpoint and stage context:
+
+```typescript
+const executor = new AutonomousWorkflowExecutor(agent, checkpointStore);
+const first = await executor.start(task, {
+  domain: "coding",
+  candidates: agent.models(),
+  approveProviderCall: true,
+  maxStages: 2,
+  acceptedPlanRefinement: proposal,
+});
+
+// Persist first.checkpoint. A restart must supply the same accepted proposal object/digest.
+const resumed = await executor.resume(first.job_id, task, {
+  candidates: agent.models(),
+  approveProviderCall: true,
+  acceptedPlanRefinement: proposal,
+});
+console.log(resumed.plan_refinement_digest); // value-only identity, never provider text
+```
+
+For cross-domain execution, pass the corresponding `AutonomousCrossDomainPlanRefinementResult`
+as `acceptedCrossDomainPlanRefinement`. It may reorder only existing child ids; bounded workers,
+child outputs, synthesis context, result ordering, and learning episodes all carry the same
+`plan_refinement_digest`. Omitting acceptance preserves declaration order. A missing or changed
+proposal is rejected before the next provider dispatch, so replay cannot silently substitute a
+different plan. Workflow and cross-domain learning episodes retain this digest as metadata while
+the evaluator still remains the only source of reward.
 
 Structured autonomous responses are opt-in and capability-gated. Pass `requireJson: true` to
 `AutonomousAgent.run()` or `runCrossDomain()` and optionally pass a JSON `responseSchema`; the

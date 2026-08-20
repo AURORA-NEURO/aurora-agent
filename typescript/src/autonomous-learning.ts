@@ -92,6 +92,8 @@ export interface AutonomousLearningEpisode extends JsonObject {
   stage_id: string | null;
   parent_job_id: string | null;
   workflow_digest: Digest;
+  /** Digest of the accepted provider refinement that shaped this episode, if any. */
+  plan_refinement_digest?: Digest | null;
   status: "pending" | "settled";
   settlement: AutonomousLearningSettlementMetadata | null;
   episode_digest: Digest;
@@ -614,9 +616,10 @@ export class AutonomousLearningController {
     return this.evaluator.evaluate(execution, input);
   }
 
-  async prepareRun(result: AutonomousRunResult, options: { episodeId: string; runId?: string; stageId?: string; parentJobId?: string }): Promise<AutonomousLearningEpisode> {
+  async prepareRun(result: AutonomousRunResult, options: { episodeId: string; runId?: string; stageId?: string; parentJobId?: string; planRefinementDigest?: string | null }): Promise<AutonomousLearningEpisode> {
     if (!isObject(options)) throw new ArgumentError("learning episode options must be an object");
     const episodeId = boundedIdentifier("episodeId", options.episodeId);
+    const planRefinementDigest = options.planRefinementDigest === undefined ? null : boundedDigest("planRefinementDigest", options.planRefinementDigest, true);
     if (result.status !== "completed" || !result.blueprint || !result.selection?.selected_model) throw new ArgumentError("learning episode requires a completed autonomous run");
     const runId = boundedIdentifier("runId", options.runId ?? episodeId);
     const selectionDigest = await digestJson(result.selection);
@@ -641,6 +644,7 @@ export class AutonomousLearningController {
       stage_id: options.stageId === undefined ? null : boundedIdentifier("stageId", options.stageId),
       parent_job_id: options.parentJobId === undefined ? null : boundedIdentifier("parentJobId", options.parentJobId),
       workflow_digest: result.blueprint.workflow.workflow_digest,
+      plan_refinement_digest: planRefinementDigest,
       context_digest: result.blueprint.learning_context_digest ?? null,
       learning_context: { ...result.blueprint.selection_context },
       status: "pending" as const,

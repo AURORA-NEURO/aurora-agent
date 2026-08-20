@@ -75,6 +75,76 @@ test("workflow executor checkpoints stages, pauses at a bounded budget, and resu
   await assert.rejects(() => executor.resume("workflow-job-1", "A different task", { candidates: agent.models(), approveProviderCall: true }), /digest/);
 });
 
+test("accepted provider plan refinement is checkpoint-bound and required for replay", async () => {
+  let calls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      calls += 1;
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: `accepted-plan-stage-${calls}` }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("accepted-plan", "https://accepted-plan.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  const acceptedModel = { ...model(), provider: "accepted-plan", model: "accepted-plan-model" };
+  agent.registerModel(acceptedModel);
+  const task = "Apply this accepted workflow ordering and verify the bounded result";
+  const preview = await agent.blueprint(task, { domain: "coding" });
+  assert.ok(preview.blueprint);
+  const blueprint = preview.blueprint;
+  const acceptedPlan = {
+    schema: "bioprism-python-autonomous-plan-refinement/0.1",
+    status: "completed",
+    task_digest: blueprint.task_digest,
+    base_plan_digest: await digestJson(blueprint.plan),
+    workflow_digest: blueprint.workflow.workflow_digest,
+    priority_stage_ids: blueprint.workflow.stages.map((stage) => stage.id),
+    focus_stage_ids: [blueprint.workflow.stages[0].id],
+    review_required: false,
+    confidence: 0.97,
+    selected_model: { provider: acceptedModel.provider, model: acceptedModel.model },
+    selection_digest: null,
+    planner_prompt_digest: null,
+    planner_plan_digest: null,
+    outcome_digest: null,
+    retention: "stage_ids_and_digests_only; planner_transcript_not_retained",
+    authorization: "plan_proposal_only; no_tools_or_effects_authorized",
+  };
+  const acceptedPlanDigest = await digestJson(acceptedPlan);
+  const store = new InMemoryAutonomousWorkflowCheckpointStore();
+  const executor = new AutonomousWorkflowExecutor(agent, store);
+  const first = await executor.start(task, {
+    domain: "coding",
+    jobId: "workflow-accepted-plan-1",
+    candidates: [acceptedModel],
+    approveProviderCall: true,
+    maxStages: 1,
+    acceptedPlanRefinement: acceptedPlan,
+  });
+  assert.equal(first.status, "paused");
+  assert.equal(first.plan_refinement_digest, acceptedPlanDigest);
+  assert.equal(first.checkpoint.plan_refinement_digest, acceptedPlanDigest);
+  assert.equal(first.checkpoint.next_stage_id, acceptedPlan.priority_stage_ids[1]);
+  assert.equal(calls, 1);
+
+  await assert.rejects(
+    () => executor.resume("workflow-accepted-plan-1", task, { candidates: [acceptedModel], approveProviderCall: true, maxStages: 32 }),
+    /plan refinement/,
+  );
+  const changedPlan = { ...acceptedPlan, focus_stage_ids: [acceptedPlan.priority_stage_ids.at(-1)] };
+  await assert.rejects(
+    () => executor.resume("workflow-accepted-plan-1", task, { candidates: [acceptedModel], approveProviderCall: true, maxStages: 32, acceptedPlanRefinement: changedPlan }),
+    /plan refinement/,
+  );
+  assert.equal(calls, 1, "plan identity mismatches must be rejected before dispatch");
+
+  const resumed = await executor.resume("workflow-accepted-plan-1", task, { candidates: [acceptedModel], approveProviderCall: true, maxStages: 32, acceptedPlanRefinement: acceptedPlan });
+  assert.equal(resumed.status, "completed");
+  assert.equal(resumed.plan_refinement_digest, acceptedPlanDigest);
+  assert.equal(resumed.completed_stage_count, 5);
+  assert.equal(calls, 5);
+});
+
 test("workflow resume refuses a changed selection contract before provider dispatch", async () => {
   let calls = 0;
   const llm = new LLMRuntime({
@@ -307,6 +377,48 @@ test("workflow executor exposes approval pauses and checkpoint readiness for eve
     assert.equal(result.checkpoint.workflow_digest, profile.workflow.workflow_digest);
     assert.equal(result.checkpoint.completed_stage_ids.length, 0);
     assert.equal(result.events.at(-1).event_type, "approval_required");
+  }
+});
+
+test("accepted plan identity is validated for every single-domain workflow profile", async () => {
+  const llm = new LLMRuntime({ credentials: new CredentialStore(), fetch: async () => { throw new Error("provider must not be called before approval"); } });
+  llm.registerProvider(openaiCompatibleProvider("all-domain-plans", "https://all-domain-plans.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  const allCapabilities = ["reasoning", "code", "web", "data", "science", "biomedical", "neuroscience", "coordination", "operations", "enterprise", "multimodal", "evaluation"];
+  const registered = { ...model(), provider: "all-domain-plans", model: "all-domain-plans-model", capabilities: allCapabilities };
+  agent.registerModel(registered);
+  const profiles = await builtinAutonomousDomainProfiles();
+  for (const profile of profiles.filter((candidate) => candidate.domain !== "cross_domain")) {
+    const preview = await agent.blueprint(`Review a bounded ${profile.domain} workflow.`, { domain: profile.domain });
+    assert.ok(preview.blueprint, profile.domain);
+    const blueprint = preview.blueprint;
+    const refinement = {
+      schema: "bioprism-python-autonomous-plan-refinement/0.1",
+      status: "completed",
+      task_digest: blueprint.task_digest,
+      base_plan_digest: await digestJson(blueprint.plan),
+      workflow_digest: blueprint.workflow.workflow_digest,
+      priority_stage_ids: blueprint.workflow.stages.map((stage) => stage.id),
+      focus_stage_ids: [blueprint.workflow.stages[0].id],
+      review_required: false,
+      confidence: 1,
+      selected_model: null,
+      selection_digest: null,
+      planner_prompt_digest: null,
+      planner_plan_digest: null,
+      outcome_digest: null,
+      retention: "stage_ids_and_digests_only; planner_transcript_not_retained",
+      authorization: "plan_proposal_only; no_tools_or_effects_authorized",
+    };
+    const result = await new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore()).start(`Review a bounded ${profile.domain} workflow.`, {
+      domain: profile.domain,
+      jobId: `all-domain-accepted-${profile.domain}`,
+      candidates: [registered],
+      acceptedPlanRefinement: refinement,
+    });
+    assert.equal(result.status, "approval_required", profile.domain);
+    assert.equal(result.plan_refinement_digest, await digestJson(refinement), profile.domain);
+    assert.equal(result.checkpoint.domain, profile.domain);
   }
 });
 

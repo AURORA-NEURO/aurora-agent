@@ -14,6 +14,7 @@ import {
   assembleAutonomousPrompt,
   compileAutonomousPlan,
   digestCanonicalJsonTextSync,
+  digestJson,
   openaiCompatibleProvider,
   routeAutonomousTask,
 } from "../dist/index.js";
@@ -486,6 +487,63 @@ test("cross-domain fan-out uses bounded concurrency and preserves deterministic 
     }),
     (error) => error?.name === "ArgumentError",
   );
+});
+
+test("accepted cross-domain plan refinement reorders bounded fan-out and carries digest metadata", async () => {
+  const bodies = [];
+  let calls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      bodies.push(JSON.parse(String(init.body)));
+      calls += 1;
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: `accepted-cross-child-${calls}` }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("accepted-cross", "https://accepted-cross.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel(candidate("accepted-cross", "accepted-cross-model", ["reasoning", "coordination", "biomedical", "neuroscience", "science"]));
+  const task = "Research a biomedical neuroscience experiment with EEG patient evidence";
+  const preview = await agent.blueprint(task);
+  assert.ok(preview.cross_domain_blueprint);
+  const blueprint = preview.cross_domain_blueprint;
+  const acceptedPlan = {
+    schema: "bioprism-python-autonomous-cross-domain-plan-refinement/0.1",
+    status: "completed",
+    task_digest: blueprint.task_digest,
+    base_plan_digest: blueprint.plan_digest,
+    priority_child_ids: [...blueprint.child_ids].reverse(),
+    focus_child_ids: [blueprint.child_ids.at(-1)],
+    review_required: false,
+    confidence: 0.94,
+    selected_model: { provider: "accepted-cross", model: "accepted-cross-model" },
+    selection_digest: null,
+    planner_prompt_digest: null,
+    planner_plan_digest: null,
+    outcome_digest: null,
+    retention: "child_ids_and_digests_only; planner_transcript_not_retained",
+    authorization: "plan_proposal_only; no_tools_or_effects_authorized",
+  };
+  const acceptedPlanDigest = await digestJson(acceptedPlan);
+  const result = await agent.runCrossDomain(task, {
+    candidates: agent.models(),
+    approveProviderCall: true,
+    synthesize: false,
+    maxParallelChildren: 1,
+    acceptedCrossDomainPlanRefinement: acceptedPlan,
+  });
+  assert.equal(result.status, "children_completed");
+  assert.deepEqual(result.child_runs.map((child) => child.id), [...blueprint.child_ids].reverse());
+  assert.equal(result.plan_refinement_digest, acceptedPlanDigest);
+  assert.equal(calls, blueprint.child_ids.length);
+  assert.match(bodies[0].messages.find((message) => message.content.startsWith("Context accepted-cross-domain-plan:\n"))?.content ?? "", /priority_rank/);
+
+  const invalidPlan = { ...acceptedPlan, base_plan_digest: "0".repeat(64) };
+  await assert.rejects(
+    () => agent.runCrossDomain(task, { candidates: agent.models(), approveProviderCall: true, synthesize: false, acceptedCrossDomainPlanRefinement: invalidPlan }),
+    /base does not match/,
+  );
+  assert.equal(calls, blueprint.child_ids.length, "invalid accepted plans must fail before child dispatch");
 });
 
 test("online learner adapts only from explicit evaluator rewards", async () => {

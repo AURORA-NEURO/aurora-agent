@@ -714,6 +714,17 @@ effects, credentials, new domains, or synthesis. Malformed structured output bec
 digest-only `provider_invalid` result, while credential and transport failures remain typed runtime
 errors for application retry or review policy.
 
+On the TypeScript path, single-domain acceptance is supplied as
+`acceptedPlanRefinement` to `AutonomousWorkflowExecutor.start()`/`resume()`, and cross-domain
+acceptance is supplied as `acceptedCrossDomainPlanRefinement` to `runCrossDomain()`. The accepted
+record must be completed, non-review, task/base-plan/workflow bound, and an exact dependency-safe
+permutation of the existing stage or child ids. Its SHA-256 identity is written as
+`plan_refinement_digest` in the checkpoint and execution result, carried as digest-only context to
+stage, specialist, and synthesis calls, and copied into value-only learning episodes. Resume
+requires the same identity; omitting it or substituting a different proposal fails before the next
+provider dispatch. Without explicit acceptance, TypeScript retains declaration order and no plan
+digest is persisted.
+
 For long-running fan-out, `BrainWorker` can execute one provider or tool-loop child per lease and
 then one synthesis call. Submit a normal `BrainJobStore` packet with a caller-owned resolver and
 select `execution_kind="cross_domain"`:
