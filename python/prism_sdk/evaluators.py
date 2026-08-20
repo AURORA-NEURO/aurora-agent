@@ -124,6 +124,9 @@ class DomainEvaluationEvidence:
     signals: Mapping[str, float]
     references: tuple[str, ...] = ()
     limitations: tuple[str, ...] = ()
+    stage_plan_digest: str | None = None
+    capability_contract_digests: tuple[str, ...] = ()
+    selected_tool_names: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _text("domain evidence domain", self.domain)
@@ -151,6 +154,26 @@ class DomainEvaluationEvidence:
                     len(value) != 64 or any(character not in "0123456789abcdef" for character in value)
                 ):
                     raise BrainRunError("domain evidence references must be lowercase SHA-256 digests")
+        if self.stage_plan_digest is not None:
+            if len(self.stage_plan_digest) != 64 or any(
+                character not in "0123456789abcdef" for character in self.stage_plan_digest
+            ):
+                raise BrainRunError("domain evidence stage_plan_digest must be a lowercase SHA-256 digest")
+        if not isinstance(self.capability_contract_digests, Sequence) or isinstance(
+            self.capability_contract_digests, (str, bytes)
+        ) or len(self.capability_contract_digests) > MAX_DOMAIN_EVALUATOR_SIGNAL_COUNT:
+            raise BrainRunError("domain evidence capability_contract_digests are outside their bound")
+        for digest in self.capability_contract_digests:
+            if not isinstance(digest, str) or len(digest) != 64 or any(
+                character not in "0123456789abcdef" for character in digest
+            ):
+                raise BrainRunError("domain evidence capability contract digests must be lowercase SHA-256 digests")
+        if not isinstance(self.selected_tool_names, Sequence) or isinstance(
+            self.selected_tool_names, (str, bytes)
+        ) or len(self.selected_tool_names) > MAX_DOMAIN_EVALUATOR_SIGNAL_COUNT:
+            raise BrainRunError("domain evidence selected_tool_names are outside their bound")
+        for name in self.selected_tool_names:
+            _text("domain evidence selected tool name", name)
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "DomainEvaluationEvidence":
@@ -171,6 +194,9 @@ class DomainEvaluationEvidence:
             "workflow_digest",
             "stage_id",
             "required_signals",
+            "stage_plan_digest",
+            "capability_contract_digests",
+            "selected_tool_names",
         }
         if any(not isinstance(key, str) for key in value) or set(value).difference(allowed):
             raise BrainRunError("domain evaluation evidence contains unsupported fields")
@@ -198,6 +224,29 @@ class DomainEvaluationEvidence:
                 _text("domain evaluation required signal", signal)
                 if not _SAFE_SIGNAL.fullmatch(signal):
                     raise BrainRunError(f"domain evaluation required signal is not a safe identifier: {signal}")
+        stage_plan_digest = value.get("stage_plan_digest")
+        if stage_plan_digest is not None:
+            if not isinstance(stage_plan_digest, str) or len(stage_plan_digest) != 64 or any(
+                character not in "0123456789abcdef" for character in stage_plan_digest
+            ):
+                raise BrainRunError("domain evaluation stage_plan_digest must be a lowercase SHA-256 digest")
+        contract_digests = value.get("capability_contract_digests", ())
+        if not isinstance(contract_digests, Sequence) or isinstance(contract_digests, (str, bytes)):
+            raise BrainRunError("domain evaluation capability_contract_digests must be a sequence")
+        if len(contract_digests) > MAX_DOMAIN_EVALUATOR_SIGNAL_COUNT:
+            raise BrainRunError("domain evaluation capability_contract_digests exceed the bounded count")
+        for digest in contract_digests:
+            if not isinstance(digest, str) or len(digest) != 64 or any(
+                character not in "0123456789abcdef" for character in digest
+            ):
+                raise BrainRunError("domain evaluation capability contract digests must be lowercase SHA-256 digests")
+        selected_tool_names = value.get("selected_tool_names", ())
+        if not isinstance(selected_tool_names, Sequence) or isinstance(selected_tool_names, (str, bytes)):
+            raise BrainRunError("domain evaluation selected_tool_names must be a sequence")
+        if len(selected_tool_names) > MAX_DOMAIN_EVALUATOR_SIGNAL_COUNT:
+            raise BrainRunError("domain evaluation selected_tool_names exceed the bounded count")
+        for name in selected_tool_names:
+            _text("domain evaluation selected tool name", name)
         normalized_signals: dict[str, float] = {}
         for signal, raw in raw_signals.items():
             if isinstance(raw, bool):
@@ -221,6 +270,9 @@ class DomainEvaluationEvidence:
                     "signals": normalized_signals,
                     "references": list(references),
                     "limitations": list(limitations),
+                    "stage_plan_digest": stage_plan_digest,
+                    "capability_contract_digests": list(contract_digests),
+                    "selected_tool_names": list(selected_tool_names),
                 }
             )
         except BrainMemoryError as error:
@@ -232,6 +284,9 @@ class DomainEvaluationEvidence:
             signals=safe["signals"],
             references=tuple(safe["references"]),
             limitations=tuple(safe["limitations"]),
+            stage_plan_digest=safe.get("stage_plan_digest"),
+            capability_contract_digests=tuple(safe.get("capability_contract_digests", ())),
+            selected_tool_names=tuple(safe.get("selected_tool_names", ())),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -243,6 +298,9 @@ class DomainEvaluationEvidence:
             "signals": dict(self.signals),
             "references": list(self.references),
             "limitations": list(self.limitations),
+            "stage_plan_digest": self.stage_plan_digest,
+            "capability_contract_digests": list(self.capability_contract_digests),
+            "selected_tool_names": list(self.selected_tool_names),
             "retention": "value_only_digests_and_signal_scores",
         }
 

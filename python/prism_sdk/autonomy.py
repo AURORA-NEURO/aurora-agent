@@ -117,6 +117,7 @@ AUTONOMOUS_DOMAIN_PACK_SCHEMA = "bioprism-python-autonomous-domain-pack/0.1"
 AUTONOMOUS_EXECUTION_PLAN_SCHEMA = "bioprism-python-autonomous-execution-plan/0.1"
 AUTONOMOUS_CAPABILITY_CONTRACT_SCHEMA = "bioprism-python-autonomous-capability-contract/0.1"
 AUTONOMOUS_CAPABILITY_PLAN_SCHEMA = "bioprism-python-autonomous-capability-plan/0.1"
+AUTONOMOUS_WORKFLOW_STAGE_PLAN_SCHEMA = "bioprism-python-autonomous-workflow-stage-plan/0.1"
 AUTONOMOUS_CAPABILITY_PLAN_STATUSES = (
     "ready",
     "provider_only",
@@ -152,6 +153,7 @@ MAX_AUTONOMOUS_DOMAIN_PACK_ITEMS = 64
 MAX_AUTONOMOUS_EXECUTION_PLAN_BYTES = 512_000
 MAX_AUTONOMOUS_CAPABILITY_CONTRACTS = 64
 MAX_AUTONOMOUS_CAPABILITY_PLAN_BYTES = 128_000
+MAX_AUTONOMOUS_WORKFLOW_STAGE_PLAN_BYTES = 64_000
 AUTONOMOUS_SEMANTIC_ROUTE_SCHEMA = "bioprism-python-autonomous-semantic-route/0.1"
 AUTONOMOUS_PLAN_REFINEMENT_SCHEMA = "bioprism-python-autonomous-plan-refinement/0.1"
 AUTONOMOUS_ROUTE_EVIDENCE = {
@@ -161,6 +163,7 @@ AUTONOMOUS_ROUTE_EVIDENCE = {
 _SAFE_IDENTIFIER_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-")
 _AUTONOMOUS_EXECUTION_PLAN_CONTEXT_KEY = "_aurora_execution_plan"
 _AUTONOMOUS_CAPABILITY_CONTRACT_CONTEXT_KEY = "_aurora_capability_contract"
+_AUTONOMOUS_WORKFLOW_STAGE_PLAN_CONTEXT_KEY = "_aurora_workflow_stage_plan"
 
 
 # A domain workflow uses a small, stable capability vocabulary while live tools often expose
@@ -3459,6 +3462,23 @@ class AutonomousWorkflowCheckpoint:
             _workflow_digest(response_digest, "workflow checkpoint response_digest")
             evidence = raw.get("evidence", [])
             uncertainty = raw.get("uncertainty", [])
+            stage_plan_digest = raw.get("stage_execution_plan_digest")
+            if stage_plan_digest is not None:
+                _workflow_digest(stage_plan_digest, "workflow checkpoint stage_execution_plan_digest")
+            selected_tool_names = raw.get("stage_selected_tool_names", [])
+            selected_tool_names = _sequence(
+                "workflow checkpoint stage_selected_tool_names",
+                selected_tool_names,
+                maximum=MAX_AUTONOMOUS_DOMAIN_PACK_ITEMS,
+            )
+            contract_digests = raw.get("stage_capability_contract_digests", [])
+            contract_digests = _sequence(
+                "workflow checkpoint stage_capability_contract_digests",
+                contract_digests,
+                maximum=MAX_AUTONOMOUS_DOMAIN_PACK_ITEMS,
+            )
+            for digest in contract_digests:
+                _workflow_digest(digest, "workflow checkpoint stage capability contract digest")
             normalized.append(
                 {
                     "stage_id": stage_id,
@@ -3469,6 +3489,9 @@ class AutonomousWorkflowCheckpoint:
                     "uncertainty": list(_sequence("workflow checkpoint uncertainty", uncertainty, maximum=MAX_AUTONOMOUS_WORKFLOW_STAGE_EVIDENCE)),
                     "attempt": attempt,
                     "response_digest": response_digest,
+                    "stage_execution_plan_digest": stage_plan_digest,
+                    "stage_selected_tool_names": list(selected_tool_names),
+                    "stage_capability_contract_digests": list(contract_digests),
                 }
             )
         encoded = json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
@@ -3531,6 +3554,292 @@ class AutonomousWorkflowCheckpoint:
 
 
 @dataclass(frozen=True, slots=True)
+class AutonomousWorkflowStageExecutionPlan:
+    """The exact runtime handoff for one stage of a domain workflow.
+
+    This packet is the stage-level counterpart to the domain execution plan.  It narrows the
+    provider-visible tool names using the compiled activation projection, preserves the
+    capability/evidence contract for every stage capability, and gives the evaluator and
+    checkpoint a digest-bound identity for what was attempted.  It contains no task text,
+    arguments, provider output, credentials, or effect authorization.
+    """
+
+    domain: str
+    workflow_id: str
+    workflow_digest: str
+    stage_id: str
+    stage_objective: str
+    required_capabilities: tuple[str, ...]
+    tool_capabilities: tuple[str, ...]
+    capability_contracts: tuple[Mapping[str, Any], ...]
+    required_model_capabilities: tuple[str, ...]
+    evidence_outputs: tuple[str, ...]
+    evaluator_signals: tuple[str, ...]
+    active_tool_names: tuple[str, ...] = ()
+    selected_tool_names: tuple[str, ...] = ()
+    withheld_tool_names: tuple[str, ...] = ()
+    approval_required: bool = False
+    read_only: bool = True
+    execution_posture: str = "provider_only_or_blocked"
+    source_plan_digest: str | None = None
+
+    def __post_init__(self) -> None:
+        _identifier("stage execution plan domain", self.domain)
+        _identifier("stage execution plan workflow_id", self.workflow_id)
+        _workflow_digest(self.workflow_digest, "stage execution plan workflow_digest")
+        _identifier("stage execution plan stage_id", self.stage_id)
+        _text("stage execution plan stage_objective", self.stage_objective, maximum=2_048)
+        for name, values in (
+            ("required_capabilities", self.required_capabilities),
+            ("tool_capabilities", self.tool_capabilities),
+            ("required_model_capabilities", self.required_model_capabilities),
+            ("evidence_outputs", self.evidence_outputs),
+            ("evaluator_signals", self.evaluator_signals),
+            ("active_tool_names", self.active_tool_names),
+            ("selected_tool_names", self.selected_tool_names),
+            ("withheld_tool_names", self.withheld_tool_names),
+        ):
+            object.__setattr__(
+                self,
+                name,
+                _sequence(
+                    f"stage execution plan {name}",
+                    values,
+                    maximum=MAX_AUTONOMOUS_DOMAIN_PACK_ITEMS,
+                ),
+            )
+        if not self.required_capabilities or not self.evidence_outputs or not self.evaluator_signals:
+            raise BrainRunError(
+                "stage execution plan requires capabilities, evidence outputs, and evaluator signals"
+            )
+        if len(self.required_capabilities) != len(set(self.required_capabilities)):
+            raise BrainRunError("stage execution plan required_capabilities contain duplicates")
+        if not isinstance(self.capability_contracts, Sequence) or isinstance(
+            self.capability_contracts, (str, bytes)
+        ):
+            raise BrainRunError("stage execution plan capability_contracts must be a sequence")
+        if not self.capability_contracts or len(self.capability_contracts) > MAX_AUTONOMOUS_DOMAIN_PACK_ITEMS:
+            raise BrainRunError("stage execution plan capability_contracts are outside their bound")
+        normalized_contracts: list[Mapping[str, Any]] = []
+        contract_capabilities: list[str] = []
+        for contract in self.capability_contracts:
+            if not isinstance(contract, Mapping):
+                raise BrainRunError("stage execution plan capability contracts must be mappings")
+            normalized = _safe_json("stage execution plan capability contract", contract, maximum=32_000)
+            if not isinstance(normalized, Mapping):
+                raise BrainRunError("stage execution plan capability contract must remain a mapping")
+            capability = _identifier(
+                "stage execution plan capability contract capability",
+                normalized.get("capability"),
+            )
+            contract_digest = normalized.get("contract_digest")
+            _workflow_digest(
+                contract_digest,
+                "stage execution plan capability contract contract_digest",
+            )
+            contract_capabilities.append(capability)
+            normalized_contracts.append(normalized)
+        if set(contract_capabilities) != set(self.required_capabilities) or len(contract_capabilities) != len(
+            self.required_capabilities
+        ):
+            raise BrainRunError("stage execution plan capability contracts do not match required capabilities")
+        object.__setattr__(self, "capability_contracts", tuple(normalized_contracts))
+        if not isinstance(self.approval_required, bool) or not isinstance(self.read_only, bool):
+            raise BrainRunError("stage execution plan safety flags must be booleans")
+        _identifier("stage execution plan execution_posture", self.execution_posture)
+        if self.source_plan_digest is not None:
+            _workflow_digest(self.source_plan_digest, "stage execution plan source_plan_digest")
+
+    def descriptor(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_WORKFLOW_STAGE_PLAN_SCHEMA,
+            "domain": self.domain,
+            "workflow_id": self.workflow_id,
+            "workflow_digest": self.workflow_digest,
+            "stage_id": self.stage_id,
+            "stage_objective": self.stage_objective,
+            "required_capabilities": list(self.required_capabilities),
+            "tool_capabilities": list(self.tool_capabilities),
+            "capability_contracts": [dict(contract) for contract in self.capability_contracts],
+            "required_model_capabilities": list(self.required_model_capabilities),
+            "evidence_outputs": list(self.evidence_outputs),
+            "evaluator_signals": list(self.evaluator_signals),
+            "active_tool_names": list(self.active_tool_names),
+            "selected_tool_names": list(self.selected_tool_names),
+            "withheld_tool_names": list(self.withheld_tool_names),
+            "approval_required": self.approval_required,
+            "read_only": self.read_only,
+            "execution_posture": self.execution_posture,
+            "source_plan_digest": self.source_plan_digest,
+        }
+
+    @property
+    def stage_plan_digest(self) -> str:
+        return content_digest(self.descriptor())
+
+    @property
+    def capability_contract_digests(self) -> tuple[str, ...]:
+        return tuple(
+            contract["contract_digest"]
+            for contract in self.capability_contracts
+            if isinstance(contract.get("contract_digest"), str)
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            **self.descriptor(),
+            "stage_plan_digest": self.stage_plan_digest,
+            "capability_contract_digests": list(self.capability_contract_digests),
+            "credential_posture": "caller_supplied_opaque_handles; no_keys_or_handles",
+            "authority_posture": "metadata_only; stage_plan_does_not_grant_authority",
+        }
+
+
+def compile_autonomous_workflow_stage_execution_plan(
+    blueprint: AutonomousTaskBlueprint,
+    stage: AutonomousWorkflowStage,
+    *,
+    execution_plan_context: Mapping[str, Any] | None = None,
+    provider_tools: Sequence[ProviderTool] = (),
+) -> AutonomousWorkflowStageExecutionPlan:
+    """Compile a stage packet and fail closed when a supplied domain plan is malformed."""
+
+    if not isinstance(blueprint, AutonomousTaskBlueprint):
+        raise BrainRunError("stage execution plan requires an AutonomousTaskBlueprint")
+    if not isinstance(stage, AutonomousWorkflowStage):
+        raise BrainRunError("stage execution plan requires an AutonomousWorkflowStage")
+    if stage.id not in {item.id for item in blueprint.workflow.stages}:
+        raise BrainRunError("stage execution plan stage is outside the prepared workflow")
+    if not isinstance(provider_tools, Sequence) or isinstance(provider_tools, (str, bytes)):
+        raise BrainRunError("stage execution plan provider_tools must be a sequence")
+    if any(not isinstance(tool, ProviderTool) for tool in provider_tools):
+        raise BrainRunError("stage execution plan provider_tools must contain ProviderTool values")
+    contracts = _build_domain_capability_contracts(
+        blueprint.profile,
+        blueprint.domain_pack,
+        blueprint.workflow,
+    )
+    stage_contracts = tuple(
+        contract for contract in contracts if contract.capability in stage.required_capabilities
+    )
+    if len(stage_contracts) != len(set(stage.required_capabilities)):
+        raise BrainRunError("stage execution plan has an unresolved capability contract")
+    tool_capabilities = tuple(
+        dict.fromkeys(
+            tool_capability
+            for contract in stage_contracts
+            for tool_capability in contract.tool_capabilities
+        )
+    )
+    active_tool_names: tuple[str, ...] = ()
+    withheld_tool_names: tuple[str, ...] = ()
+    source_plan_digest: str | None = None
+    plan_supplied = execution_plan_context is not None
+    if execution_plan_context is not None:
+        if not isinstance(execution_plan_context, Mapping):
+            raise BrainRunError("stage execution plan context must be a mapping")
+        raw_plans = execution_plan_context.get("plans")
+        if isinstance(raw_plans, Sequence) and not isinstance(raw_plans, (str, bytes)):
+            domain_plan = next(
+                (
+                    value for value in raw_plans
+                    if isinstance(value, Mapping) and value.get("domain") == blueprint.profile.domain
+                ),
+                None,
+            )
+        elif execution_plan_context.get("domain") == blueprint.profile.domain:
+            domain_plan = execution_plan_context
+        else:
+            domain_plan = None
+        if not isinstance(domain_plan, Mapping):
+            raise BrainRunError("stage execution plan context has no matching domain plan")
+        raw_digest = domain_plan.get("plan_digest")
+        if not isinstance(raw_digest, str):
+            raise BrainRunError("stage execution plan domain packet is missing plan_digest")
+        _workflow_digest(raw_digest, "stage execution plan source_plan_digest")
+        source_plan_digest = raw_digest
+        capabilities_packet = domain_plan.get("capabilities")
+        if not isinstance(capabilities_packet, Mapping):
+            raise BrainRunError("stage execution plan domain packet has malformed capabilities")
+        capability_rows = capabilities_packet.get("contracts", [])
+        if not isinstance(capability_rows, Sequence) or isinstance(capability_rows, (str, bytes)):
+            raise BrainRunError("stage execution plan domain packet has malformed capabilities")
+        matching_rows = [
+            row for row in capability_rows
+            if isinstance(row, Mapping) and row.get("capability") in stage.required_capabilities
+        ]
+        if len({row.get("capability") for row in matching_rows}) != len(set(stage.required_capabilities)):
+            raise BrainRunError("stage execution plan domain packet is missing a stage capability")
+        expected_contract_digests = {
+            contract.capability: contract.contract_digest
+            for contract in stage_contracts
+        }
+        for row in matching_rows:
+            capability = row.get("capability")
+            if row.get("contract_digest") != expected_contract_digests.get(capability):
+                raise BrainRunError("stage execution plan domain packet has a stale capability contract")
+            for field_name in ("active_tool_names", "withheld_tool_names"):
+                raw_names = row.get(field_name, ())
+                _sequence(
+                    f"stage execution plan domain packet {field_name}",
+                    raw_names,
+                    maximum=MAX_AUTONOMOUS_DOMAIN_PACK_ITEMS,
+                )
+        active_tool_names = tuple(
+            sorted(
+                {
+                    name
+                    for row in matching_rows
+                    for name in row.get("active_tool_names", ())
+                    if isinstance(name, str)
+                }
+            )
+        )
+        withheld_tool_names = tuple(
+            sorted(
+                {
+                    name
+                    for row in matching_rows
+                    for name in row.get("withheld_tool_names", ())
+                    if isinstance(name, str)
+                }
+            )
+        )
+    provider_tool_names = {tool.name for tool in provider_tools}
+    selected_tool_names = tuple(
+        sorted(provider_tool_names.intersection(active_tool_names))
+        if plan_supplied
+        else sorted(provider_tool_names)
+    )
+    if stage.approval_required:
+        execution_posture = "approval_gated"
+    elif selected_tool_names:
+        execution_posture = "tool_backed"
+    else:
+        execution_posture = "provider_only_or_blocked"
+    return AutonomousWorkflowStageExecutionPlan(
+        domain=blueprint.profile.domain,
+        workflow_id=blueprint.workflow.workflow_id,
+        workflow_digest=blueprint.workflow.workflow_digest,
+        stage_id=stage.id,
+        stage_objective=stage.objective,
+        required_capabilities=tuple(stage.required_capabilities),
+        tool_capabilities=tool_capabilities,
+        capability_contracts=tuple(contract.to_dict() for contract in stage_contracts),
+        required_model_capabilities=tuple(blueprint.required_capabilities),
+        evidence_outputs=tuple(stage.evidence_outputs),
+        evaluator_signals=tuple(stage.evaluator_signals),
+        active_tool_names=active_tool_names,
+        selected_tool_names=selected_tool_names,
+        withheld_tool_names=withheld_tool_names,
+        approval_required=stage.approval_required,
+        read_only=stage.read_only,
+        execution_posture=execution_posture,
+        source_plan_digest=source_plan_digest,
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class AutonomousWorkflowStageResult:
     """One executed stage plus its bounded model contract and caller-visible result."""
 
@@ -3544,6 +3853,7 @@ class AutonomousWorkflowStageResult:
     validation_errors: tuple[str, ...] = ()
     attempt: int = 1
     response_digest: str | None = None
+    stage_execution_plan: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.execution_status not in AUTONOMOUS_WORKFLOW_EXECUTION_STATUSES:
@@ -3558,6 +3868,18 @@ class AutonomousWorkflowStageResult:
             if not isinstance(self.structured, Mapping):
                 raise BrainRunError("workflow stage structured output must be an object")
             _safe_json("workflow stage structured output", self.structured, maximum=250_000)
+        if self.stage_execution_plan is not None:
+            if not isinstance(self.stage_execution_plan, Mapping):
+                raise BrainRunError("workflow stage execution plan must be a mapping or None")
+            object.__setattr__(
+                self,
+                "stage_execution_plan",
+                _safe_json(
+                    "workflow stage execution plan",
+                    self.stage_execution_plan,
+                    maximum=MAX_AUTONOMOUS_WORKFLOW_STAGE_PLAN_BYTES,
+                ),
+            )
         object.__setattr__(self, "evidence", _sequence("workflow stage evidence", self.evidence, maximum=MAX_AUTONOMOUS_WORKFLOW_STAGE_EVIDENCE))
         object.__setattr__(self, "uncertainty", _sequence("workflow stage uncertainty", self.uncertainty, maximum=MAX_AUTONOMOUS_WORKFLOW_STAGE_EVIDENCE))
         object.__setattr__(self, "validation_errors", _sequence("workflow stage validation_errors", self.validation_errors, maximum=16))
@@ -3578,6 +3900,15 @@ class AutonomousWorkflowStageResult:
             "uncertainty": list(self.uncertainty),
             "attempt": self.attempt,
             "response_digest": self.response_digest,
+            "stage_execution_plan_digest": None
+            if self.stage_execution_plan is None
+            else self.stage_execution_plan.get("stage_plan_digest"),
+            "stage_selected_tool_names": []
+            if self.stage_execution_plan is None
+            else list(self.stage_execution_plan.get("selected_tool_names", ())),
+            "stage_capability_contract_digests": []
+            if self.stage_execution_plan is None
+            else list(self.stage_execution_plan.get("capability_contract_digests", ())),
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -3591,6 +3922,9 @@ class AutonomousWorkflowStageResult:
             "validation_errors": list(self.validation_errors),
             "attempt": self.attempt,
             "response_digest": self.response_digest,
+            "stage_execution_plan": None
+            if self.stage_execution_plan is None
+            else dict(self.stage_execution_plan),
             "result": None if self.result is None else self.result.to_dict(),
             "retention": "provider_result_returned_to_caller; checkpoint_is_structured_only",
         }
@@ -3962,6 +4296,19 @@ class AutonomousPromptBuilder:
                     "priority": 994,
                 }
             )
+        runtime_stage_plan = spec.context.get(_AUTONOMOUS_WORKFLOW_STAGE_PLAN_CONTEXT_KEY)
+        if runtime_stage_plan is not None:
+            if not isinstance(runtime_stage_plan, Mapping):
+                raise BrainRunError("autonomous workflow stage plan context must be a mapping")
+            context.append(
+                {
+                    "id": "autonomy-workflow-stage-plan",
+                    "role": "developer",
+                    "content": _json_text(runtime_stage_plan),
+                    "required": True,
+                    "priority": 993,
+                }
+            )
         elif capability_contract is not None:
             if not isinstance(capability_contract, AutonomousCapabilityContract):
                 raise BrainRunError("capability_contract must be an AutonomousCapabilityContract or None")
@@ -4025,6 +4372,7 @@ class AutonomousPromptBuilder:
             if key not in {
                 _AUTONOMOUS_EXECUTION_PLAN_CONTEXT_KEY,
                 _AUTONOMOUS_CAPABILITY_CONTRACT_CONTEXT_KEY,
+                _AUTONOMOUS_WORKFLOW_STAGE_PLAN_CONTEXT_KEY,
             }
         }
         if user_context:
@@ -5132,6 +5480,16 @@ class AutonomousTaskOrchestrator:
                 raise BrainRunError("autonomous execution plan context is missing digest or status")
             selection_context["execution_plan_digest"] = plan_digest
             selection_context["execution_plan_status"] = plan_status
+        runtime_stage_plan = spec.context.get(_AUTONOMOUS_WORKFLOW_STAGE_PLAN_CONTEXT_KEY)
+        if runtime_stage_plan is not None:
+            if not isinstance(runtime_stage_plan, Mapping):
+                raise BrainRunError("autonomous workflow stage plan context must be a mapping")
+            stage_plan_digest = runtime_stage_plan.get("stage_plan_digest")
+            stage_id = runtime_stage_plan.get("stage_id")
+            if not isinstance(stage_plan_digest, str) or not isinstance(stage_id, str):
+                raise BrainRunError("autonomous workflow stage plan context is missing digest or stage_id")
+            selection_context["stage_execution_plan_digest"] = stage_plan_digest
+            selection_context["stage_id"] = stage_id
         prompt = AutonomousPromptBuilder.build(
             spec,
             profile,
@@ -5942,6 +6300,7 @@ class AutonomousTaskOrchestrator:
         selection_overrides: Mapping[str, Any] | None = None,
         approve_provider_call: bool = False,
         approve_mission_dispatch: bool = False,
+        approved_stage_ids: Sequence[str] = (),
         run_id: str | None = None,
         max_output_tokens: int = 2_048,
         temperature: float | None = None,
@@ -5991,6 +6350,19 @@ class AutonomousTaskOrchestrator:
         )
         if not isinstance(auto_route, bool):
             raise BrainRunError("auto_route must be a boolean")
+        approved_stage_ids = _sequence(
+            "workflow approved_stage_ids",
+            approved_stage_ids,
+            maximum=len(blueprint.workflow.stages),
+        )
+        unknown_approved_stages = sorted(
+            set(approved_stage_ids).difference(stage.id for stage in blueprint.workflow.stages)
+        )
+        if unknown_approved_stages:
+            raise BrainRunError(
+                "workflow approved_stage_ids contains unknown stages: "
+                + ", ".join(unknown_approved_stages)
+            )
         if bandit_state is not None:
             if not isinstance(bandit_state, Mapping):
                 raise BrainRunError("bandit_state must be a mapping or None")
@@ -6680,6 +7052,35 @@ class AutonomousTaskOrchestrator:
                     ),
                     tuple(remaining),
                 )
+            stage_execution_plan = compile_autonomous_workflow_stage_execution_plan(
+                blueprint,
+                ready,
+                execution_plan_context=execution_plan_context,
+                provider_tools=provider_tools,
+            )
+            if ready.approval_required and ready.id not in set(approved_stage_ids):
+                stage_report = AutonomousWorkflowStageResult(
+                    stage=ready,
+                    execution_status="approval_required",
+                    declared_status=None,
+                    result=None,
+                    structured=None,
+                    validation_errors=("workflow_stage_approval_required",),
+                    stage_execution_plan=stage_execution_plan.to_dict(),
+                )
+                return AutonomousWorkflowRun(
+                    workflow_run_id,
+                    "approval_required",
+                    blueprint,
+                    (stage_report,),
+                    self._workflow_checkpoint(
+                        run_id=workflow_run_id,
+                        blueprint=blueprint,
+                        snapshots=tuple(snapshots.values()),
+                        plan_refinement_digest=plan_refinement_digest,
+                    ),
+                    (ready.id,),
+                )
             calls += 1
             stage_task = _text(
                 "workflow stage task",
@@ -6714,12 +7115,17 @@ class AutonomousTaskOrchestrator:
             }
             if execution_plan_context is not None:
                 stage_context[_AUTONOMOUS_EXECUTION_PLAN_CONTEXT_KEY] = dict(execution_plan_context)
+            stage_context[_AUTONOMOUS_WORKFLOW_STAGE_PLAN_CONTEXT_KEY] = stage_execution_plan.to_dict()
+            stage_provider_tools = tuple(
+                tool for tool in provider_tools
+                if tool.name in set(stage_execution_plan.selected_tool_names)
+            )
             stage_result = self.run(
                 task=stage_task,
                 domain=blueprint.spec.domain,
                 model_candidates=model_candidates,
                 credentials=credentials,
-                capability=blueprint.spec.capability,
+                capability=ready.required_capabilities[0],
                 risk_class=blueprint.spec.risk_class,
                 constraints=blueprint.spec.constraints,
                 desired_outputs=ready.evidence_outputs,
@@ -6753,7 +7159,7 @@ class AutonomousTaskOrchestrator:
                 auto_route=auto_route,
                 enforce_route_tools=enforce_route_tools,
                 require_resolved_route=require_resolved_route,
-                provider_tools=provider_tools,
+                provider_tools=stage_provider_tools,
                 tool_choice=tool_choice,
                 max_provider_failovers=max_provider_failovers,
                 tool_loop_options=tool_loop_options,
@@ -6779,6 +7185,7 @@ class AutonomousTaskOrchestrator:
                 validation_errors=errors,
                 response_digest=response_digest,
                 attempt=1,
+                stage_execution_plan=stage_execution_plan.to_dict(),
             )
             stage_results.append(stage_report)
             snapshot = stage_report.checkpoint_snapshot()
@@ -6866,6 +7273,7 @@ class AutonomousTaskOrchestrator:
         blueprint: AutonomousTaskBlueprint,
         stage: AutonomousWorkflowStage,
         raw: Mapping[str, Any] | None,
+        stage_execution_plan: Mapping[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         if raw is None:
             return None
@@ -6896,21 +7304,42 @@ class AutonomousTaskOrchestrator:
         for reference in references:
             _workflow_digest(reference, f"workflow stage {stage.id} reference")
         limitations = _sequence(f"workflow stage {stage.id} limitations", limitations, maximum=32)
+        evidence = {
+            "schema": AUTONOMOUS_WORKFLOW_EVALUATOR_SCHEMA,
+            "workflow_id": blueprint.workflow.workflow_id,
+            "workflow_digest": blueprint.workflow.workflow_digest,
+            "stage_id": stage.id,
+            "required_signals": list(stage.evaluator_signals),
+            "domain": blueprint.domain_pack.domain,
+            "capability": stage.required_capabilities[0] if stage.required_capabilities else blueprint.spec.capability,
+            "risk_class": blueprint.spec.risk_class,
+            "signals": normalized_signals,
+            "references": list(references),
+            "limitations": list(limitations),
+        }
+        if stage_execution_plan is not None:
+            if not isinstance(stage_execution_plan, Mapping):
+                raise BrainRunError("workflow stage execution plan evidence must be a mapping")
+            stage_plan_digest = stage_execution_plan.get("stage_plan_digest")
+            contract_digests = stage_execution_plan.get("capability_contract_digests", ())
+            selected_tool_names = stage_execution_plan.get("selected_tool_names", ())
+            if not isinstance(stage_plan_digest, str):
+                raise BrainRunError("workflow stage evidence is missing stage_plan_digest")
+            _workflow_digest(stage_plan_digest, "workflow stage evidence stage_plan_digest")
+            if not isinstance(contract_digests, Sequence) or isinstance(contract_digests, (str, bytes)):
+                raise BrainRunError("workflow stage evidence capability_contract_digests must be a sequence")
+            for digest in contract_digests:
+                _workflow_digest(digest, "workflow stage evidence capability contract digest")
+            if not isinstance(selected_tool_names, Sequence) or isinstance(selected_tool_names, (str, bytes)):
+                raise BrainRunError("workflow stage evidence selected_tool_names must be a sequence")
+            evidence["stage_plan_digest"] = stage_plan_digest
+            evidence["capability_contract_digests"] = list(contract_digests)
+            evidence["selected_tool_names"] = list(
+                _sequence("workflow stage evidence selected_tool_names", selected_tool_names, maximum=64)
+            )
         return _safe_json(
             f"workflow stage {stage.id} evidence",
-            {
-                "schema": AUTONOMOUS_WORKFLOW_EVALUATOR_SCHEMA,
-                "workflow_id": blueprint.workflow.workflow_id,
-                "workflow_digest": blueprint.workflow.workflow_digest,
-                "stage_id": stage.id,
-                "required_signals": list(stage.evaluator_signals),
-                "domain": blueprint.domain_pack.domain,
-                "capability": stage.required_capabilities[0] if stage.required_capabilities else blueprint.spec.capability,
-                "risk_class": blueprint.spec.risk_class,
-                "signals": normalized_signals,
-                "references": list(references),
-                "limitations": list(limitations),
-            },
+            evidence,
             maximum=250_000,
         )
 
@@ -6995,6 +7424,7 @@ class AutonomousTaskOrchestrator:
                     blueprint,
                     stage_result.stage,
                     None if stage_evidence is None else stage_evidence.get(stage_result.stage.id),
+                    stage_result.stage_execution_plan,
                 )
                 decision, report = resolved_evaluator.evaluate_and_record_with_decision(
                     self.brain,
@@ -7187,6 +7617,7 @@ class AutonomousTaskOrchestrator:
                     blueprint,
                     stage_result.stage,
                     None if stage_evidence is None else stage_evidence.get(stage_result.stage.id),
+                    stage_result.stage_execution_plan,
                 )
             )
 
@@ -9443,7 +9874,11 @@ class AutonomousAgent:
                 )
         if capability_contract is not None and not isinstance(capability_contract, Mapping):
             raise BrainRunError("capability contract must be a mapping")
-        for reserved_key in (_AUTONOMOUS_EXECUTION_PLAN_CONTEXT_KEY, _AUTONOMOUS_CAPABILITY_CONTRACT_CONTEXT_KEY):
+        for reserved_key in (
+            _AUTONOMOUS_EXECUTION_PLAN_CONTEXT_KEY,
+            _AUTONOMOUS_CAPABILITY_CONTRACT_CONTEXT_KEY,
+            _AUTONOMOUS_WORKFLOW_STAGE_PLAN_CONTEXT_KEY,
+        ):
             caller_context = resolved_options.get("context")
             if isinstance(caller_context, Mapping) and reserved_key in caller_context:
                 raise BrainRunError("context cannot override an autonomous runtime contract")
@@ -10350,9 +10785,11 @@ __all__ = [
     "MAX_AUTONOMOUS_EXECUTION_PLAN_BYTES",
     "AUTONOMOUS_CAPABILITY_CONTRACT_SCHEMA",
     "AUTONOMOUS_CAPABILITY_PLAN_SCHEMA",
+    "AUTONOMOUS_WORKFLOW_STAGE_PLAN_SCHEMA",
     "AUTONOMOUS_CAPABILITY_PLAN_STATUSES",
     "MAX_AUTONOMOUS_CAPABILITY_CONTRACTS",
     "MAX_AUTONOMOUS_CAPABILITY_PLAN_BYTES",
+    "MAX_AUTONOMOUS_WORKFLOW_STAGE_PLAN_BYTES",
     "AUTONOMOUS_ROUTE_REASONS",
     "MAX_AUTONOMOUS_ROUTE_CANDIDATES",
     "MAX_AUTONOMOUS_ROUTE_DOMAINS",
@@ -10369,6 +10806,8 @@ __all__ = [
     "AutonomousDomainPack",
     "AutonomousDomainPackRegistry",
     "AutonomousCapabilityContract",
+    "AutonomousWorkflowStageExecutionPlan",
+    "compile_autonomous_workflow_stage_execution_plan",
     "compile_autonomous_domain_execution_plan",
     "AutonomousRouteCandidate",
     "AutonomousRouteProposal",

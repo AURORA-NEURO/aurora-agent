@@ -10,6 +10,8 @@ from prism_sdk import (
     AutonomousDomainToolBinding,
     AutonomousDomainToolRegistry,
     BrainRunError,
+    compile_autonomous_workflow_stage_execution_plan,
+    DomainEvaluationEvidence,
     LLMRuntime,
     ModelCatalogue,
     plan_mcp_catalogue_bindings,
@@ -287,3 +289,141 @@ def test_approval_gated_capability_needs_capability_approval_separate_from_provi
             credentials={},
             approve_provider_call=True,
         )
+
+
+def test_stage_execution_plan_narrows_tools_and_binds_evidence_contracts():
+    registry = AutonomousDomainToolRegistry(
+        [
+            AutonomousDomainTool(
+                name="repository_catalog",
+                domains=("coding",),
+                capability="repository_inspection",
+                description="Read bounded repository metadata.",
+                parameters={"type": "object"},
+            ),
+            AutonomousDomainTool(
+                name="ci_evidence_audit",
+                domains=("coding",),
+                capability="ci_evidence_audit",
+                description="Read bounded CI evidence.",
+                parameters={"type": "object"},
+            ),
+        ]
+    )
+    agent = AutonomousAgent(
+        _Workspace(),
+        LLMRuntime(),
+        model_catalogue=ModelCatalogue([_model()]),
+        tool_registry=registry,
+    )
+    blueprint = agent.prepare(task="inspect a bounded repository failure", domain="coding")
+    execution_plan = agent.domain_execution_plan("coding")
+    inspect = next(stage for stage in blueprint.workflow.stages if stage.id == "inspect")
+    provider_tools = tuple(registry.provider_tools(("coding",)))
+
+    stage_plan = compile_autonomous_workflow_stage_execution_plan(
+        blueprint,
+        inspect,
+        execution_plan_context=execution_plan,
+        provider_tools=provider_tools,
+    )
+
+    assert stage_plan.execution_posture == "tool_backed"
+    assert stage_plan.selected_tool_names == ("ci_evidence_audit", "repository_catalog")
+    assert set(stage_plan.required_capabilities) == {"review", "debugging"}
+    assert stage_plan.evidence_outputs == ("observations", "evidence_gaps")
+    assert stage_plan.evaluator_signals == ("evidence_complete",)
+    assert stage_plan.stage_plan_digest
+    assert len(stage_plan.capability_contract_digests) == 2
+    public = json.dumps(stage_plan.to_dict())
+    assert "inspect a bounded repository failure" not in public
+    assert "api_key" not in public
+
+    tampered_plan = json.loads(json.dumps(execution_plan))
+    tampered_contract = next(
+        row for row in tampered_plan["capabilities"]["contracts"]
+        if row["capability"] == "debugging"
+    )
+    tampered_contract["contract_digest"] = "d" * 64
+    with pytest.raises(BrainRunError, match="stale capability contract"):
+        compile_autonomous_workflow_stage_execution_plan(
+            blueprint,
+            inspect,
+            execution_plan_context=tampered_plan,
+            provider_tools=provider_tools,
+        )
+
+
+def test_workflow_stage_plan_is_retained_in_checkpoint_and_learning_evidence():
+    agent = AutonomousAgent(
+        _Workspace(),
+        LLMRuntime(),
+        model_catalogue=ModelCatalogue([_model()]),
+    )
+    blueprint = agent.prepare(task="prepare a bounded coding workflow", domain="coding")
+    inspect = next(stage for stage in blueprint.workflow.stages if stage.id == "inspect")
+    stage_plan = compile_autonomous_workflow_stage_execution_plan(blueprint, inspect)
+    checkpoint = blueprint.workflow.stage_response_schema("inspect")
+    assert checkpoint["required"]
+    evidence = agent.orchestrator._workflow_stage_evidence(
+        blueprint,
+        inspect,
+        {"signals": {"evidence_complete": True}},
+        stage_plan.to_dict(),
+    )
+
+    assert evidence is not None
+    assert evidence["stage_plan_digest"] == stage_plan.stage_plan_digest
+    assert evidence["capability_contract_digests"] == list(stage_plan.capability_contract_digests)
+    assert evidence["selected_tool_names"] == []
+
+
+def test_stage_execution_plan_compiles_every_stage_in_every_builtin_domain():
+    agent = AutonomousAgent(
+        _Workspace(),
+        LLMRuntime(),
+        model_catalogue=ModelCatalogue([_model()]),
+    )
+
+    compiled = []
+    expected_count = 0
+    for domain in AUTONOMOUS_DOMAINS:
+        blueprint = agent.prepare(task=f"prepare a bounded {domain} workflow", domain=domain)
+        execution_plan = agent.domain_execution_plan(domain)
+        expected_count += len(blueprint.workflow.stages)
+        for stage in blueprint.workflow.stages:
+            stage_plan = compile_autonomous_workflow_stage_execution_plan(
+                blueprint,
+                stage,
+                execution_plan_context=execution_plan,
+            )
+            compiled.append(stage_plan)
+            assert stage_plan.domain == domain
+            assert stage_plan.stage_id == stage.id
+            assert stage_plan.required_capabilities
+            assert stage_plan.evidence_outputs == stage.evidence_outputs
+            assert stage_plan.evaluator_signals == stage.evaluator_signals
+            assert stage_plan.stage_plan_digest
+
+    assert len(compiled) == expected_count
+    assert len(compiled) >= len(AUTONOMOUS_DOMAINS) * 4
+
+
+def test_evaluator_evidence_round_trips_stage_contract_digests_as_value_only_data():
+    stage_plan = "a" * 64
+    contract_digests = ("b" * 64, "c" * 64)
+    evidence = DomainEvaluationEvidence.from_mapping(
+        {
+            "domain": "coding",
+            "capability": "debugging",
+            "risk_class": "read_only_analysis",
+            "signals": {"evidence_complete": True},
+            "stage_plan_digest": stage_plan,
+            "capability_contract_digests": list(contract_digests),
+            "selected_tool_names": ["repository_catalog"],
+        }
+    )
+
+    assert evidence.stage_plan_digest == stage_plan
+    assert evidence.capability_contract_digests == contract_digests
+    assert evidence.to_dict()["selected_tool_names"] == ["repository_catalog"]

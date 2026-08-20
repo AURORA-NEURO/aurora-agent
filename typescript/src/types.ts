@@ -460,6 +460,33 @@ export interface AutonomousCapabilityPlans extends JsonObject {
   secret_material: string;
 }
 
+/** Exact, digest-bound runtime handoff for one workflow stage. */
+export interface AutonomousWorkflowStageExecutionPlan extends JsonObject {
+  schema: "bioprism-python-autonomous-workflow-stage-plan/0.1" | string;
+  domain: string;
+  workflow_id: string;
+  workflow_digest: string;
+  stage_id: string;
+  stage_objective: string;
+  required_capabilities: string[];
+  tool_capabilities: string[];
+  capability_contracts: AutonomousCapabilityContract[];
+  required_model_capabilities: string[];
+  evidence_outputs: string[];
+  evaluator_signals: string[];
+  active_tool_names: string[];
+  selected_tool_names: string[];
+  withheld_tool_names: string[];
+  approval_required: boolean;
+  read_only: boolean;
+  execution_posture: string;
+  source_plan_digest: string | null;
+  stage_plan_digest: string;
+  capability_contract_digests: string[];
+  credential_posture: string;
+  authority_posture: string;
+}
+
 /** Exact-domain held-out evaluator contract shared with the Python replay registry. */
 export interface AutonomousDomainEvaluatorProfile extends JsonObject {
   schema: "bioprism-brain-domain-evaluator/0.1" | string;

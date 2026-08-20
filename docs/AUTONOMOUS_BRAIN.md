@@ -1829,6 +1829,35 @@ caller must pass `approve_capability=True`; this is intentionally separate from
 `approve_provider_call=True`, because provider transport approval is not operational or business
 approval.
 
+Workflow execution compiles the same contract one stage at a time. Each stage receives an
+`AutonomousWorkflowStageExecutionPlan` containing its exact objective, required capabilities,
+selected and withheld tool names, model capability requirements, evidence outputs, evaluator
+signals, approval posture, and immutable `stage_plan_digest`. The packet is included in the
+reserved developer context, the checkpoint snapshot, and the value-only evaluator evidence. This
+keeps later evaluation and learning tied to the approved stage boundary instead of treating a
+provider response as proof that the stage's evidence contract was satisfied.
+
+```python
+workflow_run = agent.run_workflow(
+    task="inspect, implement, and verify the requested change",
+    domain="coding",
+    credentials=session,
+    approve_provider_call=True,
+    approved_stage_ids=("approval",),  # only needed when the selected stage is gated
+)
+
+for stage in workflow_run.stage_results:
+    print(stage.stage.id, stage.stage_execution_plan["stage_plan_digest"])
+```
+
+An approval-gated stage returns `status == "approval_required"` without invoking the provider or
+executing a tool. The caller can review the stage packet and resume with that exact stage ID in
+`approved_stage_ids`; provider approval remains a separate gate. Resumption rehydrates the
+checkpoint and preserves the stage packet digest, selected tool names, and capability-contract
+digests, so delayed-credit bandit updates can be scoped to the actual stage boundary. The packet
+is metadata only: it never carries task text, arguments, provider output, credentials, or effect
+authority.
+
 `execution_plans()` compiles all twelve built-in domains for readiness dashboards and startup
 diagnostics. The possible plan states are `ready`, `degraded_tool_coverage`, `provider_pending`,
 `activation_review_required`, `stale`, `revoked`, and `model_gap`. A plan is descriptive only:
