@@ -158,7 +158,7 @@ const FORBIDDEN_KEYS = new Set([
   "prompt", "messages", "response", "content", "raw", "body", "headers", "arguments", "input", "output", "task",
 ]);
 const SECRET_PATTERNS = [
-  /(?i:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|password|authorization|secret)\s*[:=]\s*\S+/i,
+  /(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|password|authorization|secret)\s*[:=]\s*\S+/i,
   /\bbearer\s+[A-Za-z0-9._~+/=-]{16,}/i,
   /\b(?:sk|rk|pk)-[A-Za-z0-9_-]{16,}\b/,
 ];

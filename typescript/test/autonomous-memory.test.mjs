@@ -84,6 +84,7 @@ test("episodic memory records value-only episodes, evaluates them, queries every
   assert.equal(serialized.includes("api_key"), false);
   await assert.rejects(memory.recordEpisode({ ...(await episodeInput("coding", "secret-episode")), prompt: "private prompt" }), /forbidden/);
   await assert.rejects(memory.recordEpisode({ ...(await episodeInput("coding", "secret-episode-2")), provenance: { api_key: "sk-secret-value" } }), /forbidden/);
+  await assert.rejects(memory.recordEpisode({ ...(await episodeInput("coding", "secret-episode-3")), lesson: "authorization: top-secret-value" }), /secret material/);
 });
 
 test("episodic memory snapshots restore integrity and refuse tampering", async () => {
