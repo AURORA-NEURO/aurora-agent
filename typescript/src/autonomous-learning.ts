@@ -709,6 +709,7 @@ export class AutonomousLearningController {
     assertRewardInput(input);
     const creditedReward = boundedReward("credited reward", options.creditedReward ?? input.reward);
     if (!this.agent.learner) throw new ArgumentError("learning settlement requires an AutonomousOnlineLearner on the agent");
+    const creditedOutcomeDigest = await digestJson({ run_id: episode.run.run_id, outcome_digest: episode.run.outcome_digest });
     const assessment: BrainEvaluatorAssessment = {
       evaluator_id: input.evaluator_id,
       evaluator_version: input.evaluator_version,
@@ -725,14 +726,14 @@ export class AutonomousLearningController {
     const armId = `${episode.run.provider}/${episode.run.model}`;
     if (options.remote === true) {
       if (!this.apiClient || typeof this.apiClient.brainOutcomeRecord !== "function") throw new ArgumentError("remote learning settlement requires an ApiClient with brainOutcomeRecord");
-      const projected = projectOutcome(await this.apiClient.brainOutcomeRecord({ run: episode.run, assessment, bandit_state: this.agent.learner.snapshot(), arm_id: armId }));
+      const projected = projectOutcome(await this.apiClient.brainOutcomeRecord({ run: episode.run, assessment, bandit_state: this.agent.learner.snapshot(), arm_id: armId, idempotency_key: `episode:${episode.episode_id}` }));
       if (!projected.next_state || !Array.isArray(projected.next_state.arms) || !projected.learning_evidence) throw new ProviderRuntimeError("brain outcome record returned an incomplete learning projection");
       nextState = projected.next_state;
       learningEvidence = projected.learning_evidence;
-      this.agent.learner.update({ arm_id: armId, reward: creditedReward, failed: assessment.failed, outcome_digest: episode.run.outcome_digest });
+      this.agent.learner.update({ arm_id: armId, reward: creditedReward, failed: assessment.failed, outcome_digest: projected.learning_evidence.bandit_update?.outcome_digest ?? creditedOutcomeDigest, contract_digest: projected.learning_evidence.bandit_update?.contract_digest ?? null });
       remote = true;
     } else {
-      nextState = await this.agent.recordEvaluatorReward(armId, creditedReward, { failed: assessment.failed, outcomeDigest: episode.run.outcome_digest });
+      nextState = await this.agent.recordEvaluatorReward(armId, creditedReward, { failed: assessment.failed, outcomeDigest: creditedOutcomeDigest });
     }
     const settlementBase = { evaluation_digest: input.evidence_digest ?? null, reward: input.reward, credited_reward: creditedReward, next_generation: boundedGeneration(nextState.generation ?? 0), settled_at: Date.now() };
     const settlement: AutonomousLearningSettlementMetadata = { ...settlementBase, settlement_digest: await digestJson(settlementBase) };

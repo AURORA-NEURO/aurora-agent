@@ -96,9 +96,10 @@ def test_delayed_learning_episode_is_restart_safe_and_settles_once(tmp_path) -> 
         evaluator_id="quality-evaluator",
         evaluator_version="1",
     )
+    restored_episode = restored.pending_episodes()[0]
     decision, report = evaluator.evaluate_episode(
         brain,
-        restored.pending_episodes()[0],
+        restored_episode,
         bandit_state=_empty_state(),
         evidence={"quality": 0.9},
         ledger=restored,
@@ -112,6 +113,7 @@ def test_delayed_learning_episode_is_restart_safe_and_settles_once(tmp_path) -> 
     assert isinstance(sent_state, dict)
     assert sent_state["arms"][0]["arm_id"] == "openai/model-a"  # type: ignore[index]
     assert outcome_call["run"]["outcome_digest"] == "e" * 64  # type: ignore[index]
+    assert outcome_call["idempotency_key"] == f"episode:{restored_episode.episode_id}"
 
     with pytest.raises(BrainRunError, match="already settled"):
         evaluator.evaluate_episode(

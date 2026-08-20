@@ -1777,6 +1777,7 @@ export class ApiClient {
   ): Promise<RestToolResponse<BrainOutcomeRecordResult>> {
     if (!isObject(args) || !isObject(args.run) || !isObject(args.assessment) || !isObject(args.bandit_state) || !Array.isArray(args.bandit_state.arms)) throw new ArgumentError("brain outcome record must contain run, assessment, and bandit_state.arms");
     if (typeof args.arm_id !== "string" || !args.arm_id.trim()) throw new ArgumentError("brain outcome record arm_id must be a non-empty string");
+    if (args.idempotency_key !== undefined && (typeof args.idempotency_key !== "string" || !args.idempotency_key.trim() || args.idempotency_key.length > 256)) throw new ArgumentError("brain outcome record idempotency_key must be a bounded non-empty string");
     if (typeof args.assessment.reward !== "number" || typeof args.assessment.passed !== "boolean") throw new ArgumentError("brain outcome assessment must contain reward and passed");
     return this.callTool<BrainOutcomeRecordResult>("brain_outcome_record", args, options);
   }

@@ -1191,6 +1191,18 @@ export class AutonomousOnlineLearner {
   /** Apply an explicit evaluator reward. Provider success alone is not treated as task quality. */
   update(update: BrainBanditUpdate): BrainBanditState {
     if (!isObject(update) || typeof update.arm_id !== "string" || !update.arm_id.trim() || typeof update.reward !== "number" || !Number.isFinite(update.reward) || update.reward < 0 || update.reward > 1) throw new ArgumentError("online learner update requires an arm_id and reward within [0, 1]");
+    const creditedOutcomes = [...(this.stateValue.credited_outcomes ?? [])];
+    if (update.outcome_digest !== undefined && update.outcome_digest !== null) {
+      if (typeof update.outcome_digest !== "string" || !/^[0-9a-f]{64}$/.test(update.outcome_digest)) throw new ArgumentError("online learner outcome_digest must be a lowercase SHA-256 digest");
+      const prior = creditedOutcomes.find((receipt) => receipt.outcome_digest === update.outcome_digest);
+      if (prior) {
+        if (prior.arm_id !== update.arm_id || prior.reward !== update.reward || Boolean(prior.failed) !== Boolean(update.failed) || (prior.contract_digest ?? null) !== (update.contract_digest ?? null)) throw new ArgumentError("online learner replayed outcome has contradictory evaluator evidence");
+        return this.snapshot();
+      }
+      if (creditedOutcomes.length >= 4096) throw new ArgumentError("online learner credited outcome ledger is full");
+      if (update.contract_digest !== undefined && update.contract_digest !== null && (typeof update.contract_digest !== "string" || !/^[0-9a-f]{64}$/.test(update.contract_digest))) throw new ArgumentError("online learner contract_digest must be a lowercase SHA-256 digest");
+      creditedOutcomes.push({ outcome_digest: update.outcome_digest, arm_id: update.arm_id, reward: update.reward, failed: update.failed ?? false, contract_digest: update.contract_digest ?? null });
+    }
     const arms = this.stateValue.arms.map((arm) => ({ ...arm }));
     const existing = arms.find((arm) => arm.arm_id === update.arm_id);
     if (existing) {
@@ -1200,13 +1212,15 @@ export class AutonomousOnlineLearner {
     } else {
       arms.push({ arm_id: update.arm_id, pulls: 1, reward_sum: update.reward, failures: update.failed ? 1 : 0 });
     }
-    this.stateValue = { ...this.stateValue, generation: (this.stateValue.generation ?? 0) + 1, policy: this.policy, arms: arms.sort((left, right) => left.arm_id.localeCompare(right.arm_id)) };
+    this.stateValue = { ...this.stateValue, generation: (this.stateValue.generation ?? 0) + 1, policy: this.policy, arms: arms.sort((left, right) => left.arm_id.localeCompare(right.arm_id)), credited_outcomes: creditedOutcomes };
     this.assertState();
     return this.snapshot();
   }
 
   private assertState(): void {
     if (!isObject(this.stateValue) || !Array.isArray(this.stateValue.arms) || this.stateValue.arms.length > 128) throw new ArgumentError("online learner state is malformed");
+    const creditedOutcomes = this.stateValue.credited_outcomes ?? [];
+    if (!Array.isArray(creditedOutcomes) || creditedOutcomes.length > 4096 || creditedOutcomes.some((receipt) => !isObject(receipt) || typeof receipt.outcome_digest !== "string" || !/^[0-9a-f]{64}$/.test(receipt.outcome_digest) || typeof receipt.arm_id !== "string" || !receipt.arm_id.trim() || typeof receipt.reward !== "number" || !Number.isFinite(receipt.reward) || receipt.reward < 0 || receipt.reward > 1 || (receipt.failed !== undefined && typeof receipt.failed !== "boolean") || (receipt.contract_digest !== undefined && receipt.contract_digest !== null && (typeof receipt.contract_digest !== "string" || !/^[0-9a-f]{64}$/.test(receipt.contract_digest)))) || new Set(creditedOutcomes.map((receipt) => receipt.outcome_digest)).size !== creditedOutcomes.length) throw new ArgumentError("online learner credited outcome ledger is malformed");
     for (const arm of this.stateValue.arms) {
       if (typeof arm.arm_id !== "string" || !arm.arm_id.trim() || !Number.isSafeInteger(arm.pulls ?? 0) || (arm.pulls ?? 0) < 0 || typeof (arm.reward_sum ?? 0) !== "number" || !Number.isFinite(arm.reward_sum ?? 0)) throw new ArgumentError("online learner arm is malformed");
     }
@@ -1215,7 +1229,7 @@ export class AutonomousOnlineLearner {
 
 function cloneBanditState(state: BrainBanditState): BrainBanditState {
   if (!isObject(state) || !Array.isArray(state.arms)) throw new ArgumentError("bandit state must contain arms");
-  return { schema: typeof state.schema === "string" ? state.schema : "bioprism-brain-bandit-state/0.1", generation: state.generation ?? 0, policy: state.policy ? { ...state.policy } : undefined, arms: state.arms.map((arm) => ({ ...arm })) };
+  return { schema: typeof state.schema === "string" ? state.schema : "bioprism-brain-bandit-state/0.1", generation: state.generation ?? 0, policy: state.policy ? { ...state.policy } : undefined, arms: state.arms.map((arm) => ({ ...arm })), credited_outcomes: (state.credited_outcomes ?? []).map((receipt) => ({ ...receipt })) };
 }
 
 /** Adapt the TypeScript runtime to the value-only Rust/Python contextual selector. */

@@ -286,6 +286,9 @@ Learning episodes can only be prepared from a completed autonomous run; approval
 refusals, child failures, and tool-loop limits cannot be converted into evaluator or bandit credit.
 Trajectory settlement is resumable after a later episode failure: matching already-settled reward
 projections are skipped, while changed reward evidence is refused.
+Remote settlement also uses an episode idempotency key and a bounded credited-outcome receipt. A
+retry after a crash is a no-op for the same arm/reward/failure contract; contradictory evidence is
+rejected, including after the caller rehydrates the persisted bandit state.
 
 Ambiguous tasks now have a real fan-out/fan-in path. `blueprint()` returns a
 `cross_domain_blueprint` containing one child workflow per selected domain plus a cross-domain

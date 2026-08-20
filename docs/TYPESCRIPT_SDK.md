@@ -1707,6 +1707,14 @@ payload, credential handle, or evaluator evidence packet. Local settlement updat
 value-only projection, and then reconciles the same explicit reward into local state. Remote
 settlement requires an `ApiClient` and never sends the private specification.
 
+Remote episode settlement sends an idempotency key derived from the caller-owned episode identity.
+The Rust brain and MCP transport retain only bounded value-only receipts: a retry returns the same
+projection and does not increment the arm again, even if the crash happened after the local learner
+updated but before the episode store marked the row settled. The receipt also binds arm, reward,
+and failure metadata, so reusing an episode key with changed evaluator evidence is refused. The
+bandit state carries up to 4096 credited receipts for restart-safe replay after the MCP process
+cache is gone.
+
 `prepareTrajectory()` and `settleTrajectory()` provide delayed credit for a bounded sequence of
 episodes. Rewards are scored in reverse order as `clamp(reward + discount * next_return, 0, 1)`;
 the original evaluator reward and the credited reward remain distinguishable in settlement

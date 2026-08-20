@@ -14,6 +14,7 @@
 //! application-owned job store and recreate this projection on startup. The process boundary is
 //! explicit in every response so an in-memory MCP session cannot be mistaken for a durable queue.
 
+use bioprism_brain::{record_brain_outcome, BrainOutcomeRecordRequest};
 use bioprism_ids::ContentHash;
 use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -33,6 +34,7 @@ const MAX_REASON_BYTES: usize = 2_048;
 const MAX_SIGNAL_COUNT: usize = 64;
 const MAX_REFERENCE_COUNT: usize = 64;
 const MAX_LIMITATION_COUNT: usize = 32;
+const MAX_OUTCOME_RECORDS: usize = 4096;
 
 #[derive(Clone, Default)]
 pub(crate) struct BrainControlState {
@@ -42,6 +44,7 @@ pub(crate) struct BrainControlState {
     head_digest: String,
     next_sequence: u64,
     health: BTreeMap<(String, String), HealthRecord>,
+    outcome_records: BTreeMap<String, OutcomeRecord>,
 }
 
 #[derive(Clone)]
@@ -82,7 +85,86 @@ struct HealthRecord {
     eligible: bool,
 }
 
+#[derive(Clone)]
+struct OutcomeRecord {
+    contract_digest: String,
+    report: Value,
+}
+
 impl BrainControlState {
+    /// Record one evaluator outcome with an in-process idempotency barrier.
+    ///
+    /// The durable bandit state remains caller-owned. This bounded cache only closes the common
+    /// retry window while an MCP process is alive; the credited outcome digest in the returned
+    /// state is what makes the update replay-safe after the caller or server restarts.
+    pub(crate) fn outcome_record(&mut self, arguments: &Value) -> Result<Value, String> {
+        let object = object(arguments, "brain_outcome_record")?;
+        reject_unknown(
+            object,
+            &[
+                "run",
+                "assessment",
+                "bandit_state",
+                "arm_id",
+                "idempotency_key",
+            ],
+        )?;
+        let idempotency_key = object
+            .get("idempotency_key")
+            .map(|value| bounded_text(value, "idempotency_key", MAX_ID_BYTES))
+            .transpose()?;
+        let request: BrainOutcomeRecordRequest = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid brain outcome record request: {error}"))?;
+        let contract_digest = digest_value(&json!({
+            "run": request.run.clone(),
+            "assessment": request.assessment.clone(),
+            "arm_id": request.arm_id.clone(),
+        }))?;
+        let idempotency_key_digest = idempotency_key
+            .as_ref()
+            .map(|key| digest_value(&json!(key)))
+            .transpose()?;
+
+        if let Some(key) = &idempotency_key {
+            if let Some(existing) = self.outcome_records.get(key) {
+                if existing.contract_digest != contract_digest {
+                    return Err(
+                        "idempotency_key is already bound to a different evaluator outcome contract"
+                            .into(),
+                    );
+                }
+                let mut replay = existing.report.clone();
+                replay["idempotent"] = json!(true);
+                replay["idempotency_key_digest"] = json!(digest_value(&json!(key))?);
+                return Ok(replay);
+            }
+            if self.outcome_records.len() >= MAX_OUTCOME_RECORDS {
+                return Err(format!(
+                    "brain outcome idempotency capacity is exhausted at {MAX_OUTCOME_RECORDS} records"
+                ));
+            }
+        }
+
+        let report = record_brain_outcome(&request)
+            .map_err(|error| format!("brain outcome record refused: {error}"))?;
+        let mut value = serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode brain learning evidence: {error}"))?;
+        value["idempotent"] = json!(false);
+        value["idempotency_key_digest"] = idempotency_key_digest
+            .map(|digest| json!(digest))
+            .unwrap_or(Value::Null);
+        if let Some(key) = idempotency_key {
+            self.outcome_records.insert(
+                key,
+                OutcomeRecord {
+                    contract_digest,
+                    report: value.clone(),
+                },
+            );
+        }
+        Ok(value)
+    }
+
     pub(crate) fn submit_job(&mut self, arguments: &Value) -> Result<Value, String> {
         let object = object(arguments, "brain_job_submit")?;
         reject_unknown(
@@ -1340,5 +1422,51 @@ mod tests {
                 .unwrap()["provider_health"]["openai"]["credential_ready"],
             json!(true)
         );
+    }
+
+    #[test]
+    fn keyed_outcome_record_replays_without_double_credit_and_rejects_contract_changes() {
+        let mut state = BrainControlState::default();
+        let arguments = json!({
+            "run": {
+                "run_id": "run-001",
+                "selection_digest": "a".repeat(64),
+                "prompt_digest": "b".repeat(64),
+                "plan_digest": "c".repeat(64),
+                "provider": "openai",
+                "model": "test-model",
+                "outcome_digest": "d".repeat(64)
+            },
+            "assessment": {
+                "evaluator_id": "quality",
+                "evaluator_version": "1",
+                "reward": 0.8,
+                "passed": true,
+                "failed": false
+            },
+            "bandit_state": {
+                "schema": "bioprism-brain-bandit/0.1",
+                "generation": 0,
+                "arms": [{
+                    "arm_id": "openai/test-model",
+                    "pulls": 0,
+                    "reward_sum": 0.0,
+                    "failures": 0,
+                    "disabled": false
+                }]
+            },
+            "arm_id": "openai/test-model",
+            "idempotency_key": "episode:run-001"
+        });
+        let first = state.outcome_record(&arguments).unwrap();
+        assert_eq!(first["idempotent"], json!(false));
+        let mut retry = arguments.clone();
+        retry["bandit_state"] = first["next_state"].clone();
+        let replay = state.outcome_record(&retry).unwrap();
+        assert_eq!(replay["idempotent"], json!(true));
+        assert_eq!(replay["next_state"], first["next_state"]);
+
+        retry["assessment"]["reward"] = json!(0.2);
+        assert!(state.outcome_record(&retry).is_err());
     }
 }

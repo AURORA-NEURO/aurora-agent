@@ -337,6 +337,18 @@ test("online learner adapts only from explicit evaluator rewards", async () => {
   assert.equal(learner.snapshot().generation, 2);
 });
 
+test("online learner does not double-credit a replayed evaluator outcome", async () => {
+  const learner = new AutonomousOnlineLearner();
+  const outcomeDigest = "a".repeat(64);
+  const first = learner.update({ arm_id: "a/one", reward: 0.8, outcome_digest: outcomeDigest });
+  const replay = learner.update({ arm_id: "a/one", reward: 0.8, outcome_digest: outcomeDigest });
+  assert.equal(first.generation, 1);
+  assert.deepEqual(replay, first);
+  assert.equal(replay.arms[0].pulls, 1);
+  assert.deepEqual(replay.credited_outcomes, [{ outcome_digest: outcomeDigest, arm_id: "a/one", reward: 0.8, failed: false, contract_digest: null }]);
+  assert.throws(() => learner.update({ arm_id: "a/one", reward: 0.1, outcome_digest: outcomeDigest }), /contradictory evaluator evidence/);
+});
+
 test("contextual selector bridge sends only model and health metadata to the control plane", async () => {
   let received;
   const apiClient = {

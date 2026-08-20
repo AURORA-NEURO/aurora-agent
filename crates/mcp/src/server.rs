@@ -112,10 +112,9 @@ use bioprism_bioevalx::{OutputVerdict, Reexecution, Trajectory, Worldline as Eva
 use bioprism_biolang::{compile as compile_bioql, QuerySchema};
 use bioprism_bioworlds::SliceCatalog;
 use bioprism_brain::{
-    assemble_prompt, plan_autonomous, record_brain_outcome, select_bandit_arm, select_model,
-    select_model_contextual, update_bandit, AutonomousPlanRequest, BanditState, BanditUpdate,
-    BrainOutcomeRecordRequest, ContextualModelSelectionRequest, ModelSelectionRequest,
-    PromptAssemblyRequest,
+    assemble_prompt, plan_autonomous, select_bandit_arm, select_model, select_model_contextual,
+    update_bandit, AutonomousPlanRequest, BanditState, BanditUpdate,
+    ContextualModelSelectionRequest, ModelSelectionRequest, PromptAssemblyRequest,
 };
 use bioprism_bundle::{
     KeyRegistry, PubliclyAttestedBundle, ResultBundle, TrustPolicy, VerificationKey,
@@ -2036,12 +2035,10 @@ impl Server {
     /// Bind one explicit evaluator judgment to a value-only run identity and advance the
     /// caller-owned bandit state. Provider text and credentials are never accepted here.
     fn brain_outcome_record(&self, arguments: &Value) -> Result<Value, String> {
-        let request: BrainOutcomeRecordRequest = serde_json::from_value(arguments.clone())
-            .map_err(|error| format!("invalid brain outcome record request: {error}"))?;
-        let report = record_brain_outcome(&request)
-            .map_err(|error| format!("brain outcome record refused: {error}"))?;
-        serde_json::to_value(report)
-            .map_err(|error| format!("cannot encode brain learning evidence: {error}"))
+        self.brain_control_state
+            .lock()
+            .map_err(|_| "brain control-plane state is unavailable".to_string())?
+            .outcome_record(arguments)
     }
 
     fn brain_job_submit(&self, arguments: &Value) -> Result<Value, String> {
@@ -35863,7 +35860,8 @@ pub fn tool_definitions() -> Vec<Value> {
                     "run": { "type": "object", "description": "Run ID plus selection, prompt, plan, and outcome SHA-256 digests and provider/model metadata; contains no response text." },
                     "assessment": { "type": "object", "description": "Explicit evaluator ID/version, bounded reward, pass/fail state, and optional value-free evidence metadata." },
                     "bandit_state": { "type": "object" },
-                    "arm_id": { "type": "string" }
+                    "arm_id": { "type": "string" },
+                    "idempotency_key": { "type": "string", "maxLength": 256, "description": "Optional caller-owned retry identity. Reusing it with a different evaluator contract is refused." }
                 },
                 "required": ["run", "assessment", "bandit_state", "arm_id"]
             }

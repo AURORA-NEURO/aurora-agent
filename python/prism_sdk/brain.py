@@ -104,6 +104,7 @@ MAX_BRAIN_REPLAN_INSTRUCTION_BYTES = 4_096
 MAX_BRAIN_LEARNING_EPISODE_BYTES = 64_000
 MAX_BRAIN_LEARNING_TRAJECTORY_STEPS = 32
 MAX_BRAIN_LEARNING_TRAJECTORY_BYTES = 256_000
+MAX_BRAIN_CREDITED_OUTCOMES = 4096
 MAX_MODEL_SELECTION_AUDIT_RANKING = 64
 MAX_MODEL_SELECTION_AUDIT_INPUT_RANKING = 512
 MAX_MODEL_SELECTION_AUDIT_REASON_BYTES = 512
@@ -727,6 +728,47 @@ def _ensure_bandit_arm(state: Mapping[str, Any], arm_id: str) -> dict[str, Any]:
     if not isinstance(generation, int) or isinstance(generation, bool) or generation < 0:
         raise BrainRunError("bandit_state generation must be a non-negative integer")
     normalized["generation"] = generation
+    credited_outcomes = normalized.get("credited_outcomes", [])
+    if not isinstance(credited_outcomes, list):
+        raise BrainRunError("bandit_state credited_outcomes must be a list")
+    if len(credited_outcomes) > MAX_BRAIN_CREDITED_OUTCOMES:
+        raise BrainRunError("bandit_state credited_outcomes exceed their bounded size")
+    seen_outcomes: set[str] = set()
+    normalized_outcomes: list[dict[str, Any]] = []
+    for raw_outcome in credited_outcomes:
+        if not isinstance(raw_outcome, Mapping):
+            raise BrainRunError("bandit_state credited_outcomes must contain objects")
+        outcome = dict(raw_outcome)
+        outcome_digest = outcome.get("outcome_digest")
+        outcome_arm = outcome.get("arm_id")
+        outcome_reward = outcome.get("reward")
+        outcome_failed = outcome.get("failed", False)
+        outcome_contract = outcome.get("contract_digest")
+        if (
+            not _valid_digest(outcome_digest)
+            or not isinstance(outcome_arm, str)
+            or not outcome_arm.strip()
+            or isinstance(outcome_reward, bool)
+            or not isinstance(outcome_reward, (int, float))
+            or not math.isfinite(float(outcome_reward))
+            or not 0.0 <= float(outcome_reward) <= 1.0
+            or not isinstance(outcome_failed, bool)
+            or (outcome_contract is not None and not _valid_digest(outcome_contract))
+        ):
+            raise BrainRunError("bandit_state credited_outcomes contain malformed receipts")
+        if outcome_digest in seen_outcomes:
+            raise BrainRunError("bandit_state credited_outcomes contain a duplicate digest")
+        seen_outcomes.add(outcome_digest)
+        normalized_outcomes.append(
+            {
+                "outcome_digest": outcome_digest,
+                "arm_id": outcome_arm,
+                "reward": float(outcome_reward),
+                "failed": outcome_failed,
+                "contract_digest": outcome_contract,
+            }
+        )
+    normalized["credited_outcomes"] = normalized_outcomes
     arms = normalized.get("arms", [])
     if not isinstance(arms, list):
         raise BrainRunError("bandit_state arms must be a list")
@@ -5276,6 +5318,7 @@ class AutonomousBrain:
                 },
                 "bandit_state": normalized_bandit_state,
                 "arm_id": effective_arm_id,
+                "idempotency_key": f"run:{brain_result.run_id}",
             },
         )
         if not isinstance(report, Mapping) or not report.get("ok"):
@@ -5506,6 +5549,7 @@ class AutonomousBrain:
                 },
                 "bandit_state": normalized_bandit_state,
                 "arm_id": normalized_episode.arm_id,
+                "idempotency_key": f"episode:{normalized_episode.episode_id}",
             },
         )
         if not isinstance(report, Mapping) or not report.get("ok"):

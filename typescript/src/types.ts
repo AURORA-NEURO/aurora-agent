@@ -619,11 +619,20 @@ export interface BrainBanditArm extends JsonObject {
   disabled?: boolean;
 }
 
+export interface BrainCreditedOutcome extends JsonObject {
+  outcome_digest: string;
+  arm_id: string;
+  reward: number;
+  failed?: boolean;
+  contract_digest?: string | null;
+}
+
 export interface BrainBanditState extends JsonObject {
   schema: string;
   generation?: number;
   policy?: BrainBanditPolicy;
   arms: BrainBanditArm[];
+  credited_outcomes?: BrainCreditedOutcome[];
 }
 
 export interface BrainBanditSelectionResult extends JsonObject {
@@ -642,6 +651,7 @@ export interface BrainBanditUpdate extends JsonObject {
   reward: number;
   failed?: boolean;
   outcome_digest?: string | null;
+  contract_digest?: string | null;
 }
 
 export interface BrainRunIdentity extends JsonObject {
@@ -671,6 +681,7 @@ export interface BrainOutcomeRecordArgs extends JsonObject {
   assessment: BrainEvaluatorAssessment;
   bandit_state: BrainBanditState;
   arm_id: string;
+  idempotency_key?: string;
 }
 
 export interface BrainLearningEvidence extends JsonObject {
@@ -683,12 +694,15 @@ export interface BrainLearningEvidence extends JsonObject {
   next_generation: number;
   next_state_digest: string;
   evidence_digest: string;
+  idempotency_key?: string | null;
   does_not_claim: string[];
 }
 
 export interface BrainOutcomeRecordResult extends JsonObject {
   ok: boolean;
   status: string;
+  idempotent?: boolean;
+  idempotency_key_digest?: string | null;
   next_state: BrainBanditState;
   learning_evidence: BrainLearningEvidence;
 }

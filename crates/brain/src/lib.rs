@@ -20,7 +20,7 @@
 //! can consume the same state schema without invalidating existing ledgers.
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
@@ -41,6 +41,7 @@ const MAX_PLAN_STEPS: usize = 256;
 const MAX_TOOL_NAME_BYTES: usize = 256;
 const MAX_EVALUATOR_ID_BYTES: usize = 256;
 const MAX_CONTEXT_LABEL_BYTES: usize = 256;
+const MAX_CREDITED_OUTCOMES: usize = 4096;
 
 #[derive(Debug, Error)]
 pub enum BrainError {
@@ -72,6 +73,10 @@ pub enum BrainError {
     DuplicateContextObservation(String),
     #[error("bandit state contains duplicate arm {0:?}")]
     DuplicateArm(String),
+    #[error("bandit state contains duplicate credited outcome {0:?}")]
+    DuplicateCreditedOutcome(String),
+    #[error("credited outcome {0:?} was replayed with different evaluator evidence")]
+    ConflictingCreditedOutcome(String),
     #[error("bandit reward is outside the configured range")]
     InvalidReward,
     #[error("unsupported bandit strategy {0:?}")]
@@ -1288,6 +1293,19 @@ pub struct BanditArm {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CreditedOutcome {
+    pub outcome_digest: String,
+    pub arm_id: String,
+    pub reward: f64,
+    #[serde(default)]
+    pub failed: bool,
+    /// Digest of the evaluator contract that produced this credit. Optional for legacy direct
+    /// bandit updates that do not carry an evaluator boundary.
+    #[serde(default)]
+    pub contract_digest: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BanditState {
     pub schema: String,
     #[serde(default)]
@@ -1295,6 +1313,11 @@ pub struct BanditState {
     #[serde(default)]
     pub policy: BanditPolicy,
     pub arms: Vec<BanditArm>,
+    /// Lowercase outcome digests already credited to this caller-owned state. Keeping this
+    /// bounded ledger in the state makes evaluator settlement replay-safe across retries and
+    /// process restarts without retaining prompts, responses, or credentials.
+    #[serde(default)]
+    pub credited_outcomes: Vec<CreditedOutcome>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1331,6 +1354,8 @@ pub struct BanditUpdate {
     pub failed: bool,
     #[serde(default)]
     pub outcome_digest: Option<String>,
+    #[serde(default)]
+    pub contract_digest: Option<String>,
 }
 
 /// Value-only identity for one provider-backed brain run.
@@ -1375,6 +1400,10 @@ pub struct BrainOutcomeRecordRequest {
     pub assessment: BrainEvaluatorAssessment,
     pub bandit_state: BanditState,
     pub arm_id: String,
+    /// Optional caller-owned idempotency identity for transports that retain a replay cache.
+    /// The outcome digest in `run` remains the durable learning identity.
+    #[serde(default)]
+    pub idempotency_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1388,6 +1417,8 @@ pub struct BrainLearningEvidence {
     pub next_generation: u64,
     pub next_state_digest: String,
     pub evidence_digest: String,
+    #[serde(default)]
+    pub idempotency_key: Option<String>,
     pub does_not_claim: Vec<String>,
 }
 
@@ -1459,12 +1490,32 @@ pub fn record_brain_outcome(
     validate_brain_run_identity(&request.run)?;
     validate_brain_assessment(&request.assessment)?;
     non_empty(&request.arm_id, "arm_id")?;
+    if let Some(idempotency_key) = &request.idempotency_key {
+        non_empty(idempotency_key, "idempotency_key")?;
+        if idempotency_key.len() > MAX_CONTEXT_LABEL_BYTES {
+            return Err(BrainError::TooMany {
+                field: "idempotency_key",
+                max: MAX_CONTEXT_LABEL_BYTES,
+            });
+        }
+    }
     validate_bandit_state(&request.bandit_state)?;
+    let credited_outcome_digest = digest(&json!({
+        "run_id": request.run.run_id.clone(),
+        "outcome_digest": request.run.outcome_digest.clone(),
+    }))?;
+    let contract_digest = digest(&json!({
+        "run_id": request.run.run_id.clone(),
+        "outcome_digest": request.run.outcome_digest.clone(),
+        "arm_id": request.arm_id.clone(),
+        "assessment": request.assessment.clone(),
+    }))?;
     let bandit_update = BanditUpdate {
         arm_id: request.arm_id.clone(),
         reward: request.assessment.reward,
         failed: request.assessment.failed,
-        outcome_digest: Some(request.run.outcome_digest.clone()),
+        outcome_digest: Some(credited_outcome_digest),
+        contract_digest: Some(contract_digest),
     };
     let next_state = update_bandit(&request.bandit_state, &bandit_update)?;
     let next_state_digest = digest(&next_state)?;
@@ -1478,6 +1529,7 @@ pub fn record_brain_outcome(
         next_generation: next_state.generation,
         next_state_digest,
         evidence_digest: String::new(),
+        idempotency_key: request.idempotency_key.clone(),
         does_not_claim: vec![
             "an evaluator reward is not proof that the provider answer is true".into(),
             "online adaptation is not a claim of general intelligence or biological learning".into(),
@@ -1503,6 +1555,34 @@ fn validate_bandit_state(state: &BanditState) -> Result<(), BrainError> {
         finite_range(arm.reward_sum, "arm.reward_sum", -1e12, 1e12)?;
         if !seen.insert(arm.arm_id.clone()) {
             return Err(BrainError::DuplicateArm(arm.arm_id.clone()));
+        }
+    }
+    if state.credited_outcomes.len() > MAX_CREDITED_OUTCOMES {
+        return Err(BrainError::TooMany {
+            field: "bandit credited outcomes",
+            max: MAX_CREDITED_OUTCOMES,
+        });
+    }
+    let mut credited = BTreeSet::new();
+    for outcome in &state.credited_outcomes {
+        validate_digest_value(
+            &outcome.outcome_digest,
+            "bandit.credited_outcomes.outcome_digest",
+        )?;
+        non_empty(&outcome.arm_id, "bandit.credited_outcomes.arm_id")?;
+        finite_range(
+            outcome.reward,
+            "bandit.credited_outcomes.reward",
+            state.policy.min_reward,
+            state.policy.max_reward,
+        )?;
+        if let Some(contract_digest) = &outcome.contract_digest {
+            validate_digest_value(contract_digest, "bandit.credited_outcomes.contract_digest")?;
+        }
+        if !credited.insert(&outcome.outcome_digest) {
+            return Err(BrainError::DuplicateCreditedOutcome(
+                outcome.outcome_digest.clone(),
+            ));
         }
     }
     Ok(())
@@ -1639,6 +1719,28 @@ pub fn update_bandit(
         state.policy.min_reward,
         state.policy.max_reward,
     )?;
+    if let Some(outcome_digest) = &update.outcome_digest {
+        validate_digest_value(outcome_digest, "update.outcome_digest")?;
+        if let Some(contract_digest) = &update.contract_digest {
+            validate_digest_value(contract_digest, "update.contract_digest")?;
+        }
+        if let Some(prior) = state
+            .credited_outcomes
+            .iter()
+            .find(|known| known.outcome_digest == *outcome_digest)
+        {
+            if prior.arm_id != update.arm_id
+                || prior.reward != update.reward
+                || prior.failed != update.failed
+                || prior.contract_digest != update.contract_digest
+            {
+                return Err(BrainError::ConflictingCreditedOutcome(
+                    outcome_digest.clone(),
+                ));
+            }
+            return Ok(state.clone());
+        }
+    }
     let mut next = state.clone();
     let arm = next
         .arms
@@ -1652,6 +1754,21 @@ pub fn update_bandit(
     arm.reward_sum += update.reward;
     if update.failed {
         arm.failures = arm.failures.saturating_add(1);
+    }
+    if let Some(outcome_digest) = &update.outcome_digest {
+        if next.credited_outcomes.len() >= MAX_CREDITED_OUTCOMES {
+            return Err(BrainError::TooMany {
+                field: "bandit credited outcomes",
+                max: MAX_CREDITED_OUTCOMES,
+            });
+        }
+        next.credited_outcomes.push(CreditedOutcome {
+            outcome_digest: outcome_digest.clone(),
+            arm_id: update.arm_id.clone(),
+            reward: update.reward,
+            failed: update.failed,
+            contract_digest: update.contract_digest.clone(),
+        });
     }
     next.generation = next.generation.saturating_add(1);
     Ok(next)
@@ -1991,6 +2108,7 @@ mod tests {
                     disabled: false,
                 },
             ],
+            credited_outcomes: Vec::new(),
         };
         let selected = select_bandit_arm(&state).unwrap();
         assert_eq!(selected.selected_arm_id.as_deref(), Some("new"));
@@ -2001,6 +2119,7 @@ mod tests {
                 reward: 0.8,
                 failed: false,
                 outcome_digest: Some("a".repeat(64)),
+                contract_digest: None,
             },
         )
         .unwrap();
@@ -2053,6 +2172,41 @@ mod tests {
     }
 
     #[test]
+    fn bandit_update_is_idempotent_for_a_credited_outcome_digest() {
+        let state = BanditState {
+            schema: BANDIT_SCHEMA.into(),
+            generation: 4,
+            policy: BanditPolicy::default(),
+            arms: vec![BanditArm {
+                arm_id: "openai/test-model".into(),
+                pulls: 1,
+                reward_sum: 0.2,
+                failures: 0,
+                disabled: false,
+            }],
+            credited_outcomes: vec![CreditedOutcome {
+                outcome_digest: "d".repeat(64),
+                arm_id: "openai/test-model".into(),
+                reward: 0.9,
+                failed: false,
+                contract_digest: None,
+            }],
+        };
+        let next = update_bandit(
+            &state,
+            &BanditUpdate {
+                arm_id: "openai/test-model".into(),
+                reward: 0.9,
+                failed: false,
+                outcome_digest: Some("d".repeat(64)),
+                contract_digest: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(next, state);
+    }
+
+    #[test]
     fn bandit_rejects_unknown_policy_strategy() {
         let mut state = BanditState {
             schema: BANDIT_SCHEMA.into(),
@@ -2065,6 +2219,7 @@ mod tests {
                 failures: 0,
                 disabled: false,
             }],
+            credited_outcomes: Vec::new(),
         };
         state.policy.strategy = "unbounded_random".into();
         let error = select_bandit_arm(&state).unwrap_err();
@@ -2084,6 +2239,7 @@ mod tests {
                 failures: 0,
                 disabled: false,
             }],
+            credited_outcomes: Vec::new(),
         };
         let report = record_brain_outcome(&BrainOutcomeRecordRequest {
             run: BrainRunIdentity {
@@ -2108,6 +2264,7 @@ mod tests {
             },
             bandit_state: state,
             arm_id: "openai/test-model".into(),
+            idempotency_key: Some("episode:run-1".into()),
         })
         .unwrap();
         assert!(report.ok);
@@ -2155,8 +2312,10 @@ mod tests {
                     failures: 0,
                     disabled: false,
                 }],
+                credited_outcomes: Vec::new(),
             },
             arm_id: "openai/test-model".into(),
+            idempotency_key: None,
         })
         .unwrap_err();
         assert!(matches!(error, BrainError::ContradictoryAssessment));
