@@ -335,6 +335,10 @@ test("online learner adapts only from explicit evaluator rewards", async () => {
   const second = learner.select(request);
   assert.equal(second.selected_model.provider, "b");
   assert.equal(learner.snapshot().generation, 2);
+  const constrained = learner.select({ ...request, max_latency_ms: 50 });
+  assert.equal(constrained.selected_model, null);
+  assert.match(constrained.abstention_reason, /no eligible candidate/);
+  assert.throws(() => learner.select({ ...request, min_quality: 2 }), /min_quality is outside its bounds/);
 });
 
 test("online learner does not double-credit a replayed evaluator outcome", async () => {

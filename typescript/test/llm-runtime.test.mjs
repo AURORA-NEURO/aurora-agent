@@ -512,6 +512,38 @@ test("autonomous runtime gates candidates on provider readiness and feeds health
   await assert.rejects(gatedAgent.invoke({ ...plan, candidates: [{ ...candidates[0], provider: "openai", model: "gated-model", requires_credential: true }] }), ProviderRuntimeError);
 });
 
+test("autonomous selection applies caller budget, latency, and quality gates before dispatch", async () => {
+  const runtime = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => jsonResponse({ output_text: "constrained answer" }),
+  });
+  runtime.registerProvider(openaiCompatibleProvider("fast", "https://fast-constraints.test", { requiresCredential: false }));
+  runtime.registerProvider(openaiCompatibleProvider("slow", "https://slow-constraints.test", { requiresCredential: false }));
+  const agent = new AutonomousRuntime(runtime);
+  const plan = {
+    task: "Choose within the caller's explicit operating envelope.",
+    domain: "operations",
+    capability: "reasoning",
+    requiredCapabilities: [],
+    maxCostPerMillionTokens: 20,
+    maxLatencyMs: 100,
+    minQuality: 0.7,
+    candidates: [
+      { provider: "fast", model: "fast-1", context_window_tokens: 16_000, max_output_tokens: 1_000, quality: 0.72, latency_ms: 20, cost_per_million_tokens: 10, reliability: 0.85 },
+      { provider: "slow", model: "slow-1", context_window_tokens: 32_000, max_output_tokens: 1_000, quality: 0.94, latency_ms: 800, cost_per_million_tokens: 80, reliability: 0.96 },
+    ],
+    request: request("selection-placeholder"),
+  };
+  const selected = await agent.select(plan);
+  assert.deepEqual(selected.selected_model, { provider: "fast", model: "fast-1" });
+  assert.equal(selected.ranking.find((row) => row.provider === "slow").eligible, false);
+  assert.deepEqual(selected.ranking.find((row) => row.provider === "slow").reasons, ["model cost exceeds the caller budget", "model latency exceeds the caller bound"]);
+  const refused = await agent.select({ ...plan, maxLatencyMs: 10 });
+  assert.equal(refused.selected_model, null);
+  assert.match(refused.abstention_reason, /latency exceeds the caller bound/);
+  await assert.rejects(agent.invoke({ ...plan, maxLatencyMs: 10 }), /autonomous selection abstained/);
+});
+
 test("autonomous runtime performs bounded provider failover and journals the admission", async () => {
   const calls = [];
   const runtime = new LLMRuntime({

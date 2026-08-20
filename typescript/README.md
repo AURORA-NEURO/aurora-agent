@@ -163,6 +163,11 @@ deterministic route remains the safety baseline: provider/deterministic disagree
 malformed output remain explicit refusals. Routing still requires `approveProviderCall: true` and
 never authorizes a tool, effect, or domain claim.
 
+Model selection accepts caller-owned hard gates through `maxCostPerMillionTokens`, `maxLatencyMs`,
+and `minQuality`. The same gates are enforced by local health-aware ranking, contextual
+Rust/Python selection, and `AutonomousOnlineLearner` before a model can be chosen. Refused models
+remain explainable in the ranking; an empty eligible set fails closed before provider dispatch.
+
 Contextual model selections resolve exact `provider/model` IDs. A model-only ID is accepted only
 when it matches one registered candidate; duplicate matches abstain before provider dispatch.
 

@@ -453,6 +453,12 @@ export interface AutonomousRunOptions {
   allowCrossDomain?: boolean;
   maxInputTokens?: number;
   maxOutputTokens?: number;
+  /** Refuse candidates above this caller-owned cost prior. */
+  maxCostPerMillionTokens?: number;
+  /** Refuse candidates above this caller-owned latency prior. */
+  maxLatencyMs?: number;
+  /** Refuse candidates below this caller-owned quality prior. */
+  minQuality?: number;
   temperature?: number;
   tools?: readonly ProviderTool[];
   authorizeAndExecute?: (calls: ProviderToolCall[]) => ProviderToolResult[] | Promise<ProviderToolResult[]>;
@@ -1152,6 +1158,18 @@ export class AutonomousDomainToolRuntime {
   }
 }
 
+function validateOnlineSelectionConstraints(request: AutonomousSelectionRequest): void {
+  const constraints: Array<[string, unknown, number]> = [
+    ["max_cost_per_million_tokens", request.max_cost_per_million_tokens, 1_000_000_000],
+    ["max_latency_ms", request.max_latency_ms, 10 * 60_000],
+    ["min_quality", request.min_quality, 1],
+  ];
+  for (const [name, value, maximum] of constraints) {
+    if (value === undefined || value === null) continue;
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > maximum) throw new ArgumentError(`online learner ${name} is outside its bounds`);
+  }
+}
+
 /** Caller-owned bounded UCB1 state for online model adaptation. No hidden server state is used. */
 export class AutonomousOnlineLearner {
   private stateValue: BrainBanditState;
@@ -1170,9 +1188,10 @@ export class AutonomousOnlineLearner {
 
   /** Select the best eligible model using persisted pulls/rewards; deterministic ties are by arm id. */
   select(request: AutonomousSelectionRequest): AutonomousSelectionDecision {
+    validateOnlineSelectionConstraints(request);
     const eligible = request.candidates.filter((candidate) => {
       const health = request.provider_health[candidate.provider];
-      return candidate.enabled !== false && health !== undefined && health.circuit !== "open" && (health.credential_required === false || health.credential_ready === true) && candidate.context_window_tokens >= request.estimated_input_tokens + request.requested_output_tokens && candidate.max_output_tokens >= request.requested_output_tokens && request.required_capabilities.every((capability) => (candidate.capabilities ?? []).includes(capability));
+      return candidate.enabled !== false && health !== undefined && health.circuit !== "open" && (health.credential_required === false || health.credential_ready === true) && candidate.context_window_tokens >= request.estimated_input_tokens + request.requested_output_tokens && candidate.max_output_tokens >= request.requested_output_tokens && request.required_capabilities.every((capability) => (candidate.capabilities ?? []).includes(capability)) && (request.max_cost_per_million_tokens === undefined || request.max_cost_per_million_tokens === null || candidate.cost_per_million_tokens <= request.max_cost_per_million_tokens) && (request.max_latency_ms === undefined || request.max_latency_ms === null || candidate.latency_ms <= request.max_latency_ms) && (request.min_quality === undefined || request.min_quality === null || candidate.quality >= request.min_quality);
     });
     const totalPulls = Math.max(1, this.stateValue.arms.reduce((sum, arm) => sum + (arm.pulls ?? 0), 0));
     const ranking = eligible.map((candidate) => {
@@ -1255,6 +1274,9 @@ export function contextualSelector(client: ApiClient, options: { requestOptions?
       required_capabilities: [...request.required_capabilities],
       input_tokens: request.estimated_input_tokens,
       requested_output_tokens: request.requested_output_tokens,
+      max_cost_per_million_tokens: request.max_cost_per_million_tokens ?? null,
+      max_latency_ms: request.max_latency_ms ?? null,
+      min_quality: request.min_quality ?? null,
       models,
       provider_health: Object.fromEntries(Object.entries(request.provider_health).map(([provider, health]) => [provider, { registered: true, circuit: health.circuit, credential_ready: health.credential_ready, eligible: health.eligible, attempts: health.attempts, successes: health.successes, failures: health.failures, success_rate: health.success_rate, mean_latency_ms: health.mean_latency_ms }] as [string, BrainProviderHealth])),
       model_health: Object.fromEntries(Object.entries(request.model_health).map(([arm, health]) => [arm, { attempts: health.attempts, successes: health.successes, failures: health.failures, success_rate: health.success_rate, mean_latency_ms: health.mean_latency_ms, last_latency_ms: health.last_latency_ms, circuit: health.circuit }])),
@@ -1480,7 +1502,7 @@ export class AutonomousAgent {
     const tools = options.tools ?? await this.liveTools(selectedDomains);
     const messages: ProviderMessage[] = blueprint.prompt.messages.map((message) => ({ role: message.role, content: message.content }));
     const request: ProviderRequest = { model: "autonomous-selection-placeholder", messages, maxOutputTokens: options.maxOutputTokens ?? 1_024, temperature: options.temperature, tools: tools.length ? tools : undefined, toolChoice: tools.length ? "auto" : undefined };
-    const executionPlan = { task: taskText, domain: blueprint.domain_profile.domain, capability: options.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class, requiredCapabilities: blueprint.required_capabilities, candidates, request };
+    const executionPlan = { task: taskText, domain: blueprint.domain_profile.domain, capability: options.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class, requiredCapabilities: blueprint.required_capabilities, maxCostPerMillionTokens: options.maxCostPerMillionTokens, maxLatencyMs: options.maxLatencyMs, minQuality: options.minQuality, candidates, request };
     const healthObserver = this.modelHealthController?.observer({ domain: blueprint.domain_profile.domain, capability: executionPlan.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class });
     const remoteHealthObserver = this.modelHealthBridge?.observer({ domain: blueprint.domain_profile.domain, capability: executionPlan.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class });
     const feedbackObserver = composeInvocationObservers(options.observer, healthObserver, remoteHealthObserver);
@@ -1543,6 +1565,9 @@ export class AutonomousAgent {
         hints: [],
         maxInputTokens: options.maxInputTokens,
         maxOutputTokens: options.maxOutputTokens,
+        maxCostPerMillionTokens: options.maxCostPerMillionTokens,
+        maxLatencyMs: options.maxLatencyMs,
+        minQuality: options.minQuality,
         temperature: options.temperature,
         tools: options.tools,
         authorizeAndExecute: options.authorizeAndExecute,
@@ -1621,6 +1646,9 @@ export class AutonomousAgent {
       hints: [],
       maxInputTokens: options.maxInputTokens,
       maxOutputTokens: options.maxOutputTokens,
+      maxCostPerMillionTokens: options.maxCostPerMillionTokens,
+      maxLatencyMs: options.maxLatencyMs,
+      minQuality: options.minQuality,
       temperature: options.temperature,
       tools: options.tools,
       authorizeAndExecute: options.authorizeAndExecute,

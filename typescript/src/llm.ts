@@ -493,6 +493,12 @@ export interface AutonomousSelectionRequest extends JsonObject {
   required_capabilities: string[];
   estimated_input_tokens: number;
   requested_output_tokens: number;
+  /** Hard caller-owned budget gate applied before utility ranking. */
+  max_cost_per_million_tokens?: number | null;
+  /** Hard caller-owned latency gate applied before utility ranking. */
+  max_latency_ms?: number | null;
+  /** Hard caller-owned quality floor applied before utility ranking. */
+  min_quality?: number | null;
   candidates: AutonomousModelCandidate[];
   provider_health: Record<string, ProviderHealth>;
   model_health: Record<string, ProviderHealth>;
@@ -519,6 +525,9 @@ export interface AutonomousExecutionPlan {
   capability?: string;
   riskClass?: string;
   requiredCapabilities?: readonly string[];
+  maxCostPerMillionTokens?: number;
+  maxLatencyMs?: number;
+  minQuality?: number;
   candidates: readonly AutonomousModelCandidate[];
   request: ProviderRequest;
 }
@@ -1951,6 +1960,11 @@ export class AutonomousRuntime {
     validateRequest(plan.request);
     if (!Array.isArray(plan.candidates) || plan.candidates.length === 0 || plan.candidates.length > MAX_PROVIDER_TOOLS) throw new ProviderRuntimeError("autonomous model candidates are outside their bounds");
     if (plan.requiredCapabilities !== undefined && (!Array.isArray(plan.requiredCapabilities) || plan.requiredCapabilities.length > 64 || plan.requiredCapabilities.some((capability) => typeof capability !== "string" || capability.trim().length === 0 || capability.length > 256))) throw new ProviderRuntimeError("autonomous required capabilities are outside their bounds");
+    validateSelectionConstraints({
+      max_cost_per_million_tokens: plan.maxCostPerMillionTokens,
+      max_latency_ms: plan.maxLatencyMs,
+      min_quality: plan.minQuality,
+    });
     const excluded = new Set(excludedProviders.map((provider) => boundedIdentifier("excluded provider", provider, 128)));
     const candidates = plan.candidates.map((candidate) => {
       if (!isObject(candidate)) throw new ProviderRuntimeError("autonomous model candidate must be an object");
@@ -1983,6 +1997,9 @@ export class AutonomousRuntime {
       required_capabilities: [...(plan.requiredCapabilities ?? [])],
       estimated_input_tokens: Math.max(1, Math.ceil(plan.request.messages.reduce((sum, message) => sum + bytes(message.content), 0) / 4)),
       requested_output_tokens: plan.request.maxOutputTokens,
+      max_cost_per_million_tokens: plan.maxCostPerMillionTokens ?? null,
+      max_latency_ms: plan.maxLatencyMs ?? null,
+      min_quality: plan.minQuality ?? null,
       candidates,
       provider_health: providerHealth,
       model_health: this.llm.modelHealthSnapshot(),
@@ -1994,11 +2011,27 @@ export class AutonomousRuntime {
   }
 }
 
+function validateSelectionConstraints(request: Pick<AutonomousSelectionRequest, "max_cost_per_million_tokens" | "max_latency_ms" | "min_quality">): void {
+  const constraints: Array<[string, unknown, number]> = [
+    ["max_cost_per_million_tokens", request.max_cost_per_million_tokens, 1_000_000_000],
+    ["max_latency_ms", request.max_latency_ms, 10 * 60_000],
+    ["min_quality", request.min_quality, 1],
+  ];
+  for (const [name, value, maximum] of constraints) {
+    if (value === undefined || value === null) continue;
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > maximum) {
+      throw new ProviderRuntimeError(`autonomous selection ${name} is outside its bounds`);
+    }
+  }
+}
+
 /**
  * Pure, deterministic model ranking shared by the local runtime and persisted-health adapters.
- * It consumes only candidate metadata, credential readiness, and aggregate health values.
+ * It consumes only candidate metadata, credential readiness, aggregate health values, and
+ * caller-owned selection constraints.
  */
 export function rankAutonomousModels(request: AutonomousSelectionRequest): AutonomousModelRanking[] {
+  validateSelectionConstraints(request);
   return request.candidates.map((candidate) => {
     const reasons: string[] = [];
     const provider = request.provider_health[candidate.provider];
@@ -2011,6 +2044,9 @@ export function rankAutonomousModels(request: AutonomousSelectionRequest): Auton
     if (candidate.max_output_tokens < request.requested_output_tokens) reasons.push("model output capacity is below the request");
     if (candidate.context_window_tokens < request.estimated_input_tokens + request.requested_output_tokens) reasons.push("model context capacity is below the request");
     if (request.required_capabilities.some((required) => !(candidate.capabilities ?? []).includes(required))) reasons.push("model lacks a required capability");
+    if (request.max_cost_per_million_tokens !== undefined && request.max_cost_per_million_tokens !== null && candidate.cost_per_million_tokens > request.max_cost_per_million_tokens) reasons.push("model cost exceeds the caller budget");
+    if (request.max_latency_ms !== undefined && request.max_latency_ms !== null && candidate.latency_ms > request.max_latency_ms) reasons.push("model latency exceeds the caller bound");
+    if (request.min_quality !== undefined && request.min_quality !== null && candidate.quality < request.min_quality) reasons.push("model quality is below the caller floor");
     const healthRate = typeof model?.success_rate === "number" && model.attempts && model.attempts > 0 ? model.success_rate : 0.5;
     const qualityObservations = model?.quality_observations ?? 0;
     const qualityRate = typeof model?.quality_mean === "number" && qualityObservations > 0 ? model.quality_mean : null;

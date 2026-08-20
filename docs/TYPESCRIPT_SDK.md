@@ -1542,6 +1542,15 @@ health, task digest/context, required capabilities, and domain risk metadata to
 responses, and secret material remain in the application process. A remote refusal or malformed
 selection never silently becomes a local authorization.
 
+Selection constraints are caller-owned hard gates and travel through every selection strategy.
+`maxCostPerMillionTokens`, `maxLatencyMs`, and `minQuality` can be supplied to `run()` and
+`runCrossDomain()` (or directly on an `AutonomousExecutionPlan`). Local ranking, contextual Rust/
+Python selection, and `AutonomousOnlineLearner` all apply the same limits before scoring or UCB
+exploration. Ineligible candidates remain in the ranking with explicit budget, latency, or
+quality-floor reasons; if no candidate remains, invocation is refused before provider transport.
+These limits are policy gates, not estimates derived from provider responses, and they do not grant
+credentials or effect authorization.
+
 Contextual model selections resolve exact `provider/model` IDs. A model-only ID is accepted only
 when it matches one registered candidate; duplicate matches abstain before provider dispatch.
 
