@@ -373,6 +373,114 @@ class DomainEvaluatorAdapter(BrainOutcomeEvaluator):
         return self.profile.to_dict()
 
 
+class CompositeDomainEvaluator(BrainOutcomeEvaluator):
+    """Route value-only decisions to domain-specific evaluators under one stable identity.
+
+    Cross-domain trajectories must expose one evaluator identity to the learning ledger, but the
+    quality rubric for a coding child should not silently become the rubric for a biomedical or
+    operations child. This adapter keeps one outer identity for trajectory settlement and routes
+    each value-only input using the reviewed selection context's domain. It never sees provider
+    text, credentials, or raw tool envelopes.
+    """
+
+    def __init__(
+        self,
+        evaluators: Mapping[str, BrainOutcomeEvaluator],
+        *,
+        evaluator_id: str = "composite-domain-quality",
+        evaluator_version: str = "1",
+    ) -> None:
+        if not isinstance(evaluators, Mapping) or not evaluators:
+            raise BrainRunError("composite domain evaluators must be a non-empty mapping")
+        normalized: dict[str, BrainOutcomeEvaluator] = {}
+        for domain, evaluator in evaluators.items():
+            if not isinstance(domain, str) or not domain.strip() or len(domain.encode("utf-8")) > MAX_DOMAIN_EVALUATOR_TEXT_BYTES:
+                raise BrainRunError("composite domain evaluator keys must be bounded domain names")
+            if not isinstance(evaluator, BrainOutcomeEvaluator):
+                raise BrainRunError("composite domain evaluator values must be BrainOutcomeEvaluator instances")
+            if domain in normalized:
+                raise BrainRunError(f"duplicate composite domain evaluator: {domain}")
+            normalized[domain] = evaluator
+        self.evaluators = normalized
+        super().__init__(self._evaluate, evaluator_id=evaluator_id, evaluator_version=evaluator_version)
+
+    def _resolve_domain(self, evaluation_input: Mapping[str, Any]) -> str:
+        context = evaluation_input.get("context")
+        domain = context.get("domain") if isinstance(context, Mapping) else None
+        evidence = evaluation_input.get("evidence")
+        evidence_domain = evidence.get("domain") if isinstance(evidence, Mapping) else None
+        if domain is None:
+            domain = evidence_domain
+        if not isinstance(domain, str) or not domain.strip():
+            raise BrainRunError("composite domain evaluation requires an explicit domain context")
+        if evidence_domain is not None and not isinstance(evidence_domain, str):
+            raise BrainRunError("composite domain evidence domain must be a string when supplied")
+        if domain not in self.evaluators:
+            raise BrainRunError(f"no composite evaluator is registered for {domain!r}")
+        return domain
+
+    def _evaluate(self, evaluation_input: Mapping[str, Any]) -> dict[str, Any]:
+        try:
+            domain = self._resolve_domain(evaluation_input)
+        except BrainRunError:
+            return {
+                "reward": 0.0,
+                "passed": False,
+                "failed": True,
+                "failure_class": "unmapped_domain_evaluator",
+                "replan_requested": True,
+                "replan_instruction": "Provide an explicit reviewed evaluator for the routed domain.",
+            }
+        decision = self.evaluators[domain].assess_value_only_input(evaluation_input)
+        return {
+            "reward": decision.reward,
+            "passed": decision.passed,
+            "failed": decision.failed,
+            "feedback_digest": decision.feedback_digest,
+            "failure_class": decision.failure_class,
+            "evidence_digest": decision.evidence_digest,
+            "replan_requested": decision.replan_requested,
+            "replan_instruction": decision.replan_instruction,
+        }
+
+    def catalogue_entry(self) -> dict[str, Any]:
+        return {
+            "schema": DOMAIN_EVALUATOR_SCHEMA,
+            "evaluator_id": self.evaluator_id,
+            "evaluator_version": self.evaluator_version,
+            "domains": [
+                {
+                    "domain": domain,
+                    "evaluator_id": evaluator.evaluator_id,
+                    "evaluator_version": evaluator.evaluator_version,
+                }
+                for domain, evaluator in sorted(self.evaluators.items())
+            ],
+            "execution": "value_only_domain_routing",
+            "retention": "evaluator_id_version_and_domain_keys_only",
+        }
+
+    @classmethod
+    def from_registry(
+        cls,
+        registry: "DomainEvaluatorRegistry",
+        *,
+        domains: Sequence[str],
+        evaluator_id: str = "composite-domain-quality",
+        evaluator_version: str = "1",
+    ) -> "CompositeDomainEvaluator":
+        if not isinstance(registry, DomainEvaluatorRegistry):
+            raise BrainRunError("composite evaluator registry must be a DomainEvaluatorRegistry")
+        if not isinstance(domains, Sequence) or isinstance(domains, (str, bytes)) or not domains:
+            raise BrainRunError("composite evaluator domains must be a non-empty sequence")
+        selected: dict[str, BrainOutcomeEvaluator] = {}
+        for domain in domains:
+            if not isinstance(domain, str) or not domain.strip():
+                raise BrainRunError("composite evaluator domains must contain non-empty strings")
+            selected[domain] = registry.resolve_for_autonomous_domain(domain)
+        return cls(selected, evaluator_id=evaluator_id, evaluator_version=evaluator_version)
+
+
 class DomainEvaluatorRegistry:
     """Deterministic registry of domain evaluator adapters."""
 
@@ -617,6 +725,7 @@ __all__ = [
     "DOMAIN_EVALUATOR_SCHEMA",
     "DomainEvaluationEvidence",
     "DomainEvaluatorAdapter",
+    "CompositeDomainEvaluator",
     "DomainEvaluatorProfile",
     "DomainEvaluatorRegistry",
     "builtin_domain_profiles",

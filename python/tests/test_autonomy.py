@@ -5,6 +5,7 @@ import json
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 import threading
+from typing import Mapping
 
 import pytest
 
@@ -31,6 +32,8 @@ from prism_sdk import (
     AutonomousRoutingHoldoutEvaluator,
     AutonomousTaskRouter,
     AutonomousWorkflowRegistry,
+    CompositeDomainEvaluator,
+    DomainEvaluatorRegistry,
     BrainRunError,
     BrainEpisodicMemory,
     BrainLearningLedger,
@@ -2323,6 +2326,188 @@ def test_run_auto_routes_cross_domain_replan_learning_with_explicit_limits(tmp_p
         assert result.result.replan_count == 0
         assert len(result.result.attempts) == 1
         assert "auto-cross-domain-replan-secret" not in json.dumps(result.to_dict())
+    finally:
+        memory.close()
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_composite_domain_evaluator_routes_all_builtin_domains_and_fails_closed():
+    registry = DomainEvaluatorRegistry.with_builtin_autonomous_profiles()
+    evaluator = CompositeDomainEvaluator.from_registry(
+        registry,
+        domains=AUTONOMOUS_DOMAINS,
+        evaluator_id="all-domain-composite-quality",
+        evaluator_version="1",
+    )
+    for domain in AUTONOMOUS_DOMAINS:
+        adapter = registry.resolve_for_autonomous_domain(domain)
+        evidence = {
+            "domain": domain,
+            "capability": "review",
+            "risk_class": "review",
+            "signals": {signal: 1.0 for signal in adapter.profile.required_signals},
+        }
+        decision = evaluator.assess_value_only_input(
+            {
+                "schema": "bioprism-brain-evaluator-input/0.1",
+                "context": {"domain": domain},
+                "evidence": evidence,
+            }
+        )
+        assert decision.evaluator_id == "all-domain-composite-quality"
+        assert decision.passed is True
+        assert decision.replan_requested is False
+    unmapped = evaluator.assess_value_only_input(
+        {
+            "schema": "bioprism-brain-evaluator-input/0.1",
+            "context": {"domain": "unregistered-domain"},
+            "evidence": {},
+        }
+    )
+    assert unmapped.passed is False
+    assert unmapped.replan_requested is True
+    assert unmapped.failure_class == "unmapped_domain_evaluator"
+
+
+def test_cross_domain_replan_checkpoint_resumes_after_settled_attempt(tmp_path: Path):
+    runtime, store, server, thread = _runtime()
+    memory = BrainEpisodicMemory(tmp_path / "durable-cross-domain-replan.sqlite3")
+    ledger = BrainLearningLedger(tmp_path / "durable-cross-domain-replan-ledger.jsonl")
+    handle = store.register("openai", "durable-cross-domain-replan-secret")
+    callback_count = 0
+    evidence_digests: list[str | None] = []
+    checkpoints: list[object] = []
+
+    def evaluate(evaluation_input: Mapping[str, object]) -> dict[str, object]:
+        nonlocal callback_count
+        callback_count += 1
+        evidence_digests.append(
+            evaluation_input.get("evidence_digest")
+            if isinstance(evaluation_input.get("evidence_digest"), str)
+            else None
+        )
+        requested = callback_count <= 3
+        return {
+            "reward": -0.25 if requested else 0.9,
+            "passed": not requested,
+            "failed": requested,
+            "failure_class": "insufficient_evidence" if requested else None,
+            "replan_requested": requested,
+            "replan_instruction": (
+                "Reconcile the bounded evidence before retrying the approved route."
+                if requested
+                else None
+            ),
+        }
+
+    evaluator = BrainOutcomeEvaluator(
+        evaluate,
+        evaluator_id="durable-cross-domain-replan-quality",
+        evaluator_version="1",
+    )
+
+    def pause_after_checkpoint(checkpoint: object) -> None:
+        checkpoints.append(checkpoint)
+        if getattr(checkpoint, "status", None) == "retry_ready":
+            raise RuntimeError("simulated worker restart after checkpoint persistence")
+
+    task = "coordinate a durable engineering and data review"
+    subtasks = [
+        {"id": "engineering", "task": "review implementation risks", "domain": "coding"},
+        {"id": "data", "task": "review lineage risks", "domain": "data"},
+    ]
+    try:
+        agent = AutonomousAgent(_Workspace(), runtime, memory=memory, ledger=ledger)
+        with pytest.raises(BrainRunError, match="checkpoint persistence failed"):
+            agent.run_cross_domain_replan_learning(
+                task=task,
+                subtasks=subtasks,
+                model_candidates=_model(),
+                credentials={"openai": handle},
+                context={"repository": "aurora"},
+                approve_provider_call=True,
+                evaluator=evaluator,
+                evidence={
+                    "engineering": {"signals": {"tests": False}},
+                    "data": {"signals": {"lineage": False}},
+                    "synthesis": {"signals": {"reconciled": True}},
+                },
+                max_replans=1,
+                run_id="durable-cross-domain-replan-run",
+                trajectory_id="durable-cross-domain-replan-trajectory",
+                idempotency_key="durable-cross-domain-replan-key",
+                bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+                ledger=ledger,
+                checkpoint_sink=pause_after_checkpoint,
+            )
+        assert len(checkpoints) == 1
+        checkpoint = checkpoints[0]
+        assert checkpoint.status == "retry_ready"  # type: ignore[union-attr]
+        assert task not in json.dumps(checkpoint.to_dict())  # type: ignore[union-attr]
+        assert "durable-cross-domain-replan-secret" not in json.dumps(checkpoint.to_dict())  # type: ignore[union-attr]
+        assert "Reconcile the bounded evidence" not in json.dumps(checkpoint.to_dict())  # type: ignore[union-attr]
+        latest_state = ledger.latest_state()
+        assert latest_state is not None
+        assert len(evidence_digests) == 3
+        continuation = {
+            "schema": "bioprism-python-autonomous-cross-domain-replan-context/0.1",
+            "workflow": "cross_domain_replan_context",
+            "attempt": 2,
+            "previous": {
+                "plan_digest": checkpoint.last_plan_digest,  # type: ignore[union-attr]
+                "outcome_digest": checkpoint.last_outcome_digest,  # type: ignore[union-attr]
+            },
+            "evaluator": {
+                "evaluator_id": "durable-cross-domain-replan-quality",
+                "evaluator_version": "1",
+                "reward": -0.25,
+                "passed": False,
+                "failed": True,
+                "feedback_digest": None,
+                "failure_class": "insufficient_evidence",
+                "evidence_digest": evidence_digests[-1],
+            },
+            "instruction": "Reconcile the bounded evidence before retrying the approved route.",
+            "bounded_replan": True,
+            "does_not_authorize": [
+                "new domains, capabilities, tools, credentials, approvals, or effects",
+                "treating prior specialist or synthesis output as verified truth",
+                "claiming that an external action occurred",
+            ],
+        }
+        assert content_digest(continuation) == checkpoint.next_context_digest  # type: ignore[union-attr]
+        resumed = agent.run_cross_domain_replan_learning(
+            task=task,
+            subtasks=subtasks,
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            context={"repository": "aurora", "_aurora_cross_domain_replan": continuation},
+            approve_provider_call=True,
+            evaluator=evaluator,
+            evidence={
+                "engineering": {"signals": {"tests": True}},
+                "data": {"signals": {"lineage": True}},
+                "synthesis": {"signals": {"reconciled": True}},
+            },
+            max_replans=1,
+            run_id="durable-cross-domain-replan-run",
+            trajectory_id="durable-cross-domain-replan-trajectory",
+            idempotency_key="durable-cross-domain-replan-key",
+            bandit_state=latest_state,
+            ledger=ledger,
+            checkpoint=checkpoint,
+        )
+        assert resumed.status == "completed"
+        assert resumed.attempts_before == 1
+        assert resumed.attempts[0].attempt == 2
+        assert resumed.replan_count == 1
+        assert resumed.checkpoint is not None
+        assert resumed.checkpoint.status == "completed"
+        assert callback_count == 6
+        assert "durable-cross-domain-replan-secret" not in json.dumps(resumed.to_dict())
+        assert b"Reconcile the bounded evidence" not in (tmp_path / "durable-cross-domain-replan.sqlite3").read_bytes()
     finally:
         memory.close()
         server.shutdown()

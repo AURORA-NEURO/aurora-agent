@@ -68,7 +68,11 @@ from .autonomy_persistence import (
     AutonomousExecutionPolicy,
     AutonomyPersistenceError,
 )
-from .evaluators import DomainEvaluatorRegistry, builtin_autonomous_domain_evaluator_profiles
+from .evaluators import (
+    CompositeDomainEvaluator,
+    DomainEvaluatorRegistry,
+    builtin_autonomous_domain_evaluator_profiles,
+)
 from .autonomy_evaluation import (
     AutonomousToolLearningReport,
     AutonomousToolOutcomeEvaluator,
@@ -122,6 +126,7 @@ AUTONOMOUS_WORKFLOW_EVALUATOR_SCHEMA = "bioprism-python-autonomous-workflow-eval
 AUTONOMOUS_CROSS_DOMAIN_LEARNING_SCHEMA = "bioprism-python-autonomous-cross-domain-learning/0.1"
 AUTONOMOUS_CROSS_DOMAIN_REPLAN_SCHEMA = "bioprism-python-autonomous-cross-domain-replan/0.1"
 AUTONOMOUS_CROSS_DOMAIN_REPLAN_CONTEXT_SCHEMA = "bioprism-python-autonomous-cross-domain-replan-context/0.1"
+AUTONOMOUS_CROSS_DOMAIN_REPLAN_CHECKPOINT_SCHEMA = "bioprism-python-autonomous-cross-domain-replan-checkpoint/0.1"
 AUTONOMOUS_CROSS_DOMAIN_TRAJECTORY_LEARNING_SCHEMA = "bioprism-python-autonomous-cross-domain-trajectory-learning/0.1"
 AUTONOMOUS_CROSS_DOMAIN_PLAN_REFINEMENT_SCHEMA = "bioprism-python-autonomous-cross-domain-plan-refinement/0.1"
 AUTONOMOUS_WORKFLOW_LEARNING_SCHEMA = "bioprism-python-autonomous-workflow-learning/0.1"
@@ -165,6 +170,7 @@ MAX_AUTONOMOUS_ROUTE_CANDIDATES = len(AUTONOMOUS_DOMAINS)
 MAX_AUTONOMOUS_ROUTE_DOMAINS = 4
 MAX_AUTONOMOUS_CROSS_DOMAIN_CHILDREN = 8
 MAX_AUTONOMOUS_CROSS_DOMAIN_REPLANS = 3
+MAX_AUTONOMOUS_CROSS_DOMAIN_REPLAN_CHECKPOINT_BYTES = 128_000
 MAX_AUTONOMOUS_DOMAIN_PACK_ITEMS = 64
 MAX_AUTONOMOUS_EXECUTION_PLAN_BYTES = 512_000
 MAX_AUTONOMOUS_CAPABILITY_CONTRACTS = 64
@@ -2974,6 +2980,24 @@ def _cross_domain_plan_digest(blueprint: AutonomousCrossDomainBlueprint) -> str:
     )
 
 
+def _resolve_cross_domain_evaluator(
+    evaluator: BrainOutcomeEvaluator | DomainEvaluatorRegistry,
+    domains: Sequence[str],
+) -> BrainOutcomeEvaluator:
+    """Normalize one evaluator or a domain registry into a stable trajectory evaluator."""
+
+    if isinstance(evaluator, BrainOutcomeEvaluator):
+        return evaluator
+    if isinstance(evaluator, DomainEvaluatorRegistry):
+        unique_domains = tuple(dict.fromkeys(domains))
+        if not unique_domains:
+            raise BrainRunError("cross-domain evaluator resolution requires at least one domain")
+        return CompositeDomainEvaluator.from_registry(evaluator, domains=unique_domains)
+    raise BrainRunError(
+        "cross-domain evaluator must be a BrainOutcomeEvaluator or DomainEvaluatorRegistry"
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class AutonomousCrossDomainResult:
     """Results from bounded child execution and optional cross-domain synthesis."""
@@ -3608,6 +3632,8 @@ class AutonomousCrossDomainReplanResult:
     final: AutonomousCrossDomainReplanAttempt | None
     attempts: tuple[AutonomousCrossDomainReplanAttempt, ...]
     replan_count: int
+    attempts_before: int = 0
+    checkpoint: "AutonomousCrossDomainReplanCheckpoint | None" = None
 
     def __post_init__(self) -> None:
         _identifier("cross-domain replan result status", self.status)
@@ -3617,9 +3643,23 @@ class AutonomousCrossDomainReplanResult:
             raise BrainRunError("cross-domain replan result contains too many attempts")
         if any(not isinstance(attempt, AutonomousCrossDomainReplanAttempt) for attempt in self.attempts):
             raise BrainRunError("cross-domain replan attempts contain an invalid value")
-        if tuple(attempt.attempt for attempt in self.attempts) != tuple(range(1, len(self.attempts) + 1)):
+        if (
+            not isinstance(self.attempts_before, int)
+            or isinstance(self.attempts_before, bool)
+            or not 0 <= self.attempts_before <= MAX_AUTONOMOUS_CROSS_DOMAIN_REPLANS + 1
+        ):
+            raise BrainRunError("cross-domain replan attempts_before is outside the bound")
+        if self.attempts_before + len(self.attempts) > MAX_AUTONOMOUS_CROSS_DOMAIN_REPLANS + 1:
+            raise BrainRunError("cross-domain replan attempts exceed the bounded history")
+        if tuple(attempt.attempt for attempt in self.attempts) != tuple(
+            range(self.attempts_before + 1, self.attempts_before + len(self.attempts) + 1)
+        ):
             raise BrainRunError("cross-domain replan attempts must be contiguous and ordered")
-        if not isinstance(self.replan_count, int) or isinstance(self.replan_count, bool) or self.replan_count != max(0, len(self.attempts) - 1):
+        if (
+            not isinstance(self.replan_count, int)
+            or isinstance(self.replan_count, bool)
+            or self.replan_count != max(0, self.attempts_before + len(self.attempts) - 1)
+        ):
             raise BrainRunError("cross-domain replan count must match the attempt sequence")
         if self.final is not None:
             if not isinstance(self.final, AutonomousCrossDomainReplanAttempt):
@@ -3628,6 +3668,11 @@ class AutonomousCrossDomainReplanResult:
                 raise BrainRunError("cross-domain replan final attempt must be the latest attempt")
         elif self.attempts:
             raise BrainRunError("cross-domain replan result with attempts must expose a final attempt")
+        if self.checkpoint is not None:
+            if not isinstance(self.checkpoint, AutonomousCrossDomainReplanCheckpoint):
+                raise BrainRunError("cross-domain replan result checkpoint is invalid")
+            if self.final is not None and self.checkpoint.attempt != self.final.attempt:
+                raise BrainRunError("cross-domain replan result checkpoint must match the final attempt")
         object.__setattr__(self, "attempts", tuple(self.attempts))
 
     def to_dict(self) -> dict[str, Any]:
@@ -3637,9 +3682,199 @@ class AutonomousCrossDomainReplanResult:
             "final": None if self.final is None else self.final.to_dict(),
             "attempts": [attempt.to_dict() for attempt in self.attempts],
             "replan_count": self.replan_count,
+            "attempts_before": self.attempts_before,
+            "checkpoint": None if self.checkpoint is None else self.checkpoint.to_dict(),
             "retention": "provider_results_caller_owned; replan_instruction_transient; value_only_attempt_projection",
             "authorization": "reviewed_route_and_caller_approval_remain_required",
         }
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousCrossDomainReplanCheckpoint:
+    """Metadata-only attempt-boundary continuation state for cross-domain replanning.
+
+    A checkpoint is safe to persist in a job journal or caller-owned store. It binds the next
+    attempt to the original task, plan, learner state, and prior outcomes without retaining raw
+    provider results or the transient evaluator instruction. The caller rehydrates the raw
+    continuation context and verifies its digest before resuming.
+    """
+
+    run_id: str
+    task_digest: str
+    base_plan_digest: str
+    trajectory_base_id: str
+    max_replans: int
+    attempt: int
+    status: str
+    replan_count: int = 0
+    attempt_trajectory_ids: tuple[str, ...] = ()
+    attempt_outcome_digests: tuple[str, ...] = ()
+    last_plan_digest: str | None = None
+    last_outcome_digest: str | None = None
+    next_context_digest: str | None = None
+    replan_instruction_digest: str | None = None
+    bandit_state_digest: str | None = None
+
+    _STATUSES = frozenset(
+        {
+            "initial",
+            "retry_ready",
+            "completed",
+            "completed_without_replan",
+            "replan_limit_reached",
+            "execution_blocked",
+        }
+    )
+
+    def __post_init__(self) -> None:
+        _identifier("cross-domain replan checkpoint run_id", self.run_id)
+        _route_digest(self.task_digest, "cross-domain replan checkpoint task_digest")
+        _route_digest(self.base_plan_digest, "cross-domain replan checkpoint base_plan_digest")
+        _text("cross-domain replan checkpoint trajectory_base_id", self.trajectory_base_id, maximum=512)
+        if (
+            not isinstance(self.max_replans, int)
+            or isinstance(self.max_replans, bool)
+            or not 0 <= self.max_replans <= MAX_AUTONOMOUS_CROSS_DOMAIN_REPLANS
+        ):
+            raise BrainRunError("cross-domain replan checkpoint max_replans is outside the bound")
+        if (
+            not isinstance(self.attempt, int)
+            or isinstance(self.attempt, bool)
+            or not 0 <= self.attempt <= self.max_replans + 1
+        ):
+            raise BrainRunError("cross-domain replan checkpoint attempt is outside the bound")
+        if self.status not in self._STATUSES:
+            raise BrainRunError("cross-domain replan checkpoint has an invalid status")
+        if (
+            not isinstance(self.replan_count, int)
+            or isinstance(self.replan_count, bool)
+            or self.replan_count != max(0, self.attempt - 1)
+        ):
+            raise BrainRunError("cross-domain replan checkpoint replan_count must match the attempt")
+        trajectory_ids = _sequence(
+            "cross-domain replan checkpoint attempt_trajectory_ids",
+            self.attempt_trajectory_ids,
+            maximum=MAX_AUTONOMOUS_CROSS_DOMAIN_REPLANS + 1,
+        )
+        for trajectory_id in trajectory_ids:
+            _text("cross-domain replan checkpoint trajectory_id", trajectory_id, maximum=512)
+        if len(set(trajectory_ids)) != len(trajectory_ids):
+            raise BrainRunError("cross-domain replan checkpoint trajectory IDs must be unique")
+        outcome_digests = _sequence(
+            "cross-domain replan checkpoint attempt_outcome_digests",
+            self.attempt_outcome_digests,
+            maximum=MAX_AUTONOMOUS_CROSS_DOMAIN_REPLANS + 1,
+        )
+        for digest in outcome_digests:
+            _route_digest(digest, "cross-domain replan checkpoint outcome digest")
+        if len(trajectory_ids) != self.attempt or len(outcome_digests) != self.attempt:
+            raise BrainRunError("cross-domain replan checkpoint attempt metadata must align")
+        for name, digest in (
+            ("last_plan_digest", self.last_plan_digest),
+            ("last_outcome_digest", self.last_outcome_digest),
+            ("next_context_digest", self.next_context_digest),
+            ("replan_instruction_digest", self.replan_instruction_digest),
+            ("bandit_state_digest", self.bandit_state_digest),
+        ):
+            if digest is not None:
+                _route_digest(digest, f"cross-domain replan checkpoint {name}")
+        if self.attempt == 0:
+            if self.status != "initial" or any(
+                value is not None
+                for value in (
+                    self.last_plan_digest,
+                    self.last_outcome_digest,
+                    self.next_context_digest,
+                    self.replan_instruction_digest,
+                    self.bandit_state_digest,
+                )
+            ):
+                raise BrainRunError("initial cross-domain replan checkpoint contains attempt state")
+        else:
+            if any(
+                value is None
+                for value in (self.last_plan_digest, self.last_outcome_digest, self.bandit_state_digest)
+            ):
+                raise BrainRunError("settled cross-domain replan checkpoint is missing attempt digests")
+        if self.status == "retry_ready":
+            if self.attempt == 0 or self.attempt >= self.max_replans + 1:
+                raise BrainRunError("retry-ready checkpoint is outside the retry bound")
+            if self.next_context_digest is None or self.replan_instruction_digest is None:
+                raise BrainRunError("retry-ready checkpoint is missing transient context digests")
+        elif self.next_context_digest is not None or self.replan_instruction_digest is not None:
+            raise BrainRunError("terminal cross-domain replan checkpoint retains retry context")
+        payload = self._payload(
+            trajectory_ids=trajectory_ids,
+            outcome_digests=outcome_digests,
+        )
+        encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        if len(encoded.encode("utf-8")) > MAX_AUTONOMOUS_CROSS_DOMAIN_REPLAN_CHECKPOINT_BYTES:
+            raise BrainRunError("cross-domain replan checkpoint exceeds the bounded size")
+        object.__setattr__(self, "attempt_trajectory_ids", trajectory_ids)
+        object.__setattr__(self, "attempt_outcome_digests", outcome_digests)
+
+    def _payload(
+        self,
+        *,
+        trajectory_ids: Sequence[str] | None = None,
+        outcome_digests: Sequence[str] | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_CROSS_DOMAIN_REPLAN_CHECKPOINT_SCHEMA,
+            "run_id": self.run_id,
+            "task_digest": self.task_digest,
+            "base_plan_digest": self.base_plan_digest,
+            "trajectory_base_id": self.trajectory_base_id,
+            "max_replans": self.max_replans,
+            "attempt": self.attempt,
+            "status": self.status,
+            "replan_count": self.replan_count,
+            "attempt_trajectory_ids": list(self.attempt_trajectory_ids if trajectory_ids is None else trajectory_ids),
+            "attempt_outcome_digests": list(self.attempt_outcome_digests if outcome_digests is None else outcome_digests),
+            "last_plan_digest": self.last_plan_digest,
+            "last_outcome_digest": self.last_outcome_digest,
+            "next_context_digest": self.next_context_digest,
+            "replan_instruction_digest": self.replan_instruction_digest,
+            "bandit_state_digest": self.bandit_state_digest,
+        }
+
+    @property
+    def checkpoint_digest(self) -> str:
+        return content_digest(self._payload())
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            **self._payload(),
+            "checkpoint_digest": self.checkpoint_digest,
+            "retention": "task_plan_attempt_and_value_digests_only; raw_provider_results_caller_owned",
+            "authorization": "retry_reuses_original_route_and_caller_approval_boundary",
+        }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "AutonomousCrossDomainReplanCheckpoint":
+        if not isinstance(value, Mapping) or value.get("schema") != AUTONOMOUS_CROSS_DOMAIN_REPLAN_CHECKPOINT_SCHEMA:
+            raise BrainRunError("cross-domain replan checkpoint has an invalid schema")
+        checkpoint = cls(
+            run_id=value.get("run_id"),
+            task_digest=value.get("task_digest"),
+            base_plan_digest=value.get("base_plan_digest"),
+            trajectory_base_id=value.get("trajectory_base_id"),
+            max_replans=value.get("max_replans"),
+            attempt=value.get("attempt"),
+            status=value.get("status"),
+            replan_count=value.get("replan_count", 0),
+            attempt_trajectory_ids=tuple(value.get("attempt_trajectory_ids", ())),
+            attempt_outcome_digests=tuple(value.get("attempt_outcome_digests", ())),
+            last_plan_digest=value.get("last_plan_digest"),
+            last_outcome_digest=value.get("last_outcome_digest"),
+            next_context_digest=value.get("next_context_digest"),
+            replan_instruction_digest=value.get("replan_instruction_digest"),
+            bandit_state_digest=value.get("bandit_state_digest"),
+        )
+        supplied_digest = value.get("checkpoint_digest")
+        if supplied_digest is not None and supplied_digest != checkpoint.checkpoint_digest:
+            raise BrainRunError("cross-domain replan checkpoint digest does not match its contents")
+        return checkpoint
 
 
 def _workflow_digest(value: Any, name: str) -> str:
@@ -8694,7 +8929,7 @@ class AutonomousTaskOrchestrator:
         *,
         cross_domain: AutonomousCrossDomainResult,
         bandit_state: Mapping[str, Any],
-        evaluator: BrainOutcomeEvaluator,
+        evaluator: BrainOutcomeEvaluator | DomainEvaluatorRegistry,
         evidence: Mapping[str, Mapping[str, Any]] | None = None,
         memory: BrainEpisodicMemory | None = None,
         memory_tags: Sequence[str] = (),
@@ -8716,8 +8951,13 @@ class AutonomousTaskOrchestrator:
         if not isinstance(bandit_state, Mapping):
             raise BrainRunError("cross-domain trajectory bandit_state must be a mapping")
         BrainLearningLedger._assert_safe(bandit_state)
-        if not isinstance(evaluator, BrainOutcomeEvaluator):
-            raise BrainRunError("cross-domain trajectory evaluator must be a BrainOutcomeEvaluator")
+        evaluator = _resolve_cross_domain_evaluator(
+            evaluator,
+            [
+                *[child.profile.domain for child in cross_domain.blueprint.child_blueprints],
+                cross_domain.blueprint.synthesis_blueprint.profile.domain,
+            ],
+        )
         if not isinstance(retain_replan_instruction, bool):
             raise BrainRunError("retain_replan_instruction must be a boolean")
         if evidence is not None:
@@ -8840,7 +9080,7 @@ class AutonomousTaskOrchestrator:
         model_candidates: Sequence[Mapping[str, Any]],
         credentials: Mapping[str, CredentialHandle],
         bandit_state: Mapping[str, Any],
-        evaluator: BrainOutcomeEvaluator,
+        evaluator: BrainOutcomeEvaluator | DomainEvaluatorRegistry,
         evidence: Mapping[str, Mapping[str, Any]] | None = None,
         memory: BrainEpisodicMemory | None = None,
         memory_tags: Sequence[str] = (),
@@ -8861,8 +9101,17 @@ class AutonomousTaskOrchestrator:
         if not isinstance(bandit_state, Mapping):
             raise BrainRunError("cross-domain trajectory bandit_state must be a mapping")
         BrainLearningLedger._assert_safe(bandit_state)
-        if not isinstance(evaluator, BrainOutcomeEvaluator):
-            raise BrainRunError("cross-domain trajectory evaluator must be a BrainOutcomeEvaluator")
+        evaluator = _resolve_cross_domain_evaluator(
+            evaluator,
+            [
+                *[
+                    value.get("domain")
+                    for value in subtasks
+                    if isinstance(value, Mapping) and isinstance(value.get("domain"), str)
+                ],
+                "cross_domain",
+            ],
+        )
         if evidence is not None:
             if not isinstance(evidence, Mapping) or any(
                 not isinstance(key, str) or not isinstance(value, Mapping)
@@ -8985,7 +9234,7 @@ class AutonomousTaskOrchestrator:
         model_candidates: Sequence[Mapping[str, Any]],
         credentials: Mapping[str, CredentialHandle],
         bandit_state: Mapping[str, Any],
-        evaluator: BrainOutcomeEvaluator,
+        evaluator: BrainOutcomeEvaluator | DomainEvaluatorRegistry,
         evidence: Mapping[str, Mapping[str, Any]] | None = None,
         memory: BrainEpisodicMemory | None = None,
         memory_tags: Sequence[str] = (),
@@ -8995,6 +9244,8 @@ class AutonomousTaskOrchestrator:
         trajectory_terminal_reward: float | None = None,
         run_id: str | None = None,
         idempotency_key: str | None = None,
+        checkpoint: AutonomousCrossDomainReplanCheckpoint | Mapping[str, Any] | None = None,
+        checkpoint_sink: Callable[[AutonomousCrossDomainReplanCheckpoint], Any] | None = None,
         ledger: BrainLearningLedger | None = None,
         **kwargs: Any,
     ) -> AutonomousCrossDomainReplanResult:
@@ -9004,14 +9255,26 @@ class AutonomousTaskOrchestrator:
         state therefore affects the next specialist and synthesis selections, while the approved
         route, caller-owned tools, credentials, effect policy, and aggregate execution controller
         remain unchanged. A replan instruction is inserted only as a reserved developer context
-        packet and is never copied into the value-only result projection.
+        packet and is never copied into the value-only result projection. ``checkpoint_sink`` is
+        called only after an attempt's trajectory has settled; a caller can persist the resulting
+        metadata and resume at the next attempt by supplying the checkpoint and the same
+        value-only bandit state plus the caller-owned continuation context.
         """
 
         if not isinstance(bandit_state, Mapping):
             raise BrainRunError("cross-domain replan bandit_state must be a mapping")
         BrainLearningLedger._assert_safe(bandit_state)
-        if not isinstance(evaluator, BrainOutcomeEvaluator):
-            raise BrainRunError("cross-domain replan evaluator must be a BrainOutcomeEvaluator")
+        evaluator = _resolve_cross_domain_evaluator(
+            evaluator,
+            [
+                *[
+                    value.get("domain")
+                    for value in subtasks
+                    if isinstance(value, Mapping) and isinstance(value.get("domain"), str)
+                ],
+                "cross_domain",
+            ],
+        )
         memory_store = memory if memory is not None else self.brain.memory
         if not isinstance(memory_store, BrainEpisodicMemory):
             raise BrainRunError("cross-domain replan memory must be a BrainEpisodicMemory")
@@ -9033,18 +9296,75 @@ class AutonomousTaskOrchestrator:
         elif not isinstance(base_context, Mapping):
             raise BrainRunError("cross-domain replan context must be a mapping or None")
         base_context = dict(_safe_json("cross-domain replan context", base_context))
-        if run_id is None:
+        if checkpoint_sink is not None and not callable(checkpoint_sink):
+            raise BrainRunError("cross-domain replan checkpoint_sink must be callable or None")
+        checkpoint_value: AutonomousCrossDomainReplanCheckpoint | None
+        if checkpoint is None:
+            checkpoint_value = None
+        elif isinstance(checkpoint, AutonomousCrossDomainReplanCheckpoint):
+            checkpoint_value = checkpoint
+        elif isinstance(checkpoint, Mapping):
+            checkpoint_value = AutonomousCrossDomainReplanCheckpoint.from_dict(checkpoint)
+        else:
+            raise BrainRunError("cross-domain replan checkpoint must be a checkpoint, mapping, or None")
+        if checkpoint_value is None and _AUTONOMOUS_CROSS_DOMAIN_REPLAN_CONTEXT_KEY in base_context:
+            raise BrainRunError(
+                "cross-domain replan continuation context requires a matching checkpoint"
+            )
+
+        initial_context = {
+            key: value
+            for key, value in base_context.items()
+            if key != _AUTONOMOUS_CROSS_DOMAIN_REPLAN_CONTEXT_KEY
+        }
+        preparation_options: dict[str, Any] = {"context": initial_context}
+        for option_name in (
+            "desired_outputs",
+            "child_execution_mode",
+            "synthesis_execution_mode",
+            "max_steps",
+            "require_json",
+            "response_schema",
+        ):
+            if option_name in kwargs:
+                preparation_options[option_name] = kwargs[option_name]
+        if "input_tokens" in kwargs:
+            preparation_options["max_input_tokens"] = kwargs["input_tokens"]
+        base_blueprint = self.prepare_cross_domain(
+            task=task,
+            subtasks=subtasks,
+            **preparation_options,
+        )
+        base_plan_digest = _cross_domain_plan_digest(base_blueprint)
+        if checkpoint_value is not None:
+            if checkpoint_value.task_digest != base_blueprint.task_digest:
+                raise BrainRunError("cross-domain replan checkpoint task does not match the request")
+            if checkpoint_value.base_plan_digest != base_plan_digest:
+                raise BrainRunError("cross-domain replan checkpoint plan does not match the request")
+            if checkpoint_value.max_replans != max_replans:
+                raise BrainRunError("cross-domain replan checkpoint max_replans does not match the request")
+            if run_id is None:
+                base_run_id = checkpoint_value.run_id
+            else:
+                base_run_id = _identifier("cross-domain replan run_id", run_id)
+                if base_run_id != checkpoint_value.run_id:
+                    raise BrainRunError("cross-domain replan checkpoint run_id does not match the request")
+        elif run_id is None:
             base_run_id = f"cross-replan-{uuid.uuid4().hex}"
         else:
             base_run_id = _identifier("cross-domain replan run_id", run_id)
         if idempotency_key is not None:
             _text("cross-domain replan idempotency_key", idempotency_key, maximum=256)
-        if trajectory_id is None:
+        if trajectory_id is None and checkpoint_value is not None:
+            base_trajectory_id = checkpoint_value.trajectory_base_id
+        elif trajectory_id is None:
             base_trajectory_id = "cross-domain-replan-" + content_digest(
                 {"task": task, "run_id": base_run_id}
             )
         else:
             base_trajectory_id = _text("cross-domain replan trajectory_id", trajectory_id, maximum=512)
+        if checkpoint_value is not None and base_trajectory_id != checkpoint_value.trajectory_base_id:
+            raise BrainRunError("cross-domain replan checkpoint trajectory identity does not match the request")
 
         def attempt_identity(prefix: str, attempt: int, name: str) -> str:
             candidate = f"{prefix}-attempt-{attempt}"
@@ -9061,9 +9381,73 @@ class AutonomousTaskOrchestrator:
             return _text("cross-domain replan attempt trajectory_id", candidate, maximum=512)
 
         state: Mapping[str, Any] = dict(bandit_state)
+        if checkpoint_value is not None and checkpoint_value.attempt > 0:
+            if checkpoint_value.bandit_state_digest != content_digest(state):
+                raise BrainRunError("cross-domain replan checkpoint bandit state does not match the request")
+        if checkpoint_value is None:
+            checkpoint_value = AutonomousCrossDomainReplanCheckpoint(
+                run_id=base_run_id,
+                task_digest=base_blueprint.task_digest,
+                base_plan_digest=base_plan_digest,
+                trajectory_base_id=base_trajectory_id,
+                max_replans=max_replans,
+                attempt=0,
+                status="initial",
+            )
+        elif checkpoint_value.status in {
+            "completed",
+            "completed_without_replan",
+            "replan_limit_reached",
+        }:
+            raise BrainRunError("cross-domain replan checkpoint is already terminal")
+        if checkpoint_value.status == "retry_ready":
+            retry_context = base_context.get(_AUTONOMOUS_CROSS_DOMAIN_REPLAN_CONTEXT_KEY)
+            if not isinstance(retry_context, Mapping):
+                raise BrainRunError("resuming a cross-domain replan requires the caller-owned retry context")
+            if checkpoint_value.next_context_digest != content_digest(retry_context):
+                raise BrainRunError("caller-owned retry context does not match the replan checkpoint")
+        start_attempt = checkpoint_value.attempt + 1
+        attempts_before = checkpoint_value.attempt
         current_context = dict(base_context)
         attempts: list[AutonomousCrossDomainReplanAttempt] = []
-        for attempt in range(1, max_replans + 2):
+
+        def persist_checkpoint(value: AutonomousCrossDomainReplanCheckpoint) -> None:
+            if checkpoint_sink is None:
+                return
+            try:
+                checkpoint_sink(value)
+            except Exception as error:
+                raise BrainRunError("cross-domain replan checkpoint persistence failed") from error
+
+        def checkpoint_after_attempt(
+            *,
+            attempt_result: AutonomousCrossDomainReplanAttempt,
+            status: str,
+            next_context: Mapping[str, Any] | None = None,
+        ) -> AutonomousCrossDomainReplanCheckpoint:
+            trajectory_ids = [*checkpoint_value.attempt_trajectory_ids, attempt_result.trajectory_result.trajectory.trajectory_id]
+            outcome_digests = [*checkpoint_value.attempt_outcome_digests, attempt_result.outcome_digest]
+            checkpoint_result = AutonomousCrossDomainReplanCheckpoint(
+                run_id=base_run_id,
+                task_digest=base_blueprint.task_digest,
+                base_plan_digest=base_plan_digest,
+                trajectory_base_id=base_trajectory_id,
+                max_replans=max_replans,
+                attempt=attempt_result.attempt,
+                status=status,
+                replan_count=max(0, attempt_result.attempt - 1),
+                attempt_trajectory_ids=tuple(trajectory_ids),
+                attempt_outcome_digests=tuple(outcome_digests),
+                last_plan_digest=attempt_result.plan_digest,
+                last_outcome_digest=attempt_result.outcome_digest,
+                next_context_digest=None if next_context is None else content_digest(next_context),
+                replan_instruction_digest=attempt_result.replan_instruction_digest if next_context is not None else None,
+                bandit_state_digest=content_digest(attempt_result.bandit_state),
+            )
+            persist_checkpoint(checkpoint_result)
+            return checkpoint_result
+
+        for attempt in range(start_attempt, max_replans + 2):
             attempt_run_id = attempt_identity(base_run_id, attempt, "cross-domain replan attempt run_id")
             attempt_key = None if idempotency_key is None else attempt_identity(
                 idempotency_key,
@@ -9100,7 +9484,9 @@ class AutonomousTaskOrchestrator:
                     status=cross_domain.status,
                     final=None,
                     attempts=tuple(attempts),
-                    replan_count=max(0, len(attempts) - 1),
+                    replan_count=max(0, attempts_before + len(attempts) - 1),
+                    attempts_before=attempts_before,
+                    checkpoint=checkpoint_value,
                 )
             trajectory_result = self.settle_cross_domain_trajectory_learning(
                 cross_domain=cross_domain,
@@ -9150,24 +9536,42 @@ class AutonomousTaskOrchestrator:
             if selected_decision is None:
                 passed = bool(decisions) and all(decision.passed for decision in decisions)
                 final_status = "completed" if cross_domain.status == "completed" and passed else "completed_without_replan"
+                checkpoint_value = checkpoint_after_attempt(
+                    attempt_result=attempt_result,
+                    status=final_status,
+                )
                 return AutonomousCrossDomainReplanResult(
                     status=final_status,
                     final=attempt_result,
                     attempts=tuple(attempts),
                     replan_count=attempt - 1,
+                    attempts_before=attempts_before,
+                    checkpoint=checkpoint_value,
                 )
             if attempt > max_replans:
+                checkpoint_value = checkpoint_after_attempt(
+                    attempt_result=attempt_result,
+                    status="replan_limit_reached",
+                )
                 return AutonomousCrossDomainReplanResult(
                     status="replan_limit_reached",
                     final=attempt_result,
                     attempts=tuple(attempts),
                     replan_count=attempt - 1,
+                    attempts_before=attempts_before,
+                    checkpoint=checkpoint_value,
                 )
-            current_context[_AUTONOMOUS_CROSS_DOMAIN_REPLAN_CONTEXT_KEY] = _cross_domain_replan_context(
+            next_context = _cross_domain_replan_context(
                 attempt=attempt + 1,
                 plan_digest=plan_digest,
                 outcome_digest=outcome_digest,
                 decision=selected_decision,
+            )
+            current_context[_AUTONOMOUS_CROSS_DOMAIN_REPLAN_CONTEXT_KEY] = next_context
+            checkpoint_value = checkpoint_after_attempt(
+                attempt_result=attempt_result,
+                status="retry_ready",
+                next_context=next_context,
             )
         raise BrainRunError("cross-domain replan loop exited without a terminal result")
 
@@ -11278,7 +11682,7 @@ class AutonomousAgent:
         cross_domain_replan_learning: bool = False,
         cross_domain_replan_max_replans: int = 1,
         cross_domain_evidence: Mapping[str, Mapping[str, Any]] | None = None,
-        cross_domain_evaluator: BrainOutcomeEvaluator | None = None,
+        cross_domain_evaluator: BrainOutcomeEvaluator | DomainEvaluatorRegistry | None = None,
         cross_domain_trajectory_discount: float = 0.90,
         cross_domain_trajectory_terminal_reward: float | None = None,
         accepted_cross_domain_plan_refinement: AutonomousCrossDomainPlanRefinementResult | None = None,
@@ -11355,8 +11759,13 @@ class AutonomousAgent:
             raise BrainRunError(
                 "learning_mode cannot be combined with explicit learning flags; choose one control surface"
             )
-        if cross_domain_evaluator is not None and not isinstance(cross_domain_evaluator, BrainOutcomeEvaluator):
-            raise BrainRunError("cross_domain_evaluator must be a BrainOutcomeEvaluator or None")
+        if cross_domain_evaluator is not None and not isinstance(
+            cross_domain_evaluator,
+            (BrainOutcomeEvaluator, DomainEvaluatorRegistry),
+        ):
+            raise BrainRunError(
+                "cross_domain_evaluator must be a BrainOutcomeEvaluator, DomainEvaluatorRegistry, or None"
+            )
         if not isinstance(workflow_retry_blocked, bool):
             raise BrainRunError("workflow_retry_blocked must be a boolean")
         if not workflow_execution and (
@@ -11974,6 +12383,7 @@ __all__ = [
     "AUTONOMOUS_CROSS_DOMAIN_TRAJECTORY_LEARNING_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_REPLAN_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_REPLAN_CONTEXT_SCHEMA",
+    "AUTONOMOUS_CROSS_DOMAIN_REPLAN_CHECKPOINT_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_PLAN_REFINEMENT_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_STEP_SCHEMA",
@@ -11995,6 +12405,7 @@ __all__ = [
     "MAX_AUTONOMOUS_ROUTE_DOMAINS",
     "MAX_AUTONOMOUS_CROSS_DOMAIN_CHILDREN",
     "MAX_AUTONOMOUS_CROSS_DOMAIN_REPLANS",
+    "MAX_AUTONOMOUS_CROSS_DOMAIN_REPLAN_CHECKPOINT_BYTES",
     "MAX_AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_BYTES",
     "AUTONOMOUS_WORKFLOW_SCHEMA",
     "AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA",
@@ -12028,6 +12439,7 @@ __all__ = [
     "AutonomousCrossDomainTrajectoryLearningResult",
     "AutonomousCrossDomainReplanAttempt",
     "AutonomousCrossDomainReplanResult",
+    "AutonomousCrossDomainReplanCheckpoint",
     "AutonomousAutoBlueprint",
     "AutonomousAutoResult",
     "AutonomousLearningResult",

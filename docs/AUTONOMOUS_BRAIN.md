@@ -1310,6 +1310,41 @@ exclusive with the sequential and one-trajectory cross-domain modes, requires an
 terminal `completed` result means every settled decision passed and no further replan was
 requested; `replan_limit_reached` is an explicit bounded stop, not an implicit success.
 
+For a route spanning different quality rubrics, pass a `DomainEvaluatorRegistry` instead of
+writing one bespoke callback. The SDK constructs a `CompositeDomainEvaluator` with one stable
+outer evaluator identity for the trajectory, then routes each value-only decision by the
+reviewed child or synthesis domain. Missing domain coverage fails closed as a zero-reward,
+replan-requesting decision rather than silently applying the wrong rubric:
+
+```python
+registry = DomainEvaluatorRegistry.with_builtin_autonomous_profiles()
+quality = CompositeDomainEvaluator.from_registry(
+    registry,
+    domains=("coding", "data", "cross_domain"),
+)
+replanned = agent.run_cross_domain_replan_learning(
+    task="Coordinate engineering and data review.",
+    subtasks=(
+        {"id": "engineering", "domain": "coding", "task": "Review implementation risk."},
+        {"id": "data", "domain": "data", "task": "Review lineage risk."},
+    ),
+    credentials=session,
+    evaluator=quality,
+    bandit_state=caller_owned_bandit_state,
+    memory=memory,
+    evidence=domain_evidence,
+    approve_provider_call=True,
+)
+```
+
+Replan durability is deliberately attempt-boundary based. Supplying `checkpoint_sink` receives a
+metadata-only `AutonomousCrossDomainReplanCheckpoint` after trajectory settlement and before the
+next provider attempt. Persist that checkpoint with the caller's latest value-only bandit state;
+after a worker restart, pass the checkpoint, the matching state, and the caller-owned raw
+continuation packet back to the same method. The SDK verifies task, base-plan, trajectory, outcome,
+instruction-context, and learner-state digests before dispatching the next attempt. A checkpoint
+never contains task text, provider output, credentials, evidence, or the raw replan instruction.
+
 For example, a route-aware tool loop across any supported domain can be entered through the same
 facade:
 
