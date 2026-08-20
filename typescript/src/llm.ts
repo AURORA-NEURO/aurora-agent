@@ -467,6 +467,9 @@ export interface ProviderHealth extends JsonObject {
   last_status_code: number | null;
   credential_posture: "caller_supplied_opaque_handle";
   credential_required: boolean;
+  /** Optional persisted evaluator-quality projection supplied by a caller-owned health ledger. */
+  quality_mean?: number | null;
+  quality_observations?: number;
 }
 
 interface HealthState {
@@ -1523,24 +1526,36 @@ export class AutonomousRuntime {
   }
 
   private rank(request: AutonomousSelectionRequest): AutonomousModelRanking[] {
-    return request.candidates.map((candidate) => {
-      const reasons: string[] = [];
-      const provider = request.provider_health[candidate.provider];
-      const model = request.model_health[`${candidate.provider}/${candidate.model}`];
-      if (candidate.enabled === false) reasons.push("candidate disabled");
-      if (!provider) reasons.push("provider not registered");
-      if (provider?.circuit === "open") reasons.push("provider circuit open");
-      if (provider?.credential_required !== false && provider?.credential_ready !== true) reasons.push("credential not ready");
-      if (candidate.max_output_tokens < request.requested_output_tokens) reasons.push("model output capacity is below the request");
-      if (candidate.context_window_tokens < request.estimated_input_tokens + request.requested_output_tokens) reasons.push("model context capacity is below the request");
-      if (request.required_capabilities.some((required) => !(candidate.capabilities ?? []).includes(required))) reasons.push("model lacks a required capability");
-      const healthRate = typeof model?.success_rate === "number" && model.attempts && model.attempts > 0 ? model.success_rate : 0.5;
-      const latencyUtility = 1 - Math.min(1, candidate.latency_ms / 60_000);
-      const costUtility = 1 - Math.min(1, candidate.cost_per_million_tokens / 10_000);
-      const score = candidate.quality * 0.4 + candidate.reliability * 0.3 + healthRate * 0.15 + latencyUtility * 0.1 + costUtility * 0.05;
-      return { provider: candidate.provider, model: candidate.model, score: Number(score.toFixed(12)), eligible: reasons.length === 0, reasons };
-    }).sort((left, right) => Number(right.eligible) - Number(left.eligible) || right.score - left.score || left.provider.localeCompare(right.provider) || left.model.localeCompare(right.model));
+    return rankAutonomousModels(request);
   }
+}
+
+/**
+ * Pure, deterministic model ranking shared by the local runtime and persisted-health adapters.
+ * It consumes only candidate metadata, credential readiness, and aggregate health values.
+ */
+export function rankAutonomousModels(request: AutonomousSelectionRequest): AutonomousModelRanking[] {
+  return request.candidates.map((candidate) => {
+    const reasons: string[] = [];
+    const provider = request.provider_health[candidate.provider];
+    const model = request.model_health[`${candidate.provider}/${candidate.model}`];
+    if (candidate.enabled === false) reasons.push("candidate disabled");
+    if (!provider) reasons.push("provider not registered");
+    if (provider?.circuit === "open") reasons.push("provider circuit open");
+    if (model?.circuit === "open") reasons.push("model circuit open");
+    if (provider?.credential_required !== false && provider?.credential_ready !== true) reasons.push("credential not ready");
+    if (candidate.max_output_tokens < request.requested_output_tokens) reasons.push("model output capacity is below the request");
+    if (candidate.context_window_tokens < request.estimated_input_tokens + request.requested_output_tokens) reasons.push("model context capacity is below the request");
+    if (request.required_capabilities.some((required) => !(candidate.capabilities ?? []).includes(required))) reasons.push("model lacks a required capability");
+    const healthRate = typeof model?.success_rate === "number" && model.attempts && model.attempts > 0 ? model.success_rate : 0.5;
+    const qualityObservations = model?.quality_observations ?? 0;
+    const qualityRate = typeof model?.quality_mean === "number" && qualityObservations > 0 ? model.quality_mean : null;
+    const latencyUtility = 1 - Math.min(1, candidate.latency_ms / 60_000);
+    const costUtility = 1 - Math.min(1, candidate.cost_per_million_tokens / 10_000);
+    const adaptiveHealth = qualityRate === null ? healthRate * 0.15 : healthRate * 0.1 + qualityRate * 0.05;
+    const score = candidate.quality * 0.4 + candidate.reliability * 0.3 + adaptiveHealth + latencyUtility * 0.1 + costUtility * 0.05;
+    return { provider: candidate.provider, model: candidate.model, score: Number(score.toFixed(12)), eligible: reasons.length === 0, reasons };
+  }).sort((left, right) => Number(right.eligible) - Number(left.eligible) || right.score - left.score || left.provider.localeCompare(right.provider) || left.model.localeCompare(right.model));
 }
 
 function emptyHealth(): HealthState {

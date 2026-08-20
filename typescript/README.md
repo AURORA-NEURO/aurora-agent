@@ -141,6 +141,16 @@ warning. `AutonomousMemoryPersistenceCoordinator` connects the store to a caller
 object-store adapter. Snapshots and event chains are content-addressed, and raw prompts, provider
 responses, tool payloads, credentials, and secret-shaped fields are rejected.
 
+`InMemoryAutonomousModelHealthStore` adds the restart-safe selection feedback plane. It records
+separate value-only invocation and evaluator-quality observations, aggregates success/failure,
+latency, quality, and circuit projections per provider/model arm, and exposes a deterministic
+`AutonomousModelHealthController` selector plus invocation observer. Restore the content-addressed
+snapshot through `AutonomousModelHealthPersistenceCoordinator` before constructing a worker; the
+controller then makes historical quality influence the next model ranking without sending old
+prompts or responses to a provider. `AutonomousOfflineReplayEngine` re-evaluates caller-rehydrated
+numeric signal cases for all twelve domains, compares expected reward/pass/digest witnesses, and
+never invokes a provider or turns a replay mismatch into authorization.
+
 The live tool boundary is opt-in and catalogue-backed. Create a `ToolCatalogue` from the gateway's
 tool definitions, pass it with a caller-owned executor, and inspect
 `AutonomousDomainToolRegistry.plan()` before allowing a run. Read-only tools can be proposed

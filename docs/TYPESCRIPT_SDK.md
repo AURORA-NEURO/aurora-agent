@@ -1278,6 +1278,45 @@ SHA-256 snapshot digest plus the event hash chain. `AutonomousMemoryPersistenceC
 bridges the store to an application-owned SQLite, Postgres, IndexedDB, or object-store adapter;
 the SDK does not select a filesystem or persist provider secrets.
 
+### Restart-safe model health and offline replay
+
+`InMemoryAutonomousModelHealthStore` is the TypeScript reference ledger for the selection feedback
+plane. `recordInvocation()` appends provider/model transport observations; `recordEvaluation()`
+appends explicit evaluator-quality observations as a separate event kind. Health aggregation keeps
+transport attempts, successes/failures, latency, quality mean/pass rate, and the circuit projection
+distinct. A provider success is therefore not silently treated as task quality, and a quality
+assessment does not inflate transport-attempt counts.
+
+`AutonomousModelHealthController.selector()` is a value-only `AutonomousModelSelector`. It merges
+the restored provider/model health overlay with the current request and delegates ranking to the
+same pure deterministic utility used by `AutonomousRuntime`. Its `observer(context)` records only
+provider/model, domain, capability, risk, status, token counts, latency, and failure class. The
+controller never receives credential handles, prompt messages, tool arguments, or provider text.
+`AutonomousModelHealthPersistenceCoordinator` connects hash-chained snapshots to an application-
+owned SQLite, Postgres, IndexedDB, or object-store adapter; `restore()` verifies the snapshot and
+every event digest before the overlay is usable.
+
+`AutonomousOfflineReplayEngine` evaluates caller-rehydrated numeric signal maps against the exact
+reviewed evaluator profile for every built-in domain. It returns per-case reward, pass state,
+missing/rejected signals, evaluator digest, and explicit expected-witness mismatches. Replay is
+offline metadata evaluation: it does not replay a provider call, execute a tool, mutate bandit
+state, or authorize a mission. Raw evidence remains outside the SDK and is represented only by a
+caller-supplied digest.
+
+```typescript
+const health = new InMemoryAutonomousModelHealthStore();
+const controller = new AutonomousModelHealthController(health);
+const selector = controller.selector();
+const observer = controller.observer({ domain: "coding", capability: "reasoning", riskClass: "review_required" });
+const runtime = new AutonomousRuntime(llm, { selector });
+await runtime.invoke(plan, { credentialFor, observer });
+await controller.recordEvaluation({
+  provider: "openai", model: "gpt-5", domain: "coding", capability: "reasoning",
+  riskClass: "review_required", evaluatorId: "coding-reviewer", evaluatorVersion: "0.1",
+  reward: 0.9, passed: true, evidenceDigest: callerOwnedEvidenceDigest,
+});
+```
+
 The live catalogue path is:
 
 ```text
