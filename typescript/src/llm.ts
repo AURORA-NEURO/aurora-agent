@@ -2064,12 +2064,14 @@ export class AutonomousRuntime {
     if (this.selector) {
       const selected = await this.selector(request);
       if (!isObject(selected)) throw new ProviderRuntimeError("autonomous model selector returned a malformed decision");
+      const projectedRanking = selectorRankingProjection(selected.ranking, ranking);
+      const exploration = selectorExplorationProjection(selected);
       const selectedModel = selected.selected_model;
-      if (selectedModel === null) return { selected_model: null, strategy: "caller_selector", ranking, abstention_reason: typeof selected.abstention_reason === "string" ? selected.abstention_reason : "caller selector abstained" };
+      if (selectedModel === null) return { selected_model: null, strategy: "caller_selector", ranking: projectedRanking, abstention_reason: typeof selected.abstention_reason === "string" ? selected.abstention_reason : "caller selector abstained", ...exploration };
       if (!isObject(selectedModel) || typeof selectedModel.provider !== "string" || typeof selectedModel.model !== "string") throw new ProviderRuntimeError("autonomous selector returned an invalid selected_model");
       const chosen = ranking.find((row) => row.provider === selectedModel.provider && row.model === selectedModel.model);
       if (!chosen || !chosen.eligible) throw new ProviderRuntimeError("autonomous selector chose an ineligible model");
-      return { selected_model: { provider: chosen.provider, model: chosen.model }, strategy: "caller_selector", ranking, abstention_reason: null };
+      return { selected_model: { provider: chosen.provider, model: chosen.model }, strategy: "caller_selector", ranking: projectedRanking, abstention_reason: null, ...exploration };
     }
     const chosen = ranking.find((row) => row.eligible);
     return { selected_model: chosen ? { provider: chosen.provider, model: chosen.model } : null, strategy: "deterministic_health_utility", ranking, abstention_reason: chosen ? null : "no eligible model candidate" };
@@ -2258,6 +2260,29 @@ export class AutonomousRuntime {
   private rank(request: AutonomousSelectionRequest): AutonomousModelRanking[] {
     return rankAutonomousModels(request);
   }
+}
+
+function selectorRankingProjection(value: unknown, fallback: AutonomousModelRanking[]): AutonomousModelRanking[] {
+  if (value === undefined || value === null) return fallback;
+  if (!Array.isArray(value) || value.length > 128) throw new ProviderRuntimeError("autonomous model selector returned a malformed ranking");
+  if (value.length === 0) return fallback;
+  return value.map((row) => {
+    if (!isObject(row) || typeof row.provider !== "string" || !row.provider.trim() || typeof row.model !== "string" || !row.model.trim() || typeof row.score !== "number" || !Number.isFinite(row.score) || typeof row.eligible !== "boolean" || !Array.isArray(row.reasons) || row.reasons.length > 64 || row.reasons.some((reason) => typeof reason !== "string" || !reason.trim())) {
+      throw new ProviderRuntimeError("autonomous model selector returned a malformed ranking row");
+    }
+    return { provider: row.provider, model: row.model, score: row.score, eligible: row.eligible, reasons: [...row.reasons] };
+  });
+}
+
+function selectorExplorationProjection(value: JsonObject): Pick<AutonomousSelectionDecision, "exploration_draw" | "exploration_taken"> {
+  const draw = value.exploration_draw;
+  const taken = value.exploration_taken;
+  if (draw !== undefined && draw !== null && (typeof draw !== "number" || !Number.isFinite(draw) || draw < 0 || draw > 1)) throw new ProviderRuntimeError("autonomous model selector returned an invalid exploration_draw");
+  if (taken !== undefined && typeof taken !== "boolean") throw new ProviderRuntimeError("autonomous model selector returned an invalid exploration_taken flag");
+  return {
+    ...(draw === undefined ? {} : { exploration_draw: draw as number | null }),
+    ...(taken === undefined ? {} : { exploration_taken: taken as boolean }),
+  };
 }
 
 function validateSelectionConstraints(request: Pick<AutonomousSelectionRequest, "max_cost_per_million_tokens" | "max_latency_ms" | "min_quality">): void {

@@ -400,6 +400,27 @@ test("online learner adapts only from explicit evaluator rewards", async () => {
   assert.throws(() => learner.select({ ...request, min_quality: 2 }), /min_quality is outside its bounds/);
 });
 
+test("autonomous invocation preserves learner exploration and ranking evidence", async () => {
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => jsonResponse({ choices: [{ message: { role: "assistant", content: "selected through the learner" }, finish_reason: "stop" }] }),
+  });
+  llm.registerProvider(openaiCompatibleProvider("a", "https://learner-a.test", { requiresCredential: false }));
+  llm.registerProvider(openaiCompatibleProvider("b", "https://learner-b.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm, {
+    learner: new AutonomousOnlineLearner({ policy: { strategy: "epsilon_greedy", epsilon: 1, seed: 7 } }),
+  });
+  agent.registerModel(candidate("a", "one"));
+  agent.registerModel(candidate("b", "two"));
+  agent.learner.update({ arm_id: "a/one", reward: 0.2 });
+  agent.learner.update({ arm_id: "b/two", reward: 0.8 });
+  const result = await agent.run("Choose a model for this bounded coding task.", { domain: "coding", approveProviderCall: true });
+  assert.equal(result.status, "completed");
+  assert.equal(result.selection.exploration_taken, true);
+  assert.equal(typeof result.selection.exploration_draw, "number");
+  assert.ok(result.selection.ranking.some((row) => row.reasons.some((reason) => reason.startsWith("history="))));
+});
+
 test("online learner honors seeded epsilon exploration, failure penalties, and signed rewards", () => {
   const request = {
     task: "choose a reasoning model",
@@ -467,7 +488,10 @@ test("online learner isolates evaluator rewards by domain learning context", asy
 test("online learner rejects malformed contextual snapshots with typed errors", () => {
   assert.throws(() => new AutonomousOnlineLearner({ state: { schema: "test", generation: 0, arms: [], contextual_states: [null] } }), /bandit contextual state must contain context and arms/);
   assert.throws(() => new AutonomousOnlineLearner({ state: { schema: "test", generation: 0, arms: [{ arm_id: "a/one", pulls: 1, reward_sum: 2 }] } }), /online learner arm is malformed/);
+  assert.throws(() => new AutonomousOnlineLearner({ state: { schema: "test", generation: -1, arms: [] } }), /generation must be a non-negative safe integer/);
+  assert.throws(() => new AutonomousOnlineLearner({ state: { schema: "test", generation: 0, arms: [{ arm_id: "a/one" }, { arm_id: "a/one" }] } }), /arm a\/one is duplicated/);
   const learner = new AutonomousOnlineLearner();
+  assert.throws(() => learner.restore({ schema: "test", generation: 0, policy: { epsilon: 0.9 }, arms: [] }), /remote policy epsilon conflicts/);
   assert.throws(() => learner.update({ arm_id: "a/one", reward: 0.5, context: { domain: "coding", capability: "implementation", risk_class: "engineering_change" } }), /context requires a context_digest/);
   assert.throws(() => learner.update({ arm_id: "a/one", reward: 0.5, context_digest: "0".repeat(64), context: { domain: "coding", capability: "implementation", risk_class: "engineering_change" } }), /does not match its context identity/);
 });

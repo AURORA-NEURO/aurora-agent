@@ -1473,4 +1473,43 @@ mod tests {
         retry["assessment"]["reward"] = json!(0.2);
         assert!(state.outcome_record(&retry).is_err());
     }
+
+    #[test]
+    fn first_outcome_record_hydrates_an_unseen_arm_at_the_mcp_boundary() {
+        let mut state = BrainControlState::default();
+        let arguments = json!({
+            "run": {
+                "run_id": "run-first-seen",
+                "selection_digest": "a".repeat(64),
+                "prompt_digest": "b".repeat(64),
+                "plan_digest": "c".repeat(64),
+                "provider": "anthropic",
+                "model": "new-model",
+                "outcome_digest": "d".repeat(64)
+            },
+            "assessment": {
+                "evaluator_id": "quality",
+                "evaluator_version": "1",
+                "reward": 0.6,
+                "passed": true,
+                "failed": false
+            },
+            "bandit_state": {
+                "schema": "bioprism-brain-bandit/0.1",
+                "generation": 0,
+                "arms": []
+            },
+            "arm_id": "anthropic/new-model"
+        });
+
+        let result = state.outcome_record(&arguments).unwrap();
+        assert_eq!(result["learning_evidence"]["next_generation"], json!(1));
+        assert_eq!(result["next_state"]["generation"], json!(1));
+        assert_eq!(
+            result["next_state"]["arms"][0]["arm_id"],
+            json!("anthropic/new-model")
+        );
+        assert_eq!(result["next_state"]["arms"][0]["pulls"], json!(1));
+        assert_eq!(result["next_state"]["arms"][0]["reward_sum"], json!(0.6));
+    }
 }

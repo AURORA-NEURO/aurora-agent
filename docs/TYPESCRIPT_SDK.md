@@ -1663,6 +1663,10 @@ the digest must equal the SHA-256 of the normalized context object, including `t
 when no task family is supplied. `digestCanonicalJsonTextSync()` provides this small control-plane
 identity check without depending on Node crypto, while asynchronous Web Crypto remains available
 for general catalogue and evidence digests.
+When a learner is wired into `AutonomousAgent`, the selected model's ranking evidence and seeded
+exploration metadata are preserved through the actual provider invocation result. Restored remote
+states reject malformed generations, duplicate arms, and explicit policy fields that conflict with
+the local policy, preventing a silent split between the selector and the settlement ledger.
 Learning episodes can only be prepared from a completed autonomous run; approval pauses, provider
 refusals, child failures, and tool-loop limits cannot be converted into evaluator or bandit credit.
 Trajectory settlement is resumable after a later episode failure: matching already-settled reward

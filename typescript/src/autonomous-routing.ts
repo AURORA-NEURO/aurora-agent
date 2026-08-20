@@ -134,7 +134,7 @@ export async function semanticRouteAutonomousTask(agent: AutonomousAgent, task: 
   if (!candidates.length) throw new ProviderRuntimeError("semantic routing requires at least one model candidate");
   const catalogText = catalogue.map((entry) => `${entry.domain}: capability=${entry.capability}; risk=${entry.risk_class}; capabilities=${entry.capabilities.join(", ")}; ${entry.description}`).join("\n");
   const request = {
-    model: "semantic-routing-selection-placeholder",
+    model: "selection-delegated",
     messages: [
       { role: "system" as const, content: "You are a bounded autonomous task router. You classify work into the reviewed domain catalogue; you do not execute tools, make external changes, diagnose, or claim evidence. Use only catalogue domain names. Abstain when the task is underspecified. Return JSON only.", },
       { role: "developer" as const, content: `Reviewed domain catalogue:\n${catalogText}\n\nReturn selected_domains with at most ${options.maxDomains ?? 8} entries, a score in [0,1], a short rationale, confidence in [0,1], and abstain/abstain_reason.`, },

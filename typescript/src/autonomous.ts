@@ -59,6 +59,7 @@ export const AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA = "bioprism-typescript-autono
 export const AUTONOMOUS_MODEL_REFRESH_SCHEMA = "bioprism-typescript-autonomous-model-refresh/0.1" as const;
 export const AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN = 8;
 export const AUTONOMOUS_CROSS_DOMAIN_MAX_CONCURRENCY = 4;
+const AUTONOMOUS_BANDIT_MAX_ARMS = 512;
 
 export const AUTONOMOUS_DOMAIN_NAMES = [
   "coding",
@@ -1275,6 +1276,8 @@ function learnerContext(request: AutonomousSelectionRequest): { context_digest: 
 
 function validateContextState(state: BrainBanditContextState): void {
   if (!isObject(state) || typeof state.context_digest !== "string" || !/^[0-9a-f]{64}$/.test(state.context_digest) || !isObject(state.context) || !Array.isArray(state.arms)) throw new ArgumentError("online learner contextual state is malformed");
+  if (state.generation !== undefined && (!Number.isSafeInteger(state.generation) || state.generation < 0)) throw new ArgumentError("online learner contextual generation is malformed");
+  if (state.observed !== undefined && typeof state.observed !== "boolean") throw new ArgumentError("online learner contextual observed flag is malformed");
   learnerContext({ ...state.context, context_digest: state.context_digest, task: "context", required_capabilities: [], estimated_input_tokens: 1, requested_output_tokens: 1, candidates: [], provider_health: {}, model_health: {} });
 }
 
@@ -1317,6 +1320,11 @@ export class AutonomousOnlineLearner {
    */
   restore(state: BrainBanditState): BrainBanditState {
     const restoredState = cloneBanditState(state);
+    if (restoredState.policy !== undefined) {
+      for (const field of ["strategy", "exploration", "epsilon", "min_reward", "max_reward", "failure_penalty", "seed"] as const) {
+        if (restoredState.policy[field] !== undefined && restoredState.policy[field] !== this.policy[field]) throw new ArgumentError(`online learner remote policy ${field} conflicts with the local policy`);
+      }
+    }
     this.stateValue = { ...restoredState, policy: this.policy };
     this.assertState();
     return this.snapshot();
@@ -1423,16 +1431,20 @@ export class AutonomousOnlineLearner {
   }
 
   private assertState(): void {
-    if (!isObject(this.stateValue) || !Array.isArray(this.stateValue.arms) || this.stateValue.arms.length > 128) throw new ArgumentError("online learner state is malformed");
+    if (!isObject(this.stateValue) || !Array.isArray(this.stateValue.arms) || this.stateValue.arms.length > AUTONOMOUS_BANDIT_MAX_ARMS) throw new ArgumentError("online learner state is malformed");
+    if (!Number.isSafeInteger(this.stateValue.generation) || (this.stateValue.generation ?? 0) < 0) throw new ArgumentError("online learner state generation is malformed");
     const creditedOutcomes = this.stateValue.credited_outcomes ?? [];
     if (!Array.isArray(creditedOutcomes) || creditedOutcomes.length > 4096 || creditedOutcomes.some((receipt) => !isObject(receipt) || typeof receipt.outcome_digest !== "string" || !/^[0-9a-f]{64}$/.test(receipt.outcome_digest) || typeof receipt.arm_id !== "string" || !receipt.arm_id.trim() || typeof receipt.reward !== "number" || !Number.isFinite(receipt.reward) || receipt.reward < (this.policy.min_reward ?? -1) || receipt.reward > (this.policy.max_reward ?? 1) || (receipt.failed !== undefined && typeof receipt.failed !== "boolean") || (receipt.contract_digest !== undefined && receipt.contract_digest !== null && (typeof receipt.contract_digest !== "string" || !/^[0-9a-f]{64}$/.test(receipt.contract_digest))) || (receipt.context_digest !== undefined && receipt.context_digest !== null && (typeof receipt.context_digest !== "string" || !/^[0-9a-f]{64}$/.test(receipt.context_digest)))) || new Set(creditedOutcomes.map((receipt) => receipt.outcome_digest)).size !== creditedOutcomes.length) throw new ArgumentError("online learner credited outcome ledger is malformed");
     const validateArms = (arms: BrainBanditArm[]): void => {
-      if (!Array.isArray(arms) || arms.length > 128) throw new ArgumentError("online learner arm collection is malformed");
+      if (!Array.isArray(arms) || arms.length > AUTONOMOUS_BANDIT_MAX_ARMS) throw new ArgumentError("online learner arm collection is malformed");
+      const armIds = new Set<string>();
       for (const arm of arms) {
         const pulls = arm?.pulls ?? 0;
         const rewardSum = arm?.reward_sum ?? 0;
         const failures = arm?.failures ?? 0;
         if (!isObject(arm) || typeof arm.arm_id !== "string" || !arm.arm_id.trim() || !Number.isSafeInteger(pulls) || pulls < 0 || typeof rewardSum !== "number" || !Number.isFinite(rewardSum) || rewardSum < pulls * (this.policy.min_reward ?? -1) || rewardSum > pulls * (this.policy.max_reward ?? 1) || !Number.isSafeInteger(failures) || failures < 0 || failures > pulls || (arm.disabled !== undefined && typeof arm.disabled !== "boolean")) throw new ArgumentError("online learner arm is malformed");
+        if (armIds.has(arm.arm_id)) throw new ArgumentError(`online learner arm ${arm.arm_id} is duplicated`);
+        armIds.add(arm.arm_id);
       }
     };
     validateArms(this.stateValue.arms);
@@ -1447,6 +1459,7 @@ export class AutonomousOnlineLearner {
 
 function cloneBanditState(state: BrainBanditState): BrainBanditState {
   if (!isObject(state) || !Array.isArray(state.arms)) throw new ArgumentError("bandit state must contain arms");
+  if (state.generation !== undefined && (!Number.isSafeInteger(state.generation) || state.generation < 0)) throw new ArgumentError("bandit state generation must be a non-negative safe integer");
   if (state.credited_outcomes !== undefined && !Array.isArray(state.credited_outcomes)) throw new ArgumentError("bandit credited_outcomes must be an array");
   if (state.contextual_states !== undefined && !Array.isArray(state.contextual_states)) throw new ArgumentError("bandit contextual_states must be an array");
   const contextualStates = state.contextual_states ?? [];
@@ -1742,7 +1755,7 @@ export class AutonomousAgent {
     const requiredCapabilities = [...blueprint.required_capabilities];
     if (options.requireJson === true && !requiredCapabilities.includes("structured_output")) requiredCapabilities.push("structured_output");
     const request: ProviderRequest = {
-      model: "autonomous-selection-placeholder",
+      model: "selection-delegated",
       messages,
       maxOutputTokens: options.maxOutputTokens ?? 1_024,
       temperature: options.temperature,

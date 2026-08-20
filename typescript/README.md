@@ -353,6 +353,9 @@ Remote settlement adopts the control plane's returned bandit projection, includi
 generations, replay receipts, contextual rows, and first-run arm hydration. A selected model may be
 credited even when the caller's persisted state began with no arm for it; direct low-level updates
 remain strict about unknown arms.
+Learner-backed provider results retain the exploration draw and ranking evidence used for the actual
+selection, and malformed restored generations, duplicate arms, or conflicting remote policy fields
+are rejected before they can influence a later run.
 
 Learning episodes can only be prepared from a completed autonomous run; approval pauses, provider
 refusals, child failures, and tool-loop limits cannot be converted into evaluator or bandit credit.
