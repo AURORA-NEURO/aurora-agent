@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   AutonomousAgent,
+  AutonomousDurableJobController,
   AutonomousWorkflowExecutor,
   CredentialStore,
   InMemoryAutonomousWorkflowCheckpointStore,
@@ -85,4 +86,86 @@ test("workflow executor exposes approval pauses and checkpoint readiness for eve
     assert.equal(result.checkpoint.completed_stage_ids.length, 0);
     assert.equal(result.events.at(-1).event_type, "approval_required");
   }
+});
+
+test("durable job controller sends only metadata, preserves server approval, and rehydrates local execution", async () => {
+  let calls = 0;
+  let serverState = "queued";
+  const seen = [];
+  const job = {
+    schema: "brain-job",
+    job_id: "server-job-1",
+    idempotency_key_digest: "a".repeat(64),
+    spec_digest: "b".repeat(64),
+    domain: "coding",
+    capability: "coding_delivery",
+    risk_class: "engineering_change",
+    priority: 1,
+    max_attempts: 3,
+    state: serverState,
+    attempts: 0,
+    side_effect_boundary: "not_started",
+    recovered_after_restart: false,
+    created_sequence: 1,
+    updated_sequence: 1,
+    record_digest: "c".repeat(64),
+    spec: "not_returned",
+    retention: "metadata_only",
+  };
+  const projection = (structuredContent) => ({ ok: true, mcp: { result: { structuredContent } } });
+  const api = {
+    async brainJobSubmit(args) {
+      seen.push({ operation: "submit", args });
+      job.spec_digest = args.spec_digest;
+      return projection({ job: { ...job } });
+    },
+    async brainJobStatus(args) {
+      seen.push({ operation: "status", args });
+      return projection({ job: { ...job, state: serverState } });
+    },
+    async brainJobEvents(args) {
+      seen.push({ operation: "events", args });
+      return projection({ events: [], after: args.after ?? 0, next_after: args.after ?? 0, head_digest: "d".repeat(64), chain: "sha256_prev_digest", retention: "metadata_only" });
+    },
+    async brainJobApproval(args) {
+      seen.push({ operation: "approval", args });
+      serverState = args.action === "request" ? "waiting_approval" : "queued";
+      return projection({ job: { ...job, state: serverState }, authorization: { posture: "caller_proof", verified_by_server: false, execution: "not_started" } });
+    },
+  };
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      calls += 1;
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: "stage complete" }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("workflow", "https://workflow.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel(model());
+  const controller = new AutonomousDurableJobController(agent, api, new InMemoryAutonomousWorkflowCheckpointStore());
+  const task = "Implement this durable coding workflow";
+  const submitted = await controller.submit(task, { idempotencyKey: "durable-request-1", domain: "coding", candidates: agent.models() });
+  assert.equal(submitted.status, "submitted");
+  assert.equal(submitted.job.job_id, "server-job-1");
+  assert.equal(seen[0].args.spec_digest, submitted.spec_digest);
+  assert.equal(Object.prototype.hasOwnProperty.call(seen[0].args, "task"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(seen[0].args, "prompt"), false);
+  await controller.approval("server-job-1", "request", { reason: "operator review" });
+  const blocked = await controller.execute("server-job-1", task, { candidates: agent.models(), approveProviderCall: true });
+  assert.equal(blocked.local.status, "approval_required");
+  assert.equal(calls, 0);
+  await controller.approval("server-job-1", "approve", { authorizationDigest: "e".repeat(64) });
+  const executed = await controller.execute("server-job-1", task, { candidates: agent.models(), approveProviderCall: true, maxStages: 1 });
+  assert.equal(executed.local.status, "paused");
+  assert.equal(executed.local.completed_stage_count, 1);
+  assert.equal(calls, 1);
+  assert.ok(seen.every((row) => !Object.prototype.hasOwnProperty.call(row.args, "prompt")));
+
+  serverState = "queued";
+  job.domain = "not-a-built-in-domain";
+  await assert.rejects(
+    () => controller.execute("server-job-1", task, { candidates: agent.models(), approveProviderCall: true, maxStages: 1 }),
+    /unsupported autonomous domain/,
+  );
 });

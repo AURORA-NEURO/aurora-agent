@@ -1322,3 +1322,23 @@ store. `resume(jobId, task, options)` requires the caller to rehydrate task text
 then refuses if the task, workflow, or plan digest has changed. This is the local worker boundary;
 the existing value-only `brain_job_*` APIs can retain a separate server-side job projection without
 receiving the private specification.
+
+### Durable job-controller handoff
+
+`AutonomousDurableJobController` provides the concrete handoff between those two planes. Its
+`submit()` method routes and compiles the local task, then sends only the bounded control-plane
+projection required by `brain_job_submit`: idempotency key, task/spec digest, selected domain,
+capability, risk class, priority, retry budget, and optional checkpoint digest. It returns the local
+blueprint to the caller and retains the private specification at the application boundary. The
+controller exposes typed `status()`, `events()`, and `approval()` methods for the server projection;
+these methods preserve server refusal and approval evidence rather than treating a transport success
+as permission to execute.
+
+`execute(jobId, task, options)` is an explicit worker operation, not a hidden remote execution
+claim. It refuses non-queued jobs, returns an `approval_required` local result while the server is
+waiting for approval, validates the server domain against the twelve built-in profiles, and then
+rehydrates the caller-supplied task into the local workflow executor. The caller must also attach a
+fresh local credential handle through its provider/runtime boundary. No task text, prompt,
+credential, tool argument/result, or provider response enters the brain job request or durable job
+projection. Local completion is returned together with the refreshed server metadata, while
+reconciliation remains an explicit responsibility of the worker deployment.

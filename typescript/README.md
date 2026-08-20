@@ -141,6 +141,17 @@ is suitable for tests and small workers; production applications should implemen
 prompts, provider responses, credentials, or tool payloads, and restart recovery explicitly
 requires caller-owned task and credential rehydration.
 
+When a deployment also needs a server-visible queue, `AutonomousDurableJobController` bridges that
+local worker to the value-only `brain_job_submit`, `brain_job_status`, `brain_job_events`, and
+`brain_job_approval` operations. Submission sends only an idempotency key, task/spec digest,
+domain, capability, risk class, retry budget, priority, and optional checkpoint digest. The server
+record is a control-plane projection: it never receives the task, prompt, model transcript, tool
+payload, credential, or provider response. A worker reads the projection, honors a server-side
+approval pause, rehydrates the task and an unexpired BYOK credential locally, and then runs the
+matching domain workflow through `AutonomousWorkflowExecutor`. The controller validates the server
+domain against the built-in catalogue and does not claim server completion; an external worker or
+reconciliation process must record that relationship in its own system.
+
 ## Contract boundaries
 
 - Requests and responses are bounded. The client enforces a request byte ceiling, incrementally

@@ -184,10 +184,15 @@ export {
   AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA,
   AUTONOMOUS_WORKFLOW_MAX_EVENTS,
   AUTONOMOUS_WORKFLOW_MAX_STAGES_PER_CALL,
+  AUTONOMOUS_DURABLE_JOB_SCHEMA,
+  AutonomousDurableJobController,
   AutonomousWorkflowExecutor,
   InMemoryAutonomousWorkflowCheckpointStore,
 } from "./workflow-execution.js";
 export type {
+  AutonomousDurableJobExecutionResult,
+  AutonomousDurableJobSubmitOptions,
+  AutonomousDurableJobSubmission,
   AutonomousWorkflowCheckpoint,
   AutonomousWorkflowCheckpointStatus,
   AutonomousWorkflowCheckpointStore,

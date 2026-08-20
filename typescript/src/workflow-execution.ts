@@ -1,17 +1,29 @@
 import { ArgumentError, ProviderRuntimeError } from "./errors.js";
+import type { ApiClient } from "./client.js";
+import { AUTONOMOUS_DOMAIN_NAMES } from "./autonomous.js";
 import type {
   AutonomousAgent,
   AutonomousDomainName,
   AutonomousRunOptions,
   AutonomousRunResult,
+  AutonomousRouteProposal,
   AutonomousTaskBlueprint,
   AutonomousWorkflowStage,
 } from "./autonomous.js";
 import { digestJson } from "./tooling.js";
+import type {
+  BrainJobApprovalResult,
+  BrainJobEventsResult,
+  BrainJobRecord,
+  BrainJobStatusResult,
+  JsonValue,
+  RestToolResponse,
+} from "./types.js";
 
 export const AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA = "bioprism-typescript-autonomous-workflow-execution/0.1" as const;
 export const AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA = "bioprism-typescript-autonomous-workflow-checkpoint/0.1" as const;
 export const AUTONOMOUS_WORKFLOW_EVENT_SCHEMA = "bioprism-typescript-autonomous-workflow-event/0.1" as const;
+export const AUTONOMOUS_DURABLE_JOB_SCHEMA = "bioprism-typescript-autonomous-durable-job/0.1" as const;
 export const AUTONOMOUS_WORKFLOW_MAX_STAGES_PER_CALL = 32;
 export const AUTONOMOUS_WORKFLOW_MAX_EVENTS = 256;
 
@@ -93,6 +105,32 @@ export interface AutonomousWorkflowExecutionResult {
 export interface AutonomousWorkflowExecuteOptions extends AutonomousRunOptions {
   jobId?: string;
   maxStages?: number;
+}
+
+export interface AutonomousDurableJobSubmitOptions extends AutonomousWorkflowExecuteOptions {
+  idempotencyKey: string;
+  priority?: number;
+  maxAttempts?: number;
+  checkpointDigest?: string | null;
+}
+
+export interface AutonomousDurableJobSubmission {
+  schema: typeof AUTONOMOUS_DURABLE_JOB_SCHEMA;
+  status: "submitted" | "route_review_required";
+  route: AutonomousRouteProposal;
+  blueprint: AutonomousTaskBlueprint | null;
+  job: BrainJobRecord | null;
+  spec_digest: string | null;
+  execution: "not_started";
+  private_spec: "caller_owned;task_prompt_response_and_credentials_not_sent_to_control_plane";
+}
+
+export interface AutonomousDurableJobExecutionResult {
+  schema: typeof AUTONOMOUS_DURABLE_JOB_SCHEMA;
+  job: BrainJobRecord;
+  local: AutonomousWorkflowExecutionResult;
+  server_job_posture: "control_plane_projection;completion_requires_external_worker_reconciliation";
+  private_spec: "caller_owned;task_prompt_response_and_credentials_not_sent_to_control_plane";
 }
 
 /** A bounded process-local store useful for tests and small workers; production callers can replace it with SQLite/Redis/etc. */
@@ -294,5 +332,75 @@ export class AutonomousWorkflowExecutor {
 
   private async result(status: AutonomousWorkflowExecutionStatus, checkpoint: AutonomousWorkflowCheckpoint, blueprint: AutonomousTaskBlueprint, stageResults: AutonomousWorkflowStageResult[]): Promise<AutonomousWorkflowExecutionResult> {
     return { schema: AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA, status, job_id: checkpoint.job_id, blueprint, checkpoint, events: await this.store.events(checkpoint.job_id, 0, AUTONOMOUS_WORKFLOW_MAX_EVENTS), stage_results: stageResults, completed_stage_count: checkpoint.completed_stage_ids.length, total_stage_count: blueprint.workflow.stages.length, recovery: "caller_rehydrates_task_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only" };
+  }
+}
+
+function projectControlPlane<T extends JsonValue>(response: RestToolResponse<T>, operation: string): T {
+  if (!response.ok || response.mcp.error || response.mcp.result?.isError) throw new ProviderRuntimeError(`${operation} returned a control-plane refusal`);
+  const value = response.mcp.result?.structuredContent;
+  if (!value || typeof value !== "object") throw new ProviderRuntimeError(`${operation} returned no structured projection`);
+  return value as T;
+}
+
+function boundedIdempotencyKey(value: unknown): string {
+  if (typeof value !== "string" || !value.trim() || value.length > 512 || value.includes("\u0000")) throw new ArgumentError("durable job idempotencyKey is outside its bounded contract");
+  return value;
+}
+
+/** Bridge local private execution to the value-only brain job control plane. */
+export class AutonomousDurableJobController {
+  readonly agent: AutonomousAgent;
+  readonly apiClient: ApiClient;
+  readonly executor: AutonomousWorkflowExecutor;
+
+  constructor(agent: AutonomousAgent, apiClient: ApiClient, store: AutonomousWorkflowCheckpointStore) {
+    if (!apiClient || typeof apiClient.brainJobSubmit !== "function" || typeof apiClient.brainJobStatus !== "function" || typeof apiClient.brainJobEvents !== "function" || typeof apiClient.brainJobApproval !== "function") throw new ArgumentError("durable job controller requires brain job ApiClient methods");
+    this.agent = agent;
+    this.apiClient = apiClient;
+    this.executor = new AutonomousWorkflowExecutor(agent, store);
+  }
+
+  async submit(task: string, options: AutonomousDurableJobSubmitOptions): Promise<AutonomousDurableJobSubmission> {
+    const route = await this.agent.route(task, { domain: options.domain, hints: options.hints });
+    if (route.abstained || !route.primary_domain || route.cross_domain) return { schema: AUTONOMOUS_DURABLE_JOB_SCHEMA, status: "route_review_required", route, blueprint: null, job: null, spec_digest: null, execution: "not_started", private_spec: "caller_owned;task_prompt_response_and_credentials_not_sent_to_control_plane" };
+    const envelope = await this.agent.blueprint(task, { domain: route.primary_domain, capability: options.capability, context: options.context, hints: options.hints, maxInputTokens: options.maxInputTokens, tools: options.tools?.map((tool) => tool.name) });
+    const blueprint = envelope.blueprint;
+    if (!blueprint) return { schema: AUTONOMOUS_DURABLE_JOB_SCHEMA, status: "route_review_required", route, blueprint: null, job: null, spec_digest: null, execution: "not_started", private_spec: "caller_owned;task_prompt_response_and_credentials_not_sent_to_control_plane" };
+    const projection = projectControlPlane(await this.apiClient.brainJobSubmit({
+      idempotency_key: boundedIdempotencyKey(options.idempotencyKey),
+      spec_digest: route.task_digest,
+      domain: blueprint.domain_profile.domain,
+      capability: blueprint.selection_context.capability,
+      risk_class: blueprint.domain_profile.risk_class,
+      priority: options.priority,
+      max_attempts: options.maxAttempts,
+      checkpoint_digest: options.checkpointDigest ?? null,
+    }), "brain job submit");
+    return { schema: AUTONOMOUS_DURABLE_JOB_SCHEMA, status: "submitted", route, blueprint, job: projection.job, spec_digest: route.task_digest, execution: "not_started", private_spec: "caller_owned;task_prompt_response_and_credentials_not_sent_to_control_plane" };
+  }
+
+  async status(jobId: string): Promise<BrainJobStatusResult> {
+    return projectControlPlane(await this.apiClient.brainJobStatus({ job_id: boundedJobId(jobId) }), "brain job status");
+  }
+
+  async events(jobId?: string, after = 0, limit = AUTONOMOUS_WORKFLOW_MAX_EVENTS): Promise<BrainJobEventsResult> {
+    return projectControlPlane(await this.apiClient.brainJobEvents({ job_id: jobId === undefined ? undefined : boundedJobId(jobId), after, limit }), "brain job events");
+  }
+
+  async approval(jobId: string, action: "request" | "approve" | "deny", options: { reason?: string; authorizationDigest?: string } = {}): Promise<BrainJobApprovalResult> {
+    return projectControlPlane(await this.apiClient.brainJobApproval({ job_id: boundedJobId(jobId), action, reason: options.reason, authorization_digest: options.authorizationDigest }), "brain job approval");
+  }
+
+  async execute(jobId: string, task: string, options: Omit<AutonomousWorkflowExecuteOptions, "jobId"> = {}): Promise<AutonomousDurableJobExecutionResult> {
+    const normalizedJobId = boundedJobId(jobId);
+    const server = await this.status(normalizedJobId);
+    if (server.job.state === "waiting_approval") {
+      return { schema: AUTONOMOUS_DURABLE_JOB_SCHEMA, job: server.job, local: { schema: AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA, status: "approval_required", job_id: normalizedJobId, blueprint: null, checkpoint: null, events: [], stage_results: [], completed_stage_count: 0, total_stage_count: 0, recovery: "caller_rehydrates_task_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only" }, server_job_posture: "control_plane_projection;completion_requires_external_worker_reconciliation", private_spec: "caller_owned;task_prompt_response_and_credentials_not_sent_to_control_plane" };
+    }
+    if (server.job.state !== "queued") throw new ProviderRuntimeError(`brain job ${normalizedJobId} is not executable in state ${server.job.state}`);
+    if (!AUTONOMOUS_DOMAIN_NAMES.includes(server.job.domain as AutonomousDomainName)) throw new ProviderRuntimeError(`brain job ${normalizedJobId} has an unsupported autonomous domain`);
+    const local = await this.executor.start(task, { ...options, domain: server.job.domain as AutonomousDomainName, jobId: normalizedJobId });
+    const refreshed = await this.status(normalizedJobId);
+    return { schema: AUTONOMOUS_DURABLE_JOB_SCHEMA, job: refreshed.job, local, server_job_posture: "control_plane_projection;completion_requires_external_worker_reconciliation", private_spec: "caller_owned;task_prompt_response_and_credentials_not_sent_to_control_plane" };
   }
 }
