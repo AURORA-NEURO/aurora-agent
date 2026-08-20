@@ -37,8 +37,13 @@ export {
   LLMRuntime,
   ProviderOnboarding,
   anthropicProvider,
+  deepseekProvider,
+  groqProvider,
+  mistralProvider,
   openaiCompatibleProvider,
   openaiProvider,
+  openrouterProvider,
+  xaiProvider,
 } from "./llm.js";
 export type {
   AutonomousExecutionPlan,
@@ -70,7 +75,24 @@ export type {
   ProviderToolLoopResult,
   ProviderToolResult,
   ProviderUsage,
+  ProviderFactoryOptions,
 } from "./llm.js";
+export {
+  PROVIDER_CATALOG_SCHEMA,
+  PROVIDER_SETUP_INPUT_METHODS,
+  PROVIDER_SETUP_SCHEMA,
+  SUPPORTED_PROVIDER_NAMES,
+  ProviderSetup,
+  providerConfig,
+  providerPreset,
+  providerPresets,
+} from "./provider-setup.js";
+export type {
+  ProviderPreset,
+  ProviderSetupPlan,
+  ProviderSetupStatus,
+  SupportedProviderName,
+} from "./provider-setup.js";
 export {
   MAX_ALLOWED_TOOLS,
   MISSION_ASSEMBLY_SCHEMA,

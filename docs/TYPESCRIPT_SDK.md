@@ -46,6 +46,28 @@ metadata first, then choose one of these credential sources:
 | Secret manager | `CredentialProvisioner.registerResolver(provider, reference, resolver)` | none in the SDK; the callback and reference remain process-local |
 | No-echo prompt | `runtime.onboarding.configureFromPrompt(...)` | none; the caller supplies the reader |
 
+`ProviderSetup` is the recommended embedding façade when a product needs a real setup screen. It
+ships redacted presets for OpenAI, Anthropic, DeepSeek, Groq, Mistral, OpenRouter, and xAI. Its
+process is deliberately explicit:
+
+1. Call `providerPresets()` or `setup.catalog()` to render the available providers.
+2. Call `setup.registerProvider(name)` to install non-secret transport metadata.
+3. Render `setup.instructions(name)` or `setup.plan([name])`; the next action is either
+   `register_provider`, `collect_user_credential`, or `ready`.
+4. Create `setup.startSession()` and pass the key from the application's protected password input
+   to `setup.collectUserCredential(session, name, value)`. This is the only step that receives
+   user key material.
+5. Pass only `session.handle(name)` to `AutonomousRuntime` or `LLMRuntime`; selection can then
+   include credential readiness while the selector remains value-only.
+6. Close the session on completion, cancellation, expiry, or rotation. Closing revokes the handle
+   before another network dispatch can occur.
+
+`providerConfig(name)` provides the same preset transport configuration for callers that need to
+register providers directly. Preset metadata, setup plans, and onboarding status all carry
+`secret_material: "never_returned"`; they are safe projections, not proof that a provider account
+or model is valid. The first bounded provider invocation is the access check, and provider errors
+remain typed.
+
 The recommended non-interactive worker flow is:
 
 1. Register provider URLs/protocols with `LLMRuntime.registerProvider()`.

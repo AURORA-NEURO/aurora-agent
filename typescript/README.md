@@ -33,7 +33,26 @@ while `LLMRuntime` owns only short-lived, process-local credential handles. Keys
 placed in MCP arguments, prompts, tool results, model-selection state, telemetry, or durable job
 records. A protected UI can submit a value through `collectUserCredential()`; a deployment with
 no human key entry can register an environment variable or an external resolver through
-`CredentialProvisioner`:
+`ProviderSetup` and `CredentialProvisioner` provide the complete setup process. The catalog ships
+presets for OpenAI, Anthropic, DeepSeek, Groq, Mistral, OpenRouter, and xAI, with their official
+wire protocols, paths, and conventional environment-variable names. A UI can render a redacted
+setup plan before asking for a key:
+
+```typescript
+import { LLMRuntime, ProviderSetup } from "@aurora-neuro/prism-sdk";
+
+const runtime = new LLMRuntime();
+const setup = new ProviderSetup(runtime);
+setup.registerProvider("openai");
+const instructions = setup.instructions("openai");
+// instructions.next_action === "collect_user_credential"
+const session = setup.startSession({ ttlMs: 15 * 60_000 });
+// The value must come from the app's password/secure-input boundary.
+setup.collectUserCredential(session, "openai", userEnteredKey);
+// pass session.handle("openai") to AutonomousRuntime/LLMRuntime, then close the session
+```
+
+For deployments without a human entry path, `CredentialProvisioner`:
 
 ```typescript
 import { CredentialProvisioner, LLMRuntime, openaiProvider } from "@aurora-neuro/prism-sdk";
@@ -55,6 +74,15 @@ const answer = await runtime.invoke("openai", {
 }, { credential: session.handle("openai") });
 session.close();
 ```
+
+`providerPresets()` and `setup.plan()` are safe to send to a setup screen or readiness endpoint:
+they contain provider metadata and the next action, never key values, handles, prompt text, or
+resolver references. The protected UI should use a password input, disable echo/history and
+browser autofill where appropriate, submit only over the application's authenticated transport,
+and clear its local value immediately after `collectUserCredential()` returns. The SDK does not
+persist the key or provide a fake “connected” state: readiness becomes usable only when the
+provider is registered and an unexpired handle exists, and the first real invocation remains the
+provider-access check.
 
 `status()`, `instructions()`, and `plan()` return redacted readiness metadata for a UI or
 operator dashboard. `CredentialSession.close()` and expiry revoke its handles; a process restart

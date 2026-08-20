@@ -1569,7 +1569,7 @@ function providerHttpError(status: number): ProviderRuntimeError {
   return new ProviderRuntimeError(`provider returned HTTP status ${status}`, { retryable: retryableStatus(status), statusCode: status });
 }
 
-type ProviderFactoryOptions = Omit<ProviderConfig, "provider" | "protocol" | "baseUrl"> & { baseUrl?: string };
+export type ProviderFactoryOptions = Omit<ProviderConfig, "provider" | "protocol" | "baseUrl"> & { baseUrl?: string };
 
 export function openaiProvider(options: ProviderFactoryOptions = {}): ProviderConfig {
   const { baseUrl, ...rest } = options;
@@ -1583,6 +1583,52 @@ export function anthropicProvider(options: ProviderFactoryOptions = {}): Provide
 
 export function openaiCompatibleProvider(provider: string, baseUrl: string, options: Omit<ProviderConfig, "provider" | "protocol" | "baseUrl"> = {}): ProviderConfig {
   return { provider, baseUrl, protocol: "openai_chat_completions", ...options };
+}
+
+/** Official OpenAI-compatible provider presets used by the autonomous BYOK setup flow. */
+export function deepseekProvider(options: ProviderFactoryOptions = {}): ProviderConfig {
+  const { baseUrl, ...rest } = options;
+  return openaiCompatibleProvider("deepseek", baseUrl ?? "https://api.deepseek.com", {
+    ...rest,
+    path: rest.path ?? "/chat/completions",
+    structuredOutputMode: rest.structuredOutputMode ?? "json_object",
+  });
+}
+
+export function groqProvider(options: ProviderFactoryOptions = {}): ProviderConfig {
+  const { baseUrl, ...rest } = options;
+  return openaiCompatibleProvider("groq", baseUrl ?? "https://api.groq.com/openai/v1", {
+    ...rest,
+    path: rest.path ?? "/chat/completions",
+    structuredOutputMode: rest.structuredOutputMode ?? "json_object",
+  });
+}
+
+export function mistralProvider(options: ProviderFactoryOptions = {}): ProviderConfig {
+  const { baseUrl, ...rest } = options;
+  return openaiCompatibleProvider("mistral", baseUrl ?? "https://api.mistral.ai", {
+    ...rest,
+    path: rest.path ?? "/v1/chat/completions",
+    structuredOutputMode: rest.structuredOutputMode ?? "json_object",
+  });
+}
+
+export function openrouterProvider(options: ProviderFactoryOptions = {}): ProviderConfig {
+  const { baseUrl, ...rest } = options;
+  return openaiCompatibleProvider("openrouter", baseUrl ?? "https://openrouter.ai/api/v1", {
+    ...rest,
+    path: rest.path ?? "/chat/completions",
+    structuredOutputMode: rest.structuredOutputMode ?? "json_object",
+  });
+}
+
+export function xaiProvider(options: ProviderFactoryOptions = {}): ProviderConfig {
+  const { baseUrl, ...rest } = options;
+  return openaiCompatibleProvider("xai", baseUrl ?? "https://api.x.ai", {
+    ...rest,
+    path: rest.path ?? "/v1/chat/completions",
+    structuredOutputMode: rest.structuredOutputMode ?? "json_object",
+  });
 }
 
 const DEFAULT_CREDENTIAL_ENVIRONMENT_VARIABLES: Record<string, string> = {
