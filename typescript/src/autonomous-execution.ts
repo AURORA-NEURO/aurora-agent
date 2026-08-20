@@ -6,6 +6,7 @@ export const AUTONOMOUS_EXECUTION_POLICY_SCHEMA = "bioprism-typescript-autonomou
 export const AUTONOMOUS_EXECUTION_STATE_SCHEMA = "bioprism-typescript-autonomous-execution-state/0.1" as const;
 export const AUTONOMOUS_EXECUTION_EVENT_SCHEMA = "bioprism-typescript-autonomous-execution-event/0.1" as const;
 export const AUTONOMOUS_EXECUTION_JOURNAL_SCHEMA = "bioprism-typescript-autonomous-execution-journal/0.1" as const;
+export const AUTONOMOUS_EXECUTION_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-execution-snapshot/0.1" as const;
 
 export const AUTONOMOUS_EXECUTION_MAX_STEPS = 4_096;
 export const AUTONOMOUS_EXECUTION_MAX_PROVIDER_CALLS = 1_024;
@@ -82,6 +83,11 @@ function boundedDigest(name: string, value: unknown, allowNull = false): string 
   if (value === undefined && allowNull) return null;
   if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new AutonomousExecutionError(`${name} must be a lowercase SHA-256 digest`);
   return value;
+}
+
+function boundedHeadDigest(name: string, value: unknown): string {
+  if (value === "") return "";
+  return boundedDigest(name, value)!;
 }
 
 function boundedInteger(name: string, value: unknown, maximum: number): number {
@@ -240,6 +246,26 @@ export interface AutonomousExecutionJournalReceipt {
   retention: "metadata_only_hash_chained";
 }
 
+export interface AutonomousExecutionJournalSnapshot {
+  schema: typeof AUTONOMOUS_EXECUTION_SNAPSHOT_SCHEMA;
+  rows: AutonomousExecutionJournalRow[];
+  head_digest: string;
+  retention: "metadata_only_hash_chained";
+  secret_material: "never_returned";
+  snapshot_digest: string;
+}
+
+/** Adapter contract for durable SQLite, IndexedDB, object-store, or database persistence. */
+export interface AutonomousExecutionSnapshotPersistence {
+  read(): Promise<AutonomousExecutionJournalSnapshot | null> | AutonomousExecutionJournalSnapshot | null;
+  write(snapshot: AutonomousExecutionJournalSnapshot): Promise<void> | void;
+}
+
+export interface AutonomousExecutionSnapshotJournal extends AutonomousExecutionJournal {
+  snapshot(): Promise<AutonomousExecutionJournalSnapshot>;
+  restore(snapshot: AutonomousExecutionJournalSnapshot): Promise<void>;
+}
+
 export interface AutonomousExecutionJournal {
   append(event: AutonomousExecutionEvent): Promise<AutonomousExecutionJournalReceipt> | AutonomousExecutionJournalReceipt;
   state(executionId: string): Promise<AutonomousExecutionState | null> | AutonomousExecutionState | null;
@@ -308,11 +334,12 @@ function validateEvent(event: AutonomousExecutionEvent, policy: AutonomousExecut
 }
 
 /** In-memory reference journal; applications can supply SQLite, IndexedDB, or object-store adapters through the journal interface. */
-export class InMemoryAutonomousExecutionJournal implements AutonomousExecutionJournal {
+export class InMemoryAutonomousExecutionJournal implements AutonomousExecutionSnapshotJournal {
   private readonly rows: AutonomousExecutionJournalRow[] = [];
   private readonly maxEvents: number;
   private readonly maxBytes: number;
   private readonly clock: () => number;
+  private readonly validationPolicy: AutonomousExecutionPolicy;
   private totalBytes = 0;
   private appendOperation: Promise<void> = Promise.resolve();
 
@@ -323,16 +350,15 @@ export class InMemoryAutonomousExecutionJournal implements AutonomousExecutionJo
     if (this.maxBytes < AUTONOMOUS_EXECUTION_MAX_EVENT_BYTES) throw new AutonomousExecutionError("journal maxBytes is below one event capacity");
     this.clock = options.clock ?? (() => Date.now());
     if (typeof this.clock !== "function") throw new AutonomousExecutionError("journal clock must be callable");
+    this.validationPolicy = new AutonomousExecutionPolicy({ max_steps: AUTONOMOUS_EXECUTION_MAX_STEPS, max_provider_calls: AUTONOMOUS_EXECUTION_MAX_PROVIDER_CALLS, max_provider_failovers: AUTONOMOUS_EXECUTION_MAX_PROVIDER_FAILOVERS, max_tool_calls: AUTONOMOUS_EXECUTION_MAX_TOOL_CALLS, max_effectful_calls: AUTONOMOUS_EXECUTION_MAX_EFFECTFUL_CALLS, max_replans: AUTONOMOUS_EXECUTION_MAX_REPLANS, max_cost_units: AUTONOMOUS_EXECUTION_MAX_COST_UNITS, allow_side_effects: true });
   }
 
   async append(event: AutonomousExecutionEvent): Promise<AutonomousExecutionJournalReceipt> {
-    const run = this.appendOperation.then(() => this.appendUnlocked(event));
-    this.appendOperation = run.then(() => undefined, () => undefined);
-    return run;
+    return this.enqueueJournal(() => this.appendUnlocked(event));
   }
 
   private async appendUnlocked(event: AutonomousExecutionEvent): Promise<AutonomousExecutionJournalReceipt> {
-    const normalized = validateEvent(event, new AutonomousExecutionPolicy({ max_steps: AUTONOMOUS_EXECUTION_MAX_STEPS, max_provider_calls: AUTONOMOUS_EXECUTION_MAX_PROVIDER_CALLS, max_provider_failovers: AUTONOMOUS_EXECUTION_MAX_PROVIDER_FAILOVERS, max_tool_calls: AUTONOMOUS_EXECUTION_MAX_TOOL_CALLS, max_effectful_calls: AUTONOMOUS_EXECUTION_MAX_EFFECTFUL_CALLS, max_replans: AUTONOMOUS_EXECUTION_MAX_REPLANS, max_cost_units: AUTONOMOUS_EXECUTION_MAX_COST_UNITS, allow_side_effects: true }));
+    const normalized = validateEvent(event, this.validationPolicy);
     if (this.rows.length >= this.maxEvents) throw new AutonomousExecutionError("execution journal event capacity is exhausted");
     const createdAt = this.clock();
     if (!Number.isFinite(createdAt) || createdAt < 0) throw new AutonomousExecutionError("journal clock returned an invalid timestamp");
@@ -365,19 +391,84 @@ export class InMemoryAutonomousExecutionJournal implements AutonomousExecutionJo
   }
 
   async verifyIntegrity(): Promise<{ schema: typeof AUTONOMOUS_EXECUTION_JOURNAL_SCHEMA; verified: true; events: number; head_digest: string; retention: "metadata_only" }> {
-    let previous = "";
-    for (let index = 0; index < this.rows.length; index += 1) {
-      const row = this.rows[index]!;
-      if (row.sequence !== index + 1 || row.previous_digest !== previous) throw new AutonomousExecutionError("execution journal hash chain sequence is invalid");
-      const descriptor = { schema: AUTONOMOUS_EXECUTION_EVENT_SCHEMA, sequence: row.sequence, event: row.event, previous_digest: row.previous_digest, created_at: row.created_at };
-      if (await digestJson(descriptor) !== row.event_digest) throw new AutonomousExecutionError("execution journal hash chain digest is invalid");
-      previous = row.event_digest;
-    }
-    return { schema: AUTONOMOUS_EXECUTION_JOURNAL_SCHEMA, verified: true, events: this.rows.length, head_digest: previous, retention: "metadata_only" };
+    return this.enqueueJournal(() => this.verifyIntegrityUnlocked());
   }
 
   snapshotRows(): AutonomousExecutionJournalRow[] {
     return this.rows.map(clone);
+  }
+
+  async snapshot(): Promise<AutonomousExecutionJournalSnapshot> {
+    return this.enqueueJournal(() => this.snapshotUnlocked());
+  }
+
+  async restore(snapshot: AutonomousExecutionJournalSnapshot): Promise<void> {
+    await this.enqueueJournal(async () => {
+      if (!isObject(snapshot) || snapshot.schema !== AUTONOMOUS_EXECUTION_SNAPSHOT_SCHEMA || !Array.isArray(snapshot.rows) || snapshot.retention !== "metadata_only_hash_chained" || snapshot.secret_material !== "never_returned") throw new AutonomousExecutionError("execution journal snapshot is malformed");
+      boundedHeadDigest("snapshot head_digest", snapshot.head_digest);
+      boundedDigest("snapshot snapshot_digest", snapshot.snapshot_digest);
+      const { snapshot_digest: observed, ...descriptor } = snapshot;
+      if (await digestJson(descriptor) !== observed) throw new AutonomousExecutionError("execution journal snapshot digest does not match");
+      const validated = await this.validateRows(snapshot.rows);
+      if (validated.headDigest !== snapshot.head_digest) throw new AutonomousExecutionError("execution journal snapshot head does not match its rows");
+      this.rows.splice(0, this.rows.length, ...snapshot.rows.map(clone));
+      this.totalBytes = validated.totalBytes;
+    });
+  }
+
+  private async snapshotUnlocked(): Promise<AutonomousExecutionJournalSnapshot> {
+    const rows = this.rows.map(clone);
+    const descriptor = { schema: AUTONOMOUS_EXECUTION_SNAPSHOT_SCHEMA, rows, head_digest: rows.at(-1)?.event_digest ?? "", retention: "metadata_only_hash_chained" as const, secret_material: "never_returned" as const };
+    return clone({ ...descriptor, snapshot_digest: await digestJson(descriptor) });
+  }
+
+  private async verifyIntegrityUnlocked(): Promise<{ schema: typeof AUTONOMOUS_EXECUTION_JOURNAL_SCHEMA; verified: true; events: number; head_digest: string; retention: "metadata_only" }> {
+    const validated = await this.validateRows(this.rows);
+    if (validated.totalBytes !== this.totalBytes) throw new AutonomousExecutionError("execution journal byte accounting is inconsistent");
+    return { schema: AUTONOMOUS_EXECUTION_JOURNAL_SCHEMA, verified: true, events: this.rows.length, head_digest: validated.headDigest, retention: "metadata_only" };
+  }
+
+  private async validateRows(rows: readonly AutonomousExecutionJournalRow[]): Promise<{ headDigest: string; totalBytes: number }> {
+    if (rows.length > this.maxEvents) throw new AutonomousExecutionError("execution journal snapshot event count exceeds its capacity");
+    let previous = "";
+    let totalBytes = 0;
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = rows[index]!;
+      if (!isObject(row) || row.schema !== AUTONOMOUS_EXECUTION_EVENT_SCHEMA || row.sequence !== index + 1 || row.previous_digest !== previous || typeof row.event_digest !== "string" || !/^([0-9a-f]{64})$/.test(row.event_digest) || !Number.isSafeInteger(row.created_at) || row.created_at < 0) throw new AutonomousExecutionError("execution journal hash chain sequence is invalid");
+      const event = validateEvent(row.event, this.validationPolicy);
+      const descriptor = { schema: AUTONOMOUS_EXECUTION_EVENT_SCHEMA, sequence: row.sequence, event, previous_digest: row.previous_digest, created_at: row.created_at };
+      if (await digestJson(descriptor) !== row.event_digest) throw new AutonomousExecutionError("execution journal hash chain digest is invalid");
+      totalBytes += new TextEncoder().encode(JSON.stringify(row)).byteLength;
+      if (totalBytes > this.maxBytes) throw new AutonomousExecutionError("execution journal snapshot exceeds its byte capacity");
+      previous = row.event_digest;
+    }
+    return { headDigest: previous, totalBytes };
+  }
+
+  private enqueueJournal<T>(operation: () => Promise<T>): Promise<T> {
+    const run = this.appendOperation.then(operation);
+    this.appendOperation = run.then(() => undefined, () => undefined);
+    return run;
+  }
+}
+
+/** Coordinates an integrity-checked execution journal with a caller-owned durable adapter. */
+export class AutonomousExecutionPersistenceCoordinator {
+  constructor(readonly journal: AutonomousExecutionSnapshotJournal, readonly persistence: AutonomousExecutionSnapshotPersistence) {
+    if (!journal || typeof journal.snapshot !== "function" || typeof journal.restore !== "function") throw new AutonomousExecutionError("execution persistence requires a snapshot-capable journal");
+    if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new AutonomousExecutionError("execution persistence adapter is malformed");
+  }
+
+  async restore(): Promise<AutonomousExecutionJournalSnapshot | null> {
+    const snapshot = await this.persistence.read();
+    if (snapshot) await this.journal.restore(snapshot);
+    return snapshot;
+  }
+
+  async flush(): Promise<AutonomousExecutionJournalSnapshot> {
+    const snapshot = await this.journal.snapshot();
+    await this.persistence.write(snapshot);
+    return snapshot;
   }
 }
 
@@ -504,7 +595,8 @@ export class AutonomousExecutionController {
     // The provider outcome label is an event-level result, not the lifecycle of the
     // enclosing execution. A successful turn must not make later tool/provider turns
     // or an explicit resume look terminal.
-    this.stateValue = { ...this.stateValue, last_event_kind: "provider_call", last_outcome_digest: options.outcomeDigest, status: "running" };
+    const lifecycleStatus = options.outcome === "failure" && options.retryable !== true && this.policy.stop_on_error ? "error" : "running";
+    this.stateValue = { ...this.stateValue, last_event_kind: "provider_call", last_outcome_digest: options.outcomeDigest, status: lifecycleStatus };
     return this.persist("provider_call", options.status, { provider: options.provider, model: options.model, invocation_kind: options.invocationKind, attempt: options.attempt, turn: options.turn, provider_outcome: options.outcome, latency_ms: options.latencyMs, input_tokens: options.inputTokens, output_tokens: options.outputTokens, estimated_cost_units: options.estimatedCostUnits, actual_cost_units: options.actualCostUnits, selection_digest: options.selectionDigest, outcome_digest: options.outcomeDigest, request_id_digest: options.requestIdDigest, failure_class: options.failureClass, status_code: options.statusCode, retryable: options.retryable });
   }
 
@@ -524,7 +616,8 @@ export class AutonomousExecutionController {
     const callId = boundedIdentifier("callId", options.callId, 512);
     const costUnits = boundedCost("tool cost_units", options.costUnits ?? 0);
     this.ensureCost(costUnits);
-    this.stateValue = { ...this.stateValue, step_index: this.stateValue.step_index + 1, tool_calls: this.stateValue.tool_calls + 1, effectful_calls: this.stateValue.effectful_calls + (readOnly ? 0 : 1), cost_units: this.stateValue.cost_units + costUnits, last_tool: tool, last_call_id: callId, last_event_kind: "tool_intent", status: approvalRequired ? "approval_required" : "running" };
+    const lifecycleStatus = approvalRequired && this.policy.pause_on_approval ? "approval_required" : "running";
+    this.stateValue = { ...this.stateValue, step_index: this.stateValue.step_index + 1, tool_calls: this.stateValue.tool_calls + 1, effectful_calls: this.stateValue.effectful_calls + (readOnly ? 0 : 1), cost_units: this.stateValue.cost_units + costUnits, last_tool: tool, last_call_id: callId, last_event_kind: "tool_intent", status: lifecycleStatus };
     return this.persist("tool_intent", this.stateValue.status, { tool, call_id: callId, read_only: readOnly, approval_required: approvalRequired, cost_units: costUnits });
   }
 
@@ -539,7 +632,9 @@ export class AutonomousExecutionController {
     const outcomeDigest = boundedDigest("tool outcomeDigest", options.outcomeDigest, true);
     const reason = options.reason === undefined || options.reason === null ? null : boundedIdentifier("tool reason", options.reason, 2_048);
     const outcomeStatus = boundedIdentifier("tool outcome status", options.status);
-    const lifecycleStatus = outcomeStatus === "authorization_required" ? "approval_required" : "running";
+    const lifecycleStatus = outcomeStatus === "authorization_required"
+      ? (this.policy.pause_on_approval ? "approval_required" : "running")
+      : outcomeStatus === "failed" && this.policy.stop_on_error ? "error" : "running";
     this.stateValue = { ...this.stateValue, last_tool: tool, last_call_id: callId, last_outcome_digest: outcomeDigest, last_event_kind: "tool_outcome", status: lifecycleStatus };
     return this.persist("tool_outcome", outcomeStatus, { tool, call_id: callId, outcome_digest: outcomeDigest, reason });
   }
@@ -605,7 +700,7 @@ export class AutonomousExecutionController {
   }
 
   private async failUnlocked(reason: string, status = "failed"): Promise<AutonomousExecutionState> {
-    this.ensureActive();
+    if (this.terminal || AUTONOMOUS_EXECUTION_TERMINAL_STATUSES.includes(this.stateValue.status as AutonomousExecutionTerminalStatus)) throw new AutonomousExecutionPolicyError("execution is terminal");
     const normalizedReason = boundedIdentifier("failure reason", reason, 2_048);
     const normalized = boundedIdentifier("failure status", status);
     this.stateValue = { ...this.stateValue, status: normalized, last_event_kind: "failed" };
@@ -619,7 +714,7 @@ export class AutonomousExecutionController {
   }
 
   private ensureActive(): void {
-    if (this.terminal || AUTONOMOUS_EXECUTION_TERMINAL_STATUSES.includes(this.stateValue.status as AutonomousExecutionTerminalStatus)) throw new AutonomousExecutionPolicyError("execution is terminal");
+    if (this.terminal || AUTONOMOUS_EXECUTION_TERMINAL_STATUSES.includes(this.stateValue.status as AutonomousExecutionTerminalStatus) || (this.policy.stop_on_error && this.stateValue.status === "error")) throw new AutonomousExecutionPolicyError("execution is terminal or halted");
   }
 
   private ensureStep(): void {

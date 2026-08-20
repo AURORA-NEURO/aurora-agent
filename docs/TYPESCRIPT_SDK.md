@@ -1360,6 +1360,22 @@ chain; `resume: true` requires an existing non-terminal execution and an identic
 `max_effectful_calls` bound. The journal interface is deliberately storage-neutral so an
 application can provide durable persistence without giving the SDK filesystem authority.
 
+`InMemoryAutonomousExecutionJournal.snapshot()` and `restore()` provide the reference restart
+boundary. `AutonomousExecutionPersistenceCoordinator` connects that journal to a caller-owned
+`read()`/`write()` adapter for SQLite, IndexedDB, object storage, or another database. A snapshot
+contains only the bounded event rows, their hash-chain head, retention markers, and a snapshot
+digest; restore recomputes the snapshot digest, validates every event and row digest, checks the
+global sequence/head, and enforces event and byte ceilings before replacing local state. A worker
+can restore first, then call `AutonomousExecutionController.create({ resume: true, ... })` with the
+same execution id and policy digest. Raw task text, prompts, responses, credentials, tool payloads,
+and transient provider arguments are not admitted into the snapshot.
+
+`stop_on_error` defaults to true. A non-retryable provider failure or failed tool outcome therefore
+halts the controller in an `error` projection until the caller explicitly chooses `fail()`; a
+retryable provider failure remains eligible for bounded runtime failover. `pause_on_approval`
+controls only whether an approval-required tool intent is projected as `approval_required`; it does
+not authorize the effect, and the caller's authorization callback remains mandatory.
+
 `AutonomousRuntime.invoke()` uses `max_provider_failovers` as an actual selection budget, not only
 as telemetry. A retryable provider failure causes the failed provider to be excluded from the next
 selection, and the next provider request is admitted with `failover: true`; non-retryable failures,

@@ -199,6 +199,18 @@ explicitly; prompts, responses, credentials, tool arguments, and raw outputs are
 metadata. Replan cycles own the controller lifecycle across attempts so a later failure cannot
 silently reset earlier provider or learning accounting.
 
+`InMemoryAutonomousExecutionJournal.snapshot()` produces an integrity-checked, metadata-only
+snapshot suitable for a caller-owned durable adapter. `AutonomousExecutionPersistenceCoordinator`
+restores that snapshot before a worker resumes and flushes the current hash chain after a bounded
+transition. Snapshot restore validates row sequence, event schemas, every event digest, the head
+digest, event count, and byte capacity; tampered or payload-bearing snapshots are refused.
+
+`stop_on_error` defaults to true: a non-retryable provider or failed tool outcome changes the
+controller to a halted `error` projection until the caller explicitly fails the execution. Retryable
+provider failures remain resumable so the runtime can perform bounded failover. `pause_on_approval`
+controls whether an approval-required tool intent is projected as `approval_required`; it never
+authorizes the effect, which still requires the caller's approval callback.
+
 `AutonomousRuntime.invoke()` performs bounded provider failover when a selected provider returns a
 retryable `ProviderRuntimeError`: it removes that provider from the next ranking, selects again
 from the remaining eligible providers, and marks the retry as a failover admission. The default

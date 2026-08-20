@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   AutonomousExecutionController,
+  AutonomousExecutionPersistenceCoordinator,
   AutonomousExecutionPolicyError,
   InMemoryAutonomousExecutionJournal,
 } from "../dist/index.js";
@@ -78,6 +79,29 @@ test("execution controller refuses unapproved effectful tools", async () => {
   assert.equal(controller.state.tool_calls, 1);
 });
 
+test("execution policy applies stop-on-error and approval pause semantics", async () => {
+  const halted = await AutonomousExecutionController.create({ executionId: "execution-stop-on-error-1", domain: "operations", capability: "incident_response", riskClass: "read_only", policy: { max_provider_calls: 2, stop_on_error: true } });
+  await halted.admitProviderCall({ provider: "unstable", model: "model", invocationKind: "autonomous_selected_model" });
+  await halted.recordProviderOutcome({ provider: "unstable", model: "model", invocationKind: "autonomous_selected_model", attempt: 1, turn: 1, status: "provider_refused", outcome: "failure", latencyMs: 1, inputTokens: 1, outputTokens: 0, estimatedCostUnits: 0, actualCostUnits: 0, outcomeDigest: digest("e"), retryable: false });
+  assert.equal(halted.state.status, "error");
+  await assert.rejects(halted.admitProviderCall({ provider: "backup", model: "model", invocationKind: "autonomous_selected_model" }), /terminal or halted/);
+  await halted.fail("provider_refused");
+  assert.equal(halted.state.status, "failed");
+
+  const continuing = await AutonomousExecutionController.create({ executionId: "execution-stop-on-error-2", domain: "operations", capability: "incident_response", riskClass: "read_only", policy: { max_provider_calls: 2, stop_on_error: false } });
+  await continuing.admitProviderCall({ provider: "unstable", model: "model", invocationKind: "autonomous_selected_model" });
+  await continuing.recordProviderOutcome({ provider: "unstable", model: "model", invocationKind: "autonomous_selected_model", attempt: 1, turn: 1, status: "provider_refused", outcome: "failure", latencyMs: 1, inputTokens: 1, outputTokens: 0, estimatedCostUnits: 0, actualCostUnits: 0, outcomeDigest: digest("f"), retryable: false });
+  await continuing.admitProviderCall({ provider: "backup", model: "model", invocationKind: "autonomous_selected_model" });
+  assert.equal(continuing.state.provider_calls, 2);
+
+  const paused = await AutonomousExecutionController.create({ executionId: "execution-approval-pause-1", domain: "operations", capability: "incident_response", riskClass: "operational_effect", policy: { allow_side_effects: true, max_effectful_calls: 1, pause_on_approval: true } });
+  await paused.admitToolCall({ tool: "incident_write", callId: "call-paused", readOnly: false, approvalRequired: true });
+  assert.equal(paused.state.status, "approval_required");
+  const notPaused = await AutonomousExecutionController.create({ executionId: "execution-approval-pause-2", domain: "operations", capability: "incident_response", riskClass: "operational_effect", policy: { allow_side_effects: true, max_effectful_calls: 1, pause_on_approval: false } });
+  await notPaused.admitToolCall({ tool: "incident_write", callId: "call-not-paused", readOnly: false, approvalRequired: true });
+  assert.equal(notPaused.state.status, "running");
+});
+
 test("shared execution journals serialize concurrent session starts", async () => {
   const journal = new InMemoryAutonomousExecutionJournal();
   await Promise.all([
@@ -87,4 +111,36 @@ test("shared execution journals serialize concurrent session starts", async () =
   const rows = await journal.events();
   assert.deepEqual(rows.map((row) => row.sequence), [1, 2]);
   assert.equal((await journal.verifyIntegrity()).verified, true);
+});
+
+test("execution journal snapshots restore resumable state through a durable adapter", async () => {
+  const policy = { max_steps: 8, max_provider_calls: 4, max_cost_units: 8 };
+  const sourceJournal = new InMemoryAutonomousExecutionJournal();
+  const source = await AutonomousExecutionController.create({ executionId: "execution-snapshot-1", domain: "operations", capability: "incident_response", riskClass: "read_only", policy, journal: sourceJournal });
+  await source.admitProviderCall({ provider: "snapshot-provider", model: "snapshot-model", invocationKind: "autonomous_selected_model", attempt: 1, turn: 1, costUnits: 1 });
+  const snapshot = await sourceJournal.snapshot();
+  assert.equal(snapshot.rows.length, 2);
+  assert.doesNotMatch(JSON.stringify(snapshot), /A private task transcript/);
+
+  let durableSnapshot = null;
+  const sourcePersistence = new AutonomousExecutionPersistenceCoordinator(sourceJournal, {
+    read: () => durableSnapshot,
+    write: (value) => { durableSnapshot = structuredClone(value); },
+  });
+  await sourcePersistence.flush();
+  assert.equal(durableSnapshot.snapshot_digest, snapshot.snapshot_digest);
+
+  const tampered = structuredClone(durableSnapshot);
+  tampered.rows[0].event.status = "tampered";
+  const restoredJournal = new InMemoryAutonomousExecutionJournal();
+  await assert.rejects(restoredJournal.restore(tampered), /snapshot digest does not match/);
+  const restoredPersistence = new AutonomousExecutionPersistenceCoordinator(restoredJournal, {
+    read: () => durableSnapshot,
+    write: () => {},
+  });
+  await restoredPersistence.restore();
+  const resumed = await AutonomousExecutionController.create({ executionId: "execution-snapshot-1", domain: "operations", capability: "incident_response", riskClass: "read_only", policy, journal: restoredJournal, resume: true });
+  assert.equal(resumed.state.provider_calls, 1);
+  assert.equal(resumed.state.status, "resumed");
+  assert.equal((await restoredJournal.verifyIntegrity()).verified, true);
 });
