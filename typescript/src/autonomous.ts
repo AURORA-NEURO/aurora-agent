@@ -378,7 +378,15 @@ export interface AutonomousDomainToolPlan extends JsonObject {
   secret_material: "never_returned";
 }
 
-export type AutonomousRunStatus = "completed" | "route_review_required" | "approval_required" | "abstained" | "cross_domain_partial" | "child_failed";
+export type AutonomousRunStatus = "completed" | "route_review_required" | "approval_required" | "turn_limit_reached" | "abstained" | "cross_domain_partial" | "child_failed";
+
+export type AutonomousToolLoopStatus = "completed" | "authorization_required" | "turn_limit_reached";
+
+export interface AutonomousToolLoopSummary {
+  status: AutonomousToolLoopStatus;
+  turns: number;
+  toolCalls: number;
+}
 
 export interface AutonomousRunResult {
   schema: "bioprism-typescript-autonomous-run/0.1";
@@ -387,7 +395,7 @@ export interface AutonomousRunResult {
   blueprint: AutonomousTaskBlueprint | null;
   selection: AutonomousSelectionDecision | null;
   response: ProviderResponse | null;
-  tool_loop?: { status: string; turns: number; toolCalls: number } | null;
+  tool_loop?: AutonomousToolLoopSummary | null;
   cross_domain?: AutonomousCrossDomainRunResult | null;
   learning: "provider_health_feedback_only" | "online_bandit_feedback_available";
   retention: "provider_response_local; value_only_learning_projection";
@@ -1463,7 +1471,8 @@ export class AutonomousAgent {
       const authorizeAndExecute = options.authorizeAndExecute ?? (this.toolRuntimeForRun() ? (calls: ProviderToolCall[]) => this.toolRuntimeForRun()!.authorizeAndExecute(calls, { domains: selectedDomains, approveEffects: options.approveEffects }) : async (calls: ProviderToolCall[]) => calls.map((call) => ({ callId: call.id, approved: false, isError: true, content: { status: "authorization_required", tool: call.name, secret_material: "never_returned" } })));
       const toolReadOnly = options.toolReadOnly ?? (async (call: ProviderToolCall): Promise<boolean> => this.domainToolRegistry?.binding(call.name, selectedDomains)?.risk_class === "read_only");
       const loop = await this.runtime.invokeToolLoop(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, authorizeAndExecute, signal: options.signal, observer: feedbackObserver, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers, toolReadOnly });
-      return { schema: "bioprism-typescript-autonomous-run/0.1", status: "completed", route, blueprint, selection: loop.selection, response: loop.loop.finalResponse, tool_loop: { status: loop.loop.status, turns: loop.loop.turns, toolCalls: loop.loop.toolCalls }, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
+      const status: AutonomousRunStatus = loop.loop.status === "completed" ? "completed" : loop.loop.status === "authorization_required" ? "approval_required" : "turn_limit_reached";
+      return { schema: "bioprism-typescript-autonomous-run/0.1", status, route, blueprint, selection: loop.selection, response: loop.loop.finalResponse, tool_loop: { status: loop.loop.status, turns: loop.loop.turns, toolCalls: loop.loop.toolCalls }, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
     }
     const result = await this.runtime.invoke(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: feedbackObserver, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers });
     return { schema: "bioprism-typescript-autonomous-run/0.1", status: "completed", route, blueprint, selection: result.selection, response: result.response, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };

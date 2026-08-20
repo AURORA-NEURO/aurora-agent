@@ -1542,6 +1542,14 @@ health, task digest/context, required capabilities, and domain risk metadata to
 responses, and secret material remain in the application process. A remote refusal or malformed
 selection never silently becomes a local authorization.
 
+Tool-loop lifecycle is preserved at the high-level result boundary. A loop is `completed` only
+when the provider returns a final response without more tool calls. If the authorization callback
+declines a requested call, `AutonomousAgent.run()` returns `status: "approval_required"` and
+`tool_loop.status: "authorization_required"`; if the bounded turn or tool-call budget is reached,
+it returns `status: "turn_limit_reached"`. These are explicit workflow outcomes, not successful
+provider completions, so evaluators and checkpoint managers can pause, retry, or escalate them
+without treating an unexecuted or incomplete plan as evidence of task success.
+
 The online learner uses bounded UCB-style exploration over caller-registered model arms. It updates
 only after an explicit evaluator reward, failed-outcome flag, or outcome digest supplied through
 `recordEvaluatorReward()`. Remote reconciliation sends the value-only update to

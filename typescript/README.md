@@ -192,6 +192,13 @@ failures, and controller-completion failures fail the shared execution before be
 the caller selects `executionLifecycle: "observe_only"` for an enclosing manager. Absent HTTP status
 codes remain typed `null` metadata instead of causing a secondary journal validation error.
 
+Tool-loop outcomes are intentionally not collapsed into provider success. A loop that receives a
+final assistant response returns `status: "completed"`; a caller authorization callback that
+declines any requested tool returns `status: "approval_required"` with
+`tool_loop.status: "authorization_required"`; and a loop that reaches its bounded turn/tool-call
+budget returns `status: "turn_limit_reached"`. The public `AutonomousToolLoopStatus` and
+`AutonomousToolLoopSummary` types make this lifecycle explicit to workflow and evaluator code.
+
 Long-running callers can pass an `AutonomousExecutionController` through the same run options.
 `AutonomousExecutionPolicy` bounds steps, provider calls, provider failovers, tool calls, effectful
 calls, replans, and caller-defined cost units. The runtime admits each provider request before

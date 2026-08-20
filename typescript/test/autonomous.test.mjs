@@ -163,6 +163,48 @@ test("AutonomousAgent performs a real selected-provider tool loop with domain po
   assert.equal(bodies[1].messages.at(-1).content, JSON.stringify({ tool: "repository_catalog", files: ["README.md"] }));
 });
 
+test("AutonomousAgent preserves authorization pauses instead of reporting tool success", async () => {
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => jsonResponse({ choices: [{ message: { role: "assistant", content: "", tool_calls: [{ id: "approval-tool-1", type: "function", function: { name: "repository_catalog", arguments: "{}" } }] }, finish_reason: "tool_calls" }] }),
+  });
+  llm.registerProvider(openaiCompatibleProvider("approval-loop", "https://approval-loop.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel(candidate("approval-loop", "approval-model"));
+  const result = await agent.run("Review this repository", {
+    domain: "coding",
+    approveProviderCall: true,
+    tools: [{ name: "repository_catalog", description: "Inspect repository", parameters: { type: "object", additionalProperties: false } }],
+    authorizeAndExecute: async () => [{ callId: "approval-tool-1", approved: false, isError: true, content: { status: "authorization_required", secret_material: "never_returned" } }],
+  });
+  assert.equal(result.status, "approval_required");
+  assert.equal(result.tool_loop.status, "authorization_required");
+});
+
+test("AutonomousAgent reports bounded tool-loop exhaustion instead of completed", async () => {
+  let calls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      calls += 1;
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: "", tool_calls: [{ id: `limit-tool-${calls}`, type: "function", function: { name: "repository_catalog", arguments: "{}" } }] }, finish_reason: "tool_calls" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("limit-loop", "https://limit-loop.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel(candidate("limit-loop", "limit-model"));
+  const result = await agent.run("Review this repository", {
+    domain: "coding",
+    approveProviderCall: true,
+    tools: [{ name: "repository_catalog", description: "Inspect repository", parameters: { type: "object", additionalProperties: false } }],
+    authorizeAndExecute: async (toolCalls) => toolCalls.map((call) => ({ callId: call.id, approved: true, content: { ok: true } })),
+  });
+  assert.equal(result.status, "turn_limit_reached");
+  assert.equal(result.tool_loop.status, "turn_limit_reached");
+  assert.equal(result.tool_loop.turns, 4);
+  assert.equal(calls, 4);
+});
+
 test("cross-domain execution fans out to specialists, gates approval, and synthesizes bounded local outputs", async () => {
   const bodies = [];
   let calls = 0;

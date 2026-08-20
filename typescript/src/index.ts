@@ -182,6 +182,8 @@ export type {
   AutonomousRunResult,
   AutonomousRunStatus,
   AutonomousTaskBlueprint,
+  AutonomousToolLoopStatus,
+  AutonomousToolLoopSummary,
   AutonomousWorkflow,
   AutonomousWorkflowStage,
   AutonomousAgentOptions,

@@ -33,6 +33,7 @@ export const AUTONOMOUS_DECISION_CYCLE_SCHEMA = "bioprism-typescript-autonomous-
 export type AutonomousDecisionCycleStatus =
   | "completed"
   | "approval_required"
+  | "turn_limit_reached"
   | "route_review_required"
   | "provider_abstained"
   | "provider_invalid"
@@ -173,6 +174,7 @@ async function recordMemoryEvaluation(memory: AutonomousDecisionCycleMemoryOptio
 function cycleStatusForRun(status: AutonomousRunResult["status"]): AutonomousDecisionCycleStatus {
   if (status === "completed") return "completed";
   if (status === "approval_required") return "approval_required";
+  if (status === "turn_limit_reached") return "turn_limit_reached";
   return "route_review_required";
 }
 
