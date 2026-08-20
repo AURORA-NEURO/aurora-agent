@@ -49,6 +49,7 @@ export interface AutonomousDecisionCycleSemanticOptions {
   execution?: AutonomousExecutionController;
   executionAttempt?: number;
   maxProviderFailovers?: number;
+  executionLifecycle?: "managed" | "observe_only";
 }
 
 export type AutonomousDecisionCycleEvaluator = (
@@ -266,6 +267,7 @@ export async function runAutonomousDecisionCycle(
       execution: options.execution,
       executionAttempt: options.executionAttempt,
       maxProviderFailovers: options.semanticRouting.maxProviderFailovers,
+      executionLifecycle: options.executionLifecycle,
       signal: options.signal,
       observer: options.observer,
     });
@@ -599,9 +601,20 @@ export async function runAutonomousReplanCycle(
       throw error;
     }
     final = cycle;
-    const digests = await replanRunDigests(cycle.run);
+    let digests: { selection: string | null; outcome: string | null };
+    try {
+      digests = await replanRunDigests(cycle.run);
+    } catch (error) {
+      await failExecutionIfActive(options.execution, error);
+      throw error;
+    }
     if (cycle.status !== "completed" || !cycle.run) {
-      await options.execution?.checkpoint({ status: cycle.status, reason: `replan_cycle_${cycle.status}` });
+      try {
+        await options.execution?.checkpoint({ status: cycle.status, reason: `replan_cycle_${cycle.status}` });
+      } catch (error) {
+        await failExecutionIfActive(options.execution, error);
+        throw error;
+      }
       attempts.push({ attempt: attempt + 1, status: cycle.status, run_status: cycle.run?.status ?? null, route_digest: cycle.route.route_digest, selection_digest: digests.selection, outcome_digest: digests.outcome, evaluation_digest: null, evaluation: null, learning_episode_id: null });
       return replanResult(cycle.status, final, attempts, evaluations, learningEpisodeIds, settlements);
     }
@@ -635,16 +648,32 @@ export async function runAutonomousReplanCycle(
     attempts.push({ attempt: attempt + 1, status: cycle.status, run_status: cycle.run.status, route_digest: cycle.route.route_digest, selection_digest: digests.selection, outcome_digest: digests.outcome, evaluation_digest: evaluationDigest, evaluation: projection, learning_episode_id: learningEpisodeId });
 
     if (!evaluation.replan_requested) {
-      await options.execution?.complete(evaluation.passed ? "completed" : "completed_without_replan");
+      try {
+        await options.execution?.complete(evaluation.passed ? "completed" : "completed_without_replan");
+      } catch (error) {
+        await failExecutionIfActive(options.execution, error);
+        throw error;
+      }
       return replanResult(evaluation.passed ? "completed" : "completed_without_replan", final, attempts, evaluations, learningEpisodeIds, settlements);
     }
     if (attempt >= maxReplans) {
-      await options.execution?.complete("replan_limit_reached");
+      try {
+        await options.execution?.complete("replan_limit_reached");
+      } catch (error) {
+        await failExecutionIfActive(options.execution, error);
+        throw error;
+      }
       return replanResult("replan_limit_reached", final, attempts, evaluations, learningEpisodeIds, settlements);
     }
 
-    const nextContext = await replanContextChunk(attempt + 2, cycle.route.route_digest, digests.selection, digests.outcome, evaluation);
-    await options.execution?.replan({ instructionDigest: projection.replan_instruction_digest, attempt: attempt + 2, reason: "evaluator_requested" });
+    let nextContext: AutonomousPromptChunk;
+    try {
+      nextContext = await replanContextChunk(attempt + 2, cycle.route.route_digest, digests.selection, digests.outcome, evaluation);
+      await options.execution?.replan({ instructionDigest: projection.replan_instruction_digest, attempt: attempt + 2, reason: "evaluator_requested" });
+    } catch (error) {
+      await failExecutionIfActive(options.execution, error);
+      throw error;
+    }
     context = [...context, nextContext];
     routeOverride = cycle.route;
   }
@@ -781,6 +810,7 @@ export async function runAutonomousCrossDomainDecisionCycle(
       execution: options.execution,
       executionAttempt: options.executionAttempt,
       maxProviderFailovers: options.semanticRouting.maxProviderFailovers,
+      executionLifecycle: options.executionLifecycle,
       signal: options.signal,
       observer: options.observer,
     });

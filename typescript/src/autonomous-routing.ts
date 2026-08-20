@@ -51,12 +51,21 @@ export interface AutonomousSemanticRouteOptions {
   execution?: AutonomousExecutionController;
   executionAttempt?: number;
   maxProviderFailovers?: number;
+  executionLifecycle?: "managed" | "observe_only";
   signal?: AbortSignal;
   observer?: ProviderInvocationObserver;
 }
 
 const RETENTION = "route_digests_and_scores_only;task_prompt_and_provider_response_not_retained" as const;
 const AUTHORIZATION = "route_review_only;provider_call_requires_explicit_approval" as const;
+
+async function failSemanticExecution(options: AutonomousSemanticRouteOptions): Promise<void> {
+  const execution = options.execution;
+  if (!execution || options.executionLifecycle === "observe_only") return;
+  const state = execution.state;
+  if (["completed", "failed", "cancelled", "reconciliation_required"].includes(state.status) || ["completed", "failed"].includes(state.last_event_kind)) return;
+  await execution.fail("semantic_routing_failure");
+}
 
 function boundedText(name: string, value: unknown, maximum: number): string {
   if (typeof value !== "string" || !value.trim() || value.includes("\u0000") || new TextEncoder().encode(value).byteLength > maximum) throw new ArgumentError(`${name} is outside its bounded text contract`);
@@ -125,7 +134,13 @@ export async function semanticRouteAutonomousTask(agent: AutonomousAgent, task: 
     requireJson: true,
     responseSchema: routeSchema(),
   };
-  const execution = await agent.runtime.invoke({ task: taskText, domain: "cross_domain", capability: "routing", riskClass: "route_review", requiredCapabilities: ["reasoning"], candidates, request }, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: options.observer, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers });
+  let execution: Awaited<ReturnType<AutonomousAgent["runtime"]["invoke"]>>;
+  try {
+    execution = await agent.runtime.invoke({ task: taskText, domain: "cross_domain", capability: "routing", riskClass: "route_review", requiredCapabilities: ["reasoning"], candidates, request }, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: options.observer, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers });
+  } catch (error) {
+    await failSemanticExecution(options);
+    throw error;
+  }
   const outcomeDigest = await digestJson({ status: "semantic_route", selection: execution.selection, response: execution.response });
   const selectionDigest = await digestJson(execution.selection);
   const selectedModel = execution.selection.selected_model;

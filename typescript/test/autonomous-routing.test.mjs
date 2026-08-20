@@ -3,7 +3,9 @@ import { test } from "node:test";
 
 import {
   AutonomousAgent,
+  AutonomousExecutionController,
   CredentialStore,
+  InMemoryAutonomousExecutionJournal,
   LLMRuntime,
   builtinAutonomousDomainProfiles,
   openaiCompatibleProvider,
@@ -60,6 +62,20 @@ test("semantic routing resolves an ambiguous task into a reviewed domain route",
   assert.equal(calls(), 1);
   assert.equal(JSON.stringify(result).includes(task), false);
   assert.equal(Object.prototype.hasOwnProperty.call(bodies[0], "authorization"), false);
+});
+
+test("semantic routing fails the supplied execution when provider dispatch throws", async () => {
+  const llm = new LLMRuntime({ credentials: new CredentialStore(), fetch: async () => { throw new Error("semantic provider offline"); } });
+  llm.registerProvider(openaiCompatibleProvider("router-provider", "https://router.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel(model());
+  const execution = await AutonomousExecutionController.create({ executionId: "semantic-routing-failure-1", domain: "cross_domain", capability: "routing", riskClass: "route_review", journal: new InMemoryAutonomousExecutionJournal() });
+  await assert.rejects(
+    semanticRouteAutonomousTask(agent, "Route this ambiguous technical task", { approveProviderCall: true, execution }),
+    /provider/,
+  );
+  assert.equal(execution.state.status, "failed");
+  assert.equal(execution.state.last_event_kind, "failed");
 });
 
 test("semantic routing refuses provider/deterministic disagreement instead of overriding the baseline", async () => {

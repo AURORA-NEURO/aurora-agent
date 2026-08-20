@@ -192,6 +192,24 @@ test("execution policy stops a replanned provider call before dispatch", async (
   assert.equal(execution.state.status, "failed");
 });
 
+test("replan policy failures after evaluation fail the shared execution", async () => {
+  const { agent, calls } = cycleAgent([{ text: "first answer" }]);
+  const execution = await AutonomousExecutionController.create({ executionId: "replan-policy-failure-1", domain: "coding", capability: "code_review", riskClass: "read_only", policy: { max_replans: 0 }, journal: new InMemoryAutonomousExecutionJournal() });
+  await assert.rejects(
+    runAutonomousReplanCycle(agent, "Review this coding change", {
+      domain: "coding",
+      approveProviderCall: true,
+      maxReplans: 1,
+      execution,
+      evaluate: () => ({ evaluator_id: "reviewer", evaluator_version: "1", reward: 0.2, passed: false, replan_requested: true, replan_instruction: "Collect another independent witness." }),
+    }),
+    /max_replans/,
+  );
+  assert.equal(calls(), 1);
+  assert.equal(execution.state.status, "failed");
+  assert.equal(execution.state.last_event_kind, "failed");
+});
+
 test("replan cycle runs the same reviewed path for every built-in domain", async () => {
   const domains = ["coding", "browser", "data", "science", "biomedical", "neuroscience", "operations", "enterprise", "multi_agent", "multimodal", "cross_domain", "evaluation"];
   const { agent, calls } = cycleAgent();

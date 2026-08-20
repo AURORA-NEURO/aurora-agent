@@ -187,6 +187,11 @@ result retains the normal local prompt/response boundary. Use a unique `episodeP
 logical cycle when persistence is enabled; no provider response or raw evaluator instruction is
 sent to the remote learning plane.
 
+When a controller is supplied, thrown semantic/provider dispatch failures, replan-transition
+failures, and controller-completion failures fail the shared execution before being rethrown unless
+the caller selects `executionLifecycle: "observe_only"` for an enclosing manager. Absent HTTP status
+codes remain typed `null` metadata instead of causing a secondary journal validation error.
+
 Long-running callers can pass an `AutonomousExecutionController` through the same run options.
 `AutonomousExecutionPolicy` bounds steps, provider calls, provider failovers, tool calls, effectful
 calls, replans, and caller-defined cost units. The runtime admits each provider request before

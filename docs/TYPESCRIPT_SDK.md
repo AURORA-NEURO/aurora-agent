@@ -1279,7 +1279,11 @@ trusting provider-supplied capabilities or risk classes. The deterministic route
 baseline: a provider/deterministic disagreement returns `provider_disagreement` with the original
 route preserved; provider abstention and malformed output remain typed refusals. The semantic
 route result retains only candidate scores, route/selection/prompt/outcome digests, and the
-selected model. It does not authorize execution, tools, effects, or external claims.
+selected model. It does not authorize execution, tools, effects, or external claims. With an
+execution controller, a thrown semantic-provider dispatch fails the controller unless the caller
+selects `executionLifecycle: "observe_only"` for an enclosing manager. Missing HTTP status codes
+remain nullable metadata, preserving the typed transport failure instead of causing a secondary
+journal validation error.
 
 `runAutonomousDecisionCycle()` is the composed single-domain handoff. It can run the semantic
 router first, validates that the selected route digest belongs to the supplied task, then passes
@@ -1318,6 +1322,8 @@ one and is capped at three. A successful evaluator ends with `completed`; a fail
 does not request another attempt ends with `completed_without_replan`; a still-requested attempt at
 the ceiling ends with `replan_limit_reached`. Provider approval, semantic routing approval,
 abstention, disagreement, malformed routing, and route review remain terminating gates.
+Failures while deriving attempt digests, recording a replan transition, or completing the shared
+controller are likewise fail-closed before the original error is rethrown.
 
 When learning is supplied, each completed attempt calls `prepareRun()` and `settleRun()` with a
 unique `episodePrefix:task_digest:attempt-N` identity. Settlement is immediate and value-only,
