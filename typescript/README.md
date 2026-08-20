@@ -215,6 +215,42 @@ the separate execution approval and applies the same gates again to the routed d
 Contextual model selections resolve exact `provider/model` IDs. A model-only ID is accepted only
 when it matches one registered candidate; duplicate matches abstain before provider dispatch.
 
+### Provider-assisted planning proposals
+
+The TypeScript façade also exposes the provider-planning boundary used by the Python brain. Build
+the deterministic blueprint first, then make a second, separately approved call when a model
+should prioritize an existing workflow:
+
+```typescript
+const intake = await agent.blueprint("Debug this repository and verify the fix.", { domain: "coding" });
+if (!intake.blueprint) throw new Error("routing did not produce a single-domain blueprint");
+
+const proposal = await agent.planWithProvider(intake.blueprint, {
+  approveProviderCall: true,
+  credential: session.handle("openai"),
+  maxOutputTokens: 1_024,
+});
+
+if (proposal.status !== "completed" || proposal.review_required) {
+  await reviewQueue.enqueue(proposal); // caller-owned acceptance boundary
+}
+```
+
+`planWithProvider()` can reorder only the exact reviewed stage identifiers and return a focus
+subset. `planCrossDomainWithProvider()` applies the same contract to the existing specialist
+child identifiers. Both methods require explicit approval, use the normal model-selection,
+credential, budget, health, retry, and abort gates, and return `approval_required` without network
+dispatch when approval is absent. Provider output is checked for strict JSON shape, exact
+permutations, dependency safety, abstention, and confidence bounds. A malformed structured
+response is converted into a typed `provider_invalid` result with a digest-only failure receipt;
+credential and transport failures remain typed runtime errors for the caller's retry policy.
+
+These methods produce proposals, never authorization or execution. The returned records retain
+only existing ids, bounded confidence, selected-model metadata, and SHA-256 digests. They do not
+retain the original task, prompt transcript, provider response, tool names, credentials, effects,
+or new domain authority. A caller that accepts a completed proposal must still apply it through
+its own workflow executor and re-check the task/blueprint digests at that boundary.
+
 Structured autonomous responses are opt-in and capability-gated. Pass `requireJson: true` to
 `AutonomousAgent.run()` or `runCrossDomain()` and optionally pass a JSON `responseSchema`; the
 candidate must declare `structured_output`, the provider must not advertise

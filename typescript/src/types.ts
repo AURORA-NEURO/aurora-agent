@@ -379,6 +379,25 @@ export interface AutonomousPlanRefinementResult extends JsonObject {
   authorization: string;
 }
 
+/** Provider-assisted ordering proposal for an existing cross-domain fan-out. */
+export interface AutonomousCrossDomainPlanRefinementResult extends JsonObject {
+  schema: "bioprism-python-autonomous-cross-domain-plan-refinement/0.1" | string;
+  status: "completed" | "approval_required" | "plan_refused" | "provider_invalid" | "provider_disagreement" | string;
+  task_digest: string;
+  base_plan_digest: string;
+  priority_child_ids: string[];
+  focus_child_ids: string[];
+  review_required: boolean;
+  confidence: number;
+  selected_model: { provider: string; model: string } | null;
+  selection_digest: string | null;
+  planner_prompt_digest: string | null;
+  planner_plan_digest: string | null;
+  outcome_digest: string | null;
+  retention: string;
+  authorization: string;
+}
+
 export interface AutonomousRoutingHoldoutReport extends JsonObject {
   schema: "bioprism-python-autonomous-holdout-evaluation/0.1" | string;
   evaluator_id: string;

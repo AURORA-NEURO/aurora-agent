@@ -702,6 +702,18 @@ trajectory item. Without explicit acceptance, children retain declaration order.
 transcript and task text remain transient; returned planning and learning records retain only
 child identifiers, bounded confidence, model identity, and digests.
 
+The TypeScript façade exposes the same provider-planning boundary as explicit proposal methods:
+`agent.planWithProvider(blueprint, { approveProviderCall: true, credential })` for a single
+workflow and `agent.planCrossDomainWithProvider(crossBlueprint, { approveProviderCall: true,
+credential })` for an existing fan-out. Approval is checked before provider dispatch; model
+selection, credential readiness, health, retry, budget, abort, and structured-output gates remain
+active. The TypeScript result is intentionally proposal-only: it contains existing stage or child
+ids, bounded confidence, selected-model metadata, and digests, and must be accepted and applied by
+the caller's workflow executor after rechecking the blueprint digests. It never authorizes tools,
+effects, credentials, new domains, or synthesis. Malformed structured output becomes a typed,
+digest-only `provider_invalid` result, while credential and transport failures remain typed runtime
+errors for application retry or review policy.
+
 For long-running fan-out, `BrainWorker` can execute one provider or tool-loop child per lease and
 then one synthesis call. Submit a normal `BrainJobStore` packet with a caller-owned resolver and
 select `execution_kind="cross_domain"`:

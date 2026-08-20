@@ -118,6 +118,127 @@ test("prompt and plan construction preserve budgets, omissions, dependencies, an
   assert.equal(plan.plan_digest.length, 64);
 });
 
+test("provider planning is approval-gated, dependency-closed, and domain-neutral", async () => {
+  const calls = [];
+  const allCapabilities = ["reasoning", "code", "web", "data", "science", "biomedical", "coordination", "operations", "enterprise", "multimodal", "evaluation", "structured_output"];
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      const body = JSON.parse(String(init.body));
+      calls.push(body);
+      const planningMessage = body.messages.find((message) => message.content.startsWith("Context planning-contract:\n"));
+      const contract = JSON.parse(planningMessage.content.slice("Context planning-contract:\n".length));
+      const ids = (contract.stage_catalogue ?? contract.child_catalogue).map((row) => row.id);
+      const focusField = contract.stage_catalogue ? "focus_stage_ids" : "focus_child_ids";
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify({ priority_order: ids, [focusField]: ids.slice(0, 1), review_required: false, confidence: 0.91, abstain: false }) }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("planner", "https://planner.test", { requiresCredential: false, structuredOutputMode: "json_schema" }));
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel(candidate("planner", "planner-model", allCapabilities));
+
+  const blueprint = await agent.blueprint("Debug this coding repository and report verified tests.", { domain: "coding" });
+  assert.ok(blueprint.blueprint);
+  const refused = await agent.planWithProvider(blueprint.blueprint);
+  assert.equal(refused.status, "approval_required");
+  assert.equal(calls.length, 0);
+  assert.doesNotMatch(JSON.stringify(refused), /Debug this coding repository/);
+
+  const planned = await agent.planWithProvider(blueprint.blueprint, { approveProviderCall: true });
+  assert.equal(planned.status, "completed");
+  assert.deepEqual(planned.priority_stage_ids, blueprint.blueprint.workflow.stages.map((stage) => stage.id));
+  assert.equal(planned.focus_stage_ids.length, 1);
+  assert.equal(planned.planner_prompt_digest.length, 64);
+  assert.equal(planned.selection_digest.length, 64);
+  assert.equal(calls[0].response_format.type, "json_schema");
+
+  const crossBlueprint = await agent.blueprint("Write Python code for this dataset pipeline.");
+  assert.ok(crossBlueprint.cross_domain_blueprint);
+  const cross = await agent.planCrossDomainWithProvider(crossBlueprint.cross_domain_blueprint, { approveProviderCall: true });
+  assert.equal(cross.status, "completed");
+  assert.deepEqual(cross.priority_child_ids, crossBlueprint.cross_domain_blueprint.child_ids);
+  assert.equal(cross.planner_prompt_digest.length, 64);
+  assert.doesNotMatch(JSON.stringify(cross), /Write Python code/);
+
+  const domains = {
+    coding: "debug this Rust repository",
+    browser: "navigate the browser and compare sources",
+    data: "validate this parquet dataset lineage",
+    science: "design a hypothesis experiment",
+    biomedical: "review patient treatment evidence",
+    neuroscience: "analyze EEG preprocessing",
+    operations: "plan a rollback after an outage",
+    enterprise: "review governance compliance ownership",
+    multi_agent: "delegate this subtask to a specialist agent",
+    multimodal: "inspect this image and transcript",
+    cross_domain: "perform an interdisciplinary synthesis",
+    evaluation: "run a benchmark holdout replay",
+  };
+  for (const [domain, task] of Object.entries(domains)) {
+    const routed = await agent.blueprint(task, { domain });
+    if (routed.cross_domain_blueprint) {
+      const result = await agent.planCrossDomainWithProvider(routed.cross_domain_blueprint, { approveProviderCall: true });
+      assert.equal(result.status, "completed", domain);
+    } else {
+      assert.ok(routed.blueprint, domain);
+      const result = await agent.planWithProvider(routed.blueprint, { approveProviderCall: true });
+      assert.equal(result.status, "completed", domain);
+    }
+  }
+});
+
+test("provider planning refuses dependency-invalid proposals without retaining provider output", async () => {
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      const body = JSON.parse(String(init.body));
+      const message = body.messages.find((row) => row.content.startsWith("Context planning-contract:\n"));
+      const contract = JSON.parse(message.content.slice("Context planning-contract:\n".length));
+      const ids = contract.stage_catalogue.map((row) => row.id).reverse();
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify({ priority_order: ids, focus_stage_ids: [ids[0]], review_required: false, confidence: 1, abstain: false }) }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("invalid-planner", "https://invalid-planner.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel(candidate("invalid-planner", "planner-model", ["reasoning", "code", "structured_output"]));
+  const blueprint = await agent.blueprint("Debug this coding repository.", { domain: "coding" });
+  const result = await agent.planWithProvider(blueprint.blueprint, { approveProviderCall: true });
+  assert.equal(result.status, "provider_disagreement");
+  assert.equal(result.review_required, true);
+  assert.doesNotMatch(JSON.stringify(result), /provider_private_text/);
+});
+
+test("provider planning converts malformed structured output into a digest-only refusal", async () => {
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      const body = JSON.parse(String(init.body));
+      const message = body.messages.find((row) => row.content.startsWith("Context planning-contract:\n"));
+      const contract = JSON.parse(message.content.slice("Context planning-contract:\n".length));
+      const ids = contract.stage_catalogue.map((row) => row.id);
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify({ priority_order: ids, focus_stage_ids: [ids[0]], review_required: false, confidence: 1, abstain: false, provider_private_text: "must not be projected" }) }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("malformed-planner", "https://malformed-planner.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel(candidate("malformed-planner", "planner-model", ["reasoning", "code", "structured_output"]));
+  const blueprint = await agent.blueprint("Debug this coding repository.", { domain: "coding" });
+  const result = await agent.planWithProvider(blueprint.blueprint, { approveProviderCall: true });
+  assert.equal(result.status, "provider_invalid");
+  assert.equal(result.review_required, true);
+  assert.equal(result.planner_plan_digest, null);
+  assert.equal(result.outcome_digest.length, 64);
+  assert.doesNotMatch(JSON.stringify(result), /provider_private_text/);
+});
+
+test("provider planning rejects a broken blueprint dependency closure before dispatch", async () => {
+  const agent = new AutonomousAgent(new LLMRuntime({ credentials: new CredentialStore() }));
+  const blueprint = await agent.blueprint("Debug this coding repository.", { domain: "coding" });
+  const malformed = structuredClone(blueprint.blueprint);
+  malformed.workflow.stages[0].depends_on = ["missing-stage"];
+  await assert.rejects(() => agent.planWithProvider(malformed), /dependencies are not closed/);
+});
+
 test("live catalogue binding covers every domain and effectful tools remain approval-gated", async () => {
   const profiles = await builtinAutonomousDomainProfiles();
   const definitions = [...new Map(profiles.flatMap((profile) => {

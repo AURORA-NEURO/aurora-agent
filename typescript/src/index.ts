@@ -153,6 +153,8 @@ export {
   AUTONOMOUS_MODEL_REFRESH_SCHEMA,
   AUTONOMOUS_LEARNING_SCHEMA,
   AUTONOMOUS_PLAN_SCHEMA,
+  AUTONOMOUS_PLAN_REFINEMENT_SCHEMA,
+  AUTONOMOUS_CROSS_DOMAIN_PLAN_REFINEMENT_SCHEMA,
   AUTONOMOUS_PROMPT_SCHEMA,
   AUTONOMOUS_ROUTE_SCHEMA,
   AUTONOMOUS_WORKFLOW_SCHEMA,
@@ -199,6 +201,7 @@ export type {
   AutonomousWorkflowStage,
   AutonomousAgentOptions,
   AutonomousModelRefreshResult,
+  AutonomousProviderPlanningOptions,
   DomainToolApprover,
   DomainToolExecutor,
 } from "./autonomous.js";

@@ -10,6 +10,7 @@ import {
   type AutonomousModelSelector,
   type AutonomousSelectionDecision,
   type AutonomousSelectionRequest,
+  type AutonomousExecutionPlan,
   type CredentialHandle,
   type ProviderInvocationObserver,
   type ProviderMessage,
@@ -39,6 +40,8 @@ import type {
   BrainProviderHealth,
   JsonObject,
   JsonValue,
+  AutonomousCrossDomainPlanRefinementResult,
+  AutonomousPlanRefinementResult,
   RestToolResponse,
   ToolDefinition,
 } from "./types.js";
@@ -50,6 +53,8 @@ export const AUTONOMOUS_WORKFLOW_SCHEMA = "bioprism-python-autonomous-workflow/0
 export const AUTONOMOUS_DOMAIN_PACK_SCHEMA = "bioprism-python-autonomous-domain-pack/0.1" as const;
 export const AUTONOMOUS_PROMPT_SCHEMA = "bioprism-python-autonomous-prompt/0.1" as const;
 export const AUTONOMOUS_PLAN_SCHEMA = "bioprism-python-autonomous-plan/0.1" as const;
+export const AUTONOMOUS_PLAN_REFINEMENT_SCHEMA = "bioprism-python-autonomous-plan-refinement/0.1" as const;
+export const AUTONOMOUS_CROSS_DOMAIN_PLAN_REFINEMENT_SCHEMA = "bioprism-python-autonomous-cross-domain-plan-refinement/0.1" as const;
 export const AUTONOMOUS_DOMAIN_TOOL_SCHEMA = "bioprism-typescript-autonomous-domain-tool/0.1" as const;
 export const AUTONOMOUS_DOMAIN_TOOL_REGISTRY_SCHEMA = "bioprism-typescript-autonomous-domain-tool-registry/0.1" as const;
 export const AUTONOMOUS_DOMAIN_TOOL_PLAN_SCHEMA = "bioprism-typescript-autonomous-domain-tool-plan/0.1" as const;
@@ -448,6 +453,27 @@ export interface AutonomousAgentOptions {
   toolExecutor?: DomainToolExecutor;
   toolApprover?: DomainToolApprover;
   learner?: AutonomousOnlineLearner;
+}
+
+/** Caller-owned controls for one provider-assisted planning proposal. */
+export interface AutonomousProviderPlanningOptions {
+  candidates?: readonly AutonomousModelCandidate[];
+  credential?: CredentialHandle;
+  credentialFor?: (provider: string) => CredentialHandle | undefined;
+  context?: readonly AutonomousPromptChunk[];
+  maxInputTokens?: number;
+  maxOutputTokens?: number;
+  maxCostPerMillionTokens?: number;
+  maxLatencyMs?: number;
+  minQuality?: number;
+  approveProviderCall?: boolean;
+  runId?: string;
+  temperature?: number;
+  execution?: AutonomousExecutionController;
+  executionAttempt?: number;
+  maxProviderFailovers?: number;
+  signal?: AbortSignal;
+  observer?: ProviderInvocationObserver;
 }
 
 export interface AutonomousModelRefreshResult {
@@ -960,6 +986,127 @@ async function buildTaskBlueprint(
     execution: "not_started",
     credential_posture: "caller_supplied_opaque_handle_not_returned",
   };
+}
+
+function planningResponseSchema(ids: readonly string[], focusField: "focus_stage_ids" | "focus_child_ids"): JsonObject {
+  const enumValues = [...ids];
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      priority_order: { type: "array", items: { type: "string", enum: enumValues } },
+      [focusField]: { type: "array", items: { type: "string", enum: enumValues } },
+      review_required: { type: "boolean" },
+      confidence: { type: "number", minimum: 0, maximum: 1 },
+      abstain: { type: "boolean" },
+    },
+    required: ["priority_order", focusField, "review_required", "confidence", "abstain"],
+  };
+}
+
+interface PreparedProviderPlanning {
+  prompt: AutonomousPromptResult;
+  plan: AutonomousExecutionPlan;
+}
+
+function validatePlanningWorkflow(stages: readonly AutonomousWorkflowStage[]): string[] {
+  if (!Array.isArray(stages) || stages.length === 0 || stages.length > 64) throw new ProviderRuntimeError("provider planning workflow stages are outside their bounds");
+  const stageIds = stages.map((stage) => {
+    if (!isObject(stage) || typeof stage.id !== "string" || !stage.id.trim()) throw new ProviderRuntimeError("provider planning workflow stage is malformed");
+    return stage.id;
+  });
+  if (new Set(stageIds).size !== stageIds.length) throw new ProviderRuntimeError("provider planning workflow stages are duplicated");
+  const known = new Set(stageIds);
+  for (const stage of stages) {
+    if (!Array.isArray(stage.depends_on) || stage.depends_on.some((dependency: string) => typeof dependency !== "string" || !known.has(dependency) || dependency === stage.id)) {
+      throw new ProviderRuntimeError("provider planning workflow dependencies are not closed");
+    }
+  }
+  return stageIds;
+}
+
+async function prepareProviderPlanning(
+  profile: AutonomousDomainProfile,
+  blueprint: AutonomousTaskBlueprint,
+  ids: readonly string[],
+  focusField: "focus_stage_ids" | "focus_child_ids",
+  contract: JsonObject,
+  options: AutonomousProviderPlanningOptions,
+): Promise<PreparedProviderPlanning> {
+  const taskMessage = blueprint.prompt.messages.find((message) => message.source_id === "task");
+  if (!taskMessage) throw new ProviderRuntimeError("provider planning blueprint has no bounded task message");
+  const plannerTask = boundedText(
+    "autonomous provider planning task",
+    "Propose a bounded refinement for the reviewed autonomous workflow. Return only the required JSON object. "
+      + "Reorder and focus existing identifiers only; preserve every existing dependency. Do not add tools, "
+      + "credentials, domains, permissions, effects, factual claims, or completed evidence. Mark review_required "
+      + "when a human should inspect the proposal. Original task:\n\n"
+      + taskMessage.content,
+    32_000,
+  );
+  const planningContext: AutonomousPromptChunk[] = [
+    { id: "planning-contract", content: JSON.stringify(contract), required: true, priority: 100 },
+    ...(options.context ?? []),
+  ];
+  const prompt = await assembleAutonomousPrompt(profile, plannerTask, {
+    context: planningContext,
+    maxInputTokens: options.maxInputTokens,
+    outputContract: `Return JSON with priority_order, ${focusField}, review_required, confidence, and abstain. Use only identifiers from the planning contract.`,
+  });
+  const responseSchema = planningResponseSchema(ids, focusField);
+  const requiredCapabilities = [...new Set([...blueprint.required_capabilities, "structured_output"])];
+  const request: ProviderRequest = {
+    model: "selection-delegated",
+    messages: prompt.messages.map(({ role, content }) => ({ role, content })),
+    maxOutputTokens: options.maxOutputTokens ?? 1_024,
+    ...(options.temperature === undefined ? {} : { temperature: options.temperature }),
+    requireJson: true,
+    responseSchema,
+    ...(options.runId === undefined ? {} : { idempotencyKey: boundedIdentifier("planning run id", options.runId) }),
+  };
+  return {
+    prompt,
+    plan: {
+      task: plannerTask,
+      domain: profile.domain,
+      capability: "planning",
+      riskClass: profile.risk_class,
+      taskFamily: profile.workflow.workflow_id,
+      learningContextDigest: blueprint.learning_context_digest,
+      requiredCapabilities,
+      maxCostPerMillionTokens: options.maxCostPerMillionTokens,
+      maxLatencyMs: options.maxLatencyMs,
+      minQuality: options.minQuality,
+      candidates: options.candidates ?? [],
+      request,
+    },
+  };
+}
+
+function planningModelProjection(selection: AutonomousSelectionDecision): { provider: string; model: string } | null {
+  return selection.selected_model === null ? null : { ...selection.selected_model };
+}
+
+async function planningOutcomeDigest(execution: { selection: AutonomousSelectionDecision; response: ProviderResponse }): Promise<string> {
+  const responseDigest = await digestJson({
+    provider: execution.response.provider,
+    model: execution.response.model,
+    status_code: execution.response.statusCode,
+    request_id: execution.response.requestId,
+    usage: execution.response.usage,
+    text: execution.response.text,
+    structured: execution.response.structured,
+  });
+  return digestJson({ selection: execution.selection, response_digest: responseDigest });
+}
+
+/** Project a malformed provider response into a digest-only planning refusal. */
+async function planningProviderFailureDigest(error: ProviderRuntimeError): Promise<string> {
+  return digestJson({
+    code: error.code,
+    provider: error.provider ?? null,
+    status_code: error.statusCode ?? null,
+  });
 }
 
 function assertSafeTransientValue(value: unknown, depth = 0): void {
@@ -1642,6 +1789,175 @@ export class AutonomousAgent {
     const activeToolNames = options.tools ? [...options.tools] : await this.liveToolNames([route.primary_domain]);
     const blueprint = await buildTaskBlueprint(profile, taskText, { taskDigest: route.task_digest, capability: options.capability, context: options.context, maxInputTokens: options.maxInputTokens, activeToolNames, selectedToolNames: activeToolNames });
     return { schema: "bioprism-python-autonomous-auto-blueprint/0.1", route, blueprint, cross_domain_blueprint: null, execution: "not_started", authorization: "route_and_plan_only; no_provider_or_tool_effects_authorized" };
+  }
+
+  /**
+   * Ask an approved provider to refine an existing single-domain workflow.
+   *
+   * The provider receives only the reviewed stage catalogue and transient task prompt. The
+   * returned value is a proposal: it cannot add stages, tools, credentials, permissions, effects,
+   * or evidence, and it is never treated as authorization. Callers may persist the digest-only
+   * result and explicitly apply it in a workflow executor.
+   */
+  async planWithProvider(
+    blueprint: AutonomousTaskBlueprint,
+    options: AutonomousProviderPlanningOptions = {},
+  ): Promise<AutonomousPlanRefinementResult> {
+    if (!isObject(blueprint) || blueprint.schema !== "bioprism-python-autonomous-task/0.1") throw new ArgumentError("provider planning requires an AutonomousTaskBlueprint");
+    if (!isObject(blueprint.workflow) || !Array.isArray(blueprint.workflow.stages)) throw new ProviderRuntimeError("provider planning workflow is malformed");
+    const stages = blueprint.workflow.stages;
+    const stageIds = validatePlanningWorkflow(stages);
+    const basePlanDigest = await digestJson(blueprint.plan);
+    const contract: JsonObject = {
+      schema: AUTONOMOUS_PLAN_REFINEMENT_SCHEMA,
+      task_digest: blueprint.task_digest,
+      base_plan_digest: basePlanDigest,
+      workflow_digest: blueprint.workflow.workflow_digest,
+      stage_catalogue: stages.map((stage) => ({ id: stage.id, depends_on: [...stage.depends_on], required_capabilities: [...stage.required_capabilities], evidence_outputs: [...stage.evidence_outputs], approval_required: stage.approval_required })),
+      reconciliation: "priority_order_must_contain_each_existing_stage_exactly_once",
+      does_not_authorize: ["tools", "provider effects", "external writes", "credentials"],
+    };
+    const prepared = await prepareProviderPlanning(blueprint.domain_profile, blueprint, stageIds, "focus_stage_ids", contract, options);
+    const base = {
+      schema: AUTONOMOUS_PLAN_REFINEMENT_SCHEMA,
+      status: "approval_required",
+      task_digest: blueprint.task_digest,
+      base_plan_digest: basePlanDigest,
+      workflow_digest: blueprint.workflow.workflow_digest,
+      priority_stage_ids: [],
+      focus_stage_ids: [],
+      review_required: true,
+      confidence: 0,
+      selected_model: null,
+      selection_digest: null,
+      planner_prompt_digest: prepared.prompt.prompt_digest,
+      planner_plan_digest: null,
+      outcome_digest: null,
+      retention: "stage_ids_and_digests_only; planner_transcript_not_retained",
+      authorization: "plan_proposal_only; no_tools_or_effects_authorized",
+    } satisfies AutonomousPlanRefinementResult;
+    if (options.approveProviderCall !== true) return { ...base, status: "approval_required" };
+    const candidates = options.candidates ? [...options.candidates] : this.models();
+    if (!candidates.length) throw new ProviderRuntimeError("provider planning requires at least one model candidate");
+    let execution: Awaited<ReturnType<AutonomousRuntime["invoke"]>>;
+    try {
+      execution = await this.runtime.invoke({ ...prepared.plan, candidates }, {
+        credential: options.credential,
+        credentialFor: options.credentialFor,
+        signal: options.signal,
+        observer: options.observer,
+        execution: options.execution,
+        executionAttempt: options.executionAttempt,
+        maxProviderFailovers: options.maxProviderFailovers,
+      });
+    } catch (error) {
+      if (!(error instanceof ProviderRuntimeError) || error.code !== "invalid_response") throw error;
+      return {
+        ...base,
+        status: "provider_invalid",
+        outcome_digest: await planningProviderFailureDigest(error),
+      };
+    }
+    const selectionDigest = await digestJson(execution.selection);
+    const outcomeDigest = await planningOutcomeDigest(execution);
+    const plannerPlanDigest = await digestJson({ planner_output: execution.response.structured });
+    const metadata = { ...base, selected_model: planningModelProjection(execution.selection), selection_digest: selectionDigest, planner_plan_digest: plannerPlanDigest, outcome_digest: outcomeDigest };
+    const raw = execution.response.structured;
+    if (!isObject(raw)) return { ...metadata, status: "provider_invalid" };
+    const priority = raw.priority_order;
+    const focus = raw.focus_stage_ids;
+    const reviewRequired = raw.review_required;
+    const confidence = raw.confidence;
+    const abstain = raw.abstain;
+    const priorityIds = Array.isArray(priority) ? priority.filter((id): id is string => typeof id === "string") : [];
+    const focusIds = Array.isArray(focus) ? focus.filter((id): id is string => typeof id === "string") : [];
+    if (!Array.isArray(priority) || !Array.isArray(focus) || typeof reviewRequired !== "boolean" || typeof confidence !== "number" || !Number.isFinite(confidence) || confidence < 0 || confidence > 1 || typeof abstain !== "boolean" || priorityIds.length !== priority.length || focusIds.length !== focus.length || priorityIds.length !== stageIds.length || new Set(priorityIds).size !== priorityIds.length || priorityIds.some((id) => !stageIds.includes(id)) || focusIds.some((id) => !stageIds.includes(id)) || new Set(focusIds).size !== focusIds.length) return { ...metadata, status: "provider_invalid" };
+    const positions = new Map(priorityIds.map((id, index) => [id, index]));
+    if (stages.some((stage) => stage.depends_on.some((dependency) => (positions.get(dependency) ?? -1) > (positions.get(stage.id) ?? -1)))) return { ...metadata, priority_stage_ids: [...priorityIds], focus_stage_ids: [...focusIds], review_required: true, confidence, status: "provider_disagreement" };
+    if (abstain) return { ...metadata, priority_stage_ids: [...priorityIds], focus_stage_ids: [...focusIds], review_required: true, confidence, status: "provider_disagreement" };
+    return { ...metadata, priority_stage_ids: [...priorityIds], focus_stage_ids: [...focusIds], review_required: reviewRequired, confidence, status: "completed" };
+  }
+
+  /** Ask an approved provider to reorder only the already-reviewed cross-domain specialists. */
+  async planCrossDomainWithProvider(
+    blueprint: AutonomousCrossDomainBlueprint,
+    options: AutonomousProviderPlanningOptions = {},
+  ): Promise<AutonomousCrossDomainPlanRefinementResult> {
+    if (!isObject(blueprint) || blueprint.schema !== AUTONOMOUS_CROSS_DOMAIN_SCHEMA) throw new ArgumentError("cross-domain provider planning requires an AutonomousCrossDomainBlueprint");
+    if (!Array.isArray(blueprint.child_ids) || !isObject(blueprint.dependency_graph) || !Array.isArray(blueprint.dependency_graph.fan_out)) throw new ProviderRuntimeError("cross-domain provider planning blueprint is malformed");
+    const childIds = [...blueprint.child_ids];
+    if (childIds.length < 2 || childIds.length > AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN || childIds.some((id) => typeof id !== "string" || !id.trim()) || new Set(childIds).size !== childIds.length) throw new ProviderRuntimeError("cross-domain provider planning children are malformed");
+    const fanOutIds = blueprint.dependency_graph.fan_out.map((child) => isObject(child) && typeof child.id === "string" ? child.id : null);
+    if (fanOutIds.length !== childIds.length || fanOutIds.some((id, index) => id !== childIds[index])) throw new ProviderRuntimeError("cross-domain provider planning dependency graph is not closed");
+    const basePlanDigest = blueprint.plan_digest;
+    const contract: JsonObject = {
+      schema: AUTONOMOUS_CROSS_DOMAIN_PLAN_REFINEMENT_SCHEMA,
+      task_digest: blueprint.task_digest,
+      base_plan_digest: basePlanDigest,
+      child_catalogue: blueprint.dependency_graph.fan_out.map((child) => ({ ...child })),
+      reconciliation: "priority_order_must_contain_each_existing_child_exactly_once",
+      does_not_authorize: ["new domains", "new tools", "new credentials", "effects", "synthesis authority"],
+    };
+    const prepared = await prepareProviderPlanning(blueprint.synthesis_blueprint.domain_profile, blueprint.synthesis_blueprint, childIds, "focus_child_ids", contract, options);
+    const base = {
+      schema: AUTONOMOUS_CROSS_DOMAIN_PLAN_REFINEMENT_SCHEMA,
+      status: "approval_required",
+      task_digest: blueprint.task_digest,
+      base_plan_digest: basePlanDigest,
+      priority_child_ids: [],
+      focus_child_ids: [],
+      review_required: true,
+      confidence: 0,
+      selected_model: null,
+      selection_digest: null,
+      planner_prompt_digest: prepared.prompt.prompt_digest,
+      planner_plan_digest: null,
+      outcome_digest: null,
+      retention: "child_ids_and_digests_only; planner_transcript_not_retained",
+      authorization: "plan_proposal_only; no_tools_or_effects_authorized",
+    } satisfies AutonomousCrossDomainPlanRefinementResult;
+    if (options.approveProviderCall !== true) return base;
+    const candidates = options.candidates ? [...options.candidates] : this.models();
+    if (!candidates.length) throw new ProviderRuntimeError("cross-domain provider planning requires at least one model candidate");
+    let execution: Awaited<ReturnType<AutonomousRuntime["invoke"]>>;
+    try {
+      execution = await this.runtime.invoke({ ...prepared.plan, candidates }, {
+        credential: options.credential,
+        credentialFor: options.credentialFor,
+        signal: options.signal,
+        observer: options.observer,
+        execution: options.execution,
+        executionAttempt: options.executionAttempt,
+        maxProviderFailovers: options.maxProviderFailovers,
+      });
+    } catch (error) {
+      if (!(error instanceof ProviderRuntimeError) || error.code !== "invalid_response") throw error;
+      return {
+        ...base,
+        status: "provider_invalid",
+        outcome_digest: await planningProviderFailureDigest(error),
+      };
+    }
+    const metadata = {
+      ...base,
+      status: "provider_invalid" as const,
+      selected_model: planningModelProjection(execution.selection),
+      selection_digest: await digestJson(execution.selection),
+      planner_plan_digest: await digestJson({ planner_output: execution.response.structured }),
+      outcome_digest: await planningOutcomeDigest(execution),
+    };
+    const raw = execution.response.structured;
+    if (!isObject(raw)) return metadata;
+    const priority = raw.priority_order;
+    const focus = raw.focus_child_ids;
+    const reviewRequired = raw.review_required;
+    const confidence = raw.confidence;
+    const abstain = raw.abstain;
+    const priorityIds = Array.isArray(priority) ? priority.filter((id): id is string => typeof id === "string") : [];
+    const focusIds = Array.isArray(focus) ? focus.filter((id): id is string => typeof id === "string") : [];
+    if (!Array.isArray(priority) || !Array.isArray(focus) || typeof reviewRequired !== "boolean" || typeof confidence !== "number" || !Number.isFinite(confidence) || confidence < 0 || confidence > 1 || typeof abstain !== "boolean" || priorityIds.length !== priority.length || focusIds.length !== focus.length || priorityIds.length !== childIds.length || new Set(priorityIds).size !== priorityIds.length || priorityIds.some((id) => !childIds.includes(id)) || focusIds.some((id) => !childIds.includes(id)) || new Set(focusIds).size !== focusIds.length) return metadata;
+    if (abstain) return { ...metadata, status: "provider_disagreement", priority_child_ids: [...priorityIds], focus_child_ids: [...focusIds], review_required: true, confidence };
+    return { ...metadata, status: "completed", priority_child_ids: [...priorityIds], focus_child_ids: [...focusIds], review_required: reviewRequired, confidence };
   }
 
   /** Build a bounded fan-out/fan-in plan without contacting a provider or executing a tool. */
