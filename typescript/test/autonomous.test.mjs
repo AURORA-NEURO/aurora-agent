@@ -370,6 +370,9 @@ test("online learner adapts only from explicit evaluator rewards", async () => {
   const constrained = learner.select({ ...request, max_latency_ms: 50 });
   assert.equal(constrained.selected_model, null);
   assert.match(constrained.abstention_reason, /no eligible candidate/);
+  assert.equal(constrained.ranking.length, 2);
+  assert.equal(constrained.ranking.every((row) => row.eligible === false), true);
+  assert.match(constrained.ranking[0].reasons.join(";"), /latency exceeds the caller bound/);
   assert.throws(() => learner.select({ ...request, min_quality: 2 }), /min_quality is outside its bounds/);
 });
 

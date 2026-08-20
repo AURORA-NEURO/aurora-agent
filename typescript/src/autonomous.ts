@@ -19,6 +19,7 @@ import {
   type ProviderToolResult,
   LLMRuntime,
   providerModelsToCandidates,
+  rankAutonomousModels,
   type AutonomousModelCandidateDefaults,
   type ProviderModelDiscovery,
 } from "./llm.js";
@@ -1236,12 +1237,11 @@ export class AutonomousOnlineLearner {
   /** Select the best eligible model using persisted pulls/rewards; deterministic ties are by arm id. */
   select(request: AutonomousSelectionRequest): AutonomousSelectionDecision {
     validateOnlineSelectionConstraints(request);
-    const eligible = request.candidates.filter((candidate) => {
-      const health = request.provider_health[candidate.provider];
-      return candidate.enabled !== false && health !== undefined && health.circuit !== "open" && (health.credential_required === false || health.credential_ready === true) && candidate.context_window_tokens >= request.estimated_input_tokens + request.requested_output_tokens && candidate.max_output_tokens >= request.requested_output_tokens && request.required_capabilities.every((capability) => (candidate.capabilities ?? []).includes(capability)) && (request.require_json !== true || ((candidate.capabilities ?? []).includes("structured_output") && health.structured_output_mode !== undefined && health.structured_output_mode !== "disabled")) && (request.max_cost_per_million_tokens === undefined || request.max_cost_per_million_tokens === null || candidate.cost_per_million_tokens <= request.max_cost_per_million_tokens) && (request.max_latency_ms === undefined || request.max_latency_ms === null || candidate.latency_ms <= request.max_latency_ms) && (request.min_quality === undefined || request.min_quality === null || candidate.quality >= request.min_quality);
-    });
+    const canonicalRanking = rankAutonomousModels(request);
+    const eligible = canonicalRanking.filter((row) => row.eligible);
     const totalPulls = Math.max(1, this.stateValue.arms.reduce((sum, arm) => sum + (arm.pulls ?? 0), 0));
-    const ranking = eligible.map((candidate) => {
+    const scoredEligible = eligible.map((row) => {
+      const candidate = request.candidates.find((item) => item.provider === row.provider && item.model === row.model)!;
       const armId = `${candidate.provider}/${candidate.model}`;
       const arm = this.stateValue.arms.find((row) => row.arm_id === armId);
       const pulls = arm?.pulls ?? 0;
@@ -1249,9 +1249,16 @@ export class AutonomousOnlineLearner {
       const bonus = pulls ? Math.sqrt((2 * Math.log(totalPulls + 1)) / pulls) * (this.policy.exploration ?? 1) : Number.POSITIVE_INFINITY;
       return { candidate, armId, pulls, score: pulls ? mean + bonus : Number.POSITIVE_INFINITY, mean, bonus };
     }).sort((left, right) => (Number(right.score === Number.POSITIVE_INFINITY) - Number(left.score === Number.POSITIVE_INFINITY)) || right.score - left.score || left.armId.localeCompare(right.armId));
-    const chosen = ranking[0];
-    if (!chosen) return { selected_model: null, strategy: "caller_selector", ranking: [], abstention_reason: "online learner found no eligible candidate" };
-    return { selected_model: { provider: chosen.candidate.provider, model: chosen.candidate.model }, strategy: "caller_selector", ranking: ranking.map((row) => ({ provider: row.candidate.provider, model: row.candidate.model, score: Number((Number.isFinite(row.score) ? row.score : 1_000_000).toFixed(12)), eligible: true, reasons: [`arm_id=${row.armId}`, `pulls=${row.pulls}`] })), abstention_reason: null };
+    const ranking = [
+      ...scoredEligible.map((row) => ({ provider: row.candidate.provider, model: row.candidate.model, score: Number((Number.isFinite(row.score) ? row.score : 1_000_000).toFixed(12)), eligible: true, reasons: [`arm_id=${row.armId}`, `pulls=${row.pulls}`] })),
+      ...canonicalRanking.filter((row) => !row.eligible),
+    ];
+    const selected = scoredEligible[0];
+    if (!selected) {
+      const reasons = ranking.flatMap((row) => row.reasons).join("; ");
+      return { selected_model: null, strategy: "caller_selector", ranking, abstention_reason: `online learner found no eligible candidate${reasons ? `: ${reasons}` : ""}` };
+    }
+    return { selected_model: { provider: selected.candidate.provider, model: selected.candidate.model }, strategy: "caller_selector", ranking, abstention_reason: null };
   }
 
   /** Apply an explicit evaluator reward. Provider success alone is not treated as task quality. */
