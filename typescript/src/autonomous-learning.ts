@@ -612,7 +612,7 @@ export class AutonomousLearningController {
   async prepareRun(result: AutonomousRunResult, options: { episodeId: string; runId?: string; stageId?: string; parentJobId?: string }): Promise<AutonomousLearningEpisode> {
     if (!isObject(options)) throw new ArgumentError("learning episode options must be an object");
     const episodeId = boundedIdentifier("episodeId", options.episodeId);
-    if (!result.blueprint || !result.selection?.selected_model) throw new ArgumentError("learning episode requires a provider-completed or selected autonomous run");
+    if (result.status !== "completed" || !result.blueprint || !result.selection?.selected_model) throw new ArgumentError("learning episode requires a completed autonomous run");
     const runId = boundedIdentifier("runId", options.runId ?? episodeId);
     const selectionDigest = await digestJson(result.selection);
     const outcomeDigest = await digestJson({ status: result.status, route_digest: result.route.route_digest, selection: result.selection, response: result.response });

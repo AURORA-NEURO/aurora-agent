@@ -144,6 +144,14 @@ test("learning episodes rehydrate by digest and settle through the local bandit"
   await assert.rejects(() => controller.settleRun("episode-local-1", { evaluator_id: "coding-reviewer", evaluator_version: "1", reward: 0.8, passed: true }), /already been settled/);
 });
 
+test("learning refuses incomplete autonomous runs before creating an episode", async () => {
+  const agent = await learningAgent();
+  const controller = new AutonomousLearningController(agent);
+  const completed = await agent.run("Implement this bounded learning test.", { domain: "coding", approveProviderCall: true });
+  const incomplete = { ...completed, status: "turn_limit_reached", tool_loop: { status: "turn_limit_reached", turns: 4, toolCalls: 4 } };
+  await assert.rejects(() => controller.prepareRun(incomplete, { episodeId: "episode-incomplete" }), /completed autonomous run/);
+});
+
 test("trajectory settlement assigns bounded discounted return-to-go across episodes", async () => {
   const agent = await learningAgent();
   const episodes = new InMemoryAutonomousLearningEpisodeStore();

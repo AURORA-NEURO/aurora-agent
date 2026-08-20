@@ -711,6 +711,8 @@ export class AutonomousBrainControlPlaneBridge {
       const remoteHealth: Record<string, ProviderHealth & { model: string; quality_mean?: number | null; quality_observations?: number }> = {};
       for (const row of projected.models) {
         if (!isObject(row) || typeof row.provider !== "string" || typeof row.model !== "string") throw new ProviderRuntimeError("remote model health snapshot contains a malformed model row");
+        const rowKey = `${row.provider}/${row.model}`;
+        if (remoteHealth[rowKey] !== undefined) throw new ProviderRuntimeError("remote model health snapshot contains duplicate model rows");
         const attempts = nonnegativeInteger("remote health attempts", row.attempts) ?? 0;
         const successes = nonnegativeInteger("remote health successes", row.successes) ?? 0;
         const failures = nonnegativeInteger("remote health failures", row.failures) ?? 0;
@@ -719,7 +721,7 @@ export class AutonomousBrainControlPlaneBridge {
         if (successes > attempts || failures > attempts) throw new ProviderRuntimeError("remote model health snapshot contains inconsistent counters");
         const qualityMean = row.average_quality === null || row.average_quality === undefined ? null : finite("remote health average_quality", row.average_quality, 0, 1);
         const qualityObservations = row.quality_observations === undefined ? (qualityMean === null ? 0 : 1) : nonnegativeInteger("remote health quality_observations", row.quality_observations) ?? 0;
-        remoteHealth[`${row.provider}/${row.model}`] = {
+        remoteHealth[rowKey] = {
           provider: row.provider,
           model: row.model,
           circuit: row.last_status === "circuit_open" || consecutiveFailures >= circuitFailureThreshold ? "open" : "closed",

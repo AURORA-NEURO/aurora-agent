@@ -281,3 +281,23 @@ test("remote selection fails closed on an incomplete health snapshot", async () 
     model_health: {},
   }), /remote model health snapshot returned a refusal/);
 });
+
+test("remote selection refuses duplicate persisted health rows", async () => {
+  const row = { provider: "provider", model: "model", attempts: 1, successes: 1, failures: 0, consecutive_failures: 0, average_latency_ms: 10, average_quality: null, quality_observations: 0, last_status: "success", last_sequence: 1, registered: true, credential_ready: true, eligible: true };
+  const bridge = new AutonomousBrainControlPlaneBridge({
+    brainModelHealth: async () => ({ ok: true, mcp: { result: { structuredContent: { ok: true, operation: "snapshot", models: [row, { ...row, last_sequence: 2 }] } } } }),
+    brainReplayEvaluate: async () => ({ ok: true }),
+  });
+  await assert.rejects(bridge.selector()({
+    task: "bounded task",
+    domain: "coding",
+    capability: "reasoning",
+    risk_class: "review_required",
+    required_capabilities: [],
+    estimated_input_tokens: 1,
+    requested_output_tokens: 1,
+    candidates: [{ provider: "provider", model: "model", capabilities: ["reasoning"], context_window_tokens: 1_000, max_output_tokens: 100, quality: 0.5, latency_ms: 100, cost_per_million_tokens: 1, reliability: 0.5 }],
+    provider_health: { provider: { provider: "provider", circuit: "closed", consecutive_failures: 0, attempts: 0, successes: 0, failures: 0, success_rate: 0, mean_latency_ms: null, last_latency_ms: null, last_model: null, last_status_code: null, credential_posture: "caller_supplied_opaque_handle", credential_required: false, credential_ready: true } },
+    model_health: {},
+  }), /duplicate model rows/);
+});

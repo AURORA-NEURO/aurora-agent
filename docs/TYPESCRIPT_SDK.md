@@ -1558,6 +1558,8 @@ only after an explicit evaluator reward, failed-outcome flag, or outcome digest 
 `recordEvaluatorReward()`. Remote reconciliation sends the value-only update to
 `brainBanditUpdate()` and then applies the same validated update locally. Provider success and
 latency are separate from task quality; no provider health event is treated as reinforcement.
+Learning episodes can only be prepared from a completed autonomous run; approval pauses, provider
+refusals, child failures, and tool-loop limits cannot be converted into evaluator or bandit credit.
 This gives applications a safe loop for model-selection adaptation without pretending that an
 unverified response is scientific, clinical, operational, or release truth.
 

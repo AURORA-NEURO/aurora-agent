@@ -282,6 +282,9 @@ explicit evaluator feedback and can optionally submit the same value-only update
 plane. This is adaptation infrastructure, not an automatic truth signal: feedback must be produced
 by a caller-owned evaluator, and provider health is kept separate from task quality.
 
+Learning episodes can only be prepared from a completed autonomous run; approval pauses, provider
+refusals, child failures, and tool-loop limits cannot be converted into evaluator or bandit credit.
+
 Ambiguous tasks now have a real fan-out/fan-in path. `blueprint()` returns a
 `cross_domain_blueprint` containing one child workflow per selected domain plus a cross-domain
 synthesis workflow. `runCrossDomain()` executes those children under the same provider approval,
