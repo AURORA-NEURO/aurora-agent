@@ -1242,6 +1242,17 @@ route preserved; provider abstention and malformed output remain typed refusals.
 route result retains only candidate scores, route/selection/prompt/outcome digests, and the
 selected model. It does not authorize execution, tools, effects, or external claims.
 
+`runAutonomousDecisionCycle()` is the composed single-domain handoff. It can run the semantic
+router first, validates that the selected route digest belongs to the supplied task, then passes
+that reviewed route into local blueprint construction, prompt assembly, model selection, and
+provider invocation. Semantic-provider approval and execution approval are distinct gates. A
+caller may attach an `AutonomousLearningController` with an episode ID and an evaluator callback;
+the callback returns only bounded evaluator fields, and settlement updates the local or remote
+bandit through the same value-only learning contract. No provider completion, latency, HTTP status,
+or model self-report is treated as reward. The cycle deliberately refuses cross-domain fan-out so
+`runCrossDomain()` can preserve child/synthesis identity and delayed credit through
+`settleCrossDomain()`.
+
 The live catalogue path is:
 
 ```text

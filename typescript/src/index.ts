@@ -229,6 +229,18 @@ export type {
   AutonomousSemanticRouteOptions,
   AutonomousSemanticRouteResult,
 } from "./autonomous-routing.js";
+export {
+  AUTONOMOUS_DECISION_CYCLE_SCHEMA,
+  runAutonomousDecisionCycle,
+} from "./autonomous-cycle.js";
+export type {
+  AutonomousDecisionCycleEvaluator,
+  AutonomousDecisionCycleLearningOptions,
+  AutonomousDecisionCycleOptions,
+  AutonomousDecisionCycleResult,
+  AutonomousDecisionCycleSemanticOptions,
+  AutonomousDecisionCycleStatus,
+} from "./autonomous-cycle.js";
 export type {
   AutonomousDomainEvaluatorProfile,
   AutonomousCrossDomainLearningSettlement,

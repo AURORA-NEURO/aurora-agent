@@ -115,6 +115,16 @@ deterministic route remains the safety baseline: provider/deterministic disagree
 malformed output remain explicit refusals. Routing still requires `approveProviderCall: true` and
 never authorizes a tool, effect, or domain claim.
 
+`runAutonomousDecisionCycle()` composes the single-domain path into one caller-controlled loop:
+optional semantic routing, task-digest-validated route handoff, prompt and plan construction,
+health/bandit model selection, provider invocation, and optional evaluator settlement. Semantic
+routing approval and execution approval remain separate. Supplying an
+`AutonomousLearningController` creates a pending episode; supplying an evaluator callback settles
+it only from explicit bounded reward fields. The provider response, transport success, and model
+self-report never become reinforcement automatically. Cross-domain cycles continue through
+`runCrossDomain()` and `settleCrossDomain()` so specialist and synthesis episodes retain delayed
+credit separately.
+
 The live tool boundary is opt-in and catalogue-backed. Create a `ToolCatalogue` from the gateway's
 tool definitions, pass it with a caller-owned executor, and inspect
 `AutonomousDomainToolRegistry.plan()` before allowing a run. Read-only tools can be proposed

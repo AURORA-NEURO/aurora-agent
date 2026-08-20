@@ -427,12 +427,15 @@ export interface AutonomousAgentOptions {
 
 export interface AutonomousRunOptions {
   domain?: AutonomousDomainName;
+  /** Reuse a route already approved by a caller-owned semantic router. */
+  routeOverride?: AutonomousRouteProposal;
   capability?: string;
   candidates?: readonly AutonomousModelCandidate[];
   credential?: CredentialHandle;
   credentialFor?: (provider: string) => CredentialHandle | undefined;
   context?: readonly AutonomousPromptChunk[];
   hints?: readonly string[];
+  allowCrossDomain?: boolean;
   maxInputTokens?: number;
   maxOutputTokens?: number;
   temperature?: number;
@@ -757,6 +760,20 @@ export async function routeAutonomousTask(
   }
   const result = { ...base, selected_domains: [top.domain], primary_domain: top.domain, confidence: top.score, abstained: false, reason: "routed" as const };
   return { ...result, route_digest: await digestJson(result) };
+}
+
+/** Validate a caller-owned route handoff before it can influence local planning. */
+async function assertRouteOverride(task: string, route: AutonomousRouteProposal): Promise<AutonomousRouteProposal> {
+  if (!isObject(route) || route.schema !== AUTONOMOUS_ROUTE_SCHEMA || typeof route.task_digest !== "string") throw new ArgumentError("autonomous route override is malformed");
+  const expectedTaskDigest = await digestJson({ task: boundedText("autonomous route override task", task, 32_000) });
+  if (route.task_digest !== expectedTaskDigest) throw new ArgumentError("autonomous route override does not match the task digest");
+  if (!Array.isArray(route.selected_domains) || route.selected_domains.length > AUTONOMOUS_DOMAIN_NAMES.length || route.selected_domains.some((domain) => !AUTONOMOUS_DOMAIN_NAMES.includes(domain))) throw new ArgumentError("autonomous route override contains unsupported domains");
+  if (route.primary_domain !== null && !AUTONOMOUS_DOMAIN_NAMES.includes(route.primary_domain)) throw new ArgumentError("autonomous route override has an unsupported primary domain");
+  if (!route.abstained && (!route.primary_domain || !route.selected_domains.includes(route.primary_domain))) throw new ArgumentError("autonomous route override must bind a selected primary domain");
+  if (route.abstained && (route.primary_domain !== null || route.selected_domains.length > 0)) throw new ArgumentError("abstained autonomous route override cannot select domains");
+  if (typeof route.cross_domain !== "boolean" || route.cross_domain !== (route.selected_domains.length > 1)) throw new ArgumentError("autonomous route override has an inconsistent cross-domain selection");
+  if (!route.abstained && !route.cross_domain && route.selected_domains.length !== 1) throw new ArgumentError("single-domain route override must select exactly one domain");
+  return structuredClone(route);
 }
 
 async function buildDomainPack(profile: AutonomousDomainProfile): Promise<AutonomousDomainPack> {
@@ -1365,7 +1382,7 @@ export class AutonomousAgent {
 
   async run(task: string, options: AutonomousRunOptions = {}): Promise<AutonomousRunResult> {
     const taskText = boundedText("autonomous task", task, 32_000);
-    const route = await this.route(taskText, { domain: options.domain, hints: options.hints });
+    const route = options.routeOverride ? await assertRouteOverride(taskText, options.routeOverride) : await this.route(taskText, { domain: options.domain, hints: options.hints, allowCrossDomain: options.allowCrossDomain });
     if (route.cross_domain && options.domain === undefined) {
       const cross = await this.runCrossDomain(taskText, options);
       return {
@@ -1407,7 +1424,7 @@ export class AutonomousAgent {
   /** Execute routed specialist children sequentially, then hand bounded local outputs to synthesis. */
   async runCrossDomain(task: string, options: AutonomousCrossDomainRunOptions = {}): Promise<AutonomousCrossDomainRunResult> {
     const taskText = boundedText("cross-domain task", task, 32_000);
-    const route = await this.route(taskText, { hints: options.hints });
+    const route = options.routeOverride ? await assertRouteOverride(taskText, options.routeOverride) : await this.route(taskText, { hints: options.hints, allowCrossDomain: options.allowCrossDomain });
     const learning = this.learner ? "online_bandit_feedback_available" as const : "provider_health_feedback_only" as const;
     if (route.abstained || !route.cross_domain || route.selected_domains.length < 2) {
       return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: "route_review_required", route, blueprint: null, child_runs: [], synthesis: null, completed_children: 0, total_children: route.selected_domains.length, partial: false, learning_episode_ids: [], learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
