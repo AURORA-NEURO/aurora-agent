@@ -1253,6 +1253,14 @@ or model self-report is treated as reward. The cycle deliberately refuses cross-
 `runCrossDomain()` can preserve child/synthesis identity and delayed credit through
 `settleCrossDomain()`.
 
+`runAutonomousCrossDomainDecisionCycle()` is the fan-out/fan-in counterpart. It accepts the same
+optional semantic-routing gate, validates that the route actually selects multiple reviewed
+domains, and delegates child/synthesis identity creation to `runCrossDomain()`. When learning is
+enabled, its evaluator callback must cover exactly the returned `learning_episode_ids`; the
+controller then applies discounted return-to-go to the completed specialist/synthesis sequence.
+`synthesize: false` is a supported specialists-only mode, and a partial run never receives a hidden
+synthesis reward.
+
 The live catalogue path is:
 
 ```text

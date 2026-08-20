@@ -8,6 +8,7 @@ import {
   CredentialStore,
   LLMRuntime,
   openaiCompatibleProvider,
+  runAutonomousCrossDomainDecisionCycle,
   runAutonomousDecisionCycle,
 } from "../dist/index.js";
 
@@ -146,4 +147,112 @@ test("decision cycle executes every built-in domain through the same reviewed pa
     assert.equal(result.run.blueprint.domain_profile.domain, domain);
   }
   assert.equal(calls(), 12);
+});
+
+test("cross-domain decision cycle settles specialist and synthesis credit as one trajectory", async () => {
+  const { agent, calls } = cycleAgent();
+  const learning = new AutonomousLearningController(agent);
+  const result = await runAutonomousCrossDomainDecisionCycle(agent, "Research a biomedical neuroscience experiment with EEG patient evidence", {
+    approveProviderCall: true,
+    subtasks: [
+      { id: "bio", domain: "biomedical", task: "Review biomedical evidence and safety boundaries." },
+      { id: "neuro", domain: "neuroscience", task: "Analyze EEG signal design and interpretation limits." },
+    ],
+    learning: {
+      controller: learning,
+      trajectoryId: "cross-cycle-1",
+      evaluate: (run) => Object.fromEntries(run.learning_episode_ids.map((episodeId) => [episodeId, { evaluator_id: "cross-reviewer", evaluator_version: "1", reward: 0.8, passed: true }])),
+    },
+  });
+  assert.equal(result.status, "completed");
+  assert.equal(result.run.child_runs.length, 2);
+  assert.equal(result.run.completed_children, 2);
+  assert.equal(result.run.synthesis.response.text, "cycle answer");
+  assert.equal(result.learning_episode_ids.length, 3);
+  assert.equal(Object.keys(result.evaluation).length, 3);
+  assert.equal(result.settlement.trajectory.trajectory.status, "settled");
+  assert.equal(result.settlement.trajectory.settlements.length, 3);
+  assert.equal(result.settlement.trajectory.settlements.at(-1).next_state.generation, 3);
+  assert.equal(calls(), 3);
+});
+
+test("cross-domain decision cycle applies semantic routing before fan-out and preserves both gates", async () => {
+  const semantic = cycleAgent([
+    { route: { selected_domains: [{ domain: "biomedical", score: 0.93, rationale: "biomedical evidence" }, { domain: "neuroscience", score: 0.91, rationale: "EEG study" }], confidence: 0.92, abstain: false, abstain_reason: null } },
+    { text: "biomedical specialist" },
+    { text: "neuroscience specialist" },
+    { text: "integrated synthesis" },
+  ]);
+  const result = await runAutonomousCrossDomainDecisionCycle(semantic.agent, "Help with an unfamiliar biomedical neuroscience study.", {
+    approveProviderCall: true,
+    semanticRouting: { enabled: true, approveProviderCall: true, allowCrossDomain: true },
+    subtasks: [
+      { id: "bio", domain: "biomedical", task: "Review biomedical evidence." },
+      { id: "neuro", domain: "neuroscience", task: "Review neuroscience evidence." },
+    ],
+  });
+  assert.equal(result.status, "completed");
+  assert.equal(result.semantic_route.status, "completed");
+  assert.equal(result.route.source, "provider_semantic_hybrid");
+  assert.deepEqual(result.run.child_runs.map((child) => child.domain), ["biomedical", "neuroscience"]);
+  assert.equal(result.run.synthesis.response.text, "integrated synthesis");
+  assert.equal(semantic.calls(), 4);
+
+  const gatedSemantic = cycleAgent([{ route: { selected_domains: [{ domain: "biomedical", score: 0.9, rationale: "bio" }, { domain: "neuroscience", score: 0.9, rationale: "neuro" }], confidence: 0.9, abstain: false, abstain_reason: null } }]);
+  const semanticGate = await runAutonomousCrossDomainDecisionCycle(gatedSemantic.agent, "an unfamiliar biomedical neuroscience study", { approveProviderCall: true, semanticRouting: { enabled: true, approveProviderCall: false } });
+  assert.equal(semanticGate.status, "approval_required");
+  assert.equal(gatedSemantic.calls(), 0);
+
+  const gatedExecution = cycleAgent();
+  const executionGate = await runAutonomousCrossDomainDecisionCycle(gatedExecution.agent, "biomedical neuroscience", { approveProviderCall: false, synthesize: false, subtasks: [{ id: "bio", domain: "biomedical", task: "bio" }, { id: "neuro", domain: "neuroscience", task: "neuro" }] });
+  assert.equal(executionGate.status, "approval_required");
+  assert.equal(gatedExecution.calls(), 0);
+});
+
+test("cross-domain decision cycle settles partial specialist trajectories without inventing synthesis", async () => {
+  const { agent, calls } = cycleAgent();
+  const learning = new AutonomousLearningController(agent);
+  const result = await runAutonomousCrossDomainDecisionCycle(agent, "biomedical neuroscience", {
+    approveProviderCall: true,
+    synthesize: false,
+    subtasks: [
+      { id: "bio", domain: "biomedical", task: "bio" },
+      { id: "neuro", domain: "neuroscience", task: "neuro" },
+    ],
+    learning: {
+      controller: learning,
+      trajectoryId: "cross-cycle-specialists-only",
+      evaluate: (run) => Object.fromEntries(run.learning_episode_ids.map((episodeId) => [episodeId, { evaluator_id: "specialist-reviewer", evaluator_version: "1", reward: 0.7, passed: true }])),
+    },
+  });
+  assert.equal(result.status, "children_completed");
+  assert.equal(result.run.synthesis, null);
+  assert.equal(result.learning_episode_ids.length, 2);
+  assert.equal(result.settlement.trajectory.settlements.length, 2);
+  assert.equal(calls(), 2);
+});
+
+test("cross-domain fan-out accepts a representative pair for every built-in domain", async () => {
+  const domains = ["coding", "browser", "data", "science", "biomedical", "neuroscience", "operations", "enterprise", "multi_agent", "multimodal", "cross_domain", "evaluation"];
+  const { agent, calls } = cycleAgent();
+  for (let index = 0; index < domains.length; index += 1) {
+    const left = domains[index];
+    const right = domains[(index + 1) % domains.length];
+    const task = `${left} ${right}`;
+    const route = await agent.route(task, { maxDomains: 2, minMargin: 0.2, allowCrossDomain: true });
+    assert.equal(route.cross_domain, true, `${left}/${right} should fan out`);
+    const result = await runAutonomousCrossDomainDecisionCycle(agent, task, {
+      routeOverride: route,
+      approveProviderCall: true,
+      synthesize: false,
+      subtasks: [
+        { id: "left", domain: left, task: `${left} specialist review` },
+        { id: "right", domain: right, task: `${right} specialist review` },
+      ],
+    });
+    assert.equal(result.status, "children_completed", `${left}/${right} should complete`);
+    assert.deepEqual(result.run.child_runs.map((child) => child.domain), [left, right]);
+    assert.equal(result.run.synthesis, null);
+  }
+  assert.equal(calls(), domains.length * 2);
 });

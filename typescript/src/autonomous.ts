@@ -713,7 +713,7 @@ export async function routeAutonomousTask(
   for (const profile of profiles) {
     const seed = PROFILE_SEEDS.find((candidate) => candidate.domain === profile.domain) as ProfileSeed;
     const terms = [...seed.terms, profile.domain, profile.default_capability];
-    const matched = terms.filter((term, index, values) => values.indexOf(term) === index && termMatches(normalized, term));
+    const matched = terms.filter((term, index, values) => values.findIndex((candidate) => normalizeRouteText(candidate) === normalizeRouteText(term)) === index && termMatches(normalized, term));
     if (!matched.length) continue;
     const points = matched.reduce((sum, term) => sum + (term === profile.domain || term === profile.default_capability ? 2.5 : term.includes(" ") || term.length >= 9 ? 2 : 1), 0);
     scored.push({

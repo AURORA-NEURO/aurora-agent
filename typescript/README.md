@@ -125,6 +125,13 @@ self-report never become reinforcement automatically. Cross-domain cycles contin
 `runCrossDomain()` and `settleCrossDomain()` so specialist and synthesis episodes retain delayed
 credit separately.
 
+`runAutonomousCrossDomainDecisionCycle()` composes the corresponding fan-out/fan-in path. It can
+semantically review an ambiguous task, requires a cross-domain route with at least two reviewed
+domains, then runs bounded specialists and optional synthesis under the same provider and effect
+approvals. Its evaluator callback must return an exact reward map for the returned episode IDs;
+settlement applies delayed credit across the actual specialist/synthesis order. Partial runs and
+`synthesize: false` remain settleable without inventing a synthesis episode.
+
 The live tool boundary is opt-in and catalogue-backed. Create a `ToolCatalogue` from the gateway's
 tool definitions, pass it with a caller-owned executor, and inspect
 `AutonomousDomainToolRegistry.plan()` before allowing a run. Read-only tools can be proposed

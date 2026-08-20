@@ -230,10 +230,17 @@ export type {
   AutonomousSemanticRouteResult,
 } from "./autonomous-routing.js";
 export {
+  AUTONOMOUS_CROSS_DOMAIN_DECISION_CYCLE_SCHEMA,
   AUTONOMOUS_DECISION_CYCLE_SCHEMA,
+  runAutonomousCrossDomainDecisionCycle,
   runAutonomousDecisionCycle,
 } from "./autonomous-cycle.js";
 export type {
+  AutonomousCrossDomainDecisionCycleEvaluator,
+  AutonomousCrossDomainDecisionCycleLearningOptions,
+  AutonomousCrossDomainDecisionCycleOptions,
+  AutonomousCrossDomainDecisionCycleResult,
+  AutonomousCrossDomainDecisionCycleStatus,
   AutonomousDecisionCycleEvaluator,
   AutonomousDecisionCycleLearningOptions,
   AutonomousDecisionCycleOptions,
