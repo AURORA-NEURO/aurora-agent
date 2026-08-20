@@ -1,4 +1,4 @@
-import { CredentialError, ProviderRuntimeError, ResponseTooLargeError, isObject } from "./errors.js";
+import { ArgumentError, AutonomousCostBudgetError, CredentialError, ProviderRuntimeError, ResponseTooLargeError, isObject } from "./errors.js";
 import type { ProviderErrorCode, ProviderFailureClass } from "./errors.js";
 import { AUTONOMOUS_EXECUTION_MAX_PROVIDER_FAILOVERS } from "./autonomous-execution.js";
 import type { AutonomousExecutionController } from "./autonomous-execution.js";
@@ -24,6 +24,7 @@ export const MAX_PROVIDER_MODELS = 512;
 export const MAX_CREDENTIAL_PROVISIONING_SOURCES = 128;
 export const MAX_CREDENTIAL_PROVISIONING_PROVIDERS = 128;
 export const MAX_CREDENTIAL_SOURCE_LABEL_BYTES = 256;
+export const AUTONOMOUS_COST_BUDGET_MAX_COST_UNITS = 1_000_000;
 export const CREDENTIAL_PROVISIONING_SCHEMA = "bioprism-llm-credential-provisioning/0.1" as const;
 const STRUCTURED_SCHEMA_TYPES = new Set(["object", "array", "string", "number", "integer", "boolean", "null"]);
 
@@ -429,6 +430,84 @@ export interface ProviderInvocationOutcome {
 export interface ProviderInvocationObserver {
   before?(metadata: ProviderInvocationMetadata): void | Promise<void>;
   after?(metadata: ProviderInvocationMetadata, outcome: ProviderInvocationOutcome): void | Promise<void>;
+}
+
+/** A synchronous reservation released only when a provider call fails before dispatch. */
+export type AutonomousCostReservation = () => void;
+
+/** Internal/provider-boundary hook used to compose one budget across nested autonomous calls. */
+export type AutonomousCostReservationCallback = (costUnits: number) => AutonomousCostReservation | void;
+
+/** Estimate the cost of one provider request from caller-owned candidate metadata. */
+export type AutonomousProviderCostEstimator = (request: ProviderRequest) => number;
+
+export interface ProviderInvocationOptions {
+  credential?: CredentialHandle;
+  signal?: AbortSignal;
+  observer?: ProviderInvocationObserver;
+  invocationKind?: string;
+  execution?: AutonomousExecutionController;
+  executionAttempt?: number;
+  executionTurn?: number;
+  executionFailover?: boolean;
+  selectionDigest?: string | null;
+  estimatedCostUnits?: number;
+  reserveCost?: AutonomousCostReservationCallback;
+}
+
+/**
+ * Process-local aggregate cost accounting for composed autonomous work.
+ *
+ * Reservations are synchronous so parallel fan-out cannot interleave a check and an increment.
+ * A reservation is retained once provider dispatch begins; callers only receive a release handle
+ * for failures in the local admission path before the external request is sent.
+ */
+export class AutonomousCostBudget {
+  readonly maxCostUnits: number;
+  private consumedCostUnitsValue = 0;
+
+  constructor(maxCostUnits: number) {
+    if (!Number.isFinite(maxCostUnits) || maxCostUnits < 0 || maxCostUnits > AUTONOMOUS_COST_BUDGET_MAX_COST_UNITS) {
+      throw new ArgumentError(`maxTotalCostUnits must be finite and within [0, ${AUTONOMOUS_COST_BUDGET_MAX_COST_UNITS}]`);
+    }
+    this.maxCostUnits = maxCostUnits;
+  }
+
+  get consumedCostUnits(): number {
+    return this.consumedCostUnitsValue;
+  }
+
+  get remainingCostUnits(): number {
+    return Math.max(0, this.maxCostUnits - this.consumedCostUnitsValue);
+  }
+
+  snapshot(): { max_cost_units: number; consumed_cost_units: number; remaining_cost_units: number } {
+    return {
+      max_cost_units: this.maxCostUnits,
+      consumed_cost_units: this.consumedCostUnits,
+      remaining_cost_units: this.remainingCostUnits,
+    };
+  }
+
+  reserve(costUnits: number): AutonomousCostReservation {
+    if (!Number.isFinite(costUnits) || costUnits < 0 || costUnits > AUTONOMOUS_COST_BUDGET_MAX_COST_UNITS) {
+      throw new ArgumentError(`provider estimated cost must be finite and within [0, ${AUTONOMOUS_COST_BUDGET_MAX_COST_UNITS}]`);
+    }
+    if (this.consumedCostUnitsValue + costUnits > this.maxCostUnits) {
+      throw new AutonomousCostBudgetError("autonomous aggregate cost budget exceeded before provider dispatch", {
+        maxCostUnits: this.maxCostUnits,
+        consumedCostUnits: this.consumedCostUnitsValue,
+        requestedCostUnits: costUnits,
+      });
+    }
+    this.consumedCostUnitsValue += costUnits;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.consumedCostUnitsValue = Math.max(0, this.consumedCostUnitsValue - costUnits);
+    };
+  }
 }
 
 async function recordExecutionProviderOutcome(
@@ -1579,14 +1658,20 @@ export class LLMRuntime {
   async invoke(
     provider: string,
     request: ProviderRequest,
-    options: { credential?: CredentialHandle; signal?: AbortSignal; observer?: ProviderInvocationObserver; invocationKind?: string; execution?: AutonomousExecutionController; executionAttempt?: number; executionTurn?: number; executionFailover?: boolean; selectionDigest?: string | null; estimatedCostUnits?: number } = {},
+    options: ProviderInvocationOptions = {},
   ): Promise<ProviderResponse> {
     const config = this.requireProvider(provider);
     validateRequest(request);
     validateStructuredOutputSupport(config, request);
     const metadata = requestMetadata(provider, request, options.invocationKind ?? "provider_call");
-    await options.execution?.admitProviderCall({ provider, model: request.model, invocationKind: metadata.kind, attempt: options.executionAttempt, turn: options.executionTurn, selectionDigest: options.selectionDigest, estimatedCostUnits: options.estimatedCostUnits, costUnits: options.estimatedCostUnits, failover: options.executionFailover });
-    await options.observer?.before?.(metadata);
+    const releaseCost = options.reserveCost?.(options.estimatedCostUnits ?? 0);
+    try {
+      await options.execution?.admitProviderCall({ provider, model: request.model, invocationKind: metadata.kind, attempt: options.executionAttempt, turn: options.executionTurn, selectionDigest: options.selectionDigest, estimatedCostUnits: options.estimatedCostUnits, costUnits: options.estimatedCostUnits, failover: options.executionFailover });
+      await options.observer?.before?.(metadata);
+    } catch (error) {
+      releaseCost?.();
+      throw error;
+    }
     const started = nowMs();
     let outcomeRecorded = false;
     const recordOutcome = async (outcome: ProviderInvocationOutcome): Promise<void> => {
@@ -1624,14 +1709,20 @@ export class LLMRuntime {
   async *invokeStream(
     provider: string,
     request: ProviderRequest,
-    options: { credential?: CredentialHandle; signal?: AbortSignal; observer?: ProviderInvocationObserver; invocationKind?: string; execution?: AutonomousExecutionController; executionAttempt?: number; executionTurn?: number; executionFailover?: boolean; selectionDigest?: string | null; estimatedCostUnits?: number } = {},
+    options: ProviderInvocationOptions = {},
   ): AsyncIterable<ProviderStreamEvent> {
     const config = this.requireProvider(provider);
     validateRequest(request);
     validateStructuredOutputSupport(config, request);
     const metadata = requestMetadata(provider, request, options.invocationKind ?? "provider_stream");
-    await options.execution?.admitProviderCall({ provider, model: request.model, invocationKind: metadata.kind, attempt: options.executionAttempt, turn: options.executionTurn, selectionDigest: options.selectionDigest, estimatedCostUnits: options.estimatedCostUnits, costUnits: options.estimatedCostUnits, failover: options.executionFailover });
-    await options.observer?.before?.(metadata);
+    const releaseCost = options.reserveCost?.(options.estimatedCostUnits ?? 0);
+    try {
+      await options.execution?.admitProviderCall({ provider, model: request.model, invocationKind: metadata.kind, attempt: options.executionAttempt, turn: options.executionTurn, selectionDigest: options.selectionDigest, estimatedCostUnits: options.estimatedCostUnits, costUnits: options.estimatedCostUnits, failover: options.executionFailover });
+      await options.observer?.before?.(metadata);
+    } catch (error) {
+      releaseCost?.();
+      throw error;
+    }
     const started = nowMs();
     let outcome: ProviderInvocationOutcome | null = null;
     try {
@@ -1721,7 +1812,7 @@ export class LLMRuntime {
     }
   }
 
-  async collectStream(provider: string, request: ProviderRequest, options: { credential?: CredentialHandle; signal?: AbortSignal; observer?: ProviderInvocationObserver; invocationKind?: string; execution?: AutonomousExecutionController; executionAttempt?: number; executionTurn?: number; executionFailover?: boolean; selectionDigest?: string | null; estimatedCostUnits?: number } = {}): Promise<ProviderResponse> {
+  async collectStream(provider: string, request: ProviderRequest, options: ProviderInvocationOptions = {}): Promise<ProviderResponse> {
     const text: string[] = [];
     const calls: ProviderToolCall[] = [];
     let usage: ProviderUsage = {};
@@ -1749,20 +1840,13 @@ export class LLMRuntime {
   async invokeToolLoop(
     provider: string,
     request: ProviderRequest,
-    options: {
-      credential?: CredentialHandle;
+    options: ProviderInvocationOptions & {
       authorizeAndExecute: (calls: ProviderToolCall[]) => ProviderToolResult[] | Promise<ProviderToolResult[]>;
       maxTurns?: number;
       maxToolCalls?: number;
       stream?: boolean;
       initialResponse?: ProviderResponse;
-      signal?: AbortSignal;
-      observer?: ProviderInvocationObserver;
-      execution?: AutonomousExecutionController;
-      executionAttempt?: number;
-      selectionDigest?: string | null;
-      estimatedCostUnits?: number;
-      executionFailover?: boolean;
+      costEstimator?: AutonomousProviderCostEstimator;
       toolReadOnly?: (call: ProviderToolCall) => boolean | Promise<boolean>;
     },
   ): Promise<ProviderToolLoopResult> {
@@ -1776,7 +1860,11 @@ export class LLMRuntime {
     const responses: ProviderResponse[] = [];
     let toolCalls = 0;
     for (let turn = 0; turn < maxTurns; turn += 1) {
-      const providerOptions = { ...options, executionTurn: turn + 1 };
+      const providerOptions = {
+        ...options,
+        executionTurn: turn + 1,
+        ...(options.costEstimator ? { estimatedCostUnits: options.costEstimator(current) } : {}),
+      };
       response ??= options.stream ? await this.collectStream(provider, current, providerOptions) : await this.invoke(provider, current, providerOptions);
       responses.push(response);
       if (response.toolCalls.length === 0) return { status: "completed", responses, finalResponse: response, turns: responses.length, toolCalls };
@@ -1935,6 +2023,12 @@ export class LLMRuntime {
   }
 }
 
+function estimatedProviderCostUnits(candidate: AutonomousModelCandidate | undefined, request: ProviderRequest): number {
+  if (!candidate) return 0;
+  const estimatedInputTokens = Math.max(1, Math.ceil(request.messages.reduce((sum, message) => sum + bytes(message.content), 0) / 4));
+  return ((estimatedInputTokens + request.maxOutputTokens) / 1_000_000) * candidate.cost_per_million_tokens;
+}
+
 /**
  * Application-side composition for the autonomous brain boundary.
  *
@@ -1985,6 +2079,7 @@ export class AutonomousRuntime {
       execution?: AutonomousExecutionController;
       executionAttempt?: number;
       maxProviderFailovers?: number;
+      reserveCost?: AutonomousCostReservationCallback;
     } = {},
   ): Promise<AutonomousExecutionResult> {
     const maxProviderFailovers = autonomousProviderFailoverLimit(options);
@@ -2003,11 +2098,10 @@ export class AutonomousRuntime {
         },
       };
       const selectedCandidate = plan.candidates.find((candidate) => candidate.provider === provider && candidate.model === selection.selected_model!.model);
-      const estimatedInputTokens = Math.max(1, Math.ceil(plan.request.messages.reduce((sum, message) => sum + bytes(message.content), 0) / 4));
-      const estimatedCostUnits = selectedCandidate ? ((estimatedInputTokens + plan.request.maxOutputTokens) / 1_000_000) * selectedCandidate.cost_per_million_tokens : 0;
+      const estimatedCostUnits = estimatedProviderCostUnits(selectedCandidate, plan.request);
       const selectionDigest = await digestJson(selection);
       try {
-        const response = await this.llm.invoke(provider, { ...plan.request, model: selection.selected_model.model }, { credential, signal: options.signal, observer, invocationKind: "autonomous_selected_model", execution: options.execution, executionAttempt: options.executionAttempt, executionTurn: 1, executionFailover: failovers > 0, selectionDigest, estimatedCostUnits });
+        const response = await this.llm.invoke(provider, { ...plan.request, model: selection.selected_model.model }, { credential, signal: options.signal, observer, invocationKind: "autonomous_selected_model", execution: options.execution, executionAttempt: options.executionAttempt, executionTurn: 1, executionFailover: failovers > 0, selectionDigest, estimatedCostUnits, reserveCost: options.reserveCost });
         return { selection, response };
       } catch (error) {
         if (!(error instanceof ProviderRuntimeError) || !error.retryable || failovers >= maxProviderFailovers) throw error;
@@ -2034,6 +2128,7 @@ export class AutonomousRuntime {
       execution?: AutonomousExecutionController;
       executionAttempt?: number;
       maxProviderFailovers?: number;
+      reserveCost?: AutonomousCostReservationCallback;
       toolReadOnly?: (call: ProviderToolCall) => boolean | Promise<boolean>;
     },
   ): Promise<{ selection: AutonomousSelectionDecision; loop: ProviderToolLoopResult }> {
@@ -2054,8 +2149,7 @@ export class AutonomousRuntime {
         },
       };
       const selectedCandidate = plan.candidates.find((candidate) => candidate.provider === provider && candidate.model === selection.selected_model!.model);
-      const estimatedInputTokens = Math.max(1, Math.ceil(plan.request.messages.reduce((sum, message) => sum + bytes(message.content), 0) / 4));
-      const estimatedCostUnits = selectedCandidate ? ((estimatedInputTokens + plan.request.maxOutputTokens) / 1_000_000) * selectedCandidate.cost_per_million_tokens : 0;
+      const estimatedCostUnits = estimatedProviderCostUnits(selectedCandidate, plan.request);
       const selectionDigest = await digestJson(selection);
       const authorizeAndExecute = async (calls: ProviderToolCall[]): Promise<ProviderToolResult[]> => {
         if (calls.length > 0) toolActivity = true;
@@ -2075,6 +2169,8 @@ export class AutonomousRuntime {
           executionFailover: failovers > 0,
           selectionDigest,
           estimatedCostUnits,
+          reserveCost: options.reserveCost,
+          costEstimator: (request) => estimatedProviderCostUnits(selectedCandidate, request),
           toolReadOnly: options.toolReadOnly,
         });
         return { selection, loop };

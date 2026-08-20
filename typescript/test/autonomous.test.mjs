@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   AutonomousAgent,
+  AutonomousCostBudgetError,
   AutonomousDomainToolRegistry,
   AutonomousDomainToolRuntime,
   AutonomousOnlineLearner,
@@ -250,6 +251,17 @@ test("cross-domain execution fans out to specialists, gates approval, and synthe
   const synthesisBody = bodies[2];
   assert.ok(synthesisBody.messages.some((message) => String(message.content).includes("biomedical evidence finding")));
   assert.ok(synthesisBody.messages.some((message) => String(message.content).includes("neuroscience signal finding")));
+  await assert.rejects(agent.runCrossDomain(task, {
+    candidates: agent.models(),
+    approveProviderCall: true,
+    maxTotalCostUnits: 0,
+    synthesize: false,
+    subtasks: [
+      { id: "bio-budget", domain: "biomedical", task: "Review the biomedical evidence." },
+      { id: "neuro-budget", domain: "neuroscience", task: "Review the neuroscience evidence." },
+    ],
+  }), (error) => error instanceof AutonomousCostBudgetError);
+  assert.equal(calls, 3, "aggregate budget refusal must happen before another provider dispatch");
 });
 
 test("cross-domain structured output propagates through specialists and synthesis", async () => {

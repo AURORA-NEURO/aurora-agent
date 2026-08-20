@@ -185,6 +185,14 @@ and `minQuality`. The same gates are enforced by local health-aware ranking, con
 Rust/Python selection, and `AutonomousOnlineLearner` before a model can be chosen. Refused models
 remain explainable in the ranking; an empty eligible set fails closed before provider dispatch.
 
+For aggregate control over a composed run, pass `maxTotalCostUnits` or create one
+`AutonomousCostBudget` and pass it through the composed boundary. The shared budget covers
+semantic classification, provider failover attempts, every tool-loop turn, cross-domain specialist
+fan-out, synthesis, and decision-cycle execution. Reservations are atomic for local concurrent
+workers; provider attempts that reach dispatch remain charged, while pre-dispatch admission
+failures release their reservation. This aggregate ceiling complements, rather than replaces, the
+optional `AutonomousExecutionController` cost policy.
+
 The provider-assisted semantic classifier used by `semanticRouting.enabled` is also a model
 invocation, so decision cycles forward the caller's cost, latency, and quality gates to it before
 transport. A successful classifier result does not authorize execution: the cycle still requires

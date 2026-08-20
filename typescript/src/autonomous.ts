@@ -5,6 +5,7 @@ import type { AutonomousExecutionController } from "./autonomous-execution.js";
 import type { AutonomousLearningController } from "./autonomous-learning.js";
 import {
   AutonomousRuntime,
+  AutonomousCostBudget,
   type AutonomousModelCandidate,
   type AutonomousModelSelector,
   type AutonomousSelectionDecision,
@@ -478,6 +479,10 @@ export interface AutonomousRunOptions {
   maxLatencyMs?: number;
   /** Refuse candidates below this caller-owned quality prior. */
   minQuality?: number;
+  /** Aggregate estimated spend ceiling shared by nested provider calls in this run. */
+  maxTotalCostUnits?: number;
+  /** Share a caller-owned aggregate budget across fan-out, synthesis, retries, or cycles. */
+  costBudget?: AutonomousCostBudget;
   /** Require a provider response that parses as JSON; disabled by default. */
   requireJson?: boolean;
   /** Optional JSON Schema checked locally and, when supported, enforced by the provider. */
@@ -529,6 +534,12 @@ function composeInvocationObservers(...observers: readonly (ProviderInvocationOb
       for (const observer of active) await observer.after?.(metadata, outcome);
     },
   };
+}
+
+function resolveAutonomousCostBudget(options: Pick<AutonomousRunOptions, "maxTotalCostUnits" | "costBudget">): AutonomousCostBudget | undefined {
+  if (options.costBudget !== undefined && !(options.costBudget instanceof AutonomousCostBudget)) throw new ArgumentError("costBudget must be an AutonomousCostBudget");
+  if (options.costBudget !== undefined && options.maxTotalCostUnits !== undefined) throw new ArgumentError("costBudget and maxTotalCostUnits cannot both be supplied");
+  return options.costBudget ?? (options.maxTotalCostUnits === undefined ? undefined : new AutonomousCostBudget(options.maxTotalCostUnits));
 }
 
 interface ProfileSeed {
@@ -1562,9 +1573,10 @@ export class AutonomousAgent {
   async run(task: string, options: AutonomousRunOptions = {}): Promise<AutonomousRunResult> {
     const taskText = boundedText("autonomous task", task, 32_000);
     validateAutonomousStructuredOutputOptions(options);
+    const costBudget = resolveAutonomousCostBudget(options);
     const route = options.routeOverride ? await assertRouteOverride(taskText, options.routeOverride) : await this.route(taskText, { domain: options.domain, hints: options.hints, allowCrossDomain: options.allowCrossDomain });
     if (route.cross_domain && options.domain === undefined) {
-      const cross = await this.runCrossDomain(taskText, options);
+      const cross = await this.runCrossDomain(taskText, { ...options, maxTotalCostUnits: undefined, costBudget });
       return {
         schema: "bioprism-typescript-autonomous-run/0.1",
         status: cross.status === "completed" ? "completed" : cross.status === "approval_required" ? "approval_required" : cross.status === "turn_limit_reached" ? "turn_limit_reached" : cross.status === "child_failed" ? "child_failed" : cross.status === "children_partial" ? "cross_domain_partial" : "route_review_required",
@@ -1608,11 +1620,11 @@ export class AutonomousAgent {
     if (tools.length || options.authorizeAndExecute || this.toolRuntimeForRun()) {
       const authorizeAndExecute = options.authorizeAndExecute ?? (this.toolRuntimeForRun() ? (calls: ProviderToolCall[]) => this.toolRuntimeForRun()!.authorizeAndExecute(calls, { domains: selectedDomains, approveEffects: options.approveEffects }) : async (calls: ProviderToolCall[]) => calls.map((call) => ({ callId: call.id, approved: false, isError: true, content: { status: "authorization_required", tool: call.name, secret_material: "never_returned" } })));
       const toolReadOnly = options.toolReadOnly ?? (async (call: ProviderToolCall): Promise<boolean> => this.domainToolRegistry?.binding(call.name, selectedDomains)?.risk_class === "read_only");
-      const loop = await this.runtime.invokeToolLoop(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, authorizeAndExecute, signal: options.signal, observer: feedbackObserver, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers, toolReadOnly });
+      const loop = await this.runtime.invokeToolLoop(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, authorizeAndExecute, signal: options.signal, observer: feedbackObserver, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined, toolReadOnly });
       const status: AutonomousRunStatus = loop.loop.status === "completed" ? "completed" : loop.loop.status === "authorization_required" ? "approval_required" : "turn_limit_reached";
       return { schema: "bioprism-typescript-autonomous-run/0.1", status, route, blueprint, selection: loop.selection, response: loop.loop.finalResponse, tool_loop: { status: loop.loop.status, turns: loop.loop.turns, toolCalls: loop.loop.toolCalls }, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
     }
-    const result = await this.runtime.invoke(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: feedbackObserver, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers });
+    const result = await this.runtime.invoke(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: feedbackObserver, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined });
     return { schema: "bioprism-typescript-autonomous-run/0.1", status: "completed", route, blueprint, selection: result.selection, response: result.response, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
   }
 
@@ -1620,6 +1632,7 @@ export class AutonomousAgent {
   async runCrossDomain(task: string, options: AutonomousCrossDomainRunOptions = {}): Promise<AutonomousCrossDomainRunResult> {
     const taskText = boundedText("cross-domain task", task, 32_000);
     validateAutonomousStructuredOutputOptions(options);
+    const costBudget = resolveAutonomousCostBudget(options);
     const route = options.routeOverride ? await assertRouteOverride(taskText, options.routeOverride) : await this.route(taskText, { hints: options.hints, allowCrossDomain: options.allowCrossDomain });
     const learning = this.learner ? "online_bandit_feedback_available" as const : "provider_health_feedback_only" as const;
     if (route.abstained || !route.cross_domain || route.selected_domains.length < 2) {
@@ -1677,6 +1690,8 @@ export class AutonomousAgent {
         approveProviderCall: true,
         approveEffects: options.approveEffects,
         execution: options.execution,
+        maxTotalCostUnits: undefined,
+        costBudget,
         executionAttempt: index + 1,
         maxProviderFailovers: options.maxProviderFailovers,
         signal: options.signal,
@@ -1760,6 +1775,8 @@ export class AutonomousAgent {
       approveProviderCall: true,
       approveEffects: options.approveEffects,
       execution: options.execution,
+      maxTotalCostUnits: undefined,
+      costBudget,
       executionAttempt: totalChildren + 1,
       maxProviderFailovers: options.maxProviderFailovers,
       signal: options.signal,

@@ -9,7 +9,7 @@ import {
   type AutonomousRouteProposal,
 } from "./autonomous.js";
 import type { CredentialHandle, ProviderInvocationObserver } from "./llm.js";
-import type { AutonomousModelCandidate } from "./llm.js";
+import { AutonomousCostBudget, type AutonomousModelCandidate } from "./llm.js";
 import { digestJson } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
@@ -52,6 +52,9 @@ export interface AutonomousSemanticRouteOptions {
   maxCostPerMillionTokens?: number;
   maxLatencyMs?: number;
   minQuality?: number;
+  /** Aggregate budget for the routing classifier; cycles can share it with execution. */
+  maxTotalCostUnits?: number;
+  costBudget?: AutonomousCostBudget;
   execution?: AutonomousExecutionController;
   executionAttempt?: number;
   maxProviderFailovers?: number;
@@ -117,6 +120,9 @@ function routeSchema(): JsonObject {
 export async function semanticRouteAutonomousTask(agent: AutonomousAgent, task: string, options: AutonomousSemanticRouteOptions = {}): Promise<AutonomousSemanticRouteResult> {
   if (!agent || typeof agent.route !== "function" || !agent.runtime) throw new ArgumentError("semantic routing requires an AutonomousAgent");
   const taskText = boundedText("semantic route task", task, 32_000);
+  if (options.costBudget !== undefined && !(options.costBudget instanceof AutonomousCostBudget)) throw new ArgumentError("costBudget must be an AutonomousCostBudget");
+  if (options.costBudget !== undefined && options.maxTotalCostUnits !== undefined) throw new ArgumentError("costBudget and maxTotalCostUnits cannot both be supplied");
+  const costBudget = options.costBudget ?? (options.maxTotalCostUnits === undefined ? undefined : new AutonomousCostBudget(options.maxTotalCostUnits));
   const deterministic = await agent.route(taskText, { hints: options.hints, allowCrossDomain: options.allowCrossDomain ?? true, maxDomains: options.maxDomains ?? 8 });
   const taskDigest = deterministic.task_digest;
   const profiles = await builtinAutonomousDomainProfiles();
@@ -140,7 +146,7 @@ export async function semanticRouteAutonomousTask(agent: AutonomousAgent, task: 
   };
   let execution: Awaited<ReturnType<AutonomousAgent["runtime"]["invoke"]>>;
   try {
-    execution = await agent.runtime.invoke({ task: taskText, domain: "cross_domain", capability: "routing", riskClass: "route_review", requiredCapabilities: ["reasoning"], maxCostPerMillionTokens: options.maxCostPerMillionTokens, maxLatencyMs: options.maxLatencyMs, minQuality: options.minQuality, candidates, request }, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: options.observer, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers });
+    execution = await agent.runtime.invoke({ task: taskText, domain: "cross_domain", capability: "routing", riskClass: "route_review", requiredCapabilities: ["reasoning"], maxCostPerMillionTokens: options.maxCostPerMillionTokens, maxLatencyMs: options.maxLatencyMs, minQuality: options.minQuality, candidates, request }, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: options.observer, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined });
   } catch (error) {
     if (error instanceof ProviderRuntimeError && error.code === "invalid_response") return routeReviewResult(deterministic, "provider_invalid", promptDigest, null, null);
     await failSemanticExecution(options);

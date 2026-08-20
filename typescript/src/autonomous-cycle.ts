@@ -1,4 +1,5 @@
 import { ArgumentError, isObject } from "./errors.js";
+import { AutonomousCostBudget } from "./llm.js";
 import type { AutonomousExecutionController } from "./autonomous-execution.js";
 import {
   type AutonomousAgent,
@@ -210,7 +211,13 @@ function reviewResult(
   };
 }
 
-function runOptions(options: AutonomousDecisionCycleOptions, route: AutonomousRouteProposal, memoryChunk: AutonomousPromptChunk | null): AutonomousRunOptions {
+function cycleCostBudget(options: Pick<AutonomousRunOptions, "maxTotalCostUnits" | "costBudget">): AutonomousCostBudget | undefined {
+  if (options.costBudget !== undefined && !(options.costBudget instanceof AutonomousCostBudget)) throw new ArgumentError("costBudget must be an AutonomousCostBudget");
+  if (options.costBudget !== undefined && options.maxTotalCostUnits !== undefined) throw new ArgumentError("costBudget and maxTotalCostUnits cannot both be supplied");
+  return options.costBudget ?? (options.maxTotalCostUnits === undefined ? undefined : new AutonomousCostBudget(options.maxTotalCostUnits));
+}
+
+function runOptions(options: AutonomousDecisionCycleOptions, route: AutonomousRouteProposal, memoryChunk: AutonomousPromptChunk | null, costBudget?: AutonomousCostBudget): AutonomousRunOptions {
   return {
     domain: options.domain,
     routeOverride: route,
@@ -226,6 +233,8 @@ function runOptions(options: AutonomousDecisionCycleOptions, route: AutonomousRo
     maxCostPerMillionTokens: options.maxCostPerMillionTokens,
     maxLatencyMs: options.maxLatencyMs,
     minQuality: options.minQuality,
+    maxTotalCostUnits: costBudget ? undefined : options.maxTotalCostUnits,
+    costBudget,
     requireJson: options.requireJson,
     responseSchema: options.responseSchema,
     temperature: options.temperature,
@@ -257,6 +266,7 @@ export async function runAutonomousDecisionCycle(
 ): Promise<AutonomousDecisionCycleResult> {
   if (!agent || typeof agent.run !== "function" || typeof agent.route !== "function") throw new ArgumentError("decision cycle requires an AutonomousAgent");
   if (options.semanticRouting?.enabled && options.domain !== undefined) throw new ArgumentError("semantic decision routing cannot replace an explicit caller domain");
+  const costBudget = cycleCostBudget(options);
 
   let route: AutonomousRouteProposal;
   let semanticRoute: AutonomousSemanticRouteResult | null = null;
@@ -274,6 +284,8 @@ export async function runAutonomousDecisionCycle(
       maxCostPerMillionTokens: options.maxCostPerMillionTokens,
       maxLatencyMs: options.maxLatencyMs,
       minQuality: options.minQuality,
+      maxTotalCostUnits: undefined,
+      costBudget,
       execution: options.execution,
       executionAttempt: options.executionAttempt,
       maxProviderFailovers: options.semanticRouting.maxProviderFailovers,
@@ -299,7 +311,7 @@ export async function runAutonomousDecisionCycle(
   const recalledMemory = await recallMemory(options.memory, route);
   let run: AutonomousRunResult;
   try {
-    run = await agent.run(task, runOptions(options, route, recalledMemory.promptChunk));
+    run = await agent.run(task, runOptions(options, route, recalledMemory.promptChunk, costBudget));
   } catch (error) {
     if (options.executionLifecycle !== "observe_only") await failExecutionIfActive(options.execution, error);
     throw error;
@@ -754,7 +766,7 @@ function crossReviewResult(
   };
 }
 
-function crossRunOptions(options: AutonomousCrossDomainDecisionCycleOptions, route: AutonomousRouteProposal, memoryChunk: AutonomousPromptChunk | null): AutonomousCrossDomainRunOptions {
+function crossRunOptions(options: AutonomousCrossDomainDecisionCycleOptions, route: AutonomousRouteProposal, memoryChunk: AutonomousPromptChunk | null, costBudget?: AutonomousCostBudget): AutonomousCrossDomainRunOptions {
   return {
     routeOverride: route,
     capability: options.capability,
@@ -769,6 +781,8 @@ function crossRunOptions(options: AutonomousCrossDomainDecisionCycleOptions, rou
     maxCostPerMillionTokens: options.maxCostPerMillionTokens,
     maxLatencyMs: options.maxLatencyMs,
     minQuality: options.minQuality,
+    maxTotalCostUnits: costBudget ? undefined : options.maxTotalCostUnits,
+    costBudget,
     requireJson: options.requireJson,
     responseSchema: options.responseSchema,
     temperature: options.temperature,
@@ -808,6 +822,7 @@ export async function runAutonomousCrossDomainDecisionCycle(
   if (!agent || typeof agent.runCrossDomain !== "function" || typeof agent.route !== "function") throw new ArgumentError("cross-domain decision cycle requires an AutonomousAgent");
   if (options.semanticRouting?.enabled && options.domain !== undefined) throw new ArgumentError("semantic decision routing cannot replace an explicit caller domain");
   if (options.learning && (!options.learning.controller || typeof options.learning.controller.prepareCrossDomainTrajectory !== "function" || typeof options.learning.controller.settleCrossDomain !== "function")) throw new ArgumentError("cross-domain decision cycle learning controller is malformed");
+  const costBudget = cycleCostBudget(options);
 
   let route: AutonomousRouteProposal;
   let semanticRoute: AutonomousSemanticRouteResult | null = null;
@@ -825,6 +840,8 @@ export async function runAutonomousCrossDomainDecisionCycle(
       maxCostPerMillionTokens: options.maxCostPerMillionTokens,
       maxLatencyMs: options.maxLatencyMs,
       minQuality: options.minQuality,
+      maxTotalCostUnits: undefined,
+      costBudget,
       execution: options.execution,
       executionAttempt: options.executionAttempt,
       maxProviderFailovers: options.semanticRouting.maxProviderFailovers,
@@ -850,7 +867,7 @@ export async function runAutonomousCrossDomainDecisionCycle(
   const recalledMemory = await recallMemory(options.memory, route);
   let run: AutonomousCrossDomainRunResult;
   try {
-    run = await agent.runCrossDomain(task, crossRunOptions(options, route, recalledMemory.promptChunk));
+    run = await agent.runCrossDomain(task, crossRunOptions(options, route, recalledMemory.promptChunk, costBudget));
   } catch (error) {
     if (options.executionLifecycle !== "observe_only") await failExecutionIfActive(options.execution, error);
     throw error;

@@ -6,6 +6,8 @@ import {
   CredentialProvisioner,
   CredentialStore,
   AutonomousAgent,
+  AutonomousCostBudget,
+  AutonomousCostBudgetError,
   AutonomousRuntime,
   AutonomousExecutionController,
   InMemoryAutonomousExecutionJournal,
@@ -574,6 +576,63 @@ test("autonomous structured output is opt-in, schema-checked, and capability-gat
   disabledRuntime.registerProvider(openaiCompatibleProvider("disabled-structured", "https://disabled-structured.test", { requiresCredential: false, structuredOutputMode: "disabled" }));
   const disabledAgent = new AutonomousAgent(disabledRuntime);
   await assert.rejects(disabledAgent.run("This must refuse on provider capability.", { domain: "coding", candidates: [{ ...model, provider: "disabled-structured" }], approveProviderCall: true, requireJson: true }), (error) => error instanceof ProviderRuntimeError && error.message.includes("structured output is disabled"));
+});
+
+test("aggregate cost budgets charge failed failover attempts before allowing another dispatch", async () => {
+  const calls = [];
+  const runtime = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (url) => {
+      calls.push(String(url));
+      if (String(url).startsWith("https://budget-unstable.test")) return jsonResponse({ error: "busy" }, 503);
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: "must not dispatch" }, finish_reason: "stop" }] });
+    },
+  });
+  runtime.registerProvider(openaiCompatibleProvider("budget-unstable", "https://budget-unstable.test", { requiresCredential: false, maxAttempts: 1 }));
+  runtime.registerProvider(openaiCompatibleProvider("budget-backup", "https://budget-backup.test", { requiresCredential: false, maxAttempts: 1 }));
+  const agent = new AutonomousRuntime(runtime);
+  const budget = new AutonomousCostBudget(0.2);
+  const plan = {
+    task: "Fail over only when the aggregate spend still permits it.",
+    candidates: [
+      { provider: "budget-unstable", model: "unstable-model", context_window_tokens: 8_000, max_output_tokens: 512, quality: 0.99, latency_ms: 10, cost_per_million_tokens: 1_000, reliability: 0.99 },
+      { provider: "budget-backup", model: "backup-model", context_window_tokens: 8_000, max_output_tokens: 512, quality: 0.5, latency_ms: 100, cost_per_million_tokens: 1_000, reliability: 0.5 },
+    ],
+    request: request("selection-placeholder"),
+  };
+  await assert.rejects(agent.invoke(plan, {
+    maxProviderFailovers: 1,
+    reserveCost: (costUnits) => budget.reserve(costUnits),
+  }), (error) => error instanceof AutonomousCostBudgetError && error.maxCostUnits === 0.2);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0], /budget-unstable/);
+  assert.ok(budget.consumedCostUnits > 0);
+  assert.equal(budget.snapshot().remaining_cost_units, 0.2 - budget.consumedCostUnits);
+});
+
+test("tool-loop aggregate budgets reserve each provider turn, not just the initial selection", async () => {
+  const calls = [];
+  const runtime = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (url) => {
+      calls.push(String(url));
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: "", tool_calls: [{ id: "budget-tool", type: "function", function: { name: "lookup", arguments: "{}" } }] }, finish_reason: "tool_calls" }] });
+    },
+  });
+  runtime.registerProvider(openaiCompatibleProvider("budget-loop", "https://budget-loop.test", { requiresCredential: false }));
+  const agent = new AutonomousRuntime(runtime);
+  const budget = new AutonomousCostBudget(0.2);
+  await assert.rejects(agent.invokeToolLoop({
+    task: "Bound every tool-loop turn.",
+    candidates: [{ provider: "budget-loop", model: "loop-model", context_window_tokens: 8_000, max_output_tokens: 128, quality: 0.9, latency_ms: 100, cost_per_million_tokens: 1_000, reliability: 0.9 }],
+    request: request("selection-placeholder", { tools: [{ name: "lookup", description: "Read a bounded value.", parameters: { type: "object" } }] }),
+  }, {
+    reserveCost: (costUnits) => budget.reserve(costUnits),
+    authorizeAndExecute: async (toolCalls) => toolCalls.map((call) => ({ callId: call.id, approved: true, content: { ok: true } })),
+    toolReadOnly: () => true,
+  }), (error) => error instanceof AutonomousCostBudgetError);
+  assert.equal(calls.length, 1);
+  assert.ok(budget.consumedCostUnits > 0);
 });
 
 test("AutonomousAgent refreshes live model metadata with atomic catalogue reconciliation", async () => {

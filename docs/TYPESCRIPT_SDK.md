@@ -1565,6 +1565,15 @@ quality-floor reasons; if no candidate remains, invocation is refused before pro
 These limits are policy gates, not estimates derived from provider responses, and they do not grant
 credentials or effect authorization.
 
+For composed work, `maxTotalCostUnits` adds an aggregate estimated-spend ceiling across the whole
+run. A single `AutonomousCostBudget` can be supplied when a caller needs to share that ceiling
+across semantic routing, retries, tool-loop turns, cross-domain specialists, synthesis, or a
+decision cycle. Reservations are atomic in the local process; a budget refusal occurs before the
+next provider request, and a failed local admission releases its reservation. Provider attempts
+that reach dispatch remain charged, including retryable failures, so failover cannot silently spend
+past the caller's aggregate limit. This is independent of the optional `AutonomousExecutionController`
+cost policy; when both are present, both ceilings must admit the call.
+
 Provider-assisted semantic routing is subject to the same gates. When `semanticRouting.enabled` is
 used by a decision cycle, the caller's cost, latency, and quality limits are applied to the routing
 classifier before it can send the task to a provider. A classifier with no eligible candidate fails

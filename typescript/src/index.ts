@@ -2,6 +2,7 @@ export { ApiClient } from "./client.js";
 export {
   ApiError,
   ArgumentError,
+  AutonomousCostBudgetError,
   CredentialError,
   MissionWaitTimeoutError,
   PrismSdkError,
@@ -32,6 +33,8 @@ export {
   MAX_PROVIDER_TURNS,
   PROVIDER_OBSERVATION_SCHEMA,
   PROVIDER_MODEL_DISCOVERY_SCHEMA,
+  AUTONOMOUS_COST_BUDGET_MAX_COST_UNITS,
+  AutonomousCostBudget,
   CredentialHandle,
   CredentialProvisioner,
   CredentialSession,
@@ -53,6 +56,10 @@ export {
 export type {
   AutonomousExecutionPlan,
   AutonomousExecutionResult,
+  AutonomousCostReservation,
+  AutonomousCostReservationCallback,
+  AutonomousProviderCostEstimator,
+  ProviderInvocationOptions,
   AutonomousModelCandidate,
   AutonomousModelCandidateDefaults,
   AutonomousModelRanking,

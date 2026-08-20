@@ -88,6 +88,21 @@ export class CredentialError extends PrismSdkError {
   override readonly name = "CredentialError";
 }
 
+/** A caller-owned autonomous cost ceiling refused another provider attempt. */
+export class AutonomousCostBudgetError extends ArgumentError {
+  override readonly name = "AutonomousCostBudgetError";
+  readonly maxCostUnits: number;
+  readonly consumedCostUnits: number;
+  readonly requestedCostUnits: number;
+
+  constructor(message: string, options: { maxCostUnits: number; consumedCostUnits: number; requestedCostUnits: number }) {
+    super(message);
+    this.maxCostUnits = options.maxCostUnits;
+    this.consumedCostUnits = options.consumedCostUnits;
+    this.requestedCostUnits = options.requestedCostUnits;
+  }
+}
+
 /** Stable, redacted categories for provider failures; raw provider bodies are never embedded. */
 export type ProviderErrorCode =
   | "provider_error"
