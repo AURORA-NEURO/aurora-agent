@@ -410,7 +410,7 @@ export interface AutonomousCrossDomainChildRun {
   output_bytes: number;
 }
 
-export type AutonomousCrossDomainRunStatus = "completed" | "children_completed" | "children_partial" | "approval_required" | "child_failed" | "route_review_required";
+export type AutonomousCrossDomainRunStatus = "completed" | "children_completed" | "children_partial" | "approval_required" | "turn_limit_reached" | "child_failed" | "route_review_required";
 
 export interface AutonomousCrossDomainRunResult {
   schema: typeof AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA;
@@ -1440,7 +1440,7 @@ export class AutonomousAgent {
       const cross = await this.runCrossDomain(taskText, options);
       return {
         schema: "bioprism-typescript-autonomous-run/0.1",
-        status: cross.status === "completed" ? "completed" : cross.status === "approval_required" ? "approval_required" : cross.status === "child_failed" ? "child_failed" : cross.status === "children_partial" ? "cross_domain_partial" : "route_review_required",
+        status: cross.status === "completed" ? "completed" : cross.status === "approval_required" ? "approval_required" : cross.status === "turn_limit_reached" ? "turn_limit_reached" : cross.status === "child_failed" ? "child_failed" : cross.status === "children_partial" ? "cross_domain_partial" : "route_review_required",
         route,
         blueprint: cross.blueprint?.synthesis_blueprint ?? null,
         selection: cross.synthesis?.selection ?? null,
@@ -1576,8 +1576,9 @@ export class AutonomousAgent {
     const completedChildren = childRuns.filter((child) => child.result.status === "completed").length;
     const allChildrenCompleted = childRuns.length === blueprint.child_blueprints.length && completedChildren === blueprint.child_blueprints.length;
     const hasApproval = childRuns.some((child) => child.result.status === "approval_required");
+    const hasTurnLimit = childRuns.some((child) => child.result.status === "turn_limit_reached");
     if (!allChildrenCompleted && !options.allowPartial) {
-      return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: hasApproval ? "approval_required" : "child_failed", route, blueprint, child_runs: childRuns, synthesis: null, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: completedChildren > 0, learning_episode_ids: learningEpisodeIds, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
+      return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: hasApproval ? "approval_required" : hasTurnLimit ? "turn_limit_reached" : "child_failed", route, blueprint, child_runs: childRuns, synthesis: null, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: completedChildren > 0, learning_episode_ids: learningEpisodeIds, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
     }
     if (options.synthesize === false) {
       return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: allChildrenCompleted ? "children_completed" : "children_partial", route, blueprint, child_runs: childRuns, synthesis: null, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: !allChildrenCompleted, learning_episode_ids: learningEpisodeIds, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
@@ -1620,7 +1621,7 @@ export class AutonomousAgent {
       const episode = await options.learning.prepareRun(synthesis, { episodeId, runId: episodeId, stageId: "synthesis", parentJobId: `cross:${route.task_digest}` });
       learningEpisodeIds.push(episode.episode_id);
     }
-    const status: AutonomousCrossDomainRunStatus = synthesis.status === "completed" ? (allChildrenCompleted ? "completed" : "children_partial") : synthesis.status === "approval_required" ? "approval_required" : "child_failed";
+    const status: AutonomousCrossDomainRunStatus = synthesis.status === "completed" ? (allChildrenCompleted ? "completed" : "children_partial") : synthesis.status === "approval_required" ? "approval_required" : synthesis.status === "turn_limit_reached" ? "turn_limit_reached" : "child_failed";
     return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status, route, blueprint, child_runs: childRuns, synthesis, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: !allChildrenCompleted, learning_episode_ids: learningEpisodeIds, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
   }
 

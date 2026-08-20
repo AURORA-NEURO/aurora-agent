@@ -292,6 +292,11 @@ bounded failure. `allowPartial: true` makes partial synthesis an explicit caller
 Calling `run()` without an explicit domain automatically uses this path when routing selects more
 than one domain.
 
+Provider tool-loop exhaustion remains `turn_limit_reached` when it occurs in a specialist or the
+fan-in synthesis stage. It is not rewritten as a successful partial result or as an opaque child
+failure, so a caller can distinguish a bounded retry/escalation decision from an authorization
+pause or an unexpected child exception.
+
 For resumable single-domain workflows, `AutonomousWorkflowExecutor` turns the reviewed workflow
 DAG into bounded stage calls. It checkpoints after each completed stage, pauses after
 `maxStages`, records a metadata-only event chain, and resumes only when the caller supplies the

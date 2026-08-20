@@ -20,6 +20,7 @@ function jsonResponse(payload) {
 }
 
 const capabilities = ["reasoning", "code", "web", "data", "science", "biomedical", "coordination", "operations", "enterprise", "multimodal", "evaluation"];
+const loopTools = [{ name: "repository_catalog", description: "Inspect repository", parameters: { type: "object", additionalProperties: false } }];
 
 function candidate() {
   return {
@@ -53,6 +54,22 @@ function cycleAgent(payloads = [{ text: "cycle answer" }]) {
   return { agent, bodies, calls: () => calls };
 }
 
+function toolLoopAgent(stopResponses = 0) {
+  let calls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      calls += 1;
+      if (calls <= stopResponses) return jsonResponse({ choices: [{ message: { role: "assistant", content: "child answer" }, finish_reason: "stop" }] });
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: "", tool_calls: [{ id: `cycle-tool-${calls}`, type: "function", function: { name: "repository_catalog", arguments: "{}" } }] }, finish_reason: "tool_calls" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("cycle-provider", "https://cycle-tool-loop.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel(candidate());
+  return { agent, calls: () => calls };
+}
+
 test("decision cycle connects approval, invocation, evaluator settlement, and bandit adaptation", async () => {
   const { agent, calls } = cycleAgent();
   const learning = new AutonomousLearningController(agent);
@@ -75,6 +92,29 @@ test("decision cycle connects approval, invocation, evaluator settlement, and ba
   assert.equal(result.settlement.next_state.generation, 1);
   assert.equal(calls(), 1);
   assert.equal(JSON.stringify(result.settlement).includes(task), false);
+});
+
+test("decision cycle preserves bounded tool-loop exhaustion without evaluator settlement", async () => {
+  const { agent, calls } = toolLoopAgent();
+  const learning = new AutonomousLearningController(agent);
+  const result = await runAutonomousDecisionCycle(agent, "Review this coding repository", {
+    domain: "coding",
+    approveProviderCall: true,
+    tools: loopTools,
+    authorizeAndExecute: async (toolCalls) => toolCalls.map((call) => ({ callId: call.id, approved: true, content: { ok: true } })),
+    learning: {
+      controller: learning,
+      episodeId: "cycle-tool-limit",
+      evaluate: () => { throw new Error("tool-limit result must not be evaluated"); },
+    },
+  });
+  assert.equal(result.status, "turn_limit_reached");
+  assert.equal(result.run.status, "turn_limit_reached");
+  assert.equal(result.run.tool_loop.status, "turn_limit_reached");
+  assert.equal(result.learning_episode_id, null);
+  assert.equal(result.evaluation, null);
+  assert.equal(result.settlement, null);
+  assert.equal(calls(), 4);
 });
 
 test("decision cycle fails the shared execution when post-run evaluation throws", async () => {
@@ -334,6 +374,24 @@ test("cross-domain decision cycle settles specialist and synthesis credit as one
   assert.equal(execution.state.status, "completed");
   assert.equal(execution.state.provider_calls, 3);
   assert.equal(calls(), 3);
+});
+
+test("cross-domain decision cycle preserves synthesis tool-loop exhaustion", async () => {
+  const { agent, calls } = toolLoopAgent(2);
+  const result = await runAutonomousCrossDomainDecisionCycle(agent, "Research a biomedical neuroscience experiment with EEG patient evidence", {
+    approveProviderCall: true,
+    tools: loopTools,
+    authorizeAndExecute: async (toolCalls) => toolCalls.map((call) => ({ callId: call.id, approved: true, content: { ok: true } })),
+    subtasks: [
+      { id: "bio", domain: "biomedical", task: "Review biomedical evidence." },
+      { id: "neuro", domain: "neuroscience", task: "Review neuroscience evidence." },
+    ],
+  });
+  assert.equal(result.status, "turn_limit_reached");
+  assert.equal(result.run.status, "turn_limit_reached");
+  assert.equal(result.run.synthesis.status, "turn_limit_reached");
+  assert.equal(result.run.completed_children, 2);
+  assert.equal(calls(), 6);
 });
 
 test("cross-domain decision cycle fails the shared execution when settlement throws", async () => {

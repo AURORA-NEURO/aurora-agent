@@ -1578,6 +1578,11 @@ evidence; `synthesize: false` returns child results without claiming an integrat
 `run()` automatically delegates to this path when it receives an ambiguous task with more than one
 selected domain and no explicit domain override.
 
+Provider tool-loop exhaustion remains `turn_limit_reached` when it occurs in a specialist or the
+fan-in synthesis stage. It is not rewritten as a successful partial result or as an opaque child
+failure, so a caller can distinguish a bounded retry/escalation decision from an authorization
+pause or an unexpected child exception.
+
 The result preserves `completed_children`, `total_children`, `partial`, child-local run results,
 and synthesis status. The returned provider responses stay application-local; the cross-domain
 metadata is suitable for caller-owned audit and evaluator code but is not sent to the value-only
