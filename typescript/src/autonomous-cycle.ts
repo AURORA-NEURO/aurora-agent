@@ -1,4 +1,5 @@
 import { ArgumentError, isObject } from "./errors.js";
+import type { AutonomousExecutionController } from "./autonomous-execution.js";
 import {
   type AutonomousAgent,
   type AutonomousCrossDomainRunOptions,
@@ -45,6 +46,9 @@ export interface AutonomousDecisionCycleSemanticOptions {
   maxDomains?: number;
   allowCrossDomain?: boolean;
   maxOutputTokens?: number;
+  execution?: AutonomousExecutionController;
+  executionAttempt?: number;
+  maxProviderFailovers?: number;
 }
 
 export type AutonomousDecisionCycleEvaluator = (
@@ -171,6 +175,18 @@ function cycleStatusForRun(status: AutonomousRunResult["status"]): AutonomousDec
   return "route_review_required";
 }
 
+function executionFailureReason(error: unknown): string {
+  const name = error instanceof Error ? error.name : "unknown_error";
+  return /^[A-Za-z0-9_.:-]{1,128}$/.test(name) ? name : "unknown_error";
+}
+
+async function failExecutionIfActive(execution: AutonomousExecutionController | undefined, error: unknown): Promise<void> {
+  if (!execution) return;
+  const status = execution.state.status;
+  if (["completed", "failed", "cancelled", "reconciliation_required"].includes(status) || ["completed", "failed"].includes(execution.state.last_event_kind)) return;
+  await execution.fail(executionFailureReason(error));
+}
+
 function reviewResult(
   status: AutonomousDecisionCycleStatus,
   route: AutonomousRouteProposal,
@@ -207,8 +223,13 @@ function runOptions(options: AutonomousDecisionCycleOptions, route: AutonomousRo
     temperature: options.temperature,
     tools: options.tools,
     authorizeAndExecute: options.authorizeAndExecute,
+    toolReadOnly: options.toolReadOnly,
     approveProviderCall: options.approveProviderCall,
     approveEffects: options.approveEffects,
+    execution: options.execution,
+    executionAttempt: options.executionAttempt,
+    maxProviderFailovers: options.maxProviderFailovers,
+    executionLifecycle: options.executionLifecycle,
     signal: options.signal,
     observer: options.observer,
   };
@@ -242,11 +263,15 @@ export async function runAutonomousDecisionCycle(
       maxDomains: options.semanticRouting.maxDomains,
       allowCrossDomain: options.semanticRouting.allowCrossDomain,
       maxOutputTokens: options.semanticRouting.maxOutputTokens,
+      execution: options.execution,
+      executionAttempt: options.executionAttempt,
+      maxProviderFailovers: options.semanticRouting.maxProviderFailovers,
       signal: options.signal,
       observer: options.observer,
     });
     route = semanticRoute.route;
     if (semanticRoute.status !== "completed") {
+      if (options.executionLifecycle !== "observe_only") await options.execution?.checkpoint({ status: semanticRoute.status, reason: `semantic_route_${semanticRoute.status}` });
       return reviewResult(semanticRoute.status === "approval_required" ? "approval_required" : semanticRoute.status, route, semanticRoute);
     }
   } else if (options.routeOverride) {
@@ -255,11 +280,23 @@ export async function runAutonomousDecisionCycle(
     route = await agent.route(task, { domain: options.domain, hints: options.hints, allowCrossDomain: options.allowCrossDomain });
   }
 
-  if (route.abstained || !route.primary_domain || route.cross_domain || route.selected_domains.length !== 1) return reviewResult("route_review_required", route, semanticRoute);
+  if (route.abstained || !route.primary_domain || route.cross_domain || route.selected_domains.length !== 1) {
+    if (options.executionLifecycle !== "observe_only") await options.execution?.checkpoint({ status: "route_review_required", reason: "single_domain_route_review_required" });
+    return reviewResult("route_review_required", route, semanticRoute);
+  }
   const recalledMemory = await recallMemory(options.memory, route);
-  const run = await agent.run(task, runOptions(options, route, recalledMemory.promptChunk));
+  let run: AutonomousRunResult;
+  try {
+    run = await agent.run(task, runOptions(options, route, recalledMemory.promptChunk));
+  } catch (error) {
+    if (options.executionLifecycle !== "observe_only") await failExecutionIfActive(options.execution, error);
+    throw error;
+  }
   const cycleStatus = cycleStatusForRun(run.status);
-  if (cycleStatus !== "completed") return { ...reviewResult(cycleStatus, route, semanticRoute), run, memory: recalledMemory.projection };
+  if (cycleStatus !== "completed") {
+    if (options.executionLifecycle !== "observe_only") await options.execution?.checkpoint({ status: cycleStatus, reason: `run_${cycleStatus}` });
+    return { ...reviewResult(cycleStatus, route, semanticRoute), run, memory: recalledMemory.projection };
+  }
 
   let learningEpisodeId: string | null = null;
   let settlement: AutonomousLearningSettlement | null = null;
@@ -286,6 +323,8 @@ export async function runAutonomousDecisionCycle(
       }
     }
   }
+
+  if (options.executionLifecycle !== "observe_only") await options.execution?.complete("completed");
 
   return {
     schema: AUTONOMOUS_DECISION_CYCLE_SCHEMA,
@@ -538,39 +577,70 @@ export async function runAutonomousReplanCycle(
   let final: AutonomousDecisionCycleResult | null = null;
 
   for (let attempt = 0; attempt <= maxReplans; attempt += 1) {
-    const cycle = await runAutonomousDecisionCycle(agent, task, {
-      ...options,
-      semanticRouting: attempt === 0 ? options.semanticRouting : undefined,
-      routeOverride,
-      context,
-      learning: undefined,
-      memory: undefined,
-    });
+    let cycle: AutonomousDecisionCycleResult;
+    try {
+      cycle = await runAutonomousDecisionCycle(agent, task, {
+        ...options,
+        semanticRouting: attempt === 0 ? options.semanticRouting : undefined,
+        routeOverride,
+        context,
+        executionAttempt: attempt + 1,
+        executionLifecycle: "observe_only",
+        learning: undefined,
+        memory: undefined,
+      });
+    } catch (error) {
+      await failExecutionIfActive(options.execution, error);
+      throw error;
+    }
     final = cycle;
     const digests = await replanRunDigests(cycle.run);
     if (cycle.status !== "completed" || !cycle.run) {
+      await options.execution?.checkpoint({ status: cycle.status, reason: `replan_cycle_${cycle.status}` });
       attempts.push({ attempt: attempt + 1, status: cycle.status, run_status: cycle.run?.status ?? null, route_digest: cycle.route.route_digest, selection_digest: digests.selection, outcome_digest: digests.outcome, evaluation_digest: null, evaluation: null, learning_episode_id: null });
       return replanResult(cycle.status, final, attempts, evaluations, learningEpisodeIds, settlements);
     }
 
-    const evaluation = normalizeReplanEvaluation(await options.evaluate(cycle.run));
-    const projection = await replanEvaluationProjection(evaluation);
-    const evaluationDigest = await digestJson(projection);
+    let evaluation: AutonomousReplanEvaluation;
+    let projection: AutonomousReplanEvaluationProjection;
+    let evaluationDigest: string;
+    try {
+      evaluation = normalizeReplanEvaluation(await options.evaluate(cycle.run));
+      projection = await replanEvaluationProjection(evaluation);
+      evaluationDigest = await digestJson(projection);
+      await options.execution?.recordEvaluation({ evaluatorId: evaluation.evaluator_id, evaluatorVersion: evaluation.evaluator_version, reward: evaluation.reward, passed: evaluation.passed, evaluationDigest, failureClass: evaluation.failure_class });
+    } catch (error) {
+      await failExecutionIfActive(options.execution, error);
+      throw error;
+    }
     let learningEpisodeId: string | null = null;
-    if (options.learning) {
-      learningEpisodeId = `${episodePrefix}:${cycle.run.blueprint!.task_digest}:attempt-${attempt + 1}`;
-      const episode = await options.learning.controller.prepareRun(cycle.run, { episodeId: learningEpisodeId, runId: learningEpisodeId, stageId: `replan-${attempt + 1}` });
-      const settlement = await options.learning.controller.settleRun(episode.episode_id, evaluation, { remote: options.learning.remote });
-      learningEpisodeIds.push(episode.episode_id);
-      settlements.push(settlement);
+    try {
+      if (options.learning) {
+        learningEpisodeId = `${episodePrefix}:${cycle.run.blueprint!.task_digest}:attempt-${attempt + 1}`;
+        const episode = await options.learning.controller.prepareRun(cycle.run, { episodeId: learningEpisodeId, runId: learningEpisodeId, stageId: `replan-${attempt + 1}` });
+        const settlement = await options.learning.controller.settleRun(episode.episode_id, evaluation, { remote: options.learning.remote });
+        learningEpisodeIds.push(episode.episode_id);
+        settlements.push(settlement);
+      }
+    } catch (error) {
+      await failExecutionIfActive(options.execution, error);
+      throw error;
     }
     evaluations.push(projection);
     attempts.push({ attempt: attempt + 1, status: cycle.status, run_status: cycle.run.status, route_digest: cycle.route.route_digest, selection_digest: digests.selection, outcome_digest: digests.outcome, evaluation_digest: evaluationDigest, evaluation: projection, learning_episode_id: learningEpisodeId });
 
-    if (!evaluation.replan_requested) return replanResult(evaluation.passed ? "completed" : "completed_without_replan", final, attempts, evaluations, learningEpisodeIds, settlements);
-    if (attempt >= maxReplans) return replanResult("replan_limit_reached", final, attempts, evaluations, learningEpisodeIds, settlements);
+    if (!evaluation.replan_requested) {
+      await options.execution?.complete(evaluation.passed ? "completed" : "completed_without_replan");
+      return replanResult(evaluation.passed ? "completed" : "completed_without_replan", final, attempts, evaluations, learningEpisodeIds, settlements);
+    }
+    if (attempt >= maxReplans) {
+      await options.execution?.complete("replan_limit_reached");
+      return replanResult("replan_limit_reached", final, attempts, evaluations, learningEpisodeIds, settlements);
+    }
 
-    context = [...context, await replanContextChunk(attempt + 2, cycle.route.route_digest, digests.selection, digests.outcome, evaluation)];
+    const nextContext = await replanContextChunk(attempt + 2, cycle.route.route_digest, digests.selection, digests.outcome, evaluation);
+    await options.execution?.replan({ instructionDigest: projection.replan_instruction_digest, attempt: attempt + 2, reason: "evaluator_requested" });
+    context = [...context, nextContext];
     routeOverride = cycle.route;
   }
 
@@ -655,8 +725,13 @@ function crossRunOptions(options: AutonomousCrossDomainDecisionCycleOptions, rou
     temperature: options.temperature,
     tools: options.tools,
     authorizeAndExecute: options.authorizeAndExecute,
+    toolReadOnly: options.toolReadOnly,
     approveProviderCall: options.approveProviderCall,
     approveEffects: options.approveEffects,
+    execution: options.execution,
+    executionAttempt: options.executionAttempt,
+    maxProviderFailovers: options.maxProviderFailovers,
+    executionLifecycle: options.executionLifecycle,
     signal: options.signal,
     observer: options.observer,
     subtasks: options.subtasks,
@@ -698,20 +773,35 @@ export async function runAutonomousCrossDomainDecisionCycle(
       maxDomains: options.semanticRouting.maxDomains,
       allowCrossDomain: options.semanticRouting.allowCrossDomain ?? true,
       maxOutputTokens: options.semanticRouting.maxOutputTokens,
+      execution: options.execution,
+      executionAttempt: options.executionAttempt,
+      maxProviderFailovers: options.semanticRouting.maxProviderFailovers,
       signal: options.signal,
       observer: options.observer,
     });
     route = semanticRoute.route;
-    if (semanticRoute.status !== "completed") return crossReviewResult(semanticRoute.status === "approval_required" ? "approval_required" : semanticRoute.status, route, semanticRoute);
+    if (semanticRoute.status !== "completed") {
+      if (options.executionLifecycle !== "observe_only") await options.execution?.checkpoint({ status: semanticRoute.status, reason: `semantic_route_${semanticRoute.status}` });
+      return crossReviewResult(semanticRoute.status === "approval_required" ? "approval_required" : semanticRoute.status, route, semanticRoute);
+    }
   } else if (options.routeOverride) {
     route = options.routeOverride;
   } else {
     route = await agent.route(task, { hints: options.hints, allowCrossDomain: options.allowCrossDomain ?? true });
   }
-  if (route.abstained || !route.cross_domain || route.selected_domains.length < 2) return crossReviewResult("route_review_required", route, semanticRoute);
+  if (route.abstained || !route.cross_domain || route.selected_domains.length < 2) {
+    if (options.executionLifecycle !== "observe_only") await options.execution?.checkpoint({ status: "route_review_required", reason: "cross_domain_route_review_required" });
+    return crossReviewResult("route_review_required", route, semanticRoute);
+  }
 
   const recalledMemory = await recallMemory(options.memory, route);
-  const run = await agent.runCrossDomain(task, crossRunOptions(options, route, recalledMemory.promptChunk));
+  let run: AutonomousCrossDomainRunResult;
+  try {
+    run = await agent.runCrossDomain(task, crossRunOptions(options, route, recalledMemory.promptChunk));
+  } catch (error) {
+    if (options.executionLifecycle !== "observe_only") await failExecutionIfActive(options.execution, error);
+    throw error;
+  }
   let settlement: AutonomousCrossDomainLearningSettlement | null = null;
   if (options.learning?.evaluate && run.learning_episode_ids.length > 0) {
     const rewards = await options.learning.evaluate(run);
@@ -742,6 +832,10 @@ export async function runAutonomousCrossDomainDecisionCycle(
         memoryProjection.evaluation_recorded_episode_ids.push(memoryEpisode.episode_id);
       }
     }
+  }
+  if (options.executionLifecycle !== "observe_only") {
+    if (run.status === "completed" || run.status === "children_completed" || run.status === "children_partial") await options.execution?.complete(run.status);
+    else await options.execution?.checkpoint({ status: run.status, reason: `cross_domain_${run.status}` });
   }
   return {
     schema: AUTONOMOUS_CROSS_DOMAIN_DECISION_CYCLE_SCHEMA,

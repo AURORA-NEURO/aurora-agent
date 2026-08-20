@@ -1,5 +1,6 @@
 import { ArgumentError, ProviderRuntimeError, isObject } from "./errors.js";
 import type { AutonomousAgent } from "./autonomous.js";
+import type { AutonomousExecutionController } from "./autonomous-execution.js";
 import {
   AUTONOMOUS_DOMAIN_NAMES,
   builtinAutonomousDomainProfiles,
@@ -47,6 +48,9 @@ export interface AutonomousSemanticRouteOptions {
   maxDomains?: number;
   allowCrossDomain?: boolean;
   maxOutputTokens?: number;
+  execution?: AutonomousExecutionController;
+  executionAttempt?: number;
+  maxProviderFailovers?: number;
   signal?: AbortSignal;
   observer?: ProviderInvocationObserver;
 }
@@ -121,7 +125,7 @@ export async function semanticRouteAutonomousTask(agent: AutonomousAgent, task: 
     requireJson: true,
     responseSchema: routeSchema(),
   };
-  const execution = await agent.runtime.invoke({ task: taskText, domain: "cross_domain", capability: "routing", riskClass: "route_review", requiredCapabilities: ["reasoning"], candidates, request }, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: options.observer });
+  const execution = await agent.runtime.invoke({ task: taskText, domain: "cross_domain", capability: "routing", riskClass: "route_review", requiredCapabilities: ["reasoning"], candidates, request }, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: options.observer, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers });
   const outcomeDigest = await digestJson({ status: "semantic_route", selection: execution.selection, response: execution.response });
   const selectionDigest = await digestJson(execution.selection);
   const selectedModel = execution.selection.selected_model;

@@ -6,6 +6,8 @@ import {
   CredentialProvisioner,
   CredentialStore,
   AutonomousRuntime,
+  AutonomousExecutionController,
+  InMemoryAutonomousExecutionJournal,
   LLMRuntime,
   ProviderRuntimeError,
   anthropicProvider,
@@ -508,4 +510,113 @@ test("autonomous runtime gates candidates on provider readiness and feeds health
   gatedRuntime.registerProvider(openaiProvider({ baseUrl: "https://gated.test" }));
   const gatedAgent = new AutonomousRuntime(gatedRuntime);
   await assert.rejects(gatedAgent.invoke({ ...plan, candidates: [{ ...candidates[0], provider: "openai", model: "gated-model", requires_credential: true }] }), ProviderRuntimeError);
+});
+
+test("autonomous runtime performs bounded provider failover and journals the admission", async () => {
+  const calls = [];
+  const runtime = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (url) => {
+      calls.push(String(url));
+      if (String(url).startsWith("https://unstable.test")) return jsonResponse({ error: "busy" }, 503);
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: "stable answer" }, finish_reason: "stop" }] });
+    },
+  });
+  runtime.registerProvider(openaiCompatibleProvider("unstable", "https://unstable.test", { requiresCredential: false, maxAttempts: 1 }));
+  runtime.registerProvider(openaiCompatibleProvider("stable", "https://stable.test", { requiresCredential: false, maxAttempts: 1 }));
+  const journal = new InMemoryAutonomousExecutionJournal();
+  const execution = await AutonomousExecutionController.create({
+    executionId: "autonomous-failover-1",
+    domain: "general",
+    capability: "reasoning",
+    riskClass: "read_only",
+    policy: { max_steps: 8, max_provider_calls: 2, max_provider_failovers: 1 },
+    journal,
+  });
+  const agent = new AutonomousRuntime(runtime);
+  const result = await agent.invoke({
+    task: "Answer with one bounded sentence.",
+    domain: "general",
+    capability: "reasoning",
+    candidates: [
+      { provider: "unstable", model: "unstable-model", context_window_tokens: 8_000, max_output_tokens: 512, quality: 0.99, latency_ms: 10, cost_per_million_tokens: 1, reliability: 0.99 },
+      { provider: "stable", model: "stable-model", context_window_tokens: 8_000, max_output_tokens: 512, quality: 0.6, latency_ms: 100, cost_per_million_tokens: 5, reliability: 0.7 },
+    ],
+    request: request("selection-placeholder"),
+  }, { execution });
+  assert.equal(result.selection.selected_model.provider, "stable");
+  assert.equal(result.response.text, "stable answer");
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0], "https://unstable.test/v1/chat/completions");
+  assert.equal(calls[1], "https://stable.test/v1/chat/completions");
+  assert.equal(execution.state.provider_calls, 2);
+  assert.equal(execution.state.provider_failovers, 1);
+  assert.equal((await journal.verifyIntegrity()).verified, true);
+  await execution.complete();
+});
+
+test("autonomous failover stays fail-closed for non-retryable failures and exhausted budgets", async () => {
+  const nonRetryableCalls = [];
+  const nonRetryableRuntime = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (url) => { nonRetryableCalls.push(String(url)); return jsonResponse({ error: "unauthorized" }, 401); },
+  });
+  nonRetryableRuntime.registerProvider(openaiCompatibleProvider("denied", "https://denied.test", { requiresCredential: false, maxAttempts: 1 }));
+  nonRetryableRuntime.registerProvider(openaiCompatibleProvider("backup", "https://backup.test", { requiresCredential: false, maxAttempts: 1 }));
+  const plan = {
+    task: "Do not retry an authorization refusal.",
+    candidates: [
+      { provider: "denied", model: "denied-model", context_window_tokens: 8_000, max_output_tokens: 512, quality: 0.99, latency_ms: 10, cost_per_million_tokens: 1, reliability: 0.99 },
+      { provider: "backup", model: "backup-model", context_window_tokens: 8_000, max_output_tokens: 512, quality: 0.5, latency_ms: 100, cost_per_million_tokens: 5, reliability: 0.5 },
+    ],
+    request: request("selection-placeholder"),
+  };
+  const nonRetryableAgent = new AutonomousRuntime(nonRetryableRuntime);
+  await assert.rejects(nonRetryableAgent.invoke(plan, { maxProviderFailovers: 1 }), (error) => error instanceof ProviderRuntimeError && error.statusCode === 401 && error.retryable === false);
+  assert.deepEqual(nonRetryableCalls, ["https://denied.test/v1/chat/completions"]);
+
+  const exhaustedCalls = [];
+  const exhaustedRuntime = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (url) => { exhaustedCalls.push(String(url)); return jsonResponse({ error: "busy" }, 503); },
+  });
+  exhaustedRuntime.registerProvider(openaiCompatibleProvider("busy", "https://busy.test", { requiresCredential: false, maxAttempts: 1 }));
+  exhaustedRuntime.registerProvider(openaiCompatibleProvider("unused", "https://unused.test", { requiresCredential: false, maxAttempts: 1 }));
+  const exhaustedAgent = new AutonomousRuntime(exhaustedRuntime);
+  await assert.rejects(exhaustedAgent.invoke({ ...plan, task: "Do not exceed the zero failover budget.", candidates: plan.candidates.map((candidate) => ({ ...candidate, provider: candidate.provider === "denied" ? "busy" : "unused", model: `${candidate.model}-busy` })) }, { maxProviderFailovers: 0 }), (error) => error instanceof ProviderRuntimeError && error.statusCode === 503);
+  assert.deepEqual(exhaustedCalls, ["https://busy.test/v1/chat/completions"]);
+});
+
+test("autonomous tool loops never replay after a provider has requested a tool", async () => {
+  const calls = [];
+  const runtime = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (url) => {
+      calls.push(String(url));
+      if (calls.length === 1) return jsonResponse({ choices: [{ message: { role: "assistant", content: "", tool_calls: [{ id: "call-guarded", type: "function", function: { name: "lookup", arguments: "{}" } }] }, finish_reason: "tool_calls" }] });
+      if (String(url).startsWith("https://unstable-loop.test")) return jsonResponse({ error: "busy" }, 503);
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: "unsafe replay" }, finish_reason: "stop" }] });
+    },
+  });
+  runtime.registerProvider(openaiCompatibleProvider("unstable-loop", "https://unstable-loop.test", { requiresCredential: false, maxAttempts: 1 }));
+  runtime.registerProvider(openaiCompatibleProvider("backup-loop", "https://backup-loop.test", { requiresCredential: false, maxAttempts: 1 }));
+  const execution = await AutonomousExecutionController.create({ executionId: "autonomous-tool-failover-1", domain: "coding", capability: "repository_inspection", riskClass: "read_only", policy: { max_steps: 8, max_provider_calls: 2, max_provider_failovers: 1 } });
+  const agent = new AutonomousRuntime(runtime);
+  await assert.rejects(agent.invokeToolLoop({
+    task: "Inspect without replaying a tool request.",
+    candidates: [
+      { provider: "unstable-loop", model: "unstable-loop-model", context_window_tokens: 8_000, max_output_tokens: 512, quality: 0.99, latency_ms: 10, cost_per_million_tokens: 1, reliability: 0.99 },
+      { provider: "backup-loop", model: "backup-loop-model", context_window_tokens: 8_000, max_output_tokens: 512, quality: 0.5, latency_ms: 100, cost_per_million_tokens: 5, reliability: 0.5 },
+    ],
+    request: request("selection-placeholder", { tools: [{ name: "lookup", description: "Read a bounded value.", parameters: { type: "object" } }] }),
+  }, {
+    execution,
+    maxProviderFailovers: 1,
+    authorizeAndExecute: async (toolCalls) => toolCalls.map((toolCall) => ({ callId: toolCall.id, approved: true, content: { ok: true } })),
+    toolReadOnly: () => true,
+  }), (error) => error instanceof ProviderRuntimeError && error.statusCode === 503);
+  assert.deepEqual(calls, ["https://unstable-loop.test/v1/chat/completions", "https://unstable-loop.test/v1/chat/completions"]);
+  assert.equal(execution.state.provider_failovers, 0);
+  assert.equal(execution.state.tool_calls, 1);
+  assert.equal(execution.state.status, "running");
 });

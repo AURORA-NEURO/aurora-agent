@@ -1,6 +1,7 @@
 import { ArgumentError, ProviderRuntimeError, isObject } from "./errors.js";
 import type { ApiClient } from "./client.js";
 import { AutonomousBrainControlPlaneBridge, AutonomousModelHealthController, type AutonomousModelHealthStore } from "./autonomous-control.js";
+import type { AutonomousExecutionController } from "./autonomous-execution.js";
 import type { AutonomousLearningController } from "./autonomous-learning.js";
 import {
   AutonomousRuntime,
@@ -447,8 +448,18 @@ export interface AutonomousRunOptions {
   temperature?: number;
   tools?: readonly ProviderTool[];
   authorizeAndExecute?: (calls: ProviderToolCall[]) => ProviderToolResult[] | Promise<ProviderToolResult[]>;
+  /** Classify custom provider tool calls for an execution controller; unknown tools are not read-only by default. */
+  toolReadOnly?: (call: ProviderToolCall) => boolean | Promise<boolean>;
   approveProviderCall?: boolean;
   approveEffects?: boolean;
+  /** Optional caller-owned policy/state controller enforced at provider and tool boundaries. */
+  execution?: AutonomousExecutionController;
+  /** Logical attempt number recorded in execution metadata; it never changes provider authority. */
+  executionAttempt?: number;
+  /** Maximum number of retryable provider failures that may trigger a new provider selection. */
+  maxProviderFailovers?: number;
+  /** Internal composition mode for a higher-level session that owns terminal transitions. */
+  executionLifecycle?: "managed" | "observe_only";
   signal?: AbortSignal;
   observer?: ProviderInvocationObserver;
 }
@@ -1450,10 +1461,11 @@ export class AutonomousAgent {
     const feedbackObserver = composeInvocationObservers(options.observer, healthObserver, remoteHealthObserver);
     if (tools.length || options.authorizeAndExecute || this.toolRuntimeForRun()) {
       const authorizeAndExecute = options.authorizeAndExecute ?? (this.toolRuntimeForRun() ? (calls: ProviderToolCall[]) => this.toolRuntimeForRun()!.authorizeAndExecute(calls, { domains: selectedDomains, approveEffects: options.approveEffects }) : async (calls: ProviderToolCall[]) => calls.map((call) => ({ callId: call.id, approved: false, isError: true, content: { status: "authorization_required", tool: call.name, secret_material: "never_returned" } })));
-      const loop = await this.runtime.invokeToolLoop(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, authorizeAndExecute, signal: options.signal, observer: feedbackObserver });
+      const toolReadOnly = options.toolReadOnly ?? (async (call: ProviderToolCall): Promise<boolean> => this.domainToolRegistry?.binding(call.name, selectedDomains)?.risk_class === "read_only");
+      const loop = await this.runtime.invokeToolLoop(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, authorizeAndExecute, signal: options.signal, observer: feedbackObserver, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers, toolReadOnly });
       return { schema: "bioprism-typescript-autonomous-run/0.1", status: "completed", route, blueprint, selection: loop.selection, response: loop.loop.finalResponse, tool_loop: { status: loop.loop.status, turns: loop.loop.turns, toolCalls: loop.loop.toolCalls }, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
     }
-    const result = await this.runtime.invoke(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: feedbackObserver });
+    const result = await this.runtime.invoke(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: feedbackObserver, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers });
     return { schema: "bioprism-typescript-autonomous-run/0.1", status: "completed", route, blueprint, selection: result.selection, response: result.response, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
   }
 
@@ -1508,8 +1520,12 @@ export class AutonomousAgent {
         temperature: options.temperature,
         tools: options.tools,
         authorizeAndExecute: options.authorizeAndExecute,
+        toolReadOnly: options.toolReadOnly,
         approveProviderCall: true,
         approveEffects: options.approveEffects,
+        execution: options.execution,
+        executionAttempt: index + 1,
+        maxProviderFailovers: options.maxProviderFailovers,
         signal: options.signal,
         observer: options.observer,
       });
@@ -1581,8 +1597,12 @@ export class AutonomousAgent {
       temperature: options.temperature,
       tools: options.tools,
       authorizeAndExecute: options.authorizeAndExecute,
+      toolReadOnly: options.toolReadOnly,
       approveProviderCall: true,
       approveEffects: options.approveEffects,
+      execution: options.execution,
+      executionAttempt: totalChildren + 1,
+      maxProviderFailovers: options.maxProviderFailovers,
       signal: options.signal,
       observer: options.observer,
     });

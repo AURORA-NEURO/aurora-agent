@@ -187,6 +187,27 @@ result retains the normal local prompt/response boundary. Use a unique `episodeP
 logical cycle when persistence is enabled; no provider response or raw evaluator instruction is
 sent to the remote learning plane.
 
+Long-running callers can pass an `AutonomousExecutionController` through the same run options.
+`AutonomousExecutionPolicy` bounds steps, provider calls, provider failovers, tool calls, effectful
+calls, replans, and caller-defined cost units. The runtime admits each provider request before
+dispatch and each tool intent before authorization; a rejected admission prevents the external
+operation. `InMemoryAutonomousExecutionJournal` is a hash-chained reference journal, while the
+`AutonomousExecutionJournal` interface accepts caller-owned SQLite, IndexedDB, or object-store
+adapters. Journal events retain only identifiers, counts, status, digests, timing, and evaluator
+values. Controllers can pause, resume only against the same policy digest, and terminate
+explicitly; prompts, responses, credentials, tool arguments, and raw outputs are rejected from
+metadata. Replan cycles own the controller lifecycle across attempts so a later failure cannot
+silently reset earlier provider or learning accounting.
+
+`AutonomousRuntime.invoke()` performs bounded provider failover when a selected provider returns a
+retryable `ProviderRuntimeError`: it removes that provider from the next ranking, selects again
+from the remaining eligible providers, and marks the retry as a failover admission. The default
+limit comes from `execution.policy.max_provider_failovers`; without an execution controller the
+default is zero, while callers can opt into a bounded standalone limit with
+`maxProviderFailovers`. Tool loops may fail over only before the first provider-issued tool call;
+after a tool request is observed, the runtime fails closed instead of replaying a potentially
+effectful loop.
+
 `runAutonomousCrossDomainDecisionCycle()` composes the corresponding fan-out/fan-in path. It can
 semantically review an ambiguous task, requires a cross-domain route with at least two reviewed
 domains, then runs bounded specialists and optional synthesis under the same provider and effect

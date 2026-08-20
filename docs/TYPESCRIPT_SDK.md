@@ -1327,6 +1327,55 @@ raw replan instruction; only digests, bounded evaluator fields, and local final-
 retained. A caller-owned evaluator remains the truth authority: provider completion, latency,
 transport success, and model self-report never produce reward automatically.
 
+### Execution policy, admission, and resumable journal
+
+`AutonomousExecutionController` is the caller-owned long-horizon policy boundary. Create it with an
+`AutonomousExecutionPolicy` and optionally an `AutonomousExecutionJournal`, then pass the
+controller through `AutonomousRunOptions` or `AutonomousReplanCycleOptions`:
+
+```ts
+const execution = await AutonomousExecutionController.create({
+  executionId: "job-2026-08-20-42",
+  domain: "operations",
+  capability: "incident_response",
+  riskClass: "operational_effect",
+  policy: {
+    max_provider_calls: 8,
+    max_provider_failovers: 2,
+    max_tool_calls: 32,
+    max_effectful_calls: 0,
+    max_replans: 2,
+    max_cost_units: 25,
+  },
+  journal: new InMemoryAutonomousExecutionJournal(),
+});
+```
+
+Provider requests are admitted after model selection but before dispatch, and tool intents are
+admitted before the caller's authorization callback. A policy refusal therefore stops the
+operation at the local boundary. Provider outcomes, tool outcomes, evaluator settlements, and
+replan transitions append redacted hash-chained events. `verifyIntegrity()` recomputes the whole
+chain; `resume: true` requires an existing non-terminal execution and an identical policy digest.
+`allow_side_effects` is false by default, and enabling it requires a positive
+`max_effectful_calls` bound. The journal interface is deliberately storage-neutral so an
+application can provide durable persistence without giving the SDK filesystem authority.
+
+`AutonomousRuntime.invoke()` uses `max_provider_failovers` as an actual selection budget, not only
+as telemetry. A retryable provider failure causes the failed provider to be excluded from the next
+selection, and the next provider request is admitted with `failover: true`; non-retryable failures,
+an empty eligible set, or an exhausted budget remain typed refusals. The standalone runtime option
+`maxProviderFailovers` can set a bounded limit when no controller is present. A tool loop can only
+fail over before any tool request has been observed. Once a provider has requested a tool, a later
+retryable provider failure is returned without replaying the loop, preventing duplicate effects.
+Provider and tool outcome labels are event-level observations; they do not silently transition the
+enclosing execution to terminal `completed` state. Terminal transitions require `complete()` or
+`fail()`.
+
+The controller is an accounting and authorization boundary, not evidence of success: a completed
+provider request remains only a local response, and evaluator reward still requires an explicit
+caller-owned evaluator. Cross-domain children share the supplied controller, so fan-out and
+synthesis consume the same provider/tool/cost budget and are visible in one execution identity.
+
 `runAutonomousCrossDomainDecisionCycle()` is the fan-out/fan-in counterpart. It accepts the same
 optional semantic-routing gate, validates that the route actually selects multiple reviewed
 domains, and delegates child/synthesis identity creation to `runCrossDomain()`. When learning is

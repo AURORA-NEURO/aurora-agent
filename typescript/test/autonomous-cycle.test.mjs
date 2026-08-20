@@ -3,6 +3,8 @@ import { test } from "node:test";
 
 import {
   AutonomousAgent,
+  AutonomousExecutionController,
+  InMemoryAutonomousExecutionJournal,
   AutonomousLearningController,
   AutonomousOnlineLearner,
   CredentialStore,
@@ -78,11 +80,13 @@ test("decision cycle connects approval, invocation, evaluator settlement, and ba
 test("replan cycle feeds bounded evaluator guidance into the next attempt and settles each attempt", async () => {
   const { agent, bodies, calls } = cycleAgent([{ text: "first answer" }, { text: "verified answer" }]);
   const learning = new AutonomousLearningController(agent);
+  const execution = await AutonomousExecutionController.create({ executionId: "cycle-execution-1", domain: "coding", capability: "code_review", riskClass: "read_only", journal: new InMemoryAutonomousExecutionJournal() });
   let evaluations = 0;
   const result = await runAutonomousReplanCycle(agent, "Debug this coding repository and report the verified tests.", {
     domain: "coding",
     approveProviderCall: true,
     maxReplans: 1,
+    execution,
     evaluate: () => {
       evaluations += 1;
       return evaluations === 1
@@ -99,6 +103,9 @@ test("replan cycle feeds bounded evaluator guidance into the next attempt and se
   assert.equal(result.learning_episode_ids.length, 2);
   assert.equal(result.settlements.length, 2);
   assert.equal(result.settlements.at(-1).next_state.generation, 2);
+  assert.equal(execution.state.status, "completed");
+  assert.equal(execution.state.provider_calls, 2);
+  assert.equal(execution.state.replans, 1);
   assert.equal(calls(), 2);
   assert.match(JSON.stringify(bodies[1]), /autonomous-replan-2/);
   assert.match(JSON.stringify(bodies[1]), /Add explicit verification evidence/);
@@ -146,18 +153,43 @@ test("replan cycle refuses credential-shaped evaluator instructions", async () =
   );
 });
 
+test("execution policy stops a replanned provider call before dispatch", async () => {
+  const { agent, calls } = cycleAgent([{ text: "first answer" }, { text: "must not dispatch" }]);
+  const execution = await AutonomousExecutionController.create({ executionId: "cycle-execution-budget-1", domain: "coding", capability: "code_review", riskClass: "read_only", policy: { max_provider_calls: 1 } });
+  let evaluations = 0;
+  await assert.rejects(
+    runAutonomousReplanCycle(agent, "Review this coding change.", {
+      domain: "coding",
+      approveProviderCall: true,
+      maxReplans: 1,
+      execution,
+      evaluate: () => {
+        evaluations += 1;
+        return { evaluator_id: "reviewer", evaluator_version: "1", reward: 0.2, passed: false, replan_requested: evaluations === 1, replan_instruction: evaluations === 1 ? "Collect another independent witness." : null };
+      },
+    }),
+    /max_provider_calls/,
+  );
+  assert.equal(calls(), 1);
+  assert.equal(execution.state.status, "failed");
+});
+
 test("replan cycle runs the same reviewed path for every built-in domain", async () => {
   const domains = ["coding", "browser", "data", "science", "biomedical", "neuroscience", "operations", "enterprise", "multi_agent", "multimodal", "cross_domain", "evaluation"];
   const { agent, calls } = cycleAgent();
   for (const domain of domains) {
+    const execution = await AutonomousExecutionController.create({ executionId: `domain-execution-${domain}`, domain, capability: "domain_review", riskClass: "read_only" });
     const result = await runAutonomousReplanCycle(agent, `${domain} review`, {
       domain,
       approveProviderCall: true,
       maxReplans: 0,
+      execution,
       evaluate: () => ({ evaluator_id: `${domain}-reviewer`, evaluator_version: "1", reward: 0.75, passed: true, replan_requested: false }),
     });
     assert.equal(result.status, "completed", domain);
     assert.equal(result.final.run.blueprint.domain_profile.domain, domain);
+    assert.equal(execution.state.status, "completed", domain);
+    assert.equal(execution.state.provider_calls, 1, domain);
   }
   assert.equal(calls(), domains.length);
 });
@@ -240,8 +272,10 @@ test("decision cycle executes every built-in domain through the same reviewed pa
 test("cross-domain decision cycle settles specialist and synthesis credit as one trajectory", async () => {
   const { agent, calls } = cycleAgent();
   const learning = new AutonomousLearningController(agent);
+  const execution = await AutonomousExecutionController.create({ executionId: "cross-execution-1", domain: "cross_domain", capability: "cross_domain_synthesis", riskClass: "review_required", policy: { max_provider_calls: 4 }, journal: new InMemoryAutonomousExecutionJournal() });
   const result = await runAutonomousCrossDomainDecisionCycle(agent, "Research a biomedical neuroscience experiment with EEG patient evidence", {
     approveProviderCall: true,
+    execution,
     subtasks: [
       { id: "bio", domain: "biomedical", task: "Review biomedical evidence and safety boundaries." },
       { id: "neuro", domain: "neuroscience", task: "Analyze EEG signal design and interpretation limits." },
@@ -261,6 +295,8 @@ test("cross-domain decision cycle settles specialist and synthesis credit as one
   assert.equal(result.settlement.trajectory.trajectory.status, "settled");
   assert.equal(result.settlement.trajectory.settlements.length, 3);
   assert.equal(result.settlement.trajectory.settlements.at(-1).next_state.generation, 3);
+  assert.equal(execution.state.status, "completed");
+  assert.equal(execution.state.provider_calls, 3);
   assert.equal(calls(), 3);
 });
 

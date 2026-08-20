@@ -1,5 +1,8 @@
 import { CredentialError, ProviderRuntimeError, ResponseTooLargeError, isObject } from "./errors.js";
 import type { ProviderErrorCode, ProviderFailureClass } from "./errors.js";
+import { AUTONOMOUS_EXECUTION_MAX_PROVIDER_FAILOVERS } from "./autonomous-execution.js";
+import type { AutonomousExecutionController } from "./autonomous-execution.js";
+import { digestJson } from "./tooling.js";
 import type { JsonObject, JsonValue } from "./types.js";
 
 /** Public schema for the cross-language, application-owned provider runtime. */
@@ -425,6 +428,35 @@ export interface ProviderInvocationOutcome {
 export interface ProviderInvocationObserver {
   before?(metadata: ProviderInvocationMetadata): void | Promise<void>;
   after?(metadata: ProviderInvocationMetadata, outcome: ProviderInvocationOutcome): void | Promise<void>;
+}
+
+async function recordExecutionProviderOutcome(
+  execution: AutonomousExecutionController | undefined,
+  metadata: ProviderInvocationMetadata,
+  outcome: ProviderInvocationOutcome,
+  options: { attempt?: number; turn?: number; selectionDigest?: string | null; estimatedCostUnits?: number } = {},
+): Promise<void> {
+  if (!execution) return;
+  await execution.recordProviderOutcome({
+    provider: metadata.provider,
+    model: metadata.model,
+    invocationKind: metadata.kind,
+    attempt: options.attempt ?? 1,
+    turn: options.turn ?? 1,
+    status: outcome.status,
+    outcome: outcome.success ? "success" : "failure",
+    latencyMs: outcome.latencyMs,
+    inputTokens: outcome.inputTokens,
+    outputTokens: outcome.outputTokens,
+    estimatedCostUnits: options.estimatedCostUnits ?? 0,
+    actualCostUnits: options.estimatedCostUnits ?? 0,
+    selectionDigest: options.selectionDigest ?? null,
+    outcomeDigest: await digestJson({ provider: metadata.provider, model: metadata.model, kind: metadata.kind, outcome }),
+    requestIdDigest: outcome.requestId ? await digestJson(outcome.requestId) : null,
+    failureClass: outcome.failureClass ?? null,
+    statusCode: outcome.statusCode ?? null,
+    retryable: outcome.retryable ?? false,
+  });
 }
 
 /** Candidate contract accepted from the value-only Rust/Python model-selection plane. */
@@ -1121,6 +1153,14 @@ function contextProviderFailure(error: ProviderFailure, provider: string, operat
   return error instanceof ProviderRuntimeError ? error.withContext({ provider, operation }) : error;
 }
 
+function autonomousProviderFailoverLimit(options: { maxProviderFailovers?: number; execution?: AutonomousExecutionController }): number {
+  const value = options.maxProviderFailovers ?? options.execution?.toJSON().policy.max_provider_failovers ?? 0;
+  if (!Number.isSafeInteger(value) || value < 0 || value > AUTONOMOUS_EXECUTION_MAX_PROVIDER_FAILOVERS) {
+    throw new ProviderRuntimeError(`autonomous maxProviderFailovers must be within [0, ${AUTONOMOUS_EXECUTION_MAX_PROVIDER_FAILOVERS}]`);
+  }
+  return value;
+}
+
 function abortFailure(callerSignal: AbortSignal | undefined, timedOut: boolean): ProviderRuntimeError {
   if (callerSignal?.aborted) return new ProviderRuntimeError("provider request was aborted by the caller", { code: "aborted" });
   if (timedOut) return new ProviderRuntimeError("provider request timed out", { code: "timeout", retryable: true });
@@ -1398,24 +1438,32 @@ export class LLMRuntime {
   async invoke(
     provider: string,
     request: ProviderRequest,
-    options: { credential?: CredentialHandle; signal?: AbortSignal; observer?: ProviderInvocationObserver; invocationKind?: string } = {},
+    options: { credential?: CredentialHandle; signal?: AbortSignal; observer?: ProviderInvocationObserver; invocationKind?: string; execution?: AutonomousExecutionController; executionAttempt?: number; executionTurn?: number; executionFailover?: boolean; selectionDigest?: string | null; estimatedCostUnits?: number } = {},
   ): Promise<ProviderResponse> {
     const config = this.requireProvider(provider);
     validateRequest(request);
     const metadata = requestMetadata(provider, request, options.invocationKind ?? "provider_call");
+    await options.execution?.admitProviderCall({ provider, model: request.model, invocationKind: metadata.kind, attempt: options.executionAttempt, turn: options.executionTurn, selectionDigest: options.selectionDigest, estimatedCostUnits: options.estimatedCostUnits, costUnits: options.estimatedCostUnits, failover: options.executionFailover });
     await options.observer?.before?.(metadata);
     const started = nowMs();
+    let outcomeRecorded = false;
+    const recordOutcome = async (outcome: ProviderInvocationOutcome): Promise<void> => {
+      if (outcomeRecorded) return;
+      outcomeRecorded = true;
+      await options.observer?.after?.(metadata, outcome);
+      await recordExecutionProviderOutcome(options.execution, metadata, outcome, { attempt: options.executionAttempt, turn: options.executionTurn, selectionDigest: options.selectionDigest, estimatedCostUnits: options.estimatedCostUnits });
+    };
     try {
       const response = await this.request(config, request, options.credential, options.signal, false);
       const latencyMs = Math.max(0, nowMs() - started);
       this.record(provider, request.model, true, latencyMs, response.statusCode, response);
-      await options.observer?.after?.(metadata, { success: true, status: "completed", latencyMs, inputTokens: response.usage.input_tokens ?? metadata.inputTokens, outputTokens: response.usage.output_tokens ?? 0, statusCode: response.statusCode });
+      await recordOutcome({ success: true, status: "completed", latencyMs, inputTokens: response.usage.input_tokens ?? metadata.inputTokens, outputTokens: response.usage.output_tokens ?? 0, statusCode: response.statusCode });
       return response;
     } catch (unknownError) {
       const error = contextProviderFailure(errorFromUnknown(unknownError), provider, "invoke");
       const latencyMs = Math.max(0, nowMs() - started);
       this.record(provider, request.model, false, latencyMs, error instanceof ProviderRuntimeError ? error.statusCode ?? null : null);
-      await options.observer?.after?.(metadata, {
+      await recordOutcome({
         success: false,
         status: "provider_refused",
         latencyMs,
@@ -1434,11 +1482,12 @@ export class LLMRuntime {
   async *invokeStream(
     provider: string,
     request: ProviderRequest,
-    options: { credential?: CredentialHandle; signal?: AbortSignal; observer?: ProviderInvocationObserver; invocationKind?: string } = {},
+    options: { credential?: CredentialHandle; signal?: AbortSignal; observer?: ProviderInvocationObserver; invocationKind?: string; execution?: AutonomousExecutionController; executionAttempt?: number; executionTurn?: number; executionFailover?: boolean; selectionDigest?: string | null; estimatedCostUnits?: number } = {},
   ): AsyncIterable<ProviderStreamEvent> {
     const config = this.requireProvider(provider);
     validateRequest(request);
     const metadata = requestMetadata(provider, request, options.invocationKind ?? "provider_stream");
+    await options.execution?.admitProviderCall({ provider, model: request.model, invocationKind: metadata.kind, attempt: options.executionAttempt, turn: options.executionTurn, selectionDigest: options.selectionDigest, estimatedCostUnits: options.estimatedCostUnits, costUnits: options.estimatedCostUnits, failover: options.executionFailover });
     await options.observer?.before?.(metadata);
     const started = nowMs();
     let outcome: ProviderInvocationOutcome | null = null;
@@ -1522,11 +1571,14 @@ export class LLMRuntime {
       };
       throw error;
     } finally {
-      if (outcome) await options.observer?.after?.(metadata, outcome);
+      if (outcome) {
+        await options.observer?.after?.(metadata, outcome);
+        await recordExecutionProviderOutcome(options.execution, metadata, outcome, { attempt: options.executionAttempt, turn: options.executionTurn, selectionDigest: options.selectionDigest, estimatedCostUnits: options.estimatedCostUnits });
+      }
     }
   }
 
-  async collectStream(provider: string, request: ProviderRequest, options: { credential?: CredentialHandle; signal?: AbortSignal; observer?: ProviderInvocationObserver; invocationKind?: string } = {}): Promise<ProviderResponse> {
+  async collectStream(provider: string, request: ProviderRequest, options: { credential?: CredentialHandle; signal?: AbortSignal; observer?: ProviderInvocationObserver; invocationKind?: string; execution?: AutonomousExecutionController; executionAttempt?: number; executionTurn?: number; executionFailover?: boolean; selectionDigest?: string | null; estimatedCostUnits?: number } = {}): Promise<ProviderResponse> {
     const text: string[] = [];
     const calls: ProviderToolCall[] = [];
     let usage: ProviderUsage = {};
@@ -1562,6 +1614,12 @@ export class LLMRuntime {
       initialResponse?: ProviderResponse;
       signal?: AbortSignal;
       observer?: ProviderInvocationObserver;
+      execution?: AutonomousExecutionController;
+      executionAttempt?: number;
+      selectionDigest?: string | null;
+      estimatedCostUnits?: number;
+      executionFailover?: boolean;
+      toolReadOnly?: (call: ProviderToolCall) => boolean | Promise<boolean>;
     },
   ): Promise<ProviderToolLoopResult> {
     if (typeof options.authorizeAndExecute !== "function") throw new ProviderRuntimeError("authorizeAndExecute must be callable");
@@ -1574,15 +1632,31 @@ export class LLMRuntime {
     const responses: ProviderResponse[] = [];
     let toolCalls = 0;
     for (let turn = 0; turn < maxTurns; turn += 1) {
-      response ??= options.stream ? await this.collectStream(provider, current, options) : await this.invoke(provider, current, options);
+      const providerOptions = { ...options, executionTurn: turn + 1 };
+      response ??= options.stream ? await this.collectStream(provider, current, providerOptions) : await this.invoke(provider, current, providerOptions);
       responses.push(response);
       if (response.toolCalls.length === 0) return { status: "completed", responses, finalResponse: response, turns: responses.length, toolCalls };
       toolCalls += response.toolCalls.length;
       if (toolCalls > maxToolCalls || turn + 1 >= maxTurns) return { status: "turn_limit_reached", responses, finalResponse: response, turns: responses.length, toolCalls };
-      const returned = await options.authorizeAndExecute(response.toolCalls);
+      for (const call of response.toolCalls) {
+        const readOnly = options.toolReadOnly ? await options.toolReadOnly(call) : true;
+        await options.execution?.admitToolCall({ tool: call.name, callId: call.id, readOnly, approvalRequired: !readOnly });
+      }
+      let returned: ProviderToolResult[];
+      try {
+        returned = await options.authorizeAndExecute(response.toolCalls);
+      } catch (unknownError) {
+        const reason = unknownError instanceof Error && /^[A-Za-z0-9_.:-]+$/.test(unknownError.name) ? unknownError.name : "tool_executor_error";
+        for (const call of response.toolCalls) await options.execution?.recordToolOutcome({ tool: call.name, callId: call.id, status: "failed", reason });
+        throw unknownError;
+      }
       if (!Array.isArray(returned) || returned.length !== response.toolCalls.length || returned.some((result) => !isObject(result) || typeof result.callId !== "string")) throw new ProviderRuntimeError("authorization callback returned malformed tool results");
       const requestedCallIds = new Set(response.toolCalls.map((call) => call.id));
       if (returned.some((result) => !requestedCallIds.has(result.callId)) || new Set(returned.map((result) => result.callId)).size !== returned.length) throw new ProviderRuntimeError("authorization callback returned unbound or duplicate tool call ids");
+      for (const result of returned) {
+        const call = response.toolCalls.find((candidate) => candidate.id === result.callId)!;
+        await options.execution?.recordToolOutcome({ tool: call.name, callId: result.callId, status: result.approved ? "completed" : "authorization_required", outcomeDigest: await digestJson({ call_id: result.callId, approved: result.approved, is_error: result.isError ?? false, content: result.content }) });
+      }
       if (returned.some((result) => !result.approved)) return { status: "authorization_required", responses, finalResponse: response, turns: responses.length, toolCalls };
       const assistant: ProviderMessage = { role: "assistant", content: response.text, toolCalls: response.toolCalls };
       const resultMessages: ProviderMessage[] = returned.map((result) => ({ role: "tool", content: jsonText(result.content), toolCallId: result.callId }));
@@ -1736,8 +1810,8 @@ export class AutonomousRuntime {
     this.selector = options.selector;
   }
 
-  async select(plan: AutonomousExecutionPlan): Promise<AutonomousSelectionDecision> {
-    const request = this.selectionRequest(plan);
+  async select(plan: AutonomousExecutionPlan, options: { excludedProviders?: readonly string[] } = {}): Promise<AutonomousSelectionDecision> {
+    const request = this.selectionRequest(plan, options.excludedProviders);
     const ranking = this.rank(request);
     if (!ranking.some((row) => row.eligible)) {
       return { selected_model: null, strategy: this.selector ? "caller_selector" : "deterministic_health_utility", ranking, abstention_reason: ranking.flatMap((row) => row.reasons).join("; ") || "no eligible model candidate" };
@@ -1764,21 +1838,41 @@ export class AutonomousRuntime {
       signal?: AbortSignal;
       observer?: ProviderInvocationObserver;
       feedback?: (decision: AutonomousSelectionDecision, outcome: ProviderInvocationOutcome) => void | Promise<void>;
+      execution?: AutonomousExecutionController;
+      executionAttempt?: number;
+      maxProviderFailovers?: number;
     } = {},
   ): Promise<AutonomousExecutionResult> {
-    const selection = await this.select(plan);
-    if (!selection.selected_model) throw new ProviderRuntimeError(`autonomous selection abstained: ${selection.abstention_reason ?? "no model"}`);
-    const provider = selection.selected_model.provider;
-    const credential = options.credential ?? options.credentialFor?.(provider);
-    const observer: ProviderInvocationObserver = {
-      before: options.observer?.before,
-      after: async (metadata, outcome) => {
-        await options.observer?.after?.(metadata, outcome);
-        await options.feedback?.(selection, outcome);
-      },
-    };
-    const response = await this.llm.invoke(provider, { ...plan.request, model: selection.selected_model.model }, { credential, signal: options.signal, observer, invocationKind: "autonomous_selected_model" });
-    return { selection, response };
+    const maxProviderFailovers = autonomousProviderFailoverLimit(options);
+    const excludedProviders = new Set<string>();
+    let failovers = 0;
+    while (true) {
+      const selection = await this.select(plan, { excludedProviders: [...excludedProviders] });
+      if (!selection.selected_model) throw new ProviderRuntimeError(`autonomous selection abstained: ${selection.abstention_reason ?? "no model"}`);
+      const provider = selection.selected_model.provider;
+      const credential = options.credential ?? options.credentialFor?.(provider);
+      const observer: ProviderInvocationObserver = {
+        before: options.observer?.before,
+        after: async (metadata, outcome) => {
+          await options.observer?.after?.(metadata, outcome);
+          await options.feedback?.(selection, outcome);
+        },
+      };
+      const selectedCandidate = plan.candidates.find((candidate) => candidate.provider === provider && candidate.model === selection.selected_model!.model);
+      const estimatedInputTokens = Math.max(1, Math.ceil(plan.request.messages.reduce((sum, message) => sum + bytes(message.content), 0) / 4));
+      const estimatedCostUnits = selectedCandidate ? ((estimatedInputTokens + plan.request.maxOutputTokens) / 1_000_000) * selectedCandidate.cost_per_million_tokens : 0;
+      const selectionDigest = await digestJson(selection);
+      try {
+        const response = await this.llm.invoke(provider, { ...plan.request, model: selection.selected_model.model }, { credential, signal: options.signal, observer, invocationKind: "autonomous_selected_model", execution: options.execution, executionAttempt: options.executionAttempt, executionTurn: 1, executionFailover: failovers > 0, selectionDigest, estimatedCostUnits });
+        return { selection, response };
+      } catch (error) {
+        if (!(error instanceof ProviderRuntimeError) || !error.retryable || failovers >= maxProviderFailovers) throw error;
+        excludedProviders.add(provider);
+        const anotherProviderRemains = plan.candidates.some((candidate) => !excludedProviders.has(candidate.provider));
+        if (!anotherProviderRemains) throw error;
+        failovers += 1;
+      }
+    }
   }
 
   async invokeToolLoop(
@@ -1793,36 +1887,71 @@ export class AutonomousRuntime {
       signal?: AbortSignal;
       observer?: ProviderInvocationObserver;
       feedback?: (decision: AutonomousSelectionDecision, outcome: ProviderInvocationOutcome) => void | Promise<void>;
+      execution?: AutonomousExecutionController;
+      executionAttempt?: number;
+      maxProviderFailovers?: number;
+      toolReadOnly?: (call: ProviderToolCall) => boolean | Promise<boolean>;
     },
   ): Promise<{ selection: AutonomousSelectionDecision; loop: ProviderToolLoopResult }> {
-    const selection = await this.select(plan);
-    if (!selection.selected_model) throw new ProviderRuntimeError(`autonomous selection abstained: ${selection.abstention_reason ?? "no model"}`);
-    const provider = selection.selected_model.provider;
-    const credential = options.credential ?? options.credentialFor?.(provider);
-    const observer: ProviderInvocationObserver = {
-      before: options.observer?.before,
-      after: async (metadata, outcome) => {
-        await options.observer?.after?.(metadata, outcome);
-        await options.feedback?.(selection, outcome);
-      },
-    };
-    const loop = await this.llm.invokeToolLoop(provider, { ...plan.request, model: selection.selected_model.model }, {
-      credential,
-      authorizeAndExecute: options.authorizeAndExecute,
-      maxTurns: options.maxTurns,
-      maxToolCalls: options.maxToolCalls,
-      stream: options.stream,
-      signal: options.signal,
-      observer,
-    });
-    return { selection, loop };
+    const maxProviderFailovers = autonomousProviderFailoverLimit(options);
+    const excludedProviders = new Set<string>();
+    let failovers = 0;
+    let toolActivity = false;
+    while (true) {
+      const selection = await this.select(plan, { excludedProviders: [...excludedProviders] });
+      if (!selection.selected_model) throw new ProviderRuntimeError(`autonomous selection abstained: ${selection.abstention_reason ?? "no model"}`);
+      const provider = selection.selected_model.provider;
+      const credential = options.credential ?? options.credentialFor?.(provider);
+      const observer: ProviderInvocationObserver = {
+        before: options.observer?.before,
+        after: async (metadata, outcome) => {
+          await options.observer?.after?.(metadata, outcome);
+          await options.feedback?.(selection, outcome);
+        },
+      };
+      const selectedCandidate = plan.candidates.find((candidate) => candidate.provider === provider && candidate.model === selection.selected_model!.model);
+      const estimatedInputTokens = Math.max(1, Math.ceil(plan.request.messages.reduce((sum, message) => sum + bytes(message.content), 0) / 4));
+      const estimatedCostUnits = selectedCandidate ? ((estimatedInputTokens + plan.request.maxOutputTokens) / 1_000_000) * selectedCandidate.cost_per_million_tokens : 0;
+      const selectionDigest = await digestJson(selection);
+      const authorizeAndExecute = async (calls: ProviderToolCall[]): Promise<ProviderToolResult[]> => {
+        if (calls.length > 0) toolActivity = true;
+        return options.authorizeAndExecute(calls);
+      };
+      try {
+        const loop = await this.llm.invokeToolLoop(provider, { ...plan.request, model: selection.selected_model.model }, {
+          credential,
+          authorizeAndExecute,
+          maxTurns: options.maxTurns,
+          maxToolCalls: options.maxToolCalls,
+          stream: options.stream,
+          signal: options.signal,
+          observer,
+          execution: options.execution,
+          executionAttempt: options.executionAttempt,
+          executionFailover: failovers > 0,
+          selectionDigest,
+          estimatedCostUnits,
+          toolReadOnly: options.toolReadOnly,
+        });
+        return { selection, loop };
+      } catch (error) {
+        // Replaying a loop after any provider-issued tool call could duplicate an effect. A
+        // failover is therefore permitted only before the first tool request is observed.
+        if (toolActivity || !(error instanceof ProviderRuntimeError) || !error.retryable || failovers >= maxProviderFailovers) throw error;
+        excludedProviders.add(provider);
+        const anotherProviderRemains = plan.candidates.some((candidate) => !excludedProviders.has(candidate.provider));
+        if (!anotherProviderRemains) throw error;
+        failovers += 1;
+      }
+    }
   }
 
-  private selectionRequest(plan: AutonomousExecutionPlan): AutonomousSelectionRequest {
+  private selectionRequest(plan: AutonomousExecutionPlan, excludedProviders: readonly string[] = []): AutonomousSelectionRequest {
     if (!isObject(plan) || typeof plan.task !== "string" || plan.task.trim().length === 0 || bytes(plan.task) > 16_000) throw new ProviderRuntimeError("autonomous task is outside its bounds");
     validateRequest(plan.request);
     if (!Array.isArray(plan.candidates) || plan.candidates.length === 0 || plan.candidates.length > MAX_PROVIDER_TOOLS) throw new ProviderRuntimeError("autonomous model candidates are outside their bounds");
     if (plan.requiredCapabilities !== undefined && (!Array.isArray(plan.requiredCapabilities) || plan.requiredCapabilities.length > 64 || plan.requiredCapabilities.some((capability) => typeof capability !== "string" || capability.trim().length === 0 || capability.length > 256))) throw new ProviderRuntimeError("autonomous required capabilities are outside their bounds");
+    const excluded = new Set(excludedProviders.map((provider) => boundedIdentifier("excluded provider", provider, 128)));
     const candidates = plan.candidates.map((candidate) => {
       if (!isObject(candidate)) throw new ProviderRuntimeError("autonomous model candidate must be an object");
       const normalized = candidate as unknown as AutonomousModelCandidate;
@@ -1833,7 +1962,7 @@ export class AutonomousRuntime {
       }
       if (normalized.quality > 1 || normalized.reliability > 1 || normalized.context_window_tokens < 1 || normalized.max_output_tokens < 1) throw new ProviderRuntimeError("candidate quality, reliability, or capacity is outside its bounds");
       return normalized;
-    });
+    }).filter((candidate) => !excluded.has(candidate.provider));
     const providers = new Set(candidates.map((candidate) => candidate.provider));
     const providerHealth: Record<string, ProviderHealth> = {};
     for (const provider of providers) {
