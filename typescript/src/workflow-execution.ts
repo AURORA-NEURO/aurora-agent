@@ -1,4 +1,5 @@
-import { ArgumentError, ProviderRuntimeError } from "./errors.js";
+import { ArgumentError, CredentialError, ProviderRuntimeError } from "./errors.js";
+import type { ProviderErrorCode } from "./errors.js";
 import type { ApiClient } from "./client.js";
 import { AUTONOMOUS_DOMAIN_NAMES } from "./autonomous.js";
 import type { AutonomousLearningController } from "./autonomous-learning.js";
@@ -40,6 +41,9 @@ export interface AutonomousWorkflowStageOutcome {
   response_digest: string | null;
   output_bytes: number;
   error_class: string | null;
+  error_code?: ProviderErrorCode | null;
+  retryable?: boolean | null;
+  status_code?: number | null;
   learning_episode_id: string | null;
 }
 
@@ -188,6 +192,17 @@ function responseText(run: AutonomousRunResult | null): string {
   return run.response.structured === null || run.response.structured === undefined ? "" : JSON.stringify(run.response.structured);
 }
 
+function safeErrorClass(error: unknown): string {
+  const candidate = error instanceof Error && typeof error.constructor?.name === "string" ? error.constructor.name : "UnknownError";
+  return /^[A-Za-z0-9_.-]{1,128}$/.test(candidate) ? candidate : "UnknownError";
+}
+
+function stageFailure(error: unknown): { error_class: string; error_code: ProviderErrorCode | null; retryable: boolean | null; status_code: number | null } {
+  if (error instanceof ProviderRuntimeError) return { error_class: error.name, error_code: error.code, retryable: error.retryable, status_code: error.statusCode ?? null };
+  if (error instanceof CredentialError) return { error_class: error.name, error_code: "credential", retryable: false, status_code: null };
+  return { error_class: safeErrorClass(error), error_code: null, retryable: null, status_code: null };
+}
+
 function runOptions(options: AutonomousWorkflowExecuteOptions, stage: AutonomousWorkflowStage, domain: AutonomousDomainName, context: AutonomousRunOptions["context"]): AutonomousRunOptions {
   return {
     domain,
@@ -304,7 +319,8 @@ export class AutonomousWorkflowExecutor {
       try {
         run = await this.agent.run(`Execute workflow stage ${stage.id} for task: ${task}`, runOptions(options, stage, blueprint.domain_profile.domain, context));
       } catch (error) {
-        checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "failed", run_status: "exception", selection_digest: null, response_digest: null, output_bytes: 0, error_class: error instanceof Error ? error.constructor.name : "UnknownError", learning_episode_id: null }], "failed", checkpoint);
+        const failure = stageFailure(error);
+        checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "failed", run_status: "exception", selection_digest: null, response_digest: null, output_bytes: 0, error_class: failure.error_class, error_code: failure.error_code, retryable: failure.retryable, status_code: failure.status_code, learning_episode_id: null }], "failed", checkpoint);
         await this.store.save(checkpoint);
         await this.appendEvent(checkpoint.job_id, "stage_failed", stage.id, checkpoint);
         return this.result("failed", checkpoint, blueprint, stageResults);

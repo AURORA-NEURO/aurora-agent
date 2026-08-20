@@ -1475,7 +1475,12 @@ workflow. It consumes the blueprint DAG, invokes one stage at a time through `Au
 and saves a checkpoint after every completed stage. `maxStages` bounds one worker call; the executor
 returns `paused` with the next stage rather than silently running an unbounded workflow. A stage
 failure is retained as a typed failed checkpoint, while provider approval produces an explicit
-`approval_required` pause without dispatch.
+`approval_required` pause without dispatch. Thrown provider failures are projected into the stage
+outcome as bounded `error_code`, `retryable`, `status_code`, and sanitized `error_class` fields;
+messages, response bodies, prompts, credentials, and arbitrary thrown objects never cross the
+checkpoint boundary. `transport` and `timeout` can therefore be routed to a caller-owned retry
+policy, while `credential`, `aborted`, configuration, and protocol failures remain visible as
+distinct escalation signals without claiming that a retry is safe.
 
 `AutonomousWorkflowCheckpointStore` is deliberately caller-owned. The included
 `InMemoryAutonomousWorkflowCheckpointStore` is a bounded reference implementation; applications

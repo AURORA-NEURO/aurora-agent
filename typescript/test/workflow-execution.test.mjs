@@ -71,6 +71,33 @@ test("workflow executor checkpoints stages, pauses at a bounded budget, and resu
   await assert.rejects(() => executor.resume("workflow-job-1", "A different task", { candidates: agent.models(), approveProviderCall: true }), /digest/);
 });
 
+test("workflow stage failures checkpoint typed redacted retry metadata", async () => {
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => { throw new Error("provider body contained secret material"); },
+  });
+  llm.registerProvider(openaiCompatibleProvider("workflow", "https://workflow.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel(model());
+  const executor = new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore());
+  const result = await executor.start("Implement and verify this failure path", {
+    domain: "coding",
+    jobId: "workflow-failure-1",
+    candidates: agent.models(),
+    approveProviderCall: true,
+    maxStages: 1,
+  });
+  assert.equal(result.status, "failed");
+  const outcome = result.checkpoint.stage_outcomes.at(-1);
+  assert.equal(outcome.status, "failed");
+  assert.equal(outcome.error_class, "ProviderRuntimeError");
+  assert.equal(outcome.error_code, "transport");
+  assert.equal(outcome.retryable, true);
+  assert.equal(outcome.status_code, null);
+  assert.equal(JSON.stringify(result.checkpoint).includes("provider body contained secret material"), false);
+  assert.equal(result.events.at(-1).event_type, "stage_failed");
+});
+
 test("workflow executor exposes approval pauses and checkpoint readiness for every built-in domain", async () => {
   const llm = new LLMRuntime({ credentials: new CredentialStore(), fetch: async () => { throw new Error("provider must not be called before approval"); } });
   llm.registerProvider(openaiCompatibleProvider("workflow", "https://workflow.test", { requiresCredential: false }));

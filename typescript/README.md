@@ -237,6 +237,10 @@ original task and the rebuilt workflow/plan digests match. `InMemoryAutonomousWo
 is suitable for tests and small workers; production applications should implement
 `AutonomousWorkflowCheckpointStore` over their durable store. Checkpoints never contain task text,
 prompts, provider responses, credentials, or tool payloads, and restart recovery explicitly
+projects thrown provider failures as redacted `error_code`, `retryable`, `status_code`, and bounded
+`error_class` metadata so workers can choose whether to retry or escalate without retaining the
+provider message or response body. A failed stage remains terminal until the caller explicitly
+rehydrates and chooses a new execution policy.
 requires caller-owned task and credential rehydration.
 
 Pass an `AutonomousLearningController` to the executor when staged model outcomes should enter the
