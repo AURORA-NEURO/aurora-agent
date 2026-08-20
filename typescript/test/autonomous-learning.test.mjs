@@ -258,6 +258,50 @@ test("remote learning settlement sends run identity and evaluator values only", 
   assert.equal(seen[0].assessment.reward, 0.7);
 });
 
+test("trajectory settlement resumes after a transient later-episode failure", async () => {
+  const agent = await learningAgent();
+  const episodes = new InMemoryAutonomousLearningEpisodeStore();
+  const trajectories = new InMemoryAutonomousLearningTrajectoryStore();
+  let calls = 0;
+  const apiClient = {
+    async brainOutcomeRecord(args) {
+      calls += 1;
+      if (calls === 2) throw new Error("temporary learning transport failure");
+      const generation = agent.learner.snapshot().generation;
+      return {
+        ok: true,
+        mcp: {
+          result: {
+            structuredContent: {
+              ok: true,
+              status: "recorded_evaluator_reward",
+              next_state: { schema: "bandit", generation: generation + 1, arms: [{ arm_id: args.arm_id, pulls: generation + 1, reward_sum: args.assessment.reward, failures: 0 }] },
+              learning_evidence: { schema: "evidence", evidence_digest: "b".repeat(64) },
+            },
+          },
+        },
+      };
+    },
+  };
+  const controller = new AutonomousLearningController(agent, { episodes, trajectories, apiClient });
+  const run = await agent.run("Implement this resumable learning test.", { domain: "coding", approveProviderCall: true });
+  await controller.prepareRun(run, { episodeId: "resume-episode-1" });
+  await controller.prepareRun(run, { episodeId: "resume-episode-2" });
+  await controller.prepareTrajectory(["resume-episode-1", "resume-episode-2"], { trajectoryId: "resume-trajectory", discount: 0.9 });
+  const rewards = {
+    "resume-episode-1": { evaluator_id: "resume-reviewer", evaluator_version: "1", reward: 0.4, passed: false },
+    "resume-episode-2": { evaluator_id: "resume-reviewer", evaluator_version: "1", reward: 0.8, passed: true },
+  };
+  await assert.rejects(() => controller.settleTrajectory("resume-trajectory", rewards, { remote: true }), /temporary learning transport failure/);
+  assert.equal(episodes.load("resume-episode-1").status, "settled");
+  const resumed = await controller.settleTrajectory("resume-trajectory", rewards, { remote: true });
+  assert.equal(resumed.trajectory.status, "settled");
+  assert.equal(resumed.settlements.length, 1);
+  assert.equal(episodes.pending().length, 0);
+  assert.equal(agent.learner.snapshot().generation, 2);
+  assert.equal(calls, 3);
+});
+
 test("cross-domain learning tracks specialists and synthesis as one delayed-credit trajectory", async () => {
   const agent = await learningAgent();
   const state = new InMemoryAutonomousLearningStateStore();

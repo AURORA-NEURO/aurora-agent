@@ -1560,6 +1560,8 @@ only after an explicit evaluator reward, failed-outcome flag, or outcome digest 
 latency are separate from task quality; no provider health event is treated as reinforcement.
 Learning episodes can only be prepared from a completed autonomous run; approval pauses, provider
 refusals, child failures, and tool-loop limits cannot be converted into evaluator or bandit credit.
+Trajectory settlement is resumable after a later episode failure: matching already-settled reward
+projections are skipped, while changed reward evidence is refused.
 This gives applications a safe loop for model-selection adaptation without pretending that an
 unverified response is scientific, clinical, operational, or release truth.
 

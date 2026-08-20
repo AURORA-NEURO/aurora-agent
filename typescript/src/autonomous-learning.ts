@@ -778,6 +778,13 @@ export class AutonomousLearningController {
     const settlements: AutonomousLearningSettlement[] = [];
     for (const step of trajectory.steps) {
       const reward = rewards[step.episode_id]!;
+      const episode = await this.episodes.load(step.episode_id);
+      if (!episode) throw new ArgumentError(`learning episode ${step.episode_id} disappeared during settlement`);
+      if (episode.status === "settled") {
+        const prior = episode.settlement;
+        if (!prior || prior.reward !== reward.reward || prior.credited_reward !== returnToGo[step.episode_id]) throw new ArgumentError(`learning episode ${step.episode_id} was already settled with different reward evidence`);
+        continue;
+      }
       settlements.push(await this.settleRun(step.episode_id, reward, { creditedReward: returnToGo[step.episode_id], remote: options.remote }));
     }
     const settlementDigest = await digestJson({ trajectory_digest: trajectory.trajectory_digest, return_to_go: returnToGo, settlement_digests: settlements.map((settlement) => settlement.episode.settlement?.settlement_digest ?? null) });
