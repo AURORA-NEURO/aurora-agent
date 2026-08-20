@@ -252,6 +252,38 @@ test("cross-domain execution fans out to specialists, gates approval, and synthe
   assert.ok(synthesisBody.messages.some((message) => String(message.content).includes("neuroscience signal finding")));
 });
 
+test("cross-domain structured output propagates through specialists and synthesis", async () => {
+  const bodies = [];
+  let calls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      bodies.push(JSON.parse(String(init.body)));
+      calls += 1;
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify({ answer: `structured-${calls}` }) }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("structured-cross", "https://structured-cross.test", { requiresCredential: false, structuredOutputMode: "json_object" }));
+  const agent = new AutonomousAgent(llm);
+  const model = candidate("structured-cross", "structured-cross-model", ["reasoning", "coordination", "biomedical", "science", "structured_output"]);
+  const responseSchema = { type: "object", additionalProperties: false, properties: { answer: { type: "string" } }, required: ["answer"] };
+  const result = await agent.runCrossDomain("Research a biomedical neuroscience experiment with EEG patient evidence", {
+    candidates: [model],
+    approveProviderCall: true,
+    requireJson: true,
+    responseSchema,
+    subtasks: [
+      { id: "bio", domain: "biomedical", task: "Review the biomedical evidence." },
+      { id: "neuro", domain: "neuroscience", task: "Analyze the neuroscience signal limits." },
+    ],
+  });
+  assert.equal(result.status, "completed");
+  assert.equal(calls, 3);
+  assert.deepEqual(result.child_runs.map((child) => child.result.response.structured), [{ answer: "structured-1" }, { answer: "structured-2" }]);
+  assert.deepEqual(result.synthesis.response.structured, { answer: "structured-3" });
+  assert.deepEqual(bodies.map((body) => body.response_format), [{ type: "json_object" }, { type: "json_object" }, { type: "json_object" }]);
+});
+
 test("cross-domain fan-out uses bounded concurrency and preserves deterministic child order", async () => {
   let active = 0;
   let maximumActive = 0;

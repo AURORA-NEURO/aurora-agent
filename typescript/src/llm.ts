@@ -25,6 +25,7 @@ export const MAX_CREDENTIAL_PROVISIONING_SOURCES = 128;
 export const MAX_CREDENTIAL_PROVISIONING_PROVIDERS = 128;
 export const MAX_CREDENTIAL_SOURCE_LABEL_BYTES = 256;
 export const CREDENTIAL_PROVISIONING_SCHEMA = "bioprism-llm-credential-provisioning/0.1" as const;
+const STRUCTURED_SCHEMA_TYPES = new Set(["object", "array", "string", "number", "integer", "boolean", "null"]);
 
 export type ProviderProtocol = "openai_responses" | "openai_chat_completions" | "anthropic_messages";
 
@@ -499,6 +500,8 @@ export interface AutonomousSelectionRequest extends JsonObject {
   max_latency_ms?: number | null;
   /** Hard caller-owned quality floor applied before utility ranking. */
   min_quality?: number | null;
+  /** Whether the provider response must be valid JSON at the transport boundary. */
+  require_json?: boolean;
   candidates: AutonomousModelCandidate[];
   provider_health: Record<string, ProviderHealth>;
   model_health: Record<string, ProviderHealth>;
@@ -553,6 +556,8 @@ export interface ProviderHealth extends JsonObject {
   last_status_code: number | null;
   credential_posture: "caller_supplied_opaque_handle";
   credential_required: boolean;
+  /** Provider transport capability used as a hard gate for explicit structured output. */
+  structured_output_mode?: "disabled" | "json_object" | "json_schema";
   /** Optional persisted evaluator-quality projection supplied by a caller-owned health ledger. */
   quality_mean?: number | null;
   quality_observations?: number;
@@ -680,6 +685,121 @@ function validateJsonValue(value: unknown, depth = 0): void {
   throw new ProviderRuntimeError("provider request contains an unsupported value");
 }
 
+function validateStructuredResponse(value: unknown, schema: JsonObject, path = "$", depth = 0): void {
+  if (depth > 16) throw new ProviderRuntimeError("provider structured response exceeds the schema nesting bound");
+  const type = schema.type;
+  const types = typeof type === "string" ? [type] : Array.isArray(type) && type.every((item) => typeof item === "string") ? type : undefined;
+  if (type !== undefined && !types) throw new ProviderRuntimeError("responseSchema.type must be a string or string array");
+  if (types && !types.some((candidate) => (
+    (candidate === "object" && isObject(value)) ||
+    (candidate === "array" && Array.isArray(value)) ||
+    (candidate === "string" && typeof value === "string") ||
+    (candidate === "number" && typeof value === "number" && Number.isFinite(value)) ||
+    (candidate === "integer" && typeof value === "number" && Number.isSafeInteger(value)) ||
+    (candidate === "boolean" && typeof value === "boolean") ||
+    (candidate === "null" && value === null)
+  ))) throw new ProviderRuntimeError(`structured response violates responseSchema at ${path}`);
+  if (Array.isArray(schema.enum) && !schema.enum.some((candidate) => JSON.stringify(candidate) === JSON.stringify(value))) throw new ProviderRuntimeError(`structured response violates responseSchema.enum at ${path}`);
+  if (schema.const !== undefined && JSON.stringify(schema.const) !== JSON.stringify(value)) throw new ProviderRuntimeError(`structured response violates responseSchema.const at ${path}`);
+  if (typeof value === "string") {
+    if (schema.minLength !== undefined && (typeof schema.minLength !== "number" || !Number.isSafeInteger(schema.minLength) || value.length < schema.minLength)) throw new ProviderRuntimeError(`structured response violates responseSchema.minLength at ${path}`);
+    if (schema.maxLength !== undefined && (typeof schema.maxLength !== "number" || !Number.isSafeInteger(schema.maxLength) || value.length > schema.maxLength)) throw new ProviderRuntimeError(`structured response violates responseSchema.maxLength at ${path}`);
+    if (schema.pattern !== undefined) {
+      if (typeof schema.pattern !== "string") throw new ProviderRuntimeError("responseSchema.pattern must be a string");
+      try { if (!new RegExp(schema.pattern).test(value)) throw new ProviderRuntimeError(`structured response violates responseSchema.pattern at ${path}`); } catch (error) { if (error instanceof ProviderRuntimeError) throw error; throw new ProviderRuntimeError("responseSchema.pattern is not a valid regular expression"); }
+    }
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    if (schema.minimum !== undefined && (typeof schema.minimum !== "number" || value < schema.minimum)) throw new ProviderRuntimeError(`structured response violates responseSchema.minimum at ${path}`);
+    if (schema.maximum !== undefined && (typeof schema.maximum !== "number" || value > schema.maximum)) throw new ProviderRuntimeError(`structured response violates responseSchema.maximum at ${path}`);
+  }
+  if (Array.isArray(value)) {
+    if (schema.items !== undefined) {
+      if (!isObject(schema.items)) throw new ProviderRuntimeError("responseSchema.items must be an object");
+      value.forEach((child, index) => validateStructuredResponse(child, schema.items as JsonObject, `${path}[${index}]`, depth + 1));
+    }
+    if (schema.minItems !== undefined && (typeof schema.minItems !== "number" || !Number.isSafeInteger(schema.minItems) || value.length < schema.minItems)) throw new ProviderRuntimeError(`structured response violates responseSchema.minItems at ${path}`);
+    if (schema.maxItems !== undefined && (typeof schema.maxItems !== "number" || !Number.isSafeInteger(schema.maxItems) || value.length > schema.maxItems)) throw new ProviderRuntimeError(`structured response violates responseSchema.maxItems at ${path}`);
+  }
+  if (isObject(value)) {
+    if (schema.required !== undefined) {
+      if (!Array.isArray(schema.required)) throw new ProviderRuntimeError("responseSchema.required must contain strings");
+      const requiredKeys: string[] = [];
+      for (const key of schema.required) {
+        if (typeof key !== "string") throw new ProviderRuntimeError("responseSchema.required must contain strings");
+        requiredKeys.push(key);
+      }
+      for (const key of requiredKeys) if (!(key in value)) throw new ProviderRuntimeError(`structured response is missing responseSchema.required field ${key}`);
+    }
+    const properties = schema.properties;
+    if (properties !== undefined && !isObject(properties)) throw new ProviderRuntimeError("responseSchema.properties must be an object");
+    if (isObject(properties)) {
+      for (const [key, childSchema] of Object.entries(properties)) {
+        if (key in value) {
+          if (!isObject(childSchema)) throw new ProviderRuntimeError(`responseSchema property ${key} must be an object`);
+          validateStructuredResponse(value[key], childSchema as JsonObject, `${path}.${key}`, depth + 1);
+        }
+      }
+    }
+    if (schema.additionalProperties === false) {
+      const known = isObject(properties) ? new Set(Object.keys(properties)) : new Set<string>();
+      for (const key of Object.keys(value)) if (!known.has(key)) throw new ProviderRuntimeError(`structured response contains additional property ${key} at ${path}`);
+    } else if (schema.additionalProperties !== undefined && typeof schema.additionalProperties !== "boolean" && !isObject(schema.additionalProperties)) {
+      throw new ProviderRuntimeError("responseSchema.additionalProperties must be false or an object");
+    } else if (isObject(schema.additionalProperties)) {
+      const known = isObject(properties) ? new Set(Object.keys(properties)) : new Set<string>();
+      for (const [key, child] of Object.entries(value)) if (!known.has(key)) validateStructuredResponse(child, schema.additionalProperties as JsonObject, `${path}.${key}`, depth + 1);
+    }
+  }
+}
+
+function validateStructuredSchemaDefinition(schema: JsonObject, path = "$", depth = 0): void {
+  if (depth > 16) throw new ProviderRuntimeError(`responseSchema exceeds its nesting bound at ${path}`);
+  if (schema.type !== undefined) {
+    const types = typeof schema.type === "string" ? [schema.type] : Array.isArray(schema.type) ? schema.type : null;
+    if (!types || types.length === 0 || types.some((type) => typeof type !== "string" || !STRUCTURED_SCHEMA_TYPES.has(type))) throw new ProviderRuntimeError(`responseSchema.type is invalid at ${path}`);
+  }
+  if (schema.enum !== undefined && (!Array.isArray(schema.enum) || schema.enum.length > 1024)) throw new ProviderRuntimeError(`responseSchema.enum is invalid at ${path}`);
+  for (const name of ["minLength", "maxLength", "minItems", "maxItems"] as const) {
+    const value = schema[name];
+    if (value !== undefined && (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)) throw new ProviderRuntimeError(`responseSchema.${name} is invalid at ${path}`);
+  }
+  for (const name of ["minimum", "maximum"] as const) {
+    const value = schema[name];
+    if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value))) throw new ProviderRuntimeError(`responseSchema.${name} is invalid at ${path}`);
+  }
+  if (schema.pattern !== undefined) {
+    if (typeof schema.pattern !== "string") throw new ProviderRuntimeError(`responseSchema.pattern is invalid at ${path}`);
+    try { new RegExp(schema.pattern); } catch { throw new ProviderRuntimeError(`responseSchema.pattern is invalid at ${path}`); }
+  }
+  if (schema.required !== undefined) {
+    if (!Array.isArray(schema.required) || schema.required.length > 256 || schema.required.some((key) => typeof key !== "string" || bytes(key) > 256)) throw new ProviderRuntimeError(`responseSchema.required is invalid at ${path}`);
+  }
+  if (schema.items !== undefined) {
+    if (!isObject(schema.items)) throw new ProviderRuntimeError(`responseSchema.items is invalid at ${path}`);
+    validateStructuredSchemaDefinition(schema.items as JsonObject, `${path}[]`, depth + 1);
+  }
+  if (schema.properties !== undefined) {
+    if (!isObject(schema.properties) || Object.keys(schema.properties).length > 256) throw new ProviderRuntimeError(`responseSchema.properties is invalid at ${path}`);
+    for (const [key, child] of Object.entries(schema.properties)) {
+      if (bytes(key) > 256 || key.includes("\u0000") || !isObject(child)) throw new ProviderRuntimeError(`responseSchema property is invalid at ${path}.${key}`);
+      validateStructuredSchemaDefinition(child as JsonObject, `${path}.${key}`, depth + 1);
+    }
+  }
+  if (schema.additionalProperties !== undefined && typeof schema.additionalProperties !== "boolean" && !isObject(schema.additionalProperties)) throw new ProviderRuntimeError(`responseSchema.additionalProperties is invalid at ${path}`);
+  if (isObject(schema.additionalProperties)) validateStructuredSchemaDefinition(schema.additionalProperties as JsonObject, `${path}.*`, depth + 1);
+}
+
+function validateStructuredResponseOrThrow(value: JsonValue, schema: JsonObject | undefined): void {
+  try {
+    validateJsonValue(value);
+    if (schema) validateStructuredResponse(value, schema);
+  } catch (error) {
+    if (error instanceof ProviderRuntimeError) throw new ProviderRuntimeError(error.message, { code: "invalid_response" });
+    throw error;
+  }
+}
+
 function normalizeConfig(config: ProviderConfig): NormalizedProviderConfig {
   if (!isObject(config)) throw new ProviderRuntimeError("provider config must be an object");
   const provider = boundedIdentifier("provider", config.provider, 128);
@@ -769,7 +889,13 @@ function validateRequest(request: ProviderRequest): void {
   }
   if (!Number.isInteger(request.maxOutputTokens) || request.maxOutputTokens < 1 || request.maxOutputTokens > 1_000_000) throw new ProviderRuntimeError("maxOutputTokens is outside its bounds");
   if (request.temperature !== undefined && (!Number.isFinite(request.temperature) || request.temperature < 0 || request.temperature > 2)) throw new ProviderRuntimeError("temperature must be within [0, 2]");
-  if (request.responseSchema !== undefined) validateJsonValue(request.responseSchema);
+  if (request.requireJson !== undefined && typeof request.requireJson !== "boolean") throw new ProviderRuntimeError("provider requireJson must be boolean");
+  if (request.responseSchema !== undefined) {
+    if (!isObject(request.responseSchema)) throw new ProviderRuntimeError("provider responseSchema must be a JSON object");
+    if (request.requireJson !== true) throw new ProviderRuntimeError("provider responseSchema requires requireJson: true");
+    validateJsonValue(request.responseSchema);
+    validateStructuredSchemaDefinition(request.responseSchema);
+  }
   const tools = request.tools ?? [];
   if (!Array.isArray(tools) || tools.length > MAX_PROVIDER_TOOLS) throw new ProviderRuntimeError("provider tools are outside their bounds");
   const names = new Set<string>();
@@ -783,6 +909,11 @@ function validateRequest(request: ProviderRequest): void {
     validateJsonValue(normalizedTool.parameters);
   }
   safeJson(request, "provider request", MAX_PROVIDER_REQUEST_BYTES);
+}
+
+function validateStructuredOutputSupport(config: NormalizedProviderConfig, request: ProviderRequest): void {
+  if (request.requireJson !== true) return;
+  if (config.structuredOutputMode === "disabled") throw new ProviderRuntimeError(`provider ${config.provider} does not support structured JSON output`, { code: "invalid_request" });
 }
 
 function wireMessages(protocol: ProviderProtocol, messages: readonly ProviderMessage[]): JsonValue[] {
@@ -936,8 +1067,8 @@ function parseResponse(config: NormalizedProviderConfig, payload: JsonObject, st
   if (toolCalls.some((call) => !allowedTools.has(call.name))) throw new ProviderRuntimeError("provider returned an unrequested tool call");
   let structured: JsonValue | null = null;
   if (!toolCalls.length && request.requireJson) {
-    try { structured = JSON.parse(text) as JsonValue; } catch { throw new ProviderRuntimeError("provider returned invalid JSON for the requested structured response"); }
-    validateJsonValue(structured);
+    try { structured = JSON.parse(text) as JsonValue; } catch { throw new ProviderRuntimeError("provider returned invalid JSON for the requested structured response", { code: "invalid_response" }); }
+    validateStructuredResponseOrThrow(structured, request.responseSchema);
   }
   return { provider: config.provider, model, text, statusCode, requestId, usage, structured, toolCalls, stopReason };
 }
@@ -1387,6 +1518,7 @@ export class LLMRuntime {
       path: config.path,
       models_path: config.modelsPath,
       requires_credential: config.requiresCredential,
+      structured_output_mode: config.structuredOutputMode,
       credential_posture: "caller_supplied_opaque_handle_not_returned",
       secret_material: "never_returned",
     }));
@@ -1451,6 +1583,7 @@ export class LLMRuntime {
   ): Promise<ProviderResponse> {
     const config = this.requireProvider(provider);
     validateRequest(request);
+    validateStructuredOutputSupport(config, request);
     const metadata = requestMetadata(provider, request, options.invocationKind ?? "provider_call");
     await options.execution?.admitProviderCall({ provider, model: request.model, invocationKind: metadata.kind, attempt: options.executionAttempt, turn: options.executionTurn, selectionDigest: options.selectionDigest, estimatedCostUnits: options.estimatedCostUnits, costUnits: options.estimatedCostUnits, failover: options.executionFailover });
     await options.observer?.before?.(metadata);
@@ -1495,6 +1628,7 @@ export class LLMRuntime {
   ): AsyncIterable<ProviderStreamEvent> {
     const config = this.requireProvider(provider);
     validateRequest(request);
+    validateStructuredOutputSupport(config, request);
     const metadata = requestMetadata(provider, request, options.invocationKind ?? "provider_stream");
     await options.execution?.admitProviderCall({ provider, model: request.model, invocationKind: metadata.kind, attempt: options.executionAttempt, turn: options.executionTurn, selectionDigest: options.selectionDigest, estimatedCostUnits: options.estimatedCostUnits, costUnits: options.estimatedCostUnits, failover: options.executionFailover });
     await options.observer?.before?.(metadata);
@@ -1606,7 +1740,8 @@ export class LLMRuntime {
     const outputText = text.join("");
     let structured: JsonValue | null = null;
     if (!calls.length && request.requireJson) {
-      try { structured = JSON.parse(outputText) as JsonValue; } catch { throw new ProviderRuntimeError("provider stream returned invalid JSON"); }
+      try { structured = JSON.parse(outputText) as JsonValue; } catch { throw new ProviderRuntimeError("provider stream returned invalid JSON", { code: "invalid_response" }); }
+      validateStructuredResponseOrThrow(structured, request.responseSchema);
     }
     return { provider, model, text: outputText, statusCode: 200, requestId, usage, structured, toolCalls: calls, stopReason: null };
   }
@@ -1987,7 +2122,13 @@ export class AutonomousRuntime {
       }
       const status = this.llm.providerStatus(provider);
       const credential = this.llm.onboarding.status(provider);
-      providerHealth[provider] = { ...status, credential_ready: credential.ready === true, eligible: status.circuit !== "open" && (status.credential_required === false || credential.ready === true) };
+      const structuredOutputMode = metadata.structured_output_mode;
+      providerHealth[provider] = {
+        ...status,
+        ...(structuredOutputMode === "disabled" || structuredOutputMode === "json_object" || structuredOutputMode === "json_schema" ? { structured_output_mode: structuredOutputMode } : {}),
+        credential_ready: credential.ready === true,
+        eligible: status.circuit !== "open" && (status.credential_required === false || credential.ready === true),
+      };
     }
     return {
       task: plan.task,
@@ -2000,6 +2141,7 @@ export class AutonomousRuntime {
       max_cost_per_million_tokens: plan.maxCostPerMillionTokens ?? null,
       max_latency_ms: plan.maxLatencyMs ?? null,
       min_quality: plan.minQuality ?? null,
+      require_json: plan.request.requireJson === true,
       candidates,
       provider_health: providerHealth,
       model_health: this.llm.modelHealthSnapshot(),
@@ -2025,6 +2167,10 @@ function validateSelectionConstraints(request: Pick<AutonomousSelectionRequest, 
   }
 }
 
+function validateSelectionOutputRequirements(request: Pick<AutonomousSelectionRequest, "require_json">): void {
+  if (request.require_json !== undefined && typeof request.require_json !== "boolean") throw new ProviderRuntimeError("autonomous selection require_json must be boolean");
+}
+
 /**
  * Pure, deterministic model ranking shared by the local runtime and persisted-health adapters.
  * It consumes only candidate metadata, credential readiness, aggregate health values, and
@@ -2032,6 +2178,7 @@ function validateSelectionConstraints(request: Pick<AutonomousSelectionRequest, 
  */
 export function rankAutonomousModels(request: AutonomousSelectionRequest): AutonomousModelRanking[] {
   validateSelectionConstraints(request);
+  validateSelectionOutputRequirements(request);
   return request.candidates.map((candidate) => {
     const reasons: string[] = [];
     const provider = request.provider_health[candidate.provider];
@@ -2044,6 +2191,9 @@ export function rankAutonomousModels(request: AutonomousSelectionRequest): Auton
     if (candidate.max_output_tokens < request.requested_output_tokens) reasons.push("model output capacity is below the request");
     if (candidate.context_window_tokens < request.estimated_input_tokens + request.requested_output_tokens) reasons.push("model context capacity is below the request");
     if (request.required_capabilities.some((required) => !(candidate.capabilities ?? []).includes(required))) reasons.push("model lacks a required capability");
+    if (request.require_json === true && !(candidate.capabilities ?? []).includes("structured_output")) reasons.push("model lacks structured output capability");
+    if (request.require_json === true && provider && provider.structured_output_mode === undefined) reasons.push("provider structured output capability is unknown");
+    if (request.require_json === true && provider?.structured_output_mode === "disabled") reasons.push("provider structured output is disabled");
     if (request.max_cost_per_million_tokens !== undefined && request.max_cost_per_million_tokens !== null && candidate.cost_per_million_tokens > request.max_cost_per_million_tokens) reasons.push("model cost exceeds the caller budget");
     if (request.max_latency_ms !== undefined && request.max_latency_ms !== null && candidate.latency_ms > request.max_latency_ms) reasons.push("model latency exceeds the caller bound");
     if (request.min_quality !== undefined && request.min_quality !== null && candidate.quality < request.min_quality) reasons.push("model quality is below the caller floor");

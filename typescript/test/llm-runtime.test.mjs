@@ -545,6 +545,37 @@ test("autonomous selection applies caller budget, latency, and quality gates bef
   await assert.rejects(agent.invoke({ ...plan, maxLatencyMs: 10 }), /autonomous selection abstained/);
 });
 
+test("autonomous structured output is opt-in, schema-checked, and capability-gated before dispatch", async () => {
+  const calls = [];
+  const runtime = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      calls.push(requestRecord(_url, init));
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify({ answer: "structured" }) }, finish_reason: "stop" }] });
+    },
+  });
+  runtime.registerProvider(openaiCompatibleProvider("structured", "https://structured.test", { requiresCredential: false, structuredOutputMode: "json_object" }));
+  const agent = new AutonomousAgent(runtime);
+  const model = { provider: "structured", model: "structured-1", capabilities: ["reasoning", "code", "structured_output"], context_window_tokens: 32_000, max_output_tokens: 2_000, quality: 0.9, latency_ms: 100, cost_per_million_tokens: 10, reliability: 0.95 };
+  const responseSchema = { type: "object", additionalProperties: false, properties: { answer: { type: "string", minLength: 1 } }, required: ["answer"] };
+  const result = await agent.run("Return a structured coding answer.", { domain: "coding", candidates: [model], approveProviderCall: true, requireJson: true, responseSchema });
+  assert.equal(result.status, "completed");
+  assert.deepEqual(result.response.structured, { answer: "structured" });
+  assert.deepEqual(calls[0].body.response_format, { type: "json_object" });
+
+  await assert.rejects(agent.run("This schema is invalid.", { domain: "coding", candidates: [model], approveProviderCall: true, requireJson: true, responseSchema: { type: "not-a-json-type" } }), /responseSchema\.type is invalid/);
+  assert.equal(calls.length, 1, "invalid response schemas must fail before dispatch");
+
+  const missingCapability = { ...model, capabilities: ["reasoning", "code"] };
+  await assert.rejects(agent.run("This must refuse before dispatch.", { domain: "coding", candidates: [missingCapability], approveProviderCall: true, requireJson: true }), (error) => error instanceof ProviderRuntimeError && error.message.includes("structured output capability"));
+  assert.equal(calls.length, 1, "missing candidate capability must not dispatch");
+
+  const disabledRuntime = new LLMRuntime({ credentials: new CredentialStore(), fetch: async () => { throw new Error("structured-disabled provider must not be called"); } });
+  disabledRuntime.registerProvider(openaiCompatibleProvider("disabled-structured", "https://disabled-structured.test", { requiresCredential: false, structuredOutputMode: "disabled" }));
+  const disabledAgent = new AutonomousAgent(disabledRuntime);
+  await assert.rejects(disabledAgent.run("This must refuse on provider capability.", { domain: "coding", candidates: [{ ...model, provider: "disabled-structured" }], approveProviderCall: true, requireJson: true }), (error) => error instanceof ProviderRuntimeError && error.message.includes("structured output is disabled"));
+});
+
 test("AutonomousAgent refreshes live model metadata with atomic catalogue reconciliation", async () => {
   let discoveryCalls = 0;
   const runtime = new LLMRuntime({

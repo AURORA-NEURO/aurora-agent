@@ -19,7 +19,7 @@ function jsonResponse(payload) {
   return new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
 }
 
-const capabilities = ["reasoning", "code", "web", "data", "science", "biomedical", "coordination", "operations", "enterprise", "multimodal", "evaluation"];
+const capabilities = ["reasoning", "code", "web", "data", "science", "biomedical", "coordination", "operations", "enterprise", "multimodal", "evaluation", "structured_output"];
 const loopTools = [{ name: "repository_catalog", description: "Inspect repository", parameters: { type: "object", additionalProperties: false } }];
 
 function candidate() {

@@ -1565,6 +1565,38 @@ quality-floor reasons; if no candidate remains, invocation is refused before pro
 These limits are policy gates, not estimates derived from provider responses, and they do not grant
 credentials or effect authorization.
 
+Structured output is an explicit execution contract, not a prompt convention. Set `requireJson: true`
+on `AutonomousRunOptions` when the caller needs a JSON response, and optionally provide
+`responseSchema` for local schema validation:
+
+```ts
+const run = await agent.run("Summarize the verified change.", {
+  domain: "coding",
+  candidates,
+  approveProviderCall: true,
+  requireJson: true,
+  responseSchema: {
+    type: "object",
+    additionalProperties: false,
+    properties: { summary: { type: "string", minLength: 1 } },
+    required: ["summary"],
+  },
+});
+```
+
+The selected candidate must declare the `structured_output` capability, and its provider must expose
+structured JSON support. A disabled or unknown provider capability, a missing candidate capability,
+an invalid schema, or an ineligible health/cost/latency/quality state causes selection to abstain
+before network dispatch. `response.structured` contains the parsed JSON while `response.text`
+retains the bounded textual representation. `structured_output_mode: "json_object"` sends the
+provider's portable JSON-object hint and validates the returned value locally against the schema;
+`"json_schema"` additionally sends the provider-native strict schema shape. `"disabled"` refuses
+the request rather than silently degrading to an unstructured answer. The same fields propagate to
+every specialist and the synthesis call in `runCrossDomain()`, so a cross-domain result cannot mix
+structured and unstructured stages by accident. Malformed JSON or a schema mismatch is a typed
+`ProviderRuntimeError` with `code: "invalid_response"`; semantic routing converts that bounded
+provider-output failure into its explicit `provider_invalid` result.
+
 Contextual model selections resolve exact `provider/model` IDs. A model-only ID is accepted only
 when it matches one registered candidate; duplicate matches abstain before provider dispatch.
 

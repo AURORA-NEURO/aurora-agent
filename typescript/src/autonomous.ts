@@ -477,6 +477,10 @@ export interface AutonomousRunOptions {
   maxLatencyMs?: number;
   /** Refuse candidates below this caller-owned quality prior. */
   minQuality?: number;
+  /** Require a provider response that parses as JSON; disabled by default. */
+  requireJson?: boolean;
+  /** Optional JSON Schema checked locally and, when supported, enforced by the provider. */
+  responseSchema?: JsonObject;
   temperature?: number;
   tools?: readonly ProviderTool[];
   authorizeAndExecute?: (calls: ProviderToolCall[]) => ProviderToolResult[] | Promise<ProviderToolResult[]>;
@@ -650,6 +654,17 @@ function boundedIdentifier(name: string, value: unknown): string {
   const text = boundedText(name, value, 256);
   if (!/^[A-Za-z0-9_.-]+$/.test(text)) throw new ArgumentError(`${name} must be a bounded identifier`);
   return text;
+}
+
+function validateAutonomousStructuredOutputOptions(options: Pick<AutonomousRunOptions, "requireJson" | "responseSchema">): void {
+  if (options.requireJson !== undefined && typeof options.requireJson !== "boolean") throw new ArgumentError("autonomous requireJson must be boolean");
+  if (options.responseSchema !== undefined) {
+    if (!isObject(options.responseSchema)) throw new ArgumentError("autonomous responseSchema must be a JSON object");
+    if (options.requireJson !== true) throw new ArgumentError("autonomous responseSchema requires requireJson: true");
+    let encoded: string | undefined;
+    try { encoded = JSON.stringify(options.responseSchema); } catch { throw new ArgumentError("autonomous responseSchema must be JSON-serializable"); }
+    if (!encoded || bytes(encoded) > 1_000_000) throw new ArgumentError("autonomous responseSchema exceeds its bounded size");
+  }
 }
 
 function normalizeAutonomousModelCandidate(candidate: AutonomousModelCandidate): AutonomousModelCandidate {
@@ -1199,6 +1214,7 @@ function validateOnlineSelectionConstraints(request: AutonomousSelectionRequest)
     if (value === undefined || value === null) continue;
     if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > maximum) throw new ArgumentError(`online learner ${name} is outside its bounds`);
   }
+  if (request.require_json !== undefined && typeof request.require_json !== "boolean") throw new ArgumentError("online learner require_json must be boolean");
 }
 
 /** Caller-owned bounded UCB1 state for online model adaptation. No hidden server state is used. */
@@ -1222,7 +1238,7 @@ export class AutonomousOnlineLearner {
     validateOnlineSelectionConstraints(request);
     const eligible = request.candidates.filter((candidate) => {
       const health = request.provider_health[candidate.provider];
-      return candidate.enabled !== false && health !== undefined && health.circuit !== "open" && (health.credential_required === false || health.credential_ready === true) && candidate.context_window_tokens >= request.estimated_input_tokens + request.requested_output_tokens && candidate.max_output_tokens >= request.requested_output_tokens && request.required_capabilities.every((capability) => (candidate.capabilities ?? []).includes(capability)) && (request.max_cost_per_million_tokens === undefined || request.max_cost_per_million_tokens === null || candidate.cost_per_million_tokens <= request.max_cost_per_million_tokens) && (request.max_latency_ms === undefined || request.max_latency_ms === null || candidate.latency_ms <= request.max_latency_ms) && (request.min_quality === undefined || request.min_quality === null || candidate.quality >= request.min_quality);
+      return candidate.enabled !== false && health !== undefined && health.circuit !== "open" && (health.credential_required === false || health.credential_ready === true) && candidate.context_window_tokens >= request.estimated_input_tokens + request.requested_output_tokens && candidate.max_output_tokens >= request.requested_output_tokens && request.required_capabilities.every((capability) => (candidate.capabilities ?? []).includes(capability)) && (request.require_json !== true || ((candidate.capabilities ?? []).includes("structured_output") && health.structured_output_mode !== undefined && health.structured_output_mode !== "disabled")) && (request.max_cost_per_million_tokens === undefined || request.max_cost_per_million_tokens === null || candidate.cost_per_million_tokens <= request.max_cost_per_million_tokens) && (request.max_latency_ms === undefined || request.max_latency_ms === null || candidate.latency_ms <= request.max_latency_ms) && (request.min_quality === undefined || request.min_quality === null || candidate.quality >= request.min_quality);
     });
     const totalPulls = Math.max(1, this.stateValue.arms.reduce((sum, arm) => sum + (arm.pulls ?? 0), 0));
     const ranking = eligible.map((candidate) => {
@@ -1538,6 +1554,7 @@ export class AutonomousAgent {
 
   async run(task: string, options: AutonomousRunOptions = {}): Promise<AutonomousRunResult> {
     const taskText = boundedText("autonomous task", task, 32_000);
+    validateAutonomousStructuredOutputOptions(options);
     const route = options.routeOverride ? await assertRouteOverride(taskText, options.routeOverride) : await this.route(taskText, { domain: options.domain, hints: options.hints, allowCrossDomain: options.allowCrossDomain });
     if (route.cross_domain && options.domain === undefined) {
       const cross = await this.runCrossDomain(taskText, options);
@@ -1565,8 +1582,19 @@ export class AutonomousAgent {
     if (options.tools && this.toolCatalogue && this.toolExecutor) await this.ensureToolRegistry();
     const tools = options.tools ?? await this.liveTools(selectedDomains);
     const messages: ProviderMessage[] = blueprint.prompt.messages.map((message) => ({ role: message.role, content: message.content }));
-    const request: ProviderRequest = { model: "autonomous-selection-placeholder", messages, maxOutputTokens: options.maxOutputTokens ?? 1_024, temperature: options.temperature, tools: tools.length ? tools : undefined, toolChoice: tools.length ? "auto" : undefined };
-    const executionPlan = { task: taskText, domain: blueprint.domain_profile.domain, capability: options.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class, requiredCapabilities: blueprint.required_capabilities, maxCostPerMillionTokens: options.maxCostPerMillionTokens, maxLatencyMs: options.maxLatencyMs, minQuality: options.minQuality, candidates, request };
+    const requiredCapabilities = [...blueprint.required_capabilities];
+    if (options.requireJson === true && !requiredCapabilities.includes("structured_output")) requiredCapabilities.push("structured_output");
+    const request: ProviderRequest = {
+      model: "autonomous-selection-placeholder",
+      messages,
+      maxOutputTokens: options.maxOutputTokens ?? 1_024,
+      temperature: options.temperature,
+      ...(options.requireJson !== undefined ? { requireJson: options.requireJson } : {}),
+      ...(options.responseSchema !== undefined ? { responseSchema: options.responseSchema } : {}),
+      tools: tools.length ? tools : undefined,
+      toolChoice: tools.length ? "auto" : undefined,
+    };
+    const executionPlan = { task: taskText, domain: blueprint.domain_profile.domain, capability: options.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class, requiredCapabilities, maxCostPerMillionTokens: options.maxCostPerMillionTokens, maxLatencyMs: options.maxLatencyMs, minQuality: options.minQuality, candidates, request };
     const healthObserver = this.modelHealthController?.observer({ domain: blueprint.domain_profile.domain, capability: executionPlan.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class });
     const remoteHealthObserver = this.modelHealthBridge?.observer({ domain: blueprint.domain_profile.domain, capability: executionPlan.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class });
     const feedbackObserver = composeInvocationObservers(options.observer, healthObserver, remoteHealthObserver);
@@ -1584,6 +1612,7 @@ export class AutonomousAgent {
   /** Execute routed specialist children with bounded fan-out, then hand local outputs to synthesis. */
   async runCrossDomain(task: string, options: AutonomousCrossDomainRunOptions = {}): Promise<AutonomousCrossDomainRunResult> {
     const taskText = boundedText("cross-domain task", task, 32_000);
+    validateAutonomousStructuredOutputOptions(options);
     const route = options.routeOverride ? await assertRouteOverride(taskText, options.routeOverride) : await this.route(taskText, { hints: options.hints, allowCrossDomain: options.allowCrossDomain });
     const learning = this.learner ? "online_bandit_feedback_available" as const : "provider_health_feedback_only" as const;
     if (route.abstained || !route.cross_domain || route.selected_domains.length < 2) {
@@ -1632,6 +1661,8 @@ export class AutonomousAgent {
         maxCostPerMillionTokens: options.maxCostPerMillionTokens,
         maxLatencyMs: options.maxLatencyMs,
         minQuality: options.minQuality,
+        requireJson: options.requireJson,
+        responseSchema: options.responseSchema,
         temperature: options.temperature,
         tools: options.tools,
         authorizeAndExecute: options.authorizeAndExecute,
@@ -1713,6 +1744,8 @@ export class AutonomousAgent {
       maxCostPerMillionTokens: options.maxCostPerMillionTokens,
       maxLatencyMs: options.maxLatencyMs,
       minQuality: options.minQuality,
+      requireJson: options.requireJson,
+      responseSchema: options.responseSchema,
       temperature: options.temperature,
       tools: options.tools,
       authorizeAndExecute: options.authorizeAndExecute,

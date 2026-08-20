@@ -20,7 +20,7 @@ function model() {
   return {
     provider: "router-provider",
     model: "router-model",
-    capabilities: ["reasoning", "code", "web", "data", "science", "biomedical", "coordination", "operations", "enterprise", "multimodal", "evaluation"],
+    capabilities: ["reasoning", "code", "web", "data", "science", "biomedical", "coordination", "operations", "enterprise", "multimodal", "evaluation", "structured_output"],
     context_window_tokens: 32_000,
     max_output_tokens: 2_000,
     quality: 0.9,

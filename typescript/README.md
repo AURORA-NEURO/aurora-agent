@@ -188,6 +188,16 @@ remain explainable in the ranking; an empty eligible set fails closed before pro
 Contextual model selections resolve exact `provider/model` IDs. A model-only ID is accepted only
 when it matches one registered candidate; duplicate matches abstain before provider dispatch.
 
+Structured autonomous responses are opt-in and capability-gated. Pass `requireJson: true` to
+`AutonomousAgent.run()` or `runCrossDomain()` and optionally pass a JSON `responseSchema`; the
+candidate must declare `structured_output`, the provider must not advertise
+`structuredOutputMode: "disabled"`, and all normal readiness, capacity, budget, latency, quality,
+and approval gates still apply before dispatch. `json_object` providers receive a portable wire hint
+and are checked locally against the schema; `json_schema` providers also receive native strict schema
+metadata. The parsed value is returned as `response.structured`, and malformed or schema-invalid
+provider output is classified as `invalid_response`. Cross-domain children and synthesis inherit the
+same contract, preventing a partial structured run from being mistaken for a fully structured one.
+
 `runAutonomousDecisionCycle()` composes the single-domain path into one caller-controlled loop:
 optional semantic routing, task-digest-validated route handoff, prompt and plan construction,
 health/bandit model selection, provider invocation, and optional evaluator settlement. Semantic
