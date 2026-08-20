@@ -116,6 +116,8 @@ test("durable cross-domain execution pauses before dispatch and refuses a tamper
   const { agent, calls } = makeAgent();
   const store = new InMemoryAutonomousCrossDomainCheckpointStore();
   const executor = new AutonomousCrossDomainExecutor(agent, store);
+  await assert.rejects(executor.start(task, { candidates: agent.models(), subtasks, maxParallelChildren: 2 }), /sequential/);
+  await assert.rejects(executor.start(task, { candidates: agent.models(), subtasks, allowPartial: true }), /does not synthesize partial/);
   const gated = await executor.start(task, { candidates: agent.models(), subtasks, approveProviderCall: false, jobId: "durable-cross-approval", maxSteps: 1 });
   assert.equal(gated.status, "approval_required");
   assert.equal(gated.checkpoint.status, "paused");

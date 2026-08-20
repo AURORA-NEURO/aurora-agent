@@ -2,6 +2,7 @@ import { ArgumentError, CredentialError, ProviderRuntimeError, type ProviderErro
 import {
   acceptedCrossDomainPlan,
   AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN,
+  AUTONOMOUS_CROSS_DOMAIN_SCHEMA,
   type AutonomousAcceptedCrossDomainPlan,
   type AutonomousAgent,
   type AutonomousCrossDomainBlueprint,
@@ -418,6 +419,11 @@ function boundedSteps(value: unknown, total: number): number {
   return value as number;
 }
 
+function validateDurableOptions(options: AutonomousCrossDomainExecuteOptions): void {
+  if (options.maxParallelChildren !== undefined && options.maxParallelChildren !== 1) throw new ArgumentError("durable cross-domain execution is sequential; maxParallelChildren must be 1 or omitted");
+  if (options.allowPartial === true) throw new ArgumentError("durable cross-domain execution does not synthesize partial children; use synthesize: false and resume the failed child explicitly");
+}
+
 function crossPlanRefinement(options: AutonomousCrossDomainExecuteOptions): AutonomousCrossDomainPlanRefinementResult | undefined {
   if (options.acceptedPlanRefinement !== undefined && options.acceptedCrossDomainPlanRefinement !== undefined) throw new ArgumentError("acceptedPlanRefinement and acceptedCrossDomainPlanRefinement cannot both be supplied");
   return options.acceptedPlanRefinement ?? options.acceptedCrossDomainPlanRefinement;
@@ -436,7 +442,7 @@ async function executionContractDigest(agent: AutonomousAgent, options: Autonomo
 }
 
 function validCrossBlueprint(value: unknown): value is AutonomousCrossDomainBlueprint {
-  if (!isObject(value) || value.schema !== "bioprism-typescript-autonomous-cross-domain/0.1" || typeof value.task_digest !== "string" || typeof value.plan_digest !== "string" || !Array.isArray(value.child_ids) || !Array.isArray(value.child_blueprints) || !isObject(value.synthesis_blueprint)) return false;
+  if (!isObject(value) || value.schema !== AUTONOMOUS_CROSS_DOMAIN_SCHEMA || typeof value.task_digest !== "string" || typeof value.plan_digest !== "string" || !Array.isArray(value.child_ids) || !Array.isArray(value.child_blueprints) || !isObject(value.synthesis_blueprint)) return false;
   if (value.child_ids.length < 2 || value.child_ids.length > AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN || value.child_ids.some((id) => typeof id !== "string" || !id.trim()) || new Set(value.child_ids).size !== value.child_ids.length) return false;
   return value.child_blueprints.length === value.child_ids.length;
 }
@@ -476,6 +482,7 @@ export class AutonomousCrossDomainExecutor {
   }
 
   async start(task: string, options: AutonomousCrossDomainExecuteOptions = {}): Promise<AutonomousCrossDomainExecutionResult> {
+    validateDurableOptions(options);
     const taskText = boundedTask(task);
     const expectedTaskDigest = await digestJson({ task: taskText });
     if (options.routeOverride && options.routeOverride.task_digest !== expectedTaskDigest) throw new ArgumentError("cross-domain route override does not match the task digest");
@@ -501,6 +508,7 @@ export class AutonomousCrossDomainExecutor {
   }
 
   async resume(jobId: string, task: string, options: Omit<AutonomousCrossDomainExecuteOptions, "jobId"> = {}): Promise<AutonomousCrossDomainExecutionResult> {
+    validateDurableOptions(options);
     const taskText = boundedTask(task);
     const normalizedJobId = boundedId(jobId, "cross-domain jobId");
     const checkpoint = await this.store.load(normalizedJobId);
@@ -625,6 +633,7 @@ export class AutonomousCrossDomainExecutor {
       return this.result("approval_required", route, blueprint, checkpoint, stepResults, learningEpisodeIds);
     }
     const costBudget = options.costBudget ?? (options.maxTotalCostUnits === undefined ? undefined : new AutonomousCostBudget(options.maxTotalCostUnits));
+    const learning = this.learning ?? options.learning;
     for (let step = 0; step < maxSteps; step += 1) {
       if (checkpoint.next_child_id !== null) {
         const childId = checkpoint.next_child_id;
@@ -648,7 +657,7 @@ export class AutonomousCrossDomainExecutor {
         const outputDigest = text ? await digestJson({ output: text }) : null;
         const outputBytes = new TextEncoder().encode(text).byteLength;
         const resultDigest = await digestJson(run);
-        const learningEpisodeId = run.status === "completed" && this.learning ? (await this.learning.prepareRun(run, { episodeId: `cross:${checkpoint.job_id}:${childId}`, runId: `cross:${checkpoint.job_id}:${childId}`, stageId: childId, parentJobId: checkpoint.job_id, planRefinementDigest })).episode_id : null;
+        const learningEpisodeId = run.status === "completed" && learning ? (await learning.prepareRun(run, { episodeId: `cross:${checkpoint.job_id}:${childId}`, runId: `cross:${checkpoint.job_id}:${childId}`, stageId: childId, parentJobId: checkpoint.job_id, planRefinementDigest })).episode_id : null;
         if (learningEpisodeId) learningEpisodeIds.push(learningEpisodeId);
         stepResults.push({ phase: "child", item_id: childId, run, output_digest: outputDigest, output_bytes: outputBytes, execution_child_ids: [...order], completed_child_ids: [...checkpoint.completed_child_ids], child_result_digests: { ...checkpoint.child_result_digests }, plan_refinement_digest: planRefinementDigest, learning_episode_id: learningEpisodeId });
         if (run.status === "approval_required") {
@@ -700,7 +709,7 @@ export class AutonomousCrossDomainExecutor {
       }
       const synthesisText = responseText(synthesis);
       const synthesisOutputDigest = synthesisText ? await digestJson({ output: synthesisText }) : null;
-      const synthesisEpisodeId = synthesis.status === "completed" && this.learning ? (await this.learning.prepareRun(synthesis, { episodeId: `cross:${checkpoint.job_id}:synthesis`, runId: `cross:${checkpoint.job_id}:synthesis`, stageId: "synthesis", parentJobId: checkpoint.job_id, planRefinementDigest })).episode_id : null;
+      const synthesisEpisodeId = synthesis.status === "completed" && learning ? (await learning.prepareRun(synthesis, { episodeId: `cross:${checkpoint.job_id}:synthesis`, runId: `cross:${checkpoint.job_id}:synthesis`, stageId: "synthesis", parentJobId: checkpoint.job_id, planRefinementDigest })).episode_id : null;
       if (synthesisEpisodeId) learningEpisodeIds.push(synthesisEpisodeId);
       stepResults.push({ phase: "synthesis", item_id: "synthesis", run: synthesis, output_digest: synthesisOutputDigest, output_bytes: new TextEncoder().encode(synthesisText).byteLength, execution_child_ids: [...order], completed_child_ids: [...checkpoint.completed_child_ids], child_result_digests: { ...checkpoint.child_result_digests }, plan_refinement_digest: planRefinementDigest, learning_episode_id: synthesisEpisodeId });
       if (synthesis.status === "approval_required") {
