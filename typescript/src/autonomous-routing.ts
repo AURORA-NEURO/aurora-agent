@@ -48,6 +48,10 @@ export interface AutonomousSemanticRouteOptions {
   maxDomains?: number;
   allowCrossDomain?: boolean;
   maxOutputTokens?: number;
+  /** Hard caller-owned model-selection gates for the routing classifier itself. */
+  maxCostPerMillionTokens?: number;
+  maxLatencyMs?: number;
+  minQuality?: number;
   execution?: AutonomousExecutionController;
   executionAttempt?: number;
   maxProviderFailovers?: number;
@@ -136,7 +140,7 @@ export async function semanticRouteAutonomousTask(agent: AutonomousAgent, task: 
   };
   let execution: Awaited<ReturnType<AutonomousAgent["runtime"]["invoke"]>>;
   try {
-    execution = await agent.runtime.invoke({ task: taskText, domain: "cross_domain", capability: "routing", riskClass: "route_review", requiredCapabilities: ["reasoning"], candidates, request }, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: options.observer, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers });
+    execution = await agent.runtime.invoke({ task: taskText, domain: "cross_domain", capability: "routing", riskClass: "route_review", requiredCapabilities: ["reasoning"], maxCostPerMillionTokens: options.maxCostPerMillionTokens, maxLatencyMs: options.maxLatencyMs, minQuality: options.minQuality, candidates, request }, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: options.observer, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers });
   } catch (error) {
     if (error instanceof ProviderRuntimeError && error.code === "invalid_response") return routeReviewResult(deterministic, "provider_invalid", promptDigest, null, null);
     await failSemanticExecution(options);

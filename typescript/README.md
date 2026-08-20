@@ -185,6 +185,11 @@ and `minQuality`. The same gates are enforced by local health-aware ranking, con
 Rust/Python selection, and `AutonomousOnlineLearner` before a model can be chosen. Refused models
 remain explainable in the ranking; an empty eligible set fails closed before provider dispatch.
 
+The provider-assisted semantic classifier used by `semanticRouting.enabled` is also a model
+invocation, so decision cycles forward the caller's cost, latency, and quality gates to it before
+transport. A successful classifier result does not authorize execution: the cycle still requires
+the separate execution approval and applies the same gates again to the routed domain run.
+
 Contextual model selections resolve exact `provider/model` IDs. A model-only ID is accepted only
 when it matches one registered candidate; duplicate matches abstain before provider dispatch.
 

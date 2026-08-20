@@ -327,6 +327,15 @@ test("decision cycle requires both semantic and execution approvals before any p
   assert.equal(providerGate.calls(), 0);
 });
 
+test("decision cycle forwards selection gates into semantic routing", async () => {
+  const gated = cycleAgent([{ route: { selected_domains: [{ domain: "coding", score: 0.9, rationale: "code" }], confidence: 0.9, abstain: false, abstain_reason: null } }]);
+  await assert.rejects(
+    () => runAutonomousDecisionCycle(gated.agent, "Route this unfamiliar task", { semanticRouting: { enabled: true, approveProviderCall: true }, approveProviderCall: true, maxCostPerMillionTokens: 1, maxLatencyMs: 50, minQuality: 0.95 }),
+    /abstain|eligible|cost|latency|quality/,
+  );
+  assert.equal(gated.calls(), 0, "decision-cycle semantic routing must honor caller gates before dispatch");
+});
+
 test("route handoff refuses a route from a different task", async () => {
   const { agent, calls } = cycleAgent();
   const route = await agent.route("Debug this coding repository.", { domain: "coding" });

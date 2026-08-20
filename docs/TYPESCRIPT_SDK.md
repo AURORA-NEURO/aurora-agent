@@ -1565,6 +1565,12 @@ quality-floor reasons; if no candidate remains, invocation is refused before pro
 These limits are policy gates, not estimates derived from provider responses, and they do not grant
 credentials or effect authorization.
 
+Provider-assisted semantic routing is subject to the same gates. When `semanticRouting.enabled` is
+used by a decision cycle, the caller's cost, latency, and quality limits are applied to the routing
+classifier before it can send the task to a provider. A classifier with no eligible candidate fails
+before transport; a successful route still requires the separate execution approval and re-enters
+the normal selection gate for the actual domain run.
+
 Structured output is an explicit execution contract, not a prompt convention. Set `requireJson: true`
 on `AutonomousRunOptions` when the caller needs a JSON response, and optionally provide
 `responseSchema` for local schema validation:

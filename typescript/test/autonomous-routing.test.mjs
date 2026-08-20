@@ -64,6 +64,15 @@ test("semantic routing resolves an ambiguous task into a reviewed domain route",
   assert.equal(Object.prototype.hasOwnProperty.call(bodies[0], "authorization"), false);
 });
 
+test("semantic routing applies caller model-selection gates before classifier dispatch", async () => {
+  const { agent, calls } = routerAgent([{ selected_domains: [{ domain: "coding", score: 0.91, rationale: "implementation" }], confidence: 0.92, abstain: false, abstain_reason: null }]);
+  await assert.rejects(
+    () => semanticRouteAutonomousTask(agent, "Route this ambiguous technical task", { approveProviderCall: true, maxCostPerMillionTokens: 1, maxLatencyMs: 50, minQuality: 0.95 }),
+    /abstain|eligible|cost|latency|quality/,
+  );
+  assert.equal(calls(), 0, "semantic selection gates must run before classifier transport");
+});
+
 test("semantic routing fails the supplied execution when provider dispatch throws", async () => {
   const llm = new LLMRuntime({ credentials: new CredentialStore(), fetch: async () => { throw new Error("semantic provider offline"); } });
   llm.registerProvider(openaiCompatibleProvider("router-provider", "https://router.test", { requiresCredential: false }));
