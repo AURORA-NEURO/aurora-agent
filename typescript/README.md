@@ -150,6 +150,8 @@ controller then makes historical quality influence the next model ranking withou
 prompts or responses to a provider. `AutonomousOfflineReplayEngine` re-evaluates caller-rehydrated
 numeric signal cases for all twelve domains, compares expected reward/pass/digest witnesses, and
 never invokes a provider or turns a replay mismatch into authorization.
+For the high-level facade, pass `modelHealthStore` in `AutonomousAgent` options; it automatically
+uses the persisted selector and records invocation observations for single- and cross-domain runs.
 
 The live tool boundary is opt-in and catalogue-backed. Create a `ToolCatalogue` from the gateway's
 tool definitions, pass it with a caller-owned executor, and inspect

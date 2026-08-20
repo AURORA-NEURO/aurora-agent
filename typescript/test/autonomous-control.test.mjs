@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  AutonomousAgent,
   AutonomousModelHealthController,
   AutonomousModelHealthPersistenceCoordinator,
   AutonomousOfflineReplayEngine,
   InMemoryAutonomousModelHealthStore,
+  LLMRuntime,
   builtinAutonomousDomainEvaluatorProfiles,
   digestJson,
+  openaiCompatibleProvider,
 } from "../dist/index.js";
 
 const digest = "a".repeat(64);
@@ -96,6 +99,20 @@ test("persisted health drives selection and invocation observers without provide
     { success: true, status: "completed", latencyMs: 55, inputTokens: 100, outputTokens: 50 },
   );
   assert.equal((await store.health({ model: "model-b" }))[0].attempts, 1);
+});
+
+test("AutonomousAgent wires a persisted health store into selection and invocation automatically", async () => {
+  const store = new InMemoryAutonomousModelHealthStore();
+  const llm = new LLMRuntime({
+    fetch: async () => new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: "bounded answer" }, finish_reason: "stop" }] }), { status: 200, headers: { "content-type": "application/json" } }),
+  });
+  llm.registerProvider(openaiCompatibleProvider("health-provider", "https://health.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm, { modelHealthStore: store });
+  agent.registerModel({ provider: "health-provider", model: "health-model", capabilities: ["reasoning", "code"], context_window_tokens: 32_000, max_output_tokens: 2_000, quality: 0.9, latency_ms: 100, cost_per_million_tokens: 1, reliability: 0.95 });
+  const result = await agent.run("Debug this coding repository.", { domain: "coding", approveProviderCall: true });
+  assert.equal(result.status, "completed");
+  assert.equal((await store.health({ model: "health-model" }))[0].attempts, 1);
+  assert.equal(JSON.stringify(await store.snapshot()).includes("bounded answer"), false);
 });
 
 test("offline replay evaluates all twelve domains and detects expected-evidence drift", async () => {

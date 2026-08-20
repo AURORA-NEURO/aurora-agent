@@ -1302,6 +1302,9 @@ missing/rejected signals, evaluator digest, and explicit expected-witness mismat
 offline metadata evaluation: it does not replay a provider call, execute a tool, mutate bandit
 state, or authorize a mission. Raw evidence remains outside the SDK and is represented only by a
 caller-supplied digest.
+The high-level `AutonomousAgent` accepts the same store through `modelHealthStore`; it then wires
+the persisted selector and metadata-only invocation observer into ordinary single- and
+cross-domain runs automatically. Explicit evaluator updates remain caller-controlled.
 
 ```typescript
 const health = new InMemoryAutonomousModelHealthStore();

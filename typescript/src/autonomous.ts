@@ -1,5 +1,6 @@
 import { ArgumentError, ProviderRuntimeError, isObject } from "./errors.js";
 import type { ApiClient } from "./client.js";
+import { AutonomousModelHealthController, type AutonomousModelHealthStore } from "./autonomous-control.js";
 import type { AutonomousLearningController } from "./autonomous-learning.js";
 import {
   AutonomousRuntime,
@@ -418,6 +419,8 @@ export interface AutonomousCrossDomainRunResult {
 
 export interface AutonomousAgentOptions {
   selector?: AutonomousModelSelector;
+  /** Optional caller-owned persisted health ledger used for selection and invocation telemetry. */
+  modelHealthStore?: AutonomousModelHealthStore;
   apiClient?: ApiClient;
   toolCatalogue?: ToolCatalogue;
   toolExecutor?: DomainToolExecutor;
@@ -460,6 +463,19 @@ export interface DomainToolExecutor {
 
 export interface DomainToolApprover {
   (tool: AutonomousDomainToolBinding, call: ProviderToolCall): boolean | Promise<boolean>;
+}
+
+function composeInvocationObservers(...observers: readonly (ProviderInvocationObserver | undefined)[]): ProviderInvocationObserver | undefined {
+  const active = observers.filter((observer): observer is ProviderInvocationObserver => observer !== undefined);
+  if (!active.length) return undefined;
+  return {
+    before: async (metadata) => {
+      for (const observer of active) await observer.before?.(metadata);
+    },
+    after: async (metadata, outcome) => {
+      for (const observer of active) await observer.after?.(metadata, outcome);
+    },
+  };
 }
 
 interface ProfileSeed {
@@ -1223,6 +1239,7 @@ export function contextualSelector(client: ApiClient, options: { requestOptions?
 export class AutonomousAgent {
   readonly llm: LLMRuntime;
   readonly runtime: AutonomousRuntime;
+  readonly modelHealthController?: AutonomousModelHealthController;
   readonly learner?: AutonomousOnlineLearner;
   private readonly apiClient?: ApiClient;
   private readonly modelsById = new Map<string, AutonomousModelCandidate>();
@@ -1240,10 +1257,11 @@ export class AutonomousAgent {
     this.llm = llm;
     this.apiClient = options.apiClient;
     this.learner = options.learner;
+    this.modelHealthController = options.modelHealthStore === undefined ? undefined : new AutonomousModelHealthController(options.modelHealthStore);
     this.toolCatalogue = options.toolCatalogue;
     this.toolExecutor = options.toolExecutor;
     this.toolApprover = options.toolApprover;
-    const selector = options.selector ?? (options.learner ? (request: AutonomousSelectionRequest) => options.learner!.select(request) : options.apiClient ? contextualSelector(options.apiClient) : undefined);
+    const selector = options.selector ?? (this.modelHealthController ? this.modelHealthController.selector() : options.learner ? (request: AutonomousSelectionRequest) => options.learner!.select(request) : options.apiClient ? contextualSelector(options.apiClient) : undefined);
     this.runtime = new AutonomousRuntime(llm, { selector });
   }
 
@@ -1411,7 +1429,8 @@ export class AutonomousAgent {
     const messages: ProviderMessage[] = blueprint.prompt.messages.map((message) => ({ role: message.role, content: message.content }));
     const request: ProviderRequest = { model: "autonomous-selection-placeholder", messages, maxOutputTokens: options.maxOutputTokens ?? 1_024, temperature: options.temperature, tools: tools.length ? tools : undefined, toolChoice: tools.length ? "auto" : undefined };
     const executionPlan = { task: taskText, domain: blueprint.domain_profile.domain, capability: options.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class, requiredCapabilities: blueprint.required_capabilities, candidates, request };
-    const feedbackObserver: ProviderInvocationObserver = options.observer ?? {};
+    const healthObserver = this.modelHealthController?.observer({ domain: blueprint.domain_profile.domain, capability: executionPlan.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class });
+    const feedbackObserver = composeInvocationObservers(options.observer, healthObserver);
     if (tools.length || options.authorizeAndExecute || this.toolRuntimeForRun()) {
       const authorizeAndExecute = options.authorizeAndExecute ?? (this.toolRuntimeForRun() ? (calls: ProviderToolCall[]) => this.toolRuntimeForRun()!.authorizeAndExecute(calls, { domains: selectedDomains, approveEffects: options.approveEffects }) : async (calls: ProviderToolCall[]) => calls.map((call) => ({ callId: call.id, approved: false, isError: true, content: { status: "authorization_required", tool: call.name, secret_material: "never_returned" } })));
       const loop = await this.runtime.invokeToolLoop(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, authorizeAndExecute, signal: options.signal, observer: feedbackObserver });

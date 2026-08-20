@@ -9,7 +9,6 @@ import {
   type ProviderInvocationObserver,
   type ProviderInvocationOutcome,
 } from "./llm.js";
-import { builtinAutonomousDomainEvaluatorProfiles } from "./autonomous-learning.js";
 import type { AutonomousDomainName } from "./autonomous.js";
 import { digestJson } from "./tooling.js";
 import type { JsonObject } from "./types.js";
@@ -591,6 +590,7 @@ export class AutonomousOfflineReplayEngine {
   async replay(inputs: readonly AutonomousReplayCaseInput[]): Promise<AutonomousReplayReport> {
     if (!Array.isArray(inputs) || inputs.length > AUTONOMOUS_REPLAY_MAX_CASES) throw new ArgumentError("replay cases are outside their bounds");
     const cases = inputs.map(normalizeReplayCase);
+    const { builtinAutonomousDomainEvaluatorProfiles } = await import("./autonomous-learning.js");
     const profiles = await builtinAutonomousDomainEvaluatorProfiles();
     const profilesByDomain = new Map(profiles.map((profile) => [profile.domain, profile]));
     const results: AutonomousReplayCaseResult[] = [];
