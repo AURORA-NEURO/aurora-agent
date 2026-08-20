@@ -218,7 +218,7 @@ export interface AutonomousRouteCandidate extends JsonObject {
   capability: string;
   risk_class: string;
   workflow_id: string;
-  evidence: "fixed_catalogue_term_matches_only";
+  evidence: "fixed_catalogue_term_matches_only" | "provider_semantic_candidate";
 }
 
 export interface AutonomousRouteProposal extends JsonObject {
@@ -231,7 +231,7 @@ export interface AutonomousRouteProposal extends JsonObject {
   abstained: boolean;
   reason: AutonomousRouteReason;
   cross_domain: boolean;
-  source: "deterministic_vocabulary";
+  source: "deterministic_vocabulary" | "provider_semantic_hybrid";
   route_digest: string;
   retention: "route_scores_and_digests_only; task_text_is_not_retained_in_route";
   does_not_claim: string[];

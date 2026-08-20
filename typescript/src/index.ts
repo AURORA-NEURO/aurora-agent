@@ -220,6 +220,15 @@ export {
   InMemoryAutonomousLearningTrajectoryStore,
   builtinAutonomousDomainEvaluatorProfiles,
 } from "./autonomous-learning.js";
+export {
+  AUTONOMOUS_SEMANTIC_ROUTE_SCHEMA,
+  semanticRouteAutonomousTask,
+} from "./autonomous-routing.js";
+export type {
+  AutonomousSemanticRouteCandidate,
+  AutonomousSemanticRouteOptions,
+  AutonomousSemanticRouteResult,
+} from "./autonomous-routing.js";
 export type {
   AutonomousDomainEvaluatorProfile,
   AutonomousCrossDomainLearningSettlement,

@@ -106,6 +106,15 @@ workflow stage dependencies, bounded prompt assembly, exact tool binding, provid
 value-only online learning. `route()` and `blueprint()` are non-executing: they return digests,
 omissions, required capabilities, approval triggers, and a plan that explicitly has not started.
 
+For ambiguous or novel intake, `semanticRouteAutonomousTask()` adds an explicit provider-assisted
+classification pass. It sends the private task only through the caller's approved local provider,
+asks for structured domain scores against the reviewed twelve-domain catalogue, and maps the
+provider's domain choice back to catalogue-authoritative capabilities and risk classes. The
+deterministic route remains the safety baseline: provider/deterministic disagreement returns
+`provider_disagreement` and preserves the deterministic route, while provider abstention and
+malformed output remain explicit refusals. Routing still requires `approveProviderCall: true` and
+never authorizes a tool, effect, or domain claim.
+
 The live tool boundary is opt-in and catalogue-backed. Create a `ToolCatalogue` from the gateway's
 tool definitions, pass it with a caller-owned executor, and inspect
 `AutonomousDomainToolRegistry.plan()` before allowing a run. Read-only tools can be proposed

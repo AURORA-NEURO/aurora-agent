@@ -1233,6 +1233,15 @@ content digest under a token budget. `compileAutonomousPlan()` produces dependen
 steps with reviewed workflow-to-adapter aliases, exact active tool names, effect classes, and an
 explicit `execution: "not_started"` boundary.
 
+`semanticRouteAutonomousTask()` is the provider-assisted decision path for ambiguous or novel
+intake. It sends the task only to the caller-approved local provider, requires a bounded structured
+JSON response, and maps selected domains back to the reviewed profile catalogue rather than
+trusting provider-supplied capabilities or risk classes. The deterministic route remains a hard
+baseline: a provider/deterministic disagreement returns `provider_disagreement` with the original
+route preserved; provider abstention and malformed output remain typed refusals. The semantic
+route result retains only candidate scores, route/selection/prompt/outcome digests, and the
+selected model. It does not authorize execution, tools, effects, or external claims.
+
 The live catalogue path is:
 
 ```text
