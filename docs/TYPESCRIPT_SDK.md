@@ -1419,6 +1419,53 @@ enabled, its evaluator callback must cover exactly the returned `learning_episod
 controller then applies discounted return-to-go to the completed specialist/synthesis sequence.
 `synthesize: false` is a supported specialists-only mode, and a partial run never receives a hidden
 synthesis reward.
+
+`runAutonomousCrossDomainReplanCycle()` adds the bounded closed loop for cases where the evaluator
+needs another complete fan-out/fan-in attempt rather than another single provider turn:
+
+```ts
+const result = await runAutonomousCrossDomainReplanCycle(agent, task, {
+  approveProviderCall: true,
+  maxReplans: 2,
+  subtasks,
+  learning: {
+    controller: learning,
+    episodePrefix: "review-job-42",
+    trajectoryIdPrefix: "review-job-42-trajectory",
+  },
+  evaluate: async (run) => ({
+    evaluator_id: "cross-reviewer",
+    evaluator_version: "2026-08",
+    reward: 0.72,
+    passed: false,
+    replan_requested: true,
+    replan_instruction: "Resolve the specialist disagreement and state remaining uncertainty.",
+    rewards: Object.fromEntries(run.learning_episode_ids.map((episodeId) => [episodeId, {
+      evaluator_id: "cross-reviewer",
+      evaluator_version: "2026-08",
+      reward: 0.72,
+      passed: false,
+    }])),
+  }),
+});
+```
+
+Each attempt receives unique child/synthesis episode IDs in the form
+`episodePrefix:task_digest:attempt-N:item`, and a unique trajectory ID. The evaluator must return
+exactly one reward packet for every pending episode in that attempt; missing, extra, malformed, or
+credential-shaped feedback is rejected before settlement. The route from the first approved
+attempt is reused, the shared cost budget and execution controller span all attempts, and a
+replan can add only one required transient context chunk. It cannot add domains, capabilities,
+tools, effects, credentials, approvals, or budget. `maxReplans` defaults to one and is capped at
+three. The result reports `completed`, `completed_without_replan`, or `replan_limit_reached`,
+per-attempt outcome/evaluation digests, and one delayed-credit settlement per attempt. Provider
+responses and the transient instruction remain application-local; returned attempt/evaluator
+projections contain only value fields and digests. If no learning controller is supplied, the
+same evaluator loop remains available with an empty reward map and no bandit mutation.
+
+This closes the cross-domain feedback loop without pretending that a specialist response is a
+verified fact: evaluator judgment decides whether to retry, while the reviewed route, caller
+approval, tool authorization, model gates, and aggregate budgets remain the authority boundaries.
 Post-run evaluator settlement and memory projection are part of the controlled lifecycle: if either
 throws after provider work has completed, the cycle fails the shared execution controller before
 rethrowing, unless the caller chose `executionLifecycle: "observe_only"` for an enclosing manager.

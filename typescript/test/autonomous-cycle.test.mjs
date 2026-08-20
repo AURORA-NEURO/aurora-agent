@@ -11,6 +11,7 @@ import {
   LLMRuntime,
   openaiCompatibleProvider,
   runAutonomousCrossDomainDecisionCycle,
+  runAutonomousCrossDomainReplanCycle,
   runAutonomousDecisionCycle,
   runAutonomousReplanCycle,
 } from "../dist/index.js";
@@ -402,11 +403,84 @@ test("cross-domain decision cycle settles specialist and synthesis credit as one
   assert.equal(calls(), 3);
 });
 
+test("cross-domain replan cycle repeats bounded fan-out with unique trajectories and screened feedback", async () => {
+  const cycle = cycleAgent();
+  const learning = new AutonomousLearningController(cycle.agent);
+  let evaluations = 0;
+  const result = await runAutonomousCrossDomainReplanCycle(cycle.agent, "Research a biomedical neuroscience experiment with EEG patient evidence", {
+    approveProviderCall: true,
+    maxReplans: 1,
+    subtasks: [
+      { id: "bio", domain: "biomedical", task: "Review biomedical evidence." },
+      { id: "neuro", domain: "neuroscience", task: "Review neuroscience evidence." },
+    ],
+    learning: {
+      controller: learning,
+      episodePrefix: "cross-replan-test",
+      trajectoryIdPrefix: "cross-replan-trajectory",
+    },
+    evaluate: (run) => {
+      const shouldReplan = evaluations++ === 0;
+      return {
+        evaluator_id: "cross-reviewer",
+        evaluator_version: "1",
+        reward: shouldReplan ? 0.35 : 0.9,
+        passed: !shouldReplan,
+        replan_requested: shouldReplan,
+        replan_instruction: shouldReplan ? "Resolve the specialist disagreement and make uncertainty explicit." : null,
+        rewards: Object.fromEntries(run.learning_episode_ids.map((episodeId) => [episodeId, {
+          evaluator_id: "cross-reviewer",
+          evaluator_version: "1",
+          reward: shouldReplan ? 0.35 : 0.9,
+          passed: !shouldReplan,
+        }])),
+      };
+    },
+  });
+  assert.equal(result.status, "completed");
+  assert.equal(result.replan_count, 1);
+  assert.equal(result.attempts.length, 2);
+  assert.notEqual(result.attempts[0].trajectory_id, result.attempts[1].trajectory_id);
+  assert.equal(result.settlements.length, 2);
+  assert.equal(result.final.run.learning_episode_ids.length, 3);
+  assert.equal(result.final.settlement.trajectory.settlements.length, 3);
+  assert.equal(result.final.settlement.trajectory.settlements.at(-1).next_state.generation, 6);
+  assert.equal(cycle.calls(), 6);
+  assert.equal(JSON.stringify(cycle.bodies[3]).includes("autonomous-cross-domain-replan-2"), true);
+  assert.equal(JSON.stringify({ attempts: result.attempts, evaluations: result.evaluations }).includes("Resolve the specialist disagreement"), false);
+});
+
+test("cross-domain replan cycle refuses incomplete per-episode evaluator coverage", async () => {
+  const { agent, calls } = cycleAgent();
+  const learning = new AutonomousLearningController(agent);
+  await assert.rejects(
+    runAutonomousCrossDomainReplanCycle(agent, "Research a biomedical neuroscience experiment with EEG patient evidence", {
+      approveProviderCall: true,
+      subtasks: [
+        { id: "bio", domain: "biomedical", task: "Review biomedical evidence." },
+        { id: "neuro", domain: "neuroscience", task: "Review neuroscience evidence." },
+      ],
+      learning: { controller: learning },
+      evaluate: () => ({
+        evaluator_id: "cross-reviewer",
+        evaluator_version: "1",
+        reward: 0,
+        passed: false,
+        replan_requested: false,
+        rewards: {},
+      }),
+    }),
+    /cover exactly every pending learning episode/,
+  );
+  assert.equal(calls(), 3);
+});
+
 test("cross-domain decision cycle propagates structured output through fan-out and synthesis", async () => {
   const cycle = cycleAgent([{ text: JSON.stringify({ answer: "specialist-1" }) }, { text: JSON.stringify({ answer: "specialist-2" }) }, { text: JSON.stringify({ answer: "synthesis" }) }]);
   const responseSchema = { type: "object", additionalProperties: false, properties: { answer: { type: "string" } }, required: ["answer"] };
   const result = await runAutonomousCrossDomainDecisionCycle(cycle.agent, "Return a structured biomedical neuroscience synthesis.", {
     approveProviderCall: true,
+    maxParallelChildren: 1,
     requireJson: true,
     responseSchema,
     subtasks: [
@@ -540,6 +614,31 @@ test("cross-domain fan-out accepts a representative pair for every built-in doma
     assert.equal(result.status, "children_completed", `${left}/${right} should complete`);
     assert.deepEqual(result.run.child_runs.map((child) => child.domain), [left, right]);
     assert.equal(result.run.synthesis, null);
+  }
+  assert.equal(calls(), domains.length * 2);
+});
+
+test("cross-domain replan keeps the same reviewed contract for every built-in domain", async () => {
+  const domains = ["coding", "browser", "data", "science", "biomedical", "neuroscience", "operations", "enterprise", "multi_agent", "multimodal", "cross_domain", "evaluation"];
+  const { agent, calls } = cycleAgent();
+  for (let index = 0; index < domains.length; index += 1) {
+    const left = domains[index];
+    const right = domains[(index + 1) % domains.length];
+    const task = `${left} ${right}`;
+    const route = await agent.route(task, { maxDomains: 2, minMargin: 0.2, allowCrossDomain: true });
+    const result = await runAutonomousCrossDomainReplanCycle(agent, task, {
+      routeOverride: route,
+      approveProviderCall: true,
+      maxReplans: 0,
+      synthesize: false,
+      subtasks: [
+        { id: "left", domain: left, task: `${left} specialist review` },
+        { id: "right", domain: right, task: `${right} specialist review` },
+      ],
+      evaluate: () => ({ evaluator_id: "domain-reviewer", evaluator_version: "1", reward: 1, passed: true, replan_requested: false, rewards: {} }),
+    });
+    assert.equal(result.status, "completed", `${left}/${right} should complete`);
+    assert.equal(result.final.run.status, "children_completed", `${left}/${right} should retain child completion`);
   }
   assert.equal(calls(), domains.length * 2);
 });

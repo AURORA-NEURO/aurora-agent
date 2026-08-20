@@ -927,3 +927,386 @@ export async function runAutonomousCrossDomainDecisionCycle(
     throw error;
   }
 }
+
+export const AUTONOMOUS_CROSS_DOMAIN_REPLAN_CYCLE_SCHEMA = "bioprism-typescript-autonomous-cross-domain-replan-cycle/0.1" as const;
+export const AUTONOMOUS_CROSS_DOMAIN_REPLAN_CONTEXT_SCHEMA = "bioprism-typescript-autonomous-cross-domain-replan-context/0.1" as const;
+
+export interface AutonomousCrossDomainReplanEvaluation extends JsonObject {
+  evaluator_id: string;
+  evaluator_version: string;
+  reward: number;
+  passed: boolean;
+  failed?: boolean;
+  feedback_digest?: string | null;
+  failure_class?: string | null;
+  evidence_digest?: string | null;
+  rewards: Record<string, AutonomousEvaluatorRewardInput>;
+  replan_requested: boolean;
+  replan_instruction?: string | null;
+}
+
+export type AutonomousCrossDomainReplanEvaluator = (
+  result: AutonomousCrossDomainRunResult,
+) => AutonomousCrossDomainReplanEvaluation | Promise<AutonomousCrossDomainReplanEvaluation>;
+
+export interface AutonomousCrossDomainReplanLearningOptions {
+  controller: AutonomousLearningController;
+  /** Prefix must be unique for the caller's logical cross-domain replan cycle. */
+  episodePrefix?: string;
+  /** Prefix must be unique for the caller's logical cross-domain replan cycle. */
+  trajectoryIdPrefix?: string;
+  discount?: number;
+  remote?: boolean;
+}
+
+export interface AutonomousCrossDomainReplanEvaluationProjection extends JsonObject {
+  evaluator_id: string;
+  evaluator_version: string;
+  reward: number;
+  passed: boolean;
+  failed: boolean;
+  feedback_digest: string | null;
+  failure_class: string | null;
+  evidence_digest: string | null;
+  reward_episode_count: number;
+  replan_requested: boolean;
+  replan_instruction_digest: string | null;
+}
+
+export interface AutonomousCrossDomainReplanAttempt extends JsonObject {
+  attempt: number;
+  status: AutonomousCrossDomainDecisionCycleStatus;
+  run_status: AutonomousCrossDomainRunResult["status"] | null;
+  route_digest: string | null;
+  outcome_digest: string | null;
+  evaluation_digest: string | null;
+  evaluation: AutonomousCrossDomainReplanEvaluationProjection | null;
+  learning_episode_ids: string[];
+  trajectory_id: string | null;
+}
+
+export type AutonomousCrossDomainReplanCycleStatus =
+  | AutonomousCrossDomainDecisionCycleStatus
+  | "completed_without_replan"
+  | "replan_limit_reached";
+
+export interface AutonomousCrossDomainReplanCycleOptions extends Omit<AutonomousCrossDomainDecisionCycleOptions, "learning"> {
+  evaluate: AutonomousCrossDomainReplanEvaluator;
+  /** Additional evaluator-requested fan-out/fan-in attempts. The SDK caps this at three. */
+  maxReplans?: number;
+  learning?: AutonomousCrossDomainReplanLearningOptions;
+}
+
+export interface AutonomousCrossDomainReplanCycleResult {
+  schema: typeof AUTONOMOUS_CROSS_DOMAIN_REPLAN_CYCLE_SCHEMA;
+  status: AutonomousCrossDomainReplanCycleStatus;
+  final: AutonomousCrossDomainDecisionCycleResult | null;
+  attempts: AutonomousCrossDomainReplanAttempt[];
+  replan_count: number;
+  evaluations: AutonomousCrossDomainReplanEvaluationProjection[];
+  learning_episode_ids: string[];
+  settlements: AutonomousCrossDomainLearningSettlement[];
+  retention: "provider_responses_local; replan_instructions_transient; value_only_evaluation_and_learning_projection";
+  authorization: "semantic_routing_and_fanout_require_separate_explicit_approval";
+}
+
+const CROSS_REPLAN_RETENTION = "provider_responses_local; replan_instructions_transient; value_only_evaluation_and_learning_projection" as const;
+
+function normalizeCrossDomainReplanReward(value: unknown, episodeId: string): AutonomousEvaluatorRewardInput {
+  if (!isObject(value)) throw new ArgumentError(`cross-domain replan reward for ${episodeId} must be an object`);
+  const evaluatorId = boundedReplanIdentifier(`cross-domain replan reward ${episodeId} evaluator_id`, value.evaluator_id);
+  const evaluatorVersion = boundedReplanIdentifier(`cross-domain replan reward ${episodeId} evaluator_version`, value.evaluator_version);
+  const reward = boundedReplanReward(value.reward);
+  if (typeof value.passed !== "boolean") throw new ArgumentError(`cross-domain replan reward for ${episodeId} passed must be boolean`);
+  if (value.failed !== undefined && typeof value.failed !== "boolean") throw new ArgumentError(`cross-domain replan reward for ${episodeId} failed must be boolean`);
+  let failureClass: string | null = null;
+  if (value.failure_class !== undefined && value.failure_class !== null) failureClass = boundedReplanIdentifier(`cross-domain replan reward ${episodeId} failure_class`, value.failure_class);
+  return {
+    evaluator_id: evaluatorId,
+    evaluator_version: evaluatorVersion,
+    reward,
+    passed: value.passed,
+    failed: value.failed,
+    feedback_digest: boundedReplanDigest(`cross-domain replan reward ${episodeId} feedback_digest`, value.feedback_digest, true),
+    failure_class: failureClass,
+    evidence_digest: boundedReplanDigest(`cross-domain replan reward ${episodeId} evidence_digest`, value.evidence_digest, true),
+  };
+}
+
+function normalizeCrossDomainReplanEvaluation(value: unknown, expectedEpisodeIds: readonly string[]): AutonomousCrossDomainReplanEvaluation {
+  if (!isObject(value)) throw new ArgumentError("cross-domain replan evaluator must return an object");
+  const evaluatorId = boundedReplanIdentifier("cross-domain replan evaluator_id", value.evaluator_id);
+  const evaluatorVersion = boundedReplanIdentifier("cross-domain replan evaluator_version", value.evaluator_version);
+  const reward = boundedReplanReward(value.reward);
+  if (typeof value.passed !== "boolean") throw new ArgumentError("cross-domain replan evaluator passed must be boolean");
+  if (value.failed !== undefined && typeof value.failed !== "boolean") throw new ArgumentError("cross-domain replan evaluator failed must be boolean");
+  if (typeof value.replan_requested !== "boolean") throw new ArgumentError("cross-domain replan evaluator replan_requested must be boolean");
+  const instruction = boundedReplanInstruction(value.replan_instruction);
+  if (value.replan_requested && !instruction) throw new ArgumentError("cross-domain replan evaluator must provide a bounded instruction when replan_requested is true");
+  if (!value.replan_requested && instruction) throw new ArgumentError("cross-domain replan evaluator supplied an instruction without requesting a replan");
+  if (!isObject(value.rewards)) throw new ArgumentError("cross-domain replan evaluator rewards must be an object keyed by learning episode ID");
+  const rewards: Record<string, AutonomousEvaluatorRewardInput> = {};
+  const rewardEntries = Object.entries(value.rewards);
+  if (rewardEntries.length > 32) throw new ArgumentError("cross-domain replan evaluator returned too many episode rewards");
+  for (const [episodeId, reward] of rewardEntries) {
+    boundedReplanIdentifier("cross-domain replan reward episode_id", episodeId);
+    rewards[episodeId] = normalizeCrossDomainReplanReward(reward, episodeId);
+  }
+  const expected = new Set(expectedEpisodeIds);
+  const supplied = Object.keys(rewards);
+  if (supplied.length !== expected.size || supplied.some((episodeId) => !expected.has(episodeId))) throw new ArgumentError("cross-domain replan evaluator rewards must cover exactly every pending learning episode");
+  let failureClass: string | null = null;
+  if (value.failure_class !== undefined && value.failure_class !== null) failureClass = boundedReplanIdentifier("cross-domain replan evaluator failure_class", value.failure_class);
+  return {
+    evaluator_id: evaluatorId,
+    evaluator_version: evaluatorVersion,
+    reward,
+    passed: value.passed,
+    failed: value.failed,
+    feedback_digest: boundedReplanDigest("cross-domain replan evaluator feedback_digest", value.feedback_digest, true),
+    failure_class: failureClass,
+    evidence_digest: boundedReplanDigest("cross-domain replan evaluator evidence_digest", value.evidence_digest, true),
+    rewards,
+    replan_requested: value.replan_requested,
+    replan_instruction: instruction,
+  };
+}
+
+async function crossDomainReplanEvaluationProjection(value: AutonomousCrossDomainReplanEvaluation): Promise<AutonomousCrossDomainReplanEvaluationProjection> {
+  return {
+    evaluator_id: value.evaluator_id,
+    evaluator_version: value.evaluator_version,
+    reward: value.reward,
+    passed: value.passed,
+    failed: value.failed ?? !value.passed,
+    feedback_digest: value.feedback_digest ?? null,
+    failure_class: value.failure_class ?? null,
+    evidence_digest: value.evidence_digest ?? null,
+    reward_episode_count: Object.keys(value.rewards).length,
+    replan_requested: value.replan_requested,
+    replan_instruction_digest: value.replan_instruction ? await digestJson(value.replan_instruction) : null,
+  };
+}
+
+async function crossDomainReplanOutcomeDigest(run: AutonomousCrossDomainRunResult): Promise<string> {
+  return digestJson({
+    status: run.status,
+    route_digest: run.route.route_digest,
+    child_runs: run.child_runs.map((child) => ({
+      id: child.id,
+      domain: child.domain,
+      task_digest: child.task_digest,
+      status: child.result.status,
+      selection: child.result.selection,
+      response: child.result.response,
+      output_digest: child.output_digest,
+    })),
+    synthesis: run.synthesis ? {
+      status: run.synthesis.status,
+      selection: run.synthesis.selection,
+      response: run.synthesis.response,
+    } : null,
+  });
+}
+
+async function prepareCrossDomainReplanEpisodes(
+  controller: AutonomousLearningController,
+  run: AutonomousCrossDomainRunResult,
+  episodePrefix: string,
+  attempt: number,
+): Promise<AutonomousCrossDomainRunResult> {
+  const ids: string[] = [];
+  const parentJobId = boundedReplanIdentifier("cross-domain replan parent job", `${episodePrefix}:${run.route.task_digest}:attempt-${attempt}`);
+  for (const child of run.child_runs) {
+    if (child.result.status !== "completed") continue;
+    const episodeId = boundedReplanIdentifier("cross-domain replan episode", `${parentJobId}:${child.id}`);
+    const episode = await controller.prepareRun(child.result, { episodeId, runId: episodeId, stageId: child.id, parentJobId });
+    ids.push(episode.episode_id);
+  }
+  if (run.synthesis?.status === "completed") {
+    const episodeId = boundedReplanIdentifier("cross-domain replan episode", `${parentJobId}:synthesis`);
+    const episode = await controller.prepareRun(run.synthesis, { episodeId, runId: episodeId, stageId: "synthesis", parentJobId });
+    ids.push(episode.episode_id);
+  }
+  if (!ids.length) throw new ArgumentError("cross-domain replan requires at least one completed learning episode");
+  return { ...run, learning_episode_ids: ids, learning: "online_bandit_feedback_available" };
+}
+
+async function crossDomainReplanContextChunk(
+  attempt: number,
+  routeDigest: string,
+  outcomeDigest: string,
+  evaluation: AutonomousCrossDomainReplanEvaluation,
+): Promise<AutonomousPromptChunk> {
+  const instruction = evaluation.replan_instruction;
+  if (!instruction) throw new ArgumentError("cross-domain replan context requires an instruction");
+  return {
+    id: `autonomous-cross-domain-replan-${attempt}`,
+    content: JSON.stringify({
+      schema: AUTONOMOUS_CROSS_DOMAIN_REPLAN_CONTEXT_SCHEMA,
+      attempt,
+      prior: { route_digest: routeDigest, outcome_digest: outcomeDigest },
+      evaluator: {
+        evaluator_id: evaluation.evaluator_id,
+        evaluator_version: evaluation.evaluator_version,
+        reward: evaluation.reward,
+        passed: evaluation.passed,
+        failed: evaluation.failed ?? !evaluation.passed,
+        feedback_digest: evaluation.feedback_digest ?? null,
+        failure_class: evaluation.failure_class ?? null,
+        evidence_digest: evaluation.evidence_digest ?? null,
+      },
+      instruction,
+      guardrails: [
+        "This is bounded evaluator feedback, not a new authorization.",
+        "Preserve the reviewed domain set, model capability requirements, tool allow-list, budgets, and approval gates.",
+        "Do not treat prior specialist or synthesis responses as verified truth or claim an external effect occurred.",
+        "Use the same fan-out/fan-in contract and report uncertainty or unresolved domain disagreement explicitly.",
+      ],
+    }),
+    required: true,
+    priority: 95,
+  };
+}
+
+function crossDomainReplanResult(
+  status: AutonomousCrossDomainReplanCycleStatus,
+  final: AutonomousCrossDomainDecisionCycleResult | null,
+  attempts: AutonomousCrossDomainReplanAttempt[],
+  evaluations: AutonomousCrossDomainReplanEvaluationProjection[],
+  learningEpisodeIds: string[],
+  settlements: AutonomousCrossDomainLearningSettlement[],
+): AutonomousCrossDomainReplanCycleResult {
+  return {
+    schema: AUTONOMOUS_CROSS_DOMAIN_REPLAN_CYCLE_SCHEMA,
+    status,
+    final,
+    attempts,
+    replan_count: Math.max(0, attempts.length - 1),
+    evaluations,
+    learning_episode_ids: learningEpisodeIds,
+    settlements,
+    retention: CROSS_REPLAN_RETENTION,
+    authorization: CROSS_AUTHORIZATION,
+  };
+}
+
+/**
+ * Execute a bounded evaluator-guided cross-domain loop. Each attempt runs a complete specialist
+ * fan-out and optional synthesis under one shared budget. Evaluator feedback is transient and
+ * cannot widen the route, tools, approvals, or cost limits; every attempt gets unique pending
+ * episodes and an independently settled trajectory so replay and partial failure remain safe.
+ */
+export async function runAutonomousCrossDomainReplanCycle(
+  agent: AutonomousAgent,
+  task: string,
+  options: AutonomousCrossDomainReplanCycleOptions,
+): Promise<AutonomousCrossDomainReplanCycleResult> {
+  if (!options || typeof options.evaluate !== "function") throw new ArgumentError("cross-domain replan cycle requires an evaluator callback");
+  if (!agent || typeof agent.runCrossDomain !== "function" || typeof agent.route !== "function") throw new ArgumentError("cross-domain replan cycle requires an AutonomousAgent");
+  const maxReplans = boundedReplanCount(options.maxReplans);
+  const episodePrefix = options.learning ? boundedReplanIdentifier("cross-domain replan episodePrefix", options.learning.episodePrefix ?? "autonomous-cross-domain-replan") : null;
+  const trajectoryIdPrefix = options.learning ? boundedReplanIdentifier("cross-domain replan trajectoryIdPrefix", options.learning.trajectoryIdPrefix ?? "autonomous-cross-domain-replan") : null;
+  if (options.learning && (!options.learning.controller || typeof options.learning.controller.prepareRun !== "function" || typeof options.learning.controller.settleCrossDomain !== "function")) throw new ArgumentError("cross-domain replan learning controller is malformed");
+  const costBudget = cycleCostBudget(options);
+  const attempts: AutonomousCrossDomainReplanAttempt[] = [];
+  const evaluations: AutonomousCrossDomainReplanEvaluationProjection[] = [];
+  const learningEpisodeIds: string[] = [];
+  const settlements: AutonomousCrossDomainLearningSettlement[] = [];
+  let context = [...(options.context ?? [])];
+  let routeOverride = options.routeOverride;
+  let final: AutonomousCrossDomainDecisionCycleResult | null = null;
+
+  for (let attempt = 0; attempt <= maxReplans; attempt += 1) {
+    let cycle: AutonomousCrossDomainDecisionCycleResult;
+    try {
+      cycle = await runAutonomousCrossDomainDecisionCycle(agent, task, {
+        ...options,
+        semanticRouting: attempt === 0 ? options.semanticRouting : undefined,
+        routeOverride,
+        context,
+        costBudget,
+        maxTotalCostUnits: undefined,
+        executionAttempt: attempt + 1,
+        executionLifecycle: "observe_only",
+        learning: undefined,
+        memory: attempt === 0 ? options.memory : undefined,
+      });
+    } catch (error) {
+      await failExecutionIfActive(options.execution, error);
+      throw error;
+    }
+    final = cycle;
+    const run = cycle.run;
+    let outcomeDigest: string | null = null;
+    try {
+      outcomeDigest = run ? await crossDomainReplanOutcomeDigest(run) : null;
+    } catch (error) {
+      await failExecutionIfActive(options.execution, error);
+      throw error;
+    }
+    const terminalRun = run && (run.status === "completed" || run.status === "children_completed" || run.status === "children_partial");
+    if (!terminalRun || !run) {
+      try {
+        await options.execution?.checkpoint({ status: cycle.status, reason: `cross_domain_replan_${cycle.status}` });
+      } catch (error) {
+        await failExecutionIfActive(options.execution, error);
+        throw error;
+      }
+      attempts.push({ attempt: attempt + 1, status: cycle.status, run_status: run?.status ?? null, route_digest: cycle.route.route_digest, outcome_digest: outcomeDigest, evaluation_digest: null, evaluation: null, learning_episode_ids: [], trajectory_id: null });
+      return crossDomainReplanResult(cycle.status, final, attempts, evaluations, learningEpisodeIds, settlements);
+    }
+
+    let runForEvaluation = run;
+    let pendingEpisodeIds: string[] = [];
+    let trajectoryId: string | null = null;
+    try {
+      if (options.learning) {
+        runForEvaluation = await prepareCrossDomainReplanEpisodes(options.learning.controller, run, episodePrefix!, attempt + 1);
+        pendingEpisodeIds = [...runForEvaluation.learning_episode_ids];
+        trajectoryId = boundedReplanIdentifier("cross-domain replan trajectory", `${trajectoryIdPrefix}:${run.route.task_digest}:attempt-${attempt + 1}`);
+      }
+      const evaluation = normalizeCrossDomainReplanEvaluation(await options.evaluate(runForEvaluation), pendingEpisodeIds);
+      const projection = await crossDomainReplanEvaluationProjection(evaluation);
+      const evaluationDigest = await digestJson(projection);
+      await options.execution?.recordEvaluation({ evaluatorId: evaluation.evaluator_id, evaluatorVersion: evaluation.evaluator_version, reward: evaluation.reward, passed: evaluation.passed, evaluationDigest, failureClass: evaluation.failure_class });
+      if (options.learning) {
+        const settlement = await options.learning.controller.settleCrossDomain(runForEvaluation, evaluation.rewards, { trajectoryId: trajectoryId!, discount: options.learning.discount, remote: options.learning.remote });
+        settlements.push(settlement);
+        learningEpisodeIds.push(...pendingEpisodeIds);
+        if (attempt === 0 && options.memory && cycle.memory) {
+          const settlementItems = settlement.trajectory.settlements;
+          for (let index = 0; index < cycle.memory.recorded_episode_ids.length; index += 1) {
+            const memoryEpisodeId = cycle.memory.recorded_episode_ids[index];
+            const learningEpisodeId = pendingEpisodeIds[index];
+            if (!memoryEpisodeId || !learningEpisodeId) continue;
+            const settlementItem = settlementItems.find((item) => item.episode.episode_id === learningEpisodeId);
+            if (!settlementItem) continue;
+            await recordMemoryEvaluation(options.memory, memoryEpisodeId, settlementItem.assessment);
+            cycle.memory.evaluation_recorded_episode_ids.push(memoryEpisodeId);
+          }
+        }
+        final = { ...cycle, run: runForEvaluation, learning_episode_ids: pendingEpisodeIds, evaluation: projectedEvaluations(settlement), settlement };
+      }
+      evaluations.push(projection);
+      attempts.push({ attempt: attempt + 1, status: cycle.status, run_status: run.status, route_digest: cycle.route.route_digest, outcome_digest: outcomeDigest, evaluation_digest: evaluationDigest, evaluation: projection, learning_episode_ids: pendingEpisodeIds, trajectory_id: trajectoryId });
+
+      if (!evaluation.replan_requested) {
+        await options.execution?.complete(evaluation.passed ? "completed" : "completed_without_replan");
+        return crossDomainReplanResult(evaluation.passed ? "completed" : "completed_without_replan", final, attempts, evaluations, learningEpisodeIds, settlements);
+      }
+      if (attempt >= maxReplans) {
+        await options.execution?.complete("replan_limit_reached");
+        return crossDomainReplanResult("replan_limit_reached", final, attempts, evaluations, learningEpisodeIds, settlements);
+      }
+      const nextContext = await crossDomainReplanContextChunk(attempt + 2, cycle.route.route_digest, outcomeDigest!, evaluation);
+      await options.execution?.replan({ instructionDigest: projection.replan_instruction_digest, attempt: attempt + 2, reason: "cross_domain_evaluator_requested" });
+      context = [...context, nextContext];
+      routeOverride = cycle.route;
+    } catch (error) {
+      await failExecutionIfActive(options.execution, error);
+      throw error;
+    }
+  }
+  throw new ArgumentError("cross-domain replan cycle exited without a terminal result");
+}
