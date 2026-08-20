@@ -14,6 +14,7 @@ from prism_sdk.llm_runtime import (
     CredentialStore,
     LLMRuntime,
     ModelCatalogue,
+    ProviderModelDescriptor,
     ProviderHealthLedger,
     ProviderError,
     ProviderOnboarding,
@@ -487,6 +488,81 @@ class LlmRuntimeTests(unittest.TestCase):
         semantic_gap = catalogue.compatibility_report(("science",))
         self.assertEqual(semantic_gap["compatible_count"], 0)
         self.assertEqual(semantic_gap["evidence_posture"], "static_caller_declared_capabilities_only")
+
+    def test_model_catalogue_reconciliation_retires_stale_provider_arms(self) -> None:
+        catalogue = ModelCatalogue(
+            [
+                {
+                    "provider": "local",
+                    "model": "old-model",
+                    "context_window_tokens": 8_000,
+                    "max_output_tokens": 512,
+                    "quality": 0.7,
+                    "latency_ms": 100,
+                    "cost_per_million_tokens": 1,
+                    "reliability": 0.8,
+                },
+                {
+                    "provider": "local",
+                    "model": "retained-model",
+                    "context_window_tokens": 8_000,
+                    "max_output_tokens": 512,
+                    "quality": 0.7,
+                    "latency_ms": 100,
+                    "cost_per_million_tokens": 1,
+                    "reliability": 0.8,
+                },
+                {
+                    "provider": "other",
+                    "model": "unrelated-model",
+                    "context_window_tokens": 8_000,
+                    "max_output_tokens": 512,
+                    "quality": 0.7,
+                    "latency_ms": 100,
+                    "cost_per_million_tokens": 1,
+                    "reliability": 0.8,
+                },
+            ]
+        )
+        descriptor = ProviderModelDescriptor("local", "retained-model", context_window_tokens=16_000, max_output_tokens=1_024)
+        report = catalogue.reconcile_discovered(
+            [descriptor],
+            priors={
+                "local/retained-model": {
+                    "quality": 0.95,
+                    "latency_ms": 20,
+                    "cost_per_million_tokens": 2,
+                    "reliability": 0.99,
+                }
+            },
+        )
+        self.assertEqual(report["registered_model_ids"], [])
+        self.assertEqual(report["replaced_model_ids"], ["local/retained-model"])
+        self.assertEqual(report["removed_model_ids"], ["local/old-model"])
+        self.assertEqual(
+            [row["provider"] + "/" + row["model"] for row in catalogue.candidates()],
+            ["local/retained-model", "other/unrelated-model"],
+        )
+        self.assertEqual(catalogue.get("local", "retained-model").quality, 0.95)
+
+    def test_model_catalogue_reconciliation_can_retire_an_empty_provider_inventory(self) -> None:
+        catalogue = ModelCatalogue(
+            [
+                {
+                    "provider": "local",
+                    "model": "retire-me",
+                    "context_window_tokens": 8_000,
+                    "max_output_tokens": 512,
+                    "quality": 0.7,
+                    "latency_ms": 100,
+                    "cost_per_million_tokens": 1,
+                    "reliability": 0.8,
+                }
+            ]
+        )
+        report = catalogue.reconcile_discovered([], priors={}, providers=["local"])
+        self.assertEqual(report["removed_model_ids"], ["local/retire-me"])
+        self.assertEqual(catalogue.candidates(), [])
 
     def test_model_discovery_rejects_missing_credential_before_network(self) -> None:
         runtime = LLMRuntime(CredentialStore())

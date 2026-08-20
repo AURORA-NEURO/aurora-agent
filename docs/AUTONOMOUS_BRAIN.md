@@ -1777,6 +1777,12 @@ agent.register_discovered_models(
 )
 ```
 
+For a live catalogue refresh, use `agent.reconcile_discovered_models(...)` after projecting the
+provider inventory. It atomically replaces changed metadata, registers new arms, and retires stale
+arms for the represented provider. Pass `providers=[provider]` when an empty inventory is
+authoritative. The value-only receipt exposes `registered_model_ids`, `replaced_model_ids`, and
+`removed_model_ids` without retaining provider responses or credentials.
+
 Rows without an explicit `provider/model` prior are rejected instead of becoming silent routing
 arms. This makes live availability useful to model selection while preserving the separation
 between provider claims, local benchmarks, and autonomous decisions. Inventory-derived

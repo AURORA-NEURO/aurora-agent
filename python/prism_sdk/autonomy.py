@@ -8996,6 +8996,21 @@ class AutonomousAgent:
             replace_existing=replace_existing,
         )
 
+    def reconcile_discovered_models(
+        self,
+        descriptors: Sequence[ProviderModelDescriptor],
+        *,
+        priors: Mapping[str, Mapping[str, Any]],
+        providers: Sequence[str] | None = None,
+    ) -> dict[str, Any]:
+        """Atomically reconcile discovered provider arms, including stale-arm retirement."""
+
+        return self.catalogue.reconcile_discovered(
+            descriptors,
+            priors=priors,
+            providers=providers,
+        )
+
     def register_provider(self, config: ProviderConfig) -> None:
         """Register non-secret provider transport metadata for the key-entry flow."""
 

@@ -1069,6 +1069,29 @@ class ModelCatalogue:
             raise ProviderError("discovered model priors must be an object keyed by provider/model")
         if not isinstance(replace_existing, bool):
             raise ProviderError("replace_existing must be a boolean")
+        resolved = self._resolve_discovered(descriptors, priors)
+        with self._lock:
+            for candidate in resolved:
+                key = (candidate.provider, candidate.model)
+                if key in self._candidates and not replace_existing:
+                    raise ProviderError(f"model candidate is already registered: {candidate.arm_id}")
+                if len(self._candidates) >= MAX_MODEL_CANDIDATES and key not in self._candidates:
+                    raise ProviderError("model catalogue capacity is exhausted")
+            for candidate in resolved:
+                self._candidates[(candidate.provider, candidate.model)] = candidate
+        return resolved
+
+    @staticmethod
+    def _resolve_discovered(
+        descriptors: Sequence[ProviderModelDescriptor],
+        priors: Mapping[str, Mapping[str, Any]],
+    ) -> list[ModelCandidate]:
+        if not isinstance(descriptors, Sequence) or isinstance(descriptors, (str, bytes)):
+            raise ProviderError("discovered model descriptors must be a sequence")
+        if any(not isinstance(descriptor, ProviderModelDescriptor) for descriptor in descriptors):
+            raise ProviderError("discovered model descriptors must contain ProviderModelDescriptor values")
+        if not isinstance(priors, Mapping):
+            raise ProviderError("discovered model priors must be an object keyed by provider/model")
         resolved: list[ModelCandidate] = []
         seen: set[tuple[str, str]] = set()
         for descriptor in descriptors:
@@ -1083,16 +1106,80 @@ class ModelCatalogue:
                 resolved.append(descriptor.to_candidate(**dict(prior)))
             except TypeError as error:
                 raise ProviderError(f"routing prior is malformed for {descriptor.arm_id}") from error
+        return resolved
+
+    def reconcile_discovered(
+        self,
+        descriptors: Sequence[ProviderModelDescriptor],
+        *,
+        priors: Mapping[str, Mapping[str, Any]],
+        providers: Sequence[str] | None = None,
+    ) -> dict[str, Any]:
+        """Atomically reconcile provider inventory, including stale-arm retirement.
+
+        Every incoming row still requires an explicit caller-owned routing prior. ``providers``
+        is required when an authoritative inventory is empty so the caller can explicitly retire
+        every previously registered arm for that provider.
+        """
+
+        if not isinstance(descriptors, Sequence) or isinstance(descriptors, (str, bytes)):
+            raise ProviderError("discovered model descriptors must be a sequence")
+        resolved = self._resolve_discovered(descriptors, priors)
+        if providers is None:
+            provider_names = {descriptor.provider for descriptor in descriptors}
+        else:
+            if not isinstance(providers, Sequence) or isinstance(providers, (str, bytes)):
+                raise ProviderError("reconciliation providers must be a sequence")
+            if any(
+                not isinstance(provider, str)
+                or not provider.strip()
+                or "/" in provider
+                or " " in provider
+                for provider in providers
+            ):
+                raise ProviderError("reconciliation providers must be path-safe identifiers")
+            provider_names = set(providers)
+        if not provider_names:
+            raise ProviderError("reconciliation requires descriptors or explicit providers")
+        incoming_keys = {(candidate.provider, candidate.model) for candidate in resolved}
         with self._lock:
-            for candidate in resolved:
-                key = (candidate.provider, candidate.model)
-                if key in self._candidates and not replace_existing:
-                    raise ProviderError(f"model candidate is already registered: {candidate.arm_id}")
-                if len(self._candidates) >= MAX_MODEL_CANDIDATES and key not in self._candidates:
-                    raise ProviderError("model catalogue capacity is exhausted")
+            stale_keys = sorted(
+                key
+                for key, candidate in self._candidates.items()
+                if candidate.provider in provider_names and key not in incoming_keys
+            )
+            existing_keys = set(self._candidates)
+            projected_count = len(self._candidates) - len(stale_keys) + sum(
+                1 for key in incoming_keys if key not in existing_keys
+            )
+            if projected_count > MAX_MODEL_CANDIDATES:
+                raise ProviderError("model catalogue capacity is exhausted")
+            replaced = sorted(
+                candidate.arm_id
+                for candidate in resolved
+                if (candidate.provider, candidate.model) in existing_keys
+            )
+            registered = sorted(
+                candidate.arm_id
+                for candidate in resolved
+                if (candidate.provider, candidate.model) not in existing_keys
+            )
+            for key in stale_keys:
+                self._candidates.pop(key, None)
             for candidate in resolved:
                 self._candidates[(candidate.provider, candidate.model)] = candidate
-        return resolved
+        return {
+            "schema": "bioprism-python-model-catalogue-reconciliation/0.1",
+            "providers": sorted(provider_names),
+            "candidates": [candidate.to_dict() for candidate in resolved],
+            "candidate_count": len(resolved),
+            "registered_model_ids": registered,
+            "replaced_model_ids": replaced,
+            "removed_model_ids": [f"{provider}/{model}" for provider, model in stale_keys],
+            "execution": "not_started;catalogue_registration_only",
+            "retention": "model_metadata_only;credentials_and_raw_catalogue_not_retained",
+            "secret_material": "never_returned",
+        }
 
     def remove(self, provider: str, model: str) -> ModelCandidate:
         key = (provider, model)

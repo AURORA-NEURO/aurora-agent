@@ -1667,6 +1667,13 @@ When a learner is wired into `AutonomousAgent`, the selected model's ranking evi
 exploration metadata are preserved through the actual provider invocation result. Restored remote
 states reject malformed generations, duplicate arms, and explicit policy fields that conflict with
 the local policy, preventing a silent split between the selector and the settlement ledger.
+`refreshModels(provider, defaults, { replaceExisting: true })` performs a provider-scoped atomic
+reconciliation: newly discovered models are registered, changed metadata is replaced, and stale
+models that disappeared from the provider catalogue are removed. The returned `removed_model_ids`
+receipt makes that catalogue transition observable without retaining raw provider responses. An
+authoritative empty inventory is supported when replacement is enabled and retires every stale
+model for that provider; the standalone `providerModelsToCandidates()` converter remains strict
+and rejects empty input when a selectable candidate set is required.
 Learning episodes can only be prepared from a completed autonomous run; approval pauses, provider
 refusals, child failures, and tool-loop limits cannot be converted into evaluator or bandit credit.
 Trajectory settlement is resumable after a later episode failure: matching already-settled reward

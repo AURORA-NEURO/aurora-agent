@@ -644,7 +644,9 @@ test("AutonomousAgent refreshes live model metadata with atomic catalogue reconc
       discoveryCalls += 1;
       const data = discoveryCalls === 1
         ? [{ id: "model-a", context_window: 16_000, max_completion_tokens: 1_000, active: true }, { id: "model-b", context_window: 32_000, max_completion_tokens: 2_000, active: true }]
-        : [{ id: "model-a", context_window: 64_000, max_completion_tokens: 4_000, active: true }, { id: "model-c", context_window: 32_000, max_completion_tokens: 2_000, active: true }];
+        : discoveryCalls === 4
+          ? []
+          : [{ id: "model-a", context_window: 64_000, max_completion_tokens: 4_000, active: true }, { id: "model-c", context_window: 32_000, max_completion_tokens: 2_000, active: true }];
       return jsonResponse({ data });
     },
   });
@@ -660,8 +662,13 @@ test("AutonomousAgent refreshes live model metadata with atomic catalogue reconc
   const replaced = await agent.refreshModels("catalog", defaults, { replaceExisting: true });
   assert.deepEqual(replaced.replaced_model_ids, ["catalog/model-a"]);
   assert.deepEqual(replaced.registered_model_ids, ["catalog/model-c"]);
+  assert.deepEqual(replaced.removed_model_ids, ["catalog/model-b"]);
+  assert.deepEqual(agent.models().map((model) => model.model), ["model-a", "model-c"]);
   assert.equal(agent.models().find((model) => model.model === "model-a").context_window_tokens, 64_000);
-  assert.equal(discoveryCalls, 3);
+  const emptied = await agent.refreshModels("catalog", defaults, { replaceExisting: true });
+  assert.deepEqual(emptied.removed_model_ids, ["catalog/model-a", "catalog/model-c"]);
+  assert.deepEqual(agent.models(), []);
+  assert.equal(discoveryCalls, 4);
 });
 
 test("autonomous runtime performs bounded provider failover and journals the admission", async () => {

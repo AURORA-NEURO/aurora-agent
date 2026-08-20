@@ -458,6 +458,7 @@ export interface AutonomousModelRefreshResult {
   candidates: AutonomousModelCandidate[];
   registered_model_ids: string[];
   replaced_model_ids: string[];
+  removed_model_ids: string[];
   discovery: ProviderModelDiscovery;
   execution: "not_started;catalogue_registration_only";
   retention: "model_metadata_only;credentials_and_raw_catalogue_not_retained";
@@ -1584,13 +1585,20 @@ export class AutonomousAgent {
   ): Promise<AutonomousModelRefreshResult> {
     const normalizedProvider = boundedText("autonomous model refresh provider", provider, 128);
     const discovery = await this.llm.discoverModels(normalizedProvider, { credential: options.credential, signal: options.signal });
-    const candidates = providerModelsToCandidates(discovery.models, defaults);
+    const candidates = discovery.models.length === 0 ? [] : providerModelsToCandidates(discovery.models, defaults);
     if (candidates.some((candidate) => candidate.provider !== normalizedProvider)) throw new ProviderRuntimeError("provider model discovery returned a candidate for a different provider");
     const ids = candidates.map((candidate) => `${candidate.provider}/${candidate.model}`);
+    const discoveredIds = new Set(ids);
     const existing = new Set(this.modelsById.keys());
     const replaced = options.replaceExisting === true ? ids.filter((id) => existing.has(id)) : [];
     const registered = ids.filter((id) => !existing.has(id));
-    const reconciled = this.registerModels(candidates, { replaceExisting: options.replaceExisting === true });
+    const removed = options.replaceExisting === true
+      ? [...existing].filter((id) => id.startsWith(`${normalizedProvider}/`) && !discoveredIds.has(id)).sort()
+      : [];
+    const reconciled = candidates.length === 0
+      ? []
+      : this.registerModels(candidates, { replaceExisting: options.replaceExisting === true });
+    for (const id of removed) this.modelsById.delete(id);
     return {
       schema: AUTONOMOUS_MODEL_REFRESH_SCHEMA,
       provider: normalizedProvider,
@@ -1599,6 +1607,7 @@ export class AutonomousAgent {
       candidates: reconciled,
       registered_model_ids: registered,
       replaced_model_ids: replaced,
+      removed_model_ids: removed,
       discovery,
       execution: "not_started;catalogue_registration_only",
       retention: "model_metadata_only;credentials_and_raw_catalogue_not_retained",

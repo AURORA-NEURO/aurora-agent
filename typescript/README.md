@@ -356,6 +356,9 @@ remain strict about unknown arms.
 Learner-backed provider results retain the exploration draw and ranking evidence used for the actual
 selection, and malformed restored generations, duplicate arms, or conflicting remote policy fields
 are rejected before they can influence a later run.
+Live model refreshes are provider-scoped atomic reconciliations: `replaceExisting` removes stale
+discovered arms as well as registering new models and replacing changed metadata, with the removed
+IDs returned as value-only receipt metadata.
 
 Learning episodes can only be prepared from a completed autonomous run; approval pauses, provider
 refusals, child failures, and tool-loop limits cannot be converted into evaluator or bandit credit.
