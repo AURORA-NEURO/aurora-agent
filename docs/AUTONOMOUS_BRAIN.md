@@ -466,6 +466,27 @@ are mutually exclusive, and `learn=True` is rejected for staged intake unless on
 explicit modes is selected. This keeps provider transport success, task quality, and delayed
 credit assignment separate while still allowing automatic intake to drive the full online loop.
 
+For an application that wants one learning control across every automatic route, use
+`learning_mode` instead of repeating route-specific flags:
+
+```python
+result = agent.run_auto(
+    task="fix the Rust tests in the repository",
+    credentials=session,
+    learning_mode="online",  # off | online | trajectory
+    evidence={"signals": {"tests_passed": True}},
+    approve_provider_call=True,
+)
+```
+
+After the provider-free route is known, `online` selects ordinary single-domain learning,
+workflow learning when `workflow_execution=True`, or sequential cross-domain learning. It starts
+from `agent.learning_state()` unless the caller supplies `bandit_state`. `trajectory` selects
+discounted delayed credit for a staged workflow or cross-domain fan-out/synthesis and therefore
+requires `workflow_execution=True` on a single-domain route. The selected mode is returned in
+`result.to_dict()["learning_mode"]`. These shortcuts only select an existing evaluator loop:
+they do not turn provider success into reward, invent evidence, or persist credentials.
+
 Provider output never becomes authorization. Invalid JSON, missing domains, out-of-range scores,
 provider disagreement, abstention, insufficient confidence, or insufficient margin all produce a
 non-executable review result. A semantic route cannot add a domain, capability, tool, effect,

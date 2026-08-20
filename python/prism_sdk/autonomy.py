@@ -87,6 +87,7 @@ from .tooling import ToolCatalogue, ToolDefinition
 
 AUTONOMY_SCHEMA = "bioprism-python-autonomous-task/0.1"
 AUTONOMOUS_EXECUTION_MODES = ("provider", "tool_loop", "mission")
+AUTONOMOUS_LEARNING_MODES = ("off", "online", "trajectory")
 AUTONOMOUS_DOMAINS = AUTONOMOUS_DOMAIN_NAMES
 MAX_AUTONOMY_TEXT_BYTES = 16_000
 MAX_AUTONOMY_CONTEXT_BYTES = 2_000_000
@@ -2839,12 +2840,18 @@ class AutonomousAutoResult:
     status: str
     route: AutonomousRouteProposal
     result: Any | None = None
+    learning_mode: str = "off"
 
     def __post_init__(self) -> None:
         if self.status not in {"completed", "route_review_required"}:
             raise BrainRunError("automatic result status is invalid")
         if not isinstance(self.route, AutonomousRouteProposal):
             raise BrainRunError("automatic result requires an AutonomousRouteProposal")
+        if self.learning_mode not in AUTONOMOUS_LEARNING_MODES:
+            raise BrainRunError(
+                "automatic result learning_mode must be one of: "
+                + ", ".join(AUTONOMOUS_LEARNING_MODES)
+            )
         if self.status == "route_review_required" and (not self.route.abstained or self.result is not None):
             raise BrainRunError("route review result must contain an abstained route without execution")
         if self.status == "completed" and (self.route.abstained or self.result is None):
@@ -2862,6 +2869,7 @@ class AutonomousAutoResult:
             "status": self.status,
             "route": self.route.to_dict(),
             "result": result,
+            "learning_mode": self.learning_mode,
             "retention": "route_metadata_only; provider_result_caller_owned",
         }
 
@@ -10265,6 +10273,7 @@ class AutonomousAgent:
         semantic_run_id: str | None = None,
         semantic_max_output_tokens: int = 1_024,
         semantic_temperature: float | None = None,
+        learning_mode: str = "off",
         workflow_execution: bool = False,
         workflow_learning: bool = False,
         workflow_trajectory_learning: bool = False,
@@ -10292,16 +10301,25 @@ class AutonomousAgent:
         explicit ``run``/``run_cross_domain`` calls.  ``workflow_execution=True`` opts a
         single-domain route into its checkpointable stage DAG. An accepted plan refinement is
         advisory until the caller passes it explicitly here; it can only reorder ready stages.
-        ``workflow_learning`` and ``workflow_trajectory_learning`` make the evaluator boundary
-        explicit and never infer reward from provider success. ``cross_domain_learning`` and
-        ``cross_domain_trajectory_learning`` expose the same explicit evaluator and value-only
-        bandit controls for automatically classified fan-out/synthesis routes. An accepted
-        cross-domain plan can reorder existing specialists only after explicit caller acceptance.
+        ``learning_mode="online"`` selects the appropriate existing online loop after routing:
+        ordinary single-domain learning, staged workflow learning, or sequential cross-domain
+        learning. ``learning_mode="trajectory"`` selects delayed discounted credit for a staged
+        workflow or cross-domain route; a plain single provider call must opt into
+        ``workflow_execution=True`` because it has no multi-step trajectory. Both modes reuse the
+        caller's latest value-only bandit state unless ``bandit_state`` is supplied explicitly.
+        Evaluator evidence remains caller-owned and reward is never inferred from provider
+        success. The explicit route-specific flags remain available for backwards compatibility.
+        An accepted cross-domain plan can reorder existing specialists only after explicit caller
+        acceptance.
         An abstained route never invokes a provider.
         """
 
         if not isinstance(workflow_execution, bool):
             raise BrainRunError("workflow_execution must be a boolean")
+        if learning_mode not in AUTONOMOUS_LEARNING_MODES:
+            raise BrainRunError(
+                "learning_mode must be one of: " + ", ".join(AUTONOMOUS_LEARNING_MODES)
+            )
         if not isinstance(workflow_learning, bool) or not isinstance(workflow_trajectory_learning, bool):
             raise BrainRunError("workflow learning modes must be booleans")
         if workflow_learning and workflow_trajectory_learning:
@@ -10311,6 +10329,17 @@ class AutonomousAgent:
         if cross_domain_learning and cross_domain_trajectory_learning:
             raise BrainRunError(
                 "cross_domain_learning and cross_domain_trajectory_learning are mutually exclusive"
+            )
+        explicit_learning = (
+            workflow_learning
+            or workflow_trajectory_learning
+            or cross_domain_learning
+            or cross_domain_trajectory_learning
+            or kwargs.get("learn") is True
+        )
+        if learning_mode != "off" and explicit_learning:
+            raise BrainRunError(
+                "learning_mode cannot be combined with explicit learning flags; choose one control surface"
             )
         if cross_domain_evaluator is not None and not isinstance(cross_domain_evaluator, BrainOutcomeEvaluator):
             raise BrainRunError("cross_domain_evaluator must be a BrainOutcomeEvaluator or None")
@@ -10390,7 +10419,11 @@ class AutonomousAgent:
                 **prepare_options,
             )
         if blueprint.route.abstained:
-            return AutonomousAutoResult(status="route_review_required", route=blueprint.route)
+            return AutonomousAutoResult(
+                status="route_review_required",
+                route=blueprint.route,
+                learning_mode=learning_mode,
+            )
         execution_kwargs = dict(kwargs)
         for key in {
             "context",
@@ -10409,6 +10442,11 @@ class AutonomousAgent:
             execution_kwargs.pop(key, None)
         routed_context = self.orchestrator._route_context(kwargs.get("context"), blueprint.route)
         execution_kwargs["context"] = routed_context
+        if learning_mode != "off":
+            # The ledger is caller-owned and stores value-only state. Supplying it here lets all
+            # three execution branches begin from the same state without making the caller repeat
+            # a persistence detail on every automatic request.
+            execution_kwargs.setdefault("bandit_state", self.learning_state())
         if blueprint.blueprint is not None:
             if (
                 cross_domain_learning
@@ -10418,6 +10456,10 @@ class AutonomousAgent:
                 or accepted_cross_domain_plan_refinement is not None
             ):
                 raise BrainRunError("cross-domain learning options require a cross-domain route")
+            if learning_mode == "online" and workflow_execution:
+                workflow_learning = True
+            elif learning_mode == "trajectory" and workflow_execution:
+                workflow_trajectory_learning = True
             if workflow_execution:
                 if execution_kwargs.pop("learn", False):
                     if not workflow_learning and not workflow_trajectory_learning:
@@ -10472,6 +10514,12 @@ class AutonomousAgent:
                         **workflow_options,
                     )
             else:
+                if learning_mode == "online":
+                    execution_kwargs["learn"] = True
+                elif learning_mode == "trajectory":
+                    raise BrainRunError(
+                        "learning_mode='trajectory' for a single-domain route requires workflow_execution=True"
+                    )
                 result = self.run(
                     task=task,
                     domain=blueprint.route.selected_domains[0],
@@ -10482,6 +10530,10 @@ class AutonomousAgent:
                     **execution_kwargs,
                 )
         else:
+            if learning_mode == "online":
+                cross_domain_learning = True
+            elif learning_mode == "trajectory":
+                cross_domain_trajectory_learning = True
             if workflow_execution or workflow_learning or workflow_trajectory_learning or accepted_plan_refinement is not None:
                 raise BrainRunError(
                     "workflow_execution and accepted_plan_refinement currently require a single-domain route"
@@ -10571,7 +10623,12 @@ class AutonomousAgent:
                     resume_execution=resume_execution,
                     **execution_kwargs,
                 )
-        return AutonomousAutoResult(status="completed", route=blueprint.route, result=result)
+        return AutonomousAutoResult(
+            status="completed",
+            route=blueprint.route,
+            result=result,
+            learning_mode=learning_mode,
+        )
 
     def run_cross_domain_learning(
         self,
@@ -10832,6 +10889,7 @@ __all__ = [
     "AUTONOMY_SCHEMA",
     "AUTONOMOUS_DOMAINS",
     "AUTONOMOUS_EXECUTION_MODES",
+    "AUTONOMOUS_LEARNING_MODES",
     "AUTONOMOUS_CROSS_DOMAIN_LEARNING_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_TRAJECTORY_LEARNING_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_PLAN_REFINEMENT_SCHEMA",

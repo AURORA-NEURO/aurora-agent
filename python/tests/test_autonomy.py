@@ -1310,7 +1310,7 @@ def test_run_auto_can_execute_a_accepted_plan_through_the_checkpointable_workflo
         server.server_close()
 
 
-def test_run_auto_exposes_explicit_workflow_online_learning_modes():
+def test_run_auto_exposes_workflow_learning_modes_and_shortcut():
     runtime, store, server, thread = _structured_runtime()
     agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
     try:
@@ -1337,7 +1337,7 @@ def test_run_auto_exposes_explicit_workflow_online_learning_modes():
             task=task,
             credentials={"openai": handle},
             workflow_execution=True,
-            workflow_learning=True,
+            learning_mode="online",
             workflow_stage_evidence=evidence,
             workflow_max_stage_calls=2,
             bandit_state=bandit_state,
@@ -1354,7 +1354,7 @@ def test_run_auto_exposes_explicit_workflow_online_learning_modes():
             task=task,
             credentials={"openai": handle},
             workflow_execution=True,
-            workflow_trajectory_learning=True,
+            learning_mode="trajectory",
             workflow_stage_evidence=evidence,
             workflow_max_stage_calls=2,
             workflow_trajectory_discount=0.5,
@@ -1373,7 +1373,68 @@ def test_run_auto_exposes_explicit_workflow_online_learning_modes():
         server.server_close()
 
 
-def test_run_auto_exposes_explicit_cross_domain_online_learning_modes(tmp_path: Path):
+def test_run_auto_learning_mode_selects_single_and_workflow_loops(tmp_path: Path):
+    runtime, store, server, thread = _runtime()
+    memory = BrainEpisodicMemory(tmp_path / "auto-learning-mode.sqlite3")
+    agent = AutonomousAgent(
+        _Workspace(),
+        runtime,
+        model_catalogue=ModelCatalogue(_model()),
+        memory=memory,
+    )
+    handle = store.register("openai", "auto-learning-mode-secret")
+    bandit_state = {"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []}
+    evaluator = BrainOutcomeEvaluator(
+        lambda _input: {"reward": 0.8, "passed": True, "failed": False},
+        evaluator_id="auto-learning-mode-quality",
+        evaluator_version="1",
+    )
+    try:
+        online = agent.run_auto(
+            task="fix the Rust tests in the repository",
+            credentials={"openai": handle},
+            model_candidates=_model(),
+            learning_mode="online",
+            evidence={"signals": {"tests_passed": True}},
+            evaluator=evaluator,
+            bandit_state=bandit_state,
+            approve_provider_call=True,
+        )
+        assert online.learning_mode == "online"
+        assert online.result is not None
+        assert online.result.bandit_state["generation"] == 1
+
+        with pytest.raises(BrainRunError, match="workflow_execution=True"):
+            agent.run_auto(
+                task="fix the Rust tests in the repository",
+                credentials={"openai": handle},
+                model_candidates=_model(),
+                learning_mode="trajectory",
+                evaluator=evaluator,
+                bandit_state=bandit_state,
+                approve_provider_call=True,
+            )
+        with pytest.raises(BrainRunError, match="learning_mode must be one of"):
+            agent.run_auto(
+                task="fix the Rust tests in the repository",
+                credentials={"openai": handle},
+                learning_mode="invalid",
+            )
+        with pytest.raises(BrainRunError, match="cannot be combined"):
+            agent.run_auto(
+                task="fix the Rust tests in the repository",
+                credentials={"openai": handle},
+                learning_mode="online",
+                learn=True,
+            )
+    finally:
+        memory.close()
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_run_auto_exposes_cross_domain_learning_modes_and_shortcut(tmp_path: Path):
     runtime, store, server, thread = _runtime()
     memory = BrainEpisodicMemory(tmp_path / "auto-cross-domain-learning.sqlite3")
     workspace = _Workspace()
@@ -1398,12 +1459,13 @@ def test_run_auto_exposes_explicit_cross_domain_online_learning_modes(tmp_path: 
             model_candidates=_model(),
             min_confidence=0.20,
             min_margin=0.10,
-            cross_domain_learning=True,
+            learning_mode="online",
             cross_domain_evidence=evidence,
             cross_domain_evaluator=evaluator,
             bandit_state=bandit_state,
             approve_provider_call=True,
         )
+        assert online.learning_mode == "online"
         assert online.result is not None
         assert online.result.status == "completed"
         assert len(online.result.evaluations) == 3

@@ -570,6 +570,7 @@ export interface AutonomousAutoResult extends JsonObject {
   status: "completed" | "route_review_required" | string;
   route: AutonomousRouteProposal;
   result: JsonObject | null;
+  learning_mode: "off" | "online" | "trajectory" | string;
   retention: string;
 }
 
