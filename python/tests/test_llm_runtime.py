@@ -23,8 +23,13 @@ from prism_sdk.llm_runtime import (
     ProviderToolCall,
     ProviderToolResult,
     anthropic_provider,
+    deepseek_provider,
+    groq_provider,
+    mistral_provider,
     openai_compatible_provider,
     openai_provider,
+    openrouter_provider,
+    xai_provider,
 )
 from prism_sdk.brain import (
     AutonomousBrain,
@@ -296,6 +301,33 @@ class LlmRuntimeTests(unittest.TestCase):
         self.assertEqual(references, ["secret-manager://workspace/openai"])
         self.assertEqual(store.metadata(resolver_handle)["source"], "external_resolver")
         self.assertNotIn("resolver-secret", json.dumps(onboarding.status("openai")))
+
+    def test_reviewed_provider_presets_bind_wire_paths_and_default_key_inputs(self) -> None:
+        presets = (
+            (deepseek_provider(), "/chat/completions", "DEEPSEEK_API_KEY"),
+            (groq_provider(), "/openai/v1/chat/completions", "GROQ_API_KEY"),
+            (mistral_provider(), "/v1/chat/completions", "MISTRAL_API_KEY"),
+            (openrouter_provider(), "/api/v1/chat/completions", "OPENROUTER_API_KEY"),
+            (xai_provider(), "/v1/chat/completions", "XAI_API_KEY"),
+        )
+        runtime = LLMRuntime(CredentialStore())
+        onboarding = ProviderOnboarding(runtime)
+        for config, expected_path, expected_environment_variable in presets:
+            runtime.register_provider(config)
+            self.assertEqual(config.endpoint[2], expected_path)
+            instructions = onboarding.instructions(config.provider).to_dict()
+            self.assertEqual(instructions["environment_variable"], expected_environment_variable)
+            self.assertFalse(instructions["ready"])
+            self.assertEqual(instructions["next_action"], "collect_user_credential")
+
+        self.assertEqual(
+            openai_compatible_provider(
+                "local",
+                "https://example.test/api/v1",
+                path="/chat/completions",
+            ).endpoint[2],
+            "/api/v1/chat/completions",
+        )
 
     def test_adaptive_selection_rejects_revoked_handles_before_provider_invocation(self) -> None:
         store = CredentialStore()

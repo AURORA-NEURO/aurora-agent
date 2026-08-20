@@ -285,8 +285,13 @@ from .llm_runtime import (
     PROVIDER_OBSERVATION_SCHEMA,
     SecretValue,
     anthropic_provider,
+    deepseek_provider,
+    groq_provider,
+    mistral_provider,
     openai_compatible_provider,
     openai_provider,
+    openrouter_provider,
+    xai_provider,
 )
 from .anndata import AnnDataAdapter, AnnDataAuditResult, AnnDataFinding, audit_anndata
 from .alignment import AlignmentAdapter, AlignmentAuditResult, AlignmentFinding, audit_alignments
@@ -4742,6 +4747,11 @@ __all__ = [
     "PROVIDER_OBSERVATION_SCHEMA",
     "SecretValue",
     "anthropic_provider",
+    "deepseek_provider",
+    "groq_provider",
+    "mistral_provider",
     "openai_compatible_provider",
     "openai_provider",
+    "openrouter_provider",
+    "xai_provider",
 ]

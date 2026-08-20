@@ -1550,7 +1550,33 @@ The current Python runtime supports:
 
 - OpenAI Responses (`openai_provider()`);
 - Anthropic Messages (`anthropic_provider()`); and
-- OpenAI-compatible Chat Completions (`openai_compatible_provider(...)`).
+- OpenAI-compatible Chat Completions (`openai_compatible_provider(...)`), including reviewed
+  presets for DeepSeek (`deepseek_provider()`), Groq (`groq_provider()`), Mistral
+  (`mistral_provider()`), OpenRouter (`openrouter_provider()`), and xAI (`xai_provider()`).
+
+The presets are transport metadata only. They register no key and make no network request. Each
+uses the provider's documented OpenAI-compatible Chat Completions route, has a matching default
+environment-variable name (`DEEPSEEK_API_KEY`, `GROQ_API_KEY`, `MISTRAL_API_KEY`,
+`OPENROUTER_API_KEY`, or `XAI_API_KEY`), and can be overridden with a deployment-owned `base_url`
+and `path` for a proxy or local gateway. The normal onboarding process is unchanged:
+
+```python
+from prism_sdk import AutonomousAgent, deepseek_provider
+
+agent.register_provider(deepseek_provider())
+with agent.start_credential_session() as session:
+    session.configure_from_environment("deepseek")
+    result = agent.run(
+        task="compare the supplied evidence and state the uncertainty",
+        domain="evaluation",
+        credentials=session,
+        approve_provider_call=True,
+    )
+```
+
+The environment-variable path is only a convenience for the embedding application. The value
+is immediately converted into an opaque in-memory handle and never enters model selection,
+prompts, plans, tools, health records, or learning state.
 
 All use the same `ProviderRequest` and `ProviderResponse` contract. The runtime does not follow
 redirects, does not allow plain HTTP unless explicitly enabled for local/test use, bounds response

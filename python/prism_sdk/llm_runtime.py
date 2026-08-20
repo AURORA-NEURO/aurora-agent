@@ -2228,6 +2228,11 @@ class ProviderOnboarding:
     _DEFAULT_ENVIRONMENT_VARIABLES = {
         "openai": "OPENAI_API_KEY",
         "anthropic": "ANTHROPIC_API_KEY",
+        "deepseek": "DEEPSEEK_API_KEY",
+        "groq": "GROQ_API_KEY",
+        "mistral": "MISTRAL_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY",
+        "xai": "XAI_API_KEY",
     }
 
     def __init__(
@@ -3431,6 +3436,7 @@ def openai_compatible_provider(
     provider: str,
     base_url: str,
     *,
+    path: str | None = None,
     timeout_seconds: float = 60.0,
     allow_insecure_http: bool = False,
     max_attempts: int = 1,
@@ -3444,6 +3450,162 @@ def openai_compatible_provider(
         provider=provider,
         base_url=base_url,
         protocol="openai_chat_completions",
+        path=path,
+        timeout_seconds=timeout_seconds,
+        allow_insecure_http=allow_insecure_http,
+        max_attempts=max_attempts,
+        retry_backoff_seconds=retry_backoff_seconds,
+        circuit_breaker_failure_threshold=circuit_breaker_failure_threshold,
+        circuit_breaker_reset_seconds=circuit_breaker_reset_seconds,
+    )
+
+
+def _compatible_provider_preset(
+    provider: str,
+    base_url: str,
+    path: str,
+    *,
+    timeout_seconds: float,
+    allow_insecure_http: bool,
+    max_attempts: int,
+    retry_backoff_seconds: float,
+    circuit_breaker_failure_threshold: int,
+    circuit_breaker_reset_seconds: float,
+) -> ProviderConfig:
+    return openai_compatible_provider(
+        provider,
+        base_url,
+        path=path,
+        timeout_seconds=timeout_seconds,
+        allow_insecure_http=allow_insecure_http,
+        max_attempts=max_attempts,
+        retry_backoff_seconds=retry_backoff_seconds,
+        circuit_breaker_failure_threshold=circuit_breaker_failure_threshold,
+        circuit_breaker_reset_seconds=circuit_breaker_reset_seconds,
+    )
+
+
+def deepseek_provider(
+    *,
+    base_url: str = "https://api.deepseek.com",
+    path: str = "/chat/completions",
+    timeout_seconds: float = 60.0,
+    allow_insecure_http: bool = False,
+    max_attempts: int = 1,
+    retry_backoff_seconds: float = 0.0,
+    circuit_breaker_failure_threshold: int = 3,
+    circuit_breaker_reset_seconds: float = 30.0,
+) -> ProviderConfig:
+    """Create the official DeepSeek OpenAI-compatible Chat Completions configuration."""
+
+    return _compatible_provider_preset(
+        "deepseek",
+        base_url,
+        path,
+        timeout_seconds=timeout_seconds,
+        allow_insecure_http=allow_insecure_http,
+        max_attempts=max_attempts,
+        retry_backoff_seconds=retry_backoff_seconds,
+        circuit_breaker_failure_threshold=circuit_breaker_failure_threshold,
+        circuit_breaker_reset_seconds=circuit_breaker_reset_seconds,
+    )
+
+
+def groq_provider(
+    *,
+    base_url: str = "https://api.groq.com/openai/v1",
+    path: str = "/chat/completions",
+    timeout_seconds: float = 60.0,
+    allow_insecure_http: bool = False,
+    max_attempts: int = 1,
+    retry_backoff_seconds: float = 0.0,
+    circuit_breaker_failure_threshold: int = 3,
+    circuit_breaker_reset_seconds: float = 30.0,
+) -> ProviderConfig:
+    """Create the official Groq OpenAI-compatible Chat Completions configuration."""
+
+    return _compatible_provider_preset(
+        "groq",
+        base_url,
+        path,
+        timeout_seconds=timeout_seconds,
+        allow_insecure_http=allow_insecure_http,
+        max_attempts=max_attempts,
+        retry_backoff_seconds=retry_backoff_seconds,
+        circuit_breaker_failure_threshold=circuit_breaker_failure_threshold,
+        circuit_breaker_reset_seconds=circuit_breaker_reset_seconds,
+    )
+
+
+def mistral_provider(
+    *,
+    base_url: str = "https://api.mistral.ai",
+    path: str = "/v1/chat/completions",
+    timeout_seconds: float = 60.0,
+    allow_insecure_http: bool = False,
+    max_attempts: int = 1,
+    retry_backoff_seconds: float = 0.0,
+    circuit_breaker_failure_threshold: int = 3,
+    circuit_breaker_reset_seconds: float = 30.0,
+) -> ProviderConfig:
+    """Create the official Mistral Chat Completions configuration."""
+
+    return _compatible_provider_preset(
+        "mistral",
+        base_url,
+        path,
+        timeout_seconds=timeout_seconds,
+        allow_insecure_http=allow_insecure_http,
+        max_attempts=max_attempts,
+        retry_backoff_seconds=retry_backoff_seconds,
+        circuit_breaker_failure_threshold=circuit_breaker_failure_threshold,
+        circuit_breaker_reset_seconds=circuit_breaker_reset_seconds,
+    )
+
+
+def openrouter_provider(
+    *,
+    base_url: str = "https://openrouter.ai/api/v1",
+    path: str = "/chat/completions",
+    timeout_seconds: float = 60.0,
+    allow_insecure_http: bool = False,
+    max_attempts: int = 1,
+    retry_backoff_seconds: float = 0.0,
+    circuit_breaker_failure_threshold: int = 3,
+    circuit_breaker_reset_seconds: float = 30.0,
+) -> ProviderConfig:
+    """Create the official OpenRouter OpenAI-compatible configuration."""
+
+    return _compatible_provider_preset(
+        "openrouter",
+        base_url,
+        path,
+        timeout_seconds=timeout_seconds,
+        allow_insecure_http=allow_insecure_http,
+        max_attempts=max_attempts,
+        retry_backoff_seconds=retry_backoff_seconds,
+        circuit_breaker_failure_threshold=circuit_breaker_failure_threshold,
+        circuit_breaker_reset_seconds=circuit_breaker_reset_seconds,
+    )
+
+
+def xai_provider(
+    *,
+    base_url: str = "https://api.x.ai",
+    path: str = "/v1/chat/completions",
+    timeout_seconds: float = 60.0,
+    allow_insecure_http: bool = False,
+    max_attempts: int = 1,
+    retry_backoff_seconds: float = 0.0,
+    circuit_breaker_failure_threshold: int = 3,
+    circuit_breaker_reset_seconds: float = 30.0,
+) -> ProviderConfig:
+    """Create the official xAI OpenAI-compatible Chat Completions configuration."""
+
+    return _compatible_provider_preset(
+        "xai",
+        base_url,
+        path,
         timeout_seconds=timeout_seconds,
         allow_insecure_http=allow_insecure_http,
         max_attempts=max_attempts,
