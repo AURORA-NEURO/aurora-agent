@@ -94,6 +94,35 @@ and reliability priors explicitly; it does not fabricate those values from a mod
 keeps model selection current without making model availability, provider authentication, or
 scientific validity claims, and the next approved invocation remains the live access check.
 
+### Provider failure and retry contract
+
+`ProviderRuntimeError` is the stable boundary for provider transport and protocol failures. Its
+`code` is one of the bounded categories `provider_error`, `configuration`, `invalid_request`,
+`aborted`, `timeout`, `circuit_open`, `http_4xx`, `http_5xx`, `transport`, `response_too_large`,
+`protocol`, or `invalid_response`. `CredentialError` remains a separate typed failure and is
+projected as `failureCode: "credential"` to invocation observers. A runtime error can additionally
+carry the provider name, logical operation, attempt number, HTTP status, upstream request id,
+retryability, and a bounded `retryAfterMs` hint. These fields are metadata only: the SDK does not attach raw
+provider bodies, arbitrary response headers, authorization values, prompt text, tool arguments,
+or the original thrown transport object.
+
+The retry controller is deliberately conservative. Caller cancellation is classified as
+`aborted`, is never retried, and does not open or increment the provider circuit. A local deadline
+is classified as retryable `timeout` while attempts remain. HTTP 4xx responses are terminal except
+for the explicit transient set (408, 409, 425, and 429); 5xx responses are retryable. Provider
+`Retry-After` is parsed as either seconds or an HTTP date and capped at 60 seconds. Exponential
+backoff is also capped, and a caller abort interrupts either delay without dispatching another
+attempt. Once the configured retry budget is exhausted, only retryable failures contribute to the
+consecutive-failure circuit breaker; configuration, credential, protocol, response-size, and
+caller-abort failures cannot poison provider health.
+
+`ProviderInvocationObserver.after()` receives the same decision-ready projection as
+`ProviderRuntimeError`: `failureClass`, `failureCode`, `requestId`, and `retryable`, together
+with bounded latency, token counts, and status. This lets a health ledger or contextual bandit
+learn from transport quality without receiving secrets or model content. Consumers should branch
+on `failureCode`/`retryable`, not on message text, and should treat `requestId` as a support
+correlation value rather than proof of provider-side completion.
+
 The provider boundary is deliberately separate from autonomous planning. `ApiClient` exposes the
 value-only `brainModelSelect`, contextual selection, prompt assembly, plan validation, bandit
 selection/update, trajectory recording, model-health, and replay routes. A caller can feed the

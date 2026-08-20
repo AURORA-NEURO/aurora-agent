@@ -1,4 +1,5 @@
 import { CredentialError, ProviderRuntimeError, ResponseTooLargeError, isObject } from "./errors.js";
+import type { ProviderErrorCode, ProviderFailureClass } from "./errors.js";
 import type { JsonObject, JsonValue } from "./types.js";
 
 /** Public schema for the cross-language, application-owned provider runtime. */
@@ -415,7 +416,10 @@ export interface ProviderInvocationOutcome {
   inputTokens: number;
   outputTokens: number;
   statusCode?: number;
-  failureClass?: "provider_error" | "circuit_open" | "protocol_error";
+  failureClass?: ProviderFailureClass;
+  failureCode?: ProviderErrorCode;
+  requestId?: string | null;
+  retryable?: boolean;
 }
 
 export interface ProviderInvocationObserver {
@@ -1075,11 +1079,68 @@ function errorFromUnknown(error: unknown): ProviderFailure {
   if (error instanceof CredentialError) return error;
   if (error instanceof ProviderRuntimeError) return error;
   if (error instanceof ResponseTooLargeError) return error;
-  return new ProviderRuntimeError("provider transport failed; credential material was discarded", { retryable: true });
+  return new ProviderRuntimeError("provider transport failed; credential material was discarded", { retryable: true, code: "transport" });
 }
 
 function requestIdFromHeaders(headers: Headers): string | null {
   return headers.get("x-request-id") ?? headers.get("request-id");
+}
+
+function retryAfterMsFromHeaders(headers: Headers): number | undefined {
+  const value = headers.get("retry-after")?.trim();
+  if (!value) return undefined;
+  if (/^\d+$/.test(value)) return Math.min(60_000, Number(value) * 1_000);
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return undefined;
+  return Math.min(60_000, Math.max(0, timestamp - Date.now()));
+}
+
+function isAbortError(error: unknown): boolean {
+  return isObject(error) && error.name === "AbortError";
+}
+
+function failureClass(error: ProviderFailure): ProviderFailureClass {
+  if (error instanceof CredentialError) return "credential_error";
+  if (error instanceof ResponseTooLargeError) return "response_too_large";
+  if (error.code === "aborted") return "aborted";
+  if (error.code === "timeout") return "timeout";
+  if (error.code === "circuit_open") return "circuit_open";
+  if (error.code === "http_4xx") return "http_4xx";
+  if (error.code === "http_5xx") return "http_5xx";
+  if (error.code === "protocol" || error.code === "invalid_response") return "protocol_error";
+  return "provider_error";
+}
+
+function failureCode(error: ProviderFailure): ProviderErrorCode {
+  if (error instanceof CredentialError) return "credential";
+  if (error instanceof ResponseTooLargeError) return "response_too_large";
+  return error.code;
+}
+
+function contextProviderFailure(error: ProviderFailure, provider: string, operation: string): ProviderFailure {
+  return error instanceof ProviderRuntimeError ? error.withContext({ provider, operation }) : error;
+}
+
+function abortFailure(callerSignal: AbortSignal | undefined, timedOut: boolean): ProviderRuntimeError {
+  if (callerSignal?.aborted) return new ProviderRuntimeError("provider request was aborted by the caller", { code: "aborted" });
+  if (timedOut) return new ProviderRuntimeError("provider request timed out", { code: "timeout", retryable: true });
+  return new ProviderRuntimeError("provider request was aborted", { code: "aborted" });
+}
+
+function waitForRetry(delayMs: number, signal: AbortSignal | undefined): Promise<boolean> {
+  if (delayMs <= 0) return Promise.resolve(!signal?.aborted);
+  return new Promise((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (completed: boolean): void => {
+      if (timer !== undefined) clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      resolve(completed);
+    };
+    const onAbort = (): void => finish(false);
+    timer = setTimeout(() => finish(true), delayMs);
+    if (signal?.aborted) finish(false);
+    else signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function endpointUrl(config: NormalizedProviderConfig): string {
@@ -1298,15 +1359,19 @@ export class LLMRuntime {
     try {
       response = await this.fetchModelCatalog(config, options.credential, options.signal);
     } catch (unknownError) {
-      const error = errorFromUnknown(unknownError);
+      const error = contextProviderFailure(errorFromUnknown(unknownError), provider, "model_discovery");
       throw error;
     }
-    const body = await readBoundedBody(response, config.maxResponseBytes);
-    if (response.status >= 400) throw providerHttpError(response.status);
-    let payload: unknown;
-    try { payload = JSON.parse(body); } catch { throw new ProviderRuntimeError("provider model catalog returned non-JSON data", { statusCode: response.status }); }
-    if (!isObject(payload)) throw new ProviderRuntimeError("provider model catalog must be a JSON object", { statusCode: response.status });
-    return projectModelCatalog(config, payload as JsonObject, response.status, requestIdFromHeaders(response.headers));
+    try {
+      const body = await readBoundedBody(response, config.maxResponseBytes);
+      if (response.status >= 400) throw providerHttpError(response.status, response.headers);
+      let payload: unknown;
+      try { payload = JSON.parse(body); } catch { throw new ProviderRuntimeError("provider model catalog returned non-JSON data", { statusCode: response.status, code: "invalid_response" }); }
+      if (!isObject(payload)) throw new ProviderRuntimeError("provider model catalog must be a JSON object", { statusCode: response.status, code: "invalid_response" });
+      return projectModelCatalog(config, payload as JsonObject, response.status, requestIdFromHeaders(response.headers));
+    } catch (unknownError) {
+      throw contextProviderFailure(errorFromUnknown(unknownError), provider, "model_discovery");
+    }
   }
 
   providerStatus(provider: string): ProviderHealth {
@@ -1347,10 +1412,21 @@ export class LLMRuntime {
       await options.observer?.after?.(metadata, { success: true, status: "completed", latencyMs, inputTokens: response.usage.input_tokens ?? metadata.inputTokens, outputTokens: response.usage.output_tokens ?? 0, statusCode: response.statusCode });
       return response;
     } catch (unknownError) {
-      const error = errorFromUnknown(unknownError);
+      const error = contextProviderFailure(errorFromUnknown(unknownError), provider, "invoke");
       const latencyMs = Math.max(0, nowMs() - started);
       this.record(provider, request.model, false, latencyMs, error instanceof ProviderRuntimeError ? error.statusCode ?? null : null);
-      await options.observer?.after?.(metadata, { success: false, status: "provider_refused", latencyMs, inputTokens: metadata.inputTokens, outputTokens: 0, ...(error instanceof ProviderRuntimeError && error.statusCode !== undefined ? { statusCode: error.statusCode } : {}), failureClass: error instanceof ProviderRuntimeError && error.circuitOpen ? "circuit_open" : "provider_error" });
+      await options.observer?.after?.(metadata, {
+        success: false,
+        status: "provider_refused",
+        latencyMs,
+        inputTokens: metadata.inputTokens,
+        outputTokens: 0,
+        ...(error instanceof ProviderRuntimeError && error.statusCode !== undefined ? { statusCode: error.statusCode } : {}),
+        failureClass: failureClass(error),
+        failureCode: failureCode(error),
+        requestId: error instanceof ProviderRuntimeError ? error.requestId ?? null : null,
+        retryable: error instanceof ProviderRuntimeError ? error.retryable : false,
+      });
       throw error;
     }
   }
@@ -1368,7 +1444,7 @@ export class LLMRuntime {
     let outcome: ProviderInvocationOutcome | null = null;
     try {
       const response = await this.fetchWithRetries(config, request, options.credential, options.signal, true);
-      if (response.status >= 400) throw providerHttpError(response.status);
+      if (response.status >= 400) throw providerHttpError(response.status, response.headers);
       const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
       if (contentType && contentType !== "text/event-stream") throw new ProviderRuntimeError("provider stream did not return text/event-stream", { statusCode: response.status });
       if (!response.body) throw new ProviderRuntimeError("provider stream did not return a readable body");
@@ -1429,10 +1505,21 @@ export class LLMRuntime {
       this.record(provider, request.model, true, Math.max(0, nowMs() - started), 200);
       outcome = { success: true, status: "completed", latencyMs: Math.max(0, nowMs() - started), inputTokens: metadata.inputTokens, outputTokens: 0, statusCode: 200 };
     } catch (unknownError) {
-      const error = errorFromUnknown(unknownError);
+      const error = contextProviderFailure(errorFromUnknown(unknownError), provider, "stream");
       const latencyMs = Math.max(0, nowMs() - started);
       this.record(provider, request.model, false, latencyMs, error instanceof ProviderRuntimeError ? error.statusCode ?? null : null);
-      outcome = { success: false, status: "provider_refused", latencyMs, inputTokens: metadata.inputTokens, outputTokens: 0, ...(error instanceof ProviderRuntimeError && error.statusCode !== undefined ? { statusCode: error.statusCode } : {}), failureClass: error instanceof ProviderRuntimeError && error.circuitOpen ? "circuit_open" : "provider_error" };
+      outcome = {
+        success: false,
+        status: "provider_refused",
+        latencyMs,
+        inputTokens: metadata.inputTokens,
+        outputTokens: 0,
+        ...(error instanceof ProviderRuntimeError && error.statusCode !== undefined ? { statusCode: error.statusCode } : {}),
+        failureClass: failureClass(error),
+        failureCode: failureCode(error),
+        requestId: error instanceof ProviderRuntimeError ? error.requestId ?? null : null,
+        retryable: error instanceof ProviderRuntimeError ? error.retryable : false,
+      };
       throw error;
     } finally {
       if (outcome) await options.observer?.after?.(metadata, outcome);
@@ -1514,7 +1601,7 @@ export class LLMRuntime {
   private async request(config: NormalizedProviderConfig, request: ProviderRequest, credential: CredentialHandle | undefined, signal: AbortSignal | undefined, stream: boolean): Promise<ProviderResponse> {
     const response = await this.fetchWithRetries(config, request, credential, signal, stream);
     const body = await readBoundedBody(response, config.maxResponseBytes);
-    if (response.status >= 400) throw providerHttpError(response.status);
+    if (response.status >= 400) throw providerHttpError(response.status, response.headers);
     let payload: unknown;
     try { payload = JSON.parse(body); } catch { throw new ProviderRuntimeError("provider returned a non-JSON response", { statusCode: response.status }); }
     if (!isObject(payload)) throw new ProviderRuntimeError("provider response must be a JSON object", { statusCode: response.status });
@@ -1524,33 +1611,41 @@ export class LLMRuntime {
 
   private async fetchWithRetries(config: NormalizedProviderConfig, request: ProviderRequest, credential: CredentialHandle | undefined, signal: AbortSignal | undefined, stream: boolean): Promise<Response> {
     const circuit = this.circuits.get(config.provider) ?? { consecutiveFailures: 0, openedUntil: null };
-    if (circuit.openedUntil !== null && circuit.openedUntil > this.clock()) throw new ProviderRuntimeError("provider circuit is open; invocation is temporarily refused", { circuitOpen: true });
+    if (signal?.aborted) throw new ProviderRuntimeError("provider request was aborted before dispatch", { code: "aborted" });
+    if (circuit.openedUntil !== null && circuit.openedUntil > this.clock()) throw new ProviderRuntimeError("provider circuit is open; invocation is temporarily refused", { circuitOpen: true, code: "circuit_open" });
     if (circuit.openedUntil !== null) { circuit.openedUntil = null; circuit.consecutiveFailures = 0; }
     let lastError: ProviderFailure | null = null;
     for (let attempt = 0; attempt < config.maxAttempts; attempt += 1) {
       try {
         const response = await this.fetchOnce(config, request, credential, signal, stream);
-        if (response.status >= 400) throw providerHttpError(response.status);
+        if (response.status >= 400) throw providerHttpError(response.status, response.headers);
         circuit.consecutiveFailures = 0;
         circuit.openedUntil = null;
         return response;
       } catch (unknownError) {
-        const error = errorFromUnknown(unknownError);
+        const normalizedError = errorFromUnknown(unknownError);
+        const error = normalizedError instanceof ProviderRuntimeError
+          ? normalizedError.withContext({ provider: config.provider, operation: "provider_request", attempt: attempt + 1 })
+          : normalizedError;
         lastError = error;
         if (!(error instanceof ProviderRuntimeError) || !error.retryable || attempt + 1 >= config.maxAttempts) break;
-        if (config.retryBackoffMs > 0) await new Promise<void>((resolve) => setTimeout(resolve, Math.min(60_000, config.retryBackoffMs * 2 ** attempt)));
+        const delayMs = error.retryAfterMs ?? Math.min(60_000, config.retryBackoffMs * 2 ** attempt);
+        if (!(await waitForRetry(delayMs, signal))) {
+          throw abortFailure(signal, false).withContext({ provider: config.provider, operation: "provider_request", attempt: attempt + 1 });
+        }
       }
     }
-    if (lastError instanceof ProviderRuntimeError) {
+    if (lastError instanceof ProviderRuntimeError && lastError.retryable) {
       circuit.consecutiveFailures += 1;
       if (lastError.retryable && circuit.consecutiveFailures >= config.circuitBreakerFailureThreshold) circuit.openedUntil = this.clock() + config.circuitBreakerResetMs;
     }
-    throw lastError ?? new ProviderRuntimeError("provider invocation failed");
+    throw lastError ?? new ProviderRuntimeError("provider invocation failed", { code: "transport", retryable: true, provider: config.provider, operation: "provider_request" });
   }
 
   private async fetchOnce(config: NormalizedProviderConfig, request: ProviderRequest, credential: CredentialHandle | undefined, callerSignal: AbortSignal | undefined, stream: boolean): Promise<Response> {
     if (config.requiresCredential && credential === undefined) throw new CredentialError(`provider ${config.provider} requires a user credential handle`);
     if (!config.requiresCredential && credential !== undefined) throw new CredentialError(`provider ${config.provider} does not accept a credential handle`);
+    if (callerSignal?.aborted) throw abortFailure(callerSignal, false);
     const body = requestBody(config, request, stream);
     const encoded = JSON.stringify(body);
     if (encoded === undefined || bytes(encoded) > MAX_PROVIDER_REQUEST_BYTES) throw new ProviderRuntimeError("provider request exceeds its bounded size");
@@ -1562,14 +1657,16 @@ export class LLMRuntime {
     }
     if (request.idempotencyKey !== undefined) headers["Idempotency-Key"] = boundedIdentifier("idempotency key", request.idempotencyKey, 512);
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), config.timeoutMs);
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, config.timeoutMs);
     const abort = (): void => controller.abort();
     callerSignal?.addEventListener("abort", abort, { once: true });
     try {
       return await this.fetchImplementation(endpointUrl(config), { method: "POST", headers, body: encoded, signal: controller.signal });
     } catch (unknownError) {
       if (unknownError instanceof ProviderRuntimeError) throw unknownError;
-      throw new ProviderRuntimeError("provider transport failed; credential material was discarded", { retryable: true });
+      if (isAbortError(unknownError)) throw abortFailure(callerSignal, timedOut);
+      throw new ProviderRuntimeError("provider transport failed; credential material was discarded", { retryable: true, code: "transport" });
     } finally {
       clearTimeout(timer);
       callerSignal?.removeEventListener("abort", abort);
@@ -1579,18 +1676,21 @@ export class LLMRuntime {
   private async fetchModelCatalog(config: NormalizedProviderConfig, credential: CredentialHandle | undefined, callerSignal: AbortSignal | undefined): Promise<Response> {
     if (config.requiresCredential && credential === undefined) throw new CredentialError(`provider ${config.provider} requires a user credential handle`);
     if (!config.requiresCredential && credential !== undefined) throw new CredentialError(`provider ${config.provider} does not accept a credential handle`);
+    if (callerSignal?.aborted) throw abortFailure(callerSignal, false);
     const secret = credential === undefined ? null : this.credentials.resolve(credential, config.provider);
     const headers: Record<string, string> = { Accept: "application/json" };
     if (secret !== null) headers[config.apiKeyHeader] = config.protocol === "anthropic_messages" ? secret : `Bearer ${secret}`;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), config.timeoutMs);
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, config.timeoutMs);
     const abort = (): void => controller.abort();
     callerSignal?.addEventListener("abort", abort, { once: true });
     try {
       return await this.fetchImplementation(modelsEndpointUrl(config), { method: "GET", headers, signal: controller.signal });
     } catch (unknownError) {
       if (unknownError instanceof CredentialError || unknownError instanceof ProviderRuntimeError) throw unknownError;
-      throw new ProviderRuntimeError("provider model discovery transport failed; credential material was discarded", { retryable: true });
+      if (isAbortError(unknownError)) throw abortFailure(callerSignal, timedOut);
+      throw new ProviderRuntimeError("provider model discovery transport failed; credential material was discarded", { retryable: true, code: "transport" });
     } finally {
       clearTimeout(timer);
       callerSignal?.removeEventListener("abort", abort);
@@ -1815,8 +1915,14 @@ function healthProjection(provider: string, state: HealthState, circuit: "closed
   };
 }
 
-function providerHttpError(status: number): ProviderRuntimeError {
-  return new ProviderRuntimeError(`provider returned HTTP status ${status}`, { retryable: retryableStatus(status), statusCode: status });
+function providerHttpError(status: number, headers?: Headers): ProviderRuntimeError {
+  return new ProviderRuntimeError(`provider returned HTTP status ${status}`, {
+    retryable: retryableStatus(status),
+    statusCode: status,
+    code: status >= 500 ? "http_5xx" : "http_4xx",
+    requestId: headers ? requestIdFromHeaders(headers) ?? undefined : undefined,
+    retryAfterMs: headers ? retryAfterMsFromHeaders(headers) : undefined,
+  });
 }
 
 export type ProviderFactoryOptions = Omit<ProviderConfig, "provider" | "protocol" | "baseUrl"> & { baseUrl?: string };

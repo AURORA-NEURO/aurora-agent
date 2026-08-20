@@ -170,6 +170,137 @@ test("model discovery fails closed on malformed rows and missing credentials", a
   assert.equal(calls, 1);
 });
 
+test("provider failures expose redacted context and observers receive stable failure metadata", async () => {
+  let observed;
+  const runtime = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => jsonResponse({ error: "unauthorized" }, 401, { "x-request-id": "request-401" }),
+  });
+  runtime.registerProvider(openaiCompatibleProvider("diagnostic", "https://diagnostic.test", { requiresCredential: false }));
+  await assert.rejects(
+    runtime.invoke("diagnostic", request("diagnostic-model"), {
+      observer: { after: async (_metadata, outcome) => { observed = outcome; } },
+    }),
+    (error) => error instanceof ProviderRuntimeError
+      && error.code === "http_4xx"
+      && error.provider === "diagnostic"
+      && error.operation === "invoke"
+      && error.requestId === "request-401"
+      && error.retryable === false,
+  );
+  assert.equal(observed.failureClass, "http_4xx");
+  assert.equal(observed.failureCode, "http_4xx");
+  assert.equal(observed.requestId, "request-401");
+  assert.equal(observed.retryable, false);
+  assert.doesNotMatch(JSON.stringify(observed), /authorization|credential|secret|api[-_]?key|gsk_/i);
+});
+
+test("retry-after is bounded and caller aborts never dispatch or open a circuit", async () => {
+  let calls = 0;
+  const runtime = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      calls += 1;
+      return calls === 1
+        ? jsonResponse({ error: "busy" }, 429, { "retry-after": "0", "x-request-id": "retry-1" })
+        : jsonResponse({ choices: [{ message: { role: "assistant", content: "recovered" }, finish_reason: "stop" }] });
+    },
+  });
+  runtime.registerProvider(openaiCompatibleProvider("retryable", "https://retryable.test", {
+    requiresCredential: false,
+    maxAttempts: 2,
+    retryBackoffMs: 0,
+    circuitBreakerFailureThreshold: 1,
+  }));
+  const recovered = await runtime.invoke("retryable", request());
+  assert.equal(recovered.text, "recovered");
+  assert.equal(calls, 2);
+  assert.equal(runtime.providerStatus("retryable").successes, 1);
+  assert.equal(runtime.providerStatus("retryable").circuit, "closed");
+
+  const controller = new AbortController();
+  controller.abort();
+  let abortedCalls = 0;
+  const abortedRuntime = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => { abortedCalls += 1; return jsonResponse({ output_text: "must not run" }); },
+  });
+  abortedRuntime.registerProvider(openaiProvider({ baseUrl: "https://aborted.test" }));
+  let abortedOutcome;
+  await assert.rejects(
+    abortedRuntime.invoke("openai", request(), {
+      signal: controller.signal,
+      credential: abortedRuntime.credentials.register("openai", "opaque-secret"),
+      observer: { after: async (_metadata, outcome) => { abortedOutcome = outcome; } },
+    }),
+    (error) => error instanceof ProviderRuntimeError && error.code === "aborted" && error.provider === "openai" && error.operation === "invoke",
+  );
+  assert.equal(abortedCalls, 0);
+  assert.equal(abortedOutcome.failureClass, "aborted");
+  assert.equal(abortedOutcome.failureCode, "aborted");
+  assert.equal(abortedRuntime.providerStatus("openai").circuit, "closed");
+});
+
+test("transport aborts are classified without leaking the thrown error", async () => {
+  const runtime = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => { throw new DOMException("aborted", "AbortError"); },
+  });
+  runtime.registerProvider(openaiCompatibleProvider("aborted-transport", "https://aborted-transport.test", { requiresCredential: false }));
+  await assert.rejects(
+    runtime.invoke("aborted-transport", request()),
+    (error) => error instanceof ProviderRuntimeError && error.code === "aborted" && error.retryable === false,
+  );
+});
+
+test("caller aborts interrupt retry backoff before another provider dispatch", async () => {
+  const controller = new AbortController();
+  let calls = 0;
+  const runtime = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      calls += 1;
+      controller.abort();
+      return jsonResponse({ error: "temporarily unavailable" }, 503);
+    },
+  });
+  runtime.registerProvider(openaiCompatibleProvider("backoff-abort", "https://backoff-abort.test", {
+    requiresCredential: false,
+    maxAttempts: 2,
+    retryBackoffMs: 50,
+  }));
+  await assert.rejects(
+    runtime.invoke("backoff-abort", request(), { signal: controller.signal }),
+    (error) => error instanceof ProviderRuntimeError
+      && error.code === "aborted"
+      && error.provider === "backoff-abort"
+      && error.operation === "invoke",
+  );
+  assert.equal(calls, 1);
+});
+
+test("provider deadlines are classified as retryable timeouts", async () => {
+  const runtime = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => await new Promise((_, reject) => {
+      init.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+    }),
+  });
+  runtime.registerProvider(openaiCompatibleProvider("timed", "https://timed.test", {
+    requiresCredential: false,
+    timeoutMs: 1,
+    maxAttempts: 1,
+  }));
+  await assert.rejects(
+    runtime.invoke("timed", request()),
+    (error) => error instanceof ProviderRuntimeError
+      && error.code === "timeout"
+      && error.provider === "timed"
+      && error.operation === "invoke"
+      && error.retryable === true,
+  );
+});
+
 test("OpenAI Responses parsing preserves structured output and tool calls", async () => {
   let captured;
   const credentials = new CredentialStore();

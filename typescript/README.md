@@ -96,6 +96,20 @@ is supplied, or accepts a value-only selector backed by the Rust/Python contextu
 Provider failures remain typed and credential failures are not silently converted into generic
 transport errors.
 
+Provider failures expose a stable, redacted `ProviderRuntimeError` contract for operators and
+retry controllers. `code` distinguishes `http_4xx`, `http_5xx`, `transport`, `timeout`,
+`aborted`, `circuit_open`, `protocol`, `invalid_response`, and bounded configuration/request
+failures; `provider`, `operation`, `attempt`, `statusCode`, `requestId`, `retryable`, and the
+bounded `retryAfterMs` hint are optional non-secret context. Upstream response bodies, headers
+other than the bounded request-id/retry hint, authorization material, and thrown transport errors
+are not retained. Caller aborts are terminal and never retried or counted toward the circuit;
+deadlines are retryable when the configured attempt budget allows it. HTTP 4xx failures are
+terminal except for explicitly retryable statuses such as 408/409/425/429, while 5xx failures
+follow the bounded retry policy. Retry delays honor provider `Retry-After` values only within the
+SDK's 60-second ceiling, and an external abort interrupts the delay immediately. Invocation
+observers receive the matching `failureClass`, `failureCode`, `requestId`, and `retryable`
+projection without prompt, response, tool, or credential data.
+
 Model ids can be refreshed from the provider instead of being copied from stale configuration:
 
 ```typescript

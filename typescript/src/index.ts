@@ -11,6 +11,7 @@ export {
   TransportError,
   ProviderRuntimeError,
 } from "./errors.js";
+export type { ProviderErrorCode, ProviderFailureClass } from "./errors.js";
 export { parseSse } from "./sse.js";
 export {
   CREDENTIAL_ONBOARDING_SCHEMA,
