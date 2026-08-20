@@ -1302,3 +1302,23 @@ metadata is suitable for caller-owned audit and evaluator code but is not sent t
 control plane. This keeps domain-specific standards intact while allowing biomedical, neuroscience,
 science, coding, evaluation, operations, enterprise, multimodal, browser, data, and multi-agent
 specialists to participate in one bounded workflow.
+
+### Resumable workflow execution
+
+`AutonomousWorkflowExecutor` is the TypeScript stage-execution bridge for a single reviewed domain
+workflow. It consumes the blueprint DAG, invokes one stage at a time through `AutonomousAgent`,
+and saves a checkpoint after every completed stage. `maxStages` bounds one worker call; the executor
+returns `paused` with the next stage rather than silently running an unbounded workflow. A stage
+failure is retained as a typed failed checkpoint, while provider approval produces an explicit
+`approval_required` pause without dispatch.
+
+`AutonomousWorkflowCheckpointStore` is deliberately caller-owned. The included
+`InMemoryAutonomousWorkflowCheckpointStore` is a bounded reference implementation; applications
+can replace it with SQLite, a queue-backed record, or another durable store. Checkpoints contain
+only task/workflow/plan digests, stage IDs, outcome/status metadata, and a generation-bound
+checkpoint digest. Events form a bounded contiguous hash chain with `previous_event_digest`; task
+text, prompts, credentials, tool arguments/results, and provider responses are never written to the
+store. `resume(jobId, task, options)` requires the caller to rehydrate task text and credentials,
+then refuses if the task, workflow, or plan digest has changed. This is the local worker boundary;
+the existing value-only `brain_job_*` APIs can retain a separate server-side job projection without
+receiving the private specification.

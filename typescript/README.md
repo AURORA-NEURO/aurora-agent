@@ -132,6 +132,15 @@ synthesis by default; `allowPartial: true` makes partial synthesis an explicit c
 Calling `run()` without an explicit domain automatically uses this path when routing selects more
 than one domain.
 
+For resumable single-domain workflows, `AutonomousWorkflowExecutor` turns the reviewed workflow
+DAG into bounded stage calls. It checkpoints after each completed stage, pauses after
+`maxStages`, records a metadata-only event chain, and resumes only when the caller supplies the
+original task and the rebuilt workflow/plan digests match. `InMemoryAutonomousWorkflowCheckpointStore`
+is suitable for tests and small workers; production applications should implement
+`AutonomousWorkflowCheckpointStore` over their durable store. Checkpoints never contain task text,
+prompts, provider responses, credentials, or tool payloads, and restart recovery explicitly
+requires caller-owned task and credential rehydration.
+
 ## Contract boundaries
 
 - Requests and responses are bounded. The client enforces a request byte ceiling, incrementally

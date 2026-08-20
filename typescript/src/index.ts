@@ -178,3 +178,24 @@ export type {
   DomainToolApprover,
   DomainToolExecutor,
 } from "./autonomous.js";
+export {
+  AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA,
+  AUTONOMOUS_WORKFLOW_EVENT_SCHEMA,
+  AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA,
+  AUTONOMOUS_WORKFLOW_MAX_EVENTS,
+  AUTONOMOUS_WORKFLOW_MAX_STAGES_PER_CALL,
+  AutonomousWorkflowExecutor,
+  InMemoryAutonomousWorkflowCheckpointStore,
+} from "./workflow-execution.js";
+export type {
+  AutonomousWorkflowCheckpoint,
+  AutonomousWorkflowCheckpointStatus,
+  AutonomousWorkflowCheckpointStore,
+  AutonomousWorkflowEvent,
+  AutonomousWorkflowEventType,
+  AutonomousWorkflowExecuteOptions,
+  AutonomousWorkflowExecutionResult,
+  AutonomousWorkflowExecutionStatus,
+  AutonomousWorkflowStageOutcome,
+  AutonomousWorkflowStageResult,
+} from "./workflow-execution.js";
