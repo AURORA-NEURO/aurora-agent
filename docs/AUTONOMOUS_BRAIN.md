@@ -313,6 +313,29 @@ the episode settled through the replay metadata. Reusing a settled identity is r
 run begins with `arms=[]`, the selected `provider/model` arm is bootstrapped before the update, so
 the documented first-run exploration state is executable rather than a dead-end.
 
+The application-facing equivalent keeps the brain behind the same `AutonomousAgent` boundary:
+
+```python
+episode = agent.prepare_learning_episode(
+    completed_result,
+    evidence=caller_owned_evidence,
+    episode_id="job-123-attempt-0",
+)
+# Persist only episode.to_dict() in the application/job store. After restart:
+decision, report = agent.settle_learning_episode(
+    agent.restore_learning_episode(saved_episode),
+    domain="coding",  # resolves the reviewed built-in evaluator
+    evidence=caller_owned_evidence,
+)
+```
+
+For delayed multi-step credit, `agent.prepare_learning_trajectory(...)` and
+`agent.restore_learning_trajectory(...)` provide the same restart-safe boundary, while
+`agent.settle_learning_trajectory(...)` requires one explicit evaluator for the whole ordered
+sequence. This API works for every provider, tool-loop, mission, workflow, and cross-domain result;
+the agent persists only value-only projections and replay digests, never keys, prompts, task text,
+responses, tool arguments, or raw evidence.
+
 `AutonomousAgent.run_cross_domain_learning()` applies this same loop between fan-out members and
 the synthesis call. Child results are scored in declaration order, the next child receives the
 updated value-only state, and synthesis receives all preceding updates. Evidence may be supplied

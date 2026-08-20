@@ -33,7 +33,9 @@ from .errors import ArgumentError
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,
+    BrainLearningEpisode,
     BrainLearningLedger,
+    BrainLearningTrajectory,
     BrainLearningTrajectoryResult,
     BrainMissionResult,
     BrainOutcomeEvaluator,
@@ -9878,6 +9880,135 @@ class AutonomousAgent:
             "generation": 0,
             "arms": [],
         }
+
+    def domain_evaluator(
+        self,
+        domain: str,
+        *,
+        evaluator_registry: DomainEvaluatorRegistry | None = None,
+        fallback_domain: str | None = None,
+    ) -> BrainOutcomeEvaluator:
+        """Resolve the reviewed value-only evaluator for one autonomous domain."""
+
+        registry = evaluator_registry or DomainEvaluatorRegistry.with_builtin_autonomous_profiles()
+        if not isinstance(registry, DomainEvaluatorRegistry):
+            raise BrainRunError("evaluator_registry must be a DomainEvaluatorRegistry or None")
+        evaluator = registry.resolve_for_autonomous_domain(domain, fallback_domain=fallback_domain)
+        if not isinstance(evaluator, BrainOutcomeEvaluator):
+            raise BrainRunError("domain evaluator registry returned an invalid evaluator")
+        return evaluator
+
+    def prepare_learning_episode(
+        self,
+        result: BrainRunResult | BrainToolLoopResult | BrainMissionResult,
+        *,
+        evidence: Mapping[str, Any] | None = None,
+        arm_id: str | None = None,
+        episode_id: str | None = None,
+        ledger: BrainLearningLedger | None = None,
+    ) -> BrainLearningEpisode:
+        """Persist a value-only delayed-feedback handle for a completed agent result."""
+
+        return self.brain.prepare_learning_episode(
+            result,
+            evidence=evidence,
+            arm_id=arm_id,
+            episode_id=episode_id,
+            ledger=self.ledger if ledger is None else ledger,
+        )
+
+    @staticmethod
+    def restore_learning_episode(value: Mapping[str, Any]) -> BrainLearningEpisode:
+        """Validate a caller-rehydrated episode projection before delayed settlement."""
+
+        return BrainLearningEpisode.from_mapping(value)
+
+    def settle_learning_episode(
+        self,
+        episode: BrainLearningEpisode | Mapping[str, Any],
+        *,
+        evaluator: BrainOutcomeEvaluator | None = None,
+        domain: str | None = None,
+        evaluator_registry: DomainEvaluatorRegistry | None = None,
+        fallback_domain: str | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        evidence: Mapping[str, Any] | None = None,
+        ledger: BrainLearningLedger | None = None,
+    ) -> tuple[BrainEvaluatorDecision, dict[str, Any]]:
+        """Settle delayed feedback without retaining or reloading provider content.
+
+        A caller may provide an explicit evaluator or resolve one of the reviewed autonomous
+        domain evaluators. The evidence packet is transient and the ledger receives only its
+        digest plus the value-only bandit report.
+        """
+
+        if evaluator is None:
+            if domain is None:
+                raise BrainRunError("settle_learning_episode requires evaluator or domain")
+            evaluator = self.domain_evaluator(
+                domain,
+                evaluator_registry=evaluator_registry,
+                fallback_domain=fallback_domain,
+            )
+        if not isinstance(evaluator, BrainOutcomeEvaluator):
+            raise BrainRunError("evaluator must be a BrainOutcomeEvaluator or None")
+        return evaluator.evaluate_episode(
+            self.brain,
+            episode,
+            bandit_state=self.learning_state() if bandit_state is None else bandit_state,
+            evidence=evidence,
+            ledger=self.ledger if ledger is None else ledger,
+        )
+
+    def prepare_learning_trajectory(
+        self,
+        results: Sequence[BrainRunResult | BrainToolLoopResult | BrainMissionResult],
+        *,
+        evidence_by_step: Sequence[Mapping[str, Any] | None] | None = None,
+        arm_ids: Sequence[str | None] | None = None,
+        trajectory_id: str | None = None,
+        discount: float = 0.90,
+        terminal_reward: float | None = None,
+        ledger: BrainLearningLedger | None = None,
+    ) -> BrainLearningTrajectory:
+        """Register an ordered value-only trajectory for later evaluator settlement."""
+
+        return self.brain.prepare_learning_trajectory(
+            results,
+            evidence_by_step=evidence_by_step,
+            arm_ids=arm_ids,
+            trajectory_id=trajectory_id,
+            discount=discount,
+            terminal_reward=terminal_reward,
+            ledger=self.ledger if ledger is None else ledger,
+        )
+
+    @staticmethod
+    def restore_learning_trajectory(value: Mapping[str, Any]) -> BrainLearningTrajectory:
+        """Validate a caller-rehydrated trajectory projection before settlement."""
+
+        return BrainLearningTrajectory.from_mapping(value)
+
+    def settle_learning_trajectory(
+        self,
+        trajectory: BrainLearningTrajectory | Mapping[str, Any],
+        *,
+        evaluator: BrainOutcomeEvaluator,
+        bandit_state: Mapping[str, Any] | None = None,
+        evidence_by_step: Sequence[Mapping[str, Any] | None] | None = None,
+        ledger: BrainLearningLedger | None = None,
+    ) -> BrainLearningTrajectoryResult:
+        """Apply one evaluator's discounted delayed credit across a persisted trajectory."""
+
+        if not isinstance(evaluator, BrainOutcomeEvaluator):
+            raise BrainRunError("evaluator must be a BrainOutcomeEvaluator")
+        return evaluator.evaluate_trajectory(
+            self.brain,
+            trajectory,
+            bandit_state=self.learning_state() if bandit_state is None else bandit_state,
+            evidence_by_step=evidence_by_step,
+            ledger=self.ledger if ledger is None else ledger,
+        )
 
     def execution_state(self, execution_id: str) -> dict[str, Any] | None:
         """Read one restart-safe execution state without returning task or provider content."""

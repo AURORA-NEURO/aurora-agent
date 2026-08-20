@@ -1499,6 +1499,104 @@ def test_run_auto_exposes_cross_domain_learning_modes_and_shortcut(tmp_path: Pat
         server.server_close()
 
 
+def test_agent_exposes_restart_safe_delayed_learning_settlement(tmp_path: Path):
+    runtime, store, server, thread = _runtime()
+    ledger = BrainLearningLedger(tmp_path / "delayed-learning.jsonl")
+    agent = AutonomousAgent(
+        _Workspace(),
+        runtime,
+        model_catalogue=ModelCatalogue(_model()),
+        ledger=ledger,
+    )
+    handle = store.register("openai", "delayed-learning-secret")
+    bandit_state = {"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []}
+    evaluator = BrainOutcomeEvaluator(
+        lambda _input: {"reward": 0.8, "passed": True, "failed": False},
+        evaluator_id="delayed-quality",
+        evaluator_version="1",
+    )
+    evidence = {"signals": {"quality": 1.0}}
+    try:
+        first = agent.run(
+            task="review the implementation",
+            domain="coding",
+            credentials={"openai": handle},
+            model_candidates=_model(),
+            approve_provider_call=True,
+            run_id="delayed-one",
+        )
+        episode = agent.prepare_learning_episode(
+            first,
+            evidence=evidence,
+            episode_id="delayed-episode-one",
+        )
+        saved_episode = json.loads(json.dumps(episode.to_dict()))
+        assert saved_episode["status"] == "pending"
+        assert "delayed-learning-secret" not in json.dumps(saved_episode)
+        assert [item.episode_id for item in ledger.pending_episodes()] == ["delayed-episode-one"]
+
+        decision, report = agent.settle_learning_episode(
+            agent.restore_learning_episode(saved_episode),
+            evaluator=evaluator,
+            bandit_state=bandit_state,
+            evidence=evidence,
+        )
+        assert decision.passed is True
+        assert report["next_state"]["generation"] == 1
+        assert ledger.pending_episodes() == []
+        with pytest.raises(BrainRunError, match="already settled"):
+            agent.settle_learning_episode(
+                agent.restore_learning_episode(saved_episode),
+                evaluator=evaluator,
+                bandit_state=bandit_state,
+                evidence=evidence,
+            )
+
+        second = agent.run(
+            task="review the implementation",
+            domain="coding",
+            credentials={"openai": handle},
+            model_candidates=_model(),
+            approve_provider_call=True,
+            run_id="delayed-two",
+        )
+        third = agent.run(
+            task="review the implementation",
+            domain="coding",
+            credentials={"openai": handle},
+            model_candidates=_model(),
+            approve_provider_call=True,
+            run_id="delayed-three",
+        )
+        trajectory = agent.prepare_learning_trajectory(
+            [second, third],
+            evidence_by_step=[evidence, evidence],
+            trajectory_id="delayed-trajectory",
+            discount=0.5,
+            terminal_reward=0.25,
+        )
+        saved_trajectory = json.loads(json.dumps(trajectory.to_dict()))
+        assert saved_trajectory["trajectory_id"] == "delayed-trajectory"
+        assert len(ledger.pending_episodes()) == 2
+        settled = agent.settle_learning_trajectory(
+            agent.restore_learning_trajectory(saved_trajectory),
+            evaluator=evaluator,
+            bandit_state=bandit_state,
+            evidence_by_step=[evidence, evidence],
+        )
+        assert settled.status == "settled"
+        assert len(settled.credited_rewards) == 2
+        assert settled.credited_rewards[0] >= settled.credited_rewards[1]
+        assert ledger.pending_episodes() == []
+        public = json.dumps(settled.to_dict())
+        assert "delayed-learning-secret" not in public
+        assert {agent.domain_evaluator(domain).profile.domain for domain in AUTONOMOUS_DOMAINS} == set(AUTONOMOUS_DOMAINS)
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
 def test_builtin_workflow_registry_drives_all_domains_with_valid_stage_dags():
     registry = AutonomousWorkflowRegistry.with_builtin_strategies()
     strategies = registry.catalogue()
