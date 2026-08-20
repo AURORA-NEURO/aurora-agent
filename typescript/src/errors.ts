@@ -83,6 +83,29 @@ export class ToolRefusalError extends PrismSdkError {
   }
 }
 
+/** A provider credential was missing, expired, revoked, or used with the wrong provider. */
+export class CredentialError extends PrismSdkError {
+  override readonly name = "CredentialError";
+}
+
+/** A provider invocation failed at the bounded transport or protocol boundary. */
+export class ProviderRuntimeError extends PrismSdkError {
+  override readonly name = "ProviderRuntimeError";
+  readonly retryable: boolean;
+  readonly statusCode?: number;
+  readonly circuitOpen: boolean;
+
+  constructor(
+    message: string,
+    options: { retryable?: boolean; statusCode?: number; circuitOpen?: boolean } = {},
+  ) {
+    super(message);
+    this.retryable = options.retryable ?? false;
+    this.statusCode = options.statusCode;
+    this.circuitOpen = options.circuitOpen ?? false;
+  }
+}
+
 export function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

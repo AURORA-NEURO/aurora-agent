@@ -26,6 +26,48 @@ if (result.mcp.result?.isError) {
 }
 ```
 
+## BYOK onboarding and provider invocation
+
+The autonomous runtime is BYOK: the application owns the key-entry or secret-manager boundary,
+while `LLMRuntime` owns only short-lived, process-local credential handles. Keys must never be
+placed in MCP arguments, prompts, tool results, model-selection state, telemetry, or durable job
+records. A protected UI can submit a value through `collectUserCredential()`; a deployment with
+no human key entry can register an environment variable or an external resolver through
+`CredentialProvisioner`:
+
+```typescript
+import { CredentialProvisioner, LLMRuntime, openaiProvider } from "@aurora-neuro/prism-sdk";
+
+const runtime = new LLMRuntime();
+runtime.registerProvider(openaiProvider());
+const sources = new CredentialProvisioner(runtime.onboarding);
+sources.registerEnvironment("openai", { variable: "OPENAI_API_KEY" });
+// Or: await sources.registerResolver("openai", "secret-manager/openai", resolveSecret);
+
+const session = runtime.onboarding.startSession({ ttlMs: 15 * 60_000 });
+const provisioned = await sources.provision(session);
+if (!provisioned.ready) throw new Error("provider credential provisioning was refused");
+
+const answer = await runtime.invoke("openai", {
+  model: "gpt-4.1-mini",
+  messages: [{ role: "user", content: "Return a bounded answer." }],
+  maxOutputTokens: 512,
+}, { credential: session.handle("openai") });
+session.close();
+```
+
+`status()`, `instructions()`, and `plan()` return redacted readiness metadata for a UI or
+operator dashboard. `CredentialSession.close()` and expiry revoke its handles; a process restart
+requires fresh source registration and resolution. The runtime supports OpenAI Responses,
+OpenAI-compatible Chat Completions, and Anthropic Messages, including bounded retries, circuit
+breaking, streaming, structured-output validation, authorized tool loops, provider/model health,
+and invocation outcome callbacks. `AutonomousRuntime` composes the selected-model handoff with
+the invocation boundary: it gates disabled, unregistered, circuit-open, credential-unready, and
+capacity-incompatible candidates, uses bounded health-weighted fallback ranking when no selector
+is supplied, or accepts a value-only selector backed by the Rust/Python contextual bandit plane.
+Provider failures remain typed and credential failures are not silently converted into generic
+transport errors.
+
 ## Contract boundaries
 
 - Requests and responses are bounded. The client enforces a request byte ceiling, incrementally

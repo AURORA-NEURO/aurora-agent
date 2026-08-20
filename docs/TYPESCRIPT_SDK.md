@@ -34,6 +34,46 @@ Fetch API. It is intentionally an integration layer over `bioprism-api`, not a s
 implementation. The Rust MCP server remains the authority for tool schemas, refusal semantics,
 canonical serialization, and scientific contracts.
 
+## Application-owned BYOK lifecycle
+
+The TypeScript provider runtime is the application-owned invocation plane. Register transport
+metadata first, then choose one of these credential sources:
+
+| Source | Entry boundary | Durable secret state |
+|---|---|---|
+| Protected UI | `runtime.onboarding.collectUserCredential(provider, value)` | none; value is immediately held behind an opaque handle |
+| Environment | `CredentialProvisioner.registerEnvironment(...)` | none; the variable name is metadata and the value is read only during provisioning |
+| Secret manager | `CredentialProvisioner.registerResolver(provider, reference, resolver)` | none in the SDK; the callback and reference remain process-local |
+| No-echo prompt | `runtime.onboarding.configureFromPrompt(...)` | none; the caller supplies the reader |
+
+The recommended non-interactive worker flow is:
+
+1. Register provider URLs/protocols with `LLMRuntime.registerProvider()`.
+2. Register deployment wiring with `CredentialProvisioner`; its plan contains only provider,
+   source kind, source id, and a reference digest.
+3. Start a short-lived `CredentialSession` for one request or worker attempt.
+4. Call `provision(session)`; resolve sources in process and retain only opaque handles.
+5. Use `LLMRuntime.invoke()`, `collectStream()`, or `invokeToolLoop()` with the session handle.
+6. Close the session on completion, cancellation, rotation, or worker shutdown.
+
+`status()`, `instructions()`, `session.status()`, provisioning receipts, provider health, and
+model health are safe projections: they never include key values, resolver references, prompts,
+responses, tool arguments, or authorization headers. A restart must re-register sources and
+resolve fresh handles, which makes rotation and revocation explicit. The runtime refuses a
+missing, expired, revoked, or provider-mismatched handle before network dispatch.
+
+The provider boundary is deliberately separate from autonomous planning. `ApiClient` exposes the
+value-only `brainModelSelect`, contextual selection, prompt assembly, plan validation, bandit
+selection/update, trajectory recording, model-health, and replay routes. A caller can feed the
+selected provider/model and reviewed tool catalogue into `LLMRuntime`; provider invocation then
+reports only bounded outcome metadata through the observer, leaving prompts, responses, secrets,
+and raw tool arguments outside the control-plane evidence contract. `AutonomousRuntime` provides
+the local composition point: it builds a value-only selection request with provider/model health,
+credential readiness, domain/capability/risk context, and candidate constraints; it accepts a
+caller selector for Rust/Python contextual bandit decisions or applies a deterministic health-
+weighted fallback; then it invokes the selected provider or enters the authorization-gated tool
+loop. A selector can abstain, and ineligible candidates cannot be forced through the boundary.
+
 ## Start a gateway
 
 ```bash
