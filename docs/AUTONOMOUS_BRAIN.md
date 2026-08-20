@@ -1770,6 +1770,48 @@ is reviewed. `ready` means that provider readiness and the approved metadata pat
 does not mean that an external effect is approved. `agent.activation_state()` and the
 `activation` member of `agent.readiness()` are UI-safe status projections only.
 
+### Domain execution plans: the runtime handoff
+
+Activation state is compiled into an explicit, non-executing domain execution plan. This is the
+contract that turns reviewed configuration into runtime inputs without asking the model to
+invent its own tool list or evidence standard:
+
+```python
+plan = agent.domain_execution_plan("coding")
+all_plans = agent.execution_plans()
+
+print(plan["status"])
+print(plan["workflow"]["stages"])
+print(plan["tools"]["registered"])
+print(plan["models"]["candidates"])
+print(plan["learning"]["context_digest"])
+```
+
+Each plan joins the selected domain profile, pack and digest, dependency-ordered workflow
+stages, exact active/withheld tool names and schema digests, required and missing tool
+capabilities, compatible model arms, redacted provider readiness, evaluator signals, evidence
+outputs, review triggers, approval gates, and a stable bandit-learning scope. A stage is
+`tool_ready` only when its declared capabilities map to active registered tools; otherwise it is
+`provider_only_or_blocked`. Missing tools are reported as a degraded capability, never silently
+replaced with an unclassified tool.
+
+`execution_plans()` compiles all twelve built-in domains for readiness dashboards and startup
+diagnostics. The possible plan states are `ready`, `degraded_tool_coverage`, `provider_pending`,
+`activation_review_required`, `stale`, `revoked`, and `model_gap`. A plan is descriptive only:
+it does not invoke a provider, execute a tool, collect a key, or authorize an effect. When an
+activation plan has been recorded, the runtime enforces its exact approved tool names before
+constructing `provider_tools`; caller-supplied tool metadata cannot bypass that allow-list.
+Provider selection still applies live provider registration, opaque credential readiness, circuit
+health, capability matching, cost/latency bounds, and learned bandit state.
+
+For normal `AutonomousAgent.run()`, `run_workflow()`, and cross-domain calls, the façade attaches
+the bounded plan packet to a reserved developer context block and adds its digest and status to
+model-selection overrides. The prompt receives the workflow/evidence contract and the model
+selector receives the same plan identity, so evaluator feedback can be scoped to the domain,
+workflow, tool registry, activation revision, and required model capabilities. The learning
+ledger still requires independent evaluator evidence: provider success or a model's
+self-reported completion is never treated as reward.
+
 The registry is metadata and schema composition; it does not grant authority. A provider-generated
 tool call is still an intent. `AutonomousDomainToolRuntime` validates the call against the exact
 registered schema, rejects credential-shaped fields, applies the read-only/effect approval policy,

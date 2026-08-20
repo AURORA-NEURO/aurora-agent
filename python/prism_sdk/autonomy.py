@@ -114,6 +114,17 @@ AUTONOMOUS_WORKFLOW_LEARNING_SCHEMA = "bioprism-python-autonomous-workflow-learn
 AUTONOMOUS_WORKFLOW_TRAJECTORY_LEARNING_SCHEMA = "bioprism-python-autonomous-workflow-trajectory-learning/0.1"
 AUTONOMOUS_ROUTE_SCHEMA = "bioprism-python-autonomous-route/0.1"
 AUTONOMOUS_DOMAIN_PACK_SCHEMA = "bioprism-python-autonomous-domain-pack/0.1"
+AUTONOMOUS_EXECUTION_PLAN_SCHEMA = "bioprism-python-autonomous-execution-plan/0.1"
+AUTONOMOUS_EXECUTION_PLAN_STATUSES = (
+    "ready",
+    "degraded_tool_coverage",
+    "provider_pending",
+    "activation_review_required",
+    "stale",
+    "revoked",
+    "model_gap",
+    "multi_domain",
+)
 AUTONOMOUS_ROUTE_REASONS = (
     "routed",
     "cross_domain",
@@ -125,6 +136,7 @@ MAX_AUTONOMOUS_ROUTE_CANDIDATES = len(AUTONOMOUS_DOMAINS)
 MAX_AUTONOMOUS_ROUTE_DOMAINS = 4
 MAX_AUTONOMOUS_CROSS_DOMAIN_CHILDREN = 8
 MAX_AUTONOMOUS_DOMAIN_PACK_ITEMS = 64
+MAX_AUTONOMOUS_EXECUTION_PLAN_BYTES = 512_000
 AUTONOMOUS_SEMANTIC_ROUTE_SCHEMA = "bioprism-python-autonomous-semantic-route/0.1"
 AUTONOMOUS_PLAN_REFINEMENT_SCHEMA = "bioprism-python-autonomous-plan-refinement/0.1"
 AUTONOMOUS_ROUTE_EVIDENCE = {
@@ -132,6 +144,7 @@ AUTONOMOUS_ROUTE_EVIDENCE = {
     "hybrid_deterministic_and_provider_semantic_scores",
 }
 _SAFE_IDENTIFIER_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-")
+_AUTONOMOUS_EXECUTION_PLAN_CONTEXT_KEY = "_aurora_execution_plan"
 
 
 # This is an intentionally small, reviewed routing vocabulary rather than a claim that a
@@ -1903,6 +1916,348 @@ class AutonomousDomainPackRegistry:
         return result
 
 
+def compile_autonomous_domain_execution_plan(
+    domain: str,
+    *,
+    profile: "AutonomousDomainProfile",
+    pack: AutonomousDomainPack,
+    workflow: AutonomousWorkflowStrategy,
+    registered_tools: Sequence[AutonomousDomainTool] = (),
+    activation: AutonomousCapabilityActivation | Mapping[str, Any] | None = None,
+    model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] = (),
+    provider_statuses: Sequence[Mapping[str, Any]] = (),
+) -> dict[str, Any]:
+    """Compile reviewed domain contracts into a deterministic, non-executing plan.
+
+    This is the bridge between configuration and the autonomous runtime.  It joins the
+    domain pack, workflow DAG, exact registered tools, redacted activation projection, model
+    capability compatibility, evaluator obligations, and learning scope.  It never invokes a
+    provider, executes a tool, collects a key, or treats registration as authorization.
+    """
+
+    _identifier("execution plan domain", domain)
+    if not isinstance(profile, AutonomousDomainProfile) or profile.domain != domain:
+        raise BrainRunError("execution plan profile must match its domain")
+    if not isinstance(pack, AutonomousDomainPack) or pack.domain != domain:
+        raise BrainRunError("execution plan domain pack must match its domain")
+    if not isinstance(workflow, AutonomousWorkflowStrategy) or workflow.domain != domain:
+        raise BrainRunError("execution plan workflow must match its domain")
+    if pack.workflow_id != workflow.workflow_id:
+        raise BrainRunError("execution plan pack and workflow are not aligned")
+    if not isinstance(registered_tools, Sequence) or isinstance(registered_tools, (str, bytes)):
+        raise BrainRunError("execution plan registered_tools must be a sequence")
+    if any(not isinstance(tool, AutonomousDomainTool) for tool in registered_tools):
+        raise BrainRunError("execution plan registered_tools must contain AutonomousDomainTool values")
+    if not isinstance(model_candidates, Sequence) or isinstance(model_candidates, (str, bytes)):
+        raise BrainRunError("execution plan model_candidates must be a sequence")
+    if not isinstance(provider_statuses, Sequence) or isinstance(provider_statuses, (str, bytes)):
+        raise BrainRunError("execution plan provider_statuses must be a sequence")
+
+    state: Any = None
+    if activation is not None:
+        if isinstance(activation, AutonomousCapabilityActivation):
+            state = activation.state
+        elif isinstance(activation, Mapping):
+            state = dict(activation)
+        else:
+            raise BrainRunError("execution plan activation must be an activation or mapping")
+
+    def state_value(name: str, default: Any = None) -> Any:
+        if state is None:
+            return default
+        if isinstance(state, Mapping):
+            return state.get(name, default)
+        return getattr(state, name, default)
+
+    activation_status = state_value("status", "created")
+    if not isinstance(activation_status, str) or activation_status not in (
+        "created",
+        "provider_pending",
+        "catalogue_pending",
+        "review_required",
+        "partially_activated",
+        "ready",
+        "stale",
+        "revoked",
+    ):
+        raise BrainRunError("execution plan activation status is invalid")
+    approved_tools = {
+        name for name in state_value("approved_tools", ())
+        if isinstance(name, str)
+    }
+    activation_plan_recorded = state_value("plan_digest") is not None
+    activation_authority = (
+        "revoked"
+        if activation_status == "revoked"
+        else "activation_approved_tools_only"
+        if activation_plan_recorded
+        else "caller_registered_tools"
+    )
+    sorted_tools = tuple(sorted(registered_tools, key=lambda tool: tool.name))
+    active_tools = tuple(
+        tool for tool in sorted_tools
+        if activation_status != "revoked"
+        and (not activation_plan_recorded or tool.name in approved_tools)
+    )
+    withheld_tools = tuple(
+        tool for tool in sorted_tools
+        if tool not in active_tools
+    )
+
+    def tool_projection(tool: AutonomousDomainTool, *, active: bool) -> dict[str, Any]:
+        return {
+            "name": tool.name,
+            "domains": list(tool.domains),
+            "capability": tool.capability,
+            "schema_digest": tool.schema_digest,
+            "risk_class": tool.risk_class,
+            "read_only": tool.read_only,
+            "approval_required": tool.approval_required,
+            "active_for_plan": active,
+        }
+
+    required_tool_capabilities = tuple(pack.tool_capabilities)
+    available_tool_capabilities = tuple(sorted({tool.capability for tool in active_tools}))
+    missing_tool_capabilities = tuple(
+        sorted(set(required_tool_capabilities).difference(available_tool_capabilities))
+    )
+    tool_rows = [tool_projection(tool, active=True) for tool in active_tools]
+    withheld_rows = [tool_projection(tool, active=False) for tool in withheld_tools]
+    active_by_capability: dict[str, list[str]] = {}
+    for tool in active_tools:
+        active_by_capability.setdefault(tool.capability, []).append(tool.name)
+
+    status_by_provider: dict[str, Mapping[str, Any]] = {}
+    for row in provider_statuses:
+        if not isinstance(row, Mapping):
+            raise BrainRunError("execution plan provider statuses must contain mappings")
+        provider = row.get("provider")
+        if isinstance(provider, str):
+            status_by_provider[provider] = row
+
+    required_model_capabilities = tuple(
+        dict.fromkeys((*profile.required_model_capabilities, *pack.model_capabilities))
+    )
+    model_rows: list[dict[str, Any]] = []
+    for raw_candidate in model_candidates:
+        candidate = raw_candidate if isinstance(raw_candidate, ModelCandidate) else ModelCandidate.from_mapping(raw_candidate)
+        capabilities = set(candidate.capabilities)
+        provider_status = status_by_provider.get(candidate.provider, {})
+        provider_registered = bool(provider_status.get("provider_registered", False))
+        credential_ready = bool(provider_status.get("ready", False))
+        supports_required = set(required_model_capabilities).issubset(capabilities)
+        eligible = bool(candidate.enabled) and provider_registered and credential_ready and supports_required
+        model_rows.append(
+            {
+                "arm_id": candidate.arm_id,
+                "provider": candidate.provider,
+                "model": candidate.model,
+                "capabilities": list(candidate.capabilities),
+                "required_capabilities_supported": supports_required,
+                "enabled": candidate.enabled,
+                "provider_registered": provider_registered,
+                "credential_ready": credential_ready,
+                "eligible_for_selection": eligible,
+                "quality": float(candidate.quality),
+                "latency_ms": candidate.latency_ms,
+                "cost_per_million_tokens": candidate.cost_per_million_tokens,
+            }
+        )
+    model_rows.sort(key=lambda row: row["arm_id"])
+    compatible_models = [row for row in model_rows if row["required_capabilities_supported"]]
+    eligible_models = [row for row in model_rows if row["eligible_for_selection"]]
+
+    evaluator_profile = _DOMAIN_AUTONOMOUS_EVALUATOR_PROFILES.get(domain)
+    if evaluator_profile is None:
+        raise BrainRunError(f"no evaluator profile is registered for {domain!r}")
+    evidence_obligations = tuple(
+        dict.fromkeys(
+            (
+                *pack.evidence_requirements,
+                *workflow.evaluator_signals,
+                *evaluator_profile.required_signals,
+            )
+        )
+    )
+    approval_stage_ids = tuple(stage.id for stage in workflow.stages if stage.approval_required)
+    effectful_tool_names = tuple(tool.name for tool in active_tools if not tool.read_only)
+    stage_rows: list[dict[str, Any]] = []
+    for stage in workflow.stages:
+        stage_capabilities = tuple(stage.required_capabilities)
+        stage_available = tuple(
+            sorted(set(stage_capabilities).intersection(available_tool_capabilities))
+        )
+        stage_missing = tuple(sorted(set(stage_capabilities).difference(stage_available)))
+        stage_rows.append(
+            {
+                "id": stage.id,
+                "objective": stage.objective,
+                "depends_on": list(stage.depends_on),
+                "required_capabilities": list(stage_capabilities),
+                "required_tool_capabilities": list(stage_capabilities),
+                "available_tool_capabilities": list(stage_available),
+                "missing_tool_capabilities": list(stage_missing),
+                "registered_tools": sorted(
+                    {
+                        name
+                        for capability in stage_capabilities
+                        for name in active_by_capability.get(capability, ())
+                    }
+                ),
+                "evidence_outputs": list(stage.evidence_outputs),
+                "evaluator_signals": list(stage.evaluator_signals),
+                "read_only": stage.read_only,
+                "approval_required": stage.approval_required,
+                "execution_posture": "tool_ready" if not stage_missing else "provider_only_or_blocked",
+            }
+        )
+
+    learning_scope = {
+        "domain": domain,
+        "capability": profile.default_capability,
+        "risk_class": profile.risk_class,
+        "pack_digest": pack.pack_digest,
+        "workflow_digest": workflow.workflow_digest,
+        "tool_registry_digest": content_digest([tool.to_dict() for tool in sorted_tools]),
+        "activation_plan_digest": state_value("plan_digest"),
+        "activation_revision": state_value("revision", 0),
+        "approved_tool_names": sorted(approved_tools),
+        "active_tool_names": [tool.name for tool in active_tools],
+        "required_model_capabilities": list(required_model_capabilities),
+    }
+    learning_context_digest = content_digest(learning_scope)
+
+    if activation_status == "revoked":
+        plan_status = "revoked"
+    elif activation_status == "stale":
+        plan_status = "stale"
+    elif not compatible_models:
+        plan_status = "model_gap"
+    elif not eligible_models:
+        plan_status = "provider_pending"
+    elif activation_plan_recorded and not approved_tools:
+        plan_status = "activation_review_required"
+    elif missing_tool_capabilities:
+        plan_status = "degraded_tool_coverage"
+    else:
+        plan_status = "ready"
+
+    plan: dict[str, Any] = {
+        "schema": AUTONOMOUS_EXECUTION_PLAN_SCHEMA,
+        "domain": domain,
+        "status": plan_status,
+        "profile": {
+            "domain": profile.domain,
+            "default_capability": profile.default_capability,
+            "risk_class": profile.risk_class,
+            "evaluator_domain": profile.evaluator_domain,
+            "required_model_capabilities": list(profile.required_model_capabilities),
+        },
+        "domain_pack": {
+            "pack_id": pack.pack_id,
+            "pack_version": pack.pack_version,
+            "pack_digest": pack.pack_digest,
+            "workflow_id": pack.workflow_id,
+            "model_capabilities": list(pack.model_capabilities),
+            "tool_capabilities": list(pack.tool_capabilities),
+            "evidence_requirements": list(pack.evidence_requirements),
+            "review_triggers": list(pack.review_triggers),
+        },
+        "workflow": {
+            "workflow_id": workflow.workflow_id,
+            "workflow_digest": workflow.workflow_digest,
+            "stage_ids": [stage.id for stage in workflow.stages],
+            "route_intents": list(workflow.route_intents),
+            "evaluator_signals": list(workflow.evaluator_signals),
+            "completion_contract": workflow.completion_contract,
+            "stages": stage_rows,
+        },
+        "activation": {
+            "activation_id": state_value("activation_id"),
+            "status": activation_status,
+            "revision": state_value("revision", 0),
+            "catalogue_digest": state_value("catalogue_digest"),
+            "plan_digest": state_value("plan_digest"),
+            "profile_digest": state_value("profile_digest"),
+            "approved_tool_count": len(approved_tools),
+            "authority": activation_authority,
+            "does_not_authorize": [
+                "provider invocation",
+                "tool execution",
+                "credential access",
+                "effectful actions without caller approval",
+            ],
+        },
+        "tools": {
+            "required_capabilities": list(required_tool_capabilities),
+            "available_capabilities": list(available_tool_capabilities),
+            "missing_capabilities": list(missing_tool_capabilities),
+            "registered": tool_rows,
+            "withheld": withheld_rows,
+            "registered_tool_count": len(sorted_tools),
+            "active_tool_count": len(active_tools),
+            "effectful_tools_requiring_review": list(effectful_tool_names),
+            "coverage": round(
+                len(set(required_tool_capabilities).intersection(available_tool_capabilities))
+                / len(required_tool_capabilities),
+                6,
+            )
+            if required_tool_capabilities
+            else 1.0,
+        },
+        "models": {
+            "required_capabilities": list(required_model_capabilities),
+            "candidates": model_rows,
+            "compatible_candidate_count": len(compatible_models),
+            "eligible_candidate_count": len(eligible_models),
+        },
+        "evidence": {
+            "obligations": list(evidence_obligations),
+            "evaluator_id": evaluator_profile.evaluator_id,
+            "evaluator_version": evaluator_profile.evaluator_version,
+            "required_signals": list(evaluator_profile.required_signals),
+            "signal_weights": dict(evaluator_profile.signal_weights),
+            "pass_threshold": evaluator_profile.pass_threshold,
+            "stage_outputs": {
+                stage.id: list(stage.evidence_outputs)
+                for stage in workflow.stages
+            },
+        },
+        "review_gates": {
+            "provider_call_approval_required": True,
+            "workflow_stage_approval_required": list(approval_stage_ids),
+            "effectful_tool_approval_required": list(effectful_tool_names),
+            "domain_pack_review_triggers": list(pack.review_triggers),
+        },
+        "learning": {
+            "scope": learning_scope,
+            "context_digest": learning_context_digest,
+            "bandit_key": f"{domain}:{profile.default_capability}:{learning_context_digest}",
+            "delayed_credit": "evaluator_evidence_required; provider_success_is_not_reward",
+        },
+        "execution_modes": {
+            "provider": {
+                "status": "available" if eligible_models and activation_status not in ("revoked", "stale") else "blocked",
+                "requires_caller_approval": True,
+            },
+            "tool_loop": {
+                "status": "available" if active_tools and activation_status not in ("revoked", "stale") else "blocked",
+                "requires_caller_approval_for_effects": True,
+            },
+            "workflow": {
+                "status": "available" if eligible_models and activation_status not in ("revoked", "stale") else "blocked",
+                "stage_count": len(workflow.stages),
+                "dependency_order": [stage.id for stage in workflow.stages],
+            },
+        },
+        "execution": "planning_only; compiler_does_not_invoke_providers_or_tools",
+        "credential_posture": "caller_supplied_opaque_handles; no_keys_or_handles_in_plan",
+        "authority_posture": "metadata_only; activation_and_plan_do_not_grant_effect_authority",
+    }
+    plan["plan_digest"] = content_digest(plan)
+    return _safe_json("autonomous domain execution plan", plan, maximum=MAX_AUTONOMOUS_EXECUTION_PLAN_BYTES)
+
+
 class AutonomousDomainRegistry:
     """Deterministic domain-profile registry used by task intake."""
 
@@ -3211,6 +3566,19 @@ class AutonomousPromptBuilder:
                     "priority": 995,
                 }
             )
+        execution_plan = spec.context.get(_AUTONOMOUS_EXECUTION_PLAN_CONTEXT_KEY)
+        if execution_plan is not None:
+            if not isinstance(execution_plan, Mapping):
+                raise BrainRunError("autonomous execution plan context must be a mapping")
+            context.append(
+                {
+                    "id": "autonomy-execution-plan",
+                    "role": "developer",
+                    "content": _json_text(execution_plan),
+                    "required": True,
+                    "priority": 992,
+                }
+            )
         context.append(
             {
                 "id": "autonomy-workflow-contract",
@@ -3254,12 +3622,17 @@ class AutonomousPromptBuilder:
                     "priority": 940,
                 }
             )
-        if spec.context:
+        user_context = {
+            key: value
+            for key, value in spec.context.items()
+            if key != _AUTONOMOUS_EXECUTION_PLAN_CONTEXT_KEY
+        }
+        if user_context:
             context.append(
                 {
                     "id": "autonomy-user-context",
                     "role": "user",
-                    "content": _json_text({"context": dict(spec.context)}),
+                    "content": _json_text({"context": user_context}),
                     "required": True,
                     "priority": 900,
                 }
@@ -4338,6 +4711,16 @@ class AutonomousTaskOrchestrator:
             "context_keys": sorted(str(key) for key in spec.context),
             "required_model_capabilities": list(required),
         }
+        runtime_execution_plan = spec.context.get(_AUTONOMOUS_EXECUTION_PLAN_CONTEXT_KEY)
+        if runtime_execution_plan is not None:
+            if not isinstance(runtime_execution_plan, Mapping):
+                raise BrainRunError("autonomous execution plan context must be a mapping")
+            plan_digest = runtime_execution_plan.get("plan_digest")
+            plan_status = runtime_execution_plan.get("status")
+            if not isinstance(plan_digest, str) or not isinstance(plan_status, str):
+                raise BrainRunError("autonomous execution plan context is missing digest or status")
+            selection_context["execution_plan_digest"] = plan_digest
+            selection_context["execution_plan_status"] = plan_status
         prompt = AutonomousPromptBuilder.build(
             spec,
             profile,
@@ -5765,6 +6148,7 @@ class AutonomousTaskOrchestrator:
         tool_choice: str | None = None,
         max_provider_failovers: int = 2,
         tool_loop_options: Mapping[str, Any] | None = None,
+        execution_plan_context: Mapping[str, Any] | None = None,
         execution_controller: AutonomousExecutionController | None = None,
     ) -> AutonomousWorkflowRun:
         """Execute a prepared domain workflow as a resumable, dependency-checked stage DAG.
@@ -5791,6 +6175,10 @@ class AutonomousTaskOrchestrator:
             raise BrainRunError("max_stage_calls must be between 1 and 16")
         if not isinstance(auto_route, bool):
             raise BrainRunError("auto_route must be a boolean")
+        if execution_plan_context is not None:
+            if not isinstance(execution_plan_context, Mapping):
+                raise BrainRunError("workflow execution_plan_context must be a mapping or None")
+            _safe_json("workflow execution_plan_context", execution_plan_context, maximum=MAX_AUTONOMOUS_EXECUTION_PLAN_BYTES)
         plan_priority, plan_refinement_digest, plan_focus_stage_ids = self._accepted_workflow_plan(
             blueprint,
             accepted_plan_refinement,
@@ -5912,6 +6300,8 @@ class AutonomousTaskOrchestrator:
                     "widening the workflow or tool policy",
                 ],
             }
+            if execution_plan_context is not None:
+                stage_context[_AUTONOMOUS_EXECUTION_PLAN_CONTEXT_KEY] = dict(execution_plan_context)
             stage_result = self.run(
                 task=stage_task,
                 domain=blueprint.spec.domain,
@@ -6538,6 +6928,7 @@ class AutonomousTaskOrchestrator:
         model_candidates: Sequence[Mapping[str, Any]],
         credentials: Mapping[str, CredentialHandle],
         context: Mapping[str, Any] | None = None,
+        execution_plan_context: Mapping[str, Any] | None = None,
         desired_outputs: Sequence[str] = (
             "domain-attributed findings",
             "cross-domain conflicts and uncertainty",
@@ -6592,6 +6983,10 @@ class AutonomousTaskOrchestrator:
 
         if not isinstance(synthesize, bool) or not isinstance(allow_partial, bool):
             raise BrainRunError("synthesize and allow_partial must be booleans")
+        if execution_plan_context is not None:
+            if not isinstance(execution_plan_context, Mapping):
+                raise BrainRunError("cross-domain execution_plan_context must be a mapping or None")
+            _safe_json("cross-domain execution_plan_context", execution_plan_context, maximum=MAX_AUTONOMOUS_EXECUTION_PLAN_BYTES)
         if bandit_state is not None:
             if not isinstance(bandit_state, Mapping):
                 raise BrainRunError("cross-domain bandit_state must be a mapping or None")
@@ -6620,6 +7015,8 @@ class AutonomousTaskOrchestrator:
         for child_id in execution_child_ids:
             child = child_by_id[child_id]
             child_context = dict(child.spec.context)
+            if execution_plan_context is not None:
+                child_context[_AUTONOMOUS_EXECUTION_PLAN_CONTEXT_KEY] = dict(execution_plan_context)
             if plan_refinement_digest is not None:
                 child_context["accepted_cross_domain_plan"] = {
                     "refinement_digest": plan_refinement_digest,
@@ -6718,6 +7115,8 @@ class AutonomousTaskOrchestrator:
         ]
         synthesis_context = dict(blueprint.synthesis_blueprint.spec.context)
         synthesis_context["child_outputs"] = child_outputs
+        if execution_plan_context is not None:
+            synthesis_context[_AUTONOMOUS_EXECUTION_PLAN_CONTEXT_KEY] = dict(execution_plan_context)
         if plan_refinement_digest is not None:
             synthesis_context["accepted_cross_domain_plan"] = {
                 "refinement_digest": plan_refinement_digest,
@@ -6869,6 +7268,7 @@ class AutonomousTaskOrchestrator:
         max_provider_failovers = take("max_provider_failovers", 2)
         synthesize = take("synthesize", True)
         allow_partial = take("allow_partial", False)
+        execution_plan_context = take("execution_plan_context", None)
         execution_controller = take("execution_controller", None)
         if kwargs:
             raise BrainRunError(
@@ -6876,6 +7276,10 @@ class AutonomousTaskOrchestrator:
             )
         if not isinstance(synthesize, bool) or not isinstance(allow_partial, bool):
             raise BrainRunError("cross-domain learning synthesize and allow_partial must be booleans")
+        if execution_plan_context is not None:
+            if not isinstance(execution_plan_context, Mapping):
+                raise BrainRunError("cross-domain learning execution_plan_context must be a mapping or None")
+            _safe_json("cross-domain learning execution_plan_context", execution_plan_context, maximum=MAX_AUTONOMOUS_EXECUTION_PLAN_BYTES)
 
         blueprint = self.prepare_cross_domain(
             task=task,
@@ -6984,6 +7388,8 @@ class AutonomousTaskOrchestrator:
         for child_id in execution_child_ids:
             child = child_by_id[child_id]
             child_context = dict(child.spec.context)
+            if execution_plan_context is not None:
+                child_context[_AUTONOMOUS_EXECUTION_PLAN_CONTEXT_KEY] = dict(execution_plan_context)
             if plan_refinement_digest is not None:
                 child_context["accepted_cross_domain_plan"] = {
                     "refinement_digest": plan_refinement_digest,
@@ -7095,6 +7501,8 @@ class AutonomousTaskOrchestrator:
         synthesis = blueprint.synthesis_blueprint
         synthesis_context = dict(synthesis.spec.context)
         synthesis_context["child_outputs"] = child_outputs
+        if execution_plan_context is not None:
+            synthesis_context[_AUTONOMOUS_EXECUTION_PLAN_CONTEXT_KEY] = dict(execution_plan_context)
         if plan_refinement_digest is not None:
             synthesis_context["accepted_cross_domain_plan"] = {
                 "refinement_digest": plan_refinement_digest,
@@ -7766,6 +8174,82 @@ class AutonomousAgent:
             "execution": "metadata_only; registration_is_not_authorization",
         }
 
+    def domain_execution_plan(
+        self,
+        domain: str,
+        *,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Compile one domain's reviewed contracts into a non-executing runtime blueprint.
+
+        The result is intentionally safe to show in a configuration UI or attach to a
+        provider prompt.  It identifies exact registered tools and model arms, but it contains
+        no task text, credential handles, keys, tool arguments, provider responses, or effect
+        authorization.
+        """
+
+        _identifier("execution plan domain", domain)
+        if model_candidates is None:
+            candidates = self.catalogue.candidates()
+        else:
+            if not isinstance(model_candidates, Sequence) or isinstance(model_candidates, (str, bytes)):
+                raise BrainRunError("execution plan model_candidates must be a sequence")
+            candidates = [
+                candidate.to_dict()
+                if isinstance(candidate, ModelCandidate)
+                else ModelCandidate.from_mapping(candidate).to_dict()
+                for candidate in model_candidates
+            ]
+        profile = self.orchestrator.registry.resolve(domain)
+        pack = self.orchestrator.pack_registry.resolve(domain)
+        workflow = self.orchestrator.workflow_registry.resolve(domain)
+        registered = () if self.tool_registry is None else self.tool_registry.tools_for((domain,))
+        return compile_autonomous_domain_execution_plan(
+            domain,
+            profile=profile,
+            pack=pack,
+            workflow=workflow,
+            registered_tools=registered,
+            activation=self.activation,
+            model_candidates=candidates,
+            provider_statuses=self.onboarding.statuses(),
+        )
+
+    def execution_plans(
+        self,
+        domains: Sequence[str] | None = None,
+        *,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Compile deterministic execution plans for one or more autonomous domains."""
+
+        selected = tuple(AUTONOMOUS_DOMAINS) if domains is None else _sequence(
+            "execution plan domains", domains, maximum=len(AUTONOMOUS_DOMAINS)
+        )
+        unknown = sorted(set(selected).difference(AUTONOMOUS_DOMAINS))
+        if unknown:
+            raise BrainRunError("execution plan contains unknown domains: " + ", ".join(unknown))
+        plans = [
+            self.domain_execution_plan(domain, model_candidates=model_candidates)
+            for domain in selected
+        ]
+        statuses = {plan["status"] for plan in plans}
+        aggregate_status = next(iter(statuses)) if len(statuses) == 1 else "multi_domain"
+        return {
+            "schema": AUTONOMOUS_EXECUTION_PLAN_SCHEMA,
+            "status": aggregate_status,
+            "plan_digest": content_digest(plans),
+            "domains": list(selected),
+            "domain_count": len(selected),
+            "plans": plans,
+            "catalogue_digest": content_digest(self.catalogue.candidates()),
+            "domain_pack_registry_digest": self.orchestrator.pack_registry.digest,
+            "activation_id": self.activation.state.activation_id,
+            "execution": "planning_only; no_provider_or_tool_invocation",
+            "authority_posture": "metadata_only; plans_do_not_grant_authority",
+            "secret_material": "never_returned",
+        }
+
     def register_tool(
         self,
         tool: AutonomousDomainTool,
@@ -8053,6 +8537,7 @@ class AutonomousAgent:
                 self.domain_pack_tool_plan(domain)
                 for domain in AUTONOMOUS_DOMAINS
             ],
+            "domain_execution_plans": self.execution_plans()["plans"],
             "route_catalogue": self.orchestrator.router.catalogue(),
             "semantic_routing": {
                 "schema": AUTONOMOUS_SEMANTIC_ROUTE_SCHEMA,
@@ -8331,17 +8816,30 @@ class AutonomousAgent:
         options: Mapping[str, Any],
         tool_domains: Sequence[str] = (),
         resume_learning: bool = False,
+        attach_execution_plan_context: bool = True,
         execution_id: str | None = None,
         resume_execution: bool = False,
     ) -> tuple[list[dict[str, Any]], dict[str, CredentialHandle], dict[str, Any], AutonomousExecutionController | None]:
         resolved_credentials = self._credential_mapping(credentials)
+        resolved_candidates = self._resolve_candidates(model_candidates)
         resolved_options = dict(options)
         if not isinstance(resume_execution, bool):
             raise BrainRunError("resume_execution must be a boolean")
         resolved_options.setdefault("ledger", self.ledger)
         resolved_options.setdefault("memory", self.memory)
+        activation_state = self.activation.state
+        activation_guarded = activation_state.status == "revoked" or activation_state.plan_digest is not None
+        if activation_guarded and "provider_tools" in resolved_options:
+            raise BrainRunError(
+                "provider_tools cannot bypass the activation-approved domain tool set"
+            )
         if self.tool_registry is not None and "provider_tools" not in resolved_options:
             selected_tools = self.tool_registry.tools_for(tool_domains or None)
+            if activation_state.status == "revoked":
+                selected_tools = ()
+            elif activation_state.plan_digest is not None:
+                approved = set(activation_state.approved_tools)
+                selected_tools = tuple(tool for tool in selected_tools if tool.name in approved)
             pack_capabilities: set[str] = set()
             for domain in tool_domains:
                 if domain in AUTONOMOUS_DOMAINS:
@@ -8357,6 +8855,41 @@ class AutonomousAgent:
             resolved_options["provider_tools"] = tuple(
                 tool.to_provider_tool() for tool in (pack_tools or selected_tools)
             )
+        plan_domains = tuple(
+            dict.fromkeys(domain for domain in tool_domains if domain in AUTONOMOUS_DOMAINS)
+        )
+        if plan_domains:
+            execution_plan_packet = self.execution_plans(
+                plan_domains,
+                model_candidates=resolved_candidates,
+            )
+            if attach_execution_plan_context:
+                caller_context = resolved_options.get("context")
+                if caller_context is None:
+                    merged_context: dict[str, Any] = {}
+                elif isinstance(caller_context, Mapping):
+                    if _AUTONOMOUS_EXECUTION_PLAN_CONTEXT_KEY in caller_context:
+                        raise BrainRunError("context cannot override the autonomous execution plan")
+                    merged_context = dict(caller_context)
+                else:
+                    raise BrainRunError("context must be a mapping or None")
+                merged_context[_AUTONOMOUS_EXECUTION_PLAN_CONTEXT_KEY] = execution_plan_packet
+                resolved_options["context"] = merged_context
+            else:
+                resolved_options["execution_plan_context"] = execution_plan_packet
+            selection_overrides = resolved_options.get("selection_overrides")
+            if selection_overrides is None:
+                merged_overrides: dict[str, Any] = {}
+            elif isinstance(selection_overrides, Mapping):
+                merged_overrides = dict(selection_overrides)
+            else:
+                raise BrainRunError("selection_overrides must be a mapping or None")
+            merged_overrides["autonomy_execution_plan_digest"] = content_digest(execution_plan_packet["plans"])
+            merged_overrides["autonomy_execution_plan_statuses"] = {
+                plan["domain"]: plan["status"]
+                for plan in execution_plan_packet["plans"]
+            }
+            resolved_options["selection_overrides"] = merged_overrides
         execution_controller: AutonomousExecutionController | None = None
         session_runtime: AutonomousDomainToolRuntime | None = None
         persistence_requested = self.execution_journal is not None or self.execution_policy is not None or execution_id is not None
@@ -8450,7 +8983,7 @@ class AutonomousAgent:
                 resolved_options["selection_overrides"] = merged
         if resume_learning and resolved_options.get("bandit_state") is None:
             resolved_options["bandit_state"] = self.learning_state()
-        return self._resolve_candidates(model_candidates), resolved_credentials, resolved_options, execution_controller
+        return resolved_candidates, resolved_credentials, resolved_options, execution_controller
 
     @staticmethod
     def _finish_execution(
@@ -8908,6 +9441,7 @@ class AutonomousAgent:
                     ]
             )),
             resume_learning=False,
+            attach_execution_plan_context=False,
             execution_id=execution_id,
             resume_execution=resume_execution,
         )
@@ -8956,6 +9490,7 @@ class AutonomousAgent:
                 )
             ),
             resume_learning=False,
+            attach_execution_plan_context=False,
             execution_id=execution_id,
             resume_execution=resume_execution,
         )
@@ -8991,6 +9526,7 @@ class AutonomousAgent:
             options=kwargs,
             tool_domains=(blueprint.spec.domain,),
             resume_learning=True,
+            attach_execution_plan_context=False,
             execution_id=execution_id,
             resume_execution=resume_execution,
         )
@@ -9028,6 +9564,7 @@ class AutonomousAgent:
             options=options,
             tool_domains=(blueprint.spec.domain,),
             resume_learning=False,
+            attach_execution_plan_context=False,
             execution_id=execution_id,
             resume_execution=resume_execution,
         )
@@ -9065,6 +9602,7 @@ class AutonomousAgent:
             options=options,
             tool_domains=(blueprint.spec.domain,),
             resume_learning=False,
+            attach_execution_plan_context=False,
             execution_id=execution_id,
             resume_execution=resume_execution,
         )
@@ -9109,6 +9647,7 @@ class AutonomousAgent:
                 )
             ),
             resume_learning=True,
+            attach_execution_plan_context=False,
             execution_id=execution_id,
             resume_execution=resume_execution,
         )
@@ -9138,6 +9677,9 @@ __all__ = [
     "AUTONOMOUS_CROSS_DOMAIN_STEP_SCHEMA",
     "AUTONOMOUS_ROUTE_SCHEMA",
     "AUTONOMOUS_DOMAIN_PACK_SCHEMA",
+    "AUTONOMOUS_EXECUTION_PLAN_SCHEMA",
+    "AUTONOMOUS_EXECUTION_PLAN_STATUSES",
+    "MAX_AUTONOMOUS_EXECUTION_PLAN_BYTES",
     "AUTONOMOUS_ROUTE_REASONS",
     "MAX_AUTONOMOUS_ROUTE_CANDIDATES",
     "MAX_AUTONOMOUS_ROUTE_DOMAINS",
@@ -9153,6 +9695,7 @@ __all__ = [
     "AutonomousDomainRegistry",
     "AutonomousDomainPack",
     "AutonomousDomainPackRegistry",
+    "compile_autonomous_domain_execution_plan",
     "AutonomousRouteCandidate",
     "AutonomousRouteProposal",
     "AutonomousTaskRouter",
