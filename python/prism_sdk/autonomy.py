@@ -32,6 +32,7 @@ from .authoring import content_digest
 from .errors import ArgumentError
 from .brain import (
     AutonomousBrain,
+    BRAIN_CONTEXT_LEARNING_STATE_SCHEMA,
     BrainEvaluatorDecision,
     BrainLearningEpisode,
     BrainLearningLedger,
@@ -43,6 +44,7 @@ from .brain import (
     BrainRunError,
     BrainRunResult,
     BrainToolLoopResult,
+    _context_identity_digest,
 )
 from .domain_tools import (
     AUTONOMOUS_DOMAIN_NAMES,
@@ -124,6 +126,7 @@ AUTONOMOUS_WORKFLOW_TRAJECTORY_LEARNING_SCHEMA = "bioprism-python-autonomous-wor
 AUTONOMOUS_ROUTE_SCHEMA = "bioprism-python-autonomous-route/0.1"
 AUTONOMOUS_DOMAIN_PACK_SCHEMA = "bioprism-python-autonomous-domain-pack/0.1"
 AUTONOMOUS_EXECUTION_PLAN_SCHEMA = "bioprism-python-autonomous-execution-plan/0.1"
+AUTONOMOUS_DOMAIN_LEARNING_STATE_SCHEMA = "bioprism-python-autonomous-domain-learning-state/0.1"
 AUTONOMOUS_CAPABILITY_CONTRACT_SCHEMA = "bioprism-python-autonomous-capability-contract/0.1"
 AUTONOMOUS_CAPABILITY_PLAN_SCHEMA = "bioprism-python-autonomous-capability-plan/0.1"
 AUTONOMOUS_WORKFLOW_STAGE_PLAN_SCHEMA = "bioprism-python-autonomous-workflow-stage-plan/0.1"
@@ -9958,6 +9961,7 @@ class AutonomousAgent:
             "provider_health": health,
             "domains": self.domains(),
             "model_capability_coverage": self.model_capability_coverage(),
+            "domain_learning_coverage": self.domain_learning_coverage(),
             "workflows": self.workflows(),
             "domain_packs": self.domain_packs(),
             "domain_pack_registry_digest": self.orchestrator.pack_registry.digest,
@@ -10168,6 +10172,111 @@ class AutonomousAgent:
             "schema": "bioprism-brain-bandit/0.1",
             "generation": 0,
             "arms": [],
+        }
+
+    def domain_learning_state(
+        self,
+        domain: str,
+        *,
+        capability: str | None = None,
+        risk_class: str | None = None,
+        task_family: str | None = None,
+    ) -> dict[str, Any]:
+        """Return the evaluator-linked bandit state for one built-in domain context.
+
+        The returned state is directly usable as ``bandit_state`` for a domain-scoped run. The
+        lookup is keyed by the stable domain/capability/risk identity, not by task text, so every
+        domain can accumulate separate model feedback without leaking prompts or provider data.
+        """
+
+        profile = self.orchestrator.registry.resolve(domain)
+        resolved_capability = profile.default_capability if capability is None else _identifier("learning capability", capability)
+        resolved_risk = profile.risk_class if risk_class is None else _identifier("learning risk_class", risk_class)
+        resolved_task_family = None if task_family is None else _identifier("learning task_family", task_family)
+        context = {
+            "domain": profile.domain,
+            "capability": resolved_capability,
+            "risk_class": resolved_risk,
+            "task_family": resolved_task_family,
+        }
+        if self.ledger is not None:
+            snapshot = self.ledger.contextual_state(context)
+        else:
+            snapshot = {
+                "schema": BRAIN_CONTEXT_LEARNING_STATE_SCHEMA,
+                "context": context,
+                "context_digest": _context_identity_digest(context),
+                "bandit_state": self.learning_state(),
+                "observed": False,
+                "evaluation_count": 0,
+                "last_evaluator_id": None,
+                "last_evaluator_version": None,
+                "retention": "context_identity_and_evaluator_bandit_metadata_only",
+            }
+        evaluator = self.domain_evaluator(profile.domain)
+        result = {
+            "schema": AUTONOMOUS_DOMAIN_LEARNING_STATE_SCHEMA,
+            "domain": profile.domain,
+            "capability": resolved_capability,
+            "risk_class": resolved_risk,
+            "task_family": resolved_task_family,
+            "context_digest": snapshot["context_digest"],
+            "evaluator": {
+                "domain": profile.evaluator_domain,
+                "evaluator_id": evaluator.evaluator_id,
+                "evaluator_version": evaluator.evaluator_version,
+            },
+            "bandit_state": dict(snapshot["bandit_state"]),
+            "observed": bool(snapshot["observed"]),
+            "evaluation_count": snapshot["evaluation_count"],
+            "last_evaluator_id": snapshot["last_evaluator_id"],
+            "last_evaluator_version": snapshot["last_evaluator_version"],
+            "learning_authority": "explicit_domain_evaluator_feedback_only",
+            "retention": "context_identity_evaluator_metadata_and_bandit_state_only",
+        }
+        return _safe_json("autonomous domain learning state", result, maximum=MAX_AUTONOMY_CONTEXT_BYTES)
+
+    def domain_learning_coverage(self, domains: Sequence[str] | None = None) -> dict[str, Any]:
+        """Summarize evaluator-linked learning readiness across every autonomous domain."""
+
+        selected = tuple(AUTONOMOUS_DOMAINS) if domains is None else _sequence(
+            "domain learning coverage domains", domains, maximum=len(AUTONOMOUS_DOMAINS)
+        )
+        unknown = sorted(set(selected).difference(AUTONOMOUS_DOMAINS))
+        if unknown:
+            raise BrainRunError("domain learning coverage contains unknown domains: " + ", ".join(unknown))
+        rows: list[dict[str, Any]] = []
+        for domain in selected:
+            state = self.domain_learning_state(domain)
+            bandit = state["bandit_state"]
+            arms = bandit.get("arms", []) if isinstance(bandit, Mapping) else []
+            valid_arms = [arm for arm in arms if isinstance(arm, Mapping)]
+            rows.append(
+                {
+                    "domain": domain,
+                    "capability": state["capability"],
+                    "risk_class": state["risk_class"],
+                    "context_digest": state["context_digest"],
+                    "observed": state["observed"],
+                    "evaluation_count": state["evaluation_count"],
+                    "generation": bandit.get("generation", 0) if isinstance(bandit, Mapping) else 0,
+                    "arm_count": len(valid_arms),
+                    "explored_arm_count": sum(
+                        1
+                        for arm in valid_arms
+                        if isinstance(arm.get("pulls"), int) and arm.get("pulls", 0) > 0
+                    ),
+                    "evaluator": dict(state["evaluator"]),
+                }
+            )
+        return {
+            "schema": "bioprism-python-autonomous-domain-learning-coverage/0.1",
+            "domains": list(selected),
+            "domain_count": len(rows),
+            "rows": rows,
+            "learning_authority": "explicit_domain_evaluator_feedback_only",
+            "state_access": "agent.domain_learning_state(domain, capability, risk_class)",
+            "secret_material": "never_returned",
         }
 
     def domain_evaluator(
@@ -11311,6 +11420,7 @@ __all__ = [
     "AUTONOMOUS_ROUTE_SCHEMA",
     "AUTONOMOUS_DOMAIN_PACK_SCHEMA",
     "AUTONOMOUS_EXECUTION_PLAN_SCHEMA",
+    "AUTONOMOUS_DOMAIN_LEARNING_STATE_SCHEMA",
     "AUTONOMOUS_EXECUTION_PLAN_STATUSES",
     "MAX_AUTONOMOUS_EXECUTION_PLAN_BYTES",
     "AUTONOMOUS_CAPABILITY_CONTRACT_SCHEMA",

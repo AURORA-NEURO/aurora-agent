@@ -35777,7 +35777,8 @@ pub fn tool_definitions() -> Vec<Value> {
                     "models": { "type": "array", "minItems": 1, "maxItems": 256 },
                     "observations": { "type": "array", "maxItems": 256 },
                     "weights": { "type": "object" },
-                    "provider_health": { "type": "object", "description": "Provider readiness and circuit metadata only; credentials and provider responses are never accepted." }
+                    "provider_health": { "type": "object", "description": "Provider readiness and circuit metadata only; credentials and provider responses are never accepted." },
+                    "model_health": { "type": "object", "description": "Optional provider/model transport evidence. It adapts reliability and latency with a capped confidence; it is never a credential, task reward, or model-level hard gate." }
                 },
                 "required": ["task", "input_tokens", "requested_output_tokens", "models"]
             }

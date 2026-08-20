@@ -15885,7 +15885,23 @@ fn brain_control_plane_health_and_replay_remain_value_only() {
     );
     assert_eq!(health["__isError"], json!(false));
     assert_eq!(health["health"][0]["provider"], json!("openai"));
+    assert_eq!(health["health"][0]["attempts"], json!(1));
+    assert_eq!(health["health"][0]["success_rate"], json!(1.0));
     assert!(health["health"][0].get("secret").is_none());
+    let snapshot = call(
+        &mut server,
+        "brain_model_health",
+        json!({"operation": "snapshot", "provider": "openai"}),
+    );
+    assert_eq!(snapshot["__isError"], json!(false));
+    assert_eq!(
+        snapshot["model_health"]["openai/gpt-test"]["attempts"],
+        json!(1)
+    );
+    assert_eq!(
+        snapshot["model_health"]["openai/gpt-test"]["last_latency_ms"],
+        json!(120)
+    );
 
     let evidence = json!({
         "schema": "bioprism-brain-domain-evaluator/0.1",

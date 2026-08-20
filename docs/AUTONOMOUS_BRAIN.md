@@ -927,7 +927,9 @@ control-plane contract. The MCP server exposes:
   was supplied but does not verify identity and never dispatches work.
 - brain_model_health: records and projects provider/model status, latency, bounded quality,
   usage counts, registration posture, and credential readiness. A runtime can feed the resulting
-  provider_health map into brain_model_select to hard-gate open circuits or unready providers.
+  provider_health map into brain_model_select to hard-gate open circuits or unready providers,
+  and can project the model rows into the selector's model_health map for adaptive arm-level
+  reliability and latency evidence.
 - brain_replay_evaluate: evaluates digest-bound normalized [0, 1] signals for the canonical
   evaluator domains and the twelve exact autonomous domain profiles, or an explicit custom domain
   profile. It is an offline evaluator only; it does not contact a provider or replay a domain tool.
@@ -993,7 +995,13 @@ The `bioprism-brain` crate exposes the deterministic decision operations through
 transport control plane above adds the job, approval, health, and replay lifecycle:
 
 - `brain_model_select` applies capability, context-window, quality, latency, and cost gates, then
-  ranks eligible models with deterministic utility plus an exploration bonus.
+  ranks eligible models with deterministic utility plus an exploration bonus. Its optional
+  `model_health` map is a typed, bounded transport-evidence input keyed by `provider/model`:
+  evidence blends reliability and latency with confidence capped at 0.75, can demote a degraded
+  sibling arm, and never becomes a model-level hard gate. `provider_health` remains the authority
+  for provider registration, credential readiness, and provider circuits. A façade that has already
+  blended the same evidence into model descriptors sets `prior_adjustment_applied` to prevent
+  double-counting when forwarding the request to Rust.
 - `brain_model_select_contextual` scopes online observations to a domain, capability, risk class,
   and optional task family. Exact context history overrides global history per arm; missing history
   falls back to global observations. The returned context digest is the caller-owned persistence
@@ -1012,8 +1020,11 @@ transport control plane above adds the job, approval, health, and replay lifecyc
 
 `provider_health` is a value-only map generated from the live runtime. For each registered provider
 it carries circuit state, consecutive failure count, credential readiness, and (when observed)
-bounded attempts, success rate, and latency evidence. The Python boundary uses that evidence to
-adjust model priors before sending the request; the Rust selector treats an open circuit,
+bounded attempts, success rate, and latency evidence. `model_health` carries the same bounded
+projection at the provider/model arm level and takes precedence over provider evidence for that
+arm. The Python boundary may adjust model priors before sending the request and marks the forwarded
+row as already applied; direct MCP/TypeScript callers can omit that marker and let the Rust kernel
+perform the blend. The Rust selector treats an open circuit,
 missing/revoked/expired credential, unregistered provider, or caller-ineligible provider as a hard
 gate and keeps the refusal reason in the candidate ranking. Health is not a credential transport
 and cannot be used to smuggle a key into the kernel.
@@ -1031,6 +1042,14 @@ contract before choosing a provider. The evaluator then returns the next state; 
 workflow stages, and durable worker continuations feed that new state into the next selection.
 Thus a reward is not merely telemetry: it can change the next eligible arm while provider health,
 capability, cost, latency, credentials, and explicit approval gates remain authoritative filters.
+
+The high-level `AutonomousAgent` also exposes `domain_learning_state(domain, capability,
+risk_class)`. It resolves the reviewed domain profile, computes the same stable contextual digest
+used by model selection, and returns the latest evaluator-linked bandit state plus evaluator id,
+version, and count metadata. `domain_learning_coverage()` and the readiness projection summarize
+that hook for all twelve built-in domains, including untouched first-run exploration contexts.
+These reads make per-domain learning explicit; they do not invent a reward, infer a model's domain
+skill, or treat transport success as evaluator evidence.
 
 ## Domain-aware autonomous task intake
 

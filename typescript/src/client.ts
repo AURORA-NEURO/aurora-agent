@@ -1701,6 +1701,7 @@ export class ApiClient {
           const value = health[field];
           if (value !== undefined && value !== null && (typeof value !== "number" || !Number.isFinite(value) || value < 0)) throw new ArgumentError(`model_health.${field} must be a finite non-negative number or null`);
         }
+        if (health.prior_adjustment_applied !== undefined && typeof health.prior_adjustment_applied !== "boolean") throw new ArgumentError("model_health.prior_adjustment_applied must be boolean");
       }
     }
     return this.callTool<BrainModelSelectionResult>("brain_model_select", args, options);

@@ -148,6 +148,8 @@ export interface BrainModelHealthEvidence extends JsonObject {
   circuit?: "closed" | "open" | string;
   opened_until?: number | null;
   observed_at?: number | null;
+  /** Set by a façade that already blended this evidence into model priors. */
+  prior_adjustment_applied?: boolean;
   historical?: JsonObject;
 }
 

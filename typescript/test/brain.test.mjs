@@ -69,6 +69,9 @@ test("client exposes the autonomous brain value-only kernel", async () => {
     provider_health: {
       openai: { registered: true, circuit: "closed", credential_ready: true, eligible: true },
     },
+    model_health: {
+      "openai/test-model": { attempts: 12, successes: 11, failures: 1, success_rate: 11 / 12, last_latency_ms: 42 },
+    },
   });
   const contextual = await client.brainModelSelectContextual({
     context: { domain: "engineering", capability: "platform_status", risk_class: "low" },
@@ -127,6 +130,9 @@ test("client exposes the autonomous brain value-only kernel", async () => {
   assert.deepEqual(seen.find(({ path }) => path.endsWith("brain_model_select")).body.provider_health, {
     openai: { registered: true, circuit: "closed", credential_ready: true, eligible: true },
   });
+  assert.deepEqual(seen.find(({ path }) => path.endsWith("brain_model_select")).body.model_health, {
+    "openai/test-model": { attempts: 12, successes: 11, failures: 1, success_rate: 11 / 12, last_latency_ms: 42 },
+  });
   assert.equal(seen.length, 13);
   assert.ok(seen.every(({ body }) => !Object.prototype.hasOwnProperty.call(body, "api_key")));
   assert.ok(seen.every(({ body }) => !Object.prototype.hasOwnProperty.call(body, "prompt")));
@@ -142,6 +148,13 @@ test("brain client methods fail before transport on malformed input", async () =
     requested_output_tokens: 1,
     models: [model],
     provider_health: { openai: { circuit: "" } },
+  }), ArgumentError);
+  await assert.rejects(() => client.brainModelSelect({
+    task: "x",
+    input_tokens: 1,
+    requested_output_tokens: 1,
+    models: [model],
+    model_health: { "openai/test-model": { prior_adjustment_applied: "yes" } },
   }), ArgumentError);
   await assert.rejects(() => client.brainModelSelect({
     task: "x",

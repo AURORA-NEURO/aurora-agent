@@ -9,6 +9,7 @@ from prism_sdk import (
     AutonomousDomainTool,
     AutonomousDomainToolBinding,
     AutonomousDomainToolRegistry,
+    BrainLearningLedger,
     BrainRunError,
     compile_autonomous_workflow_stage_execution_plan,
     DomainEvaluationEvidence,
@@ -194,6 +195,44 @@ def test_model_capability_coverage_is_projected_for_every_domain_without_claimin
     assert coverage["runtime_gates"].startswith("not_projected")
     readiness = agent.readiness()
     assert readiness["model_capability_coverage"]["domain_count"] == len(AUTONOMOUS_DOMAINS)
+    learning = readiness["domain_learning_coverage"]
+    assert learning["domain_count"] == len(AUTONOMOUS_DOMAINS)
+    assert {row["domain"] for row in learning["rows"]} == set(AUTONOMOUS_DOMAINS)
+    assert all(row["evaluation_count"] == 0 for row in learning["rows"])
+
+
+def test_domain_learning_state_rehydrates_evaluator_linked_contextual_bandit(tmp_path):
+    ledger = BrainLearningLedger(tmp_path / "learning.jsonl")
+    agent = AutonomousAgent(
+        _Workspace(),
+        LLMRuntime(),
+        model_catalogue=ModelCatalogue([_model()]),
+        ledger=ledger,
+    )
+
+    first = agent.domain_learning_state("coding")
+    assert first["observed"] is False
+    ledger.append(
+        {
+            "learning_evidence": {
+                "evaluator_id": "engineering-evidence",
+                "evaluator_version": "1",
+                "evidence_digest": "a" * 64,
+            },
+            "next_state": {
+                "schema": "bioprism-brain-bandit/0.1",
+                "generation": 1,
+                "arms": [{"arm_id": "local/reasoning-model", "pulls": 1, "reward_sum": 0.8, "failures": 0}],
+            },
+        },
+        context_digest=first["context_digest"],
+    )
+    learned = agent.domain_learning_state("coding")
+    assert learned["observed"] is True
+    assert learned["evaluation_count"] == 1
+    assert learned["bandit_state"]["generation"] == 1
+    assert learned["bandit_state"]["arms"][0]["arm_id"] == "local/reasoning-model"
+    assert learned["evaluator"]["evaluator_id"]
 
 
 def test_capability_dispatch_narrows_provider_tools_and_binds_the_reviewed_contract():

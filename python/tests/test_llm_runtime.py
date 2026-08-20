@@ -962,6 +962,8 @@ class LlmRuntimeTests(unittest.TestCase):
         self.assertLess(models["slow-model"]["reliability"], models["healthy-model"]["reliability"])
         self.assertEqual(selection["model_health"]["openai/slow-model"]["failures"], 1)  # type: ignore[index]
         self.assertEqual(selection["model_health"]["openai/healthy-model"]["successes"], 1)  # type: ignore[index]
+        self.assertTrue(selection["model_health"]["openai/slow-model"]["prior_adjustment_applied"])  # type: ignore[index]
+        self.assertTrue(selection["model_health"]["openai/healthy-model"]["prior_adjustment_applied"])  # type: ignore[index]
         self.assertNotIn("live-model-health-secret", json.dumps(selection))
 
     def test_provider_native_tool_calls_are_typed_and_never_executed(self) -> None:

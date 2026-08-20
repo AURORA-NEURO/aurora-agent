@@ -111,6 +111,7 @@ MODEL_SELECTION_AUDIT_SCHEMA = "bioprism-brain-selection-audit/0.1"
 BRAIN_EVALUATOR_REPLAY_SCHEMA = "bioprism-brain-evaluator-replay/0.1"
 BRAIN_LEARNING_EPISODE_SCHEMA = "bioprism-brain-learning-episode/0.1"
 BRAIN_LEARNING_TRAJECTORY_SCHEMA = "bioprism-brain-learning-trajectory/0.1"
+BRAIN_CONTEXT_LEARNING_STATE_SCHEMA = "bioprism-brain-context-learning-state/0.1"
 _REPLAN_SECRET_PATTERNS = (
     re.compile(
         r"(?i)\b(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|password|authorization|secret)\b\s*[:=]\s*\S+"
@@ -501,6 +502,55 @@ class BrainLearningLedger:
                 return dict(state)
         return None
 
+    def contextual_state(self, context: Mapping[str, Any]) -> dict[str, Any]:
+        """Return evaluator-linked bandit state for one domain/capability/risk context.
+
+        The context is normalized to the same four routing identity fields used by contextual
+        model selection. Rich task text and provider payloads are not part of the lookup key.
+        This makes the result safe to request before a run (first-run exploration) and useful to
+        feed into the next domain-scoped selection without requiring callers to know the digest.
+        """
+
+        normalized_context = _normalize_learning_context(context)
+        context_digest = _context_identity_digest(normalized_context)
+        state: Mapping[str, Any] | None = None
+        evaluation_count = 0
+        last_evaluator_id: str | None = None
+        last_evaluator_version: str | None = None
+        for row in reversed(self.records()):
+            record = row.get("record")
+            if not isinstance(record, Mapping) or record.get("context_digest") != context_digest:
+                continue
+            candidate_state = record.get("next_state")
+            if state is None and isinstance(candidate_state, Mapping):
+                state = dict(candidate_state)
+            evidence = record.get("learning_evidence")
+            if isinstance(evidence, Mapping):
+                evaluation_count += 1
+                if last_evaluator_id is None and isinstance(evidence.get("evaluator_id"), str):
+                    last_evaluator_id = evidence["evaluator_id"]
+                if last_evaluator_version is None and isinstance(evidence.get("evaluator_version"), str):
+                    last_evaluator_version = evidence["evaluator_version"]
+        if state is None:
+            state = {
+                "schema": "bioprism-brain-bandit/0.1",
+                "generation": 0,
+                "arms": [],
+            }
+        result = {
+            "schema": BRAIN_CONTEXT_LEARNING_STATE_SCHEMA,
+            "context": normalized_context,
+            "context_digest": context_digest,
+            "bandit_state": dict(state),
+            "observed": evaluation_count > 0,
+            "evaluation_count": evaluation_count,
+            "last_evaluator_id": last_evaluator_id,
+            "last_evaluator_version": last_evaluator_version,
+            "retention": "context_identity_and_evaluator_bandit_metadata_only",
+        }
+        self._assert_safe(result)
+        return result
+
     def replays(
         self,
         *,
@@ -577,23 +627,28 @@ def _valid_digest(value: Any) -> bool:
     )
 
 
+def _normalize_learning_context(context: Mapping[str, Any]) -> dict[str, Any]:
+    """Normalize the stable context identity shared by routing and learning persistence."""
+
+    if not isinstance(context, Mapping):
+        raise BrainRunError("learning context must be a mapping")
+    normalized: dict[str, Any] = {}
+    for field in ("domain", "capability", "risk_class"):
+        value = context.get(field)
+        if not isinstance(value, str) or not value.strip():
+            raise BrainRunError(f"learning context.{field} must be a non-empty string")
+        normalized[field] = value
+    task_family = context.get("task_family")
+    if task_family is not None and (not isinstance(task_family, str) or not task_family.strip()):
+        raise BrainRunError("learning context.task_family must be a non-empty string when supplied")
+    normalized["task_family"] = task_family
+    return normalized
+
+
 def _context_identity_digest(context: Mapping[str, Any]) -> str:
     """Match the Rust contextual-selection digest without retaining arbitrary task text."""
 
-    required = ("domain", "capability", "risk_class")
-    for name in required:
-        value = context.get(name)
-        if not isinstance(value, str) or not value.strip():
-            raise BrainRunError(f"context.{name} must be a non-empty string")
-    task_family = context.get("task_family")
-    if task_family is not None and (not isinstance(task_family, str) or not task_family.strip()):
-        raise BrainRunError("context.task_family must be a non-empty string when supplied")
-    normalized = {
-        "domain": context["domain"],
-        "capability": context["capability"],
-        "risk_class": context["risk_class"],
-        "task_family": task_family,
-    }
+    normalized = _normalize_learning_context(context)
     encoded = json.dumps(
         normalized,
         ensure_ascii=False,
@@ -2451,6 +2506,13 @@ class AutonomousBrain:
             if evidence is None:
                 continue
             model["health_evidence"] = evidence_source
+            if evidence_source == "model":
+                # The Python façade applies the model evidence below before forwarding the
+                # request to the Rust kernel. Keep the evidence in the request for auditability,
+                # while marking this local projection so the kernel does not blend it twice.
+                forwarded_health = model_health.get(arm_id)
+                if isinstance(forwarded_health, dict):
+                    forwarded_health["prior_adjustment_applied"] = True
             confidence = float(evidence["confidence"])
             prior_reliability = model.get("reliability", 0.5)
             if (

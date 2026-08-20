@@ -72,6 +72,7 @@ struct HealthRecord {
     failures: u64,
     consecutive_failures: u64,
     total_latency_ms: u64,
+    last_latency_ms: u64,
     quality_sum: f64,
     quality_observations: u64,
     last_status: String,
@@ -577,6 +578,7 @@ impl BrainControlState {
             .or_default();
         record.observations = record.observations.saturating_add(1);
         record.total_latency_ms = record.total_latency_ms.saturating_add(latency_ms);
+        record.last_latency_ms = latency_ms;
         record.last_status = status.clone();
         record.last_sequence = sequence;
         record.registered = registered;
@@ -631,6 +633,7 @@ impl BrainControlState {
             "operation": "snapshot",
             "provider_health": provider_health,
             "models": models,
+            "model_health": self.model_health_projection(),
             "retention": "value_only_provider_model_health",
             "durability": durability_posture(),
         }))
@@ -644,10 +647,14 @@ impl BrainControlState {
                     "provider": provider,
                     "model": model,
                     "observations": record.observations,
+                    "attempts": record.observations,
                     "successes": record.successes,
                     "failures": record.failures,
                     "consecutive_failures": record.consecutive_failures,
                     "average_latency_ms": if record.observations == 0 { 0.0 } else { record.total_latency_ms as f64 / record.observations as f64 },
+                    "mean_latency_ms": if record.observations == 0 { 0.0 } else { record.total_latency_ms as f64 / record.observations as f64 },
+                    "last_latency_ms": record.last_latency_ms,
+                    "success_rate": if record.observations == 0 { 0.0 } else { record.successes as f64 / record.observations as f64 },
                     "average_quality": if record.quality_observations == 0 { Value::Null } else { json!(record.quality_sum / record.quality_observations as f64) },
                     "last_status": record.last_status,
                     "last_sequence": record.last_sequence,
@@ -655,6 +662,31 @@ impl BrainControlState {
                     "credential_ready": record.credential_ready,
                     "eligible": record.eligible,
                 })
+            })
+            .collect()
+    }
+
+    fn model_health_projection(&self) -> BTreeMap<String, Value> {
+        self.health
+            .iter()
+            .map(|((provider, model), record)| {
+                (
+                    format!("{provider}/{model}"),
+                    json!({
+                        "provider": provider,
+                        "model": model,
+                        "attempts": record.observations,
+                        "successes": record.successes,
+                        "failures": record.failures,
+                        "success_rate": if record.observations == 0 { 0.0 } else { record.successes as f64 / record.observations as f64 },
+                        "mean_latency_ms": if record.observations == 0 { 0.0 } else { record.total_latency_ms as f64 / record.observations as f64 },
+                        "last_latency_ms": record.last_latency_ms,
+                        "last_status": record.last_status,
+                        "registered": record.registered,
+                        "credential_ready": record.credential_ready,
+                        "eligible": record.eligible,
+                    }),
+                )
             })
             .collect()
     }
@@ -667,6 +699,12 @@ impl BrainControlState {
                     "registered": record.registered,
                     "circuit": "closed",
                     "consecutive_failures": 0,
+                    "attempts": 0,
+                    "successes": 0,
+                    "failures": 0,
+                    "success_rate": 0.0,
+                    "mean_latency_ms": 0.0,
+                    "last_latency_ms": 0.0,
                     "credential_ready": record.credential_ready,
                     "eligible": record.eligible,
                 })
@@ -698,6 +736,47 @@ impl BrainControlState {
                     && record.eligible
             );
             entry["consecutive_failures"] = json!(current_failures);
+            let attempts = entry
+                .get("attempts")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+                .saturating_add(record.observations);
+            let successes = entry
+                .get("successes")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+                .saturating_add(record.successes);
+            let failures = entry
+                .get("failures")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+                .saturating_add(record.failures);
+            let previous_mean = entry
+                .get("mean_latency_ms")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0);
+            let previous_attempts = attempts.saturating_sub(record.observations);
+            let row_mean = if record.observations == 0 {
+                0.0
+            } else {
+                record.total_latency_ms as f64 / record.observations as f64
+            };
+            let weighted_mean = if attempts == 0 {
+                0.0
+            } else {
+                (previous_mean * previous_attempts as f64 + row_mean * record.observations as f64)
+                    / attempts as f64
+            };
+            entry["attempts"] = json!(attempts);
+            entry["successes"] = json!(successes);
+            entry["failures"] = json!(failures);
+            entry["success_rate"] = json!(if attempts == 0 {
+                0.0
+            } else {
+                successes as f64 / attempts as f64
+            });
+            entry["mean_latency_ms"] = json!(weighted_mean);
+            entry["last_latency_ms"] = json!(record.last_latency_ms);
             if record.last_status == "circuit_open" || current_failures >= 3 {
                 entry["circuit"] = json!("open");
                 entry["eligible"] = json!(false);

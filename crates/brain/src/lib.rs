@@ -80,6 +80,8 @@ pub enum BrainError {
     ContradictoryAssessment,
     #[error("invalid provider health posture for {0:?}")]
     InvalidProviderHealth(String),
+    #[error("invalid model health evidence for {0:?}")]
+    InvalidModelHealth(String),
     #[error("{field} must be a lowercase SHA-256 digest")]
     InvalidDigest { field: &'static str },
     #[error("invalid JSON for digest: {0}")]
@@ -256,6 +258,10 @@ pub struct ModelSelectionRequest {
     /// carries bounded readiness/circuit metadata so the kernel can refuse unhealthy providers.
     #[serde(default)]
     pub provider_health: BTreeMap<String, ProviderHealth>,
+    /// Process or durable transport evidence for one provider/model arm. This is evidence only:
+    /// provider registration, credentials, and provider circuits remain the hard gates.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub model_health: BTreeMap<String, ModelHealthEvidence>,
 }
 
 fn default_provider_registered() -> bool {
@@ -304,6 +310,104 @@ impl ProviderHealth {
     }
 }
 
+/// Bounded, value-only transport evidence for one model arm.
+///
+/// The application may keep richer health records outside the kernel, but the selection contract
+/// accepts only the small projection needed to adapt reliability and latency. `historical` is a
+/// single nested projection for durable stores; deeper nesting is rejected to keep validation and
+/// resource use predictable. `prior_adjustment_applied` is set by the Python façade after it has
+/// already blended this evidence into the model descriptor, preventing a second update when the
+/// same request is forwarded to the Rust kernel.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ModelHealthEvidence {
+    #[serde(default)]
+    pub attempts: u64,
+    #[serde(default)]
+    pub successes: u64,
+    #[serde(default)]
+    pub failures: u64,
+    #[serde(default)]
+    pub success_rate: Option<f64>,
+    #[serde(default)]
+    pub mean_latency_ms: Option<f64>,
+    #[serde(default)]
+    pub last_latency_ms: Option<f64>,
+    #[serde(default)]
+    pub prior_adjustment_applied: bool,
+    #[serde(default)]
+    pub historical: Option<Box<ModelHealthEvidence>>,
+}
+
+const MAX_HEALTH_ATTEMPTS: u64 = 1_000_000_000;
+const MAX_HEALTH_LATENCY_MS: f64 = 600_000.0;
+
+impl ModelHealthEvidence {
+    fn validate(&self, arm_id: &str) -> Result<(), BrainError> {
+        self.validate_at_depth(arm_id, 0)
+    }
+
+    fn validate_at_depth(&self, arm_id: &str, depth: u8) -> Result<(), BrainError> {
+        let Some((provider, model)) = arm_id.split_once('/') else {
+            return Err(BrainError::InvalidModelHealth(arm_id.to_string()));
+        };
+        // Provider ids are the first path segment; model ids may themselves contain slashes
+        // (for example, hosted gateways commonly expose `vendor/model` names).
+        if provider.trim().is_empty() || model.trim().is_empty() {
+            return Err(BrainError::InvalidModelHealth(arm_id.to_string()));
+        }
+        if self.attempts > MAX_HEALTH_ATTEMPTS
+            || self.successes > MAX_HEALTH_ATTEMPTS
+            || self.failures > MAX_HEALTH_ATTEMPTS
+            || self.successes > self.attempts
+            || self.failures > self.attempts
+        {
+            return Err(BrainError::InvalidModelHealth(arm_id.to_string()));
+        }
+        if let Some(success_rate) = self.success_rate {
+            finite_range(success_rate, "model_health.success_rate", 0.0, 1.0)?;
+        }
+        for latency in [self.mean_latency_ms, self.last_latency_ms]
+            .into_iter()
+            .flatten()
+        {
+            finite_range(
+                latency,
+                "model_health.latency_ms",
+                0.0,
+                MAX_HEALTH_LATENCY_MS,
+            )?;
+        }
+        if depth > 0 && self.historical.is_some() {
+            return Err(BrainError::InvalidModelHealth(arm_id.to_string()));
+        }
+        if let Some(historical) = &self.historical {
+            historical.validate_at_depth(arm_id, depth.saturating_add(1))?;
+        }
+        Ok(())
+    }
+
+    fn effective_metrics(&self, model: &ModelDescriptor) -> (f64, f64) {
+        if self.prior_adjustment_applied {
+            return (model.reliability, model.latency_ms as f64);
+        }
+        let evidence = self.historical.as_deref().unwrap_or(self);
+        if evidence.attempts == 0 {
+            return (model.reliability, model.latency_ms as f64);
+        }
+        let confidence = (evidence.attempts as f64 / 12.0).min(0.75);
+        let success_rate = evidence
+            .success_rate
+            .unwrap_or(evidence.successes as f64 / evidence.attempts as f64);
+        let reliability = (1.0 - confidence) * model.reliability + confidence * success_rate;
+        let latency = evidence
+            .last_latency_ms
+            .or(evidence.mean_latency_ms)
+            .map(|observed| (1.0 - confidence) * model.latency_ms as f64 + confidence * observed)
+            .unwrap_or(model.latency_ms as f64);
+        (reliability, latency)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ModelCandidateScore {
     pub model_id: String,
@@ -347,8 +451,17 @@ pub fn select_model(request: &ModelSelectionRequest) -> Result<ModelSelectionRep
             max: MAX_MODELS,
         });
     }
+    if request.model_health.len() > MAX_MODELS {
+        return Err(BrainError::TooMany {
+            field: "model_health",
+            max: MAX_MODELS,
+        });
+    }
     for (provider, health) in &request.provider_health {
         health.validate(provider)?;
+    }
+    for (arm_id, health) in &request.model_health {
+        health.validate(arm_id)?;
     }
     request.weights.validate()?;
     if let Some(min_quality) = request.min_quality {
@@ -371,6 +484,17 @@ pub fn select_model(request: &ModelSelectionRequest) -> Result<ModelSelectionRep
             return Err(BrainError::DuplicateArm(observation.arm_id.clone()));
         }
     }
+    let mut effective_metrics = BTreeMap::new();
+    for model in &request.models {
+        model.validate()?;
+        let model_id = model.id();
+        let metrics = request
+            .model_health
+            .get(&model_id)
+            .map(|health| health.effective_metrics(model))
+            .unwrap_or((model.reliability, model.latency_ms as f64));
+        effective_metrics.insert(model_id, metrics);
+    }
     let max_cost = request
         .models
         .iter()
@@ -378,13 +502,10 @@ pub fn select_model(request: &ModelSelectionRequest) -> Result<ModelSelectionRep
         .max()
         .unwrap_or(1)
         .max(1) as f64;
-    let max_latency = request
-        .models
-        .iter()
-        .map(|model| model.latency_ms)
-        .max()
-        .unwrap_or(1)
-        .max(1) as f64;
+    let max_latency = effective_metrics
+        .values()
+        .map(|(_, latency)| *latency)
+        .fold(1.0_f64, f64::max);
     let total_pulls = request
         .observations
         .iter()
@@ -394,8 +515,11 @@ pub fn select_model(request: &ModelSelectionRequest) -> Result<ModelSelectionRep
 
     let mut ranking = Vec::with_capacity(request.models.len());
     for model in &request.models {
-        model.validate()?;
         let model_id = model.id();
+        let (effective_reliability, effective_latency) = effective_metrics
+            .get(&model_id)
+            .copied()
+            .unwrap_or((model.reliability, model.latency_ms as f64));
         let observation = observations.get(&model_id).copied();
         let mut reasons = Vec::new();
         if !model.enabled {
@@ -417,7 +541,7 @@ pub fn select_model(request: &ModelSelectionRequest) -> Result<ModelSelectionRep
             }
         }
         if let Some(max_latency) = request.max_latency_ms {
-            if model.latency_ms > max_latency {
+            if effective_latency > max_latency as f64 {
                 reasons.push("latency_limit_exceeded".into());
             }
         }
@@ -460,10 +584,10 @@ pub fn select_model(request: &ModelSelectionRequest) -> Result<ModelSelectionRep
             request.weights.exploration * (log_total / pulls as f64).sqrt()
         };
         let base_score = request.weights.quality * model.quality
-            + request.weights.reliability * model.reliability
+            + request.weights.reliability * effective_reliability
             + request.weights.exploration * mean_reward
             - request.weights.cost * (model.cost_per_million_tokens as f64 / max_cost)
-            - request.weights.latency * (model.latency_ms as f64 / max_latency);
+            - request.weights.latency * (effective_latency / max_latency);
         ranking.push(ModelCandidateScore {
             model_id,
             eligible,
@@ -1571,6 +1695,7 @@ mod tests {
             observations: Vec::new(),
             weights: SelectionWeights::default(),
             provider_health: BTreeMap::new(),
+            model_health: BTreeMap::new(),
         })
         .unwrap();
         assert!(report.selected_model_id.is_none());
@@ -1617,6 +1742,7 @@ mod tests {
             ],
             weights: SelectionWeights::default(),
             provider_health: BTreeMap::new(),
+            model_health: BTreeMap::new(),
         };
         let report = select_model_contextual(&ContextualModelSelectionRequest {
             context,
@@ -1678,6 +1804,7 @@ mod tests {
             observations: Vec::new(),
             weights: SelectionWeights::default(),
             provider_health,
+            model_health: BTreeMap::new(),
         })
         .unwrap();
         assert_eq!(report.selected_model_id.as_deref(), Some("b/ready"));
@@ -1695,6 +1822,85 @@ mod tests {
             .reasons
             .iter()
             .any(|reason| reason == "provider_health_ineligible"));
+    }
+
+    #[test]
+    fn model_health_adapts_ranking_without_becoming_a_hidden_hard_gate() {
+        let mut model_health = BTreeMap::new();
+        model_health.insert(
+            "a/degraded".into(),
+            ModelHealthEvidence {
+                attempts: 12,
+                successes: 0,
+                failures: 12,
+                success_rate: Some(0.0),
+                mean_latency_ms: Some(900.0),
+                last_latency_ms: Some(900.0),
+                prior_adjustment_applied: false,
+                historical: None,
+            },
+        );
+        let report = select_model(&ModelSelectionRequest {
+            task: "model health test".into(),
+            required_capabilities: vec!["reasoning".into()],
+            input_tokens: 100,
+            requested_output_tokens: 100,
+            max_cost_per_million_tokens: None,
+            max_latency_ms: None,
+            min_quality: None,
+            models: vec![
+                model("a", "degraded", 0.9, 1),
+                model("b", "healthy", 0.9, 1),
+            ],
+            observations: Vec::new(),
+            weights: SelectionWeights::default(),
+            provider_health: BTreeMap::new(),
+            model_health,
+        })
+        .unwrap();
+        assert_eq!(report.selected_model_id.as_deref(), Some("b/healthy"));
+        let degraded = report
+            .ranking
+            .iter()
+            .find(|candidate| candidate.model_id == "a/degraded")
+            .unwrap();
+        assert!(degraded.eligible);
+        assert!(degraded.score < report.ranking[0].score);
+        assert!(degraded.reasons.is_empty());
+    }
+
+    #[test]
+    fn invalid_model_health_is_rejected_before_selection() {
+        let mut model_health = BTreeMap::new();
+        model_health.insert(
+            "a/model".into(),
+            ModelHealthEvidence {
+                attempts: 1,
+                successes: 2,
+                failures: 0,
+                success_rate: None,
+                mean_latency_ms: None,
+                last_latency_ms: Some(10.0),
+                prior_adjustment_applied: false,
+                historical: None,
+            },
+        );
+        let error = select_model(&ModelSelectionRequest {
+            task: "invalid health test".into(),
+            required_capabilities: vec![],
+            input_tokens: 1,
+            requested_output_tokens: 1,
+            max_cost_per_million_tokens: None,
+            max_latency_ms: None,
+            min_quality: None,
+            models: vec![model("a", "model", 0.9, 1)],
+            observations: Vec::new(),
+            weights: SelectionWeights::default(),
+            provider_health: BTreeMap::new(),
+            model_health,
+        })
+        .unwrap_err();
+        assert!(matches!(error, BrainError::InvalidModelHealth(_)));
     }
 
     #[test]
