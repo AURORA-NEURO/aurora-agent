@@ -1307,6 +1307,14 @@ stores a provider secret, or assumes that a serialized snapshot is authorization
   result digests, retry state, the next wave, and a digest-only route/plan/prompt/model-selection
   decision receipt; it never stores task arguments, raw outputs, prompts, credentials, or provider
   bodies.
+- A mission can additionally bind its top-level goal to `semanticRouting`. The classifier is a
+  separate approval-gated route-review call; its selected domains must exactly cover the explicit
+  mission step domains before any step dispatch. The resulting `route_digest` is persisted in every
+  checkpoint, and a restart requires the caller to rehydrate the exact `routeOverride` rather than
+  replaying the classifier implicitly. Provider abstention, disagreement, malformed output, or
+  missing route approval returns `route_review_required` with no new checkpoint. Supplying
+  `maxTotalCostUnits` creates one caller-owned `AutonomousCostBudget` shared by semantic
+  classification and provider-backed step adapters through `cost_budget`.
 - `InMemoryAutonomousMissionCheckpointStore` is a deterministic reference store; production
   callers should implement `AutonomousMissionCheckpointStore` over their own transactional storage
   and pair it with `AutonomousMissionPersistenceCoordinator` for snapshot flush/restore. Raw step
@@ -1331,6 +1339,7 @@ stores a provider secret, or assumes that a serialized snapshot is authorization
 
 ```typescript
 const missionExecutor = new AutonomousMissionExecutor({
+  agent, // required only when semanticRouting is enabled
   catalogue: liveCatalogue,
   checkpointStore: durableMissionStore,
   resultStore: callerOwnedResultStore,
@@ -1342,11 +1351,13 @@ const missionExecutor = new AutonomousMissionExecutor({
 
 const first = await missionExecutor.start(mission, {
   approveProviderCall: true,
+  semanticRouting: { enabled: true, approveProviderCall: true },
+  maxTotalCostUnits: 500,
   max_waves: 2, // bounded continuation; persist first.checkpoint through the store
 });
 const next = first.next_wave === null
   ? first
-  : await missionExecutor.resume(mission, { approveProviderCall: true });
+  : await missionExecutor.resume(mission, { approveProviderCall: true, routeOverride: first.route });
 ```
 
 An evaluator-guided mission loop can be layered over the same executor:

@@ -1,8 +1,11 @@
 import { ArgumentError, ProviderRuntimeError, isObject } from "./errors.js";
-import { AUTONOMOUS_DOMAIN_NAMES, type AutonomousAgent, type AutonomousDomainName, type AutonomousRunOptions, type AutonomousRunResult } from "./autonomous.js";
+import { AUTONOMOUS_DOMAIN_NAMES, validateAutonomousRouteOverride, type AutonomousAgent, type AutonomousDomainName, type AutonomousRunOptions, type AutonomousRunResult, type AutonomousRouteProposal } from "./autonomous.js";
 import { AutonomousEffectReconciliationRequiredError, type AutonomousEffectBoundary } from "./autonomous-effects.js";
+import { semanticRouteAutonomousTask } from "./autonomous-routing.js";
+import type { AutonomousSemanticRouteOptions, AutonomousSemanticRouteResult } from "./autonomous-routing.js";
 import { digestJson, ToolCatalogue } from "./tooling.js";
 import { preflightMission } from "./mission.js";
+import { AutonomousCostBudget } from "./llm.js";
 import type {
   AgentMissionArgs,
   AgentMissionPolicy,
@@ -49,6 +52,7 @@ export const AUTONOMOUS_MISSION_EVENT_TYPES = [
 ] as const;
 export const AUTONOMOUS_MISSION_STATUSES = [
   "planned",
+  "route_review_required",
   "running",
   "approval_required",
   "reconciliation_required",
@@ -81,6 +85,7 @@ export const AUTONOMOUS_MISSION_MAX_ERROR_BYTES = 2_048;
 export type AutonomousMissionEventType = typeof AUTONOMOUS_MISSION_EVENT_TYPES[number];
 export type AutonomousMissionStatus = typeof AUTONOMOUS_MISSION_STATUSES[number];
 export type AutonomousMissionStepStatus = typeof AUTONOMOUS_MISSION_STEP_STATUSES[number];
+export type AutonomousMissionSemanticRouteStatus = AutonomousSemanticRouteResult["status"];
 
 /** Digest-only receipt of the planning and model-selection decisions for one mission step. */
 export interface AutonomousMissionStepDecision extends JsonObject {
@@ -121,6 +126,8 @@ export interface AutonomousMissionStepExecutionContext {
   dependency_outputs: Record<string, JsonValue>;
   execution_attempt: number;
   resumed: boolean;
+  /** Shared caller-owned budget for provider-assisted step adapters; never persisted. */
+  cost_budget?: AutonomousCostBudget;
   signal?: AbortSignal;
 }
 
@@ -184,6 +191,8 @@ export interface AutonomousMissionCheckpoint {
   step_states: Record<string, AutonomousMissionStepCheckpoint>;
   completed_step_ids: string[];
   next_wave: number | null;
+  /** Digest of the approved top-level route, when this mission was route-bound. */
+  route_digest?: string | null;
   output_bytes: number;
   generation: number;
   status: AutonomousMissionStatus;
@@ -244,6 +253,8 @@ export interface AutonomousMissionExecutionResult {
   mission_id: string;
   preflight: MissionPreflightResult;
   checkpoint: AutonomousMissionCheckpoint | null;
+  route: AutonomousRouteProposal | null;
+  semantic_route_status: AutonomousMissionSemanticRouteStatus | null;
   events: AutonomousMissionEvent[];
   results: AutonomousMissionStepResult[];
   completed_steps: number;
@@ -312,11 +323,25 @@ export interface AutonomousMissionExecuteOptions {
   signal?: AbortSignal;
   /** The caller must explicitly approve provider invocation for this local executor. */
   approveProviderCall?: boolean;
+  /** Reuse a caller-reviewed route; required to recover a route-bound checkpoint. */
+  routeOverride?: AutonomousRouteProposal;
+  /** Optional provider-assisted semantic route review for the mission goal. */
+  semanticRouting?: AutonomousMissionSemanticRoutingOptions;
+  /** Aggregate provider cost ceiling shared by routing and provider-backed step adapters. */
+  maxTotalCostUnits?: number;
+  /** Caller-owned aggregate budget shared across routing and nested step provider calls. */
+  costBudget?: AutonomousCostBudget;
+}
+
+export interface AutonomousMissionSemanticRoutingOptions extends Pick<AutonomousSemanticRouteOptions, "candidates" | "credential" | "credentialFor" | "hints" | "approveProviderCall" | "minSemanticConfidence" | "maxDomains" | "allowCrossDomain" | "maxOutputTokens" | "maxCostPerMillionTokens" | "maxLatencyMs" | "minQuality" | "maxProviderFailovers"> {
+  enabled?: boolean;
 }
 
 export interface AutonomousMissionExecutorOptions {
   catalogue: import("./tooling.js").ToolCatalogue;
   executeStep: AutonomousMissionStepExecutor;
+  /** Optional agent used only when semanticRouting is enabled for a mission call. */
+  agent?: AutonomousAgent;
   checkpointStore?: AutonomousMissionCheckpointStore;
   resultStore?: AutonomousMissionResultStore;
   /** Optional learning/evaluation projection; rewards are caller supplied, never inferred. */
@@ -461,6 +486,37 @@ function policyOf(mission: AgentMissionArgs): AgentMissionPolicy {
   return mission.policy ?? {};
 }
 
+function normalizeMissionCostOptions<T extends AutonomousMissionExecuteOptions>(options: T): T {
+  if (options.costBudget !== undefined && !(options.costBudget instanceof AutonomousCostBudget)) throw new ArgumentError("costBudget must be an AutonomousCostBudget");
+  if (options.costBudget !== undefined && options.maxTotalCostUnits !== undefined) throw new ArgumentError("costBudget and maxTotalCostUnits cannot both be supplied");
+  if (options.costBudget !== undefined || options.maxTotalCostUnits === undefined) return options;
+  return { ...options, maxTotalCostUnits: undefined, costBudget: new AutonomousCostBudget(options.maxTotalCostUnits) } as T;
+}
+
+interface MissionRouteResolution {
+  route: AutonomousRouteProposal | null;
+  semantic_status: AutonomousMissionSemanticRouteStatus | null;
+}
+
+function missionDomains(mission: AgentMissionArgs): AutonomousDomainName[] {
+  const domains: AutonomousDomainName[] = [];
+  for (const step of mission.steps) {
+    const domain = step.domain as AutonomousDomainName;
+    if (AUTONOMOUS_DOMAIN_NAMES.includes(domain) && !domains.includes(domain)) domains.push(domain);
+  }
+  return domains;
+}
+
+function routeMatchesMission(route: AutonomousRouteProposal, mission: AgentMissionArgs): boolean {
+  const expected = missionDomains(mission).sort();
+  const selected = [...route.selected_domains].sort();
+  return !route.abstained
+    && route.primary_domain !== null
+    && selected.length === expected.length
+    && selected.every((domain, index) => domain === expected[index])
+    && route.cross_domain === (expected.length > 1);
+}
+
 function isTerminalStep(status: AutonomousMissionStepStatus): boolean {
   return status === "succeeded" || status === "refused" || status === "failed" || status === "blocked" || status === "cancelled";
 }
@@ -477,6 +533,7 @@ async function validateCheckpoint(value: unknown): Promise<AutonomousMissionChec
   boundedDigest("mission checkpoint request_digest", checkpoint.request_digest);
   boundedDigest("mission checkpoint policy_digest", checkpoint.policy_digest);
   boundedDigest("mission checkpoint catalogue_digest", checkpoint.catalogue_digest);
+  if (checkpoint.route_digest !== undefined) boundedDigest("mission checkpoint route_digest", checkpoint.route_digest, true);
   if (!Array.isArray(checkpoint.ordered_steps) || !Array.isArray(checkpoint.waves) || !isObject(checkpoint.step_states)) throw new AutonomousMissionExecutionError("mission checkpoint graph metadata is malformed");
   if (checkpoint.ordered_steps.length > AUTONOMOUS_MISSION_MAX_STEPS_PER_CALL || checkpoint.waves.length > AUTONOMOUS_MISSION_MAX_STEPS_PER_CALL) throw new AutonomousMissionExecutionError("mission checkpoint exceeds its step capacity");
   const ids = new Set<string>();
@@ -489,7 +546,7 @@ async function validateCheckpoint(value: unknown): Promise<AutonomousMissionChec
   if (!AUTONOMOUS_MISSION_STATUSES.includes(checkpoint.status)) throw new AutonomousMissionExecutionError("mission checkpoint status is invalid");
   boundedDigest("mission checkpoint previous_checkpoint_digest", checkpoint.previous_checkpoint_digest, true);
   boundedDigest("mission checkpoint checkpoint_digest", checkpoint.checkpoint_digest);
-  const descriptor = { schema: checkpoint.schema, mission_id: checkpoint.mission_id, request_digest: checkpoint.request_digest, policy_digest: checkpoint.policy_digest, catalogue_digest: checkpoint.catalogue_digest, ordered_steps: checkpoint.ordered_steps, waves: checkpoint.waves, step_states: checkpoint.step_states, completed_step_ids: checkpoint.completed_step_ids, next_wave: checkpoint.next_wave, output_bytes: checkpoint.output_bytes, generation: checkpoint.generation, status: checkpoint.status, previous_checkpoint_digest: checkpoint.previous_checkpoint_digest, retention: checkpoint.retention, secret_material: checkpoint.secret_material };
+  const descriptor = { schema: checkpoint.schema, mission_id: checkpoint.mission_id, request_digest: checkpoint.request_digest, policy_digest: checkpoint.policy_digest, catalogue_digest: checkpoint.catalogue_digest, ...(checkpoint.route_digest === undefined ? {} : { route_digest: checkpoint.route_digest }), ordered_steps: checkpoint.ordered_steps, waves: checkpoint.waves, step_states: checkpoint.step_states, completed_step_ids: checkpoint.completed_step_ids, next_wave: checkpoint.next_wave, output_bytes: checkpoint.output_bytes, generation: checkpoint.generation, status: checkpoint.status, previous_checkpoint_digest: checkpoint.previous_checkpoint_digest, retention: checkpoint.retention, secret_material: checkpoint.secret_material };
   if (await digestJson(descriptor) !== checkpoint.checkpoint_digest) throw new AutonomousMissionExecutionError("mission checkpoint digest does not match its metadata");
   for (const id of checkpoint.ordered_steps) {
     const state = checkpoint.step_states[id];
@@ -653,6 +710,7 @@ function missionStatus(checkpoint: AutonomousMissionCheckpoint, steps: readonly 
 export class AutonomousMissionExecutor {
   readonly catalogue: ToolCatalogue;
   readonly executeStep: AutonomousMissionStepExecutor;
+  readonly agent?: AutonomousAgent;
   readonly store: AutonomousMissionCheckpointStore;
   readonly resultStore: AutonomousMissionResultStore;
   readonly onStepOutcome?: AutonomousMissionExecutorOptions["onStepOutcome"];
@@ -664,6 +722,7 @@ export class AutonomousMissionExecutor {
     if (typeof options.executeStep !== "function") throw new ArgumentError("mission executor requires an executeStep callback");
     this.catalogue = options.catalogue;
     this.executeStep = options.executeStep;
+    this.agent = options.agent;
     this.store = options.checkpointStore ?? new InMemoryAutonomousMissionCheckpointStore();
     this.resultStore = options.resultStore ?? new InMemoryAutonomousMissionResultStore();
     this.onStepOutcome = options.onStepOutcome;
@@ -680,25 +739,33 @@ export class AutonomousMissionExecutor {
 
   async start(mission: AgentMissionArgs, options: AutonomousMissionExecuteOptions = {}): Promise<AutonomousMissionExecutionResult> {
     if (!isObject(mission)) throw new ArgumentError("mission must be a JSON object");
+    const normalizedOptions = normalizeMissionCostOptions(options);
     const preflight = await this.preflight(mission);
     const existing = await this.store.load(preflight.mission_id);
-    if (!preflight.ok) return this.result("planned", preflight, existing, []);
-    if (preflight.execution !== "authorized") return this.result("planned", preflight, existing, []);
+    if (!preflight.ok) return this.result("planned", preflight, existing, [], null, null);
+    if (preflight.execution !== "authorized") return this.result("planned", preflight, existing, [], null, null);
+    const routeResolution = existing
+      ? await this.resolveExistingRoute(mission, existing, normalizedOptions)
+      : await this.resolveStartRoute(mission, normalizedOptions);
+    const route = routeResolution.route;
+    if (routeResolution.semantic_status !== null && routeResolution.semantic_status !== "completed") {
+      return this.result("route_review_required", preflight, existing, [], route, routeResolution.semantic_status);
+    }
     const policy = policyOf(mission);
-    if (policy.execute !== true) return this.result("planned", preflight, existing, []);
-    if (options.approveProviderCall !== undefined && options.approveProviderCall !== true) return this.result("approval_required", preflight, existing, []);
+    if (policy.execute !== true) return this.result("planned", preflight, existing, [], route, routeResolution.semantic_status);
+    if (normalizedOptions.approveProviderCall !== undefined && normalizedOptions.approveProviderCall !== true) return this.result("approval_required", preflight, existing, [], route, routeResolution.semantic_status);
     const requestDigest = preflight.request_digest || await digestJson(mission);
     const policyDigest = await digestJson(policy);
     const orderedSteps = preflight.ordered_steps;
     const waves = preflight.waves;
     const checkpoint = existing
-      ? await this.assertExisting(existing, requestDigest, policyDigest, preflight.catalogue_digest, orderedSteps, waves)
-      : await this.makeCheckpoint(preflight.mission_id, requestDigest, policyDigest, preflight.catalogue_digest, orderedSteps, waves, Object.fromEntries(orderedSteps.map((id) => [id, stepState()])), [], 0, 0, "running", null);
+      ? await this.assertExisting(existing, requestDigest, policyDigest, preflight.catalogue_digest, orderedSteps, waves, route?.route_digest ?? null)
+      : await this.makeCheckpoint(preflight.mission_id, requestDigest, policyDigest, preflight.catalogue_digest, orderedSteps, waves, Object.fromEntries(orderedSteps.map((id) => [id, stepState()])), [], 0, 0, "running", null, route?.route_digest ?? null);
     if (!existing) {
       await this.store.save(checkpoint);
       await this.appendEvent(checkpoint, "mission.started", null, null, null, "mission execution started");
     }
-    return this.drive(mission, preflight, checkpoint, options);
+    return this.drive(mission, preflight, checkpoint, normalizedOptions, route, routeResolution.semantic_status);
   }
 
   async resume(mission: AgentMissionArgs, options: AutonomousMissionExecuteOptions = {}): Promise<AutonomousMissionExecutionResult> {
@@ -709,14 +776,58 @@ export class AutonomousMissionExecutor {
     return this.store.events(boundedIdentifier("mission_id", missionId), after, limit);
   }
 
-  private async assertExisting(checkpoint: AutonomousMissionCheckpoint, requestDigest: string, policyDigest: string, catalogueDigest: string, orderedSteps: readonly string[], waves: readonly string[][]): Promise<AutonomousMissionCheckpoint> {
+  private async resolveStartRoute(mission: AgentMissionArgs, options: AutonomousMissionExecuteOptions): Promise<MissionRouteResolution> {
+    if (options.routeOverride) {
+      const route = await validateAutonomousRouteOverride(mission.goal, options.routeOverride);
+      if (!routeMatchesMission(route, mission)) throw new AutonomousMissionExecutionError("mission route override does not exactly cover the mission step domains");
+      return { route, semantic_status: null };
+    }
+    if (options.semanticRouting?.enabled !== true) return { route: null, semantic_status: null };
+    if (!this.agent || typeof this.agent.route !== "function" || !this.agent.runtime) throw new AutonomousMissionExecutionError("semantic mission routing requires an AutonomousAgent on the mission executor");
+    const domains = missionDomains(mission);
+    const semantic = await semanticRouteAutonomousTask(this.agent, mission.goal, {
+      candidates: options.semanticRouting.candidates,
+      credential: options.semanticRouting.credential,
+      credentialFor: options.semanticRouting.credentialFor,
+      hints: options.semanticRouting.hints,
+      approveProviderCall: options.semanticRouting.approveProviderCall,
+      minSemanticConfidence: options.semanticRouting.minSemanticConfidence,
+      maxDomains: options.semanticRouting.maxDomains ?? Math.min(Math.max(domains.length, 1), 8),
+      allowCrossDomain: options.semanticRouting.allowCrossDomain ?? domains.length > 1,
+      maxOutputTokens: options.semanticRouting.maxOutputTokens,
+      maxCostPerMillionTokens: options.semanticRouting.maxCostPerMillionTokens,
+      maxLatencyMs: options.semanticRouting.maxLatencyMs,
+      minQuality: options.semanticRouting.minQuality,
+      maxTotalCostUnits: options.costBudget ? undefined : options.maxTotalCostUnits,
+      costBudget: options.costBudget,
+      maxProviderFailovers: options.semanticRouting.maxProviderFailovers,
+      signal: options.signal,
+    });
+    if (semantic.status === "completed" && !routeMatchesMission(semantic.route, mission)) return { route: semantic.route, semantic_status: "provider_disagreement" };
+    return { route: semantic.route, semantic_status: semantic.status };
+  }
+
+  private async resolveExistingRoute(mission: AgentMissionArgs, checkpoint: AutonomousMissionCheckpoint, options: AutonomousMissionExecuteOptions): Promise<MissionRouteResolution> {
+    if (options.semanticRouting?.enabled === true && !options.routeOverride) throw new AutonomousMissionExecutionError("existing mission checkpoints require routeOverride to change provider-assisted routing; semantic routing is never replayed implicitly");
+    if (options.routeOverride) {
+      const route = await validateAutonomousRouteOverride(mission.goal, options.routeOverride);
+      if (!routeMatchesMission(route, mission)) throw new AutonomousMissionExecutionError("mission route override does not exactly cover the mission step domains");
+      if (checkpoint.route_digest !== route.route_digest) throw new AutonomousMissionExecutionError("mission route override does not match the persisted route digest");
+      return { route, semantic_status: null };
+    }
+    if (checkpoint.route_digest !== undefined && checkpoint.route_digest !== null) throw new AutonomousMissionExecutionError("existing route-bound mission checkpoints require routeOverride for caller-owned route recovery");
+    return { route: null, semantic_status: null };
+  }
+
+  private async assertExisting(checkpoint: AutonomousMissionCheckpoint, requestDigest: string, policyDigest: string, catalogueDigest: string, orderedSteps: readonly string[], waves: readonly string[][], routeDigest: string | null): Promise<AutonomousMissionCheckpoint> {
     const normalized = await validateCheckpoint(checkpoint);
     if (normalized.request_digest !== requestDigest || normalized.policy_digest !== policyDigest || normalized.catalogue_digest !== catalogueDigest || JSON.stringify(normalized.ordered_steps) !== JSON.stringify(orderedSteps) || JSON.stringify(normalized.waves) !== JSON.stringify(waves)) throw new AutonomousMissionExecutionError("mission checkpoint does not match the supplied mission contract");
+    if (routeDigest !== null && normalized.route_digest !== routeDigest) throw new AutonomousMissionExecutionError("mission route override does not match the persisted route digest");
     return normalized;
   }
 
-  private async makeCheckpoint(missionId: string, requestDigest: string, policyDigest: string, catalogueDigest: string, orderedSteps: readonly string[], waves: readonly string[][], states: Record<string, AutonomousMissionStepCheckpoint>, completed: readonly string[], nextWave: number | null, outputBytes: number, status: AutonomousMissionStatus, previous: AutonomousMissionCheckpoint | null): Promise<AutonomousMissionCheckpoint> {
-    const descriptor = { schema: AUTONOMOUS_MISSION_CHECKPOINT_SCHEMA, mission_id: missionId, request_digest: requestDigest, policy_digest: policyDigest, catalogue_digest: catalogueDigest, ordered_steps: [...orderedSteps], waves: waves.map((wave) => [...wave]), step_states: states, completed_step_ids: [...completed], next_wave: nextWave, output_bytes: outputBytes, generation: (previous?.generation ?? 0) + 1, status, previous_checkpoint_digest: previous?.checkpoint_digest ?? null, retention: "metadata_only_no_arguments_outputs_credentials_or_provider_material" as const, secret_material: "never_returned" as const };
+  private async makeCheckpoint(missionId: string, requestDigest: string, policyDigest: string, catalogueDigest: string, orderedSteps: readonly string[], waves: readonly string[][], states: Record<string, AutonomousMissionStepCheckpoint>, completed: readonly string[], nextWave: number | null, outputBytes: number, status: AutonomousMissionStatus, previous: AutonomousMissionCheckpoint | null, routeDigest: string | null = previous?.route_digest ?? null): Promise<AutonomousMissionCheckpoint> {
+    const descriptor = { schema: AUTONOMOUS_MISSION_CHECKPOINT_SCHEMA, mission_id: missionId, request_digest: requestDigest, policy_digest: policyDigest, catalogue_digest: catalogueDigest, route_digest: routeDigest, ordered_steps: [...orderedSteps], waves: waves.map((wave) => [...wave]), step_states: states, completed_step_ids: [...completed], next_wave: nextWave, output_bytes: outputBytes, generation: (previous?.generation ?? 0) + 1, status, previous_checkpoint_digest: previous?.checkpoint_digest ?? null, retention: "metadata_only_no_arguments_outputs_credentials_or_provider_material" as const, secret_material: "never_returned" as const };
     return { ...descriptor, checkpoint_digest: await digestJson(descriptor) };
   }
 
@@ -732,7 +843,7 @@ export class AutonomousMissionExecutor {
     return operation;
   }
 
-  private async drive(mission: AgentMissionArgs, preflight: MissionPreflightResult, initial: AutonomousMissionCheckpoint, options: AutonomousMissionExecuteOptions): Promise<AutonomousMissionExecutionResult> {
+  private async drive(mission: AgentMissionArgs, preflight: MissionPreflightResult, initial: AutonomousMissionCheckpoint, options: AutonomousMissionExecuteOptions, route: AutonomousRouteProposal | null, semanticRouteStatus: AutonomousMissionSemanticRouteStatus | null): Promise<AutonomousMissionExecutionResult> {
     const policy = policyOf(mission);
     const stepsById = new Map(mission.steps.map((step) => [step.id, step]));
     const maxWaves = options.max_waves === undefined ? AUTONOMOUS_MISSION_MAX_STEPS_PER_CALL : boundedInteger("max_waves", options.max_waves, AUTONOMOUS_MISSION_MAX_STEPS_PER_CALL, 1);
@@ -805,7 +916,7 @@ export class AutonomousMissionExecutor {
       const priorEvents = await this.store.events(checkpoint.mission_id, 0, AUTONOMOUS_MISSION_MAX_EVENTS);
       if (priorEvents.at(-1)?.event_type !== "mission.completed") await this.appendEvent(checkpoint, "mission.completed", null, null, finalStatus, "mission reached a terminal state", checkpoint.output_bytes);
     }
-    return this.result(checkpoint.status, preflight, checkpoint, localResults);
+    return this.result(checkpoint.status, preflight, checkpoint, localResults, route, semanticRouteStatus);
   }
 
   private async executeWave(mission: AgentMissionArgs, checkpoint: AutonomousMissionCheckpoint, steps: readonly AgentMissionStep[], wave: number, policy: AgentMissionPolicy, options: AutonomousMissionExecuteOptions, attempt: number, localResults: AutonomousMissionStepResult[]): Promise<{ checkpoint: AutonomousMissionCheckpoint }> {
@@ -866,7 +977,7 @@ export class AutonomousMissionExecutor {
     await this.appendEvent(started, "step.started", wave, step, "running", "step dispatch started", 0, argumentsDigest);
     let execution: AutonomousMissionStepExecutionResult;
     try {
-      execution = normalizeStepResult(await this.executeStep({ mission_id: mission.mission_id, goal: mission.goal, wave, step: clone(step), arguments: args, dependency_outputs: dependencyOutputs, execution_attempt: attempt, resumed: checkpoint.step_states[step.id]?.status !== "pending", signal: options.signal }));
+      execution = normalizeStepResult(await this.executeStep({ mission_id: mission.mission_id, goal: mission.goal, wave, step: clone(step), arguments: args, dependency_outputs: dependencyOutputs, execution_attempt: attempt, resumed: checkpoint.step_states[step.id]?.status !== "pending", cost_budget: options.costBudget, signal: options.signal }));
     } catch (error) {
       execution = { status: error instanceof AutonomousEffectReconciliationRequiredError ? "reconciliation_required" : "failed", error_class: safeFailureClass(error), detail: null };
     }
@@ -946,10 +1057,10 @@ export class AutonomousMissionExecutor {
     return { step: clone(step), status: state.status, value: value === null ? null : clone(value), result_digest: state.result_digest, output_bytes: state.output_bytes, error_class: state.error_class, run_status: state.run_status, learning_episode_id: state.learning_episode_id, decision: state.decision, attempt: state.attempt };
   }
 
-  private async result(status: AutonomousMissionStatus, preflight: MissionPreflightResult, checkpoint: AutonomousMissionCheckpoint | null, localResults: AutonomousMissionStepResult[]): Promise<AutonomousMissionExecutionResult> {
+  private async result(status: AutonomousMissionStatus, preflight: MissionPreflightResult, checkpoint: AutonomousMissionCheckpoint | null, localResults: AutonomousMissionStepResult[], route: AutonomousRouteProposal | null = null, semanticRouteStatus: AutonomousMissionSemanticRouteStatus | null = null): Promise<AutonomousMissionExecutionResult> {
     const events = checkpoint ? await this.store.events(preflight.mission_id, 0, AUTONOMOUS_MISSION_MAX_EVENTS) : [];
     const states = checkpoint ? Object.values(checkpoint.step_states) : [];
-    return { schema: AUTONOMOUS_MISSION_EXECUTION_SCHEMA, status, mission_id: preflight.mission_id, preflight, checkpoint, events, results: localResults, completed_steps: checkpoint?.completed_step_ids.length ?? 0, total_steps: preflight.ordered_steps.length, succeeded_steps: states.filter((state) => state.status === "succeeded").length, refused_steps: states.filter((state) => state.status === "refused").length, blocked_steps: states.filter((state) => state.status === "blocked").length, failed_steps: states.filter((state) => state.status === "failed").length, cancelled_steps: states.filter((state) => state.status === "cancelled").length, returned_bytes: checkpoint?.output_bytes ?? 0, next_wave: checkpoint?.next_wave ?? null, recovery: "caller_rehydrates_raw_results_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only", secret_material: "never_returned" };
+    return { schema: AUTONOMOUS_MISSION_EXECUTION_SCHEMA, status, mission_id: preflight.mission_id, preflight, checkpoint, route, semantic_route_status: semanticRouteStatus, events, results: localResults, completed_steps: checkpoint?.completed_step_ids.length ?? 0, total_steps: preflight.ordered_steps.length, succeeded_steps: states.filter((state) => state.status === "succeeded").length, refused_steps: states.filter((state) => state.status === "refused").length, blocked_steps: states.filter((state) => state.status === "blocked").length, failed_steps: states.filter((state) => state.status === "failed").length, cancelled_steps: states.filter((state) => state.status === "cancelled").length, returned_bytes: checkpoint?.output_bytes ?? 0, next_wave: checkpoint?.next_wave ?? null, recovery: "caller_rehydrates_raw_results_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only", secret_material: "never_returned" };
   }
 }
 
@@ -1041,6 +1152,7 @@ export function agentMissionStepExecutor(agent: AutonomousAgent, options: {
     };
     const run = await agent.run(context.step.objective, {
       ...options.run,
+      ...(context.cost_budget === undefined ? {} : { costBudget: context.cost_budget, maxTotalCostUnits: undefined }),
       domain: context.step.domain as AutonomousDomainName,
       capability: context.step.capability,
       context: [{ id: "mission-step-contract", content: JSON.stringify({ mission_id: context.mission_id, step_id: context.step.id, tool: context.step.tool, arguments_digest: expectedDigest, wave: context.wave }), required: true, priority: 100 }],

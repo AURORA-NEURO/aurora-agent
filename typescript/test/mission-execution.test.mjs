@@ -3,10 +3,15 @@ import assert from "node:assert/strict";
 
 import {
   AUTONOMOUS_DOMAIN_NAMES,
+  AutonomousAgent,
   AutonomousMissionExecutor,
+  CredentialStore,
   InMemoryAutonomousMissionCheckpointStore,
   InMemoryAutonomousMissionResultStore,
+  LLMRuntime,
   agentMissionStepExecutor,
+  digestJson,
+  openaiCompatibleProvider,
   settleAutonomousMissionLearning,
   ToolCatalogue,
 } from "../dist/index.js";
@@ -21,10 +26,10 @@ async function catalogue() {
   ]);
 }
 
-function mission(steps, policy = {}) {
+function mission(steps, policy = {}, goal = "exercise the durable autonomous mission executor") {
   return {
     mission_id: "mission-local-1",
-    goal: "exercise the durable autonomous mission executor",
+    goal,
     steps,
     policy: {
       execute: true,
@@ -39,6 +44,35 @@ function mission(steps, policy = {}) {
       ...policy,
     },
   };
+}
+
+function jsonResponse(payload) {
+  return new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
+}
+
+function semanticAgent(payload) {
+  let calls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      calls += 1;
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify(payload) }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("mission-router", "https://mission-router.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel({
+    provider: "mission-router",
+    model: "mission-router-model",
+    capabilities: ["reasoning", "structured_output", "code", "data", "coordination"],
+    context_window_tokens: 32_000,
+    max_output_tokens: 2_000,
+    quality: 0.9,
+    latency_ms: 50,
+    cost_per_million_tokens: 5,
+    reliability: 0.99,
+  });
+  return { agent, calls: () => calls };
 }
 
 test("durable mission execution resumes dependency waves and rehydrates caller-owned outputs", async () => {
@@ -271,4 +305,84 @@ test("agent mission adapter prepares learning only after the exact tool call com
   assert.equal(execution.status, "succeeded");
   assert.equal(execution.checkpoint.step_states["step-1"].decision.provider, "mission-provider");
   assert.equal(execution.checkpoint.step_states["step-1"].decision.plan_digest, "b".repeat(64));
+});
+
+test("durable missions bind semantic routing to explicit step domains and recover by route override", async () => {
+  const { agent, calls } = semanticAgent({
+    selected_domains: [
+      { domain: "coding", score: 0.94, rationale: "implementation work" },
+      { domain: "data", score: 0.91, rationale: "data validation work" },
+    ],
+    confidence: 0.93,
+    abstain: false,
+    abstain_reason: null,
+  });
+  const steps = [
+    { id: "code", domain: "coding", capability: "testing", objective: "run the code check", tool: "mission_probe", arguments: { value: "code" } },
+    { id: "data", domain: "data", capability: "data_analysis", objective: "run the data check", tool: "mission_probe", arguments: { value: "data" }, depends_on: ["code"] },
+  ];
+  const store = new InMemoryAutonomousMissionCheckpointStore();
+  const executor = new AutonomousMissionExecutor({
+    agent,
+    catalogue: await catalogue(),
+    checkpointStore: store,
+    executeStep: async ({ step }) => ({ status: "succeeded", value: { step: step.id } }),
+  });
+  const first = await executor.start(mission(steps, {}, "Help with an unfamiliar task."), {
+    max_waves: 1,
+    approveProviderCall: true,
+    semanticRouting: { enabled: true, approveProviderCall: true, maxDomains: 2, allowCrossDomain: true },
+  });
+  assert.equal(first.status, "running");
+  assert.equal(first.semantic_route_status, "completed");
+  assert.deepEqual([...first.route.selected_domains].sort(), ["coding", "data"]);
+  assert.equal(first.checkpoint.route_digest, first.route.route_digest);
+  assert.equal(calls(), 1, "semantic classifier runs once before mission dispatch");
+
+  const tampered = { ...first.route, confidence: first.route.confidence - 0.01 };
+  const { route_digest: _routeDigest, ...tamperedDescriptor } = tampered;
+  tampered.route_digest = await digestJson(tamperedDescriptor);
+  await assert.rejects(
+    () => executor.resume(mission(steps, {}, "Help with an unfamiliar task."), { routeOverride: tampered, approveProviderCall: true }),
+    /persisted route digest/,
+  );
+
+  const resumed = await executor.resume(mission(steps, {}, "Help with an unfamiliar task."), { routeOverride: first.route, approveProviderCall: true });
+  assert.equal(resumed.status, "succeeded");
+  assert.equal(resumed.semantic_route_status, null, "restart uses caller-owned route identity without replaying the classifier");
+  assert.equal(calls(), 1);
+});
+
+test("durable mission semantic routing stays review-only until classifier approval", async () => {
+  const { agent, calls } = semanticAgent({ selected_domains: [], confidence: 0, abstain: true, abstain_reason: "needs review" });
+  const step = { id: "review", domain: "coding", capability: "testing", objective: "review the task", tool: "mission_probe", arguments: {} };
+  const executor = new AutonomousMissionExecutor({
+    agent,
+    catalogue: await catalogue(),
+    executeStep: async () => ({ status: "succeeded", value: { should_not_run: true } }),
+  });
+  const result = await executor.start(mission([step], {}, "Help with an unfamiliar task."), {
+    approveProviderCall: true,
+    semanticRouting: { enabled: true, approveProviderCall: false },
+  });
+  assert.equal(result.status, "route_review_required");
+  assert.equal(result.semantic_route_status, "approval_required");
+  assert.equal(result.checkpoint, null);
+  assert.equal(calls(), 0);
+});
+
+test("mission step adapters receive one shared caller-owned cost budget", async () => {
+  const budgets = [];
+  const step = { id: "budgeted", domain: "coding", capability: "testing", objective: "exercise budget propagation", tool: "mission_probe", arguments: {} };
+  const executor = new AutonomousMissionExecutor({
+    catalogue: await catalogue(),
+    executeStep: async ({ cost_budget }) => {
+      budgets.push(cost_budget);
+      return { status: "succeeded", value: { ok: true } };
+    },
+  });
+  const result = await executor.start(mission([step]), { approveProviderCall: true, maxTotalCostUnits: 100 });
+  assert.equal(result.status, "succeeded");
+  assert.equal(budgets.length, 1);
+  assert.equal(budgets[0].maxCostUnits, 100);
 });

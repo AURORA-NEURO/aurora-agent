@@ -1126,6 +1126,18 @@ episodes. The optional `onStepOutcome` callback remains useful for custom evalua
 but network success, latency, model confidence, or a completed HTTP request is never treated as an
 implicit reward.
 
+The mission layer can also perform a provider-assisted semantic route review before dispatch. Pass
+an `AutonomousAgent` to `AutonomousMissionExecutor` and set `semanticRouting.enabled` to bind the
+mission goal to a reviewed route. The classifier has its own approval gate; its selected domains
+must exactly cover the mission's explicit step domains, so semantic classification cannot silently
+add or remove work. A successful route is persisted as `route_digest` in the metadata-only
+checkpoint. On restart, the caller must supply the original `routeOverride`; the classifier is never
+implicitly replayed against a changed provider, model, or prompt. Approval-required, abstained,
+invalid, or disagreeing routes return `route_review_required` before a checkpoint or step dispatch
+is created. `maxTotalCostUnits` is normalized into one caller-owned `AutonomousCostBudget` shared
+by the classifier and provider-backed step adapters; the budget object is transient and never enters
+mission persistence.
+
 `runAutonomousMissionReplanCycle()` supplies the missing bounded feedback loop for durable
 missions. It evaluates a terminal or partial attempt, settles its exact successful-step episode
 rewards, and can schedule a new attempt when the evaluator explicitly requests a replan. Every

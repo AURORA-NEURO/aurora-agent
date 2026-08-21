@@ -514,6 +514,8 @@ export type {
   AutonomousMissionExecutorOptions,
   AutonomousMissionLearningAdapter,
   AutonomousMissionLearningSettlement,
+  AutonomousMissionSemanticRouteStatus,
+  AutonomousMissionSemanticRoutingOptions,
   AutonomousMissionPersistence,
   AutonomousMissionResultStore,
   AutonomousMissionSnapshot,
