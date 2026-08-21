@@ -352,6 +352,72 @@ test("capability portfolio planning covers all domains without widening authorit
   assert.ok(sparsePlan.missing_tools.length > 0);
 });
 
+test("stage-bound adapter execution emits evidence receipts for every reviewed domain", async () => {
+  const profiles = await builtinAutonomousDomainProfiles();
+  const definitions = [...new Map(profiles.flatMap((profile) => profile.tool_profile.bindings.map((binding) => ({
+    name: binding.name,
+    description: `Stage test ${binding.name}`,
+    inputSchema: { type: "object", additionalProperties: true },
+  }))).map((definition) => [definition.name, definition])).values()];
+  const catalogue = await ToolCatalogue.fromDefinitions(definitions);
+  const registry = await AutonomousDomainToolRegistry.create(catalogue);
+  let executions = 0;
+  const runtime = new AutonomousDomainToolRuntime(registry, async () => { executions += 1; return { ok: true }; });
+
+  for (const profile of profiles) {
+    const plan = await registry.planForTask(`exercise the reviewed ${profile.domain} workflow`, { domains: [profile.domain], maxTools: 128 });
+    const coverage = plan.coverage.find((row) => row.domain === profile.domain && row.status === "selected");
+    assert.ok(coverage?.selected_tool, `${profile.domain} must have a live stage-selected tool`);
+    const stage = profile.workflow.stages.find((candidate) => candidate.id === coverage.stage_id);
+    assert.ok(stage);
+    const result = await runtime.authorizeAndExecute([{ id: `stage-${profile.domain}`, name: coverage.selected_tool, arguments: {} }], {
+      domains: [profile.domain],
+      approveEffects: true,
+      workflowContext: {
+        domain: profile.domain,
+        workflow_id: profile.workflow.workflow_id,
+        workflow_digest: profile.workflow.workflow_digest,
+        stage_id: stage.id,
+      },
+    });
+    assert.equal(result[0].approved, true, profile.domain);
+    const receipt = runtime.receiptsSnapshot().at(-1);
+    assert.equal(receipt.domain, profile.domain);
+    assert.equal(receipt.workflow_id, profile.workflow.workflow_id);
+    assert.equal(receipt.workflow_digest, profile.workflow.workflow_digest);
+    assert.equal(receipt.stage_id, stage.id);
+    assert.equal(receipt.stage_contract_digest.length, 64);
+    assert.deepEqual(receipt.required_evidence_outputs, stage.evidence_outputs);
+    assert.equal(receipt.evidence_status, "tool_execution_only");
+    assert.equal(Object.prototype.hasOwnProperty.call(receipt, "arguments"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(receipt, "result"), false);
+    assert.match(JSON.stringify(receipt), /stage evidence outputs still require evaluator review/);
+  }
+  assert.equal(executions, profiles.length);
+});
+
+test("stage-bound adapter execution rejects a domain-valid but stage-incompatible tool before dispatch", async () => {
+  const profiles = await builtinAutonomousDomainProfiles();
+  const coding = profiles.find((profile) => profile.domain === "coding");
+  const definitions = coding.tool_profile.bindings.map((binding) => ({ name: binding.name, description: binding.name, inputSchema: { type: "object", additionalProperties: true } }));
+  const registry = await AutonomousDomainToolRegistry.create(await ToolCatalogue.fromDefinitions(definitions), [coding.tool_profile]);
+  let executions = 0;
+  const runtime = new AutonomousDomainToolRuntime(registry, async () => { executions += 1; return { ok: true }; });
+  const refused = await runtime.authorizeAndExecute([{ id: "wrong-stage", name: "developer_platform_status", arguments: {} }], {
+    domains: ["coding"],
+    approveEffects: true,
+    workflowContext: { domain: "coding", workflow_id: coding.workflow.workflow_id, workflow_digest: coding.workflow.workflow_digest, stage_id: "inspect" },
+  });
+  assert.equal(refused[0].approved, false);
+  assert.equal(refused[0].content.status, "execution_failed");
+  assert.equal(executions, 0);
+  const receipt = runtime.receiptsSnapshot().at(-1);
+  assert.equal(receipt.status, "execution_failed");
+  assert.equal(receipt.domain, "coding");
+  assert.equal(receipt.stage_id, "inspect");
+  assert.equal(receipt.capability, null);
+});
+
 test("AutonomousAgent performs a real selected-provider tool loop with domain policy", async () => {
   const bodies = [];
   let calls = 0;

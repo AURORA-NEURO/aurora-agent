@@ -11,6 +11,7 @@ import {
   CredentialStore,
   InMemoryAutonomousWorkflowCheckpointStore,
   LLMRuntime,
+  ToolCatalogue,
   builtinAutonomousDomainProfiles,
   digestJson,
   openaiCompatibleProvider,
@@ -467,6 +468,46 @@ test("workflow executor runs every built-in single-domain workflow through the s
     assert.equal(result.stage_results.length, profile.workflow.stages.length, profile.domain);
     assert.ok(result.stage_results.every((stage) => stage.declared_status === "completed" && stage.validation_errors.length === 0), profile.domain);
   }
+});
+
+test("workflow executor forwards reviewed stage identity into live adapter dispatch", async () => {
+  let calls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      calls += 1;
+      if (calls === 1) {
+        return jsonResponse({ choices: [{ message: { role: "assistant", content: "", tool_calls: [{ id: "stage-tool-1", type: "function", function: { name: "conformance_run", arguments: "{}" } }] }, finish_reason: "tool_calls" }] });
+      }
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify(workflowStagePayload(init, "scope")) }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("stage-bound", "https://stage-bound.test", { requiresCredential: false }));
+  const catalogueDefinition = { name: "conformance_run", description: "Run bounded conformance checks", inputSchema: { type: "object", additionalProperties: false } };
+  const providerTool = { name: "conformance_run", description: "Run bounded conformance checks", parameters: { type: "object", additionalProperties: false } };
+  const agent = new AutonomousAgent(llm, {
+    toolCatalogue: await ToolCatalogue.fromDefinitions([catalogueDefinition]),
+    toolExecutor: async () => ({ checked: true }),
+  });
+  agent.registerModel({ ...model(), provider: "stage-bound", model: "stage-bound-model", capabilities: [...model().capabilities, "review"] });
+  const result = await new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore()).start("Inspect this coding workflow with a reviewed adapter", {
+    domain: "coding",
+    jobId: "workflow-stage-bound-1",
+    candidates: agent.models(),
+    tools: [providerTool],
+    approveProviderCall: true,
+    maxStages: 1,
+  });
+  assert.equal(result.status, "paused");
+  assert.equal(result.stage_results[0].declared_status, "completed");
+  const receipt = agent.toolExecutionEvidence().at(-1);
+  assert.equal(receipt.domain, "coding");
+  assert.equal(receipt.workflow_id, result.blueprint.workflow.workflow_id);
+  assert.equal(receipt.workflow_digest, result.blueprint.workflow.workflow_digest);
+  assert.equal(receipt.stage_id, "scope");
+  assert.equal(receipt.status, "executed");
+  assert.equal(receipt.required_evidence_outputs.includes("acceptance_criteria"), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(receipt, "arguments"), false);
 });
 
 test("workflow executor fails closed when a provider reports a blocked stage", async () => {

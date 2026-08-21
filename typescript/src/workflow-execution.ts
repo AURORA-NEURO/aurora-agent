@@ -10,6 +10,8 @@ import type {
   AutonomousRunResult,
   AutonomousRouteProposal,
   AutonomousTaskBlueprint,
+  AutonomousWorkflow,
+  AutonomousWorkflowToolContext,
   AutonomousWorkflowStage,
 } from "./autonomous.js";
 import { digestJson } from "./tooling.js";
@@ -633,9 +635,16 @@ async function acceptedWorkflowPlan(
   return { priority_stage_ids: [...priority], focus_stage_ids: [...focus], refinement_digest: await digestJson(refinement) };
 }
 
-function runOptions(options: AutonomousWorkflowExecuteOptions, stage: AutonomousWorkflowStage, domain: AutonomousDomainName, context: AutonomousRunOptions["context"]): AutonomousRunOptions {
+function runOptions(options: AutonomousWorkflowExecuteOptions, stage: AutonomousWorkflowStage, workflow: AutonomousWorkflow, context: AutonomousRunOptions["context"]): AutonomousRunOptions {
+  const workflowContext: AutonomousWorkflowToolContext = {
+    domain: workflow.domain,
+    workflow_id: workflow.workflow_id,
+    workflow_digest: workflow.workflow_digest,
+    stage_id: stage.id,
+  };
   return {
-    domain,
+    domain: workflow.domain,
+    workflowContext,
     capability: stage.required_capabilities[0],
     candidates: options.candidates,
     credential: options.credential,
@@ -865,7 +874,7 @@ export class AutonomousWorkflowExecutor {
       ];
       let run: AutonomousRunResult;
       try {
-        run = await this.agent.run(`Execute workflow stage ${stage.id} for task: ${task}`, runOptions(options, stage, blueprint.domain_profile.domain, context));
+        run = await this.agent.run(`Execute workflow stage ${stage.id} for task: ${task}`, runOptions(options, stage, blueprint.workflow, context));
       } catch (error) {
         const failure = stageFailure(error);
         checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "failed", run_status: "exception", selection_digest: null, response_digest: null, output_bytes: 0, error_class: failure.error_class, error_code: failure.error_code, retryable: failure.retryable, status_code: failure.status_code, learning_episode_id: null }], "failed", contractDigest, checkpoint, stageOrder, planRefinementDigest);

@@ -287,6 +287,44 @@ instead of being silently treated as an available capability. The plan is sealed
 `bioprism-typescript-autonomous-capability-plan/0.1` and explicitly states that it made no
 provider or tool calls.
 
+### Stage-bound adapter execution and evidence
+
+The live adapter path is stricter than portfolio selection. A workflow executor constructs an
+`AutonomousWorkflowToolContext` containing the selected domain, exact workflow id/digest, and
+current stage id. `AutonomousDomainToolRuntime` then rechecks the identity against the reviewed
+workflow before dispatching each call. It requires the binding to satisfy the stage's explicit
+capability aliases, refuses effectful tools in read-only stages, and refuses approval-gated tools
+when the stage contract does not declare approval. A tool that is registered, live, and valid for
+the domain can still be refused for the wrong stage.
+
+```typescript
+const result = await agent.executeToolCalls(
+  [{ id: "call-1", name: "repository_catalog", arguments: {} }],
+  {
+    domains: ["coding"],
+    approveEffects: false,
+    workflowContext: {
+      domain: "coding",
+      workflow_id: blueprint.workflow.workflow_id,
+      workflow_digest: blueprint.workflow.workflow_digest,
+      stage_id: "inspect",
+    },
+  },
+);
+
+// Metadata-only adapter evidence: no raw arguments, result, prompt, or credential.
+const receipts = agent.toolExecutionEvidence();
+```
+
+Each receipt binds the tool, capability, schema digest, workflow/stage identity, stage-contract
+digest, required evidence-output labels, effect posture, result digest, and redacted outcome status.
+`evidence_status: "tool_execution_only"` is intentional: dispatch success is not task success,
+and a result digest is not evidence that the external world changed as intended. Evaluators still
+must validate the stage's declared evidence and signals. `autonomousWorkflowStageContractDigest()`
+is available when a caller-owned adapter or audit store needs to reproduce the exact stage identity.
+Legacy domain-only `authorizeAndExecute()` calls remain available for direct integrations, but
+durable workflow execution always uses the stricter stage-bound path.
+
 `AutonomousAgent` is the application-facing composition layer for the autonomous brain. It covers
 the twelve reviewed domains (`coding`, `browser`, `data`, `science`, `biomedical`,
 `neuroscience`, `operations`, `enterprise`, `multi_agent`, `multimodal`, `cross_domain`, and

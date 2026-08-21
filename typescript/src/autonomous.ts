@@ -83,6 +83,7 @@ export const AUTONOMOUS_PLAN_REFINEMENT_SCHEMA = "bioprism-python-autonomous-pla
 export const AUTONOMOUS_CROSS_DOMAIN_PLAN_REFINEMENT_SCHEMA = "bioprism-python-autonomous-cross-domain-plan-refinement/0.1" as const;
 export const AUTONOMOUS_DOMAIN_TOOL_SCHEMA = "bioprism-typescript-autonomous-domain-tool/0.1" as const;
 export const AUTONOMOUS_DOMAIN_TOOL_REGISTRY_SCHEMA = "bioprism-typescript-autonomous-domain-tool-registry/0.1" as const;
+export const AUTONOMOUS_WORKFLOW_STAGE_CONTRACT_SCHEMA = "bioprism-typescript-autonomous-workflow-stage-contract/0.1" as const;
 export const AUTONOMOUS_DOMAIN_TOOL_PLAN_SCHEMA = "bioprism-typescript-autonomous-domain-tool-plan/0.1" as const;
 export const AUTONOMOUS_CAPABILITY_PLAN_SCHEMA = "bioprism-typescript-autonomous-capability-plan/0.1" as const;
 export const AUTONOMOUS_LEARNING_SCHEMA = "bioprism-typescript-autonomous-online-learning/0.1" as const;
@@ -210,6 +211,14 @@ export interface AutonomousWorkflowStage extends JsonObject {
   approval_required: boolean;
 }
 
+/** Explicit identity carried from a reviewed workflow stage into live tool admission. */
+export interface AutonomousWorkflowToolContext extends JsonObject {
+  domain: AutonomousDomainName;
+  workflow_id: string;
+  workflow_digest: string;
+  stage_id: string;
+}
+
 export interface AutonomousWorkflow extends JsonObject {
   schema: typeof AUTONOMOUS_WORKFLOW_SCHEMA;
   workflow_id: string;
@@ -231,6 +240,31 @@ export interface AutonomousDomainToolBinding extends JsonObject {
   read_only: boolean;
   approval_required: boolean;
   authorization: "metadata_only; registration_is_not_authorization";
+  secret_material: "never_returned";
+}
+
+/** Metadata-only evidence emitted by the domain adapter boundary; raw arguments/results never enter it. */
+export interface AutonomousDomainToolExecutionReceipt extends JsonObject {
+  schema: typeof AUTONOMOUS_DOMAIN_TOOL_REGISTRY_SCHEMA;
+  receipt_kind: "tool_execution_receipt";
+  domain: AutonomousDomainName | null;
+  workflow_id: string | null;
+  workflow_digest: string | null;
+  stage_id: string | null;
+  stage_contract_digest: string | null;
+  required_evidence_outputs: string[];
+  evidence_status: "tool_execution_only";
+  does_not_claim: string[];
+  tool: string;
+  capability: string | null;
+  status: "approval_required" | "executed" | "reconciliation_required" | "execution_failed";
+  schema_digest?: string;
+  result_digest?: string;
+  effect?: string;
+  effect_id?: string;
+  idempotency_key?: string;
+  error_class?: string;
+  duration_ms: number;
   secret_material: "never_returned";
 }
 
@@ -692,6 +726,8 @@ export interface AutonomousModelRefreshResult {
 
 export interface AutonomousRunOptions {
   domain?: AutonomousDomainName;
+  /** Internal reviewed-stage identity; workflow executors populate this before provider dispatch. */
+  workflowContext?: AutonomousWorkflowToolContext;
   /** Reuse a route already approved by a caller-owned semantic router. */
   routeOverride?: AutonomousRouteProposal;
   capability?: string;
@@ -1598,6 +1634,30 @@ function bindingSupportsStage(profile: AutonomousDomainProfile, stage: Autonomou
   ));
 }
 
+function workflowStageContractDescriptor(workflow: AutonomousWorkflow, stage: AutonomousWorkflowStage): JsonObject {
+  return {
+    schema: AUTONOMOUS_WORKFLOW_STAGE_CONTRACT_SCHEMA,
+    domain: workflow.domain,
+    workflow_id: workflow.workflow_id,
+    workflow_digest: workflow.workflow_digest,
+    stage_id: stage.id,
+    objective: stage.objective,
+    required_capabilities: [...stage.required_capabilities],
+    depends_on: [...stage.depends_on],
+    evidence_outputs: [...stage.evidence_outputs],
+    evaluator_signals: [...stage.evaluator_signals],
+    read_only: stage.read_only,
+    approval_required: stage.approval_required,
+  };
+}
+
+/** Digest the exact stage contract that a live adapter receipt is bound to. */
+export async function autonomousWorkflowStageContractDigest(workflow: AutonomousWorkflow, stageId: string): Promise<string> {
+  const stage = workflow.stages.find((candidate) => candidate.id === stageId);
+  if (!stage) throw new ArgumentError(`autonomous workflow stage is unavailable: ${stageId}`);
+  return digestJson(workflowStageContractDescriptor(workflow, stage));
+}
+
 function taskRelevanceTokens(task: string): string[] {
   return [...new Set(normalizeRouteText(task).split(" ").filter((token) => token.length >= 3))].slice(0, 128);
 }
@@ -1671,20 +1731,23 @@ export class AutonomousDomainToolRegistry {
   readonly profiles: readonly AutonomousDomainToolProfile[];
   readonly digest: string;
   private readonly bindingsByDomain = new Map<AutonomousDomainName, Map<string, AutonomousDomainToolBinding>>();
+  private readonly workflowsByDomain = new Map<AutonomousDomainName, AutonomousDomainProfile>();
 
-  private constructor(catalogue: ToolCatalogue, profiles: readonly AutonomousDomainToolProfile[], digest: string) {
+  private constructor(catalogue: ToolCatalogue, profiles: readonly AutonomousDomainToolProfile[], workflowProfiles: readonly AutonomousDomainProfile[], digest: string) {
     this.catalogue = catalogue;
     this.profiles = profiles;
     this.digest = digest;
     for (const profile of profiles) this.bindingsByDomain.set(profile.domain, new Map(profile.bindings.map((binding) => [binding.name, binding])));
+    for (const profile of workflowProfiles) this.workflowsByDomain.set(profile.domain, profile);
   }
 
   static async create(catalogue: ToolCatalogue, profiles?: readonly AutonomousDomainToolProfile[]): Promise<AutonomousDomainToolRegistry> {
     if (!(catalogue instanceof ToolCatalogue)) throw new ArgumentError("autonomous domain tool registry requires a ToolCatalogue");
-    const selected = profiles ? [...profiles] : await builtinAutonomousDomainProfiles().then((rows) => rows.map((profile) => profile.tool_profile));
+    const workflowProfiles = await builtinAutonomousDomainProfiles();
+    const selected = profiles ? [...profiles] : workflowProfiles.map((profile) => profile.tool_profile);
     if (!selected.length || selected.length > AUTONOMOUS_DOMAIN_NAMES.length) throw new ArgumentError("autonomous domain tool registry profile count is outside its bounds");
     const profileDigest = await digestJson(selected.map((profile) => profile));
-    return new AutonomousDomainToolRegistry(catalogue, selected, profileDigest);
+    return new AutonomousDomainToolRegistry(catalogue, selected, workflowProfiles.filter((profile) => selected.some((candidate) => candidate.domain === profile.domain)), profileDigest);
   }
 
   profile(domain: string): AutonomousDomainToolProfile {
@@ -1840,6 +1903,31 @@ export class AutonomousDomainToolRegistry {
     const plan = this.catalogue.plan(name, arguments_);
     return { binding, definition: plan.definition, arguments: plan.arguments, schemaDigest: plan.schemaDigest };
   }
+
+  /**
+   * Re-authorize a call against the exact reviewed workflow stage. This is deliberately
+   * stricter than domain lookup: a registered tool is not admitted merely because it belongs
+   * to the same broad domain.
+   */
+  stagePlan(
+    name: string,
+    arguments_: JsonObject,
+    context: AutonomousWorkflowToolContext,
+  ): { binding: AutonomousDomainToolBinding; definition: ToolDefinition; arguments: JsonObject; schemaDigest: string; workflow: AutonomousWorkflow; stage: AutonomousWorkflowStage; profile: AutonomousDomainProfile } {
+    const workflowProfile = this.workflowsByDomain.get(context.domain);
+    if (!workflowProfile) throw new ProviderRuntimeError(`workflow execution is unavailable for domain ${context.domain}`);
+    const workflow = workflowProfile.workflow;
+    if (context.workflow_id !== workflow.workflow_id || context.workflow_digest !== workflow.workflow_digest) throw new ProviderRuntimeError("autonomous tool workflow identity does not match the reviewed workflow");
+    const stage = workflow.stages.find((candidate) => candidate.id === context.stage_id);
+    if (!stage) throw new ProviderRuntimeError(`autonomous tool stage ${context.stage_id} is not in the reviewed workflow`);
+    const binding = this.binding(name, [context.domain]);
+    if (!binding) throw new ProviderRuntimeError(`tool ${name} is not approved for the selected autonomous domain`);
+    if (!bindingSupportsStage(workflowProfile, stage, binding)) throw new ProviderRuntimeError(`tool ${name} does not satisfy workflow stage ${stage.id}`);
+    if (stage.read_only && !binding.read_only) throw new ProviderRuntimeError(`effectful tool ${name} is not permitted by read-only workflow stage ${stage.id}`);
+    if (!stage.approval_required && binding.approval_required) throw new ProviderRuntimeError(`tool ${name} requires approval not declared by workflow stage ${stage.id}`);
+    const plan = this.catalogue.plan(name, arguments_);
+    return { binding, definition: plan.definition, arguments: plan.arguments, schemaDigest: plan.schemaDigest, workflow, stage, profile: workflowProfile };
+  }
 }
 
 function assertSafeToolArguments(value: unknown, depth = 0): void {
@@ -1854,13 +1942,24 @@ function assertSafeToolArguments(value: unknown, depth = 0): void {
   }
 }
 
+function normalizeWorkflowToolContext(value: unknown): AutonomousWorkflowToolContext {
+  if (!isObject(value)) throw new ProviderRuntimeError("autonomous workflow tool context is malformed");
+  if (Object.keys(value).some((key) => !["domain", "workflow_id", "workflow_digest", "stage_id"].includes(key))) throw new ProviderRuntimeError("autonomous workflow tool context contains unsupported fields");
+  if (!AUTONOMOUS_DOMAIN_NAMES.includes(value.domain as AutonomousDomainName)) throw new ProviderRuntimeError("autonomous workflow tool context domain is unsupported");
+  const workflowId = boundedIdentifier("autonomous workflow tool context workflow_id", value.workflow_id);
+  const workflowDigest = value.workflow_digest;
+  if (typeof workflowDigest !== "string" || !/^[0-9a-f]{64}$/.test(workflowDigest)) throw new ProviderRuntimeError("autonomous workflow tool context workflow_digest is malformed");
+  const stageId = boundedIdentifier("autonomous workflow tool context stage_id", value.stage_id);
+  return { domain: value.domain as AutonomousDomainName, workflow_id: workflowId, workflow_digest: workflowDigest, stage_id: stageId };
+}
+
 /** Execute only exact live tools, with schema preflight and approval for every effectful row. */
 export class AutonomousDomainToolRuntime {
   readonly registry: AutonomousDomainToolRegistry;
   readonly executor: DomainToolExecutor;
   readonly approver?: DomainToolApprover;
   readonly effectBoundary?: AutonomousEffectBoundary;
-  private readonly receipts: JsonObject[] = [];
+  private readonly receipts: AutonomousDomainToolExecutionReceipt[] = [];
 
   constructor(registry: AutonomousDomainToolRegistry, executor: DomainToolExecutor, options: { approver?: DomainToolApprover; effectBoundary?: AutonomousEffectBoundary } = {}) {
     if (!(registry instanceof AutonomousDomainToolRegistry)) throw new ProviderRuntimeError("autonomous domain tool runtime requires a registry");
@@ -1872,41 +1971,74 @@ export class AutonomousDomainToolRuntime {
     this.effectBoundary = options.effectBoundary;
   }
 
-  async authorizeAndExecute(calls: readonly ProviderToolCall[], options: { domains: readonly string[]; approveEffects?: boolean; execution?: AutonomousExecutionController; effectBoundary?: AutonomousEffectBoundary } ): Promise<ProviderToolResult[]> {
+  async authorizeAndExecute(calls: readonly ProviderToolCall[], options: { domains: readonly string[]; approveEffects?: boolean; execution?: AutonomousExecutionController; effectBoundary?: AutonomousEffectBoundary; workflowContext?: AutonomousWorkflowToolContext } ): Promise<ProviderToolResult[]> {
     if (!Array.isArray(calls) || calls.length > 128) throw new ProviderRuntimeError("autonomous tool call count is outside its bounds");
+    const workflowContext = options.workflowContext === undefined ? null : normalizeWorkflowToolContext(options.workflowContext);
+    if (workflowContext && !options.domains.includes(workflowContext.domain)) throw new ProviderRuntimeError("autonomous workflow tool context domain is outside the selected domains");
     const results: ProviderToolResult[] = [];
     for (const call of calls) {
       const started = Date.now();
+      let planned: ReturnType<AutonomousDomainToolRegistry["stagePlan"]> | ReturnType<AutonomousDomainToolRegistry["callPlan"]> | undefined;
+      let stageContractDigest: string | null = null;
+      let requiredEvidenceOutputs: string[] = [];
+      let stageApprovalRequired = false;
+      const makeReceipt = (extra: JsonObject = {}): AutonomousDomainToolExecutionReceipt => ({
+        schema: AUTONOMOUS_DOMAIN_TOOL_REGISTRY_SCHEMA,
+        receipt_kind: "tool_execution_receipt",
+        domain: workflowContext?.domain ?? (planned && "binding" in planned ? planned.binding.domains[0] ?? null : null),
+        workflow_id: workflowContext?.workflow_id ?? null,
+        workflow_digest: workflowContext?.workflow_digest ?? null,
+        stage_id: workflowContext?.stage_id ?? null,
+        stage_contract_digest: stageContractDigest,
+        required_evidence_outputs: [...requiredEvidenceOutputs],
+        evidence_status: "tool_execution_only",
+        does_not_claim: ["tool dispatch is not proof that the domain task succeeded", "a result digest is not a claim about external-world truth", "stage evidence outputs still require evaluator review"],
+        tool: call.name,
+        capability: planned?.binding.capability ?? null,
+        duration_ms: Math.max(0, Date.now() - started),
+        secret_material: "never_returned",
+        ...extra,
+      } as AutonomousDomainToolExecutionReceipt);
       try {
         assertSafeToolArguments(call.arguments);
-        const planned = this.registry.callPlan(call.name, call.arguments, options.domains);
-        let approved = planned.binding.read_only && !planned.binding.approval_required;
-        if (!approved && options.approveEffects === true) approved = this.approver ? await this.approver(planned.binding, call) : true;
+        if (workflowContext) {
+          const stagePlanned = this.registry.stagePlan(call.name, call.arguments, workflowContext);
+          planned = stagePlanned;
+          requiredEvidenceOutputs = [...stagePlanned.stage.evidence_outputs];
+          stageApprovalRequired = stagePlanned.stage.approval_required;
+          stageContractDigest = await autonomousWorkflowStageContractDigest(stagePlanned.workflow, stagePlanned.stage.id);
+        } else {
+          planned = this.registry.callPlan(call.name, call.arguments, options.domains);
+        }
+        if (!planned) throw new ProviderRuntimeError("autonomous tool call was not planned");
+        const executable = planned;
+        let approved = executable.binding.read_only && !executable.binding.approval_required && !stageApprovalRequired;
+        if (!approved && options.approveEffects === true) approved = this.approver ? await this.approver(executable.binding, call) : true;
         if (!approved) {
-          const receipt = { schema: AUTONOMOUS_DOMAIN_TOOL_REGISTRY_SCHEMA, tool: call.name, status: "approval_required", schema_digest: planned.schemaDigest, effect: planned.binding.risk_class, duration_ms: Math.max(0, Date.now() - started), secret_material: "never_returned" as const };
+          const receipt = makeReceipt({ status: "approval_required", schema_digest: executable.schemaDigest, effect: executable.binding.risk_class });
           this.receipts.push(receipt);
           results.push({ callId: call.id, approved: false, isError: true, content: { status: "approval_required", tool: call.name, receipt_digest: await digestJson(receipt) } });
           continue;
         }
         const effectBoundary = options.effectBoundary ?? this.effectBoundary;
-        const value = effectBoundary && !planned.binding.read_only
-          ? await effectBoundary.execute({ execution_id: options.execution?.state.execution_id ?? null, tool: call.name, call_id: call.id, risk_class: planned.binding.risk_class, arguments: planned.arguments }, async (effectContext) => this.executor(planned.binding, planned.arguments, effectContext), { execution: options.execution })
-          : await this.executor(planned.binding, planned.arguments);
+        const value = effectBoundary && !executable.binding.read_only
+          ? await effectBoundary.execute({ execution_id: options.execution?.state.execution_id ?? null, tool: call.name, call_id: call.id, risk_class: executable.binding.risk_class, arguments: executable.arguments }, async (effectContext) => this.executor(executable.binding, executable.arguments, effectContext), { execution: options.execution })
+          : await this.executor(executable.binding, executable.arguments);
         assertSafeToolArguments(value);
         const encoded = canonicalJson(value);
         if (bytes(encoded) > 1_000_000) throw new ProviderRuntimeError("autonomous tool result exceeds its bounded size");
-        const receipt = { schema: AUTONOMOUS_DOMAIN_TOOL_REGISTRY_SCHEMA, tool: call.name, status: "executed", schema_digest: planned.schemaDigest, result_digest: await digestJson(value), effect: planned.binding.risk_class, duration_ms: Math.max(0, Date.now() - started), secret_material: "never_returned" as const };
+        const receipt = makeReceipt({ status: "executed", schema_digest: executable.schemaDigest, result_digest: await digestJson(value), effect: executable.binding.risk_class });
         this.receipts.push(receipt);
         results.push({ callId: call.id, approved: true, content: value });
       } catch (unknownError) {
         const error = unknownError instanceof Error ? unknownError : new Error("tool execution failed");
         if (unknownError instanceof AutonomousEffectReconciliationRequiredError) {
-          const receipt = { schema: AUTONOMOUS_DOMAIN_TOOL_REGISTRY_SCHEMA, tool: call.name, status: "reconciliation_required", effect_id: unknownError.effectId, idempotency_key: unknownError.idempotencyKey, duration_ms: Math.max(0, Date.now() - started), secret_material: "never_returned" as const };
+          const receipt = makeReceipt({ status: "reconciliation_required", effect_id: unknownError.effectId, idempotency_key: unknownError.idempotencyKey });
           this.receipts.push(receipt);
           results.push({ callId: call.id, approved: false, isError: true, content: { status: "reconciliation_required", tool: call.name, effect_id: unknownError.effectId, idempotency_key: unknownError.idempotencyKey, receipt_digest: await digestJson(receipt), secret_material: "never_returned" } });
           continue;
         }
-        const receipt = { schema: AUTONOMOUS_DOMAIN_TOOL_REGISTRY_SCHEMA, tool: call.name, status: "execution_failed", error_class: error.constructor.name, duration_ms: Math.max(0, Date.now() - started), secret_material: "never_returned" as const };
+        const receipt = makeReceipt({ status: "execution_failed", error_class: error.constructor.name });
         this.receipts.push(receipt);
         results.push({ callId: call.id, approved: false, isError: true, content: { status: "execution_failed", tool: call.name, error_class: error.constructor.name, receipt_digest: await digestJson(receipt) } });
       }
@@ -1914,7 +2046,7 @@ export class AutonomousDomainToolRuntime {
     return results;
   }
 
-  receiptsSnapshot(): JsonObject[] {
+  receiptsSnapshot(): AutonomousDomainToolExecutionReceipt[] {
     return this.receipts.map((receipt) => ({ ...receipt }));
   }
 }
@@ -2417,6 +2549,7 @@ export class AutonomousAgent {
       approveEffects?: boolean;
       execution?: AutonomousExecutionController;
       effectBoundary?: AutonomousEffectBoundary;
+      workflowContext?: AutonomousWorkflowToolContext;
     },
   ): Promise<ProviderToolResult[]> {
     if (!Array.isArray(calls) || calls.length > 128) throw new ArgumentError("autonomous tool call count is outside its bounds");
@@ -2434,7 +2567,13 @@ export class AutonomousAgent {
       approveEffects: options.approveEffects,
       execution: options.execution,
       effectBoundary: options.effectBoundary ?? this.effectBoundary,
+      workflowContext: options.workflowContext,
     }));
+  }
+
+  /** Return metadata-only adapter evidence collected by this agent; raw arguments/results are never exposed here. */
+  toolExecutionEvidence(): AutonomousDomainToolExecutionReceipt[] {
+    return this.domainToolRuntime?.receiptsSnapshot() ?? [];
   }
 
   /** Discover live provider model metadata and atomically reconcile it into this agent's catalogue. */
@@ -3289,7 +3428,7 @@ export class AutonomousAgent {
       const authorizeAndExecute = options.authorizeAndExecute
         ? (calls: ProviderToolCall[]) => this.dispatchActivatedToolCalls(calls, options.authorizeAndExecute!)
         : (toolRuntime
-          ? (calls: ProviderToolCall[]) => this.dispatchActivatedToolCalls(calls, (allowed) => toolRuntime.authorizeAndExecute(allowed, { domains: selectedDomains, approveEffects: options.approveEffects, execution: options.execution, effectBoundary: options.effectBoundary ?? this.effectBoundary }))
+          ? (calls: ProviderToolCall[]) => this.dispatchActivatedToolCalls(calls, (allowed) => toolRuntime.authorizeAndExecute(allowed, { domains: selectedDomains, approveEffects: options.approveEffects, execution: options.execution, effectBoundary: options.effectBoundary ?? this.effectBoundary, workflowContext: options.workflowContext }))
           : async (calls: ProviderToolCall[]) => calls.map((call) => ({ callId: call.id, approved: false, isError: true, content: { status: "authorization_required", tool: call.name, secret_material: "never_returned" } })));
       const toolReadOnly = options.toolReadOnly ?? (async (call: ProviderToolCall): Promise<boolean> => this.domainToolRegistry?.binding(call.name, selectedDomains)?.risk_class === "read_only");
       const loop = await this.runtime.invokeToolLoop(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, authorizeAndExecute, signal: options.signal, observer: feedbackObserver, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined, toolReadOnly });

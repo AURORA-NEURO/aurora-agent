@@ -1835,6 +1835,16 @@ while `requireJson` and `responseSchema` are re-applied to each stage response. 
 cache a prior model admission as permission for later stages: every stage performs readiness,
 capacity, approval, budget, and structured-output checks before transport.
 
+When a live `ToolCatalogue` and `toolExecutor` are attached, the executor also forwards an
+`AutonomousWorkflowToolContext` into the adapter boundary for every stage. The registry rechecks
+the workflow digest, stage membership, capability aliases, read-only posture, and stage approval
+policy before dispatch. `AutonomousAgent.toolExecutionEvidence()` exposes only bounded receipts
+with tool/schema/result digests, workflow and stage identity, required evidence-output labels, and
+status. Receipts explicitly say `evidence_status: "tool_execution_only"`: they do not retain raw
+arguments/results and do not claim that a domain task succeeded or that an external effect is true.
+The stage contract digest can be independently reproduced with
+`autonomousWorkflowStageContractDigest()` for caller-owned audit and replay stores.
+
 Every new checkpoint also carries `execution_contract_digest`, a digest-only projection of the
 effective candidate metadata, selection limits, output/schema requirement, tool definitions,
 failover limit, and enclosing execution-policy digest. `resume()` and an idempotent `start()` reject

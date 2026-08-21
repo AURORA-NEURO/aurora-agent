@@ -147,6 +147,7 @@ export {
   AUTONOMOUS_DOMAIN_TOOL_PLAN_SCHEMA,
   AUTONOMOUS_DOMAIN_TOOL_REGISTRY_SCHEMA,
   AUTONOMOUS_DOMAIN_TOOL_SCHEMA,
+  AUTONOMOUS_WORKFLOW_STAGE_CONTRACT_SCHEMA,
   AUTONOMOUS_CAPABILITY_PLAN_SCHEMA,
   AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN,
   AUTONOMOUS_CROSS_DOMAIN_MAX_CONCURRENCY,
@@ -173,6 +174,7 @@ export {
   contextualSelector,
   routeAutonomousTask,
   acceptedCrossDomainPlan,
+  autonomousWorkflowStageContractDigest,
 } from "./autonomous.js";
 export type {
   AutonomousAcceptedCrossDomainPlan,
@@ -211,6 +213,8 @@ export type {
   AutonomousToolLoopSummary,
   AutonomousWorkflow,
   AutonomousWorkflowStage,
+  AutonomousWorkflowToolContext,
+  AutonomousDomainToolExecutionReceipt,
   AutonomousAgentOptions,
   AutonomousModelRefreshResult,
   AutonomousReadinessState,
