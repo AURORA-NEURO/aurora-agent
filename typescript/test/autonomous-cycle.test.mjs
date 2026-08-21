@@ -8,12 +8,14 @@ import {
   AutonomousLearningController,
   AutonomousOnlineLearner,
   CredentialStore,
+  InMemoryAutonomousCycleReplanStateStore,
   LLMRuntime,
   openaiCompatibleProvider,
   runAutonomousCrossDomainDecisionCycle,
   runAutonomousCrossDomainReplanCycle,
   runAutonomousDecisionCycle,
   runAutonomousReplanCycle,
+  validateAutonomousCycleReplanSnapshot,
 } from "../dist/index.js";
 
 function jsonResponse(payload) {
@@ -186,6 +188,100 @@ test("replan cycle feeds bounded evaluator guidance into the next attempt and se
   assert.match(JSON.stringify(bodies[1]), /autonomous-replan-2/);
   assert.match(JSON.stringify(bodies[1]), /Add explicit verification evidence/);
   assert.equal(JSON.stringify(result.attempts).includes("Add explicit verification evidence"), false);
+});
+
+test("replan persistence resumes an interrupted evaluator boundary without replaying the provider", async () => {
+  const cycle = cycleAgent();
+  const task = "Review this coding change and report the verified tests.";
+  const route = await cycle.agent.route(task, { domain: "coding" });
+  const stateStore = new InMemoryAutonomousCycleReplanStateStore();
+  let interruptedRun = null;
+  await assert.rejects(
+    runAutonomousReplanCycle(cycle.agent, task, {
+      domain: "coding",
+      routeOverride: route,
+      approveProviderCall: true,
+      cycleId: "restartable-single-cycle",
+      stateStore,
+      evaluate: (run) => {
+        interruptedRun = run;
+        throw new Error("simulated evaluator interruption");
+      },
+    }),
+    /simulated evaluator interruption/,
+  );
+  const interrupted = await stateStore.load("restartable-single-cycle");
+  assert.equal(interrupted.phase, "evaluation_pending");
+  assert.equal(interrupted.attempts.length, 1);
+  assert.equal(Object.hasOwn(interrupted, "task"), false);
+  assert.equal(JSON.stringify(interrupted).includes("cycle answer"), false);
+
+  const resumed = await runAutonomousReplanCycle(cycle.agent, task, {
+    domain: "coding",
+    approveProviderCall: true,
+    cycleId: "restartable-single-cycle",
+    stateStore,
+    rehydrateRoute: () => route,
+    rehydrateRun: () => interruptedRun,
+    evaluate: () => ({ evaluator_id: "restart-reviewer", evaluator_version: "1", reward: 0.9, passed: true, replan_requested: false }),
+  });
+  assert.equal(resumed.status, "completed");
+  assert.equal(resumed.attempts.length, 1);
+  assert.equal(resumed.evaluations.length, 1);
+  assert.equal(cycle.calls(), 1);
+  assert.equal((await stateStore.load("restartable-single-cycle")).phase, "terminal");
+  const snapshot = await stateStore.snapshot();
+  await assert.rejects(validateAutonomousCycleReplanSnapshot({ ...snapshot, snapshot_digest: "0".repeat(64) }), /snapshot digest/);
+});
+
+test("replan persistence resumes a settlement boundary from the evaluator packet", async () => {
+  const cycle = cycleAgent();
+  const task = "Review this coding change and report the verified tests.";
+  const route = await cycle.agent.route(task, { domain: "coding" });
+  const stateStore = new InMemoryAutonomousCycleReplanStateStore();
+  const learning = new AutonomousLearningController(cycle.agent);
+  const settle = learning.settleRun.bind(learning);
+  let failSettlement = true;
+  learning.settleRun = async (...args) => {
+    if (failSettlement) {
+      failSettlement = false;
+      throw new Error("simulated settlement interruption");
+    }
+    return settle(...args);
+  };
+  let evaluatorPacket = null;
+  let interruptedRun = null;
+  await assert.rejects(
+    runAutonomousReplanCycle(cycle.agent, task, {
+      domain: "coding",
+      routeOverride: route,
+      approveProviderCall: true,
+      cycleId: "restartable-settlement-cycle",
+      stateStore,
+      learning: { controller: learning, episodePrefix: "restartable-settlement" },
+      evaluate: (run) => {
+        interruptedRun = run;
+        evaluatorPacket = { evaluator_id: "settlement-reviewer", evaluator_version: "1", reward: 0.7, passed: true, replan_requested: false };
+        return evaluatorPacket;
+      },
+    }),
+    /simulated settlement interruption/,
+  );
+  assert.equal((await stateStore.load("restartable-settlement-cycle")).phase, "settlement_pending");
+  const resumed = await runAutonomousReplanCycle(cycle.agent, task, {
+    domain: "coding",
+    approveProviderCall: true,
+    cycleId: "restartable-settlement-cycle",
+    stateStore,
+    rehydrateRoute: () => route,
+    rehydrateRun: () => interruptedRun,
+    rehydrateEvaluation: () => evaluatorPacket,
+    evaluate: () => { throw new Error("evaluator must not replay after settlement checkpoint"); },
+    learning: { controller: learning, episodePrefix: "restartable-settlement" },
+  });
+  assert.equal(resumed.status, "completed");
+  assert.equal(resumed.settlements.length, 1);
+  assert.equal(cycle.calls(), 1);
 });
 
 test("replan cycle preserves one-shot completion and enforces the replan ceiling", async () => {
@@ -448,6 +544,68 @@ test("cross-domain replan cycle repeats bounded fan-out with unique trajectories
   assert.equal(cycle.calls(), 6);
   assert.equal(JSON.stringify(cycle.bodies[3]).includes("autonomous-cross-domain-replan-2"), true);
   assert.equal(JSON.stringify({ attempts: result.attempts, evaluations: result.evaluations }).includes("Resolve the specialist disagreement"), false);
+});
+
+test("cross-domain replan persistence makes terminal completion idempotent across restart", async () => {
+  const cycle = cycleAgent();
+  const stateStore = new InMemoryAutonomousCycleReplanStateStore();
+  const options = {
+    approveProviderCall: true,
+    maxReplans: 0,
+    cycleId: "restartable-cross-cycle",
+    stateStore,
+    subtasks: [
+      { id: "bio", domain: "biomedical", task: "Review biomedical evidence." },
+      { id: "neuro", domain: "neuroscience", task: "Review neuroscience evidence." },
+    ],
+    evaluate: () => ({ evaluator_id: "cross-restart-reviewer", evaluator_version: "1", reward: 0.8, passed: true, replan_requested: false, rewards: {} }),
+  };
+  const first = await runAutonomousCrossDomainReplanCycle(cycle.agent, "Research a biomedical neuroscience experiment with EEG patient evidence", options);
+  assert.equal(first.status, "completed");
+  assert.equal((await stateStore.load("restartable-cross-cycle")).phase, "terminal");
+  const providerCalls = cycle.calls();
+  const replay = await runAutonomousCrossDomainReplanCycle(cycle.agent, "Research a biomedical neuroscience experiment with EEG patient evidence", options);
+  assert.equal(replay.status, "completed");
+  assert.equal(replay.final, null);
+  assert.equal(cycle.calls(), providerCalls);
+});
+
+test("cross-domain persistence rehydrates a completed fan-out before evaluator settlement", async () => {
+  const cycle = cycleAgent();
+  const task = "Research a biomedical neuroscience experiment with EEG patient evidence";
+  const route = await cycle.agent.route(task, { allowCrossDomain: true });
+  const stateStore = new InMemoryAutonomousCycleReplanStateStore();
+  let interruptedRun = null;
+  const base = {
+    approveProviderCall: true,
+    routeOverride: route,
+    cycleId: "restartable-cross-evaluator-cycle",
+    stateStore,
+    subtasks: [
+      { id: "bio", domain: "biomedical", task: "Review biomedical evidence." },
+      { id: "neuro", domain: "neuroscience", task: "Review neuroscience evidence." },
+    ],
+  };
+  await assert.rejects(
+    runAutonomousCrossDomainReplanCycle(cycle.agent, task, {
+      ...base,
+      evaluate: (run) => {
+        interruptedRun = run;
+        throw new Error("simulated cross-domain evaluator interruption");
+      },
+    }),
+    /simulated cross-domain evaluator interruption/,
+  );
+  assert.equal((await stateStore.load("restartable-cross-evaluator-cycle")).phase, "evaluation_pending");
+  const resumed = await runAutonomousCrossDomainReplanCycle(cycle.agent, task, {
+    ...base,
+    rehydrateRoute: () => route,
+    rehydrateRun: () => interruptedRun,
+    evaluate: () => ({ evaluator_id: "cross-restart-reviewer", evaluator_version: "1", reward: 0.8, passed: true, replan_requested: false, rewards: {} }),
+  });
+  assert.equal(resumed.status, "completed");
+  assert.equal(resumed.attempts.length, 1);
+  assert.equal(cycle.calls(), 3);
 });
 
 test("cross-domain replan cycle refuses incomplete per-episode evaluator coverage", async () => {

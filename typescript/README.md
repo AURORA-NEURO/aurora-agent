@@ -319,6 +319,45 @@ result retains the normal local prompt/response boundary. Use a unique `episodeP
 logical cycle when persistence is enabled; no provider response or raw evaluator instruction is
 sent to the remote learning plane.
 
+For a worker that must survive process loss, add a stable `cycleId` and a caller-owned
+`AutonomousCycleReplanStateStore`:
+
+```typescript
+const cycleStore = new InMemoryAutonomousCycleReplanStateStore();
+const first = await runAutonomousReplanCycle(agent, task, {
+  cycleId: "review-2026-08-20-001",
+  stateStore: cycleStore,
+  domain: "coding",
+  approveProviderCall: true,
+  evaluate: (run) => evaluateWithCallerOwnedEvidence(run),
+});
+```
+
+The state journal advances through `execution_pending`, `evaluation_pending`,
+`settlement_pending`, `replan_handoff`, and `terminal`. It stores only route/outcome/evaluator/
+learning digests, bounded IDs, statuses, and a generation-linked state digest. It refuses changed
+task or mode contracts, stale generations, unsupported fields, credential-shaped metadata, raw
+payload keys, oversized snapshots, and digest tampering. The same options work on
+`runAutonomousCrossDomainReplanCycle()`; its state also records the exact specialist/synthesis
+episode and trajectory identities.
+
+After a restart, private material is supplied only through explicit rehydrators. `rehydrateRun`
+restores a completed provider outcome when evaluation or settlement was interrupted;
+`rehydrateRoute` restores the previously reviewed route by digest; `rehydrateEvaluation` restores
+an evaluator packet after the `settlement_pending` boundary; and
+`rehydrateReplanInstruction` restores transient guidance after `replan_handoff`. The SDK never
+serializes the task, prompt, response, tool arguments, evaluator instruction, credentials, or
+raw learning payload. A terminal state is idempotent: a duplicate worker returns the durable
+projection without invoking a provider again. The journal is an orchestration cursor, not an
+exactly-once provider or database transaction; production rehydrators and learning/effect stores
+must use stable idempotency keys and reconcile side effects at their own boundary.
+
+Use `AutonomousCycleReplanPersistenceCoordinator` with a caller `read()`/`write()` adapter to
+flush and restore bounded, hash-bound snapshots. The in-memory store is intended for tests and
+small workers; production deployments should place it beside the existing execution, learning,
+memory, effect, and result stores while keeping private payloads in separately access-controlled
+storage.
+
 When a controller is supplied, thrown semantic/provider dispatch failures, replan-transition
 failures, and controller-completion failures fail the shared execution before being rethrown unless
 the caller selects `executionLifecycle: "observe_only"` for an enclosing manager. Absent HTTP status

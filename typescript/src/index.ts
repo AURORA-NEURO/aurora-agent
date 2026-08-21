@@ -475,6 +475,36 @@ export {
   runAutonomousDecisionCycle,
   runAutonomousReplanCycle,
 } from "./autonomous-cycle.js";
+export {
+  AUTONOMOUS_CYCLE_REPLAN_MAX_ATTEMPTS,
+  AUTONOMOUS_CYCLE_REPLAN_MAX_EVALUATIONS,
+  AUTONOMOUS_CYCLE_REPLAN_MAX_REPLANS,
+  AUTONOMOUS_CYCLE_REPLAN_MAX_SNAPSHOT_BYTES,
+  AUTONOMOUS_CYCLE_REPLAN_MAX_STATES,
+  AUTONOMOUS_CYCLE_REPLAN_SNAPSHOT_SCHEMA,
+  AUTONOMOUS_CYCLE_REPLAN_STATE_SCHEMA,
+  AutonomousCyclePersistenceError,
+  AutonomousCycleReplanPersistenceCoordinator,
+  InMemoryAutonomousCycleReplanStateStore,
+  sealAutonomousCycleReplanState,
+  validateAutonomousCycleReplanSnapshot,
+  validateAutonomousCycleReplanState,
+} from "./autonomous-cycle-persistence.js";
+export type {
+  AutonomousCycleReplanAttemptState,
+  AutonomousCycleReplanEvaluationRehydrator,
+  AutonomousCycleReplanInstructionRehydrator,
+  AutonomousCycleReplanMode,
+  AutonomousCycleReplanPhase,
+  AutonomousCycleReplanRehydrationContext,
+  AutonomousCycleReplanRouteRehydrator,
+  AutonomousCycleReplanRunRehydrator,
+  AutonomousCycleReplanSnapshot,
+  AutonomousCycleReplanSnapshotPersistence,
+  AutonomousCycleReplanSnapshotStore,
+  AutonomousCycleReplanState,
+  AutonomousCycleReplanStateStore,
+} from "./autonomous-cycle-persistence.js";
 export type {
   AutonomousCrossDomainDecisionCycleEvaluator,
   AutonomousCrossDomainDecisionCycleLearningOptions,

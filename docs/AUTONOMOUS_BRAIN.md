@@ -1290,6 +1290,64 @@ that hook for all twelve built-in domains, including untouched first-run explora
 These reads make per-domain learning explicit; they do not invent a reward, infer a model's domain
 skill, or treat transport success as evaluator evidence.
 
+### Restart-safe TypeScript decision cycles
+
+The TypeScript façade now exposes the same autonomous boundary as a durable local orchestration
+cursor. `runAutonomousDecisionCycle()` and
+`runAutonomousCrossDomainDecisionCycle()` compose routing, model selection, prompt/plan assembly,
+provider invocation, approval, evaluator feedback, memory, and online bandit settlement. Their
+bounded replan variants, `runAutonomousReplanCycle()` and
+`runAutonomousCrossDomainReplanCycle()`, add an evaluator-controlled loop with a hard three-replan
+limit. A replan can add only a screened transient instruction; it cannot widen the reviewed route,
+capability, tool set, budget, model gate, credential scope, effect authority, or domain set.
+
+The replan façade accepts a stable caller-owned `cycleId` and an
+`AutonomousCycleReplanStateStore`. The metadata-only state machine is:
+
+```text
+execution_pending
+       │ provider outcome is available
+       ▼
+evaluation_pending
+       │ evaluator projection is persisted
+       ▼
+settlement_pending
+       │ value-only learning is settled
+       ├───────────────┐
+       │ evaluator     │ terminal or replan limit
+       │ requests more │
+       ▼               ▼
+replan_handoff      terminal
+       │
+       └── next bounded attempt
+```
+
+Every state is content-addressed and generation-linked to its predecessor. The state table keeps
+only the task digest, mode, attempt/status rows, route/selection/outcome/evaluation digests,
+learning episode and trajectory IDs, settlement digests, context digests, and bounded terminal
+status. It explicitly rejects task text, prompts, provider messages, tool arguments, evaluator
+instructions, credentials, raw evaluator evidence, and raw learning payloads. Snapshot restore
+validates field allow-lists, capacities, metadata depth, secret-shaped strings, every state digest,
+and the aggregate snapshot digest before replacing in-memory rows.
+
+Restart recovery is explicit rather than implicit. A worker provides `rehydrateRoute` to recover
+the previously reviewed route by digest, `rehydrateRun` for a private provider outcome retained in
+its own result store, `rehydrateEvaluation` when evaluation completed but learning settlement did
+not, and `rehydrateReplanInstruction` for transient evaluator guidance at a replan handoff. The
+SDK verifies every returned object against the durable digest before continuing, skips evaluator
+replay for a persisted settlement, and returns a terminal projection without dispatching a
+duplicate provider call. `InMemoryAutonomousCycleReplanStateStore` is a reference implementation;
+`AutonomousCycleReplanPersistenceCoordinator` connects the state table to a caller's transactional
+`read()`/`write()` adapter.
+
+This cursor provides bounded restart coordination, not a distributed exactly-once transaction.
+The provider result store, learning controller, effect boundary, and external systems of record
+must use stable idempotency keys and reconcile a crash between their side effect and the cursor
+commit. Ambiguous provider execution is resumed only with caller-owned rehydration or is retried
+under the original approval/budget contract. The cross-domain variant persists the same lifecycle
+while preserving exact specialist/synthesis episode coverage and delayed-credit trajectory
+identity, so partial fan-out cannot invent a synthesis reward.
+
 ## Domain-aware autonomous task intake
 
 Applications that do not want to hand-assemble every prompt and plan can use the high-level
