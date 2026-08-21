@@ -3,6 +3,7 @@ import type { AutonomousPromptChunk } from "./autonomous.js";
 import {
   AutonomousWorkflowEvaluator,
   type AutonomousLearningController,
+  type AutonomousLearningOutboxSettlementOptions,
   type AutonomousWorkflowLearningSettlement,
   type AutonomousWorkflowEvaluation,
   type AutonomousWorkflowEvaluationInput,
@@ -88,6 +89,7 @@ export interface AutonomousWorkflowCycleLearningOptions {
   trajectoryIdPrefix?: string;
   discount?: number;
   remote?: boolean;
+  outbox?: AutonomousLearningOutboxSettlementOptions;
 }
 
 export interface AutonomousWorkflowCycleOptions extends Omit<AutonomousWorkflowExecuteOptions, "jobId" | "context" | "learning"> {
@@ -634,6 +636,7 @@ export async function runAutonomousWorkflowCycle(task: string, executor: Autonom
         trajectoryId: boundedIdentifier("workflow cycle trajectory id", trajectoryId),
         discount: options.learning?.discount,
         remote: options.learning?.remote,
+        outbox: options.learning?.outbox,
         idempotencyKey: boundedIdentifier("workflow cycle settlement idempotency key", trajectoryId),
       });
       executionAttempt.settlement_digest = await digestJson(settlement);

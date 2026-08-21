@@ -3207,6 +3207,13 @@ commands fail closed. The outbox is value-only and never stores task text, promp
 responses, credentials, tool arguments, or raw evidence, so replay after a crash can repair the
 learning/memory commit without replaying provider work or double-crediting the bandit.
 
+Decision cycles, replan cycles, workflow cycles, cross-domain fan-out, mission learning, and goal
+learning can opt into the same boundary with `outbox: { workerId, leaseMs }` on their learning
+options. They preserve their existing value-only settlement result after the command is applied;
+the controller rehydrates the receipt rather than recomputing evaluator credit. This makes the
+outbox a shared orchestration contract across all built-in domains and execution surfaces, rather
+than a direct-run-only utility.
+
 ### Evidence integrity and independent evaluator mesh
 
 The TypeScript workflow evaluator derives its evidence identity from a canonical packet: stage

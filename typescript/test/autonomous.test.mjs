@@ -557,7 +557,7 @@ test("ordinary direct runs prepare explicit online-learning episodes across ever
       reward: 0.8,
       passed: true,
       evidence_digest: "a".repeat(64),
-    });
+    }, { outbox: { workerId: `domain-worker-${domain}` } });
     assert.equal(settlement.episode.status, "settled", domain);
     assert.equal(settlement.memory_evaluation.status, "recorded", domain);
     assert.equal(memory.get(`episode:direct-memory-${domain}`).evaluation.reward, 0.8, domain);

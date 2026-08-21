@@ -979,6 +979,13 @@ conflicting commands become terminal failures. Lease ownership prevents two work
 the same command concurrently, and no outbox command retains task text, prompts, responses,
 credentials, tool arguments, or raw evidence.
 
+Decision cycles, replan cycles, workflow cycles, cross-domain fan-out, mission learning, and goal
+learning can opt into the same boundary with `outbox: { workerId, leaseMs }` on their learning
+options. They preserve their normal settlement return values: the surface enqueues and dispatches
+the command, then rehydrates the receipt. This keeps direct runs, delayed-credit trajectories,
+workflow stages, cross-domain work, and mission learning on one retry/idempotency contract instead
+of giving each orchestration layer a separate settlement implementation.
+
 Workflow evaluation also verifies evidence identity instead of trusting a caller-provided digest.
 Stage identifiers and signal keys are normalized into an order-independent evidence packet, hashed
 with SHA-256, and compared with any supplied `evidence_digest`; a mismatch refuses evaluation before

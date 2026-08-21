@@ -264,6 +264,12 @@ export interface AutonomousLearningFeedbackOutboxDispatch extends JsonObject {
   secret_material: "never_returned";
 }
 
+/** Opt-in durable settlement boundary for higher-level workflow/cycle adapters. */
+export interface AutonomousLearningOutboxSettlementOptions extends JsonObject {
+  workerId?: string;
+  leaseMs?: number;
+}
+
 export interface AutonomousLearningStateStore {
   loadEpisode(episodeId: string): Promise<AutonomousLearningEpisode | null> | AutonomousLearningEpisode | null;
   saveEpisode(episode: AutonomousLearningEpisode): Promise<void> | void;
@@ -1268,7 +1274,7 @@ export class AutonomousLearningController {
   }
 
   /** Evaluate and settle the pending workflow stages with one explicit signal packet. */
-  async settleWorkflow(execution: AutonomousWorkflowExecutionResult, input: AutonomousWorkflowEvaluationInput, options: { trajectoryId: string; discount?: number; remote?: boolean; idempotencyKey?: string }): Promise<AutonomousWorkflowLearningSettlement> {
+  async settleWorkflow(execution: AutonomousWorkflowExecutionResult, input: AutonomousWorkflowEvaluationInput, options: { trajectoryId: string; discount?: number; remote?: boolean; idempotencyKey?: string; outbox?: AutonomousLearningOutboxSettlementOptions }): Promise<AutonomousWorkflowLearningSettlement> {
     const evaluation = await this.evaluateWorkflow(execution, input);
     const trajectory = await this.prepareWorkflowTrajectory(execution, options);
     const rewards: Record<string, AutonomousEvaluatorRewardInput> = {};
@@ -1288,7 +1294,7 @@ export class AutonomousLearningController {
         evidence_digest: evidence?.evidence_digest ?? evaluation.evidence_digest,
       };
     }
-    const settled = await this.settleTrajectory(trajectory.trajectory_id, rewards, { remote: options.remote, idempotencyKey: options.idempotencyKey });
+    const settled = await this.settleTrajectory(trajectory.trajectory_id, rewards, { remote: options.remote, idempotencyKey: options.idempotencyKey, outbox: options.outbox });
     return { schema: AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA, evaluation, trajectory: settled, retention: PRIVATE_RETENTION };
   }
 
@@ -1304,9 +1310,9 @@ export class AutonomousLearningController {
   }
 
   /** Settle child and synthesis episodes with exact caller-provided evaluator rewards. */
-  async settleCrossDomain(result: AutonomousCrossDomainRunResult, rewards: Record<string, AutonomousEvaluatorRewardInput>, options: { trajectoryId: string; discount?: number; remote?: boolean; idempotencyKey?: string }): Promise<AutonomousCrossDomainLearningSettlement> {
+  async settleCrossDomain(result: AutonomousCrossDomainRunResult, rewards: Record<string, AutonomousEvaluatorRewardInput>, options: { trajectoryId: string; discount?: number; remote?: boolean; idempotencyKey?: string; outbox?: AutonomousLearningOutboxSettlementOptions }): Promise<AutonomousCrossDomainLearningSettlement> {
     const trajectory = await this.prepareCrossDomainTrajectory(result, options);
-    const settled = await this.settleTrajectory(trajectory.trajectory_id, rewards, { remote: options.remote, idempotencyKey: options.idempotencyKey });
+    const settled = await this.settleTrajectory(trajectory.trajectory_id, rewards, { remote: options.remote, idempotencyKey: options.idempotencyKey, outbox: options.outbox });
     return { schema: AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA, result, trajectory: settled, retention: PRIVATE_RETENTION };
   }
 
@@ -1480,7 +1486,8 @@ export class AutonomousLearningController {
     };
   }
 
-  async settleRun(episodeId: string, input: AutonomousEvaluatorRewardInput, options: { creditedReward?: number; remote?: boolean; idempotencyKey?: string; memoryStore?: AutonomousEpisodicMemoryStore } = {}): Promise<AutonomousLearningSettlement> {
+  /** Apply one settlement directly after the outbox boundary has already been claimed. */
+  private async settleRunInline(episodeId: string, input: AutonomousEvaluatorRewardInput, options: { creditedReward?: number; remote?: boolean; idempotencyKey?: string; memoryStore?: AutonomousEpisodicMemoryStore } = {}): Promise<AutonomousLearningSettlement> {
     const id = boundedIdentifier("episodeId", episodeId);
     const episode = await this.episodes.load(id);
     if (!episode) throw new ArgumentError(`learning episode ${episodeId} was not found`);
@@ -1552,6 +1559,22 @@ export class AutonomousLearningController {
     return clone({ ...result, episode: settledEpisode });
   }
 
+  /**
+   * Settle one episode either directly or through the caller-owned feedback outbox. Outbox mode
+   * preserves the historical return type: after dispatch it rehydrates the value-only receipt,
+   * while a worker crash before dispatch leaves a durable command for `dispatchFeedback()`.
+   */
+  async settleRun(episodeId: string, input: AutonomousEvaluatorRewardInput, options: { creditedReward?: number; remote?: boolean; idempotencyKey?: string; memoryStore?: AutonomousEpisodicMemoryStore; outbox?: AutonomousLearningOutboxSettlementOptions } = {}): Promise<AutonomousLearningSettlement> {
+    if (!options.outbox) return this.settleRunInline(episodeId, input, options);
+    if (options.memoryStore !== undefined && options.memoryStore !== this.memoryStore) throw new ArgumentError("outbox settlement cannot use a per-call memoryStore override; configure the controller memoryStore");
+    const command = await this.enqueueRunSettlement(episodeId, input, { creditedReward: options.creditedReward, remote: options.remote, idempotencyKey: options.idempotencyKey });
+    if (command.status === "applied") return this.settleRunInline(episodeId, input, { creditedReward: options.creditedReward, remote: options.remote, idempotencyKey: command.command_id });
+    const dispatch = await this.dispatchFeedback({ workerId: options.outbox.workerId, leaseMs: options.outbox.leaseMs, limit: 1 });
+    const row = dispatch.rows.find((candidate) => candidate.command_id === command.command_id);
+    if (!row || row.status !== "applied") throw new ProviderRuntimeError(`feedback outbox settlement ${command.command_id} was not applied${row?.error_class ? ` (${row.error_class})` : ""}`);
+    return this.settleRunInline(episodeId, input, { creditedReward: options.creditedReward, remote: options.remote, idempotencyKey: command.command_id });
+  }
+
   async prepareTrajectory(episodeIds: readonly string[], options: { trajectoryId: string; discount?: number }): Promise<AutonomousLearningTrajectory> {
     const trajectoryId = boundedIdentifier("trajectoryId", options.trajectoryId);
     if (!Array.isArray(episodeIds) || episodeIds.length < 1 || episodeIds.length > AUTONOMOUS_LEARNING_MAX_TRAJECTORY_STEPS) throw new ArgumentError("learning trajectory must contain between 1 and 32 episodes");
@@ -1574,7 +1597,7 @@ export class AutonomousLearningController {
     return clone(trajectory);
   }
 
-  async settleTrajectory(trajectoryId: string, rewards: Record<string, AutonomousEvaluatorRewardInput>, options: { remote?: boolean; idempotencyKey?: string } = {}): Promise<AutonomousTrajectorySettlement> {
+  private async settleTrajectoryInline(trajectoryId: string, rewards: Record<string, AutonomousEvaluatorRewardInput>, options: { remote?: boolean; idempotencyKey?: string } = {}): Promise<AutonomousTrajectorySettlement> {
     const id = boundedIdentifier("trajectoryId", trajectoryId);
     const trajectory = await this.trajectories.load(id);
     if (!trajectory) throw new ArgumentError(`learning trajectory ${trajectoryId} was not found`);
@@ -1634,5 +1657,16 @@ export class AutonomousLearningController {
       settledTrajectory = observed;
     }
     return clone({ ...result, trajectory: settledTrajectory });
+  }
+
+  /** Settle a trajectory directly or through the durable feedback outbox boundary. */
+  async settleTrajectory(trajectoryId: string, rewards: Record<string, AutonomousEvaluatorRewardInput>, options: { remote?: boolean; idempotencyKey?: string; outbox?: AutonomousLearningOutboxSettlementOptions } = {}): Promise<AutonomousTrajectorySettlement> {
+    if (!options.outbox) return this.settleTrajectoryInline(trajectoryId, rewards, options);
+    const command = await this.enqueueTrajectorySettlement(trajectoryId, rewards, { remote: options.remote, idempotencyKey: options.idempotencyKey });
+    if (command.status === "applied") return this.settleTrajectoryInline(trajectoryId, rewards, { remote: options.remote, idempotencyKey: command.command_id });
+    const dispatch = await this.dispatchFeedback({ workerId: options.outbox.workerId, leaseMs: options.outbox.leaseMs, limit: 1 });
+    const row = dispatch.rows.find((candidate) => candidate.command_id === command.command_id);
+    if (!row || row.status !== "applied") throw new ProviderRuntimeError(`feedback outbox trajectory settlement ${command.command_id} was not applied${row?.error_class ? ` (${row.error_class})` : ""}`);
+    return this.settleTrajectoryInline(trajectoryId, rewards, { remote: options.remote, idempotencyKey: command.command_id });
   }
 }

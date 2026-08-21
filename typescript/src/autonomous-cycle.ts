@@ -23,6 +23,7 @@ import type {
   AutonomousEvaluatorRewardInput,
   AutonomousLearningController,
   AutonomousLearningSettlement,
+  AutonomousLearningOutboxSettlementOptions,
 } from "./autonomous-learning.js";
 import type {
   AutonomousEpisodicMemoryStore,
@@ -93,6 +94,7 @@ export interface AutonomousDecisionCycleLearningOptions {
   episodeId: string;
   evaluate?: AutonomousDecisionCycleEvaluator;
   remote?: boolean;
+  outbox?: AutonomousLearningOutboxSettlementOptions;
 }
 
 export interface AutonomousDecisionCycleMemoryOptions {
@@ -858,7 +860,7 @@ export async function runAutonomousDecisionCycle(
         const evaluationDigest = await decisionEvaluationDigest(reward);
         if (persistedPhase === "settlement_pending" && persistedEvaluationDigest !== evaluationDigest) throw new ArgumentError("rehydrated decision evaluation does not match the persisted evaluation digest");
         await commitDecisionPersistence(persistence, { phase: "settlement_pending", route_digest: route.route_digest, selection_digest: runDigests.selection, outcome_digest: runDigests.outcome, evaluation_digest: evaluationDigest, learning_episode_ids: [learningEpisodeId], settlement_digests: [], terminal_status: null });
-        settlement = await controller.settleRun(learningEpisodeId, reward, { remote: options.learning.remote, ...(persistence ? { idempotencyKey: `decision:${persistence.cycleId}:${learningEpisodeId}` } : {}) });
+        settlement = await controller.settleRun(learningEpisodeId, reward, { remote: options.learning.remote, outbox: options.learning.outbox, ...(persistence ? { idempotencyKey: `decision:${persistence.cycleId}:${learningEpisodeId}` } : {}) });
       }
     }
 
@@ -931,6 +933,7 @@ export interface AutonomousReplanLearningOptions {
   /** Prefix must be unique for the caller's logical cycle when learning is enabled. */
   episodePrefix?: string;
   remote?: boolean;
+  outbox?: AutonomousLearningOutboxSettlementOptions;
 }
 
 export interface AutonomousReplanEvaluationProjection extends JsonObject {
@@ -1290,7 +1293,7 @@ export async function runAutonomousReplanCycle(
       if (options.learning) {
         learningEpisodeId = `${episodePrefix}:${cycle.run.blueprint!.task_digest}:attempt-${attempt + 1}`;
         const episode = await options.learning.controller.prepareRun(cycle.run, { episodeId: learningEpisodeId, runId: learningEpisodeId, stageId: `replan-${attempt + 1}` });
-        settlement = await options.learning.controller.settleRun(episode.episode_id, evaluation, { remote: options.learning.remote });
+        settlement = await options.learning.controller.settleRun(episode.episode_id, evaluation, { remote: options.learning.remote, outbox: options.learning.outbox });
         learningEpisodeIds.push(episode.episode_id);
         settlements.push(settlement);
       }
@@ -1380,6 +1383,7 @@ export interface AutonomousCrossDomainDecisionCycleLearningOptions {
   discount?: number;
   evaluate?: AutonomousCrossDomainDecisionCycleEvaluator;
   remote?: boolean;
+  outbox?: AutonomousLearningOutboxSettlementOptions;
 }
 
 export interface AutonomousCrossDomainDecisionCycleOptions extends Omit<AutonomousCrossDomainRunOptions, "learning"> {
@@ -1641,6 +1645,7 @@ export async function runAutonomousCrossDomainDecisionCycle(
         trajectoryId: learning.trajectoryId,
         discount: learning.discount,
         remote: learning.remote,
+        outbox: learning.outbox,
         ...(persistence ? { idempotencyKey: `decision:${persistence.cycleId}:${learning.trajectoryId}` } : {}),
       });
     }
@@ -1731,6 +1736,7 @@ export interface AutonomousCrossDomainReplanLearningOptions {
   trajectoryIdPrefix?: string;
   discount?: number;
   remote?: boolean;
+  outbox?: AutonomousLearningOutboxSettlementOptions;
 }
 
 export interface AutonomousCrossDomainReplanEvaluationProjection extends JsonObject {
@@ -2124,7 +2130,7 @@ export async function runAutonomousCrossDomainReplanCycle(
       if (!resumedSettlement) await options.execution?.recordEvaluation({ evaluatorId: evaluation.evaluator_id, evaluatorVersion: evaluation.evaluator_version, reward: evaluation.reward, passed: evaluation.passed, evaluationDigest, failureClass: evaluation.failure_class });
       let settlement: AutonomousCrossDomainLearningSettlement | null = null;
       if (options.learning) {
-        settlement = await options.learning.controller.settleCrossDomain(runForEvaluation, evaluation.rewards, { trajectoryId: trajectoryId!, discount: options.learning.discount, remote: options.learning.remote });
+        settlement = await options.learning.controller.settleCrossDomain(runForEvaluation, evaluation.rewards, { trajectoryId: trajectoryId!, discount: options.learning.discount, remote: options.learning.remote, outbox: options.learning.outbox });
         settlements.push(settlement);
         for (const episodeId of pendingEpisodeIds) if (!learningEpisodeIds.includes(episodeId)) learningEpisodeIds.push(episodeId);
         if (attempt === 0 && options.memory && cycle.memory) {

@@ -240,10 +240,12 @@ test("mission learning linkage is metadata-only and requires exact evaluator cov
   const settled = await settleAutonomousMissionLearning(execution, learning, {
     trajectoryId: "mission-trajectory-1",
     rewards: { "episode-mission-1": { evaluator_id: "reviewer", evaluator_version: "1", reward: 0.8, passed: true } },
+    outbox: { workerId: "mission-worker" },
   });
   assert.deepEqual(settled.episode_ids, ["episode-mission-1"]);
   assert.equal(calls[0].kind, "prepare");
   assert.equal(calls[1].kind, "settle");
+  assert.deepEqual(calls[1].options.outbox, { workerId: "mission-worker" });
   await assert.rejects(() => settleAutonomousMissionLearning(execution, learning, {
     trajectoryId: "mission-trajectory-missing-reward",
     rewards: {},

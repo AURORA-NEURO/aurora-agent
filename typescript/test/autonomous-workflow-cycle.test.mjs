@@ -8,6 +8,7 @@ import {
   AutonomousWorkflowExecutor,
   CredentialStore,
   InMemoryAutonomousLearningEpisodeStore,
+  InMemoryAutonomousLearningFeedbackOutboxStore,
   InMemoryAutonomousLearningTrajectoryStore,
   InMemoryAutonomousWorkflowCheckpointStore,
   InMemoryAutonomousWorkflowCycleStateStore,
@@ -130,7 +131,8 @@ test("workflow cycle gives the evaluator a bounded replan path and settles stage
   const agent = await makeAgent(true);
   const episodes = new InMemoryAutonomousLearningEpisodeStore();
   const trajectories = new InMemoryAutonomousLearningTrajectoryStore();
-  const learning = new AutonomousLearningController(agent, { episodes, trajectories });
+  const outbox = new InMemoryAutonomousLearningFeedbackOutboxStore();
+  const learning = new AutonomousLearningController(agent, { episodes, trajectories, feedbackOutbox: outbox });
   const executor = new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore(), { learning });
   let evaluations = 0;
   const cycle = await runAutonomousWorkflowCycle("Replan this verified coding workflow once.", executor, {
@@ -139,7 +141,7 @@ test("workflow cycle gives the evaluator a bounded replan path and settles stage
     approveProviderCall: true,
     jobId: "cycle-replan-coding",
     maxReplans: 1,
-    learning: { controller: learning, trajectoryIdPrefix: "cycle-replan-trajectory" },
+    learning: { controller: learning, trajectoryIdPrefix: "cycle-replan-trajectory", outbox: { workerId: "workflow-cycle-worker" } },
     evaluate: async (execution) => {
       evaluations += 1;
       return {
@@ -159,6 +161,7 @@ test("workflow cycle gives the evaluator a bounded replan path and settles stage
   assert.equal(cycle.settlements.length, 2);
   assert.equal(episodes.pending().length, 0);
   assert.equal(agent.learner.snapshot().generation, 10);
+  assert.equal(outbox.rows().filter((command) => command.status === "applied").length, 2);
   assert.match(cycle.attempts[1].job_id, /:attempt-2$/);
 });
 

@@ -366,6 +366,32 @@ test("feedback outbox retries a post-credit journal failure through an idempoten
   assert.equal(durableReceipts.rows().length, 1);
 });
 
+test("trajectory settlement uses the same outbox boundary as single-episode settlement", async () => {
+  const agent = await learningAgent();
+  const episodes = new InMemoryAutonomousLearningEpisodeStore();
+  const trajectories = new InMemoryAutonomousLearningTrajectoryStore();
+  const outbox = new InMemoryAutonomousLearningFeedbackOutboxStore();
+  const controller = new AutonomousLearningController(agent, { episodes, trajectories, feedbackOutbox: outbox });
+  const run = await agent.run("Settle this delayed-credit trajectory through the worker boundary.", { domain: "coding", approveProviderCall: true });
+  await controller.prepareRun(run, { episodeId: "outbox-trajectory-1" });
+  await controller.prepareRun(run, { episodeId: "outbox-trajectory-2" });
+  await controller.prepareTrajectory(["outbox-trajectory-1", "outbox-trajectory-2"], { trajectoryId: "outbox-trajectory" });
+  const settled = await controller.settleTrajectory("outbox-trajectory", {
+    "outbox-trajectory-1": { evaluator_id: "trajectory-reviewer", evaluator_version: "1", reward: 0.4, passed: false },
+    "outbox-trajectory-2": { evaluator_id: "trajectory-reviewer", evaluator_version: "1", reward: 0.9, passed: true },
+  }, { outbox: { workerId: "trajectory-worker" } });
+  assert.equal(settled.trajectory.status, "settled");
+  assert.equal(settled.settlements.length, 2);
+  assert.equal(outbox.rows().filter((command) => command.status === "applied").length, 1);
+  assert.equal(agent.learner.snapshot().generation, 2);
+  const replayed = await controller.settleTrajectory("outbox-trajectory", {
+    "outbox-trajectory-1": { evaluator_id: "trajectory-reviewer", evaluator_version: "1", reward: 0.4, passed: false },
+    "outbox-trajectory-2": { evaluator_id: "trajectory-reviewer", evaluator_version: "1", reward: 0.9, passed: true },
+  }, { outbox: { workerId: "trajectory-worker-replay" } });
+  assert.deepEqual(replayed, settled);
+  assert.equal(agent.learner.snapshot().generation, 2);
+});
+
 test("trajectory receipts replay all delayed-credit settlements without provider or learner replay", async () => {
   const agent = await learningAgent();
   const episodes = new InMemoryAutonomousLearningEpisodeStore();

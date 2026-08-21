@@ -6,6 +6,7 @@ import {
   AutonomousExecutionController,
   InMemoryAutonomousExecutionJournal,
   AutonomousLearningController,
+  InMemoryAutonomousLearningFeedbackOutboxStore,
   AutonomousOnlineLearner,
   AutonomousCostBudget,
   CredentialStore,
@@ -152,7 +153,8 @@ function toolLoopAgent(stopResponses = 0) {
 
 test("decision cycle connects approval, invocation, evaluator settlement, and bandit adaptation", async () => {
   const { agent, calls } = cycleAgent();
-  const learning = new AutonomousLearningController(agent);
+  const outbox = new InMemoryAutonomousLearningFeedbackOutboxStore();
+  const learning = new AutonomousLearningController(agent, { feedbackOutbox: outbox });
   const task = "Debug this coding repository and report the verified tests.";
   const result = await runAutonomousDecisionCycle(agent, task, {
     domain: "coding",
@@ -160,6 +162,7 @@ test("decision cycle connects approval, invocation, evaluator settlement, and ba
     learning: {
       controller: learning,
       episodeId: "cycle-coding-1",
+      outbox: { workerId: "decision-cycle-worker" },
       evaluate: (run) => ({ evaluator_id: "coding-reviewer", evaluator_version: "1", reward: run.response?.text === "cycle answer" ? 0.9 : 0, passed: true }),
     },
   });
@@ -170,6 +173,7 @@ test("decision cycle connects approval, invocation, evaluator settlement, and ba
   assert.equal(result.evaluation.reward, 0.9);
   assert.equal(result.settlement.episode.status, "settled");
   assert.equal(result.settlement.next_state.generation, 1);
+  assert.equal(outbox.rows().filter((command) => command.status === "applied").length, 1);
   assert.equal(calls(), 1);
   assert.equal(JSON.stringify(result.settlement).includes(task), false);
 });
@@ -860,7 +864,8 @@ test("decision cycle executes every built-in domain through the same reviewed pa
 
 test("cross-domain decision cycle settles specialist and synthesis credit as one trajectory", async () => {
   const { agent, calls } = cycleAgent();
-  const learning = new AutonomousLearningController(agent);
+  const outbox = new InMemoryAutonomousLearningFeedbackOutboxStore();
+  const learning = new AutonomousLearningController(agent, { feedbackOutbox: outbox });
   const execution = await AutonomousExecutionController.create({ executionId: "cross-execution-1", domain: "cross_domain", capability: "cross_domain_synthesis", riskClass: "review_required", policy: { max_provider_calls: 4 }, journal: new InMemoryAutonomousExecutionJournal() });
   const result = await runAutonomousCrossDomainDecisionCycle(agent, "Research a biomedical neuroscience experiment with EEG patient evidence", {
     approveProviderCall: true,
@@ -872,6 +877,7 @@ test("cross-domain decision cycle settles specialist and synthesis credit as one
     learning: {
       controller: learning,
       trajectoryId: "cross-cycle-1",
+      outbox: { workerId: "cross-cycle-worker" },
       evaluate: (run) => Object.fromEntries(run.learning_episode_ids.map((episodeId) => [episodeId, { evaluator_id: "cross-reviewer", evaluator_version: "1", reward: 0.8, passed: true }])),
     },
   });
@@ -884,6 +890,7 @@ test("cross-domain decision cycle settles specialist and synthesis credit as one
   assert.equal(result.settlement.trajectory.trajectory.status, "settled");
   assert.equal(result.settlement.trajectory.settlements.length, 3);
   assert.equal(result.settlement.trajectory.settlements.at(-1).next_state.generation, 3);
+  assert.equal(outbox.rows().filter((command) => command.status === "applied").length, 1);
   assert.equal(execution.state.status, "completed");
   assert.equal(execution.state.provider_calls, 3);
   assert.equal(calls(), 3);

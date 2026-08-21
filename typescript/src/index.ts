@@ -718,6 +718,7 @@ export type {
   AutonomousLearningFeedbackOutboxStore,
   AutonomousLearningFeedbackOutboxDispatchRow,
   AutonomousLearningFeedbackOutboxDispatch,
+  AutonomousLearningOutboxSettlementOptions,
   AutonomousLearningTrajectory,
   AutonomousLearningTrajectoryStep,
   AutonomousLearningTrajectoryStore,

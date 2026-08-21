@@ -20,6 +20,7 @@ import type {
   AutonomousLearningEpisode,
   AutonomousLearningTrajectory,
   AutonomousTrajectorySettlement,
+  AutonomousLearningOutboxSettlementOptions,
 } from "./autonomous-learning.js";
 
 /**
@@ -301,7 +302,7 @@ export interface AutonomousMissionLearningAdapter {
   settleTrajectory(
     trajectoryId: string,
     rewards: Record<string, AutonomousEvaluatorRewardInput>,
-    options?: { remote?: boolean },
+    options?: { remote?: boolean; outbox?: AutonomousLearningOutboxSettlementOptions },
   ): Promise<AutonomousTrajectorySettlement> | AutonomousTrajectorySettlement;
 }
 
@@ -1077,6 +1078,7 @@ export async function settleAutonomousMissionLearning(
     discount?: number;
     rewards: Record<string, AutonomousEvaluatorRewardInput>;
     remote?: boolean;
+    outbox?: AutonomousLearningOutboxSettlementOptions;
   },
 ): Promise<AutonomousMissionLearningSettlement> {
   if (!execution || !isObject(execution)) throw new ArgumentError("mission learning settlement requires an execution result");
@@ -1106,7 +1108,7 @@ export async function settleAutonomousMissionLearning(
   if (trajectoryEpisodeIds.length !== episodeIds.length || trajectoryEpisodeIds.some((id, index) => id !== episodeIds[index])) throw new AutonomousMissionExecutionError("learning adapter changed mission episode order");
   const rewardKeys = Object.keys(options.rewards);
   if (rewardKeys.length !== episodeIds.length || rewardKeys.some((id) => !episodeIds.includes(id))) throw new ArgumentError("mission learning rewards must cover exactly every successful learning episode");
-  const settlement = await learning.settleTrajectory(trajectoryId, options.rewards, { remote: options.remote });
+  const settlement = await learning.settleTrajectory(trajectoryId, options.rewards, { remote: options.remote, outbox: options.outbox });
   return {
     schema: "bioprism-typescript-autonomous-mission-learning-settlement/0.1",
     mission_id: boundedIdentifier("mission_id", execution.mission_id),
