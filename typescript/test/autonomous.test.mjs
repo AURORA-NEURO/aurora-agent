@@ -9,6 +9,7 @@ import {
   AutonomousCapabilityActivationStore,
   AutonomousCapabilityPersistenceError,
   AutonomousCapabilityRuntime,
+  InMemoryAutonomousCapabilityLearningSettlementStore,
   AutonomousCostBudgetError,
   AutonomousDomainToolRegistry,
   AutonomousDomainToolRuntime,
@@ -472,6 +473,89 @@ test("capability execution produces replayable evidence envelopes across every b
   }
   assert.equal(executions, profiles.length);
   assert.equal(capabilities.executionEvidence().length, profiles.length);
+});
+
+test("capability outcomes settle metadata-only evaluator credit across every domain and replay after restart", async () => {
+  const profiles = await builtinAutonomousDomainProfiles();
+  const definitions = [...new Map(profiles.flatMap((profile) => profile.tool_profile.bindings.map((binding) => ({
+    name: binding.name,
+    description: `Capability ${binding.name}`,
+    inputSchema: { type: "object", additionalProperties: true },
+  }))).map((definition) => [definition.name, definition])).values()];
+  const catalogue = await ToolCatalogue.fromDefinitions(definitions);
+  const registry = await AutonomousDomainToolRegistry.create(catalogue);
+  const store = new InMemoryAutonomousCapabilityLearningSettlementStore();
+  const learner = new AutonomousOnlineLearner();
+  const agent = new AutonomousAgent(new LLMRuntime({ credentials: new CredentialStore() }), {
+    toolCatalogue: catalogue,
+    toolExecutor: async (binding) => ({ ok: true, domain: binding.domains[0], transient: "must never enter learning" }),
+    learner,
+    capabilityLearningSettlementStore: store,
+  });
+  const results = [];
+  for (const profile of profiles) {
+    const plan = await registry.planForTask(`execute a reviewed ${profile.domain} capability`, { domains: [profile.domain], maxTools: 128 });
+    const coverage = plan.coverage.find((row) => row.domain === profile.domain && row.status === "selected");
+    assert.ok(coverage?.selected_tool, `${profile.domain} needs a selected capability`);
+    const stage = profile.workflow.stages.find((candidate) => candidate.id === coverage.stage_id);
+    const result = await agent.executeCapability({
+      call_id: `learn-${profile.domain}`,
+      tool: coverage.selected_tool,
+      arguments: {},
+      workflow_context: { domain: profile.domain, workflow_id: profile.workflow.workflow_id, workflow_digest: profile.workflow.workflow_digest, stage_id: stage.id },
+      input_digest: await digestJson({ task: `learn ${profile.domain}` }),
+    }, {
+      approveEffects: true,
+      projectObservations: async (value) => {
+        const valueDigest = await digestJson(value);
+        return stage.evidence_outputs.map((label, index) => ({ id: `learn-${index}`, label, kind: "fact", status: "observed", value_digest: valueDigest, confidence: 0.9 }));
+      },
+    });
+    assert.equal(result.record.status, "completed", profile.domain);
+    results.push(result);
+  }
+  const evaluator = {
+    evaluator_id: "capability-quality",
+    evaluator_version: "2026-08-21",
+    evaluate(input) {
+      assert.equal(input.value, undefined);
+      assert.equal(input.arguments, undefined);
+      assert.equal(input.response, undefined);
+      assert.equal(input.caller_evidence.quality_gate, "passed");
+      assert.doesNotMatch(JSON.stringify(input), /must never enter learning/);
+      return { evaluator_id: "capability-quality", evaluator_version: "2026-08-21", reward: 1, passed: true };
+    },
+  };
+  const settled = await agent.evaluateCapabilityExecutions(results, {
+    evaluator,
+    evidence: Object.fromEntries(results.map((result) => [result.record.request_digest, { quality_gate: "passed" }])),
+    armIdFor: (record) => `local-model:${record.domain}`,
+  });
+  assert.equal(settled.settlements.length, profiles.length);
+  assert.equal(learner.snapshot().generation, profiles.length);
+  assert.equal(new Set(learner.snapshot().arms.map((arm) => arm.arm_id)).size, profiles.length);
+  assert.doesNotMatch(JSON.stringify(settled), /must never enter learning/);
+
+  const restartedLearner = new AutonomousOnlineLearner();
+  const restarted = new AutonomousAgent(new LLMRuntime({ credentials: new CredentialStore() }), {
+    toolCatalogue: catalogue,
+    toolExecutor: async () => ({ ok: true }),
+    learner: restartedLearner,
+    capabilityLearningSettlementStore: store,
+  });
+  const replay = await restarted.evaluateCapabilityExecution(results[0], {
+    evaluator,
+    callerEvidence: { quality_gate: "passed" },
+    armId: `local-model:${results[0].record.domain}`,
+  });
+  assert.equal(replay.idempotent_replay, true);
+  assert.equal(restartedLearner.snapshot().generation, 1);
+  assert.equal(replay.next_state.arms[0].pulls, 1);
+
+  const uncertain = { ...results[0].record, status: "reconciliation_required", output_digest: null, output_bytes: 0, observations: [], evidence_digest: null, evidence_status: "not_evaluated", missing_evidence_outputs: [...results[0].record.required_evidence_outputs] };
+  await assert.rejects(() => agent.evaluateCapabilityExecution(uncertain, { evaluator, callerEvidence: { quality_gate: "failed" }, armId: "local-model:reconciled" }), /reconciliation_required/);
+  const reconciled = await agent.evaluateCapabilityExecution(uncertain, { evaluator: { ...evaluator, evaluate: () => ({ evaluator_id: "capability-quality", evaluator_version: "2026-08-21", reward: -1, passed: false }) }, callerEvidence: { quality_gate: "failed" }, armId: "local-model:reconciled", allowReconciliation: true });
+  assert.equal(reconciled.failed, true);
 });
 
 test("capability execution fails closed, replays completed work, and makes batch omissions explicit", async () => {

@@ -11943,6 +11943,60 @@ class AutonomousAgent:
             return []
         return self.capability_runtime.execution_evidence()
 
+    def evaluate_capability_execution(
+        self,
+        result: AutonomousCapabilityExecutionResult,
+        *,
+        evaluator: AutonomousToolOutcomeEvaluator,
+        evidence: Mapping[str, Any] | None = None,
+        allow_reconciliation: bool = False,
+        bandit_state: Mapping[str, Any] | None = None,
+        bandit_updater: Callable[[Mapping[str, Any], Mapping[str, Any], Mapping[str, Any]], Mapping[str, Any]] | None = None,
+        ledger: BrainLearningLedger | None = None,
+    ) -> AutonomousToolLearningReport:
+        """Settle one capability execution through independent evaluator evidence."""
+
+        if not isinstance(evaluator, AutonomousToolOutcomeEvaluator):
+            raise BrainRunError("evaluator must be an AutonomousToolOutcomeEvaluator")
+        try:
+            return evaluator.evaluate_capability_result(
+                result,
+                evidence=evidence,
+                allow_reconciliation=allow_reconciliation,
+                bandit_state=bandit_state,
+                bandit_updater=bandit_updater,
+                ledger=self.ledger if ledger is None else ledger,
+            )
+        except (ArgumentError, TypeError, ValueError) as error:
+            raise BrainRunError("capability execution evaluation failed") from error
+
+    def evaluate_capability_executions(
+        self,
+        results: Sequence[AutonomousCapabilityExecutionResult],
+        *,
+        evaluator: AutonomousToolOutcomeEvaluator,
+        evidence: Mapping[str, Mapping[str, Any]] | None = None,
+        allow_reconciliation: bool = False,
+        bandit_state: Mapping[str, Any] | None = None,
+        bandit_updater: Callable[[Mapping[str, Any], Mapping[str, Any], Mapping[str, Any]], Mapping[str, Any]] | None = None,
+        ledger: BrainLearningLedger | None = None,
+    ) -> AutonomousToolLearningReport:
+        """Settle an ordered capability-result batch through one evaluator/state stream."""
+
+        if not isinstance(evaluator, AutonomousToolOutcomeEvaluator):
+            raise BrainRunError("evaluator must be an AutonomousToolOutcomeEvaluator")
+        try:
+            return evaluator.evaluate_capability_results(
+                results,
+                evidence=evidence,
+                allow_reconciliation=allow_reconciliation,
+                bandit_state=bandit_state,
+                bandit_updater=bandit_updater,
+                ledger=self.ledger if ledger is None else ledger,
+            )
+        except (ArgumentError, TypeError, ValueError) as error:
+            raise BrainRunError("capability execution batch evaluation failed") from error
+
     def evaluate_tool_receipts(
         self,
         *,

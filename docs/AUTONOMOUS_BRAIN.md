@@ -2829,6 +2829,50 @@ not invoke the executor again. `agent.capability_execution_evidence()` exposes t
 metadata history for an independent evaluator, which must supply the actual reward or pass/fail
 decision before any bandit or online-learning update.
 
+The capability-to-learning boundary is explicit through
+`evaluate_capability_execution(...)` and `evaluate_capability_executions(...)`. These methods
+accept either a transient execution result or its metadata-only record, project only
+workflow/stage identity, capability and risk labels, input/subject/parent digests, output and
+observation digests, evidence completeness, effect status, and bounded caller evidence, then pass
+that projection to a caller-owned evaluator. The evaluator must declare the reward, pass/fail
+decision, identity, and version; transport completion, `output_digest` presence, adapter latency,
+or a model claim cannot create credit. Raw adapter values are never passed to the evaluator,
+stored in the learning ledger, or included in the returned learning report.
+
+Settlement is idempotent across evaluator restarts. A stable settlement digest binds the execution
+request, metadata projection, evaluator identity/version, and evidence digest. If a
+`BrainLearningLedger` already contains that settlement, the agent returns the persisted value-only
+report and does not call the bandit updater again. The ledger therefore acts as the durable
+cross-process replay barrier; the evaluator and caller-owned updater remain the authorities for
+quality and policy. A `reconciliation_required` execution is deliberately ineligible until the
+caller passes `allow_reconciliation=True` after independently resolving the external effect. This
+prevents uncertain dispatches from being rewarded merely because a worker restarted or a retry
+observed a transport-level success. Batch settlement preserves execution order and supports
+evidence keyed by request digest (or a unique call ID), so all twelve built-in domains share the
+same learning seam without sharing private payloads.
+
+```python
+learning = agent.evaluate_capability_executions(
+    capability_results,
+    evaluator=capability_quality_evaluator,
+    evidence={result.record.request_digest: {"quality_gate": "passed"} for result in capability_results},
+    bandit_state=caller_owned_bandit_state,
+    bandit_updater=update_capability_arm,
+    ledger=BrainLearningLedger("state/learning.jsonl"),
+)
+caller_owned_bandit_state = learning.next_bandit_state
+```
+
+The TypeScript façade exposes the same contract through `evaluateCapabilityExecution(...)` and
+`evaluateCapabilityExecutions(...)`. A caller supplies an evaluator identity/version, an explicit
+reward callback, and optionally a durable `AutonomousCapabilityLearningSettlementStore`. The
+settlement receipt binds the capability request digest, execution-record digest, evaluator
+identity, caller-evidence digest, outcome digest, and next bandit-state digest. A replay adopts
+the persisted next state into a restarted `AutonomousOnlineLearner`; it does not dispatch the
+adapter, rerun the evaluator, or increment the arm twice. Batch settlement is ordered and can
+select a model/tool arm per record, so direct capabilities and provider decision cycles can feed
+the same adaptation surface without retaining private execution values.
+
 For an effectful tool, provide `tool_runtime=AutonomousDomainToolRuntime(...)` with an approval
 callback, or replace the default workspace adapter with an application executor that enforces
 identity, scope, idempotency, and operator policy. The agent never derives approval from the model,

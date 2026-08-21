@@ -978,10 +978,28 @@ def test_autonomous_agent_exposes_reviewed_capability_execution_and_journal_repl
     }
 
     first = agent.execute_capability(request)
+    learning = agent.evaluate_capability_execution(
+        first,
+        evaluator=AutonomousToolOutcomeEvaluator(
+            lambda value: {
+                "reward": 1.0 if value["evidence"]["caller_evidence"].get("quality_gate") == "passed" else -1.0,
+                "passed": value["evidence"]["caller_evidence"].get("quality_gate") == "passed",
+            },
+            evaluator_id="agent-capability-quality",
+            evaluator_version="v1",
+        ),
+        evidence={"quality_gate": "passed"},
+        bandit_state={"generation": 0},
+        bandit_updater=lambda state, _decision, _outcome: {
+            **state,
+            "generation": state["generation"] + 1,
+        },
+    )
     restored = agent.restore_capability_journal()
     replayed = agent.execute_capability(request)
 
     assert first.record.status == "completed"
+    assert learning.next_bandit_state["generation"] == 1
     assert restored["replayable"] == 1
     assert replayed.record.replay == "replayed"
     assert replayed.value is None

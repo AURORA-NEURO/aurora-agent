@@ -8,10 +8,22 @@ import {
 } from "./autonomous-activation.js";
 import { AutonomousBrainControlPlaneBridge, AutonomousModelHealthController, type AutonomousModelHealthStore } from "./autonomous-control.js";
 import type { AutonomousExecutionController } from "./autonomous-execution.js";
-import { AUTONOMOUS_CAPABILITY_BATCH_SCHEMA, AutonomousCapabilityRuntime, autonomousCapabilityRefusal } from "./autonomous-capabilities.js";
+import {
+  AUTONOMOUS_CAPABILITY_BATCH_SCHEMA,
+  AutonomousCapabilityRuntime,
+  InMemoryAutonomousCapabilityLearningSettlementStore,
+  autonomousCapabilityRefusal,
+  settleAutonomousCapabilityLearning,
+  settleAutonomousCapabilityLearningBatch,
+} from "./autonomous-capabilities.js";
 import type {
   AutonomousCapabilityBatchOptions,
   AutonomousCapabilityBatchResult,
+  AutonomousCapabilityLearningBatchOptions,
+  AutonomousCapabilityLearningBatchResult,
+  AutonomousCapabilityLearningOptions,
+  AutonomousCapabilityLearningSettlement,
+  AutonomousCapabilityLearningSettlementStore,
   AutonomousCapabilityExecutionOptions,
   AutonomousCapabilityExecutionRecord,
   AutonomousCapabilityExecutionRequest,
@@ -695,6 +707,8 @@ export interface AutonomousAgentOptions {
   effectBoundary?: AutonomousEffectBoundary;
   /** Optional caller-owned metadata-only capability journal used for restart-safe replay. */
   capabilityJournal?: AutonomousCapabilityJournalStore;
+  /** Optional caller-owned durable replay barrier for capability evaluator settlements. */
+  capabilityLearningSettlementStore?: AutonomousCapabilityLearningSettlementStore;
   learner?: AutonomousOnlineLearner;
   /** Optional caller-owned activation state machine; keys and raw prompts never enter its state. */
   activation?: AutonomousCapabilityActivation;
@@ -2461,6 +2475,7 @@ export class AutonomousAgent {
   private readonly toolApprover?: DomainToolApprover;
   private readonly effectBoundary?: AutonomousEffectBoundary;
   private readonly capabilityJournal?: AutonomousCapabilityJournalStore;
+  private readonly capabilityLearningSettlementStore: AutonomousCapabilityLearningSettlementStore;
   private domainToolRegistry?: AutonomousDomainToolRegistry;
   private domainToolRuntime?: AutonomousDomainToolRuntime;
   private capabilityRuntime?: AutonomousCapabilityRuntime;
@@ -2487,6 +2502,8 @@ export class AutonomousAgent {
     this.effectBoundary = options.effectBoundary;
     if (options.capabilityJournal !== undefined && (typeof options.capabilityJournal.append !== "function" || typeof options.capabilityJournal.find !== "function" || typeof options.capabilityJournal.records !== "function")) throw new ArgumentError("AutonomousAgent capabilityJournal is malformed");
     this.capabilityJournal = options.capabilityJournal;
+    if (options.capabilityLearningSettlementStore !== undefined && (typeof options.capabilityLearningSettlementStore.load !== "function" || typeof options.capabilityLearningSettlementStore.save !== "function")) throw new ArgumentError("AutonomousAgent capabilityLearningSettlementStore is malformed");
+    this.capabilityLearningSettlementStore = options.capabilityLearningSettlementStore ?? new InMemoryAutonomousCapabilityLearningSettlementStore();
     const selector = options.selector ?? (this.modelHealthController ? this.modelHealthController.selector() : options.learner ? (request: AutonomousSelectionRequest) => options.learner!.select(request) : options.apiClient ? contextualSelector(options.apiClient) : this.modelHealthBridge ? this.modelHealthBridge.selector() : undefined);
     this.runtime = new AutonomousRuntime(llm, { selector });
   }
@@ -2651,6 +2668,48 @@ export class AutonomousAgent {
   /** Return metadata-only capability records produced by this agent instance. */
   capabilityExecutionEvidence(): AutonomousCapabilityExecutionRecord[] {
     return this.capabilityRuntime?.executionEvidence() ?? [];
+  }
+
+  /** Evaluate and settle one reviewed capability result; transport success never becomes reward. */
+  async evaluateCapabilityExecution(
+    result: AutonomousCapabilityExecutionResult | AutonomousCapabilityExecutionRecord,
+    options: Omit<AutonomousCapabilityLearningOptions, "recordEvaluatorReward">,
+  ): Promise<AutonomousCapabilityLearningSettlement> {
+    if (!this.learner) throw new ArgumentError("AutonomousAgent has no AutonomousOnlineLearner");
+    const settlement = await settleAutonomousCapabilityLearning(result, {
+      ...options,
+      settlementStore: options.settlementStore ?? this.capabilityLearningSettlementStore,
+      recordEvaluatorReward: (armId, reward, update) => this.recordEvaluatorReward(armId, reward, {
+        failed: update.failed,
+        outcomeDigest: update.outcomeDigest,
+        contractDigest: update.contractDigest,
+        contextDigest: update.contextDigest,
+        context: update.context,
+      }),
+    });
+    this.learner.restore(settlement.next_state);
+    return settlement;
+  }
+
+  /** Evaluate and settle reviewed capability results in input order with one bandit stream. */
+  async evaluateCapabilityExecutions(
+    results: readonly (AutonomousCapabilityExecutionResult | AutonomousCapabilityExecutionRecord)[],
+    options: AutonomousCapabilityLearningBatchOptions,
+  ): Promise<AutonomousCapabilityLearningBatchResult> {
+    if (!this.learner) throw new ArgumentError("AutonomousAgent has no AutonomousOnlineLearner");
+    const settlement = await settleAutonomousCapabilityLearningBatch(results, {
+      ...options,
+      settlementStore: options.settlementStore ?? this.capabilityLearningSettlementStore,
+      recordEvaluatorReward: (armId, reward, update) => this.recordEvaluatorReward(armId, reward, {
+        failed: update.failed,
+        outcomeDigest: update.outcomeDigest,
+        contractDigest: update.contractDigest,
+        contextDigest: update.contextDigest,
+        context: update.context,
+      }),
+    });
+    for (const item of settlement.settlements) this.learner.restore(item.next_state);
+    return settlement;
   }
 
   /** Return metadata-only adapter evidence collected by this agent; raw arguments/results are never exposed here. */
@@ -3705,12 +3764,12 @@ export class AutonomousAgent {
   }
 
   /** Apply explicit evaluator feedback locally; optionally reconcile the same value-only update through the control plane. */
-  async recordEvaluatorReward(armId: string, reward: number, options: { failed?: boolean; outcomeDigest?: string | null; remote?: boolean; contextDigest?: string | null; context?: BrainBanditContext } = {}): Promise<BrainBanditState> {
+  async recordEvaluatorReward(armId: string, reward: number, options: { failed?: boolean; outcomeDigest?: string | null; contractDigest?: string | null; remote?: boolean; contextDigest?: string | null; context?: BrainBanditContext } = {}): Promise<BrainBanditState> {
     if (!this.learner) throw new ArgumentError("AutonomousAgent has no AutonomousOnlineLearner");
     const contextDigest = options.contextDigest ?? null;
     if (contextDigest !== null && (typeof contextDigest !== "string" || !/^[0-9a-f]{64}$/.test(contextDigest) || !options.context)) throw new ArgumentError("contextual evaluator rewards require a valid context digest and context");
     if (contextDigest === null && options.context !== undefined) throw new ArgumentError("contextual evaluator rewards require a context digest");
-    const update: BrainBanditUpdate = { arm_id: boundedText("armId", armId, 512), reward, failed: options.failed ?? false, outcome_digest: options.outcomeDigest ?? null, ...(contextDigest === null ? {} : { context_digest: contextDigest, context: options.context }) };
+    const update: BrainBanditUpdate = { arm_id: boundedText("armId", armId, 512), reward, failed: options.failed ?? false, outcome_digest: options.outcomeDigest ?? null, contract_digest: options.contractDigest ?? null, ...(contextDigest === null ? {} : { context_digest: contextDigest, context: options.context }) };
     if (options.remote === true && this.apiClient) {
       const response = await this.apiClient.brainBanditUpdate(this.learner.snapshot(), update);
       if (!response.ok || response.mcp.error || response.mcp.result?.isError) throw new ProviderRuntimeError("remote bandit update returned a refusal");

@@ -15,6 +15,10 @@ from typing import Any, Callable, Mapping, Sequence
 
 from .authoring import canonical_bytes, content_digest
 from .brain import BrainLearningLedger
+from .autonomous_capabilities import (
+    AutonomousCapabilityExecutionRecord,
+    AutonomousCapabilityExecutionResult,
+)
 from .domain_tools import (
     AutonomousDomainToolReceipt,
     DOMAIN_TOOL_EXECUTION_STATUSES,
@@ -90,6 +94,76 @@ def _receipt_identity(receipt: AutonomousDomainToolReceipt) -> str:
 
     execution_id = receipt.execution_id or "unjournaled"
     return f"{execution_id}:{receipt.call_id}"
+
+
+def _capability_status_to_receipt_status(status: str) -> str:
+    """Map capability lifecycle states into the existing tool-evaluator vocabulary."""
+
+    if status == "completed":
+        return "executed"
+    if status == "approval_required":
+        return "approval_required"
+    if status == "refused":
+        return "policy_refused"
+    return "execution_failed"
+
+
+def _capability_evaluator_evidence(
+    record: AutonomousCapabilityExecutionRecord,
+    caller_evidence: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Project a capability record into evaluator-safe metadata without adapter values."""
+
+    if caller_evidence is not None and not isinstance(caller_evidence, Mapping):
+        raise ArgumentError("capability evaluator evidence must be a mapping or None")
+    observations = [
+        {
+            "id": observation.id,
+            "label": observation.label,
+            "kind": observation.kind,
+            "status": observation.status,
+            "value_digest": observation.value_digest,
+            "source_digest": observation.source_digest,
+            "confidence": observation.confidence,
+            "limitations": list(observation.limitations),
+        }
+        for observation in record.observations
+    ]
+    projected = {
+        "capability_status": record.status,
+        "replay": record.replay,
+        "request_digest": record.request_digest,
+        "execution_id": record.execution_id,
+        "domain": record.domain,
+        "workflow_id": record.workflow_id,
+        "workflow_digest": record.workflow_digest,
+        "stage_id": record.stage_id,
+        "stage_contract_digest": record.stage_contract_digest,
+        "capability": record.capability,
+        "risk_class": record.risk_class,
+        "schema_digest": record.schema_digest,
+        "input_digest": record.input_digest,
+        "subject_digest": record.subject_digest,
+        "parent_evidence_digests": list(record.parent_evidence_digests),
+        "output_digest": record.output_digest,
+        "output_bytes": record.output_bytes,
+        "observations": observations,
+        "evidence_status": record.evidence_status,
+        "required_evidence_outputs": list(record.required_evidence_outputs),
+        "missing_evidence_outputs": list(record.missing_evidence_outputs),
+        "limitations": list(record.limitations),
+        "effect": record.effect,
+        "effect_id": record.effect_id,
+        "error_class": record.error_class,
+        "duration_ms": record.duration_ms,
+        "execution_record_digest": content_digest(record.to_dict()),
+        "caller_evidence": {} if caller_evidence is None else dict(caller_evidence),
+    }
+    return _safe_json(
+        "capability evaluator evidence",
+        projected,
+        maximum=MAX_TOOL_EVALUATION_EVIDENCE_BYTES,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -243,6 +317,7 @@ class AutonomousToolOutcomeEvaluator:
         self.evaluator = evaluator
         self.evaluator_id = evaluator_id
         self.evaluator_version = evaluator_version
+        self._capability_settlements: dict[str, dict[str, Any]] = {}
 
     def assess(self, outcome: AutonomousToolOutcomeEvidence) -> AutonomousToolEvaluation:
         if not isinstance(outcome, AutonomousToolOutcomeEvidence):
@@ -309,8 +384,11 @@ class AutonomousToolOutcomeEvaluator:
         bandit_state: Mapping[str, Any] | None = None,
         bandit_updater: Callable[[Mapping[str, Any], Mapping[str, Any], Mapping[str, Any]], Mapping[str, Any]] | None = None,
         ledger: BrainLearningLedger | None = None,
+        settlement_key: str | None = None,
     ) -> dict[str, Any]:
         decision = self.assess(outcome)
+        if settlement_key is not None:
+            _digest("tool settlement_key", settlement_key)
         if controller is not None:
             if controller.state.execution_id != outcome.execution_id:
                 raise ArgumentError("tool outcome execution_id does not match the controller")
@@ -359,6 +437,7 @@ class AutonomousToolOutcomeEvaluator:
             "passed": decision.passed,
             "failed": decision.failed,
             "failure_class": decision.failure_class,
+            "settlement_key": settlement_key,
             "retention": "metadata_only_no_arguments_or_outputs",
         }
         report = {"learning_evidence": learning_evidence, "next_state": dict(next_state)}
@@ -372,6 +451,7 @@ class AutonomousToolOutcomeEvaluator:
             "decision_digest": decision.decision_digest,
             "evaluator_id": decision.evaluator_id,
             "evaluator_version": decision.evaluator_version,
+            "settlement_key": settlement_key,
             "retention": "metadata_and_digests_only",
         }
         recording = None
@@ -392,6 +472,217 @@ class AutonomousToolOutcomeEvaluator:
             "replay": replay,
             "retention": "metadata_only",
         }
+
+    def _capability_settlement_report(
+        self,
+        record: AutonomousCapabilityExecutionRecord,
+        report: Mapping[str, Any],
+        *,
+        idempotent_replay: bool,
+    ) -> "AutonomousToolLearningReport":
+        learning = report.get("learning_evidence")
+        decision = report.get("decision")
+        next_state = report.get("next_state")
+        if not isinstance(learning, Mapping) or not isinstance(next_state, Mapping):
+            raise ArgumentError("capability settlement report is malformed")
+        if not isinstance(decision, Mapping):
+            decision = learning
+        evaluation = {
+            "execution_id": record.execution_id or "unjournaled",
+            "domain": record.domain,
+            "capability": record.capability or "capability_execution",
+            "risk_class": record.risk_class or "read_only",
+            "call_id": record.call_id,
+            "tool": record.tool,
+            "status": record.status,
+            "evidence_digest": learning.get("evidence_digest"),
+            "decision_digest": learning.get("decision_digest"),
+            "evaluator_id": learning.get("evaluator_id"),
+            "evaluator_version": learning.get("evaluator_version"),
+            "reward": learning.get("reward"),
+            "passed": learning.get("passed"),
+            "failed": learning.get("failed"),
+            "failure_class": learning.get("failure_class"),
+            "settlement_key": learning.get("settlement_key"),
+            "recording": report.get("recording"),
+            "idempotent_replay": idempotent_replay,
+        }
+        evaluations = (evaluation,)
+        return AutonomousToolLearningReport(
+            status="completed",
+            receipts=1,
+            evaluations=evaluations,
+            by_domain={record.domain: 1},
+            by_status={record.status: 1},
+            next_bandit_state=dict(next_state),
+            learning_digest=content_digest(evaluations),
+        )
+
+    def _stored_capability_settlement(
+        self,
+        settlement_key: str,
+        *,
+        ledger: BrainLearningLedger | None,
+    ) -> Mapping[str, Any] | None:
+        local = self._capability_settlements.get(settlement_key)
+        if local is not None:
+            return local
+        if ledger is None:
+            return None
+        if not isinstance(ledger, BrainLearningLedger):
+            raise ArgumentError("ledger must be a BrainLearningLedger or None")
+        for row in reversed(ledger.records()):
+            stored = row.get("record") if isinstance(row, Mapping) else None
+            learning = stored.get("learning_evidence") if isinstance(stored, Mapping) else None
+            if not isinstance(learning, Mapping) or learning.get("settlement_key") != settlement_key:
+                continue
+            next_state = stored.get("next_state") if isinstance(stored, Mapping) else None
+            replay = stored.get("replay") if isinstance(stored, Mapping) else None
+            if not isinstance(next_state, Mapping) or not isinstance(replay, Mapping):
+                raise ArgumentError("stored capability settlement is malformed")
+            return {
+                "learning_evidence": dict(learning),
+                "next_state": dict(next_state),
+                "replay": dict(replay),
+                "recording": None,
+            }
+        return None
+
+    def evaluate_capability_result(
+        self,
+        result: AutonomousCapabilityExecutionResult | AutonomousCapabilityExecutionRecord,
+        *,
+        evidence: Mapping[str, Any] | None = None,
+        allow_reconciliation: bool = False,
+        controller: AutonomousExecutionController | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        bandit_updater: Callable[[Mapping[str, Any], Mapping[str, Any], Mapping[str, Any]], Mapping[str, Any]] | None = None,
+        ledger: BrainLearningLedger | None = None,
+    ) -> "AutonomousToolLearningReport":
+        """Evaluate one capability record through the existing value-only learning boundary.
+
+        Capability execution is transport evidence only. The caller-owned evaluator receives
+        workflow/stage metadata, observation digests, evidence completeness, and optional safe
+        caller evidence; it never receives the transient adapter value. A reconciliation-required
+        outcome is withheld until the caller explicitly confirms that it has been reconciled.
+        Settlement identity includes request, evaluator, and evidence digests so retries and
+        process restarts cannot double-credit the same decision.
+        """
+
+        if isinstance(result, AutonomousCapabilityExecutionResult):
+            record = result.record
+        elif isinstance(result, AutonomousCapabilityExecutionRecord):
+            record = result
+        else:
+            raise ArgumentError("capability evaluation requires an execution result or record")
+        if record.status == "reconciliation_required" and allow_reconciliation is not True:
+            raise ArgumentError("reconciliation-required capability outcomes need explicit reconciliation")
+        if not isinstance(allow_reconciliation, bool):
+            raise ArgumentError("allow_reconciliation must be a boolean")
+        projected_evidence = _capability_evaluator_evidence(record, evidence)
+        receipt = AutonomousDomainToolReceipt(
+            call_id=record.call_id,
+            tool=record.tool,
+            status=_capability_status_to_receipt_status(record.status),
+            schema_digest=record.schema_digest,
+            arguments_digest=record.arguments_digest,
+            output_digest=record.output_digest,
+            execution_id=record.execution_id,
+            domain=record.domain,
+            capability=record.capability or "capability_execution",
+            risk_class=record.risk_class or "read_only",
+        )
+        outcome = AutonomousToolOutcomeEvidence.from_receipt(
+            receipt,
+            evidence=projected_evidence,
+        )
+        settlement_key = content_digest(
+            {
+                "schema": AUTONOMOUS_TOOL_EVALUATION_SCHEMA,
+                "request_digest": record.request_digest,
+                "evidence_digest": outcome.evidence_digest,
+                "evaluator_id": self.evaluator_id,
+                "evaluator_version": self.evaluator_version,
+            }
+        )
+        existing = self._stored_capability_settlement(settlement_key, ledger=ledger)
+        if existing is not None:
+            return self._capability_settlement_report(record, existing, idempotent_replay=True)
+        report = self.evaluate_and_record(
+            outcome,
+            controller=controller,
+            bandit_state=bandit_state,
+            bandit_updater=bandit_updater,
+            ledger=ledger,
+            settlement_key=settlement_key,
+        )
+        self._capability_settlements[settlement_key] = report
+        while len(self._capability_settlements) > MAX_TOOL_REPLAY_CASES:
+            self._capability_settlements.pop(next(iter(self._capability_settlements)))
+        return self._capability_settlement_report(record, report, idempotent_replay=False)
+
+    def evaluate_capability_results(
+        self,
+        results: Sequence[AutonomousCapabilityExecutionResult | AutonomousCapabilityExecutionRecord],
+        *,
+        evidence: Mapping[str, Mapping[str, Any]] | None = None,
+        allow_reconciliation: bool = False,
+        controller: AutonomousExecutionController | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        bandit_updater: Callable[[Mapping[str, Any], Mapping[str, Any], Mapping[str, Any]], Mapping[str, Any]] | None = None,
+        ledger: BrainLearningLedger | None = None,
+    ) -> "AutonomousToolLearningReport":
+        """Settle a bounded, ordered capability-result batch with one state stream."""
+
+        if not isinstance(results, Sequence) or isinstance(results, (str, bytes)) or len(results) > MAX_DOMAIN_TOOL_CALLS:
+            raise ArgumentError(f"capability result batches must contain at most {MAX_DOMAIN_TOOL_CALLS} entries")
+        if evidence is not None and not isinstance(evidence, Mapping):
+            raise ArgumentError("capability result evidence must be a mapping or None")
+        records = [item.record if isinstance(item, AutonomousCapabilityExecutionResult) else item for item in results]
+        if any(not isinstance(record, AutonomousCapabilityExecutionRecord) for record in records):
+            raise ArgumentError("capability result batches must contain execution results or records")
+        call_ids = [record.call_id for record in records]
+        request_digests = [record.request_digest for record in records]
+        unique_call_ids = {call_id for call_id in call_ids if call_ids.count(call_id) == 1}
+        evidence_by_key = {} if evidence is None else dict(evidence)
+        valid_keys = set(request_digests).union(unique_call_ids)
+        if set(evidence_by_key).difference(valid_keys):
+            raise ArgumentError("capability result evidence contains an unknown result identity")
+        for key, packet in evidence_by_key.items():
+            if not isinstance(key, str) or not isinstance(packet, Mapping):
+                raise ArgumentError("capability result evidence must map identities to mappings")
+            _safe_json(f"capability result evidence for {key}", dict(packet), maximum=MAX_TOOL_EVALUATION_EVIDENCE_BYTES)
+        state: Mapping[str, Any] | None = bandit_state
+        evaluations: list[Mapping[str, Any]] = []
+        by_domain: dict[str, int] = {}
+        by_status: dict[str, int] = {}
+        for result, record in zip(results, records):
+            packet = evidence_by_key.get(record.request_digest)
+            if packet is None and record.call_id in unique_call_ids:
+                packet = evidence_by_key.get(record.call_id)
+            report = self.evaluate_capability_result(
+                result,
+                evidence=packet,
+                allow_reconciliation=allow_reconciliation,
+                controller=controller,
+                bandit_state=state,
+                bandit_updater=bandit_updater,
+                ledger=ledger,
+            )
+            evaluations.extend(report.evaluations)
+            state = report.next_bandit_state
+            by_domain[record.domain] = by_domain.get(record.domain, 0) + 1
+            by_status[record.status] = by_status.get(record.status, 0) + 1
+        normalized_state = {} if state is None else dict(state)
+        return AutonomousToolLearningReport(
+            status="completed" if results else "no_receipts",
+            receipts=len(results),
+            evaluations=tuple(evaluations),
+            by_domain=dict(sorted(by_domain.items())),
+            by_status=dict(sorted(by_status.items())),
+            next_bandit_state=normalized_state,
+            learning_digest=content_digest(evaluations),
+        )
 
     def evaluate_receipts(
         self,

@@ -106,6 +106,13 @@ labels, evidence completeness, and replay identity. `execute_capability_batch(..
 `restore_capability_journal()` rehydrates completed replay barriers without replaying adapters.
 Independent evaluator evidence remains required before online-learning or bandit credit.
 
+`evaluate_capability_execution(...)` and `evaluate_capability_executions(...)` complete this
+boundary: they send only metadata/digests and bounded caller evidence to an explicit evaluator,
+settle a value-only bandit update, and use the learning ledger as a restart-safe idempotency
+barrier. `reconciliation_required` results cannot receive credit until the caller explicitly
+resolves the uncertain effect. Adapter values, prompts, arguments, credentials, and raw evidence
+are never passed to the evaluator or retained in the settlement report.
+
 The shared caller-owned bandit state supports `ucb1`, `epsilon_greedy`, and deterministic
 `thompson_sampling` policies. Thompson selection forms a fractional Beta posterior from explicit
 evaluator rewards, emits posterior metadata for audit/replay, and still respects capability,
