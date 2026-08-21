@@ -3195,6 +3195,18 @@ be kept in caller-controlled storage and explicitly rehydrated after restart. Du
 should atomically create a receipt for a key and keep the receipt store alongside the learning and
 cycle journals, while private execution material remains in a separately access-controlled store.
 
+The TypeScript façade also provides a caller-owned feedback outbox for deployments that need a
+worker/restart boundary across evaluator, learner, and memory stores. `enqueueRunSettlement()` and
+`enqueueTrajectorySettlement()` persist normalized evaluator values plus target/request digests;
+`dispatchFeedback()` claims commands with a bounded lease, invokes the existing receipt-idempotent
+settlement, and acknowledges the result by digest. The `AutonomousLearningFeedbackOutboxStore`
+contract is intentionally adapter-shaped: production implementations should make `claim`,
+`markApplied`, and `markFailed` conditional/atomic in the caller's database. Expired leases can be
+claimed by another worker, transient failures use bounded backoff, and malformed/conflicting
+commands fail closed. The outbox is value-only and never stores task text, prompts, provider
+responses, credentials, tool arguments, or raw evidence, so replay after a crash can repair the
+learning/memory commit without replaying provider work or double-crediting the bandit.
+
 ### Evidence integrity and independent evaluator mesh
 
 The TypeScript workflow evaluator derives its evidence identity from a canonical packet: stage

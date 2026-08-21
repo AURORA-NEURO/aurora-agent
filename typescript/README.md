@@ -966,6 +966,19 @@ prompts, responses, credentials, tool arguments, raw results, and other private 
 the cross-domain result itself is never persisted in a trajectory receipt and must be rehydrated by
 the caller.
 
+For applications that need a worker boundary across those stores, `AutonomousLearningController`
+also exposes `enqueueRunSettlement()`, `enqueueTrajectorySettlement()`, and `dispatchFeedback()`.
+The caller supplies `feedbackOutbox` implementing `AutonomousLearningFeedbackOutboxStore`; the
+in-memory implementation is a bounded test/single-worker model, while a production adapter should
+implement `claim()` and the status transitions with a conditional database update or equivalent
+lease. Commands contain only normalized evaluator values, target/request digests, and a remote-mode
+flag. Dispatch leases a command, applies the existing receipt-idempotent settlement, and marks the
+command applied by result digest. A worker crash after learner credit but before acknowledgement is
+safe to retry; transient failures are retried with bounded exponential backoff, while malformed or
+conflicting commands become terminal failures. Lease ownership prevents two workers from applying
+the same command concurrently, and no outbox command retains task text, prompts, responses,
+credentials, tool arguments, or raw evidence.
+
 Workflow evaluation also verifies evidence identity instead of trusting a caller-provided digest.
 Stage identifiers and signal keys are normalized into an order-independent evidence packet, hashed
 with SHA-256, and compared with any supplied `evidence_digest`; a mismatch refuses evaluation before

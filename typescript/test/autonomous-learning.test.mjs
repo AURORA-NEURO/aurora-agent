@@ -10,6 +10,7 @@ import {
   CredentialStore,
   InMemoryAutonomousLearningEpisodeStore,
   InMemoryAutonomousLearningSettlementReceiptStore,
+  InMemoryAutonomousLearningFeedbackOutboxStore,
   InMemoryAutonomousLearningStateStore,
   InMemoryAutonomousLearningTrajectoryStore,
   AutonomousLearningPersistenceCoordinator,
@@ -303,6 +304,66 @@ test("receipt publication recovers a transient journal failure without double-cr
   assert.equal(recovered.episode.status, "settled");
   assert.equal(agent.learner.snapshot().generation, 1);
   assert.equal(durable.rows().length, 1);
+});
+
+test("feedback outbox dispatches evaluator settlement exactly once across worker leases and restart", async () => {
+  const agent = await learningAgent();
+  const episodes = new InMemoryAutonomousLearningEpisodeStore();
+  const receipts = new InMemoryAutonomousLearningSettlementReceiptStore();
+  const outbox = new InMemoryAutonomousLearningFeedbackOutboxStore();
+  const controller = new AutonomousLearningController(agent, { episodes, settlementReceipts: receipts, feedbackOutbox: outbox });
+  const run = await agent.run("Dispatch this evaluator packet through a durable queue.", { domain: "coding", approveProviderCall: true });
+  await controller.prepareRun(run, { episodeId: "outbox-episode-1" });
+  const command = await controller.enqueueRunSettlement("outbox-episode-1", { evaluator_id: "outbox-reviewer", evaluator_version: "1", reward: 0.84, passed: true });
+  assert.equal(command.status, "pending");
+  assert.equal(agent.learner.snapshot().generation, 0);
+  assert.doesNotMatch(JSON.stringify(command), /Dispatch this evaluator packet|provider response/);
+  const held = outbox.claim(command.command_id, "worker-a", 30_000, command.created_at);
+  assert.equal(held.status, "leased");
+  assert.equal(outbox.claim(command.command_id, "worker-b", 30_000, command.created_at), null);
+  const released = outbox.markFailed(command.command_id, "worker-a", "WorkerShutdown", true, command.created_at);
+  assert.equal(released.status, "pending");
+  const dispatch = await controller.dispatchFeedback({ workerId: "worker-b", now: released.available_at, leaseMs: 30_000 });
+  assert.equal(dispatch.applied, 1);
+  assert.equal(dispatch.failed, 0);
+  assert.equal(dispatch.rows[0].result_digest.length, 64);
+  assert.equal(agent.learner.snapshot().generation, 1);
+  assert.equal(episodes.load("outbox-episode-1").status, "settled");
+  const restarted = new AutonomousLearningController(agent, { episodes, settlementReceipts: receipts, feedbackOutbox: outbox });
+  const replay = await restarted.dispatchFeedback({ workerId: "worker-c", now: released.available_at + 60_000 });
+  assert.equal(replay.inspected, 0);
+  assert.equal(outbox.load(command.command_id).status, "applied");
+  assert.equal(agent.learner.snapshot().generation, 1);
+});
+
+test("feedback outbox retries a post-credit journal failure through an idempotent receipt", async () => {
+  const agent = await learningAgent();
+  const episodes = new InMemoryAutonomousLearningEpisodeStore();
+  const durableReceipts = new InMemoryAutonomousLearningSettlementReceiptStore();
+  let failNextWrite = true;
+  const receipts = {
+    load: (key) => durableReceipts.load(key),
+    save: (receipt) => {
+      if (failNextWrite) {
+        failNextWrite = false;
+        throw new Error("temporary outbox journal failure");
+      }
+      return durableReceipts.save(receipt);
+    },
+  };
+  const outbox = new InMemoryAutonomousLearningFeedbackOutboxStore();
+  const controller = new AutonomousLearningController(agent, { episodes, settlementReceipts: receipts, feedbackOutbox: outbox });
+  const run = await agent.run("Retry this value-only evaluator settlement.", { domain: "coding", approveProviderCall: true });
+  await controller.prepareRun(run, { episodeId: "outbox-retry-1" });
+  const command = await controller.enqueueRunSettlement("outbox-retry-1", { evaluator_id: "outbox-retry-reviewer", evaluator_version: "1", reward: 0.61, passed: true });
+  const first = await controller.dispatchFeedback({ workerId: "worker-a", now: command.created_at });
+  assert.equal(first.failed, 1);
+  assert.equal(outbox.load(command.command_id).status, "pending");
+  assert.equal(agent.learner.snapshot().generation, 1);
+  const second = await controller.dispatchFeedback({ workerId: "worker-a", now: command.created_at + 1_000 });
+  assert.equal(second.applied, 1);
+  assert.equal(agent.learner.snapshot().generation, 1);
+  assert.equal(durableReceipts.rows().length, 1);
 });
 
 test("trajectory receipts replay all delayed-credit settlements without provider or learner replay", async () => {

@@ -10,7 +10,7 @@ import {
 } from "./autonomous.js";
 import type { AutonomousWorkflowExecutionResult } from "./workflow-execution.js";
 import type { AutonomousEpisodicMemoryStore } from "./autonomous-memory.js";
-import { digestJson } from "./tooling.js";
+import { digestJson, digestJsonSync } from "./tooling.js";
 import type {
   BrainBanditState,
   BrainBanditContext,
@@ -27,9 +27,11 @@ export const AUTONOMOUS_LEARNING_EPISODE_SCHEMA = "bioprism-typescript-autonomou
 export const AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA = "bioprism-typescript-autonomous-learning-trajectory/0.1" as const;
 export const AUTONOMOUS_LEARNING_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-learning-snapshot/0.1" as const;
 export const AUTONOMOUS_LEARNING_SETTLEMENT_RECEIPT_SCHEMA = "bioprism-typescript-autonomous-learning-settlement-receipt/0.1" as const;
+export const AUTONOMOUS_LEARNING_FEEDBACK_OUTBOX_SCHEMA = "bioprism-typescript-autonomous-learning-feedback-outbox/0.1" as const;
 export const AUTONOMOUS_EVALUATOR_MESH_SCHEMA = "bioprism-typescript-autonomous-evaluator-mesh/0.1" as const;
 export const AUTONOMOUS_LEARNING_MAX_STAGES = 64;
 export const AUTONOMOUS_LEARNING_MAX_TRAJECTORY_STEPS = 32;
+export const AUTONOMOUS_LEARNING_MAX_FEEDBACK_OUTBOX = 8_192;
 
 type Digest = string;
 
@@ -189,6 +191,77 @@ export interface AutonomousLearningSettlementReceipt extends JsonObject {
 export interface AutonomousLearningSettlementReceiptStore {
   load(idempotencyKey: string): Promise<AutonomousLearningSettlementReceipt | null> | AutonomousLearningSettlementReceipt | null;
   save(receipt: AutonomousLearningSettlementReceipt): Promise<void> | void;
+}
+
+export type AutonomousLearningFeedbackOutboxPayload =
+  | {
+    operation: "single_run";
+    episode_id: string;
+    reward_input: AutonomousEvaluatorRewardInput;
+    credited_reward: number;
+  }
+  | {
+    operation: "trajectory";
+    trajectory_id: string;
+    rewards: Record<string, AutonomousEvaluatorRewardInput>;
+  };
+
+/**
+ * A value-only command which lets an application coordinate evaluator feedback across process
+ * restarts. The payload intentionally contains evaluator values and digests only; it never
+ * contains a prompt, provider response, credential, tool argument, or raw evidence body.
+ */
+export interface AutonomousLearningFeedbackOutboxCommand extends JsonObject {
+  schema: typeof AUTONOMOUS_LEARNING_FEEDBACK_OUTBOX_SCHEMA;
+  command_id: string;
+  operation: "single_run" | "trajectory";
+  target_id: string;
+  target_digest: Digest;
+  request_digest: Digest;
+  remote: boolean;
+  payload: AutonomousLearningFeedbackOutboxPayload;
+  status: "pending" | "leased" | "applied" | "failed";
+  attempts: number;
+  available_at: number;
+  lease_owner: string | null;
+  lease_until: number | null;
+  last_error_class: string | null;
+  result_digest: Digest | null;
+  created_at: number;
+  updated_at: number;
+  command_digest: Digest;
+  retention: typeof PRIVATE_RETENTION;
+  secret_material: "never_returned";
+}
+
+export interface AutonomousLearningFeedbackOutboxStore {
+  load(commandId: string): Promise<AutonomousLearningFeedbackOutboxCommand | null> | AutonomousLearningFeedbackOutboxCommand | null;
+  save(command: AutonomousLearningFeedbackOutboxCommand): Promise<void> | void;
+  pending(limit?: number, now?: number): Promise<AutonomousLearningFeedbackOutboxCommand[]> | AutonomousLearningFeedbackOutboxCommand[];
+  claim(commandId: string, workerId: string, leaseMs: number, now?: number): Promise<AutonomousLearningFeedbackOutboxCommand | null> | AutonomousLearningFeedbackOutboxCommand | null;
+  markApplied(commandId: string, workerId: string, resultDigest: Digest, now?: number): Promise<AutonomousLearningFeedbackOutboxCommand> | AutonomousLearningFeedbackOutboxCommand;
+  markFailed(commandId: string, workerId: string, errorClass: string, retryable: boolean, now?: number): Promise<AutonomousLearningFeedbackOutboxCommand> | AutonomousLearningFeedbackOutboxCommand;
+}
+
+export interface AutonomousLearningFeedbackOutboxDispatchRow extends JsonObject {
+  command_id: string;
+  operation: "single_run" | "trajectory";
+  status: "applied" | "failed" | "leased_elsewhere";
+  attempts: number;
+  result_digest: Digest | null;
+  error_class: string | null;
+}
+
+export interface AutonomousLearningFeedbackOutboxDispatch extends JsonObject {
+  schema: typeof AUTONOMOUS_LEARNING_FEEDBACK_OUTBOX_SCHEMA;
+  worker_id: string;
+  inspected: number;
+  applied: number;
+  failed: number;
+  leased_elsewhere: number;
+  rows: AutonomousLearningFeedbackOutboxDispatchRow[];
+  retention: typeof PRIVATE_RETENTION;
+  secret_material: "never_returned";
 }
 
 export interface AutonomousLearningStateStore {
@@ -385,6 +458,106 @@ function assertRewardInput(value: AutonomousEvaluatorRewardInput): void {
   if (value.feedback_digest !== undefined) boundedDigest("evaluator feedback_digest", value.feedback_digest, true);
   if (value.evidence_digest !== undefined) boundedDigest("evaluator evidence_digest", value.evidence_digest, true);
   if (value.failure_class !== undefined && value.failure_class !== null) boundedIdentifier("evaluator failure_class", value.failure_class);
+}
+
+function normalizeRewardInput(value: AutonomousEvaluatorRewardInput): AutonomousEvaluatorRewardInput {
+  assertRewardInput(value);
+  return {
+    evaluator_id: value.evaluator_id,
+    evaluator_version: value.evaluator_version,
+    reward: value.reward,
+    passed: value.passed,
+    failed: value.failed ?? !value.passed,
+    feedback_digest: value.feedback_digest ?? null,
+    failure_class: value.failure_class ?? null,
+    evidence_digest: value.evidence_digest ?? null,
+  };
+}
+
+function boundedOutboxTimestamp(name: string, value: unknown): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) throw new ArgumentError(`${name} must be a non-negative safe integer timestamp`);
+  return value;
+}
+
+function boundedOutboxAttempts(value: unknown): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0 || value > 1_000_000) throw new ArgumentError("feedback outbox attempts are outside their bounds");
+  return value;
+}
+
+function assertExactKeys(value: object, allowed: readonly string[], name: string): void {
+  const permitted = new Set(allowed);
+  const unexpected = Object.keys(value).filter((key) => !permitted.has(key));
+  if (unexpected.length) throw new ArgumentError(`${name} contains unsupported fields`);
+}
+
+function assertRewardInputKeys(value: unknown, name: string): void {
+  if (!isObject(value)) throw new ArgumentError(`${name} is malformed`);
+  assertExactKeys(value, ["evaluator_id", "evaluator_version", "reward", "passed", "failed", "feedback_digest", "failure_class", "evidence_digest"], name);
+}
+
+function assertFeedbackOutboxPayload(value: unknown): asserts value is AutonomousLearningFeedbackOutboxPayload {
+  if (!isObject(value) || (value.operation !== "single_run" && value.operation !== "trajectory")) throw new ArgumentError("feedback outbox payload is malformed");
+  if (value.operation === "single_run") {
+    assertExactKeys(value, ["operation", "episode_id", "reward_input", "credited_reward"], "feedback outbox single-run payload");
+    boundedIdentifier("feedback outbox episode_id", value.episode_id);
+    assertRewardInputKeys(value.reward_input, "feedback outbox reward_input");
+    normalizeRewardInput(value.reward_input as AutonomousEvaluatorRewardInput);
+    boundedReward("feedback outbox credited_reward", value.credited_reward);
+  } else {
+    assertExactKeys(value, ["operation", "trajectory_id", "rewards"], "feedback outbox trajectory payload");
+    boundedIdentifier("feedback outbox trajectory_id", value.trajectory_id);
+    if (!isObject(value.rewards)) throw new ArgumentError("feedback outbox trajectory rewards are malformed");
+    const rewardIds = Object.keys(value.rewards);
+    if (rewardIds.length < 1 || rewardIds.length > AUTONOMOUS_LEARNING_MAX_TRAJECTORY_STEPS) throw new ArgumentError("feedback outbox trajectory rewards are outside their bounds");
+    for (const episodeId of rewardIds) {
+      boundedIdentifier("feedback outbox reward episode_id", episodeId);
+      assertRewardInputKeys(value.rewards[episodeId], `feedback outbox reward ${episodeId}`);
+      normalizeRewardInput(value.rewards[episodeId] as AutonomousEvaluatorRewardInput);
+    }
+  }
+  assertValueOnlySettlement(value);
+}
+
+function assertFeedbackOutboxCommandShape(value: unknown): asserts value is AutonomousLearningFeedbackOutboxCommand {
+  if (!isObject(value) || value.schema !== AUTONOMOUS_LEARNING_FEEDBACK_OUTBOX_SCHEMA || !isObject(value.payload)) throw new ArgumentError("feedback outbox command is malformed");
+  assertExactKeys(value, ["schema", "command_id", "operation", "target_id", "target_digest", "request_digest", "remote", "payload", "status", "attempts", "available_at", "lease_owner", "lease_until", "last_error_class", "result_digest", "created_at", "updated_at", "command_digest", "retention", "secret_material"], "feedback outbox command");
+  boundedIdentifier("feedback outbox command_id", value.command_id);
+  if (value.operation !== "single_run" && value.operation !== "trajectory") throw new ArgumentError("feedback outbox operation is malformed");
+  boundedIdentifier("feedback outbox target_id", value.target_id);
+  boundedDigest("feedback outbox target_digest", value.target_digest);
+  boundedDigest("feedback outbox request_digest", value.request_digest);
+  if (typeof value.remote !== "boolean") throw new ArgumentError("feedback outbox remote flag is malformed");
+  assertFeedbackOutboxPayload(value.payload);
+  if (value.payload.operation !== value.operation) throw new ArgumentError("feedback outbox payload operation does not match command");
+  boundedOutboxAttempts(value.attempts);
+  boundedOutboxTimestamp("feedback outbox available_at", value.available_at);
+  if (value.lease_owner !== null) boundedIdentifier("feedback outbox lease_owner", value.lease_owner);
+  if (value.lease_until !== null) boundedOutboxTimestamp("feedback outbox lease_until", value.lease_until);
+  if (value.status !== "pending" && value.status !== "leased" && value.status !== "applied" && value.status !== "failed") throw new ArgumentError("feedback outbox status is malformed");
+  if (value.status === "leased" && (value.lease_owner === null || value.lease_until === null)) throw new ArgumentError("leased feedback outbox command must have an active lease");
+  if (value.status !== "leased" && value.lease_owner !== null) throw new ArgumentError("non-leased feedback outbox command cannot retain a lease owner");
+  boundedDigest("feedback outbox result_digest", value.result_digest, true);
+  if (value.last_error_class !== null) boundedIdentifier("feedback outbox error class", value.last_error_class);
+  const createdAt = boundedOutboxTimestamp("feedback outbox created_at", value.created_at);
+  const updatedAt = boundedOutboxTimestamp("feedback outbox updated_at", value.updated_at);
+  if (updatedAt < createdAt) throw new ArgumentError("feedback outbox updated_at cannot precede created_at");
+  if (value.retention !== PRIVATE_RETENTION || value.secret_material !== "never_returned") throw new ArgumentError("feedback outbox retention contract is malformed");
+  const { command_digest: observed, ...descriptor } = value;
+  boundedDigest("feedback outbox command_digest", observed);
+  if (digestJsonSync(descriptor) !== observed) throw new ArgumentError("feedback outbox command digest does not match");
+}
+
+function refreshFeedbackOutboxCommand(command: AutonomousLearningFeedbackOutboxCommand): AutonomousLearningFeedbackOutboxCommand {
+  const { command_digest: _ignored, ...descriptor } = command;
+  return { ...descriptor, command_digest: digestJsonSync(descriptor) };
+}
+
+function feedbackOutboxErrorClass(error: unknown): string {
+  return error instanceof Error && error.constructor.name.trim() ? error.constructor.name : "FeedbackSettlementError";
+}
+
+function feedbackOutboxRetryable(error: unknown): boolean {
+  return !(error instanceof ArgumentError);
 }
 
 function requiredSignalsFor(execution: AutonomousWorkflowExecutionResult): string[] {
@@ -757,6 +930,111 @@ export class InMemoryAutonomousLearningSettlementReceiptStore implements Autonom
   }
 }
 
+/**
+ * Bounded process-local feedback outbox. Durable deployments should implement the same contract
+ * with a conditional update/lease in their database; this implementation is useful for tests and
+ * single-worker applications and deliberately models the same claim semantics.
+ */
+export class InMemoryAutonomousLearningFeedbackOutboxStore implements AutonomousLearningFeedbackOutboxStore {
+  private readonly commands = new Map<string, AutonomousLearningFeedbackOutboxCommand>();
+
+  load(commandId: string): AutonomousLearningFeedbackOutboxCommand | null {
+    const id = boundedIdentifier("feedback outbox command_id", commandId);
+    const command = this.commands.get(id);
+    if (command) assertFeedbackOutboxCommandShape(command);
+    return command ? clone(command) : null;
+  }
+
+  save(command: AutonomousLearningFeedbackOutboxCommand): void {
+    assertFeedbackOutboxCommandShape(command);
+    const prior = this.commands.get(command.command_id);
+    if (prior && (prior.target_digest !== command.target_digest || prior.request_digest !== command.request_digest || prior.operation !== command.operation)) {
+      throw new ArgumentError(`feedback outbox command ${command.command_id} conflicts with an existing identity`);
+    }
+    if (this.commands.size >= AUTONOMOUS_LEARNING_MAX_FEEDBACK_OUTBOX && !prior) throw new ArgumentError("feedback outbox is full");
+    this.commands.set(command.command_id, clone(command));
+  }
+
+  pending(limit = 64, now = Date.now()): AutonomousLearningFeedbackOutboxCommand[] {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > AUTONOMOUS_LEARNING_MAX_FEEDBACK_OUTBOX) throw new ArgumentError("feedback outbox pending limit is outside its bounds");
+    boundedOutboxTimestamp("feedback outbox pending now", now);
+    return [...this.commands.values()]
+      .filter((command) => command.status === "pending" || (command.status === "leased" && (command.lease_until ?? 0) <= now))
+      .filter((command) => command.available_at <= now)
+      .sort((left, right) => left.created_at - right.created_at || left.command_id.localeCompare(right.command_id))
+      .slice(0, limit)
+      .map((command) => clone(command));
+  }
+
+  claim(commandId: string, workerId: string, leaseMs: number, now = Date.now()): AutonomousLearningFeedbackOutboxCommand | null {
+    const id = boundedIdentifier("feedback outbox command_id", commandId);
+    const owner = boundedIdentifier("feedback outbox worker_id", workerId);
+    if (!Number.isSafeInteger(leaseMs) || leaseMs < 1 || leaseMs > 10 * 60_000) throw new ArgumentError("feedback outbox leaseMs is outside its bounds");
+    boundedOutboxTimestamp("feedback outbox claim now", now);
+    const prior = this.commands.get(id);
+    if (!prior) throw new ArgumentError(`feedback outbox command ${id} was not found`);
+    if (prior.status === "applied" || prior.status === "failed") return null;
+    if (prior.status === "leased" && (prior.lease_until ?? 0) > now) return null;
+    const claimed = refreshFeedbackOutboxCommand({
+      ...prior,
+      status: "leased",
+      attempts: prior.attempts + 1,
+      lease_owner: owner,
+      lease_until: now + leaseMs,
+      updated_at: now,
+    });
+    assertFeedbackOutboxCommandShape(claimed);
+    this.commands.set(id, clone(claimed));
+    return clone(claimed);
+  }
+
+  markApplied(commandId: string, workerId: string, resultDigest: Digest, now = Date.now()): AutonomousLearningFeedbackOutboxCommand {
+    const id = boundedIdentifier("feedback outbox command_id", commandId);
+    const owner = boundedIdentifier("feedback outbox worker_id", workerId);
+    boundedDigest("feedback outbox result_digest", resultDigest);
+    boundedOutboxTimestamp("feedback outbox applied now", now);
+    const prior = this.commands.get(id);
+    if (!prior) throw new ArgumentError(`feedback outbox command ${id} was not found`);
+    if (prior.status === "applied") {
+      if (prior.result_digest !== resultDigest) throw new ArgumentError(`feedback outbox command ${id} has a conflicting result digest`);
+      return clone(prior);
+    }
+    if (prior.status !== "leased" || prior.lease_owner !== owner) throw new ArgumentError(`feedback outbox command ${id} is not leased by this worker`);
+    const applied = refreshFeedbackOutboxCommand({ ...prior, status: "applied", lease_owner: null, lease_until: null, last_error_class: null, result_digest: resultDigest, updated_at: now });
+    assertFeedbackOutboxCommandShape(applied);
+    this.commands.set(id, clone(applied));
+    return clone(applied);
+  }
+
+  markFailed(commandId: string, workerId: string, errorClass: string, retryable: boolean, now = Date.now()): AutonomousLearningFeedbackOutboxCommand {
+    const id = boundedIdentifier("feedback outbox command_id", commandId);
+    const owner = boundedIdentifier("feedback outbox worker_id", workerId);
+    const boundedError = boundedIdentifier("feedback outbox error class", errorClass);
+    boundedOutboxTimestamp("feedback outbox failed now", now);
+    const prior = this.commands.get(id);
+    if (!prior) throw new ArgumentError(`feedback outbox command ${id} was not found`);
+    if (prior.status === "failed" && !retryable) return clone(prior);
+    if (prior.status !== "leased" || prior.lease_owner !== owner) throw new ArgumentError(`feedback outbox command ${id} is not leased by this worker`);
+    const delay = retryable ? Math.min(60_000, 250 * (2 ** Math.min(prior.attempts - 1, 8))) : 0;
+    const failed = refreshFeedbackOutboxCommand({
+      ...prior,
+      status: retryable ? "pending" : "failed",
+      available_at: now + delay,
+      lease_owner: null,
+      lease_until: null,
+      last_error_class: boundedError,
+      updated_at: now,
+    });
+    assertFeedbackOutboxCommandShape(failed);
+    this.commands.set(id, clone(failed));
+    return clone(failed);
+  }
+
+  rows(): AutonomousLearningFeedbackOutboxCommand[] {
+    return [...this.commands.values()].map((command) => clone(command));
+  }
+}
+
 /** Unified caller-owned state store with integrity-checked restart snapshots. */
 export class InMemoryAutonomousLearningStateStore implements AutonomousLearningStateStore {
   private readonly episodeStore = new InMemoryAutonomousLearningEpisodeStore();
@@ -857,12 +1135,14 @@ export class AutonomousLearningController {
   readonly episodes: AutonomousLearningEpisodeStore;
   readonly trajectories: AutonomousLearningTrajectoryStore;
   readonly settlementReceipts: AutonomousLearningSettlementReceiptStore;
+  /** Caller-owned queue for restart-safe evaluator settlement dispatch. */
+  readonly feedbackOutbox: AutonomousLearningFeedbackOutboxStore;
   /** Optional caller-owned memory sink used to attach explicit evaluator feedback to recallable episodes. */
   readonly memoryStore?: AutonomousEpisodicMemoryStore;
   readonly evaluator: AutonomousWorkflowEvaluator;
   readonly apiClient?: ApiClient;
 
-  constructor(agent: AutonomousAgent, options: { store?: AutonomousLearningStateStore; episodes?: AutonomousLearningEpisodeStore; trajectories?: AutonomousLearningTrajectoryStore; settlementReceipts?: AutonomousLearningSettlementReceiptStore; evaluator?: AutonomousWorkflowEvaluator; apiClient?: ApiClient; memoryStore?: AutonomousEpisodicMemoryStore } = {}) {
+  constructor(agent: AutonomousAgent, options: { store?: AutonomousLearningStateStore; episodes?: AutonomousLearningEpisodeStore; trajectories?: AutonomousLearningTrajectoryStore; settlementReceipts?: AutonomousLearningSettlementReceiptStore; feedbackOutbox?: AutonomousLearningFeedbackOutboxStore; evaluator?: AutonomousWorkflowEvaluator; apiClient?: ApiClient; memoryStore?: AutonomousEpisodicMemoryStore } = {}) {
     if (!agent || typeof agent.recordEvaluatorReward !== "function") throw new ArgumentError("learning controller requires an AutonomousAgent");
     this.agent = agent;
     const stateStore = options.store;
@@ -878,6 +1158,15 @@ export class AutonomousLearningController {
       markSettled: (trajectoryId: string, settlementDigest: Digest) => stateStore.markTrajectorySettled(trajectoryId, settlementDigest),
     } : new InMemoryAutonomousLearningTrajectoryStore());
     this.settlementReceipts = options.settlementReceipts ?? new InMemoryAutonomousLearningSettlementReceiptStore();
+    if (options.feedbackOutbox !== undefined && (
+      typeof options.feedbackOutbox.load !== "function"
+      || typeof options.feedbackOutbox.save !== "function"
+      || typeof options.feedbackOutbox.pending !== "function"
+      || typeof options.feedbackOutbox.claim !== "function"
+      || typeof options.feedbackOutbox.markApplied !== "function"
+      || typeof options.feedbackOutbox.markFailed !== "function"
+    )) throw new ArgumentError("learning feedbackOutbox is malformed");
+    this.feedbackOutbox = options.feedbackOutbox ?? new InMemoryAutonomousLearningFeedbackOutboxStore();
     this.memoryStore = options.memoryStore ?? agent.memoryStore;
     this.evaluator = options.evaluator ?? new AutonomousWorkflowEvaluator();
     this.apiClient = options.apiClient;
@@ -1052,14 +1341,152 @@ export class AutonomousLearningController {
     }
   }
 
+  private async makeFeedbackCommand(
+    command: Omit<AutonomousLearningFeedbackOutboxCommand, "command_digest">,
+  ): Promise<AutonomousLearningFeedbackOutboxCommand> {
+    const completed = { ...command, command_digest: await digestJson(command) };
+    assertFeedbackOutboxCommandShape(completed);
+    return clone(completed);
+  }
+
+  /** Queue one evaluator packet without mutating the learner or memory store. */
+  async enqueueRunSettlement(episodeId: string, input: AutonomousEvaluatorRewardInput, options: { creditedReward?: number; remote?: boolean; idempotencyKey?: string } = {}): Promise<AutonomousLearningFeedbackOutboxCommand> {
+    const id = boundedIdentifier("episodeId", episodeId);
+    const episode = await this.episodes.load(id);
+    if (!episode) throw new ArgumentError(`learning episode ${episodeId} was not found`);
+    const normalizedInput = normalizeRewardInput(input);
+    const creditedReward = boundedReward("credited reward", options.creditedReward ?? normalizedInput.reward);
+    const commandId = boundedIdentifier("feedback outbox idempotencyKey", options.idempotencyKey ?? `episode:${id}`);
+    const requestDigest = await digestJson({ episode_digest: episode.episode_digest, input: normalizedInput, credited_reward: creditedReward, remote: options.remote === true });
+    const existing = await this.feedbackOutbox.load(commandId);
+    if (existing) {
+      if (existing.operation !== "single_run" || existing.target_id !== id || existing.target_digest !== episode.episode_digest || existing.request_digest !== requestDigest) throw new ArgumentError(`feedback outbox command ${commandId} conflicts with a different learning settlement`);
+      return clone(existing);
+    }
+    const now = Date.now();
+    const command = await this.makeFeedbackCommand({
+      schema: AUTONOMOUS_LEARNING_FEEDBACK_OUTBOX_SCHEMA,
+      command_id: commandId,
+      operation: "single_run",
+      target_id: id,
+      target_digest: episode.episode_digest,
+      request_digest: requestDigest,
+      remote: options.remote === true,
+      payload: { operation: "single_run", episode_id: id, reward_input: normalizedInput, credited_reward: creditedReward },
+      status: "pending",
+      attempts: 0,
+      available_at: now,
+      lease_owner: null,
+      lease_until: null,
+      last_error_class: null,
+      result_digest: null,
+      created_at: now,
+      updated_at: now,
+      retention: PRIVATE_RETENTION,
+      secret_material: "never_returned",
+    });
+    await this.feedbackOutbox.save(command);
+    return clone(command);
+  }
+
+  /** Queue a delayed-credit trajectory settlement as one replay-safe outbox command. */
+  async enqueueTrajectorySettlement(trajectoryId: string, rewards: Record<string, AutonomousEvaluatorRewardInput>, options: { remote?: boolean; idempotencyKey?: string } = {}): Promise<AutonomousLearningFeedbackOutboxCommand> {
+    const id = boundedIdentifier("trajectoryId", trajectoryId);
+    const trajectory = await this.trajectories.load(id);
+    if (!trajectory) throw new ArgumentError(`learning trajectory ${trajectoryId} was not found`);
+    if (!isObject(rewards)) throw new ArgumentError("trajectory rewards must be an object keyed by episode ID");
+    const expected = new Set(trajectory.steps.map((step) => step.episode_id));
+    const supplied = Object.keys(rewards);
+    if (supplied.length !== expected.size || supplied.some((episodeId) => !expected.has(episodeId))) throw new ArgumentError("trajectory rewards must cover exactly every episode");
+    const normalizedRewards = Object.fromEntries(trajectory.steps.map((step) => [step.episode_id, normalizeRewardInput(rewards[step.episode_id]!) ]));
+    const commandId = boundedIdentifier("feedback outbox idempotencyKey", options.idempotencyKey ?? `trajectory:${id}`);
+    const requestDigest = await digestJson({ trajectory_digest: trajectory.trajectory_digest, rewards: normalizedRewards, remote: options.remote === true });
+    const existing = await this.feedbackOutbox.load(commandId);
+    if (existing) {
+      if (existing.operation !== "trajectory" || existing.target_id !== id || existing.target_digest !== trajectory.trajectory_digest || existing.request_digest !== requestDigest) throw new ArgumentError(`feedback outbox command ${commandId} conflicts with a different learning trajectory settlement`);
+      return clone(existing);
+    }
+    const now = Date.now();
+    const command = await this.makeFeedbackCommand({
+      schema: AUTONOMOUS_LEARNING_FEEDBACK_OUTBOX_SCHEMA,
+      command_id: commandId,
+      operation: "trajectory",
+      target_id: id,
+      target_digest: trajectory.trajectory_digest,
+      request_digest: requestDigest,
+      remote: options.remote === true,
+      payload: { operation: "trajectory", trajectory_id: id, rewards: normalizedRewards },
+      status: "pending",
+      attempts: 0,
+      available_at: now,
+      lease_owner: null,
+      lease_until: null,
+      last_error_class: null,
+      result_digest: null,
+      created_at: now,
+      updated_at: now,
+      retention: PRIVATE_RETENTION,
+      secret_material: "never_returned",
+    });
+    await this.feedbackOutbox.save(command);
+    return clone(command);
+  }
+
+  /**
+   * Claim and apply pending feedback commands. Settlement receipts make the operation safe when
+   * a worker crashes after applying learning but before acknowledging the outbox command.
+   */
+  async dispatchFeedback(options: { workerId?: string; limit?: number; leaseMs?: number; now?: number } = {}): Promise<AutonomousLearningFeedbackOutboxDispatch> {
+    const workerId = boundedIdentifier("feedback outbox workerId", options.workerId ?? "learning-worker");
+    const limit = options.limit ?? 64;
+    const leaseMs = options.leaseMs ?? 30_000;
+    const now = options.now ?? Date.now();
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > AUTONOMOUS_LEARNING_MAX_FEEDBACK_OUTBOX) throw new ArgumentError("feedback outbox dispatch limit is outside its bounds");
+    if (!Number.isSafeInteger(leaseMs) || leaseMs < 1 || leaseMs > 10 * 60_000) throw new ArgumentError("feedback outbox dispatch leaseMs is outside its bounds");
+    boundedOutboxTimestamp("feedback outbox dispatch now", now);
+    const candidates = await this.feedbackOutbox.pending(limit, now);
+    const rows: AutonomousLearningFeedbackOutboxDispatchRow[] = [];
+    for (const candidate of candidates) {
+      const claimed = await this.feedbackOutbox.claim(candidate.command_id, workerId, leaseMs, now);
+      if (!claimed) {
+        rows.push({ command_id: candidate.command_id, operation: candidate.operation, status: "leased_elsewhere", attempts: candidate.attempts, result_digest: candidate.result_digest, error_class: null });
+        continue;
+      }
+      try {
+        assertFeedbackOutboxCommandShape(claimed);
+        const settlement = claimed.payload.operation === "single_run"
+          ? await this.settleRun(claimed.payload.episode_id, claimed.payload.reward_input, { creditedReward: claimed.payload.credited_reward, remote: claimed.remote, idempotencyKey: claimed.command_id })
+          : await this.settleTrajectory(claimed.payload.trajectory_id, claimed.payload.rewards, { remote: claimed.remote, idempotencyKey: claimed.command_id });
+        const resultDigest = await digestJson(settlement);
+        const applied = await this.feedbackOutbox.markApplied(claimed.command_id, workerId, resultDigest, now);
+        rows.push({ command_id: applied.command_id, operation: applied.operation, status: "applied", attempts: applied.attempts, result_digest: applied.result_digest, error_class: null });
+      } catch (error) {
+        const errorClass = feedbackOutboxErrorClass(error);
+        const retryable = feedbackOutboxRetryable(error);
+        const failed = await this.feedbackOutbox.markFailed(claimed.command_id, workerId, errorClass, retryable, now);
+        rows.push({ command_id: failed.command_id, operation: failed.operation, status: "failed", attempts: failed.attempts, result_digest: failed.result_digest, error_class: failed.last_error_class });
+      }
+    }
+    return {
+      schema: AUTONOMOUS_LEARNING_FEEDBACK_OUTBOX_SCHEMA,
+      worker_id: workerId,
+      inspected: candidates.length,
+      applied: rows.filter((row) => row.status === "applied").length,
+      failed: rows.filter((row) => row.status === "failed").length,
+      leased_elsewhere: rows.filter((row) => row.status === "leased_elsewhere").length,
+      rows,
+      retention: PRIVATE_RETENTION,
+      secret_material: "never_returned",
+    };
+  }
+
   async settleRun(episodeId: string, input: AutonomousEvaluatorRewardInput, options: { creditedReward?: number; remote?: boolean; idempotencyKey?: string; memoryStore?: AutonomousEpisodicMemoryStore } = {}): Promise<AutonomousLearningSettlement> {
     const id = boundedIdentifier("episodeId", episodeId);
     const episode = await this.episodes.load(id);
     if (!episode) throw new ArgumentError(`learning episode ${episodeId} was not found`);
-    assertRewardInput(input);
-    const creditedReward = boundedReward("credited reward", options.creditedReward ?? input.reward);
+    const normalizedInput = normalizeRewardInput(input);
+    const creditedReward = boundedReward("credited reward", options.creditedReward ?? normalizedInput.reward);
     const idempotencyKey = boundedIdentifier("settlement idempotencyKey", options.idempotencyKey ?? `episode:${id}`);
-    const normalizedInput = { ...input, failed: input.failed ?? !input.passed, feedback_digest: input.feedback_digest ?? null, failure_class: input.failure_class ?? null, evidence_digest: input.evidence_digest ?? null };
     const requestDigest = await digestJson({ episode_digest: episode.episode_digest, input: normalizedInput, credited_reward: creditedReward, remote: options.remote === true });
     let priorReceipt: AutonomousLearningSettlementReceipt | null;
     try {
@@ -1079,14 +1506,14 @@ export class AutonomousLearningController {
     if (!this.agent.learner) throw new ArgumentError("learning settlement requires an AutonomousOnlineLearner on the agent");
     const creditedOutcomeDigest = await digestJson({ run_id: episode.run.run_id, outcome_digest: episode.run.outcome_digest });
     const assessment: BrainEvaluatorAssessment = {
-      evaluator_id: input.evaluator_id,
-      evaluator_version: input.evaluator_version,
+      evaluator_id: normalizedInput.evaluator_id,
+      evaluator_version: normalizedInput.evaluator_version,
       reward: creditedReward,
-      passed: input.passed,
-      failed: input.failed ?? !input.passed,
-      feedback_digest: input.feedback_digest ?? null,
-      failure_class: input.failure_class ?? null,
-      evidence_digest: input.evidence_digest ?? null,
+      passed: normalizedInput.passed,
+      failed: normalizedInput.failed ?? !normalizedInput.passed,
+      feedback_digest: normalizedInput.feedback_digest ?? null,
+      failure_class: normalizedInput.failure_class ?? null,
+      evidence_digest: normalizedInput.evidence_digest ?? null,
     };
     let nextState: BrainBanditState;
     let learningEvidence: BrainLearningEvidence | null = null;
@@ -1108,7 +1535,7 @@ export class AutonomousLearningController {
     } else {
       nextState = await this.agent.recordEvaluatorReward(armId, creditedReward, { failed: assessment.failed, outcomeDigest: creditedOutcomeDigest, contextDigest, context: learningContext });
     }
-    const settlementBase = { evaluation_digest: input.evidence_digest ?? null, reward: input.reward, credited_reward: creditedReward, next_generation: boundedGeneration(nextState.generation ?? 0), settled_at: Date.now() };
+    const settlementBase = { evaluation_digest: normalizedInput.evidence_digest ?? null, reward: normalizedInput.reward, credited_reward: creditedReward, next_generation: boundedGeneration(nextState.generation ?? 0), settled_at: Date.now() };
     const settlement: AutonomousLearningSettlementMetadata = { ...settlementBase, settlement_digest: await digestJson(settlementBase) };
     const projectedEpisode = { ...episode, status: "settled" as const, settlement };
     const memoryEvaluation = await this.recordMemoryEvaluation(episode, input, options.memoryStore ?? this.memoryStore);
@@ -1155,11 +1582,10 @@ export class AutonomousLearningController {
     const expected = new Set(trajectory.steps.map((step) => step.episode_id));
     const supplied = Object.keys(rewards);
     if (supplied.length !== expected.size || supplied.some((id) => !expected.has(id))) throw new ArgumentError("trajectory rewards must cover exactly every episode");
-    for (const step of trajectory.steps) assertRewardInput(rewards[step.episode_id]!);
+    for (const step of trajectory.steps) normalizeRewardInput(rewards[step.episode_id]!);
     const idempotencyKey = boundedIdentifier("trajectory settlement idempotencyKey", options.idempotencyKey ?? `trajectory:${id}`);
     const normalizedRewards = Object.fromEntries(trajectory.steps.map((step) => {
-      const reward = rewards[step.episode_id]!;
-      return [step.episode_id, { ...reward, failed: reward.failed ?? !reward.passed, feedback_digest: reward.feedback_digest ?? null, failure_class: reward.failure_class ?? null, evidence_digest: reward.evidence_digest ?? null }];
+      return [step.episode_id, normalizeRewardInput(rewards[step.episode_id]!)];
     }));
     const requestDigest = await digestJson({ trajectory_digest: trajectory.trajectory_digest, rewards: normalizedRewards, remote: options.remote === true });
     const priorReceipt = await this.loadReceipt(idempotencyKey, "trajectory", id, trajectory.trajectory_digest, requestDigest);
