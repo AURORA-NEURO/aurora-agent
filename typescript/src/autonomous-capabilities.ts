@@ -9,6 +9,10 @@ import type { AutonomousExecutionController } from "./autonomous-execution.js";
 import type { ProviderToolCall, ProviderToolResult } from "./llm.js";
 import { canonicalJson, digestJson } from "./tooling.js";
 import type { JsonObject, JsonValue } from "./types.js";
+import type {
+  AutonomousCapabilityJournalStore,
+} from "./autonomous-capability-persistence.js";
+import { validateAutonomousCapabilityExecutionRecord } from "./autonomous-capability-persistence.js";
 
 /** Stable schema for the adapter-to-evaluator capability boundary. */
 export const AUTONOMOUS_CAPABILITY_EXECUTION_SCHEMA = "bioprism-typescript-autonomous-capability-execution/0.1" as const;
@@ -259,6 +263,10 @@ function copyResult(result: AutonomousCapabilityExecutionResult, replay: Autonom
   };
 }
 
+function cloneRecord(record: AutonomousCapabilityExecutionRecord): AutonomousCapabilityExecutionRecord {
+  return structuredClone(record);
+}
+
 function commonDoesNotClaim(): string[] {
   return [
     "capability execution is not proof that the overall task succeeded",
@@ -278,13 +286,18 @@ function commonDoesNotClaim(): string[] {
 export class AutonomousCapabilityRuntime {
   private readonly runtime: AutonomousDomainToolRuntime;
   private readonly admitTool?: (tool: string) => boolean | string;
+  private readonly journal?: AutonomousCapabilityJournalStore;
   private readonly cache = new Map<string, CachedExecution>();
+  private readonly rehydratedByRequest = new Map<string, AutonomousCapabilityExecutionRecord>();
+  private readonly rehydratedByReplayKey = new Map<string, AutonomousCapabilityExecutionRecord>();
   private readonly history: AutonomousCapabilityExecutionRecord[] = [];
 
-  constructor(runtime: AutonomousDomainToolRuntime, options: { admitTool?: (tool: string) => boolean | string } = {}) {
+  constructor(runtime: AutonomousDomainToolRuntime, options: { admitTool?: (tool: string) => boolean | string; journal?: AutonomousCapabilityJournalStore } = {}) {
     if (!runtime || typeof runtime.authorizeAndExecute !== "function" || !runtime.registry) throw new ProviderRuntimeError("autonomous capability runtime requires a domain tool runtime");
+    if (options.journal !== undefined && (typeof options.journal.append !== "function" || typeof options.journal.find !== "function" || typeof options.journal.records !== "function")) throw new ProviderRuntimeError("autonomous capability journal is malformed");
     this.runtime = runtime;
     this.admitTool = options.admitTool;
+    this.journal = options.journal;
   }
 
   static async refusal(request: AutonomousCapabilityExecutionRequest, reason: string): Promise<AutonomousCapabilityExecutionResult> {
@@ -313,6 +326,18 @@ export class AutonomousCapabilityRuntime {
     if (cached) {
       if (cached.request_digest !== requestDigest) throw new ProviderRuntimeError("capability replay key collides with different request metadata");
       return copyResult(cached.result, "replayed");
+    }
+    const rehydrated = (replayKeyDigest === null ? undefined : this.rehydratedByReplayKey.get(replayKeyDigest)) ?? this.rehydratedByRequest.get(requestDigest);
+    if (rehydrated) {
+      if (rehydrated.request_digest !== requestDigest) throw new ProviderRuntimeError("rehydrated capability replay key collides with different request metadata");
+      const result: AutonomousCapabilityExecutionResult = {
+        schema: AUTONOMOUS_CAPABILITY_EXECUTION_SCHEMA,
+        record: rehydrated,
+        value: null,
+        value_retention: "transient_caller_value_only",
+        secret_material: "never_returned",
+      };
+      return this.recordResult(copyResult(result, "replayed"), false);
     }
 
     const started = Date.now();
@@ -452,11 +477,38 @@ export class AutonomousCapabilityRuntime {
     return this.history.map((record) => ({ ...record, observations: record.observations.map((observation) => ({ ...observation, limitations: [...observation.limitations] })), required_evidence_outputs: [...record.required_evidence_outputs], missing_evidence_outputs: [...record.missing_evidence_outputs], parent_evidence_digests: [...record.parent_evidence_digests], limitations: [...record.limitations], does_not_claim: [...record.does_not_claim] }));
   }
 
+  /** Rebuild metadata-only replay indexes after a process restart without redispatching tools. */
+  async rehydrate(): Promise<{ restored: number; replayable: number; value_retention: "transient_caller_value_only" }> {
+    if (!this.journal) return { restored: 0, replayable: 0, value_retention: "transient_caller_value_only" };
+    const rawRecords = await this.journal.records();
+    if (!Array.isArray(rawRecords) || rawRecords.length > 4_096) throw new ProviderRuntimeError("capability journal returned too many records");
+    const records = await Promise.all(rawRecords.map((record) => validateAutonomousCapabilityExecutionRecord(record)));
+    this.rehydratedByRequest.clear();
+    this.rehydratedByReplayKey.clear();
+    this.cache.clear();
+    this.history.length = 0;
+    for (const record of records) {
+      if (record.replay !== "fresh") throw new ProviderRuntimeError("capability journal returned a replayed record");
+      const prior = this.rehydratedByRequest.get(record.request_digest);
+      if (prior && await digestJson(prior) !== await digestJson(record)) throw new ProviderRuntimeError("capability journal contains conflicting request metadata");
+      this.rehydratedByRequest.set(record.request_digest, cloneRecord(record));
+      if (record.replay_key_digest !== null) {
+        const priorKey = this.rehydratedByReplayKey.get(record.replay_key_digest);
+        if (priorKey && priorKey.request_digest !== record.request_digest) throw new ProviderRuntimeError("capability journal contains a replay-key collision");
+        this.rehydratedByReplayKey.set(record.replay_key_digest, cloneRecord(record));
+      }
+      this.history.push(cloneRecord(record));
+    }
+    while (this.history.length > MAX_AUTONOMOUS_CAPABILITY_HISTORY) this.history.shift();
+    return { restored: records.length, replayable: this.rehydratedByRequest.size, value_retention: "transient_caller_value_only" };
+  }
+
   private async requestDigest(request: NormalizedRequest): Promise<string> {
     return digestJson({ schema: AUTONOMOUS_CAPABILITY_EXECUTION_SCHEMA, call_id: request.call_id, tool: request.tool, arguments_digest: await digestJson(request.arguments), workflow_context: request.workflow_context, input_digest: request.input_digest, subject_digest: request.subject_digest, parent_evidence_digests: request.parent_evidence_digests, replay_key_digest: request.replay_key === null ? null : await digestJson(request.replay_key), execution_id: request.execution_id });
   }
 
-  private recordResult(result: AutonomousCapabilityExecutionResult): AutonomousCapabilityExecutionResult {
+  private async recordResult(result: AutonomousCapabilityExecutionResult, persist = true): Promise<AutonomousCapabilityExecutionResult> {
+    if (persist && this.journal && result.record.replay === "fresh") await this.journal.append(result.record);
     this.history.push(result.record);
     while (this.history.length > MAX_AUTONOMOUS_CAPABILITY_HISTORY) this.history.shift();
     return result;

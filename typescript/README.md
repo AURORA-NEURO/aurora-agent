@@ -359,6 +359,34 @@ const capability = await agent.executeCapability({
 // Durable storage: capability.record; transient application use: capability.value.
 ```
 
+For restart-safe capability idempotency, provide a caller-owned
+`InMemoryAutonomousCapabilityJournalStore` in tests or implement
+`AutonomousCapabilityJournalStore` over the application database/queue. The journal accepts only
+fresh `AutonomousCapabilityExecutionRecord` metadata, verifies each row with a SHA-256 hash chain,
+rejects duplicate or conflicting request identities, and never stores arguments, prompts, raw values,
+credentials, or response content. `AutonomousCapabilityJournalPersistenceCoordinator` flushes and
+restores a complete digest-bound snapshot through a caller-owned persistence adapter:
+
+```typescript
+const journal = new InMemoryAutonomousCapabilityJournalStore();
+const agent = new AutonomousAgent(llm, {
+  toolCatalogue,
+  toolExecutor,
+  capabilityJournal: journal,
+});
+
+// On worker startup, after the caller restores the journal snapshot into `journal`:
+await agent.restoreCapabilityJournal();
+const replay = await agent.executeCapability(theSameRequest);
+// replay.record.replay === "replayed"; replay.value === null after a restart.
+```
+
+Restart replay deliberately returns no adapter value: only the output digest and evaluator-facing
+metadata are durable. This prevents a persistence layer from becoming an accidental raw-result
+store. If the transient value is required, the caller must retain it in a separately governed
+application store and bind that store to its own digest/provenance policy; the autonomous runtime
+will not redispatch a completed capability merely to reconstruct a discarded value.
+
 `AutonomousAgent` is the application-facing composition layer for the autonomous brain. It covers
 the twelve reviewed domains (`coding`, `browser`, `data`, `science`, `biomedical`,
 `neuroscience`, `operations`, `enterprise`, `multi_agent`, `multimodal`, `cross_domain`, and

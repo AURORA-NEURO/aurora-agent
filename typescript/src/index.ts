@@ -253,6 +253,25 @@ export type {
   AutonomousCapabilityReplayStatus,
 } from "./autonomous-capabilities.js";
 export {
+  AUTONOMOUS_CAPABILITY_JOURNAL_SCHEMA,
+  AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA,
+  AUTONOMOUS_CAPABILITY_JOURNAL_MAX_ENTRIES,
+  AUTONOMOUS_CAPABILITY_JOURNAL_MAX_SNAPSHOT_BYTES,
+  AutonomousCapabilityPersistenceError,
+  InMemoryAutonomousCapabilityJournalStore,
+  AutonomousCapabilityJournalPersistenceCoordinator,
+  validateAutonomousCapabilityExecutionRecord,
+  validateAutonomousCapabilityJournalEntry,
+  validateAutonomousCapabilityJournalSnapshot,
+} from "./autonomous-capability-persistence.js";
+export type {
+  AutonomousCapabilityJournalEntry,
+  AutonomousCapabilityJournalSnapshot,
+  AutonomousCapabilityJournalStore,
+  AutonomousCapabilityJournalSnapshotStore,
+  AutonomousCapabilityJournalSnapshotPersistence,
+} from "./autonomous-capability-persistence.js";
+export {
   AUTONOMOUS_API_TOOL_ADAPTER_SCHEMA,
   createAutonomousApiToolExecutor,
 } from "./autonomous-api-adapter.js";

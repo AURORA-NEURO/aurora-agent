@@ -17,6 +17,7 @@ import type {
   AutonomousCapabilityExecutionRequest,
   AutonomousCapabilityExecutionResult,
 } from "./autonomous-capabilities.js";
+import type { AutonomousCapabilityJournalStore } from "./autonomous-capability-persistence.js";
 import { AutonomousEffectBoundary, AutonomousEffectReconciliationRequiredError, type AutonomousEffectExecutionContext } from "./autonomous-effects.js";
 import type { AutonomousLearningController } from "./autonomous-learning.js";
 import {
@@ -692,6 +693,8 @@ export interface AutonomousAgentOptions {
   toolApprover?: DomainToolApprover;
   /** Optional caller-owned durable effect ledger used for idempotency and restart reconciliation. */
   effectBoundary?: AutonomousEffectBoundary;
+  /** Optional caller-owned metadata-only capability journal used for restart-safe replay. */
+  capabilityJournal?: AutonomousCapabilityJournalStore;
   learner?: AutonomousOnlineLearner;
   /** Optional caller-owned activation state machine; keys and raw prompts never enter its state. */
   activation?: AutonomousCapabilityActivation;
@@ -2457,6 +2460,7 @@ export class AutonomousAgent {
   private readonly toolExecutor?: DomainToolExecutor;
   private readonly toolApprover?: DomainToolApprover;
   private readonly effectBoundary?: AutonomousEffectBoundary;
+  private readonly capabilityJournal?: AutonomousCapabilityJournalStore;
   private domainToolRegistry?: AutonomousDomainToolRegistry;
   private domainToolRuntime?: AutonomousDomainToolRuntime;
   private capabilityRuntime?: AutonomousCapabilityRuntime;
@@ -2481,6 +2485,8 @@ export class AutonomousAgent {
       : undefined);
     this.toolApprover = options.toolApprover;
     this.effectBoundary = options.effectBoundary;
+    if (options.capabilityJournal !== undefined && (typeof options.capabilityJournal.append !== "function" || typeof options.capabilityJournal.find !== "function" || typeof options.capabilityJournal.records !== "function")) throw new ArgumentError("AutonomousAgent capabilityJournal is malformed");
+    this.capabilityJournal = options.capabilityJournal;
     const selector = options.selector ?? (this.modelHealthController ? this.modelHealthController.selector() : options.learner ? (request: AutonomousSelectionRequest) => options.learner!.select(request) : options.apiClient ? contextualSelector(options.apiClient) : this.modelHealthBridge ? this.modelHealthBridge.selector() : undefined);
     this.runtime = new AutonomousRuntime(llm, { selector });
   }
@@ -2633,6 +2639,13 @@ export class AutonomousAgent {
       };
     }
     return runtime.executeBatch(requests, options);
+  }
+
+  /** Restore metadata-only capability records and make completed calls replayable without redispatch. */
+  async restoreCapabilityJournal(): Promise<{ restored: number; replayable: number; value_retention: "transient_caller_value_only" }> {
+    const runtime = await this.ensureCapabilityRuntime();
+    if (!runtime) return { restored: 0, replayable: 0, value_retention: "transient_caller_value_only" };
+    return runtime.rehydrate();
   }
 
   /** Return metadata-only capability records produced by this agent instance. */
@@ -3772,6 +3785,7 @@ export class AutonomousAgent {
     if (this.toolExecutor) {
       this.domainToolRuntime = new AutonomousDomainToolRuntime(this.domainToolRegistry, this.toolExecutor, { approver: this.toolApprover, effectBoundary: this.effectBoundary });
       this.capabilityRuntime = new AutonomousCapabilityRuntime(this.domainToolRuntime, {
+        journal: this.capabilityJournal,
         admitTool: (tool) => {
           const gate = this.activationToolGate();
           return gate === null || gate.has(tool) || "activation_required";

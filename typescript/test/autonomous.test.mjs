@@ -7,6 +7,7 @@ import {
   AutonomousCapabilityActivation,
   AutonomousCapabilityActivationPersistenceCoordinator,
   AutonomousCapabilityActivationStore,
+  AutonomousCapabilityPersistenceError,
   AutonomousCapabilityRuntime,
   AutonomousCostBudgetError,
   AutonomousDomainToolRegistry,
@@ -15,6 +16,9 @@ import {
   AUTONOMOUS_API_TOOL_ADAPTER_SCHEMA,
   AUTONOMOUS_CAPABILITY_PLAN_SCHEMA,
   AUTONOMOUS_CAPABILITY_EXECUTION_SCHEMA,
+  InMemoryAutonomousCapabilityJournalStore,
+  AutonomousCapabilityJournalPersistenceCoordinator,
+  validateAutonomousCapabilityJournalSnapshot,
   AUTONOMOUS_READINESS_SCHEMA,
   CredentialStore,
   LLMRuntime,
@@ -504,6 +508,67 @@ test("capability execution fails closed, replays completed work, and makes batch
   assert.equal(batch.omitted_count, 1);
   assert.equal(batch.items[2].omission_reason, "stopped_after_failure");
   assert.equal(executions, 2);
+});
+
+test("capability journal rehydrates replay identity without retaining adapter values", async () => {
+  const profiles = await builtinAutonomousDomainProfiles();
+  const coding = profiles.find((profile) => profile.domain === "coding");
+  const binding = coding.tool_profile.bindings.find((row) => row.name === "conformance_run");
+  const definitions = [{ name: binding.name, description: "Conformance", inputSchema: { type: "object", additionalProperties: true } }];
+  const registry = await AutonomousDomainToolRegistry.create(await ToolCatalogue.fromDefinitions(definitions));
+  let executions = 0;
+  const executor = async () => { executions += 1; return { checked: true, transient: "never stored" }; };
+  const runtime = new AutonomousDomainToolRuntime(registry, executor);
+  const journal = new InMemoryAutonomousCapabilityJournalStore();
+  const capabilities = new AutonomousCapabilityRuntime(runtime, { journal });
+  const request = {
+    call_id: "journal-replay",
+    tool: binding.name,
+    arguments: { scope: "repository" },
+    workflow_context: { domain: "coding", workflow_id: coding.workflow.workflow_id, workflow_digest: coding.workflow.workflow_digest, stage_id: "scope" },
+    input_digest: await digestJson({ task: "journal restart" }),
+    replay_key: "journal-replay-key",
+  };
+  const first = await capabilities.execute(request);
+  assert.equal(first.record.status, "completed");
+  assert.equal(first.value.transient, "never stored");
+  const snapshot = await journal.snapshot();
+  assert.equal(snapshot.entries.length, 1);
+  assert.equal(snapshot.entries[0].record.replay, "fresh");
+  assert.equal(Object.prototype.hasOwnProperty.call(snapshot.entries[0].record, "value"), false);
+
+  const restoredJournal = new InMemoryAutonomousCapabilityJournalStore();
+  await restoredJournal.restore(snapshot);
+  const restarted = new AutonomousCapabilityRuntime(new AutonomousDomainToolRuntime(registry, executor), { journal: restoredJournal });
+  const restoreReceipt = await restarted.rehydrate();
+  assert.deepEqual(restoreReceipt, { restored: 1, replayable: 1, value_retention: "transient_caller_value_only" });
+  const replay = await restarted.execute(request);
+  assert.equal(replay.record.replay, "replayed");
+  assert.equal(replay.record.output_digest, first.record.output_digest);
+  assert.equal(replay.value, null);
+  assert.match(replay.value_retention, /transient/);
+  assert.equal(executions, 1, "rehydration must not redispatch the external tool");
+
+  const tampered = structuredClone(snapshot);
+  tampered.entries[0].record.value = { leaked: true };
+  await assert.rejects(() => validateAutonomousCapabilityJournalSnapshot(tampered), AutonomousCapabilityPersistenceError);
+
+  let persisted = null;
+  const coordinator = new AutonomousCapabilityJournalPersistenceCoordinator(journal, {
+    async read() { return persisted; },
+    async write(value) { persisted = structuredClone(value); },
+  });
+  const flushed = await coordinator.flush();
+  assert.equal(flushed.retention, "metadata_only");
+  assert.equal(flushed.snapshot_digest, snapshot.snapshot_digest);
+  const empty = new InMemoryAutonomousCapabilityJournalStore();
+  const restoreCoordinator = new AutonomousCapabilityJournalPersistenceCoordinator(empty, {
+    async read() { return persisted; },
+    async write() {},
+  });
+  const restored = await restoreCoordinator.restore();
+  assert.equal(restored.restored, true);
+  assert.equal(restored.entry_count, 1);
 });
 
 test("AutonomousAgent exposes capability records through its activation-aware runtime", async () => {

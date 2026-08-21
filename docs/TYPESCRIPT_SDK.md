@@ -1857,6 +1857,20 @@ truth. Completed requests are replay-safe within a bounded in-memory cache, whil
 `executeCapabilityBatch()` preserves ordered execution and records explicit omissions after a
 stop-on-failure decision. No provider key or raw prompt is needed by this layer.
 
+For process restarts, pass a caller-owned `AutonomousCapabilityJournalStore` through
+`AutonomousAgentOptions.capabilityJournal`. The exported
+`InMemoryAutonomousCapabilityJournalStore` is a bounded reference implementation; production
+applications should implement the same interface over their database or queue and use
+`AutonomousCapabilityJournalPersistenceCoordinator` to flush/restore the digest-bound snapshot.
+Each journal row is a SHA-256-linked `AutonomousCapabilityExecutionRecord`; validation rejects
+duplicate request identities, conflicting replay keys, unsupported fields, and any raw arguments,
+prompts, responses, output values, or credential-shaped material. Call
+`await agent.restoreCapabilityJournal()` after restoring the snapshot. A rehydrated request returns
+`record.replay: "replayed"` with `value: null` and the original output digest, so restart recovery
+never redispatches a completed external operation or turns the journal into a raw-result cache.
+The journal records failures and refusals as well as completions, preserving the evaluator’s ability
+to distinguish a prior refusal from an unattempted request.
+
 The live transport path is also first-class: when `AutonomousAgent` receives both an `ApiClient`
 and the exact `ToolCatalogue` used for planning, it creates
 `createAutonomousApiToolExecutor()` unless the caller supplies a custom executor. Each dispatch
