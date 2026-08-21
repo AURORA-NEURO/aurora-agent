@@ -103,9 +103,11 @@ from prism_sdk import (
 )
 
 connector_registry = AutonomousConnectorRegistry([registration])
+selection_plan = connector_registry.select_for_domains(("science",), capability="literature_search")
 connector_journal = AutonomousConnectorReceiptJournal("state/connector-receipts.jsonl")
 connector_runtime = AutonomousConnectorRuntime(connector_registry, receipt_store=connector_journal)
-result = connector_runtime.dispatch(
+result = connector_runtime.dispatch_from_plan(
+    selection_plan,
     AutonomousConnectorDispatchRequest(
         dispatch_id="evidence-dispatch-1",
         execution_id="run-1",
@@ -114,6 +116,7 @@ result = connector_runtime.dispatch(
         domains=("science",),
         capability="literature_search",
         request={"query": "caller-supplied transient query"},
+        selection_plan_digest=selection_plan.plan_digest,
         approved=True,
     )
 )
@@ -124,6 +127,14 @@ After a restart, dispatching the same execution/dispatch/call/attempt identity r
 provider-response cache. A retry must deliberately use a new `attempt_id` (and normally a new
 dispatch/call identity). The journal never claims distributed exactly-once delivery: external
 provider idempotency and cross-process locking remain caller-owned.
+
+`select_for_domains()` is the reviewable decision boundary before that dispatch. It deterministically
+selects the lexicographically first registered manifest for each requested domain/capability, retains
+all candidate and manifest digests for review, and binds the registry snapshot to `plan_digest`.
+`dispatch_from_plan()` re-verifies the live registry and requires the request's
+`selection_plan_digest`; a changed manifest, missing domain, or connector mismatch fails before the
+executor is called. This is deliberately deterministic and inspectable—provider health, cost,
+latency, and evaluator-driven connector ranking can be layered on later as caller-owned plan inputs.
 
 The registry never accepts a raw key and does not perform network I/O. A caller-owned executor
 can invoke the existing source-plan, provider-handoff, or external-payload APIs and return a

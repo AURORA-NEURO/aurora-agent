@@ -2758,6 +2758,16 @@ checks connector-kind/domain scope, and binds execution to the plan digest retur
 gateway. It does not accept a key or perform discovery; the configured `ApiClient` and any
 caller-owned credential session remain outside the autonomous metadata boundary.
 
+`AutonomousConnectorRegistry.select_for_domains()` is the explicit decision stage for connector
+routing. It produces a deterministic, digest-bound selection plan for every requested
+domain/capability, preserves all candidate connector and manifest digests for review, and never
+dispatches. `AutonomousConnectorRuntime.dispatch_from_plan()` verifies that plan against the live
+registry and requires its digest in `AutonomousConnectorDispatchRequest`; stale manifests,
+uncovered domains, capability mismatches, and connector substitutions fail before an executor is
+called. This gives the brain a reproducible routing decision that can later accept caller-owned
+health, cost, latency, or evaluator ranking inputs without allowing an opaque callback to bypass
+approval or scope checks.
+
 For a UI or service that must survive a process restart, attach the redacted activation state to
 the agent. The activation snapshot tracks provider readiness, catalogue/profile/plan digests,
 approved exact tool names, pending review, and coverage for every built-in domain. It deliberately

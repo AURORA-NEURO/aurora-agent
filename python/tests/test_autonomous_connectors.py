@@ -17,6 +17,7 @@ from prism_sdk import (
     AutonomousConnectorRegistration,
     AutonomousConnectorRegistry,
     AutonomousConnectorRuntime,
+    AutonomousConnectorSelectionPlan,
     ApiClient,
     DomainEvidenceSourceExecutionRequest,
     DomainEvidenceSourcePlanRequest,
@@ -72,6 +73,10 @@ def test_connector_registry_plans_and_dispatches_every_builtin_domain() -> None:
     assert plan["schema"] == AUTONOMOUS_CONNECTOR_REGISTRY_SCHEMA
     assert plan["plan_digest"] == content_digest({key: value for key, value in plan.items() if key != "plan_digest"})
     assert all(row["status"] == "selected" for row in plan["coverage"].values())
+    selection = registry.select_for_domains(AUTONOMOUS_DOMAINS, capability="evidence_read")
+    assert selection.complete is True
+    assert tuple(row.domain for row in selection.rows) == tuple(AUTONOMOUS_DOMAINS)
+    assert all(row.connector_id == f"connector-{domain}" for row, domain in zip(selection.rows, AUTONOMOUS_DOMAINS))
 
     published = []
     runtime = AutonomousConnectorRuntime(registry, receipt_sink=published.append)
@@ -86,6 +91,74 @@ def test_connector_registry_plans_and_dispatches_every_builtin_domain() -> None:
     encoded = json.dumps(results[0].to_dict())
     assert '"request":' not in encoded
     assert '"value":' not in encoded
+
+
+def test_connector_selection_plan_is_deterministic_reviewable_and_bound_to_dispatch() -> None:
+    registry = AutonomousConnectorRegistry([_registration("coding", lambda _manifest, _request: {"ok": True})])
+    alternative_manifest = DomainEvidenceProviderConnectorManifest(
+        connector_id="connector-coding-z",
+        version="v1",
+        provider="caller-managed-secondary",
+        connector_kind="provider_api",
+        domains=("coding",),
+        capabilities=("evidence_read",),
+    )
+    registry.register(AutonomousConnectorRegistration(alternative_manifest, lambda _manifest, _request: {"secondary": True}))
+    plan = registry.select_for_domains(("coding",), capability="evidence_read")
+
+    assert plan.complete is True
+    assert plan.rows[0].connector_id == "connector-coding"
+    assert plan.rows[0].candidate_ids == ("connector-coding", "connector-coding-z")
+    assert plan.rows[0].reason == "lexicographic_connector_id"
+    assert plan.to_dict()["plan_digest"] == plan.plan_digest
+    assert plan.to_dict()["schema"].endswith("selection-plan/0.1")
+    restored = AutonomousConnectorSelectionPlan.from_mapping(plan.to_dict())
+    assert restored == plan
+    assert registry.plan_for_domains(("coding",), capability="evidence_read")["selection_plan_digest"] == plan.plan_digest
+
+    request = replace(_request("coding"), selection_plan_digest=plan.plan_digest)
+    result = AutonomousConnectorRuntime(registry).dispatch_from_plan(plan, request)
+    assert result.receipt.request_digest == request.request_digest
+    assert result.value == {"ok": True}
+
+    with pytest.raises(ArgumentError, match="not bound"):
+        AutonomousConnectorRuntime(registry).dispatch_from_plan(plan, _request("coding"))
+
+    tampered = plan.to_dict()
+    tampered["rows"][0]["reason"] = "tampered"
+    with pytest.raises(ArgumentError, match="digest"):
+        AutonomousConnectorSelectionPlan.from_mapping(tampered)
+
+    replacement_manifest = DomainEvidenceProviderConnectorManifest(
+        connector_id="connector-coding",
+        version="v2",
+        provider="caller-managed",
+        connector_kind="provider_api",
+        domains=("coding",),
+        capabilities=("evidence_read",),
+    )
+    registry.register(
+        AutonomousConnectorRegistration(replacement_manifest, lambda _manifest, _request: {"v2": True}),
+        replace=True,
+    )
+    with pytest.raises(ArgumentError, match="stale"):
+        plan.verify(registry)
+
+
+def test_connector_selection_plan_reports_missing_domains_without_authorizing_dispatch() -> None:
+    registry = AutonomousConnectorRegistry([_registration("coding", lambda _manifest, _request: {"ok": True})])
+    plan = registry.select_for_domains(("coding", "science"), capability="evidence_read")
+
+    assert plan.complete is False
+    assert plan.rows[0].status == "selected"
+    assert plan.rows[1].status == "missing"
+    request = replace(
+        _request("coding"),
+        domains=("science",),
+        selection_plan_digest=plan.plan_digest,
+    )
+    with pytest.raises(ArgumentError, match="does not select"):
+        AutonomousConnectorRuntime(registry).dispatch_from_plan(plan, request)
 
 
 def test_connector_runtime_keeps_approval_scope_and_executor_errors_explicit() -> None:

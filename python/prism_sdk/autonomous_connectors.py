@@ -40,6 +40,8 @@ from .http_client import ApiClient
 AUTONOMOUS_CONNECTOR_REGISTRY_SCHEMA = "bioprism-python-autonomous-connector-registry/0.1"
 AUTONOMOUS_CONNECTOR_DISPATCH_SCHEMA = "bioprism-python-autonomous-connector-dispatch/0.1"
 AUTONOMOUS_CONNECTOR_RECEIPT_SCHEMA = "bioprism-python-autonomous-connector-receipt/0.1"
+AUTONOMOUS_CONNECTOR_SELECTION_PLAN_SCHEMA = "bioprism-python-autonomous-connector-selection-plan/0.1"
+AUTONOMOUS_CONNECTOR_SELECTION_ROW_SCHEMA = "bioprism-python-autonomous-connector-selection-row/0.1"
 AUTONOMOUS_CONNECTOR_RECEIPT_JOURNAL_SCHEMA = "bioprism-python-autonomous-connector-receipt-journal/0.1"
 AUTONOMOUS_CONNECTOR_RECEIPT_ENTRY_SCHEMA = "bioprism-python-autonomous-connector-receipt-entry/0.1"
 AUTONOMOUS_CONNECTOR_DISPATCH_STATUSES = ("observed", "partial", "refused", "error", "unknown")
@@ -65,6 +67,22 @@ def _digest(name: str, value: Any, *, allow_none: bool = False) -> str | None:
 
 def _manifest_digest(manifest: DomainEvidenceProviderConnectorManifest) -> str:
     return content_digest(manifest.to_dict())
+
+
+def _identifier_sequence(name: str, value: Any, *, maximum: int, allow_empty: bool = True) -> tuple[str, ...]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise ArgumentError(f"{name} must be a sequence")
+    if len(value) > maximum or (not allow_empty and not value):
+        raise ArgumentError(f"{name} exceeds its bound or is empty")
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        normalized = _identifier(f"{name} entry", item)
+        if normalized in seen:
+            raise ArgumentError(f"{name} contains a duplicate entry: {normalized}")
+        seen.add(normalized)
+        result.append(normalized)
+    return tuple(result)
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +121,207 @@ class AutonomousConnectorRegistration:
             "execution": "caller_owned_executor;metadata_only_registration",
             "secret_material": "never_returned",
         }
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousConnectorSelectionRow:
+    """One deterministic, review-only connector choice for one autonomous domain."""
+
+    domain: str
+    status: str
+    connector_id: str | None
+    manifest_digest: str | None
+    candidate_ids: tuple[str, ...]
+    candidate_manifest_digests: tuple[str, ...]
+    reason: str
+
+    def __post_init__(self) -> None:
+        _identifier("autonomous connector selection row domain", self.domain)
+        if self.domain not in AUTONOMOUS_DOMAIN_NAMES:
+            raise ArgumentError("autonomous connector selection row domain is unsupported")
+        if self.status not in {"selected", "missing"}:
+            raise ArgumentError("autonomous connector selection row status is invalid")
+        if self.connector_id is not None:
+            _identifier("autonomous connector selection row connector_id", self.connector_id)
+        if self.manifest_digest is not None:
+            _digest("autonomous connector selection row manifest_digest", self.manifest_digest)
+        candidate_ids = _identifier_sequence(
+            "autonomous connector selection row candidate_ids",
+            self.candidate_ids,
+            maximum=MAX_AUTONOMOUS_CONNECTORS,
+        )
+        candidate_digests = tuple(
+            _digest("autonomous connector selection row candidate manifest digest", digest)
+            for digest in self.candidate_manifest_digests
+        )
+        if len(candidate_ids) != len(candidate_digests):
+            raise ArgumentError("autonomous connector selection row candidates and digests must align")
+        if self.status == "selected":
+            if self.connector_id is None or self.manifest_digest is None:
+                raise ArgumentError("selected connector row requires connector and manifest identities")
+            if self.connector_id not in candidate_ids:
+                raise ArgumentError("selected connector row must select a candidate")
+            if candidate_digests[candidate_ids.index(self.connector_id)] != self.manifest_digest:
+                raise ArgumentError("selected connector row manifest digest does not match its candidate")
+        elif self.connector_id is not None or self.manifest_digest is not None:
+            raise ArgumentError("missing connector row cannot select a connector")
+        _identifier("autonomous connector selection row reason", self.reason)
+        object.__setattr__(self, "candidate_ids", candidate_ids)
+        object.__setattr__(self, "candidate_manifest_digests", candidate_digests)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_CONNECTOR_SELECTION_ROW_SCHEMA,
+            "domain": self.domain,
+            "status": self.status,
+            "connector_id": self.connector_id,
+            "manifest_digest": self.manifest_digest,
+            "candidate_ids": list(self.candidate_ids),
+            "candidate_manifest_digests": list(self.candidate_manifest_digests),
+            "reason": self.reason,
+            "retention": "metadata_only_manifest_catalogue",
+            "secret_material": "never_returned",
+        }
+
+
+def _selection_row_from_mapping(value: Mapping[str, Any]) -> AutonomousConnectorSelectionRow:
+    expected = {
+        "schema",
+        "domain",
+        "status",
+        "connector_id",
+        "manifest_digest",
+        "candidate_ids",
+        "candidate_manifest_digests",
+        "reason",
+        "retention",
+        "secret_material",
+    }
+    if not isinstance(value, Mapping) or set(value) != expected:
+        raise ArgumentError("autonomous connector selection row is malformed")
+    if value.get("schema") != AUTONOMOUS_CONNECTOR_SELECTION_ROW_SCHEMA:
+        raise ArgumentError("autonomous connector selection row schema is invalid")
+    if value.get("retention") != "metadata_only_manifest_catalogue" or value.get("secret_material") != "never_returned":
+        raise ArgumentError("autonomous connector selection row retention is invalid")
+    raw_digests = value.get("candidate_manifest_digests")
+    if not isinstance(raw_digests, Sequence) or isinstance(raw_digests, (str, bytes)):
+        raise ArgumentError("autonomous connector selection row candidate digests are invalid")
+    return AutonomousConnectorSelectionRow(
+        domain=value.get("domain"),
+        status=value.get("status"),
+        connector_id=value.get("connector_id"),
+        manifest_digest=value.get("manifest_digest"),
+        candidate_ids=value.get("candidate_ids"),
+        candidate_manifest_digests=tuple(raw_digests),
+        reason=value.get("reason"),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousConnectorSelectionPlan:
+    """Digest-bound, deterministic connector selection that never dispatches by itself."""
+
+    domains: tuple[str, ...]
+    capability: str | None
+    registry_digest: str
+    rows: tuple[AutonomousConnectorSelectionRow, ...]
+    strategy: str = "lexicographic_connector_id"
+
+    def __post_init__(self) -> None:
+        domains = _sequence(
+            "autonomous connector selection plan domains",
+            self.domains,
+            maximum=MAX_AUTONOMOUS_CONNECTOR_DOMAINS,
+        )
+        if any(domain not in AUTONOMOUS_DOMAIN_NAMES for domain in domains):
+            raise ArgumentError("autonomous connector selection plan contains an unsupported domain")
+        if self.capability is not None:
+            _identifier("autonomous connector selection plan capability", self.capability)
+        _digest("autonomous connector selection plan registry_digest", self.registry_digest)
+        if not isinstance(self.rows, Sequence) or isinstance(self.rows, (str, bytes)) or len(self.rows) != len(domains):
+            raise ArgumentError("autonomous connector selection plan rows must align with domains")
+        if any(not isinstance(row, AutonomousConnectorSelectionRow) for row in self.rows):
+            raise ArgumentError("autonomous connector selection plan rows must be typed")
+        if tuple(row.domain for row in self.rows) != domains:
+            raise ArgumentError("autonomous connector selection plan row domains are out of order")
+        _identifier("autonomous connector selection plan strategy", self.strategy)
+        object.__setattr__(self, "domains", domains)
+        object.__setattr__(self, "rows", tuple(self.rows))
+
+    @property
+    def complete(self) -> bool:
+        return all(row.status == "selected" for row in self.rows)
+
+    @property
+    def plan_digest(self) -> str:
+        return content_digest(self._payload())
+
+    def _payload(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_CONNECTOR_SELECTION_PLAN_SCHEMA,
+            "domains": list(self.domains),
+            "capability": self.capability,
+            "registry_digest": self.registry_digest,
+            "rows": [row.to_dict() for row in self.rows],
+            "strategy": self.strategy,
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            **self._payload(),
+            "complete": self.complete,
+            "plan_digest": self.plan_digest,
+            "execution": "planning_only;review_required_before_dispatch",
+            "retention": "metadata_only_manifest_catalogue",
+            "secret_material": "never_returned",
+        }
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "AutonomousConnectorSelectionPlan":
+        expected = {
+            "schema",
+            "domains",
+            "capability",
+            "registry_digest",
+            "rows",
+            "strategy",
+            "complete",
+            "plan_digest",
+            "execution",
+            "retention",
+            "secret_material",
+        }
+        if not isinstance(value, Mapping) or set(value) != expected:
+            raise ArgumentError("autonomous connector selection plan is malformed")
+        if value.get("schema") != AUTONOMOUS_CONNECTOR_SELECTION_PLAN_SCHEMA:
+            raise ArgumentError("autonomous connector selection plan schema is invalid")
+        if value.get("execution") != "planning_only;review_required_before_dispatch":
+            raise ArgumentError("autonomous connector selection plan execution posture is invalid")
+        if value.get("retention") != "metadata_only_manifest_catalogue" or value.get("secret_material") != "never_returned":
+            raise ArgumentError("autonomous connector selection plan retention is invalid")
+        raw_rows = value.get("rows")
+        if not isinstance(raw_rows, Sequence) or isinstance(raw_rows, (str, bytes)):
+            raise ArgumentError("autonomous connector selection plan rows are invalid")
+        plan = cls(
+            domains=value.get("domains"),
+            capability=value.get("capability"),
+            registry_digest=value.get("registry_digest"),
+            rows=tuple(_selection_row_from_mapping(row) for row in raw_rows),
+            strategy=value.get("strategy"),
+        )
+        if value.get("complete") is not plan.complete:
+            raise ArgumentError("autonomous connector selection plan completeness is invalid")
+        if _digest("autonomous connector selection plan plan_digest", value.get("plan_digest")) != plan.plan_digest:
+            raise ArgumentError("autonomous connector selection plan digest is invalid")
+        return plan
+
+    def verify(self, registry: "AutonomousConnectorRegistry") -> "AutonomousConnectorSelectionPlan":
+        if not isinstance(registry, AutonomousConnectorRegistry):
+            raise ArgumentError("autonomous connector selection plan verification requires a registry")
+        expected = registry.select_for_domains(self.domains, capability=self.capability)
+        if expected.plan_digest != self.plan_digest:
+            raise ArgumentError("autonomous connector selection plan is stale or tampered")
+        return self
 
 
 class AutonomousConnectorRegistry:
@@ -174,11 +393,56 @@ class AutonomousConnectorRegistry:
             "capability": capability,
             "coverage": coverage,
             "registry_digest": self.digest,
+            "selection_plan_digest": self.select_for_domains(requested, capability=capability).plan_digest,
             "execution": "planning_only;no_dispatch;no_authorization",
             "secret_material": "never_returned",
         }
         payload["plan_digest"] = content_digest(payload)
         return payload
+
+    def select_for_domains(
+        self,
+        domains: Sequence[str],
+        *,
+        capability: str | None = None,
+    ) -> AutonomousConnectorSelectionPlan:
+        requested = _sequence(
+            "autonomous connector selection domains",
+            domains,
+            maximum=MAX_AUTONOMOUS_CONNECTOR_DOMAINS,
+        )
+        if any(domain not in AUTONOMOUS_DOMAIN_NAMES for domain in requested):
+            raise ArgumentError("autonomous connector selection contains an unsupported domain")
+        if capability is not None:
+            capability = _identifier("autonomous connector selection capability", capability)
+        rows: list[AutonomousConnectorSelectionRow] = []
+        for domain in requested:
+            candidates = [
+                registration
+                for registration in self.registrations()
+                if domain in registration.manifest.domains
+                and (capability is None or capability in registration.manifest.capabilities)
+            ]
+            candidate_ids = tuple(item.connector_id for item in candidates)
+            candidate_digests = tuple(item.manifest_digest for item in candidates)
+            selected = candidates[0] if candidates else None
+            rows.append(
+                AutonomousConnectorSelectionRow(
+                    domain=domain,
+                    status="selected" if selected is not None else "missing",
+                    connector_id=None if selected is None else selected.connector_id,
+                    manifest_digest=None if selected is None else selected.manifest_digest,
+                    candidate_ids=candidate_ids,
+                    candidate_manifest_digests=candidate_digests,
+                    reason="lexicographic_connector_id" if selected is not None else "no_matching_connector",
+                )
+            )
+        return AutonomousConnectorSelectionPlan(
+            domains=requested,
+            capability=capability,
+            registry_digest=self.digest,
+            rows=tuple(rows),
+        )
 
     @property
     def digest(self) -> str:
@@ -208,6 +472,7 @@ class AutonomousConnectorDispatchRequest:
     request: Mapping[str, Any]
     parent_digests: tuple[str, ...] = ()
     attempt_id: str | None = None
+    selection_plan_digest: str | None = None
     approved: bool = False
 
     def __post_init__(self) -> None:
@@ -242,6 +507,8 @@ class AutonomousConnectorDispatchRequest:
             _digest("autonomous connector dispatch parent digest", digest)
         if self.attempt_id is not None:
             _identifier("autonomous connector dispatch attempt_id", self.attempt_id)
+        if self.selection_plan_digest is not None:
+            _digest("autonomous connector dispatch selection_plan_digest", self.selection_plan_digest)
         if not isinstance(self.approved, bool):
             raise ArgumentError("autonomous connector dispatch approved must be a boolean")
 
@@ -259,6 +526,7 @@ class AutonomousConnectorDispatchRequest:
                 "request": dict(self.request),
                 "parent_digests": list(self.parent_digests),
                 "attempt_id": self.attempt_id,
+                "selection_plan_digest": self.selection_plan_digest,
             }
         )
 
@@ -274,6 +542,7 @@ class AutonomousConnectorDispatchRequest:
             "request_digest": self.request_digest,
             "parent_digests": list(self.parent_digests),
             "attempt_id": self.attempt_id,
+            "selection_plan_digest": self.selection_plan_digest,
             "approved": self.approved,
             "retention": "metadata_only_request_not_returned",
             "secret_material": "never_returned",
@@ -821,6 +1090,31 @@ class AutonomousConnectorRuntime:
                     self._inflight.pop(identity, None)
                 pending.event.set()
 
+    def dispatch_from_plan(
+        self,
+        plan: AutonomousConnectorSelectionPlan | Mapping[str, Any],
+        request: AutonomousConnectorDispatchRequest,
+    ) -> AutonomousConnectorDispatchResult:
+        """Dispatch only when a reviewed selection plan still matches the live registry."""
+
+        if isinstance(plan, Mapping):
+            plan = AutonomousConnectorSelectionPlan.from_mapping(plan)
+        if not isinstance(plan, AutonomousConnectorSelectionPlan):
+            raise ArgumentError("autonomous connector planned dispatch requires a typed selection plan")
+        if not isinstance(request, AutonomousConnectorDispatchRequest):
+            raise ArgumentError("autonomous connector planned dispatch requires a typed request")
+        plan.verify(self.registry)
+        if plan.capability != request.capability:
+            raise ArgumentError("autonomous connector planned dispatch capability does not match the plan")
+        if request.selection_plan_digest != plan.plan_digest:
+            raise ArgumentError("autonomous connector planned dispatch is not bound to the selection plan")
+        rows = {row.domain: row for row in plan.rows}
+        for domain in request.domains:
+            row = rows.get(domain)
+            if row is None or row.status != "selected" or row.connector_id != request.connector_id:
+                raise ArgumentError("autonomous connector planned dispatch does not select the requested connector")
+        return self.dispatch(request)
+
     def _dispatch_fresh(
         self,
         request: AutonomousConnectorDispatchRequest,
@@ -1020,6 +1314,8 @@ def create_autonomous_api_source_connector_executor(
 __all__ = [
     "AUTONOMOUS_CONNECTOR_REGISTRY_SCHEMA",
     "AUTONOMOUS_CONNECTOR_DISPATCH_SCHEMA",
+    "AUTONOMOUS_CONNECTOR_SELECTION_PLAN_SCHEMA",
+    "AUTONOMOUS_CONNECTOR_SELECTION_ROW_SCHEMA",
     "AUTONOMOUS_CONNECTOR_RECEIPT_SCHEMA",
     "AUTONOMOUS_CONNECTOR_RECEIPT_JOURNAL_SCHEMA",
     "AUTONOMOUS_CONNECTOR_RECEIPT_ENTRY_SCHEMA",
@@ -1034,6 +1330,8 @@ __all__ = [
     "MAX_AUTONOMOUS_CONNECTOR_RECEIPT_ENTRY_BYTES",
     "AutonomousConnectorRegistration",
     "AutonomousConnectorRegistry",
+    "AutonomousConnectorSelectionRow",
+    "AutonomousConnectorSelectionPlan",
     "AutonomousConnectorDispatchRequest",
     "AutonomousConnectorObservation",
     "AutonomousConnectorDispatchReceipt",

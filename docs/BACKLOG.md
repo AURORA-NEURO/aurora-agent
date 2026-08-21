@@ -249,6 +249,10 @@ fsynced connector JSONL journal verifies a hash chain, deduplicates exact identi
 conflicting outcomes, and returns a metadata-only replay barrier after restart; a new attempt
 identity is required for retry. It intentionally does not claim distributed exactly-once delivery,
 cross-process fencing, provider idempotency, or response caching.
+Connector planning now also emits a typed deterministic selection plan across the exact requested
+domains and capability. It retains candidate/manifest digests, binds the registry snapshot, and
+requires the reviewed plan digest before dispatch; health, cost, latency, and evaluator-ranked
+selection remain explicit caller-owned inputs rather than hidden heuristics.
 The domain-workflow handoff now also has a retained verification boundary: callers can validate
 catalogue/contract/binding identity, rerun mission preflight, and optionally replay the original
 instantiation request before re-review. The verifier is intentionally structural and non-executing;
