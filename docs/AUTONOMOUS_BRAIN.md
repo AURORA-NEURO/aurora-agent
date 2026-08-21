@@ -2916,6 +2916,62 @@ silently re-invoking an external service. Approval refusals, scope refusals, exe
 partial observations, and replay recovery are covered across every built-in domain by the local
 TypeScript test matrix.
 
+#### Durable connector work, recovery, and evaluator feedback
+
+For services that need a real worker boundary rather than an in-process adapter, TypeScript now
+exposes `AutonomousConnectorOperationRegistry`, `InMemoryAutonomousConnectorWorkQueue`, and
+`AutonomousConnectorWorker`. The default operation registry contains one explicit operation for
+each of the twelve autonomous domains and enumerates both atomic and composite workflow
+capabilities. An operation contract binds the domain, capability vocabulary, request identity
+fields, evaluator signal vocabulary, and risk class. A request must carry the contract's
+`operation_id`; a work item cannot be enqueued for a different domain, connector capability, or
+selection-plan digest.
+
+The queue is deliberately a metadata projection. It stores work identity, operation and plan
+digests, connector identity, attempt number, lease owner/expiry, retry state, receipt/payload
+digests, and bounded failure classes. It never stores the raw request, plan object, transient
+connector value, prompt, or credential material. `claim()` uses an expiring lease and worker
+identity fence; an expired lease can be reclaimed, but a foreign or expired worker cannot complete,
+fail, or reconcile the item. Retryable failures use bounded exponential backoff and stop at the
+configured attempt ceiling. Non-rehydratable or identity-conflicting work is moved to
+`reconciliation_required`, not silently re-dispatched.
+
+```typescript
+const operations = new AutonomousConnectorOperationRegistry();
+const queue = new InMemoryAutonomousConnectorWorkQueue(operations);
+const work = queue.enqueue({
+  work_id: "science-work-1",
+  operation_id: "science.reproducible_evidence_acquisition",
+  request: reviewedTypedRequest,
+  selection_plan_digest: reviewedTypedRequest.selection_plan_digest,
+});
+
+const worker = new AutonomousConnectorWorker(runtime, queue, async (item) => ({
+  // Rehydrate from the caller's encrypted/value store, using item digests as keys.
+  plan: await callerStore.planForDigest(item.selection_plan_digest),
+  request: await callerStore.requestForDigest(item.request_digest),
+}));
+const run = await worker.run({ workerId: "connector-worker-a", limit: 32 });
+// run.rows contains receipt metadata and digests only; value_retained is always false.
+```
+
+Persist `queue.snapshot()` with `AutonomousConnectorWorkQueuePersistenceCoordinator` in the
+application's own database or object store. Restore verifies the operation-registry digest, every
+work-item digest, queue bounds, and the snapshot digest before making work visible. The worker
+verifies the rehydrated request identity, plan digest, live registry, exact selected connector, and
+operation contract before calling `dispatchFromPlan`. A runtime replay returns a metadata-only
+receipt and no connector value, so a worker crash after provider completion is safe to recover
+without assuming distributed exactly-once delivery.
+
+Task quality remains a separate evaluator boundary. `InMemoryAutonomousConnectorFeedbackLedger`
+accepts only an explicit `source: "caller_evaluator"`, evaluator identity/version, bounded reward,
+pass/fail result, and optional evidence/failure digests. The worker never records feedback and the
+ledger never derives reward from `observed`, `partial`, `refused`, `error`, or replay status. Its
+`signals()` projection produces the existing weighted-selection fields—health, success rate,
+evaluator reward, eligibility, and unknown latency/cost—so an application can pass them to
+`selectAdaptiveForDomains()` after independent evaluation. Feedback snapshots also contain no
+request, plan, prompt, connector payload, or credential.
+
 For the gateway-backed source connector path, use
 `create_autonomous_api_source_connector_executor(api_client)`. It translates a transient
 `{"plan": ..., "execution": ...}` request into the typed source-plan and source-execute requests,

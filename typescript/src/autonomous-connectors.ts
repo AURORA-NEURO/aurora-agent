@@ -118,6 +118,19 @@ function identifier(name: string, value: unknown): string {
   return text;
 }
 
+function capabilityIdentifier(name: string, value: unknown): string {
+  const text = boundedText(name, value, 256);
+  if (!/^[A-Za-z0-9_.:+-]+$/.test(text)) throw new ArgumentError(`${name} must be a bounded capability identifier`);
+  return text;
+}
+
+function capabilityIdentifiers(name: string, value: unknown, maximum: number, allowEmpty = false): string[] {
+  if (!Array.isArray(value) || value.length > maximum || (!allowEmpty && value.length === 0)) throw new ArgumentError(`${name} must contain between ${allowEmpty ? 0 : 1} and ${maximum} entries`);
+  const result = value.map((item) => capabilityIdentifier(`${name} entry`, item));
+  if (new Set(result).size !== result.length) throw new ArgumentError(`${name} contains duplicate entries`);
+  return result;
+}
+
 function digest(name: string, value: unknown, allowNull = false): string | null {
   if (allowNull && (value === null || value === undefined)) return null;
   if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new ArgumentError(`${name} must be a lowercase SHA-256 digest`);
@@ -189,7 +202,7 @@ function normalizeManifest(value: DomainEvidenceProviderConnectorManifest): Doma
     if (!AUTONOMOUS_DOMAIN_NAMES.includes(domain as AutonomousDomainName)) throw new ArgumentError(`autonomous connector manifest domain is unsupported: ${domain}`);
     return domain as AutonomousDomainName;
   });
-  const capabilities = identifiers("autonomous connector manifest capabilities", value.capabilities, 128);
+  const capabilities = capabilityIdentifiers("autonomous connector manifest capabilities", value.capabilities, 128);
   if (!isObject(value.auth_posture)) throw new ArgumentError("autonomous connector manifest auth_posture must be an object");
   const authStatus = value.auth_posture.status;
   if (authStatus !== "none" && authStatus !== "caller_asserted" && authStatus !== "delegated" && authStatus !== "unknown") throw new ArgumentError("autonomous connector manifest auth posture status is invalid");
@@ -333,14 +346,14 @@ export class AutonomousConnectorSelectionPlan {
       if (!AUTONOMOUS_DOMAIN_NAMES.includes(domain as AutonomousDomainName)) throw new ArgumentError("autonomous connector selection plan domain is unsupported");
       return domain as AutonomousDomainName;
     });
-    if (input.capability !== null) identifier("autonomous connector selection plan capability", input.capability);
+    if (input.capability !== null) capabilityIdentifier("autonomous connector selection plan capability", input.capability);
     const registryDigest = digest("autonomous connector selection plan registry_digest", input.registry_digest) as string;
     const strategy = input.strategy ?? "lexicographic_connector_id";
     if (!AUTONOMOUS_CONNECTOR_SELECTION_STRATEGIES.includes(strategy)) throw new ArgumentError("autonomous connector selection plan strategy is invalid");
     const signalDigest = digest("autonomous connector selection plan signal_digest", input.signal_digest, true);
     if (input.rows.length !== domains.length || input.rows.some((row, index) => !(row instanceof AutonomousConnectorSelectionRow) || row.domain !== domains[index])) throw new ArgumentError("autonomous connector selection plan rows must align with domains");
     this.domains = domains;
-    this.capability = input.capability === null ? null : identifier("autonomous connector selection plan capability", input.capability);
+    this.capability = input.capability === null ? null : capabilityIdentifier("autonomous connector selection plan capability", input.capability);
     this.registry_digest = registryDigest;
     this.rows = [...input.rows];
     this.strategy = strategy;
@@ -417,7 +430,7 @@ export class AutonomousConnectorRegistry {
       if (!AUTONOMOUS_DOMAIN_NAMES.includes(domain as AutonomousDomainName)) throw new ArgumentError("autonomous connector plan domain is unsupported");
       return domain as AutonomousDomainName;
     });
-    const capability = options.capability === undefined || options.capability === null ? null : identifier("autonomous connector plan capability", options.capability);
+    const capability = options.capability === undefined || options.capability === null ? null : capabilityIdentifier("autonomous connector plan capability", options.capability);
     const coverage: Record<string, AutonomousConnectorCoverageRow> = {};
     for (const domain of requested) {
       const candidates = this.registrations().filter((registration) => registration.manifest.domains.includes(domain) && (capability === null || registration.manifest.capabilities.includes(capability)));
@@ -433,7 +446,7 @@ export class AutonomousConnectorRegistry {
       if (!AUTONOMOUS_DOMAIN_NAMES.includes(domain as AutonomousDomainName)) throw new ArgumentError("autonomous connector selection domain is unsupported");
       return domain as AutonomousDomainName;
     });
-    const capability = options.capability === undefined || options.capability === null ? null : identifier("autonomous connector selection capability", options.capability);
+    const capability = options.capability === undefined || options.capability === null ? null : capabilityIdentifier("autonomous connector selection capability", options.capability);
     const strategy = options.strategy ?? "lexicographic_connector_id";
     if (!AUTONOMOUS_CONNECTOR_SELECTION_STRATEGIES.includes(strategy)) throw new ArgumentError("autonomous connector selection strategy is invalid");
     if (strategy === "lexicographic_connector_id" && options.selectionSignals !== undefined) throw new ArgumentError("lexicographic connector selection cannot consume selection signals");
@@ -493,7 +506,7 @@ export class AutonomousConnectorDispatchRequest {
       if (!AUTONOMOUS_DOMAIN_NAMES.includes(domain as AutonomousDomainName)) throw new ArgumentError("autonomous connector dispatch domain is unsupported");
       return domain as AutonomousDomainName;
     });
-    this.capability = identifier("autonomous connector dispatch capability", input.capability);
+    this.capability = capabilityIdentifier("autonomous connector dispatch capability", input.capability);
     const safeRequest = safeJson("autonomous connector dispatch request", input.request, MAX_AUTONOMOUS_CONNECTOR_REQUEST_BYTES);
     if (!isObject(safeRequest)) throw new ArgumentError("autonomous connector dispatch request must be an object");
     this.request = safeRequest as JsonObject;
@@ -561,7 +574,7 @@ export class AutonomousConnectorDispatchReceipt {
       if (!AUTONOMOUS_DOMAIN_NAMES.includes(domain as AutonomousDomainName)) throw new ArgumentError("autonomous connector receipt domain is unsupported");
       return domain as AutonomousDomainName;
     });
-    this.capability = identifier("autonomous connector receipt capability", input.capability);
+    this.capability = capabilityIdentifier("autonomous connector receipt capability", input.capability);
     if (!AUTONOMOUS_CONNECTOR_DISPATCH_STATUSES.includes(input.status)) throw new ArgumentError("autonomous connector receipt status is invalid");
     this.status = input.status;
     this.request_digest = digest("autonomous connector receipt request_digest", input.request_digest) as string;
