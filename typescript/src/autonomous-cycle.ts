@@ -42,6 +42,16 @@ import {
   sealAutonomousCycleReplanState,
   validateAutonomousCycleReplanState,
 } from "./autonomous-cycle-persistence.js";
+import {
+  AUTONOMOUS_DECISION_CYCLE_STATE_SCHEMA,
+  type AutonomousDecisionCycleMode,
+  type AutonomousDecisionCyclePhase,
+  type AutonomousDecisionCycleRehydrationContext,
+  type AutonomousDecisionCycleState,
+  type AutonomousDecisionCycleStateStore,
+  sealAutonomousDecisionCycleState,
+  validateAutonomousDecisionCycleState,
+} from "./autonomous-decision-persistence.js";
 
 export const AUTONOMOUS_DECISION_CYCLE_SCHEMA = "bioprism-typescript-autonomous-decision-cycle/0.1" as const;
 
@@ -99,7 +109,22 @@ export interface AutonomousDecisionCycleMemoryProjection extends JsonObject {
   evaluation_recorded_episode_ids: string[];
 }
 
-export interface AutonomousDecisionCycleOptions extends AutonomousRunOptions {
+export interface AutonomousDecisionCyclePersistenceOptions {
+  /** Stable caller-owned identity for restart-safe ordinary decision cycles. */
+  cycleId?: string;
+  /** Metadata-only state store; task text, prompts, responses, and credentials stay caller-owned. */
+  decisionStateStore?: AutonomousDecisionCycleStateStore;
+  /** Rehydrate a route that was already reviewed before the worker stopped. */
+  rehydrateRoute?: (context: AutonomousDecisionCycleRehydrationContext) => AutonomousRouteProposal | Promise<AutonomousRouteProposal>;
+  /** Rehydrate a provider outcome after a persisted execution boundary. */
+  rehydrateRun?: (context: AutonomousDecisionCycleRehydrationContext) => AutonomousRunResult | AutonomousCrossDomainRunResult | Promise<AutonomousRunResult | AutonomousCrossDomainRunResult>;
+  /** Rehydrate evaluator values after evaluation began; it must not return raw evidence. */
+  rehydrateEvaluation?: (context: AutonomousDecisionCycleRehydrationContext) => AutonomousEvaluatorRewardInput | Record<string, AutonomousEvaluatorRewardInput> | Promise<AutonomousEvaluatorRewardInput | Record<string, AutonomousEvaluatorRewardInput>>;
+  /** Rehydrate a terminal private result from caller-owned result storage. */
+  rehydrateResult?: (context: AutonomousDecisionCycleRehydrationContext) => AutonomousDecisionCycleResult | AutonomousCrossDomainDecisionCycleResult | Promise<AutonomousDecisionCycleResult | AutonomousCrossDomainDecisionCycleResult>;
+}
+
+export interface AutonomousDecisionCycleOptions extends AutonomousRunOptions, AutonomousDecisionCyclePersistenceOptions {
   semanticRouting?: AutonomousDecisionCycleSemanticOptions;
   learning?: AutonomousDecisionCycleLearningOptions;
   memory?: AutonomousDecisionCycleMemoryOptions;
@@ -234,6 +259,181 @@ function cycleCostBudget(options: Pick<AutonomousRunOptions, "maxTotalCostUnits"
   if (options.costBudget !== undefined && !(options.costBudget instanceof AutonomousCostBudget)) throw new ArgumentError("costBudget must be an AutonomousCostBudget");
   if (options.costBudget !== undefined && options.maxTotalCostUnits !== undefined) throw new ArgumentError("costBudget and maxTotalCostUnits cannot both be supplied");
   return options.costBudget ?? (options.maxTotalCostUnits === undefined ? undefined : new AutonomousCostBudget(options.maxTotalCostUnits));
+}
+
+interface DecisionPersistenceRuntime {
+  readonly store: AutonomousDecisionCycleStateStore;
+  readonly cycleId: string;
+  readonly taskDigest: string;
+  readonly mode: AutonomousDecisionCycleMode;
+  readonly learningEnabled: boolean;
+  readonly evaluationEnabled: boolean;
+  readonly trajectoryId: string | null;
+  state: AutonomousDecisionCycleState;
+}
+
+function boundedDecisionCycleIdentifier(name: string, value: unknown): string {
+  if (typeof value !== "string" || !value.trim() || value.length > 256 || !/^[A-Za-z0-9_.:-]+$/.test(value)) throw new ArgumentError(`${name} must be a bounded identifier`);
+  return value;
+}
+
+async function openDecisionPersistence(
+  options: AutonomousDecisionCyclePersistenceOptions,
+  task: string,
+  mode: AutonomousDecisionCycleMode,
+  learningEnabled: boolean,
+  evaluationEnabled: boolean,
+  trajectoryId: string | null,
+): Promise<DecisionPersistenceRuntime | null> {
+  if (!options.decisionStateStore) {
+    if (options.cycleId !== undefined) throw new ArgumentError("cycleId requires decisionStateStore");
+    return null;
+  }
+  if (options.cycleId === undefined) throw new ArgumentError("cycleId is required when decisionStateStore is configured");
+  const cycleId = boundedDecisionCycleIdentifier("decision cycleId", options.cycleId);
+  const taskDigest = await digestJson(task);
+  const loadedRaw = await options.decisionStateStore.load(cycleId);
+  const loaded = loadedRaw ? await validateAutonomousDecisionCycleState(loadedRaw) : null;
+  if (loaded) {
+    if (loaded.cycle_id !== cycleId || loaded.task_digest !== taskDigest || loaded.mode !== mode || loaded.learning_enabled !== learningEnabled || loaded.evaluation_enabled !== evaluationEnabled || loaded.trajectory_id !== trajectoryId) throw new ArgumentError("persisted decision-cycle state does not match the requested contract");
+    return { store: options.decisionStateStore, cycleId, taskDigest, mode, learningEnabled, evaluationEnabled, trajectoryId, state: loaded };
+  }
+  const state = await sealAutonomousDecisionCycleState({
+    schema: AUTONOMOUS_DECISION_CYCLE_STATE_SCHEMA,
+    cycle_id: cycleId,
+    task_digest: taskDigest,
+    mode,
+    learning_enabled: learningEnabled,
+    evaluation_enabled: evaluationEnabled,
+    trajectory_id: trajectoryId,
+    phase: "route_pending",
+    route_digest: null,
+    selection_digest: null,
+    outcome_digest: null,
+    evaluation_digest: null,
+    learning_episode_ids: [],
+    settlement_digests: [],
+    terminal_status: null,
+    generation: 1,
+    previous_state_digest: null,
+    retention: "metadata_only_hash_chained_no_private_payloads",
+    secret_material: "never_returned",
+  });
+  await options.decisionStateStore.save(state);
+  return { store: options.decisionStateStore, cycleId, taskDigest, mode, learningEnabled, evaluationEnabled, trajectoryId, state };
+}
+
+async function commitDecisionPersistence(
+  runtime: DecisionPersistenceRuntime | null,
+  changes: Partial<Omit<AutonomousDecisionCycleState, "state_digest" | "generation" | "previous_state_digest">>,
+): Promise<void> {
+  if (!runtime) return;
+  const { state_digest: priorDigest, generation: priorGeneration, previous_state_digest: _priorPrevious, ...descriptor } = runtime.state;
+  const next = await sealAutonomousDecisionCycleState({
+    ...descriptor,
+    ...changes,
+    generation: priorGeneration + 1,
+    previous_state_digest: priorDigest,
+  });
+  await runtime.store.save(next);
+  runtime.state = next;
+}
+
+function decisionRehydrationContext(runtime: DecisionPersistenceRuntime): AutonomousDecisionCycleRehydrationContext {
+  const state = runtime.state;
+  return {
+    cycle_id: runtime.cycleId,
+    task_digest: runtime.taskDigest,
+    mode: runtime.mode,
+    learning_enabled: runtime.learningEnabled,
+    evaluation_enabled: runtime.evaluationEnabled,
+    phase: state.phase,
+    route_digest: state.route_digest,
+    selection_digest: state.selection_digest,
+    outcome_digest: state.outcome_digest,
+    evaluation_digest: state.evaluation_digest,
+    learning_episode_ids: [...state.learning_episode_ids],
+    trajectory_id: state.trajectory_id,
+    settlement_digests: [...state.settlement_digests],
+    terminal_status: state.terminal_status,
+    generation: state.generation,
+    state_digest: state.state_digest,
+  };
+}
+
+async function rehydrateDecisionRoute(
+  runtime: DecisionPersistenceRuntime,
+  callback: AutonomousDecisionCyclePersistenceOptions["rehydrateRoute"],
+): Promise<AutonomousRouteProposal> {
+  if (!callback || !runtime.state.route_digest) throw new ArgumentError("restart resume requires rehydrateRoute for the persisted decision route");
+  const route = await callback(decisionRehydrationContext(runtime));
+  if (!route || route.route_digest !== runtime.state.route_digest) throw new ArgumentError("rehydrated decision route does not match the persisted route digest");
+  return route;
+}
+
+async function rehydrateDecisionRun(
+  runtime: DecisionPersistenceRuntime,
+  callback: AutonomousDecisionCyclePersistenceOptions["rehydrateRun"],
+): Promise<AutonomousRunResult | AutonomousCrossDomainRunResult> {
+  if (!callback || (runtime.state.phase !== "execution_pending" && !runtime.state.outcome_digest)) throw new ArgumentError("restart resume requires rehydrateRun for the persisted provider outcome");
+  const run = await callback(decisionRehydrationContext(runtime));
+  if (!run || typeof run !== "object" || !run.route || typeof run.route.route_digest !== "string" || run.route.route_digest !== runtime.state.route_digest) throw new ArgumentError("rehydrated decision run does not match the persisted route digest");
+  if (runtime.mode === "single_domain" && Array.isArray((run as AutonomousCrossDomainRunResult).child_runs)) throw new ArgumentError("single-domain decision cycle cannot rehydrate a cross-domain run");
+  if (runtime.mode === "cross_domain" && !Array.isArray((run as AutonomousCrossDomainRunResult).child_runs)) throw new ArgumentError("cross-domain decision cycle requires a fan-out run during rehydration");
+  const outcome = runtime.mode === "single_domain"
+    ? (await replanRunDigests(run as AutonomousRunResult)).outcome
+    : await crossDomainReplanOutcomeDigest(run as AutonomousCrossDomainRunResult);
+  if (runtime.state.outcome_digest !== null && outcome !== runtime.state.outcome_digest) throw new ArgumentError("rehydrated decision run does not match the persisted outcome digest");
+  return run;
+}
+
+async function rehydrateDecisionResult(
+  runtime: DecisionPersistenceRuntime,
+  callback: AutonomousDecisionCyclePersistenceOptions["rehydrateResult"],
+): Promise<AutonomousDecisionCycleResult | AutonomousCrossDomainDecisionCycleResult> {
+  if (!callback || !runtime.state.terminal_status) throw new ArgumentError("restart resume requires rehydrateResult for the terminal private result");
+  const result = await callback(decisionRehydrationContext(runtime));
+  if (!result || typeof result !== "object" || !result.route || typeof result.route.route_digest !== "string" || result.route.route_digest !== runtime.state.route_digest || result.status !== runtime.state.terminal_status) throw new ArgumentError("rehydrated terminal decision result does not match persisted identity");
+  const expectedSchema = runtime.mode === "single_domain" ? AUTONOMOUS_DECISION_CYCLE_SCHEMA : AUTONOMOUS_CROSS_DOMAIN_DECISION_CYCLE_SCHEMA;
+  if (result.schema !== expectedSchema) throw new ArgumentError("rehydrated terminal decision result has the wrong cycle schema");
+  if (result.run) {
+    if (runtime.mode === "single_domain" && Array.isArray((result.run as AutonomousCrossDomainRunResult).child_runs)) throw new ArgumentError("single-domain terminal result cannot contain a cross-domain run");
+    if (runtime.mode === "cross_domain" && !Array.isArray((result.run as AutonomousCrossDomainRunResult).child_runs)) throw new ArgumentError("cross-domain terminal result requires a fan-out run");
+    const outcome = runtime.mode === "single_domain"
+      ? (await replanRunDigests(result.run as AutonomousRunResult)).outcome
+      : await crossDomainReplanOutcomeDigest(result.run as AutonomousCrossDomainRunResult);
+    if (outcome !== runtime.state.outcome_digest) throw new ArgumentError("rehydrated terminal result does not match persisted outcome digest");
+  } else if (runtime.state.outcome_digest !== await digestJson({ status: result.status, route_digest: result.route.route_digest })) {
+    throw new ArgumentError("rehydrated terminal route result does not match persisted outcome digest");
+  }
+  return result;
+}
+
+async function decisionEvaluationDigest(input: AutonomousEvaluatorRewardInput): Promise<string> {
+  return digestJson({
+    evaluator_id: input.evaluator_id,
+    evaluator_version: input.evaluator_version,
+    reward: input.reward,
+    passed: input.passed,
+    failed: input.failed ?? !input.passed,
+    feedback_digest: input.feedback_digest ?? null,
+    failure_class: input.failure_class ?? null,
+    evidence_digest: input.evidence_digest ?? null,
+  });
+}
+
+async function decisionCrossEvaluationDigest(input: Record<string, AutonomousEvaluatorRewardInput>): Promise<string> {
+  return digestJson(Object.entries(input).sort(([left], [right]) => left.localeCompare(right)).map(([episodeId, reward]) => ({
+    episode_id: episodeId,
+    evaluator_id: reward.evaluator_id,
+    evaluator_version: reward.evaluator_version,
+    reward: reward.reward,
+    passed: reward.passed,
+    failed: reward.failed ?? !reward.passed,
+    feedback_digest: reward.feedback_digest ?? null,
+    failure_class: reward.failure_class ?? null,
+    evidence_digest: reward.evidence_digest ?? null,
+  })));
 }
 
 interface CyclePersistenceOptions {
@@ -466,10 +666,21 @@ export async function runAutonomousDecisionCycle(
   if (!agent || typeof agent.run !== "function" || typeof agent.route !== "function") throw new ArgumentError("decision cycle requires an AutonomousAgent");
   if (options.semanticRouting?.enabled && options.domain !== undefined) throw new ArgumentError("semantic decision routing cannot replace an explicit caller domain");
   const costBudget = cycleCostBudget(options);
+  const persistence = await openDecisionPersistence(options, task, "single_domain", options.learning !== undefined, options.learning?.evaluate !== undefined, null);
+  if (persistence?.state.phase === "terminal") {
+    return await rehydrateDecisionResult(persistence, options.rehydrateResult) as AutonomousDecisionCycleResult;
+  }
+  const persistedPhase = persistence && persistence.state.phase !== "route_pending" ? persistence.state.phase : null;
 
   let route: AutonomousRouteProposal;
   let semanticRoute: AutonomousSemanticRouteResult | null = null;
-  if (options.semanticRouting?.enabled) {
+  let rehydratedRun: AutonomousRunResult | null = null;
+  if (persistedPhase) {
+    route = await rehydrateDecisionRoute(persistence!, options.rehydrateRoute);
+    if (persistedPhase === "execution_pending" || persistedPhase === "evaluation_pending" || persistedPhase === "settlement_pending") {
+      rehydratedRun = await rehydrateDecisionRun(persistence!, options.rehydrateRun) as AutonomousRunResult;
+    }
+  } else if (options.semanticRouting?.enabled) {
     semanticRoute = await semanticRouteAutonomousTask(agent, task, {
       candidates: options.candidates,
       credential: options.credential,
@@ -495,7 +706,9 @@ export async function runAutonomousDecisionCycle(
     route = semanticRoute.route;
     if (semanticRoute.status !== "completed") {
       if (options.executionLifecycle !== "observe_only") await options.execution?.checkpoint({ status: semanticRoute.status, reason: `semantic_route_${semanticRoute.status}` });
-      return reviewResult(semanticRoute.status === "approval_required" ? "approval_required" : semanticRoute.status, route, semanticRoute);
+      const reviewed = reviewResult(semanticRoute.status === "approval_required" ? "approval_required" : semanticRoute.status, route, semanticRoute);
+      await commitDecisionPersistence(persistence, { phase: "terminal", route_digest: route.route_digest, selection_digest: null, outcome_digest: await digestJson({ status: reviewed.status, route_digest: route.route_digest }), evaluation_digest: null, learning_episode_ids: [], settlement_digests: [], terminal_status: reviewed.status });
+      return reviewed;
     }
   } else if (options.routeOverride) {
     route = options.routeOverride;
@@ -505,33 +718,56 @@ export async function runAutonomousDecisionCycle(
 
   if (route.abstained || !route.primary_domain || route.cross_domain || route.selected_domains.length !== 1) {
     if (options.executionLifecycle !== "observe_only") await options.execution?.checkpoint({ status: "route_review_required", reason: "single_domain_route_review_required" });
-    return reviewResult("route_review_required", route, semanticRoute);
+    const reviewed = reviewResult("route_review_required", route, semanticRoute);
+    await commitDecisionPersistence(persistence, { phase: "terminal", route_digest: route.route_digest, selection_digest: null, outcome_digest: await digestJson({ status: reviewed.status, route_digest: route.route_digest }), evaluation_digest: null, learning_episode_ids: [], settlement_digests: [], terminal_status: reviewed.status });
+    return reviewed;
   }
   const recalledMemory = await recallMemory(options.memory, route, task);
   let run: AutonomousRunResult;
   try {
-    run = await agent.run(task, runOptions(options, route, recalledMemory.promptChunk, costBudget));
+    if (rehydratedRun) {
+      run = rehydratedRun;
+    } else {
+      await commitDecisionPersistence(persistence, { phase: "execution_pending", route_digest: route.route_digest, selection_digest: null, outcome_digest: null, evaluation_digest: null, learning_episode_ids: [], settlement_digests: [], terminal_status: null });
+      run = await agent.run(task, runOptions(options, route, recalledMemory.promptChunk, costBudget));
+    }
   } catch (error) {
     if (options.executionLifecycle !== "observe_only") await failExecutionIfActive(options.execution, error);
     throw error;
   }
   const cycleStatus = cycleStatusForRun(run.status);
+  const runDigests = await replanRunDigests(run);
   if (cycleStatus !== "completed") {
     if (options.executionLifecycle !== "observe_only") await options.execution?.checkpoint({ status: cycleStatus, reason: `run_${cycleStatus}` });
+    await commitDecisionPersistence(persistence, { phase: "terminal", route_digest: route.route_digest, selection_digest: runDigests.selection, outcome_digest: runDigests.outcome, evaluation_digest: null, learning_episode_ids: [], settlement_digests: [], terminal_status: cycleStatus });
     return { ...reviewResult(cycleStatus, route, semanticRoute), run, memory: recalledMemory.projection };
   }
 
   try {
     let learningEpisodeId: string | null = null;
     let settlement: AutonomousLearningSettlement | null = null;
+    if (persistence && (persistedPhase === "evaluation_pending" || persistedPhase === "settlement_pending")) {
+      if (persistence.state.outcome_digest !== runDigests.outcome || persistence.state.selection_digest !== runDigests.selection) throw new ArgumentError("rehydrated decision run does not match the persisted selection or outcome digest");
+    }
     if (options.learning) {
       const controller = options.learning.controller;
       if (!controller || typeof controller.prepareRun !== "function" || typeof controller.settleRun !== "function") throw new ArgumentError("decision cycle learning controller is malformed");
-      const episode = await controller.prepareRun(run, { episodeId: options.learning.episodeId });
-      learningEpisodeId = episode.episode_id;
+      learningEpisodeId = persistence?.state.learning_episode_ids[0] ?? null;
+      if (!learningEpisodeId) {
+        const episode = await controller.prepareRun(run, { episodeId: options.learning.episodeId });
+        learningEpisodeId = episode.episode_id;
+      }
       if (options.learning.evaluate) {
-        const reward = await options.learning.evaluate(run);
-        settlement = await controller.settleRun(episode.episode_id, reward, { remote: options.learning.remote });
+        const resumedEvaluation = persistedPhase === "evaluation_pending" || persistedPhase === "settlement_pending";
+        const persistedEvaluationDigest = persistence?.state.evaluation_digest ?? null;
+        if (persistence && !resumedEvaluation) await commitDecisionPersistence(persistence, { phase: "evaluation_pending", route_digest: route.route_digest, selection_digest: runDigests.selection, outcome_digest: runDigests.outcome, evaluation_digest: null, learning_episode_ids: [learningEpisodeId], settlement_digests: [], terminal_status: null });
+        const reward = resumedEvaluation
+          ? await (options.rehydrateEvaluation ? options.rehydrateEvaluation(decisionRehydrationContext(persistence!)) : Promise.reject(new ArgumentError("restart resume requires rehydrateEvaluation for the persisted evaluator boundary"))) as AutonomousEvaluatorRewardInput
+          : await options.learning.evaluate(run);
+        const evaluationDigest = await decisionEvaluationDigest(reward);
+        if (persistedPhase === "settlement_pending" && persistedEvaluationDigest !== evaluationDigest) throw new ArgumentError("rehydrated decision evaluation does not match the persisted evaluation digest");
+        await commitDecisionPersistence(persistence, { phase: "settlement_pending", route_digest: route.route_digest, selection_digest: runDigests.selection, outcome_digest: runDigests.outcome, evaluation_digest: evaluationDigest, learning_episode_ids: [learningEpisodeId], settlement_digests: [], terminal_status: null });
+        settlement = await controller.settleRun(learningEpisodeId, reward, { remote: options.learning.remote, ...(persistence ? { idempotencyKey: `decision:${persistence.cycleId}:${learningEpisodeId}` } : {}) });
       }
     }
 
@@ -548,6 +784,17 @@ export async function runAutonomousDecisionCycle(
       }
     }
 
+    const settlementDigest = settlement?.episode.settlement?.settlement_digest ?? null;
+    await commitDecisionPersistence(persistence, {
+      phase: "terminal",
+      route_digest: route.route_digest,
+      selection_digest: runDigests.selection,
+      outcome_digest: runDigests.outcome,
+      evaluation_digest: settlement ? await decisionEvaluationDigest(settlement.assessment) : null,
+      learning_episode_ids: learningEpisodeId ? [learningEpisodeId] : [],
+      settlement_digests: settlementDigest ? [settlementDigest] : [],
+      terminal_status: "completed",
+    });
     if (options.executionLifecycle !== "observe_only") await options.execution?.complete("completed");
 
     return {
@@ -619,7 +866,7 @@ export interface AutonomousReplanAttempt extends JsonObject {
   learning_episode_id: string | null;
 }
 
-export interface AutonomousReplanCycleOptions extends Omit<AutonomousDecisionCycleOptions, "learning" | "memory"> {
+export interface AutonomousReplanCycleOptions extends Omit<AutonomousDecisionCycleOptions, "learning" | "memory" | "cycleId" | "decisionStateStore" | "rehydrateRoute" | "rehydrateRun" | "rehydrateEvaluation" | "rehydrateResult"> {
   evaluate: AutonomousReplanEvaluator;
   /** Additional evaluator-requested attempts. The SDK caps this at three. */
   maxReplans?: number;
@@ -873,6 +1120,12 @@ export async function runAutonomousReplanCycle(
           executionLifecycle: "observe_only",
           learning: undefined,
           memory: undefined,
+          cycleId: undefined,
+          decisionStateStore: undefined,
+          rehydrateRoute: undefined,
+          rehydrateRun: undefined,
+          rehydrateEvaluation: undefined,
+          rehydrateResult: undefined,
         });
       }
     } catch (error) {
@@ -1024,6 +1277,12 @@ export interface AutonomousCrossDomainDecisionCycleLearningOptions {
 }
 
 export interface AutonomousCrossDomainDecisionCycleOptions extends Omit<AutonomousCrossDomainRunOptions, "learning"> {
+  cycleId?: string;
+  decisionStateStore?: AutonomousDecisionCycleStateStore;
+  rehydrateRoute?: (context: AutonomousDecisionCycleRehydrationContext) => AutonomousRouteProposal | Promise<AutonomousRouteProposal>;
+  rehydrateRun?: (context: AutonomousDecisionCycleRehydrationContext) => AutonomousRunResult | AutonomousCrossDomainRunResult | Promise<AutonomousRunResult | AutonomousCrossDomainRunResult>;
+  rehydrateEvaluation?: (context: AutonomousDecisionCycleRehydrationContext) => AutonomousEvaluatorRewardInput | Record<string, AutonomousEvaluatorRewardInput> | Promise<AutonomousEvaluatorRewardInput | Record<string, AutonomousEvaluatorRewardInput>>;
+  rehydrateResult?: (context: AutonomousDecisionCycleRehydrationContext) => AutonomousDecisionCycleResult | AutonomousCrossDomainDecisionCycleResult | Promise<AutonomousDecisionCycleResult | AutonomousCrossDomainDecisionCycleResult>;
   semanticRouting?: AutonomousDecisionCycleSemanticOptions;
   learning?: AutonomousCrossDomainDecisionCycleLearningOptions;
   memory?: AutonomousDecisionCycleMemoryOptions;
@@ -1123,10 +1382,21 @@ export async function runAutonomousCrossDomainDecisionCycle(
   if (options.semanticRouting?.enabled && options.domain !== undefined) throw new ArgumentError("semantic decision routing cannot replace an explicit caller domain");
   if (options.learning && (!options.learning.controller || typeof options.learning.controller.prepareCrossDomainTrajectory !== "function" || typeof options.learning.controller.settleCrossDomain !== "function")) throw new ArgumentError("cross-domain decision cycle learning controller is malformed");
   const costBudget = cycleCostBudget(options);
+  const persistence = await openDecisionPersistence(options, task, "cross_domain", options.learning !== undefined, options.learning?.evaluate !== undefined, options.learning?.trajectoryId ?? null);
+  if (persistence?.state.phase === "terminal") {
+    return await rehydrateDecisionResult(persistence, options.rehydrateResult) as AutonomousCrossDomainDecisionCycleResult;
+  }
+  const persistedPhase = persistence && persistence.state.phase !== "route_pending" ? persistence.state.phase : null;
 
   let route: AutonomousRouteProposal;
   let semanticRoute: AutonomousSemanticRouteResult | null = null;
-  if (options.semanticRouting?.enabled) {
+  let rehydratedRun: AutonomousCrossDomainRunResult | null = null;
+  if (persistedPhase) {
+    route = await rehydrateDecisionRoute(persistence!, options.rehydrateRoute);
+    if (persistedPhase === "execution_pending" || persistedPhase === "evaluation_pending" || persistedPhase === "settlement_pending") {
+      rehydratedRun = await rehydrateDecisionRun(persistence!, options.rehydrateRun) as AutonomousCrossDomainRunResult;
+    }
+  } else if (options.semanticRouting?.enabled) {
     semanticRoute = await semanticRouteAutonomousTask(agent, task, {
       candidates: options.candidates,
       credential: options.credential,
@@ -1152,7 +1422,9 @@ export async function runAutonomousCrossDomainDecisionCycle(
     route = semanticRoute.route;
     if (semanticRoute.status !== "completed") {
       if (options.executionLifecycle !== "observe_only") await options.execution?.checkpoint({ status: semanticRoute.status, reason: `semantic_route_${semanticRoute.status}` });
-      return crossReviewResult(semanticRoute.status === "approval_required" ? "approval_required" : semanticRoute.status, route, semanticRoute);
+      const reviewed = crossReviewResult(semanticRoute.status === "approval_required" ? "approval_required" : semanticRoute.status, route, semanticRoute);
+      await commitDecisionPersistence(persistence, { phase: "terminal", route_digest: route.route_digest, selection_digest: null, outcome_digest: await digestJson({ status: reviewed.status, route_digest: route.route_digest }), evaluation_digest: null, learning_episode_ids: [], trajectory_id: persistence?.trajectoryId ?? null, settlement_digests: [], terminal_status: reviewed.status });
+      return reviewed;
     }
   } else if (options.routeOverride) {
     route = options.routeOverride;
@@ -1161,25 +1433,48 @@ export async function runAutonomousCrossDomainDecisionCycle(
   }
   if (route.abstained || !route.cross_domain || route.selected_domains.length < 2) {
     if (options.executionLifecycle !== "observe_only") await options.execution?.checkpoint({ status: "route_review_required", reason: "cross_domain_route_review_required" });
-    return crossReviewResult("route_review_required", route, semanticRoute);
+    const reviewed = crossReviewResult("route_review_required", route, semanticRoute);
+    await commitDecisionPersistence(persistence, { phase: "terminal", route_digest: route.route_digest, selection_digest: null, outcome_digest: await digestJson({ status: reviewed.status, route_digest: route.route_digest }), evaluation_digest: null, learning_episode_ids: [], trajectory_id: persistence?.trajectoryId ?? null, settlement_digests: [], terminal_status: reviewed.status });
+    return reviewed;
   }
 
   const recalledMemory = await recallMemory(options.memory, route, task);
   let run: AutonomousCrossDomainRunResult;
   try {
-    run = await agent.runCrossDomain(task, crossRunOptions(options, route, recalledMemory.promptChunk, costBudget));
+    if (rehydratedRun) {
+      run = rehydratedRun;
+    } else {
+      await commitDecisionPersistence(persistence, { phase: "execution_pending", route_digest: route.route_digest, selection_digest: null, outcome_digest: null, evaluation_digest: null, learning_episode_ids: [], trajectory_id: persistence?.trajectoryId ?? null, settlement_digests: [], terminal_status: null });
+      run = await agent.runCrossDomain(task, crossRunOptions(options, route, recalledMemory.promptChunk, costBudget));
+    }
   } catch (error) {
     if (options.executionLifecycle !== "observe_only") await failExecutionIfActive(options.execution, error);
     throw error;
   }
   try {
+    const outcomeDigest = await crossDomainReplanOutcomeDigest(run);
+    if (persistence && (persistedPhase === "evaluation_pending" || persistedPhase === "settlement_pending") && persistence.state.outcome_digest !== outcomeDigest) throw new ArgumentError("rehydrated cross-domain run does not match the persisted outcome digest");
     let settlement: AutonomousCrossDomainLearningSettlement | null = null;
-    if (options.learning?.evaluate && run.learning_episode_ids.length > 0) {
-      const rewards = await options.learning.evaluate(run);
-      settlement = await options.learning.controller.settleCrossDomain(run, rewards, {
-        trajectoryId: options.learning.trajectoryId,
-        discount: options.learning.discount,
-        remote: options.learning.remote,
+    let evaluationDigest: string | null = null;
+    const canEvaluate = Boolean(options.learning?.evaluate && run.learning_episode_ids.length > 0);
+    if (persistence && (persistedPhase === "evaluation_pending" || persistedPhase === "settlement_pending") && !canEvaluate) throw new ArgumentError("persisted cross-domain evaluator state has no learning episodes to settle");
+    if (canEvaluate) {
+      const learning = options.learning;
+      if (!learning || typeof learning.evaluate !== "function") throw new ArgumentError("cross-domain evaluator is missing");
+      const resumedEvaluation = persistedPhase === "evaluation_pending" || persistedPhase === "settlement_pending";
+      const persistedEvaluationDigest = persistence?.state.evaluation_digest ?? null;
+      if (persistence && !resumedEvaluation) await commitDecisionPersistence(persistence, { phase: "evaluation_pending", route_digest: route.route_digest, selection_digest: null, outcome_digest: outcomeDigest, evaluation_digest: null, learning_episode_ids: [...run.learning_episode_ids], trajectory_id: persistence.trajectoryId, settlement_digests: [], terminal_status: null });
+      const rewards = resumedEvaluation
+        ? await (options.rehydrateEvaluation ? options.rehydrateEvaluation(decisionRehydrationContext(persistence!)) : Promise.reject(new ArgumentError("restart resume requires rehydrateEvaluation for the persisted cross-domain evaluator boundary"))) as Record<string, AutonomousEvaluatorRewardInput>
+        : await learning.evaluate(run);
+      evaluationDigest = await decisionCrossEvaluationDigest(rewards);
+      if (persistedPhase === "settlement_pending" && persistedEvaluationDigest !== evaluationDigest) throw new ArgumentError("rehydrated cross-domain evaluation does not match the persisted evaluation digest");
+      await commitDecisionPersistence(persistence, { phase: "settlement_pending", route_digest: route.route_digest, selection_digest: null, outcome_digest: outcomeDigest, evaluation_digest: evaluationDigest, learning_episode_ids: [...run.learning_episode_ids], trajectory_id: persistence?.trajectoryId ?? null, settlement_digests: [], terminal_status: null });
+      settlement = await learning.controller.settleCrossDomain(run, rewards, {
+        trajectoryId: learning.trajectoryId,
+        discount: learning.discount,
+        remote: learning.remote,
+        ...(persistence ? { idempotencyKey: `decision:${persistence.cycleId}:${learning.trajectoryId}` } : {}),
       });
     }
     const memoryProjection = recalledMemory.projection;
@@ -1204,6 +1499,18 @@ export async function runAutonomousCrossDomainDecisionCycle(
         }
       }
     }
+    const settlementDigest = settlement?.trajectory.settlement_digest ?? (settlement ? await digestJson(settlement.trajectory) : null);
+    await commitDecisionPersistence(persistence, {
+      phase: "terminal",
+      route_digest: route.route_digest,
+      selection_digest: null,
+      outcome_digest: outcomeDigest,
+      evaluation_digest: evaluationDigest,
+      learning_episode_ids: [...run.learning_episode_ids],
+      trajectory_id: persistence?.trajectoryId ?? null,
+      settlement_digests: settlementDigest ? [settlementDigest] : [],
+      terminal_status: run.status,
+    });
     if (options.executionLifecycle !== "observe_only") {
       if (run.status === "completed" || run.status === "children_completed" || run.status === "children_partial") await options.execution?.complete(run.status);
       else if (run.status !== "reconciliation_required") await options.execution?.checkpoint({ status: run.status, reason: `cross_domain_${run.status}` });
@@ -1289,7 +1596,7 @@ export type AutonomousCrossDomainReplanCycleStatus =
   | "completed_without_replan"
   | "replan_limit_reached";
 
-export interface AutonomousCrossDomainReplanCycleOptions extends Omit<AutonomousCrossDomainDecisionCycleOptions, "learning"> {
+export interface AutonomousCrossDomainReplanCycleOptions extends Omit<AutonomousCrossDomainDecisionCycleOptions, "learning" | "cycleId" | "decisionStateStore" | "rehydrateRoute" | "rehydrateRun" | "rehydrateEvaluation" | "rehydrateResult"> {
   evaluate: AutonomousCrossDomainReplanEvaluator;
   /** Additional evaluator-requested fan-out/fan-in attempts. The SDK caps this at three. */
   maxReplans?: number;
@@ -1580,6 +1887,12 @@ export async function runAutonomousCrossDomainReplanCycle(
           executionLifecycle: "observe_only",
           learning: undefined,
           memory: attempt === 0 ? options.memory : undefined,
+          cycleId: undefined,
+          decisionStateStore: undefined,
+          rehydrateRoute: undefined,
+          rehydrateRun: undefined,
+          rehydrateEvaluation: undefined,
+          rehydrateResult: undefined,
         });
       }
     } catch (error) {

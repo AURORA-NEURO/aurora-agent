@@ -600,6 +600,54 @@ small workers; production deployments should place it beside the existing execut
 memory, effect, and result stores while keeping private payloads in separately access-controlled
 storage.
 
+### Restart-safe ordinary decision cycles
+
+The same process-loss boundary is available when a caller wants one ordinary decision cycle rather
+than the evaluator-driven replan loop. Pass a stable `cycleId` and an
+`AutonomousDecisionCycleStateStore` to `runAutonomousDecisionCycle()` or
+`runAutonomousCrossDomainDecisionCycle()`:
+
+```typescript
+const stateStore = new InMemoryAutonomousDecisionCycleStateStore();
+const snapshotStore = new AutonomousDecisionCyclePersistenceCoordinator(stateStore, {
+  read: () => applicationStore.read("decision-cycle-snapshot"),
+  write: (snapshot) => applicationStore.write("decision-cycle-snapshot", snapshot),
+});
+
+const result = await runAutonomousDecisionCycle(agent, task, {
+  cycleId: "job-2026-08-21-0001",
+  decisionStateStore: stateStore,
+  domain: "coding",
+  approveProviderCall: true,
+});
+await snapshotStore.flush();
+```
+
+The state machine is deliberately smaller than a result store. It advances through
+`route_pending`, `execution_pending`, `evaluation_pending`, `settlement_pending`, and `terminal`,
+retaining only task, route, selection, provider-outcome, evaluator, episode, trajectory, and
+settlement digests plus bounded statuses and a hash-chain generation. Task text, prompts, plans,
+provider responses, tool arguments, credentials, evaluator evidence, and final result objects remain
+caller-owned. Snapshot validation is atomic, digest-bound, capacity-limited, duplicate-ID aware,
+and rejects private/payload-shaped metadata before restore.
+
+A restart never guesses whether a provider call is safe to repeat. For a persisted route, supply
+`rehydrateRoute`; for `execution_pending`, `evaluation_pending`, or `settlement_pending`, supply
+`rehydrateRun` with the caller-owned completed run. If evaluation had already started, supply
+`rehydrateEvaluation`; if the state is terminal, supply `rehydrateResult`. Each callback is checked
+against the persisted route/outcome/evaluation digest and cycle schema. Missing or mismatched
+rehydration fails closed before another provider dispatch. Evaluated settlements use a stable
+`decision:<cycleId>:<episodeId>` idempotency key, and cross-domain learning uses the stable reviewed
+trajectory identity, so a worker can recover around a learner or database interruption without
+double-crediting the bandit.
+
+The ordinary persistence contract is domain-neutral: the same state machine and privacy rules cover
+coding, browser, data, science, biomedical, neuroscience, operations, enterprise, multi-agent,
+multimodal, evaluation, and explicit cross-domain fan-out. A terminal replay returns the private
+caller result without invoking the provider again. The journal is still an orchestration cursor,
+not a transaction across the provider, evaluator, learning ledger, memory store, or external tools;
+those boundaries must keep their own idempotency and reconciliation records.
+
 When a controller is supplied, thrown semantic/provider dispatch failures, replan-transition
 failures, and controller-completion failures fail the shared execution before being rethrown unless
 the caller selects `executionLifecycle: "observe_only"` for an enclosing manager. Absent HTTP status

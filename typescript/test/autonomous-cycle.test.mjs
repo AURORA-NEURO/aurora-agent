@@ -8,6 +8,8 @@ import {
   AutonomousLearningController,
   AutonomousOnlineLearner,
   CredentialStore,
+  AutonomousDecisionCyclePersistenceCoordinator,
+  InMemoryAutonomousDecisionCycleStateStore,
   InMemoryAutonomousCycleReplanStateStore,
   LLMRuntime,
   openaiCompatibleProvider,
@@ -15,6 +17,7 @@ import {
   runAutonomousCrossDomainReplanCycle,
   runAutonomousDecisionCycle,
   runAutonomousReplanCycle,
+  validateAutonomousDecisionCycleSnapshot,
   validateAutonomousCycleReplanSnapshot,
 } from "../dist/index.js";
 
@@ -57,6 +60,21 @@ function cycleAgent(payloads = [{ text: "cycle answer" }]) {
   return { agent, bodies, calls: () => calls };
 }
 
+function failingCycleAgent() {
+  let calls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      calls += 1;
+      throw new Error("simulated provider interruption");
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("cycle-provider", "https://cycle-interrupted.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm, { learner: new AutonomousOnlineLearner() });
+  agent.registerModel(candidate());
+  return { agent, calls: () => calls };
+}
+
 function toolLoopAgent(stopResponses = 0) {
   let calls = 0;
   const llm = new LLMRuntime({
@@ -95,6 +113,88 @@ test("decision cycle connects approval, invocation, evaluator settlement, and ba
   assert.equal(result.settlement.next_state.generation, 1);
   assert.equal(calls(), 1);
   assert.equal(JSON.stringify(result.settlement).includes(task), false);
+});
+
+test("ordinary decision cycles persist a metadata-only restart barrier across every built-in domain", async () => {
+  const domains = ["coding", "browser", "data", "science", "biomedical", "neuroscience", "operations", "enterprise", "multi_agent", "multimodal", "cross_domain", "evaluation"];
+  const first = cycleAgent();
+  const store = new InMemoryAutonomousDecisionCycleStateStore();
+  const privateResults = new Map();
+  for (const domain of domains) {
+    const task = `restart-safe ${domain} review`;
+    const cycleId = `ordinary-${domain}`;
+    const result = await runAutonomousDecisionCycle(first.agent, task, { domain, approveProviderCall: true, cycleId, decisionStateStore: store });
+    assert.equal(result.status, "completed", domain);
+    privateResults.set(cycleId, result);
+  }
+  assert.equal(first.calls(), domains.length);
+  const persisted = new Map();
+  const coordinator = new AutonomousDecisionCyclePersistenceCoordinator(store, {
+    read: () => persisted.get("snapshot") ?? null,
+    write: (snapshot) => { persisted.set("snapshot", structuredClone(snapshot)); },
+  });
+  const flushed = await coordinator.flush();
+  assert.equal(flushed.states.length, domains.length);
+  assert.doesNotMatch(JSON.stringify(flushed), /restart-safe|cycle answer/);
+  const tampered = structuredClone(flushed);
+  tampered.snapshot_digest = "0".repeat(64);
+  await assert.rejects(() => validateAutonomousDecisionCycleSnapshot(tampered), /digest/);
+
+  const restoredStore = new InMemoryAutonomousDecisionCycleStateStore();
+  const restoredCoordinator = new AutonomousDecisionCyclePersistenceCoordinator(restoredStore, {
+    read: () => persisted.get("snapshot") ?? null,
+    write: () => {},
+  });
+  const restored = await restoredCoordinator.restore();
+  assert.equal(restored?.snapshot_digest, flushed.snapshot_digest);
+  const restarted = cycleAgent();
+  for (const domain of domains) {
+    const cycleId = `ordinary-${domain}`;
+    const replay = await runAutonomousDecisionCycle(restarted.agent, `restart-safe ${domain} review`, {
+      domain,
+      approveProviderCall: true,
+      cycleId,
+      decisionStateStore: restoredStore,
+      rehydrateResult: () => privateResults.get(cycleId),
+    });
+    assert.equal(replay.status, "completed", domain);
+    assert.equal(replay.run.response?.text, "cycle answer", domain);
+  }
+  assert.equal(restarted.calls(), 0);
+});
+
+test("ordinary decision cycles recover an execution boundary from caller-owned run state", async () => {
+  const task = "Restart this coding review after the provider worker exits.";
+  const source = cycleAgent();
+  const baseline = await runAutonomousDecisionCycle(source.agent, task, { domain: "coding", approveProviderCall: true });
+  const interrupted = failingCycleAgent();
+  const stateStore = new InMemoryAutonomousDecisionCycleStateStore();
+  await assert.rejects(
+    runAutonomousDecisionCycle(interrupted.agent, task, {
+      domain: "coding",
+      routeOverride: baseline.route,
+      approveProviderCall: true,
+      cycleId: "ordinary-execution-interruption",
+      decisionStateStore: stateStore,
+    }),
+    /provider transport failed/,
+  );
+  const pending = await stateStore.load("ordinary-execution-interruption");
+  assert.equal(pending.phase, "execution_pending");
+  assert.equal(pending.outcome_digest, null);
+  assert.doesNotMatch(JSON.stringify(pending), /Restart this coding review|cycle answer/);
+
+  const resumed = await runAutonomousDecisionCycle(interrupted.agent, task, {
+    domain: "coding",
+    approveProviderCall: true,
+    cycleId: "ordinary-execution-interruption",
+    decisionStateStore: stateStore,
+    rehydrateRoute: () => baseline.route,
+    rehydrateRun: () => baseline.run,
+  });
+  assert.equal(resumed.status, "completed");
+  assert.equal(resumed.run.response.text, "cycle answer");
+  assert.equal(interrupted.calls(), 1);
 });
 
 test("decision cycle preserves structured output and caller selection policy", async () => {

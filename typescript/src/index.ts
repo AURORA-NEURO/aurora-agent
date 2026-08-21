@@ -630,6 +630,26 @@ export type {
   AutonomousCycleReplanState,
   AutonomousCycleReplanStateStore,
 } from "./autonomous-cycle-persistence.js";
+export {
+  AUTONOMOUS_DECISION_CYCLE_SNAPSHOT_SCHEMA,
+  AUTONOMOUS_DECISION_CYCLE_STATE_SCHEMA,
+  AUTONOMOUS_DECISION_CYCLE_MAX_SNAPSHOT_BYTES,
+  AUTONOMOUS_DECISION_CYCLE_MAX_STATES,
+  AutonomousDecisionCyclePersistenceCoordinator,
+  InMemoryAutonomousDecisionCycleStateStore,
+  sealAutonomousDecisionCycleState,
+  validateAutonomousDecisionCycleSnapshot,
+  validateAutonomousDecisionCycleState,
+} from "./autonomous-decision-persistence.js";
+export type {
+  AutonomousDecisionCycleMode,
+  AutonomousDecisionCyclePhase,
+  AutonomousDecisionCycleRehydrationContext,
+  AutonomousDecisionCycleSnapshot,
+  AutonomousDecisionCycleSnapshotPersistence,
+  AutonomousDecisionCycleState,
+  AutonomousDecisionCycleStateStore,
+} from "./autonomous-decision-persistence.js";
 export type {
   AutonomousCrossDomainDecisionCycleEvaluator,
   AutonomousCrossDomainDecisionCycleLearningOptions,
@@ -649,6 +669,7 @@ export type {
   AutonomousDecisionCycleMemoryOptions,
   AutonomousDecisionCycleMemoryProjection,
   AutonomousDecisionCycleOptions,
+  AutonomousDecisionCyclePersistenceOptions,
   AutonomousDecisionCycleResult,
   AutonomousDecisionCycleSemanticOptions,
   AutonomousDecisionCycleStatus,

@@ -1422,6 +1422,25 @@ duplicate provider call. `InMemoryAutonomousCycleReplanStateStore` is a referenc
 `AutonomousCycleReplanPersistenceCoordinator` connects the state table to a caller's transactional
 `read()`/`write()` adapter.
 
+The ordinary decision-cycle entry points have a separate, smaller cursor for callers that do not
+need replanning. `InMemoryAutonomousDecisionCycleStateStore` and
+`AutonomousDecisionCyclePersistenceCoordinator` expose `route_pending`, `execution_pending`,
+`evaluation_pending`, `settlement_pending`, and `terminal` phases for both single-domain and
+cross-domain cycles. A stable `cycleId` is required when persistence is enabled. The cursor keeps
+only task/route/selection/outcome/evaluator/episode/trajectory/settlement digests and bounded
+status metadata; it never stores the task, prompt, plan, provider response, tool arguments,
+credentials, evaluator evidence, or final private result.
+
+Ordinary-cycle recovery is callback-driven as well: `rehydrateRoute` restores a reviewed route,
+`rehydrateRun` supplies a caller-owned provider result after an execution boundary,
+`rehydrateEvaluation` supplies an evaluator packet after evaluation began, and `rehydrateResult`
+supplies a terminal result. The TypeScript façade checks the callback's schema and content digests
+against the cursor and refuses to guess by dispatching a provider again. Evaluated learning commits
+use stable cycle-scoped idempotency keys, while cross-domain cycles preserve the reviewed trajectory
+identity. This makes the same restart and privacy contract apply uniformly to coding, browser, data,
+science, biomedical, neuroscience, operations, enterprise, multi-agent, multimodal, evaluation,
+and explicit cross-domain work.
+
 This cursor provides bounded restart coordination, not a distributed exactly-once transaction.
 The provider result store, learning controller, effect boundary, and external systems of record
 must use stable idempotency keys and reconcile a crash between their side effect and the cursor
