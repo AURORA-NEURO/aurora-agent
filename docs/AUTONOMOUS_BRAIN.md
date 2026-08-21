@@ -2739,6 +2739,96 @@ result = agent.run(
 print(agent.tool_receipts())
 ```
 
+### Direct reviewed capability execution, observation projection, and restart replay
+
+Native provider tool loops are useful when a model is deciding which registered tool to call.
+Applications also need a deterministic seam for executing a capability that has already been
+selected by a planner, workflow stage, queue, or human operator. Python exposes that seam through
+`AutonomousAgent.execute_capability(...)` and the lower-level `AutonomousCapabilityRuntime`.
+It accepts a bounded request containing the exact tool name, JSON arguments, workflow identity,
+stage identity, input digest, optional subject/evidence digests, and an application idempotency
+key. It never accepts a credential, provider payload, arbitrary executor, or effect authority.
+
+```python
+from prism_sdk import (
+    AutonomousAgent,
+    InMemoryAutonomousCapabilityJournalStore,
+    builtin_autonomous_workflow_strategies,
+    content_digest,
+)
+
+workflow = next(
+    item for item in builtin_autonomous_workflow_strategies()
+    if item.domain == "operations"
+)
+stage = workflow.stages[0]
+journal = InMemoryAutonomousCapabilityJournalStore()
+agent = AutonomousAgent(
+    workspace,
+    runtime,
+    tool_registry=tools,
+    capability_journal=journal,
+)
+
+request = {
+    "call_id": "operations-call-1",
+    "tool": "developer_platform_status",
+    "arguments": {"scope": "workspace"},
+    "workflow_context": {
+        "domain": "operations",
+        "workflow_id": workflow.workflow_id,
+        "workflow_digest": workflow.workflow_digest,
+        "stage_id": stage.id,
+    },
+    "input_digest": content_digest({"scope": "workspace"}),
+    "subject_digest": None,
+    "parent_evidence_digests": [],
+    "replay_key": "operations-replay-1",
+    "execution_id": "operations-execution-1",
+}
+
+result = agent.execute_capability(
+    request,
+    project_observations=lambda value, _request: [
+        {
+            "id": "operations-observation-1",
+            "label": "observations",
+            "kind": "fact",
+            "status": "observed",
+            "value_digest": content_digest(value),
+        }
+    ],
+)
+```
+
+The runtime resolves the registered schema, enforces domain membership and the built-in
+workflow-stage contract, applies the same read-only/effect approval policy as the provider tool
+loop, and invokes only the caller-owned executor already configured on the agent. A successful
+call returns its adapter value only to the current caller. The durable
+`AutonomousCapabilityExecutionRecord` retains status, domain/workflow/stage identity, schema and
+argument/output digests, bounded observation labels, evidence completeness, risk posture,
+duration, and explicit non-claims. It does not retain arguments, output values, prompts, task
+text, credentials, or provider transcripts. Observation projection is an evaluator handoff, not
+a truth oracle: the projector can declare bounded fact/measurement/provenance/limitation/warning
+rows, but it cannot grant authority or turn transport success into reward.
+
+`execute_capability_batch(requests, max_parallelism=...)` provides the same contract for up to 64
+requests and returns results in input order. Parallel requests use per-replay-key in-flight
+deduplication, so identical concurrent requests dispatch once and receive one fresh result plus
+replay views. Conflicting replay keys fail closed. Batch parallelism is capped at 16 and is only
+a scheduling hint; it does not bypass approval, schema, domain, journal, or evaluator boundaries.
+
+For restart safety, pass a caller-owned `AutonomousCapabilityJournalStore` such as
+`InMemoryAutonomousCapabilityJournalStore` in tests or a persistence-backed implementation in a
+worker. Journal entries are bounded, metadata-only, hash chained, and snapshot-verifiable. After
+restoring the store, call `agent.restore_capability_journal()` (or
+`AutonomousCapabilityRuntime.rehydrate()`). Completed and reconciliation-required outcomes become
+replay barriers; approval, refusal, and failed attempts remain retryable records rather than
+permanent locks. A post-restart replay returns `replay: "replayed"` with no adapter value and does
+not invoke the executor again. `agent.capability_execution_evidence()` exposes the bounded
+metadata history for an independent evaluator, which must supply the actual reward or pass/fail
+decision before any bandit or online-learning update.
+
 For an effectful tool, provide `tool_runtime=AutonomousDomainToolRuntime(...)` with an approval
 callback, or replace the default workspace adapter with an application executor that enforces
 identity, scope, idempotency, and operator policy. The agent never derives approval from the model,

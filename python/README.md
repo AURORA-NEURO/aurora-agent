@@ -96,6 +96,16 @@ the caller has not supplied explicit provider tools, while custom tools remain a
 fallback when no reviewed candidate is available. Missing catalogue entries and activation-gated
 stages are explicit rather than optimistic.
 
+`AutonomousAgent.execute_capability(...)` is the deterministic application seam for a capability
+already selected by a plan, workflow, queue, or operator. It rechecks the exact registered tool
+schema, domain/stage contract, approval posture, and caller-owned executor, then returns the raw
+adapter value only transiently. `AutonomousCapabilityExecutionRecord` and the optional
+`InMemoryAutonomousCapabilityJournalStore` retain only bounded metadata, digests, observation
+labels, evidence completeness, and replay identity. `execute_capability_batch(...)` supports up to
+64 ordered requests with bounded parallelism and in-flight deduplication; after restart,
+`restore_capability_journal()` rehydrates completed replay barriers without replaying adapters.
+Independent evaluator evidence remains required before online-learning or bandit credit.
+
 The shared caller-owned bandit state supports `ucb1`, `epsilon_greedy`, and deterministic
 `thompson_sampling` policies. Thompson selection forms a fractional Beta posterior from explicit
 evaluator rewards, emits posterior metadata for audit/replay, and still respects capability,

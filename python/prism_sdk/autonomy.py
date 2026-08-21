@@ -58,6 +58,11 @@ from .domain_tools import (
     builtin_autonomous_domain_tool_profiles,
     plan_mcp_catalogue_bindings,
 )
+from .autonomous_capabilities import (
+    AutonomousCapabilityExecutionResult,
+    AutonomousCapabilityJournalStore,
+    AutonomousCapabilityRuntime,
+)
 from .autonomy_onboarding import (
     AutonomousActivationError,
     AutonomousCapabilityActivation,
@@ -10561,6 +10566,7 @@ class AutonomousAgent:
         health_ledger: ProviderHealthLedger | None = None,
         tool_registry: AutonomousDomainToolRegistry | None = None,
         tool_runtime: AutonomousDomainToolRuntime | None = None,
+        capability_journal: AutonomousCapabilityJournalStore | None = None,
         activation: AutonomousCapabilityActivation | None = None,
         execution_journal: AutonomousExecutionJournal | None = None,
         execution_policy: AutonomousExecutionPolicy | Mapping[str, Any] | None = None,
@@ -10586,6 +10592,11 @@ class AutonomousAgent:
             raise BrainRunError("tool_runtime must be an AutonomousDomainToolRuntime or None")
         if tool_runtime is not None and tool_registry is not None and tool_runtime.registry is not tool_registry:
             raise BrainRunError("tool_runtime registry must be the same registry supplied to the agent")
+        if capability_journal is not None and not all(
+            callable(getattr(capability_journal, method, None))
+            for method in ("append", "find", "records")
+        ):
+            raise BrainRunError("capability_journal must implement append, find, and records")
         if activation is not None and not isinstance(activation, AutonomousCapabilityActivation):
             raise BrainRunError("activation must be an AutonomousCapabilityActivation or None")
         if pack_registry is not None and not isinstance(pack_registry, AutonomousDomainPackRegistry):
@@ -10632,6 +10643,12 @@ class AutonomousAgent:
             )
         else:
             self.tool_runtime = None
+        self.capability_journal = capability_journal
+        self.capability_runtime = (
+            AutonomousCapabilityRuntime(self.tool_runtime, journal=capability_journal)
+            if self.tool_runtime is not None
+            else None
+        )
         if health_ledger is not None:
             runtime.add_observation_callback(health_ledger.record)
         self.orchestrator = AutonomousTaskOrchestrator(
@@ -11690,6 +11707,10 @@ class AutonomousAgent:
                 self.tool_registry,
                 executor=lambda resolved, arguments: self.brain.workspace.tool(resolved.name, dict(arguments)),
             )
+            self.capability_runtime = AutonomousCapabilityRuntime(
+                self.tool_runtime,
+                journal=self.capability_journal,
+            )
         return registered
 
     def plan_workspace_tool_bindings(
@@ -11836,6 +11857,10 @@ class AutonomousAgent:
                 self.tool_registry,
                 executor=lambda resolved, arguments: self.brain.workspace.tool(resolved.name, dict(arguments)),
             )
+            self.capability_runtime = AutonomousCapabilityRuntime(
+                self.tool_runtime,
+                journal=self.capability_journal,
+            )
         if self.activation.state.status != "revoked":
             try:
                 self.activation.record_registered_tools(len(self.tool_registry.catalogue()))
@@ -11856,6 +11881,67 @@ class AutonomousAgent:
         if self.tool_runtime is None:
             return []
         return [receipt.to_dict() for receipt in self.tool_runtime.receipts]
+
+    def execute_capability(
+        self,
+        request: Mapping[str, Any],
+        *,
+        project_observations: Callable[[Any, Mapping[str, Any]], Sequence[Mapping[str, Any]]] | None = None,
+    ) -> AutonomousCapabilityExecutionResult:
+        """Execute one reviewed capability through the approval-aware domain runtime.
+
+        The request contains only caller-owned identifiers, bounded arguments, and workflow
+        digests. The returned value is transient to this call; durable history and journals
+        retain execution metadata, digests, evidence labels, and refusal/replay state only.
+        """
+
+        if self.capability_runtime is None:
+            raise BrainRunError(
+                "execute_capability requires a configured domain tool runtime and workspace executor"
+            )
+        try:
+            return self.capability_runtime.execute(
+                request,
+                project_observations=project_observations,
+            )
+        except (ArgumentError, TypeError, ValueError) as error:
+            raise BrainRunError("capability execution request was rejected") from error
+
+    def execute_capability_batch(
+        self,
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        project_observations: Callable[[Any, Mapping[str, Any]], Sequence[Mapping[str, Any]]] | None = None,
+        max_parallelism: int = 1,
+    ) -> tuple[AutonomousCapabilityExecutionResult, ...]:
+        """Execute a bounded capability batch in stable input order."""
+
+        if self.capability_runtime is None:
+            raise BrainRunError(
+                "execute_capability_batch requires a configured domain tool runtime and workspace executor"
+            )
+        try:
+            return self.capability_runtime.execute_batch(
+                requests,
+                project_observations=project_observations,
+                max_parallelism=max_parallelism,
+            )
+        except (ArgumentError, TypeError, ValueError) as error:
+            raise BrainRunError("capability batch was rejected") from error
+
+    def restore_capability_journal(self) -> dict[str, Any]:
+        """Rehydrate committed capability replay identities from the configured journal."""
+
+        if self.capability_runtime is None:
+            raise BrainRunError("restore_capability_journal requires a configured capability runtime")
+        return self.capability_runtime.rehydrate()
+
+    def capability_execution_evidence(self) -> list[dict[str, Any]]:
+        """Return bounded metadata-only capability records for evaluator integration."""
+
+        if self.capability_runtime is None:
+            return []
+        return self.capability_runtime.execution_evidence()
 
     def evaluate_tool_receipts(
         self,

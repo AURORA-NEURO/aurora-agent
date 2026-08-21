@@ -272,11 +272,9 @@ export async function validateAutonomousCapabilityJournalSnapshot(value: unknown
   if (value.schema !== AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA || value.retention !== "metadata_only_hash_bound" || value.secret_material !== "never_returned") throw new AutonomousCapabilityPersistenceError("capability journal snapshot retention markers are invalid");
   if (!Array.isArray(value.entries) || value.entries.length > AUTONOMOUS_CAPABILITY_JOURNAL_MAX_ENTRIES) throw new AutonomousCapabilityPersistenceError("capability journal snapshot exceeds its entry capacity");
   const entries = await Promise.all(value.entries.map((entry) => validateAutonomousCapabilityJournalEntry(entry)));
-  const requestDigests = new Set<string>();
   for (let index = 0; index < entries.length; index += 1) {
     const entry = entries[index]!;
     if (entry.sequence !== index + 1) throw new AutonomousCapabilityPersistenceError("capability journal sequences must be contiguous from one");
-    if (!requestDigests.add(entry.record.request_digest)) throw new AutonomousCapabilityPersistenceError("capability journal contains duplicate request digests");
     const expectedPrevious = index === 0 ? null : entries[index - 1]!.entry_digest;
     if (entry.previous_entry_digest !== expectedPrevious) throw new AutonomousCapabilityPersistenceError("capability journal hash-chain continuity check failed");
   }
@@ -295,10 +293,10 @@ export class InMemoryAutonomousCapabilityJournalStore implements AutonomousCapab
 
   async append(rawRecord: AutonomousCapabilityExecutionRecord): Promise<AutonomousCapabilityJournalEntry> {
     const record = await validateAutonomousCapabilityExecutionRecord(rawRecord);
-    const existing = this.entries.find((entry) => entry.record.request_digest === record.request_digest);
+    const existing = [...this.entries].reverse().find((entry) => entry.record.request_digest === record.request_digest);
     if (existing) {
-      if (await digestJson(existing.record) !== await digestJson(record)) throw new AutonomousCapabilityPersistenceError("capability journal request digest conflicts with an existing record");
-      return clone(existing);
+      if (await digestJson(existing.record) === await digestJson(record)) return clone(existing);
+      if (["completed", "reconciliation_required"].includes(existing.record.status)) throw new AutonomousCapabilityPersistenceError("capability journal replay identity is already committed with a different outcome");
     }
     if (this.entries.length >= AUTONOMOUS_CAPABILITY_JOURNAL_MAX_ENTRIES) throw new AutonomousCapabilityPersistenceError("capability journal capacity exhausted");
     const entry = await sealEntry(this.entries.length + 1, this.entries.at(-1)?.entry_digest ?? null, record);
@@ -308,7 +306,7 @@ export class InMemoryAutonomousCapabilityJournalStore implements AutonomousCapab
 
   async find(requestDigest: string): Promise<AutonomousCapabilityExecutionRecord | null> {
     const digest = boundedDigest("capability journal request_digest", requestDigest)!;
-    const entry = this.entries.find((candidate) => candidate.record.request_digest === digest);
+    const entry = [...this.entries].reverse().find((candidate) => candidate.record.request_digest === digest);
     return entry ? clone(entry.record) : null;
   }
 

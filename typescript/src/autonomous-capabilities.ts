@@ -512,11 +512,15 @@ export class AutonomousCapabilityRuntime {
       if (record.replay !== "fresh") throw new ProviderRuntimeError("capability journal returned a replayed record");
       const prior = this.rehydratedByRequest.get(record.request_digest);
       if (prior && await digestJson(prior) !== await digestJson(record)) throw new ProviderRuntimeError("capability journal contains conflicting request metadata");
-      this.rehydratedByRequest.set(record.request_digest, cloneRecord(record));
-      if (record.replay_key_digest !== null) {
-        const priorKey = this.rehydratedByReplayKey.get(record.replay_key_digest);
-        if (priorKey && priorKey.request_digest !== record.request_digest) throw new ProviderRuntimeError("capability journal contains a replay-key collision");
-        this.rehydratedByReplayKey.set(record.replay_key_digest, cloneRecord(record));
+      this.rehydratedByRequest.delete(record.request_digest);
+      if (record.replay_key_digest !== null) this.rehydratedByReplayKey.delete(record.replay_key_digest);
+      if (["completed", "reconciliation_required"].includes(record.status)) {
+        this.rehydratedByRequest.set(record.request_digest, cloneRecord(record));
+        if (record.replay_key_digest !== null) {
+          const priorKey = this.rehydratedByReplayKey.get(record.replay_key_digest);
+          if (priorKey && priorKey.request_digest !== record.request_digest) throw new ProviderRuntimeError("capability journal contains a replay-key collision");
+          this.rehydratedByReplayKey.set(record.replay_key_digest, cloneRecord(record));
+        }
       }
       this.history.push(cloneRecord(record));
     }

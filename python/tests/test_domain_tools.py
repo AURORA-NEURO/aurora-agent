@@ -1,19 +1,27 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+import threading
+
 import pytest
 
 from prism_sdk import (
     AUTONOMOUS_DOMAINS,
+    AutonomousCapabilityRuntime,
     DOMAIN_TOOL_BINDING_PLAN_SCHEMA,
     AutonomousDomainTool,
     AutonomousDomainToolBinding,
     AutonomousDomainToolRegistry,
     AutonomousDomainToolRuntime,
+    InMemoryAutonomousCapabilityJournalStore,
     ProviderToolCall,
     ToolCatalogue,
+    builtin_autonomous_workflow_strategies,
     builtin_autonomous_domain_tool_profiles,
+    content_digest,
     plan_mcp_catalogue_bindings,
 )
+from prism_sdk.autonomy import _AUTONOMOUS_CAPABILITY_TOOL_ALIASES
 from prism_sdk.errors import ArgumentError
 
 
@@ -266,3 +274,179 @@ def test_binding_planner_can_scope_domains_and_reports_missing_exact_capabilitie
     assert plan["coverage"]["evaluation"]["available_tools"] == []
     assert "token_context_plan" in plan["coverage"]["data"]["missing_tools"]
     assert plan["coverage"]["data"]["coverage_ratio"] > 0
+
+
+def test_capability_runtime_executes_a_reviewed_stage_for_every_builtin_domain() -> None:
+    tool_profiles = {profile.domain: profile for profile in builtin_autonomous_domain_tool_profiles()}
+    workflows = {workflow.domain: workflow for workflow in builtin_autonomous_workflow_strategies()}
+    tools: list[AutonomousDomainTool] = []
+    requests: list[dict[str, object]] = []
+    for domain in AUTONOMOUS_DOMAINS:
+        workflow = workflows[domain]
+        stage = workflow.stages[0]
+        aliases = _AUTONOMOUS_CAPABILITY_TOOL_ALIASES[domain]
+        binding = next(
+            binding
+            for binding in tool_profiles[domain].bindings
+            if any(
+                binding.capability == required
+                or binding.capability in aliases.get(required, ())
+                for required in stage.required_capabilities
+            )
+        )
+        tools.append(
+            AutonomousDomainTool(
+                binding.name,
+                (domain,),
+                binding.capability,
+                f"Read bounded {domain} state.",
+                {"type": "object", "additionalProperties": False},
+            )
+        )
+        requests.append(
+            {
+                "call_id": f"call-{domain}",
+                "tool": binding.name,
+                "arguments": {},
+                "workflow_context": {
+                    "domain": domain,
+                    "workflow_id": workflow.workflow_id,
+                    "workflow_digest": workflow.workflow_digest,
+                    "stage_id": stage.id,
+                },
+                "input_digest": content_digest({"domain": domain}),
+                "subject_digest": None,
+                "parent_evidence_digests": [],
+                "replay_key": f"replay-{domain}",
+                "execution_id": f"execution-{domain}",
+            }
+        )
+
+    registry = AutonomousDomainToolRegistry(tools)
+    executed: list[str] = []
+    runtime = AutonomousDomainToolRuntime(
+        registry,
+        executor=lambda tool, _arguments: executed.append(tool.name) or {"status": "ok"},
+    )
+    capability_runtime = AutonomousCapabilityRuntime(runtime)
+
+    results = capability_runtime.execute_batch(requests, max_parallelism=4)
+
+    assert len(results) == len(AUTONOMOUS_DOMAINS)
+    assert all(result.record.status == "completed" for result in results)
+    assert all(result.record.stage_contract_digest for result in results)
+    assert all(result.record.output_digest for result in results)
+    assert len(executed) == len(AUTONOMOUS_DOMAINS)
+
+
+def test_capability_journal_rehydrates_without_replaying_or_retaining_adapter_values() -> None:
+    workflow = next(item for item in builtin_autonomous_workflow_strategies() if item.domain == "operations")
+    stage = workflow.stages[0]
+    tool = AutonomousDomainTool(
+        "operations_status",
+        ("operations",),
+        "observability",
+        "Read bounded operations status.",
+        {"type": "object", "additionalProperties": False},
+    )
+    registry = AutonomousDomainToolRegistry([tool])
+    executions: list[str] = []
+    journal = InMemoryAutonomousCapabilityJournalStore()
+    capability_runtime = AutonomousCapabilityRuntime(
+        AutonomousDomainToolRuntime(
+            registry,
+            executor=lambda resolved, _arguments: executions.append(resolved.name) or {"private": "transient"},
+        ),
+        journal=journal,
+    )
+    request = {
+        "call_id": "operations-call-1",
+        "tool": tool.name,
+        "arguments": {},
+        "workflow_context": {
+            "domain": "operations",
+            "workflow_id": workflow.workflow_id,
+            "workflow_digest": workflow.workflow_digest,
+            "stage_id": stage.id,
+        },
+        "input_digest": content_digest({"input": "operations"}),
+        "subject_digest": None,
+        "parent_evidence_digests": [],
+        "replay_key": "operations-replay-1",
+        "execution_id": "operations-execution-1",
+    }
+
+    first = capability_runtime.execute(request)
+    snapshot = journal.snapshot().to_dict()
+    restored_journal = InMemoryAutonomousCapabilityJournalStore()
+    restored_journal.restore(snapshot)
+    restarted = AutonomousCapabilityRuntime(
+        AutonomousDomainToolRuntime(
+            registry,
+            executor=lambda _resolved, _arguments: executions.append("unexpected-replay"),
+        ),
+        journal=restored_journal,
+    )
+
+    assert restarted.rehydrate()["replayable"] == 1
+    replayed = restarted.execute(request)
+
+    assert first.record.status == "completed"
+    assert replayed.record.replay == "replayed"
+    assert replayed.value is None
+    assert executions == ["operations_status"]
+    record_snapshot = snapshot["entries"][0]["record"]
+    assert "private" not in record_snapshot
+    assert "output" not in record_snapshot
+    assert "arguments" not in record_snapshot
+
+
+def test_capability_runtime_deduplicates_concurrent_identical_requests() -> None:
+    workflow = next(item for item in builtin_autonomous_workflow_strategies() if item.domain == "operations")
+    stage = workflow.stages[0]
+    tool = AutonomousDomainTool(
+        "operations_status_concurrent",
+        ("operations",),
+        "observability",
+        "Read bounded operations status.",
+        {"type": "object", "additionalProperties": False},
+    )
+    registry = AutonomousDomainToolRegistry([tool])
+    started = threading.Event()
+    release = threading.Event()
+    executions: list[str] = []
+
+    def executor(_resolved: AutonomousDomainTool, _arguments: object) -> dict[str, str]:
+        executions.append("started")
+        started.set()
+        assert release.wait(timeout=2)
+        return {"status": "ok"}
+
+    capability_runtime = AutonomousCapabilityRuntime(
+        AutonomousDomainToolRuntime(registry, executor=executor)
+    )
+    request = {
+        "call_id": "concurrent-call",
+        "tool": tool.name,
+        "arguments": {},
+        "workflow_context": {
+            "domain": "operations",
+            "workflow_id": workflow.workflow_id,
+            "workflow_digest": workflow.workflow_digest,
+            "stage_id": stage.id,
+        },
+        "input_digest": content_digest({"input": "concurrent"}),
+        "subject_digest": None,
+        "parent_evidence_digests": [],
+        "replay_key": "concurrent-replay",
+        "execution_id": "concurrent-execution",
+    }
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = [pool.submit(capability_runtime.execute, request) for _ in range(4)]
+        assert started.wait(timeout=2)
+        release.set()
+        results = [future.result(timeout=2) for future in futures]
+
+    assert len(executions) == 1
+    assert sorted(result.record.replay for result in results) == ["fresh", "replayed", "replayed", "replayed"]

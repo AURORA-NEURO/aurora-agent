@@ -13,6 +13,7 @@ from prism_sdk import (
     AUTONOMOUS_DOMAINS,
     AutonomousAgent,
     AutonomousBrain,
+    AutonomousCapabilityRuntime,
     AutonomousDomainRegistry,
     AutonomousDomainPackRegistry,
     AutonomousDomainTool,
@@ -47,6 +48,7 @@ from prism_sdk import (
     CredentialStore,
     CredentialError,
     LLMRuntime,
+    InMemoryAutonomousCapabilityJournalStore,
     ModelCandidate,
     ModelCatalogue,
     ProviderHealthLedger,
@@ -54,6 +56,7 @@ from prism_sdk import (
     ProviderTool,
     ProviderToolResult,
     builtin_autonomous_domain_evaluator_profiles,
+    builtin_autonomous_workflow_strategies,
     openai_provider,
     content_digest,
     task_facet_digests,
@@ -920,6 +923,70 @@ def test_autonomous_agent_composes_domain_tools_into_native_tool_loop():
         server.shutdown()
         thread.join(timeout=2)
         server.server_close()
+
+
+def test_autonomous_agent_exposes_reviewed_capability_execution_and_journal_replay():
+    class CapabilityWorkspace(_Workspace):
+        def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+            if name == "developer_platform_status":
+                self.calls.append((name, {} if arguments is None else dict(arguments)))
+                return {"status": "ready"}
+            return super().tool(name, arguments)
+
+    workspace = CapabilityWorkspace()
+    registry = AutonomousDomainToolRegistry(
+        [
+            AutonomousDomainTool(
+                name="developer_platform_status",
+                domains=("operations",),
+                capability="observability",
+                description="Read bounded workspace status.",
+                parameters={
+                    "type": "object",
+                    "properties": {"scope": {"type": "string"}},
+                    "required": ["scope"],
+                    "additionalProperties": False,
+                },
+            )
+        ]
+    )
+    workflow = next(item for item in builtin_autonomous_workflow_strategies() if item.domain == "operations")
+    stage = workflow.stages[0]
+    journal = InMemoryAutonomousCapabilityJournalStore()
+    agent = AutonomousAgent(
+        workspace,
+        LLMRuntime(),
+        tool_registry=registry,
+        capability_journal=journal,
+    )
+    assert isinstance(agent.capability_runtime, AutonomousCapabilityRuntime)
+    request = {
+        "call_id": "agent-capability-call",
+        "tool": "developer_platform_status",
+        "arguments": {"scope": "workspace"},
+        "workflow_context": {
+            "domain": "operations",
+            "workflow_id": workflow.workflow_id,
+            "workflow_digest": workflow.workflow_digest,
+            "stage_id": stage.id,
+        },
+        "input_digest": content_digest({"scope": "workspace"}),
+        "subject_digest": None,
+        "parent_evidence_digests": [],
+        "replay_key": "agent-capability-replay",
+        "execution_id": "agent-capability-execution",
+    }
+
+    first = agent.execute_capability(request)
+    restored = agent.restore_capability_journal()
+    replayed = agent.execute_capability(request)
+
+    assert first.record.status == "completed"
+    assert restored["replayable"] == 1
+    assert replayed.record.replay == "replayed"
+    assert replayed.value is None
+    assert workspace.calls == [("developer_platform_status", {"scope": "workspace"})]
+    assert agent.capability_execution_evidence()[0]["request_digest"]
 
 
 def test_autonomous_agent_persists_native_tool_execution_and_terminal_state(tmp_path):
