@@ -438,26 +438,75 @@ test("workflow executor fails closed when a provider reports a blocked stage", a
     fetch: async (_url, init) => {
       calls += 1;
       const payload = workflowStagePayload(init);
-      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify({ ...payload, status: "blocked", uncertainty: ["required evidence is unavailable"] }) }, finish_reason: "stop" }] });
+      const response = calls === 1 ? { ...payload, status: "blocked", uncertainty: ["required evidence is unavailable"] } : payload;
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify(response) }, finish_reason: "stop" }] });
     },
   });
   llm.registerProvider(openaiCompatibleProvider("blocked-stage", "https://blocked-stage.test", { requiresCredential: false }));
   const agent = new AutonomousAgent(llm);
   agent.registerModel({ ...model(), provider: "blocked-stage", model: "blocked-stage-model" });
-  const result = await new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore()).start("Do not advance without evidence", {
+  const executor = new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore());
+  const result = await executor.start("Do not advance without evidence", {
     domain: "coding",
     jobId: "workflow-blocked-stage-1",
     candidates: agent.models(),
     approveProviderCall: true,
     maxStages: 32,
   });
-  assert.equal(result.status, "failed");
+  assert.equal(result.status, "stage_blocked");
   assert.equal(calls, 1);
   assert.equal(result.completed_stage_count, 0);
   assert.equal(result.stage_results[0].declared_status, "blocked");
   assert.deepEqual(result.stage_results[0].validation_errors, []);
-  assert.equal(result.checkpoint.stage_outcomes.at(-1).error_class, "stage_not_completed");
+  assert.equal(result.checkpoint.stage_outcomes.at(-1).error_class, "stage_blocked");
   assert.equal(result.checkpoint.next_stage_id, "scope");
+
+  const held = await executor.resume("workflow-blocked-stage-1", "Do not advance without evidence", {
+    candidates: agent.models(),
+    approveProviderCall: true,
+    maxStages: 32,
+  });
+  assert.equal(held.status, "stage_blocked");
+  assert.equal(calls, 1, "blocked stages must not replay without an explicit retry decision");
+  await assert.rejects(
+    () => executor.resume("workflow-blocked-stage-1", "Do not advance without evidence", { candidates: agent.models(), approveProviderCall: true, retryBlocked: "yes" }),
+    /retryBlocked/,
+  );
+
+  const retried = await executor.resume("workflow-blocked-stage-1", "Do not advance without evidence", {
+    candidates: agent.models(),
+    approveProviderCall: true,
+    maxStages: 32,
+    retryBlocked: true,
+  });
+  assert.equal(retried.status, "completed");
+  assert.equal(retried.completed_stage_count, 5);
+  assert.equal(calls, 6, "an explicit retry may redispatch the blocked stage and continue the DAG");
+  assert.ok(retried.checkpoint.generation > result.checkpoint.generation);
+});
+
+test("workflow executor preserves proposed and not-attempted stage decisions", async () => {
+  let declaredStatus = "proposed";
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify({ ...workflowStagePayload(init), status: declaredStatus }) }, finish_reason: "stop" }] }),
+  });
+  llm.registerProvider(openaiCompatibleProvider("noncompleted-stage", "https://noncompleted-stage.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel({ ...model(), provider: "noncompleted-stage", model: "noncompleted-stage-model" });
+  for (const [status, expected] of [["proposed", "stage_proposed"], ["not_attempted", "stage_not_attempted"]]) {
+    declaredStatus = status;
+    const result = await new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore()).start(`Preserve ${status} workflow state`, {
+      domain: "coding",
+      jobId: `workflow-${status}-stage-1`,
+      candidates: agent.models(),
+      approveProviderCall: true,
+      maxStages: 32,
+    });
+    assert.equal(result.status, expected);
+    assert.equal(result.stage_results[0].declared_status, status);
+    assert.equal(result.checkpoint.stage_outcomes.at(-1).error_class, expected);
+  }
 });
 
 test("accepted plan identity is validated for every single-domain workflow profile", async () => {

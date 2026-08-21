@@ -775,8 +775,10 @@ dispatch. Unlike a free-form direct run, the workflow owns the stage output cont
 requires structured JSON. Every stage must return exactly `stage_id`, `status`, `evidence`,
 `uncertainty`, `notes`, and `next_actions`; `stage_id` is bound to the current stage and only
 `status: "completed"` can advance the DAG. `proposed`, `blocked`, `not_attempted`, missing, or
-unsupported fields fail closed as a terminal `stage_not_completed` or `stage_output_invalid`
-checkpoint outcome. Caller `requireJson`/`responseSchema` options cannot weaken this contract.
+unsupported fields fail closed. Declared `blocked`, `proposed`, and `not_attempted` stages return
+typed `stage_blocked`, `stage_proposed`, and `stage_not_attempted` execution statuses; malformed
+output returns `failed` with a `stage_output_invalid` checkpoint outcome. Caller
+`requireJson`/`responseSchema` options cannot weaken this contract.
 A checkpoint or previous stage admission does not authorize a later stage; readiness, capacity,
 approval, and output validation are repeated at the stage boundary.
 
@@ -786,6 +788,13 @@ caller’s evaluator/learning boundary, while the durable checkpoint retains onl
 failure metadata. The built-in stage schema caps evidence and action arrays at 32 entries, each
 entry at 4,096 bytes, and notes at 16,000 bytes. This makes workflow completion an evidence-bearing
 state transition rather than an inference from provider transport success.
+
+Blocked-stage recovery is an explicit caller decision. Resuming a checkpoint with a blocked,
+proposed, or not-attempted terminal stage returns the same typed status without dispatching another
+provider call. Pass `retryBlocked: true` only after revising the caller-owned evidence, prompt
+context, model policy, or approval decision. The executor creates a new checkpoint generation,
+retains the prior failure in the hash-linked event history, and then retries the stage under the
+same provider, tool, credential, and effect gates.
 
 New checkpoints persist only an `execution_contract_digest` for the effective candidates, selection
 limits, structured-output/schema requirement, tool definitions, failover limit, and enclosing

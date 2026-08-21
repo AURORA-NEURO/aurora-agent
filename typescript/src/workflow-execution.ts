@@ -36,7 +36,7 @@ export const AUTONOMOUS_WORKFLOW_MAX_JOBS = 1_024;
 export const AUTONOMOUS_WORKFLOW_MAX_SNAPSHOT_BYTES = 4 * 1024 * 1024;
 
 export type AutonomousWorkflowCheckpointStatus = "running" | "paused" | "completed" | "failed";
-export type AutonomousWorkflowExecutionStatus = "completed" | "paused" | "approval_required" | "failed" | "route_review_required";
+export type AutonomousWorkflowExecutionStatus = "completed" | "paused" | "approval_required" | "failed" | "stage_blocked" | "stage_proposed" | "stage_not_attempted" | "route_review_required";
 export type AutonomousWorkflowEventType = "started" | "stage_completed" | "checkpointed" | "approval_required" | "stage_failed" | "completed";
 export const AUTONOMOUS_WORKFLOW_STAGE_STATUSES = ["completed", "proposed", "blocked", "not_attempted"] as const;
 export type AutonomousWorkflowStageStatus = typeof AUTONOMOUS_WORKFLOW_STAGE_STATUSES[number];
@@ -154,6 +154,8 @@ export interface AutonomousWorkflowExecutionResult {
 export interface AutonomousWorkflowExecuteOptions extends AutonomousRunOptions {
   jobId?: string;
   maxStages?: number;
+  /** Explicitly permit re-dispatch of a stage whose provider declared it blocked/proposed/not_attempted. */
+  retryBlocked?: boolean;
   /** A completed, non-review provider proposal that may reorder only existing workflow stages. */
   acceptedPlanRefinement?: AutonomousPlanRefinementResult;
   /** Explicitly bind a legacy checkpoint that predates execution-contract digests before continuing it. */
@@ -456,6 +458,12 @@ function boundedStageCount(value: unknown): number {
   return value as number;
 }
 
+function boundedRetryBlocked(value: unknown): boolean {
+  if (value === undefined) return false;
+  if (typeof value !== "boolean") throw new ArgumentError("workflow retryBlocked must be boolean");
+  return value;
+}
+
 function responseText(run: AutonomousRunResult | null): string {
   if (!run?.response) return "";
   if (run.response.text) return run.response.text;
@@ -523,6 +531,20 @@ function validateWorkflowStageOutput(stage: AutonomousWorkflowStage, value: unkn
     : null;
   if (notes === null) errors.push("notes is outside its bounded text contract");
   return { declaredStatus, evidence, uncertainty, notes, nextActions, errors };
+}
+
+function blockedWorkflowExecutionStatus(errorClass: string | null): Extract<AutonomousWorkflowExecutionStatus, "stage_blocked" | "stage_proposed" | "stage_not_attempted"> | null {
+  if (errorClass === "stage_blocked") return "stage_blocked";
+  if (errorClass === "stage_proposed") return "stage_proposed";
+  if (errorClass === "stage_not_attempted") return "stage_not_attempted";
+  return null;
+}
+
+function blockedWorkflowErrorClass(status: AutonomousWorkflowStageStatus | null): string | null {
+  if (status === "blocked") return "stage_blocked";
+  if (status === "proposed") return "stage_proposed";
+  if (status === "not_attempted") return "stage_not_attempted";
+  return null;
 }
 
 function safeErrorClass(error: unknown): string {
@@ -743,6 +765,7 @@ export class AutonomousWorkflowExecutor {
 
   private async drive(task: string, blueprint: AutonomousTaskBlueprint, initial: AutonomousWorkflowCheckpoint, options: AutonomousWorkflowExecuteOptions, contractDigest: string, acceptedPlan: AcceptedWorkflowPlan | null): Promise<AutonomousWorkflowExecutionResult> {
     const maxStages = boundedStageCount(options.maxStages);
+    const retryBlocked = boundedRetryBlocked(options.retryBlocked);
     let checkpoint = initial;
     const stageResults: AutonomousWorkflowStageResult[] = [];
     const stages = blueprint.workflow.stages;
@@ -750,6 +773,15 @@ export class AutonomousWorkflowExecutor {
     const planRefinementDigest = acceptedPlan?.refinement_digest ?? checkpoint.plan_refinement_digest ?? null;
     let consumed = 0;
     if (checkpoint.status === "completed") return this.result("completed", checkpoint, blueprint, stageResults);
+    const previousBlockedStatus = blockedWorkflowExecutionStatus(checkpoint.stage_outcomes.at(-1)?.error_class ?? null);
+    if (previousBlockedStatus && !retryBlocked) return this.result(previousBlockedStatus, checkpoint, blueprint, stageResults);
+    if (previousBlockedStatus && retryBlocked) {
+      // Preserve the prior blocked checkpoint/event chain, but remove its active outcome from
+      // the new attempt so a successful retry can complete without duplicating one stage row.
+      checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, checkpoint.stage_outcomes.slice(0, -1), "running", contractDigest, checkpoint, stageOrder, planRefinementDigest);
+      await this.store.save(checkpoint);
+      await this.appendEvent(checkpoint.job_id, "checkpointed", checkpoint.next_stage_id, checkpoint);
+    }
     if (options.approveProviderCall !== true) {
       checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, checkpoint.stage_outcomes, "paused", contractDigest, checkpoint, stageOrder, planRefinementDigest);
       await this.store.save(checkpoint);
@@ -815,11 +847,11 @@ export class AutonomousWorkflowExecutor {
         return this.result("failed", checkpoint, blueprint, stageResults);
       }
       if (validation.errors.length > 0 || validation.declaredStatus !== "completed") {
-        const errorClass = validation.errors.length > 0 ? "stage_output_invalid" : "stage_not_completed";
+        const errorClass = validation.errors.length > 0 ? "stage_output_invalid" : blockedWorkflowErrorClass(validation.declaredStatus) ?? "stage_not_completed";
         checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "failed", run_status: run.status, selection_digest: selectionDigest, response_digest: outputDigest, output_bytes: outputBytes, error_class: errorClass, error_code: "invalid_response", retryable: false, status_code: null, learning_episode_id: null }], "failed", contractDigest, checkpoint, stageOrder, planRefinementDigest);
         await this.store.save(checkpoint);
         await this.appendEvent(checkpoint.job_id, "stage_failed", stage.id, checkpoint);
-        return this.result("failed", checkpoint, blueprint, stageResults);
+        return this.result(blockedWorkflowExecutionStatus(errorClass) ?? "failed", checkpoint, blueprint, stageResults);
       }
       const completed = [...checkpoint.completed_stage_ids, stage.id];
       const outcomes = [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "completed" as const, run_status: run.status, selection_digest: selectionDigest, response_digest: outputDigest, output_bytes: outputBytes, error_class: null, learning_episode_id: learningEpisodeId }];
