@@ -1680,17 +1680,20 @@ it returns `status: "turn_limit_reached"`. These are explicit workflow outcomes,
 provider completions, so evaluators and checkpoint managers can pause, retry, or escalate them
 without treating an unexecuted or incomplete plan as evidence of task success.
 
-The online learner uses bounded UCB-style exploration over caller-registered model arms. It updates
+The online learner uses bounded UCB1, seeded epsilon-greedy, or deterministic Thompson-sampling
+exploration over caller-registered model arms. It updates
 only after an explicit evaluator reward, failed-outcome flag, or outcome digest supplied through
 `recordEvaluatorReward()`. Remote reconciliation sends the value-only update to
 `brainBanditUpdate()` and adopts the server's returned value-only projection locally. This keeps
 server-normalized generations, contextual rows, replay receipts, and first-run arm hydration
 authoritative instead of assuming that a local replay is equivalent. Provider success and
 latency are separate from task quality; no provider health event is treated as reinforcement.
-The local policy supports both UCB1 and seeded epsilon-greedy exploration, including explicit
-failure-rate penalties and the signed reward range declared by the policy. Epsilon draws are
-derived from the caller-owned seed and state generation, so a replay can reproduce which arm was
-explored without hidden randomness.
+The local policy supports all three strategies, explicit failure-rate penalties, and the signed
+reward range declared by the policy. Thompson sampling converts bounded evaluator rewards into a
+fractional Beta posterior, derives a deterministic per-arm sample from the caller-owned seed and
+state generation, and records posterior alpha, beta, and sampled reward in the selection evidence.
+Epsilon draws and Thompson posterior samples are deterministic, so a replay can reproduce which
+arm was explored without hidden randomness.
 Every generated autonomous blueprint also carries a bounded `learning_context_digest` derived from
 the canonical domain, capability, risk class, and task-family labels shared with Rust and Python.
 Local contextual rewards are stored under that digest, so a coding evaluator cannot

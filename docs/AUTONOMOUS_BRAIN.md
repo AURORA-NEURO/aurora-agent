@@ -457,12 +457,17 @@ synthesis rewards remain comparable; domain-specific rubrics should be composed 
 value-only evaluator by the application. These modes intentionally trade within-run state updates
 for correct delayed credit and avoid double-counting immediate and terminal rewards.
 
-The Rust bandit state now supports two auditable policy modes. The backward-compatible default is
+The Rust bandit state now supports three auditable policy modes. The backward-compatible default is
 `strategy: "ucb1"`; `strategy: "epsilon_greedy"` uses `epsilon` and a public `seed` to make every
 exploration draw deterministic from the caller-owned generation and replayable from the selection
-report. Unknown strategies, invalid epsilon values, non-finite rewards, disabled arms, and empty
-eligible sets are refused. A policy choice remains routing evidence—not permission, truth, or a
-claim of biological reinforcement learning.
+report; `strategy: "thompson_sampling"` converts bounded evaluator rewards into fractional Beta
+posterior evidence and draws a deterministic per-arm posterior sample. Thompson selection emits
+posterior alpha, beta, and sample values in the ranking so a caller can audit why exploration won.
+The posterior is built only from explicit evaluator credit, adds the declared failure penalty to
+the negative mass, and never treats provider transport success as a reward. Unknown strategies,
+invalid epsilon values, non-finite rewards, disabled arms, and empty eligible sets are refused. A
+policy choice remains routing evidence—not permission, truth, or a claim of biological
+reinforcement learning.
 
 ### Provider-free automatic domain routing
 
@@ -1233,8 +1238,10 @@ transport control plane above adds the job, approval, health, and replay lifecyc
   refuses when required material does not fit and reports optional omissions with a prompt digest.
 - `brain_plan` validates an allow-listed dependency DAG, orders it deterministically, checks cost,
   and marks provider calls or external effects as approval-required. It never executes.
-- `brain_bandit_select` uses caller-persisted UCB-style arm statistics. Unexplored arms receive an
-  explicit exploration bonus and disabled arms are excluded. Supplying the optional
+- `brain_bandit_select` uses caller-persisted UCB, epsilon-greedy, or deterministic Thompson arm
+  statistics. Unexplored arms receive either an explicit UCB bonus or a Beta posterior draw, and
+  disabled arms are excluded. Thompson rankings retain posterior alpha/beta/sample metadata for
+  replay and audit. Supplying the optional
   `context_digest` and `context` selects the matching contextual arm ledger, with the global arm
   history used only as a cold-start fallback.
 - `brain_bandit_update` accepts one bounded evaluator reward and returns the next state. Contextual

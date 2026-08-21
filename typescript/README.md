@@ -181,9 +181,11 @@ contextual overlay locally when an older server does not persist it. Contextual 
 closed unless the digest is exactly the SHA-256 of the normalized `{domain, capability, risk_class,
 task_family}` identity (with an explicit `null` task family when absent), matching Rust and Python;
 the synchronous digest helper is browser-safe and does not require Node crypto or provider access.
-The local learner supports UCB1 and seeded epsilon-greedy policies, applies explicit failure-rate
-penalties, and records exploration metadata so a caller can replay an adaptive decision without
-hidden randomness.
+The local learner supports UCB1, seeded epsilon-greedy, and deterministic Thompson-sampling
+policies, applies explicit failure-rate penalties, and records exploration metadata so a caller can
+replay an adaptive decision without hidden randomness. Thompson rankings include bounded
+Beta-posterior alpha, beta, and sample evidence. All three policies consume only explicit
+evaluator rewards; provider transport success is never silently converted into learning credit.
 
 For ambiguous or novel intake, `semanticRouteAutonomousTask()` adds an explicit provider-assisted
 classification pass. It sends the private task only through the caller's approved local provider,

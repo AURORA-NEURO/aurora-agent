@@ -1460,6 +1460,66 @@ function deterministicBanditDraw(seed: number, generation: number, label: string
   return Number(firstWord) / Number(0xffff_ffff_ffff_ffffn);
 }
 
+function deterministicBanditDrawWithCounter(seed: number, generation: number, label: string, counter: number): number {
+  const labelBytes = new TextEncoder().encode(label);
+  const payload = new Uint8Array(16 + labelBytes.length + 8);
+  const view = new DataView(payload.buffer);
+  view.setBigUint64(0, BigInt(seed), false);
+  view.setBigUint64(8, BigInt(Math.max(0, Math.floor(generation))), false);
+  payload.set(labelBytes, 16);
+  view.setBigUint64(16 + labelBytes.length, BigInt(Math.max(0, Math.floor(counter))), false);
+  const firstWord = BigInt(`0x${digestBytesSync(payload).slice(0, 16)}`);
+  return (Number(firstWord) + 0.5) / (Number(0xffff_ffff_ffff_ffffn) + 1);
+}
+
+function standardNormalFromUniforms(first: number, second: number): number {
+  return Math.sqrt(-2 * Math.log(first)) * Math.cos(2 * Math.PI * second);
+}
+
+function deterministicGammaSample(shapeInput: number, seed: number, generation: number, label: string): number {
+  const shape = Math.max(1e-9, shapeInput);
+  if (shape < 1) {
+    const shifted = deterministicGammaSample(shape + 1, seed, generation, label);
+    const uniform = deterministicBanditDrawWithCounter(seed, generation, label, 255);
+    return shifted * uniform ** (1 / shape);
+  }
+  const d = shape - 1 / 3;
+  const c = 1 / Math.sqrt(9 * d);
+  for (let attempt = 0; attempt < 32; attempt += 1) {
+    const first = deterministicBanditDrawWithCounter(seed, generation, label, attempt * 3);
+    const second = deterministicBanditDrawWithCounter(seed, generation, label, attempt * 3 + 1);
+    const z = standardNormalFromUniforms(first, second);
+    const transformed = 1 + c * z;
+    if (transformed <= 0) continue;
+    const v = transformed ** 3;
+    const acceptance = deterministicBanditDrawWithCounter(seed, generation, label, attempt * 3 + 2);
+    if (acceptance < 1 - 0.0331 * z ** 4 || Math.log(acceptance) < 0.5 * z * z + d * (1 - v + Math.log(v))) return d * v;
+  }
+  return shape;
+}
+
+function deterministicBetaSample(alpha: number, beta: number, seed: number, generation: number, label: string): number {
+  const left = deterministicGammaSample(alpha, seed, generation, `${label}/alpha`);
+  const right = deterministicGammaSample(beta, seed, generation, `${label}/beta`);
+  const total = left + right;
+  return Number.isFinite(total) && total > 0 ? Math.min(1, Math.max(0, left / total)) : alpha / (alpha + beta);
+}
+
+function thompsonPosterior(arm: BrainBanditArm | undefined, policy: BrainBanditPolicy, seed: number, generation: number, armId: string): { alpha: number; beta: number; sample: number; sampledReward: number } {
+  const minimum = policy.min_reward ?? -1;
+  const maximum = policy.max_reward ?? 1;
+  const span = maximum - minimum;
+  const pulls = arm?.pulls ?? 0;
+  const rewardSum = arm?.reward_sum ?? 0;
+  const failures = arm?.failures ?? 0;
+  const normalizedSuccessMass = pulls === 0 ? 0 : Math.min(pulls, Math.max(0, (rewardSum - minimum * pulls) / span));
+  const normalizedFailureMass = Math.max(0, pulls - normalizedSuccessMass + (policy.failure_penalty ?? 0.25) * failures);
+  const alpha = 1 + normalizedSuccessMass;
+  const beta = 1 + normalizedFailureMass;
+  const sample = deterministicBetaSample(alpha, beta, seed, generation, armId);
+  return { alpha, beta, sample, sampledReward: minimum + sample * span };
+}
+
 function learnerContext(request: AutonomousSelectionRequest): { context_digest: string; context: BrainBanditContext } | null {
   if (request.context_digest === undefined || request.context_digest === null) return null;
   if (typeof request.context_digest !== "string" || !/^[0-9a-f]{64}$/.test(request.context_digest)) throw new ArgumentError("online learner context_digest must be a lowercase SHA-256 digest");
@@ -1475,14 +1535,14 @@ function validateContextState(state: BrainBanditContextState): void {
   learnerContext({ ...state.context, context_digest: state.context_digest, task: "context", required_capabilities: [], estimated_input_tokens: 1, requested_output_tokens: 1, candidates: [], provider_health: {}, model_health: {} });
 }
 
-/** Caller-owned bounded UCB1 state for online model adaptation. No hidden server state is used. */
+/** Caller-owned bounded online model adaptation. No hidden server state is used. */
 export class AutonomousOnlineLearner {
   private stateValue: BrainBanditState;
   private readonly policy: BrainBanditPolicy;
 
   constructor(options: { state?: BrainBanditState; policy?: BrainBanditPolicy } = {}) {
     this.policy = { strategy: "ucb1", exploration: 0.5, epsilon: 0.1, min_reward: -1, max_reward: 1, failure_penalty: 0.25, seed: 0, ...(options.state?.policy ?? {}), ...(options.policy ?? {}) };
-    if (this.policy.strategy !== "ucb1" && this.policy.strategy !== "epsilon_greedy") throw new ArgumentError("online learner strategy must be ucb1 or epsilon_greedy");
+    if (this.policy.strategy !== "ucb1" && this.policy.strategy !== "epsilon_greedy" && this.policy.strategy !== "thompson_sampling") throw new ArgumentError("online learner strategy must be ucb1, epsilon_greedy, or thompson_sampling");
     for (const [name, value, minimum, maximum] of [
       ["exploration", this.policy.exploration, 0, 100],
       ["epsilon", this.policy.epsilon, 0, 1],
@@ -1547,9 +1607,14 @@ export class AutonomousOnlineLearner {
       const pulls = arm?.pulls ?? 0;
       const mean = pulls ? (arm?.reward_sum ?? 0) / pulls : 0;
       const failureRate = pulls ? (arm?.failures ?? 0) / pulls : 0;
-      const bonus = this.policy.strategy === "ucb1" ? (pulls ? Math.sqrt(Math.log(totalPulls + 1) / pulls) * (this.policy.exploration ?? 0.5) : (this.policy.exploration ?? 0.5)) : 0;
-      const score = mean + bonus - (this.policy.failure_penalty ?? 0.25) * failureRate;
-      return { candidate, armId, pulls, source: observation.source, score, mean, bonus, failureRate };
+      const posterior = this.policy.strategy === "thompson_sampling" ? thompsonPosterior(arm, this.policy, this.policy.seed ?? 0, this.stateValue.generation ?? 0, armId) : null;
+      const bonus = posterior
+        ? posterior.sampledReward - mean
+        : this.policy.strategy === "ucb1"
+          ? (pulls ? Math.sqrt(Math.log(totalPulls + 1) / pulls) * (this.policy.exploration ?? 0.5) : (this.policy.exploration ?? 0.5))
+          : 0;
+      const score = (posterior ? posterior.sampledReward : mean + bonus) - (this.policy.failure_penalty ?? 0.25) * failureRate;
+      return { candidate, armId, pulls, source: observation.source, score, mean, bonus, failureRate, posterior };
     }).sort((left, right) => right.score - left.score || left.armId.localeCompare(right.armId));
     const explorationDraw = this.policy.strategy === "epsilon_greedy" ? deterministicBanditDraw(this.policy.seed ?? 0, this.stateValue.generation ?? 0, "epsilon") : null;
     const explorationTaken = explorationDraw !== null && explorationDraw < (this.policy.epsilon ?? 0.1);
@@ -1560,7 +1625,7 @@ export class AutonomousOnlineLearner {
       .filter((row) => row.eligible && observationFor(`${row.provider}/${row.model}`).arm?.disabled)
       .map((row) => ({ ...row, eligible: false, reasons: [...row.reasons, "bandit arm is disabled"] }));
     const ranking = [
-      ...scoredEligible.map((row) => ({ provider: row.candidate.provider, model: row.candidate.model, score: Number(row.score.toFixed(12)), eligible: true, reasons: [`arm_id=${row.armId}`, `pulls=${row.pulls}`, `mean_reward=${row.mean.toFixed(6)}`, `failure_rate=${row.failureRate.toFixed(6)}`, `exploration_bonus=${row.bonus.toFixed(6)}`, `history=${row.source}`, ...(context ? [`context_digest=${context.context_digest}`] : [])] })),
+      ...scoredEligible.map((row) => ({ provider: row.candidate.provider, model: row.candidate.model, score: Number(row.score.toFixed(12)), eligible: true, reasons: [`arm_id=${row.armId}`, `pulls=${row.pulls}`, `mean_reward=${row.mean.toFixed(6)}`, `failure_rate=${row.failureRate.toFixed(6)}`, `exploration_bonus=${row.bonus.toFixed(6)}`, ...(row.posterior ? [`posterior_alpha=${row.posterior.alpha.toFixed(6)}`, `posterior_beta=${row.posterior.beta.toFixed(6)}`, `posterior_sample=${row.posterior.sample.toFixed(6)}`] : []), `history=${row.source}`, ...(context ? [`context_digest=${context.context_digest}`] : [])] })),
       ...disabledRanking,
       ...canonicalRanking.filter((row) => !row.eligible),
     ];
@@ -1568,7 +1633,7 @@ export class AutonomousOnlineLearner {
       const reasons = ranking.flatMap((row) => row.reasons).join("; ");
       return { selected_model: null, strategy: "caller_selector", ranking, abstention_reason: `online learner found no eligible candidate${reasons ? `: ${reasons}` : ""}`, exploration_draw: explorationDraw, exploration_taken: false };
     }
-    return { selected_model: { provider: selected.candidate.provider, model: selected.candidate.model }, strategy: "caller_selector", ranking, abstention_reason: null, exploration_draw: explorationDraw, exploration_taken: explorationTaken };
+    return { selected_model: { provider: selected.candidate.provider, model: selected.candidate.model }, strategy: "caller_selector", ranking, abstention_reason: null, exploration_draw: explorationDraw, exploration_taken: explorationTaken || this.policy.strategy === "thompson_sampling" };
   }
 
   /** Apply an explicit evaluator reward. Provider success alone is not treated as task quality. */

@@ -630,6 +630,39 @@ test("online learner honors seeded epsilon exploration, failure penalties, and s
   assert.match(disabledDecision.ranking.find((row) => row.provider === "a").reasons.join(";"), /bandit arm is disabled/);
 });
 
+test("online learner supports deterministic Thompson posteriors with auditable evidence for every domain", () => {
+  const domains = ["coding", "browser", "data", "science", "biomedical", "neuroscience", "operations", "enterprise", "multi_agent", "multimodal", "cross_domain", "evaluation"];
+  for (const [domainIndex, domain] of domains.entries()) {
+    const request = {
+      task: `choose a reasoning model for ${domain}`,
+      domain,
+      capability: "reasoning",
+      risk_class: "bounded_review",
+      required_capabilities: ["reasoning"],
+      estimated_input_tokens: 10,
+      requested_output_tokens: 50,
+      candidates: [candidate("a", "one"), candidate("b", "two")],
+      provider_health: {
+        a: { provider: "a", circuit: "closed", credential_required: false, credential_ready: true },
+        b: { provider: "b", circuit: "closed", credential_required: false, credential_ready: true },
+      },
+      model_health: {},
+    };
+    const learner = new AutonomousOnlineLearner({ policy: { strategy: "thompson_sampling", seed: 19 } });
+    learner.update({ arm_id: "a/one", reward: 0.9, outcome_digest: "7".repeat(63) + domainIndex.toString(16) });
+    learner.update({ arm_id: "b/two", reward: -0.5, failed: true, outcome_digest: "8".repeat(63) + domainIndex.toString(16) });
+    const first = learner.select(request);
+    const replay = learner.select(request);
+    assert.deepEqual(first, replay, domain);
+    assert.equal(first.exploration_taken, true, domain);
+    assert.equal(first.exploration_draw, null, domain);
+    assert.ok(first.ranking.every((row) => row.reasons.some((reason) => reason.startsWith("posterior_alpha="))), domain);
+    assert.ok(first.ranking.every((row) => row.reasons.some((reason) => reason.startsWith("posterior_beta="))), domain);
+    assert.ok(first.ranking.every((row) => row.reasons.some((reason) => reason.startsWith("posterior_sample="))), domain);
+    assert.equal(learner.snapshot().policy.strategy, "thompson_sampling", domain);
+  }
+});
+
 test("online learner isolates evaluator rewards by domain learning context", async () => {
   const learner = new AutonomousOnlineLearner();
   const request = {

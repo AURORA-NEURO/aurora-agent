@@ -621,7 +621,7 @@ export interface AutonomousAutoResult extends JsonObject {
 }
 
 export interface BrainBanditPolicy extends JsonObject {
-  strategy?: "ucb1" | "epsilon_greedy" | string;
+  strategy?: "ucb1" | "epsilon_greedy" | "thompson_sampling" | string;
   exploration?: number;
   epsilon?: number;
   min_reward?: number;

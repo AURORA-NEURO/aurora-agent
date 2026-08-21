@@ -15,7 +15,7 @@
 //!
 //! The learning implementation is an explicit-reward policy layer rather than a claim of
 //! reinforcement learning in the statistical sense. It supports deterministic UCB and seeded
-//! epsilon-greedy exploration, updates only from a bounded reward supplied by an evaluator,
+//! epsilon-greedy exploration, deterministic Thompson-sampling exploration, updates only from a bounded reward supplied by an evaluator,
 //! records failures separately, and never mutates hidden global state. Contextual state is nested
 //! under a canonical domain/capability/risk/task-family digest and remains compatible with the
 //! legacy global arm ledger as a cold-start prior.
@@ -1290,7 +1290,10 @@ impl Default for BanditPolicy {
 
 impl BanditPolicy {
     fn validate(&self) -> Result<(), BrainError> {
-        if !matches!(self.strategy.as_str(), "ucb1" | "epsilon_greedy") {
+        if !matches!(
+            self.strategy.as_str(),
+            "ucb1" | "epsilon_greedy" | "thompson_sampling"
+        ) {
             return Err(BrainError::InvalidBanditStrategy(self.strategy.clone()));
         }
         finite_range(self.exploration, "bandit.exploration", 0.0, 100.0)?;
@@ -1378,6 +1381,15 @@ pub struct BanditCandidateScore {
     pub failure_rate: f64,
     pub score: f64,
     pub eligible: bool,
+    /// Beta posterior parameters are emitted only for Thompson-sampling selections. Keeping
+    /// them optional preserves the legacy wire shape for UCB1 and epsilon-greedy callers while
+    /// making Bayesian exploration auditable and replayable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub posterior_alpha: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub posterior_beta: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub posterior_sample: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1775,19 +1787,115 @@ fn validate_bandit_state(state: &BanditState) -> Result<(), BrainError> {
     Ok(())
 }
 
-fn deterministic_bandit_draw(seed: u64, generation: u64, label: &str) -> f64 {
+fn deterministic_bandit_draw_with_counter(
+    seed: u64,
+    generation: u64,
+    label: &str,
+    counter: u64,
+) -> f64 {
     let mut hasher = Sha256::new();
     hasher.update(seed.to_be_bytes());
     hasher.update(generation.to_be_bytes());
     hasher.update(label.as_bytes());
+    hasher.update(counter.to_be_bytes());
     let digest = hasher.finalize();
     let mut bytes = [0_u8; 8];
     bytes.copy_from_slice(&digest[..8]);
-    u64::from_be_bytes(bytes) as f64 / u64::MAX as f64
+    // Keep the draw strictly inside (0, 1) so Box-Muller and inverse-power transforms never
+    // receive log(0), even when a digest happens to begin or end with all zero bits.
+    (u64::from_be_bytes(bytes) as f64 + 0.5) / (u64::MAX as f64 + 1.0)
+}
+
+fn deterministic_bandit_draw(seed: u64, generation: u64, label: &str) -> f64 {
+    deterministic_bandit_draw_with_counter(seed, generation, label, 0)
+}
+
+fn standard_normal_from_uniforms(first: f64, second: f64) -> f64 {
+    (-2.0 * first.ln()).sqrt() * (2.0 * std::f64::consts::PI * second).cos()
+}
+
+/// Draw a deterministic Gamma variate using Marsaglia--Tsang and a hash-backed uniform stream.
+///
+/// The kernel intentionally does not depend on an ambient RNG. The seed, generation, and arm
+/// identity form the complete replay key, while the bounded retry loop prevents malformed or
+/// adversarial state from turning selection into an unbounded computation.
+fn deterministic_gamma_sample(shape: f64, seed: u64, generation: u64, label: &str) -> f64 {
+    let shape = shape.max(1.0e-9);
+    if shape < 1.0 {
+        let shifted = deterministic_gamma_sample(shape + 1.0, seed, generation, label);
+        let uniform = deterministic_bandit_draw_with_counter(seed, generation, label, 255);
+        return shifted * uniform.powf(1.0 / shape);
+    }
+    let d = shape - (1.0 / 3.0);
+    let c = (1.0 / (9.0 * d)).sqrt();
+    for attempt in 0..32_u64 {
+        let first = deterministic_bandit_draw_with_counter(seed, generation, label, attempt * 3);
+        let second =
+            deterministic_bandit_draw_with_counter(seed, generation, label, attempt * 3 + 1);
+        let z = standard_normal_from_uniforms(first, second);
+        let transformed = 1.0 + c * z;
+        if transformed <= 0.0 {
+            continue;
+        }
+        let v = transformed * transformed * transformed;
+        let acceptance =
+            deterministic_bandit_draw_with_counter(seed, generation, label, attempt * 3 + 2);
+        if acceptance < 1.0 - 0.0331 * z.powi(4)
+            || acceptance.ln() < 0.5 * z * z + d * (1.0 - v + v.ln())
+        {
+            return d * v;
+        }
+    }
+    // The mean is a deterministic, finite fallback for the extremely unlikely bounded-retry
+    // miss. It preserves selection availability without silently introducing a new RNG.
+    shape
+}
+
+fn deterministic_beta_sample(
+    alpha: f64,
+    beta: f64,
+    seed: u64,
+    generation: u64,
+    label: &str,
+) -> f64 {
+    let left = deterministic_gamma_sample(alpha, seed, generation, &format!("{label}/alpha"));
+    let right = deterministic_gamma_sample(beta, seed, generation, &format!("{label}/beta"));
+    let total = left + right;
+    if total.is_finite() && total > 0.0 {
+        (left / total).clamp(0.0, 1.0)
+    } else {
+        (alpha / (alpha + beta)).clamp(0.0, 1.0)
+    }
+}
+
+fn thompson_posterior(
+    arm: &BanditArm,
+    policy: &BanditPolicy,
+    seed: u64,
+    generation: u64,
+) -> (f64, f64, f64, f64) {
+    let span = policy.max_reward - policy.min_reward;
+    let pulls = arm.pulls as f64;
+    // Continuous evaluator rewards become fractional Bernoulli evidence. This preserves the
+    // evaluator's bounded score while giving failures an additional explicit safety penalty.
+    let normalized_success_mass = if pulls == 0.0 {
+        0.0
+    } else {
+        ((arm.reward_sum - policy.min_reward * pulls) / span).clamp(0.0, pulls)
+    };
+    let normalized_failure_mass =
+        (pulls - normalized_success_mass + policy.failure_penalty * arm.failures as f64).max(0.0);
+    let alpha = 1.0 + normalized_success_mass;
+    let beta = 1.0 + normalized_failure_mass;
+    let sample = deterministic_beta_sample(alpha, beta, seed, generation, &arm.arm_id);
+    let sampled_reward = policy.min_reward + sample * span;
+    (alpha, beta, sample, sampled_reward)
 }
 
 /// Select an arm using the configured bounded policy. UCB1 keeps the historical behaviour;
 /// epsilon-greedy adds deterministic seeded exploration so a selection can be replayed exactly.
+/// Thompson sampling draws a deterministic sample from each arm's evaluator-reward posterior;
+/// it is Bayesian exploration, not provider-success learning, and remains caller-state driven.
 /// Arms with no observations receive the full UCB exploration coefficient, so a good prior cannot
 /// permanently starve an untested model.
 pub fn select_bandit_arm(state: &BanditState) -> Result<BanditSelectionReport, BrainError> {
@@ -1795,6 +1903,7 @@ pub fn select_bandit_arm(state: &BanditState) -> Result<BanditSelectionReport, B
     let total_pulls = state.arms.iter().map(|arm| arm.pulls).sum::<u64>();
     let log_total = ((total_pulls + 1) as f64).ln();
     let use_ucb = state.policy.strategy == "ucb1";
+    let use_thompson = state.policy.strategy == "thompson_sampling";
     let mut ranking = state
         .arms
         .iter()
@@ -1809,15 +1918,28 @@ pub fn select_bandit_arm(state: &BanditState) -> Result<BanditSelectionReport, B
             } else {
                 arm.failures as f64 / arm.pulls as f64
             };
-            let exploration_bonus = if use_ucb && arm.pulls == 0 {
+            let (posterior_alpha, posterior_beta, posterior_sample, sampled_reward) =
+                if use_thompson {
+                    let (alpha, beta, sample, reward) =
+                        thompson_posterior(arm, &state.policy, state.policy.seed, state.generation);
+                    (Some(alpha), Some(beta), Some(sample), Some(reward))
+                } else {
+                    (None, None, None, None)
+                };
+            let exploration_bonus = if let Some(sampled_reward) = sampled_reward {
+                sampled_reward - mean_reward
+            } else if use_ucb && arm.pulls == 0 {
                 state.policy.exploration
             } else if use_ucb {
                 state.policy.exploration * (log_total / arm.pulls as f64).sqrt()
             } else {
                 0.0
             };
-            let score =
-                mean_reward + exploration_bonus - state.policy.failure_penalty * failure_rate;
+            let score = if let Some(sampled_reward) = sampled_reward {
+                sampled_reward - state.policy.failure_penalty * failure_rate
+            } else {
+                mean_reward + exploration_bonus - state.policy.failure_penalty * failure_rate
+            };
             BanditCandidateScore {
                 arm_id: arm.arm_id.clone(),
                 pulls: arm.pulls,
@@ -1826,6 +1948,9 @@ pub fn select_bandit_arm(state: &BanditState) -> Result<BanditSelectionReport, B
                 failure_rate,
                 score,
                 eligible: !arm.disabled,
+                posterior_alpha,
+                posterior_beta,
+                posterior_sample,
             }
         })
         .collect::<Vec<_>>();
@@ -1880,6 +2005,8 @@ pub fn select_bandit_arm(state: &BanditState) -> Result<BanditSelectionReport, B
         ranking,
         selection_status: if selected_arm_id.is_none() {
             "refused_no_eligible_arm".into()
+        } else if use_thompson {
+            "selected_thompson_sample".into()
         } else if exploration_taken {
             "selected_exploration".into()
         } else {
@@ -1888,7 +2015,7 @@ pub fn select_bandit_arm(state: &BanditState) -> Result<BanditSelectionReport, B
         state_generation: state.generation,
         strategy: state.policy.strategy.clone(),
         exploration_draw,
-        exploration_taken,
+        exploration_taken: exploration_taken || use_thompson,
     })
 }
 
@@ -2473,6 +2600,56 @@ mod tests {
         assert!(first.exploration_taken);
         assert_eq!(first.selection_status, "selected_exploration");
         assert!(first.exploration_draw.is_some());
+    }
+
+    #[test]
+    fn thompson_sampling_is_deterministic_and_emits_auditable_posteriors() {
+        let state = BanditState {
+            schema: BANDIT_SCHEMA.into(),
+            generation: 11,
+            policy: BanditPolicy {
+                strategy: "thompson_sampling".into(),
+                exploration: 0.5,
+                epsilon: 0.1,
+                min_reward: -1.0,
+                max_reward: 1.0,
+                failure_penalty: 0.25,
+                seed: 99,
+            },
+            arms: vec![
+                BanditArm {
+                    arm_id: "openai/quality".into(),
+                    pulls: 8,
+                    reward_sum: 6.4,
+                    failures: 1,
+                    disabled: false,
+                },
+                BanditArm {
+                    arm_id: "anthropic/exploration".into(),
+                    pulls: 1,
+                    reward_sum: 0.0,
+                    failures: 1,
+                    disabled: false,
+                },
+            ],
+            credited_outcomes: Vec::new(),
+            contextual_states: Vec::new(),
+        };
+        let first = select_bandit_arm(&state).unwrap();
+        let replay = select_bandit_arm(&state).unwrap();
+        assert_eq!(first, replay);
+        assert_eq!(first.strategy, "thompson_sampling");
+        assert_eq!(first.selection_status, "selected_thompson_sample");
+        assert!(first.exploration_taken);
+        assert!(first.exploration_draw.is_none());
+        assert!(first.ranking.iter().all(|row| {
+            row.posterior_alpha.is_some()
+                && row.posterior_beta.is_some()
+                && row.posterior_sample.is_some()
+                && row.posterior_alpha.unwrap() >= 1.0
+                && row.posterior_beta.unwrap() >= 1.0
+                && (0.0..=1.0).contains(&row.posterior_sample.unwrap())
+        }));
     }
 
     #[test]

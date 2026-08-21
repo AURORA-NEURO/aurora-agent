@@ -35847,7 +35847,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "brain_bandit_select",
-            "description": "Select an arm from caller-persisted UCB-style online-learning state. Untested arms receive an explicit exploration bonus; disabled arms are excluded; optional context_digest/context selects a scoped ledger with global cold-start fallback; the server keeps no hidden state.",
+            "description": "Select an arm from caller-persisted UCB1, epsilon-greedy, or deterministic Thompson-sampling online-learning state. Untested arms receive an explicit exploration bonus or Beta-posterior draw; Thompson rankings retain posterior metadata; disabled arms are excluded; optional context_digest/context selects a scoped ledger with global cold-start fallback; the server keeps no hidden state.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
