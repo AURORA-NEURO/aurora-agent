@@ -117,6 +117,28 @@ test("episodic memory retrieves related digest-only task facets without retainin
   assert.equal((await memory.verifyIntegrity()).episodes, 2);
 });
 
+test("planning recall ranks reviewed plans by evaluator quality and supports fail-closed filters", async () => {
+  const memory = new InMemoryAutonomousEpisodicMemory();
+  const highPlan = await episodeInput("coding", "planning-high");
+  highPlan.digests.plan_refinement_digest = "a".repeat(64);
+  const lowPlan = await episodeInput("coding", "planning-low");
+  lowPlan.digests.plan_refinement_digest = "b".repeat(64);
+  const noPlan = await episodeInput("coding", "planning-none");
+  await memory.recordEpisode(highPlan);
+  await memory.recordEpisode(lowPlan);
+  await memory.recordEpisode(noPlan);
+  await memory.recordEvaluation("planning-high", { evaluator_id: "reviewer", evaluator_version: "1", reward: 0.95, passed: true });
+  await memory.recordEvaluation("planning-low", { evaluator_id: "reviewer", evaluator_version: "1", reward: 0.2, passed: false });
+  await memory.recordEvaluation("planning-none", { evaluator_id: "reviewer", evaluator_version: "1", reward: 0.99, passed: true });
+
+  const ranked = await memory.retrieve({ domain: "coding", ranking: "planning", limit: 3 });
+  assert.deepEqual(ranked.map((episode) => episode.episode_id), ["planning-high", "planning-low", "planning-none"]);
+  assert.deepEqual((await memory.retrieve({ domain: "coding", ranking: "quality", min_reward: 0.9, limit: 4 })).map((episode) => episode.episode_id), ["planning-none", "planning-high"]);
+  assert.deepEqual((await memory.retrieve({ domain: "coding", require_plan_refinement: true, limit: 4 })).map((episode) => episode.episode_id), ["planning-high", "planning-low"]);
+  assert.throws(() => memory.retrieve({ ranking: "unknown" }), /ranking is unsupported/);
+  assert.throws(() => memory.retrieve({ min_reward: 1.1 }), /min_reward/);
+});
+
 test("episodic memory snapshots restore integrity and refuse tampering", async () => {
   const memory = new InMemoryAutonomousEpisodicMemory();
   await memory.recordEpisode(await episodeInput("science", "science-memory"));

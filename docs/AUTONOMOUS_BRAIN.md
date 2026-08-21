@@ -1578,6 +1578,23 @@ self-report. An approval pause or incomplete result is `not_eligible`, while ada
 explicitly `failed` without replaying or relabeling the valid provider outcome. The cross-domain
 path retains its existing specialist/synthesis trajectory and delayed-credit semantics.
 
+When the agent owns an episodic `memoryStore`, the learning controller adopts that store by
+default, or callers can pass an explicit `memoryStore` to the controller. A completed direct run
+links its pending learning episode to the value-only memory episode recorded for that run.
+`settleRun()` applies the exact evaluator packet to both the online bandit and the linked memory
+evaluation, exposing `memory_evaluation.status` as `recorded`, `not_linked`, `not_configured`, or
+`failed`. Memory failure never converts valid bandit credit into a provider failure and never
+causes a provider replay. A per-settlement `memoryStore` override is available when a run used a
+different caller-owned store. Stable `memoryRunId` and `learningEpisodeId` values are the
+restart-safe join keys.
+
+Memory queries support `ranking: "relevance" | "quality" | "planning"`, `min_reward`, and
+`require_plan_refinement`. Direct autonomous runs use advisory planning ranking by default: an
+evaluated episode with an accepted plan-refinement digest is preferred, then evaluator quality,
+then deterministic recency. `memoryRecall` selects another ranking policy. Recall remains
+metadata-only context with an explicit non-authority warning; ranking cannot widen a route,
+candidate set, tool portfolio, budget, permission, effect boundary, or evidence claim.
+
 ## Domain-aware autonomous task intake
 
 Applications that do not want to hand-assemble every prompt and plan can use the high-level

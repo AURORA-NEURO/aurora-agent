@@ -16,6 +16,7 @@ import {
   InMemoryAutonomousWorkflowCheckpointStore,
   LLMRuntime,
   AutonomousWorkflowExecutor,
+  InMemoryAutonomousEpisodicMemory,
   builtinAutonomousDomainEvaluatorProfiles,
   builtinAutonomousDomainProfiles,
   openaiCompatibleProvider,
@@ -46,13 +47,13 @@ function workflowStagePayload(init) {
   return { stage_id: stageId, status: "completed", evidence: [`evidence-${stageId}`], uncertainty: [], notes: `verified ${stageId}`, next_actions: [] };
 }
 
-async function learningAgent() {
+async function learningAgent(memory) {
   const llm = new LLMRuntime({
     credentials: new CredentialStore(),
     fetch: async (_url, init) => jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify(workflowStagePayload(init)) }, finish_reason: "stop" }] }),
   });
   llm.registerProvider(openaiCompatibleProvider("learning-provider", "https://learning.test", { requiresCredential: false }));
-  const agent = new AutonomousAgent(llm, { learner: new AutonomousOnlineLearner() });
+  const agent = new AutonomousAgent(llm, { learner: new AutonomousOnlineLearner(), ...(memory ? { memoryStore: memory } : {}) });
   agent.registerModel(candidate());
   return agent;
 }
@@ -202,6 +203,57 @@ test("learning episodes rehydrate by digest and settle through the local bandit"
   assert.equal(agent.learner.snapshot().generation, 1);
   assert.equal(episodes.pending().length, 0);
   await assert.rejects(() => controller.settleRun("episode-local-1", { evaluator_id: "coding-reviewer", evaluator_version: "1", reward: 0.8, passed: true }), /already been settled/);
+});
+
+test("direct learning settlement annotates linked episodic memory and survives controller restart", async () => {
+  const memory = new InMemoryAutonomousEpisodicMemory();
+  const agent = await learningAgent(memory);
+  const controller = new AutonomousLearningController(agent);
+  const run = await agent.run("Implement and verify the memory feedback bridge.", {
+    domain: "coding",
+    approveProviderCall: true,
+    memoryRunId: "memory-feedback-bridge",
+    learning: controller,
+    learningEpisodeId: "learning-feedback-bridge",
+    memoryLesson: "prefer the reviewed plan and verify independently",
+  });
+  assert.equal(run.memory.recorded_episode_id, "episode:memory-feedback-bridge");
+  const episode = await controller.episodes.load("learning-feedback-bridge");
+  assert.equal(episode.memory_episode_id, "episode:memory-feedback-bridge");
+  const reward = { evaluator_id: "coding-reviewer", evaluator_version: "1", reward: 0.92, passed: true, evidence_digest: "e".repeat(64) };
+  const settled = await controller.settleRun("learning-feedback-bridge", reward);
+  assert.equal(settled.memory_evaluation.status, "recorded");
+  assert.equal(memory.get("episode:memory-feedback-bridge").evaluation.reward, 0.92);
+
+  const snapshot = await memory.snapshot();
+  const restoredMemory = new InMemoryAutonomousEpisodicMemory();
+  await restoredMemory.restore(snapshot);
+  const restarted = new AutonomousLearningController(agent, { episodes: controller.episodes, settlementReceipts: controller.settlementReceipts, memoryStore: restoredMemory });
+  const replayed = await restarted.settleRun("learning-feedback-bridge", reward);
+  assert.deepEqual(replayed, settled);
+  assert.equal(agent.learner.snapshot().generation, 1);
+  assert.equal((await restoredMemory.verifyIntegrity()).evaluated, 1);
+});
+
+test("memory feedback failures are explicit without rolling back valid bandit credit", async () => {
+  const backing = new InMemoryAutonomousEpisodicMemory();
+  const failingMemory = {
+    recordEpisode: backing.recordEpisode.bind(backing),
+    recordEvaluation: async () => { throw new Error("memory evaluation backend unavailable"); },
+    get: backing.get.bind(backing),
+    retrieve: backing.retrieve.bind(backing),
+    stats: backing.stats.bind(backing),
+    verifyIntegrity: backing.verifyIntegrity.bind(backing),
+    snapshot: backing.snapshot.bind(backing),
+    restore: backing.restore.bind(backing),
+  };
+  const agent = await learningAgent(failingMemory);
+  const controller = new AutonomousLearningController(agent, { memoryStore: failingMemory });
+  const run = await agent.run("Test explicit memory feedback failure.", { domain: "coding", approveProviderCall: true, memoryRunId: "memory-feedback-failure", learning: controller, learningEpisodeId: "learning-feedback-failure" });
+  const settled = await controller.settleRun(run.learning_episode_id, { evaluator_id: "reviewer", evaluator_version: "1", reward: 0.7, passed: true });
+  assert.equal(settled.memory_evaluation.status, "failed");
+  assert.equal(settled.memory_evaluation.error_class, "Error");
+  assert.equal(agent.learner.snapshot().generation, 1);
 });
 
 test("settlement receipts make single-episode replay idempotent across controller restart", async () => {

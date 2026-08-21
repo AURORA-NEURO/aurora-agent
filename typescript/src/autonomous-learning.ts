@@ -9,6 +9,7 @@ import {
   type AutonomousRunResult,
 } from "./autonomous.js";
 import type { AutonomousWorkflowExecutionResult } from "./workflow-execution.js";
+import type { AutonomousEpisodicMemoryStore } from "./autonomous-memory.js";
 import { digestJson } from "./tooling.js";
 import type {
   BrainBanditState,
@@ -93,6 +94,8 @@ export interface AutonomousLearningEpisode extends JsonObject {
   workflow_id: string;
   stage_id: string | null;
   parent_job_id: string | null;
+  /** Optional link to the value-only episodic-memory record for automatic evaluation annotation. */
+  memory_episode_id?: string | null;
   workflow_digest: Digest;
   /** Digest of the accepted provider refinement that shaped this episode, if any. */
   plan_refinement_digest?: Digest | null;
@@ -253,8 +256,16 @@ export interface AutonomousLearningSettlement extends JsonObject {
   assessment: BrainEvaluatorAssessment;
   next_state: BrainBanditState;
   learning_evidence: BrainLearningEvidence | null;
+  memory_evaluation?: AutonomousLearningMemoryEvaluationProjection;
   remote: boolean;
   retention: typeof PRIVATE_RETENTION;
+}
+
+export interface AutonomousLearningMemoryEvaluationProjection extends JsonObject {
+  status: "recorded" | "not_configured" | "not_linked" | "failed";
+  memory_episode_id: string | null;
+  evaluation_digest: Digest | null;
+  error_class: string | null;
 }
 
 export interface AutonomousTrajectorySettlement extends JsonObject {
@@ -846,10 +857,12 @@ export class AutonomousLearningController {
   readonly episodes: AutonomousLearningEpisodeStore;
   readonly trajectories: AutonomousLearningTrajectoryStore;
   readonly settlementReceipts: AutonomousLearningSettlementReceiptStore;
+  /** Optional caller-owned memory sink used to attach explicit evaluator feedback to recallable episodes. */
+  readonly memoryStore?: AutonomousEpisodicMemoryStore;
   readonly evaluator: AutonomousWorkflowEvaluator;
   readonly apiClient?: ApiClient;
 
-  constructor(agent: AutonomousAgent, options: { store?: AutonomousLearningStateStore; episodes?: AutonomousLearningEpisodeStore; trajectories?: AutonomousLearningTrajectoryStore; settlementReceipts?: AutonomousLearningSettlementReceiptStore; evaluator?: AutonomousWorkflowEvaluator; apiClient?: ApiClient } = {}) {
+  constructor(agent: AutonomousAgent, options: { store?: AutonomousLearningStateStore; episodes?: AutonomousLearningEpisodeStore; trajectories?: AutonomousLearningTrajectoryStore; settlementReceipts?: AutonomousLearningSettlementReceiptStore; evaluator?: AutonomousWorkflowEvaluator; apiClient?: ApiClient; memoryStore?: AutonomousEpisodicMemoryStore } = {}) {
     if (!agent || typeof agent.recordEvaluatorReward !== "function") throw new ArgumentError("learning controller requires an AutonomousAgent");
     this.agent = agent;
     const stateStore = options.store;
@@ -865,6 +878,7 @@ export class AutonomousLearningController {
       markSettled: (trajectoryId: string, settlementDigest: Digest) => stateStore.markTrajectorySettled(trajectoryId, settlementDigest),
     } : new InMemoryAutonomousLearningTrajectoryStore());
     this.settlementReceipts = options.settlementReceipts ?? new InMemoryAutonomousLearningSettlementReceiptStore();
+    this.memoryStore = options.memoryStore ?? agent.memoryStore;
     this.evaluator = options.evaluator ?? new AutonomousWorkflowEvaluator();
     this.apiClient = options.apiClient;
   }
@@ -905,10 +919,11 @@ export class AutonomousLearningController {
     return this.evaluator.evaluate(execution, input);
   }
 
-  async prepareRun(result: AutonomousRunResult, options: { episodeId: string; runId?: string; stageId?: string; parentJobId?: string; planRefinementDigest?: string | null }): Promise<AutonomousLearningEpisode> {
+  async prepareRun(result: AutonomousRunResult, options: { episodeId: string; runId?: string; stageId?: string; parentJobId?: string; planRefinementDigest?: string | null; memoryEpisodeId?: string | null }): Promise<AutonomousLearningEpisode> {
     if (!isObject(options)) throw new ArgumentError("learning episode options must be an object");
     const episodeId = boundedIdentifier("episodeId", options.episodeId);
     const planRefinementDigest = options.planRefinementDigest === undefined ? null : boundedDigest("planRefinementDigest", options.planRefinementDigest, true);
+    const memoryEpisodeId = options.memoryEpisodeId === undefined || options.memoryEpisodeId === null ? null : boundedIdentifier("memoryEpisodeId", options.memoryEpisodeId);
     if (result.status !== "completed" || !result.blueprint || !result.selection?.selected_model) throw new ArgumentError("learning episode requires a completed autonomous run");
     const runId = boundedIdentifier("runId", options.runId ?? episodeId);
     const selectionDigest = await digestJson(result.selection);
@@ -932,6 +947,7 @@ export class AutonomousLearningController {
       workflow_id: result.blueprint.workflow.workflow_id,
       stage_id: options.stageId === undefined ? null : boundedIdentifier("stageId", options.stageId),
       parent_job_id: options.parentJobId === undefined ? null : boundedIdentifier("parentJobId", options.parentJobId),
+      memory_episode_id: memoryEpisodeId,
       workflow_digest: result.blueprint.workflow.workflow_digest,
       plan_refinement_digest: planRefinementDigest,
       context_digest: result.blueprint.learning_context_digest ?? null,
@@ -1005,7 +1021,38 @@ export class AutonomousLearningController {
     return { schema: AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA, result, trajectory: settled, retention: PRIVATE_RETENTION };
   }
 
-  async settleRun(episodeId: string, input: AutonomousEvaluatorRewardInput, options: { creditedReward?: number; remote?: boolean; idempotencyKey?: string } = {}): Promise<AutonomousLearningSettlement> {
+  private async recordMemoryEvaluation(
+    episode: AutonomousLearningEpisode,
+    input: AutonomousEvaluatorRewardInput,
+    store: AutonomousEpisodicMemoryStore | undefined,
+  ): Promise<AutonomousLearningMemoryEvaluationProjection> {
+    if (!store) return { status: "not_configured", memory_episode_id: episode.memory_episode_id ?? null, evaluation_digest: null, error_class: null };
+    if (!episode.memory_episode_id) return { status: "not_linked", memory_episode_id: null, evaluation_digest: null, error_class: null };
+    const normalized = {
+      evaluator_id: input.evaluator_id,
+      evaluator_version: input.evaluator_version,
+      reward: input.reward,
+      passed: input.passed,
+      failed: input.failed ?? !input.passed,
+      feedback_digest: input.feedback_digest ?? null,
+      failure_class: input.failure_class ?? null,
+      evidence_digest: input.evidence_digest ?? null,
+    };
+    const evaluationDigest = await digestJson(normalized);
+    try {
+      await store.recordEvaluation(episode.memory_episode_id, normalized);
+      return { status: "recorded", memory_episode_id: episode.memory_episode_id, evaluation_digest: evaluationDigest, error_class: null };
+    } catch (error) {
+      return {
+        status: "failed",
+        memory_episode_id: episode.memory_episode_id,
+        evaluation_digest: null,
+        error_class: error instanceof Error && error.constructor.name.trim() ? error.constructor.name : "MemoryError",
+      };
+    }
+  }
+
+  async settleRun(episodeId: string, input: AutonomousEvaluatorRewardInput, options: { creditedReward?: number; remote?: boolean; idempotencyKey?: string; memoryStore?: AutonomousEpisodicMemoryStore } = {}): Promise<AutonomousLearningSettlement> {
     const id = boundedIdentifier("episodeId", episodeId);
     const episode = await this.episodes.load(id);
     if (!episode) throw new ArgumentError(`learning episode ${episodeId} was not found`);
@@ -1064,7 +1111,8 @@ export class AutonomousLearningController {
     const settlementBase = { evaluation_digest: input.evidence_digest ?? null, reward: input.reward, credited_reward: creditedReward, next_generation: boundedGeneration(nextState.generation ?? 0), settled_at: Date.now() };
     const settlement: AutonomousLearningSettlementMetadata = { ...settlementBase, settlement_digest: await digestJson(settlementBase) };
     const projectedEpisode = { ...episode, status: "settled" as const, settlement };
-    const result = { schema: AUTONOMOUS_LEARNING_EPISODE_SCHEMA, episode: projectedEpisode, assessment, next_state: clone(nextState), learning_evidence: learningEvidence, remote, retention: PRIVATE_RETENTION } satisfies AutonomousLearningSettlement;
+    const memoryEvaluation = await this.recordMemoryEvaluation(episode, input, options.memoryStore ?? this.memoryStore);
+    const result = { schema: AUTONOMOUS_LEARNING_EPISODE_SCHEMA, episode: projectedEpisode, assessment, next_state: clone(nextState), learning_evidence: learningEvidence, memory_evaluation: memoryEvaluation, remote, retention: PRIVATE_RETENTION } satisfies AutonomousLearningSettlement;
     await this.saveReceipt("single_run", idempotencyKey, id, episode.episode_digest, requestDigest, result);
     let settledEpisode: AutonomousLearningEpisode;
     try {

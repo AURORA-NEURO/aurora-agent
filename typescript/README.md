@@ -858,6 +858,24 @@ claim never becomes reward. Incomplete runs return `not_eligible`, and adapter p
 return `failed` with a redacted error class while preserving the valid provider result. Cross-domain
 runs continue to prepare specialist and synthesis episodes as one delayed-credit trajectory.
 
+When the agent has an episodic `memoryStore`, the learning controller automatically uses that same
+caller-owned store unless its constructor receives an explicit `memoryStore`. A completed direct
+run links its pending learning episode to the recorded memory episode; `settleRun()` then writes
+the exact evaluator values (never provider transport status) back to memory. The settlement
+projection exposes `memory_evaluation.status` as `recorded`, `not_linked`, `not_configured`, or
+`failed`. A memory write failure is observable and non-fatal to valid bandit credit, so a provider
+result is never replayed merely because a secondary memory sink is unavailable. Stable
+`memoryRunId` plus `learningEpisodeId` identities make this join restart-safe; nested callers can
+pass a per-settlement `memoryStore` when the run used an override store.
+
+Memory retrieval supports `ranking: "relevance" | "quality" | "planning"`, an optional
+`min_reward`, and `require_plan_refinement`. Direct runs default to the advisory `planning`
+ranking, which prefers evaluated episodes containing an accepted plan-refinement digest while
+still preserving the warning that recalled metadata is a hypothesis aid, not authority. The
+`memoryRecall` run option can select another ranking policy. These controls only change bounded
+context ordering and filtering; they cannot add tools, providers, permissions, budgets, effects,
+or factual evidence.
+
 For bounded automatic recall, `taskFacetDigests(task)` projects short identifier-like task terms into
 at most 32 namespaced SHA-256 digests. The original task vocabulary is never stored. Callers may put
 those digests in `AutonomousMemoryEpisodeInput.task_facets` and query them through

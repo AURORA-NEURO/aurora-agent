@@ -169,12 +169,13 @@ interface RecalledMemory {
   promptChunk: AutonomousPromptChunk | null;
 }
 
-async function recallMemory(memory: AutonomousDecisionCycleMemoryOptions | undefined, route: AutonomousRouteProposal, task: string): Promise<RecalledMemory> {
+async function recallMemory(memory: AutonomousDecisionCycleMemoryOptions | undefined, route: AutonomousRouteProposal, task: string, ranking: AutonomousMemoryQuery["ranking"] = "planning"): Promise<RecalledMemory> {
   if (!memory) return { episodes: [], projection: emptyMemoryProjection(), promptChunk: null };
   if (!memory.store || typeof memory.store.retrieve !== "function" || typeof memory.store.recordEpisode !== "function") throw new ArgumentError("autonomous cycle memory store is malformed");
   const query: AutonomousMemoryQuery = { ...(memory.query ?? {}) };
   if (query.domain === undefined && !route.cross_domain && route.primary_domain) query.domain = route.primary_domain;
   if (query.task_digest === undefined && query.task_facets === undefined) query.task_facets = taskFacetDigests(task);
+  if (query.ranking === undefined) query.ranking = ranking;
   if (memory.limit !== undefined) query.limit = memory.limit;
   const episodes = await memory.store.retrieve(query);
   const recallDigest = await digestJson(episodes.map((episode) => ({ episode_id: episode.episode_id, episode_digest: episode.episode_digest, evaluation_digest: episode.evaluation?.evaluation_digest ?? null })));
@@ -661,6 +662,7 @@ function runOptions(options: AutonomousDecisionCycleOptions, route: AutonomousRo
     credential: options.credential,
     credentialFor: options.credentialFor,
     context: withMemoryContext(options.context, memoryChunk),
+    memoryRecall: options.memoryRecall,
     hints: options.hints,
     allowCrossDomain: options.allowCrossDomain,
     maxInputTokens: options.maxInputTokens,
@@ -766,7 +768,7 @@ export async function runAutonomousDecisionCycle(
     await commitDecisionPersistence(persistence, { phase: "terminal", route_digest: route.route_digest, selection_digest: null, outcome_digest: await digestJson({ status: reviewed.status, route_digest: route.route_digest }), evaluation_digest: null, learning_episode_ids: [], settlement_digests: [], terminal_status: reviewed.status });
     return reviewed;
   }
-  const recalledMemory = await recallMemory(options.memory, route, task);
+  const recalledMemory = await recallMemory(options.memory, route, task, options.memoryRecall);
   let planRefinement: AutonomousPlanRefinementResult | null = null;
   const persistedPlanRefinementDigest = persistence?.state.plan_refinement_digest ?? null;
   if (options.providerPlanning || options.acceptedSingleDomainPlanRefinement !== undefined || persistedPlanRefinementDigest !== null) {
@@ -1445,6 +1447,7 @@ function crossRunOptions(options: AutonomousCrossDomainDecisionCycleOptions, rou
     credential: options.credential,
     credentialFor: options.credentialFor,
     context: withMemoryContext(options.context, memoryChunk),
+    memoryRecall: options.memoryRecall,
     hints: options.hints,
     allowCrossDomain: options.allowCrossDomain,
     maxInputTokens: options.maxInputTokens,
@@ -1557,7 +1560,7 @@ export async function runAutonomousCrossDomainDecisionCycle(
     return reviewed;
   }
 
-  const recalledMemory = await recallMemory(options.memory, route, task);
+  const recalledMemory = await recallMemory(options.memory, route, task, options.memoryRecall);
   let planRefinement: AutonomousCrossDomainPlanRefinementResult | null = null;
   const persistedPlanRefinementDigest = persistence?.state.plan_refinement_digest ?? null;
   if (options.providerPlanning || options.acceptedCrossDomainPlanRefinement !== undefined || persistedPlanRefinementDigest !== null) {

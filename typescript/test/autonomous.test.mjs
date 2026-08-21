@@ -513,7 +513,8 @@ test("ordinary direct runs prepare explicit online-learning episodes across ever
     fetch: async () => jsonResponse({ choices: [{ message: { role: "assistant", content: "direct-learning-response" }, finish_reason: "stop" }] }),
   });
   llm.registerProvider(openaiCompatibleProvider("direct-learning-provider", "https://direct-learning.test", { requiresCredential: false }));
-  const agent = new AutonomousAgent(llm, { learner: new AutonomousOnlineLearner() });
+  const memory = new InMemoryAutonomousEpisodicMemory();
+  const agent = new AutonomousAgent(llm, { learner: new AutonomousOnlineLearner(), memoryStore: memory });
   agent.registerModel(candidate("direct-learning-provider", "direct-learning-model", [
     "reasoning", "code", "web", "data", "science", "biomedical", "operations", "enterprise", "coordination", "multimodal", "evaluation",
   ]));
@@ -538,12 +539,17 @@ test("ordinary direct runs prepare explicit online-learning episodes across ever
       approveProviderCall: true,
       learning: controller,
       learningEpisodeId: `direct-learning-${domain}`,
+      memoryRunId: `direct-memory-${domain}`,
+      memoryLesson: `verified:${domain}`,
     });
     assert.equal(result.status, "completed", domain);
     assert.equal(result.learning_episode_status, "prepared", domain);
     assert.equal(result.learning_episode_id, `direct-learning-${domain}`, domain);
+    assert.equal(result.memory.status, "recorded", domain);
+    assert.equal(result.memory.recorded_episode_id, `episode:direct-memory-${domain}`, domain);
     const episode = await controller.episodes.load(result.learning_episode_id);
     assert.equal(episode.status, "pending", domain);
+    assert.equal(episode.memory_episode_id, `episode:direct-memory-${domain}`, domain);
     assert.equal(JSON.stringify(episode).includes("direct-learning-response"), false, domain);
     const settlement = await controller.settleRun(result.learning_episode_id, {
       evaluator_id: `${domain}-reviewer`,
@@ -553,19 +559,26 @@ test("ordinary direct runs prepare explicit online-learning episodes across ever
       evidence_digest: "a".repeat(64),
     });
     assert.equal(settlement.episode.status, "settled", domain);
+    assert.equal(settlement.memory_evaluation.status, "recorded", domain);
+    assert.equal(memory.get(`episode:direct-memory-${domain}`).evaluation.reward, 0.8, domain);
   }
   assert.equal(agent.learner.snapshot().generation, 12);
+  assert.equal((await memory.stats()).evaluated, 12);
   const replay = await agent.run(tasks.coding, {
     domain: "coding",
     approveProviderCall: true,
     learning: controller,
     learningEpisodeId: "direct-learning-replay",
+    memoryRunId: "direct-memory-replay",
+    retrieveMemory: false,
   });
   const replayed = await agent.run(tasks.coding, {
     domain: "coding",
     approveProviderCall: true,
     learning: controller,
     learningEpisodeId: "direct-learning-replay",
+    memoryRunId: "direct-memory-replay",
+    retrieveMemory: false,
   });
   assert.equal(replay.learning_episode_status, "prepared");
   assert.equal(replayed.learning_episode_status, "prepared");

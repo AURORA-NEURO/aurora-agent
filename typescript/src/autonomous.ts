@@ -813,6 +813,8 @@ export interface AutonomousRunOptions {
   memoryStore?: AutonomousEpisodicMemoryStore;
   /** Additional bounded filters for value-only episodic retrieval. */
   memoryQuery?: AutonomousMemoryQuery;
+  /** Ranking policy for recalled memory; planning is the default and remains advisory only. */
+  memoryRecall?: "relevance" | "quality" | "planning";
   memoryLimit?: number;
   memoryTags?: readonly string[];
   /** Stable caller-owned identity for idempotent memory recording across restarts. */
@@ -2698,7 +2700,8 @@ export class AutonomousAgent {
   private readonly effectBoundary?: AutonomousEffectBoundary;
   private readonly capabilityJournal?: AutonomousCapabilityJournalStore;
   private readonly capabilityLearningSettlementStore: AutonomousCapabilityLearningSettlementStore;
-  private readonly memoryStore?: AutonomousEpisodicMemoryStore;
+  /** Caller-owned episodic memory; exposed so the learning controller can close evaluation feedback. */
+  readonly memoryStore?: AutonomousEpisodicMemoryStore;
   private domainToolRegistry?: AutonomousDomainToolRegistry;
   private domainToolRuntime?: AutonomousDomainToolRuntime;
   private capabilityRuntime?: AutonomousCapabilityRuntime;
@@ -3845,11 +3848,10 @@ export class AutonomousAgent {
     if (route.abstained || !route.primary_domain) return { schema: "bioprism-typescript-autonomous-run/0.1", status: "route_review_required", route, blueprint: null, plan_refinement_digest: null, selection: null, response: null, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
     const memory = await this.prepareMemory(taskText, route, options, [route.primary_domain]);
     const finish = async (result: AutonomousRunResult): Promise<AutonomousRunResult> => {
-      const withMemory = memory.store
-        ? { ...result, memory: await this.recordMemory(taskText, route, result, options, memory) }
-        : result;
+      const memoryProjection = memory.store ? await this.recordMemory(taskText, route, result, options, memory) : null;
+      const withMemory = memoryProjection ? { ...result, memory: memoryProjection } : result;
       if (!options.learning) return withMemory;
-      return { ...withMemory, ...(await this.prepareDirectLearning(withMemory, route, options)) };
+      return { ...withMemory, ...(await this.prepareDirectLearning(withMemory, route, { ...options, memoryEpisodeId: memoryProjection?.recorded_episode_id ?? null })) };
     };
     const blueprintEnvelope = await this.blueprint(taskText, { domain: route.primary_domain, routeOverride: options.routeOverride, capability: options.capability, context: [...(options.context ?? []), ...memory.context], maxInputTokens: options.maxInputTokens, tools: options.tools?.map((tool) => tool.name), hints: options.hints });
     const blueprint = blueprintEnvelope.blueprint;
@@ -4099,7 +4101,7 @@ export class AutonomousAgent {
   private async prepareDirectLearning(
     result: AutonomousRunResult,
     route: AutonomousRouteProposal,
-    options: Pick<AutonomousRunOptions, "learning" | "learningEpisodeId" | "memoryRunId">,
+    options: Pick<AutonomousRunOptions, "learning" | "learningEpisodeId" | "memoryRunId"> & { memoryEpisodeId?: string | null },
   ): Promise<Pick<AutonomousRunResult, "learning_episode_id" | "learning_episode_status" | "learning_error_class">> {
     if (!options.learning) return {};
     if (result.status !== "completed" || !result.blueprint || !result.selection?.selected_model) {
@@ -4111,7 +4113,7 @@ export class AutonomousAgent {
           ? `learning:${memoryIdentity("memory run id", options.memoryRunId)}`
           : `learning:${route.task_digest.slice(0, 24)}:${++autonomousLearningEpisodeSequence}`);
       const episodeId = memoryIdentity("learning episode id", derivedId);
-      const episode = await options.learning.prepareRun(result, { episodeId, runId: episodeId });
+      const episode = await options.learning.prepareRun(result, { episodeId, runId: episodeId, memoryEpisodeId: options.memoryEpisodeId ?? null });
       return { learning_episode_id: episode.episode_id, learning_episode_status: "prepared", learning_error_class: null };
     } catch (error) {
       // A requested learning adapter must be observable as failed, but it must not turn a valid
@@ -4124,7 +4126,7 @@ export class AutonomousAgent {
   private async prepareMemory(
     taskText: string,
     route: AutonomousRouteProposal,
-    options: Pick<AutonomousRunOptions, "memoryStore" | "memoryQuery" | "memoryLimit" | "capability" | "retrieveMemory">,
+    options: Pick<AutonomousRunOptions, "memoryStore" | "memoryQuery" | "memoryRecall" | "memoryLimit" | "capability" | "retrieveMemory">,
     domains: readonly AutonomousDomainName[],
   ): Promise<AutonomousMemoryPreparation> {
     const store = this.memoryStoreForRun(options);
@@ -4144,12 +4146,23 @@ export class AutonomousAgent {
           ...(domain === undefined ? {} : { domain }),
           ...(supplied.task_facets === undefined ? { task_facets: taskFacets } : {}),
           ...(supplied.capability === undefined && options.capability === undefined ? {} : { capability: supplied.capability ?? options.capability }),
+          ranking: options.memoryRecall ?? supplied.ranking ?? "planning",
           limit,
         };
         const episodes = await store.retrieve(query);
         for (const episode of episodes) episodesById.set(episode.episode_id, episode);
       }
-      const episodes = [...episodesById.values()].sort((left, right) => right.updated_at - left.updated_at || left.episode_id.localeCompare(right.episode_id)).slice(0, limit);
+      const ranking = options.memoryRecall ?? supplied.ranking ?? "planning";
+      const episodes = [...episodesById.values()].sort((left, right) => {
+        const planScore = (episode: AutonomousMemoryEpisode): number => {
+          const quality = episode.evaluation?.reward ?? 0;
+          const hasPlan = episode.digests.plan_refinement_digest !== null && episode.digests.plan_refinement_digest !== undefined;
+          if (ranking === "quality") return quality * 100 + (episode.evaluation?.passed ? 5 : 0);
+          if (ranking === "planning") return (hasPlan ? 100 : 0) + (episode.evaluation ? 20 + quality * 100 : 0) + (episode.evaluation?.passed ? 5 : 0);
+          return episode.evaluation?.passed ? 2 : 0;
+        };
+        return planScore(right) - planScore(left) || right.updated_at - left.updated_at || left.episode_id.localeCompare(right.episode_id);
+      }).slice(0, limit);
       const retrievalDigest = await digestJson({ episodes: episodes.map((episode) => ({ episode_id: episode.episode_id, episode_digest: episode.episode_digest })) });
       const projection = memoryProjection("retrieved", episodes, retrievalDigest, null, null);
       return { store, context: episodes.map(memoryEpisodeContext), projection };
@@ -4164,7 +4177,7 @@ export class AutonomousAgent {
     taskText: string,
     route: AutonomousRouteProposal,
     result: AutonomousRunResult | AutonomousCrossDomainRunResult,
-    options: Pick<AutonomousRunOptions, "memoryStore" | "memoryRunId" | "recordMemory" | "memoryTags" | "memoryLesson">,
+    options: Pick<AutonomousRunOptions, "memoryStore" | "memoryRunId" | "learningEpisodeId" | "recordMemory" | "memoryTags" | "memoryLesson">,
     preparation: AutonomousMemoryPreparation,
   ): Promise<AutonomousMemoryRunProjection | null> {
     if (!preparation.store || options.recordMemory === false) return preparation.projection;
@@ -4192,7 +4205,7 @@ export class AutonomousAgent {
         ...("completed_children" in result ? { completed_children: result.completed_children, total_children: result.total_children, partial: result.partial } : {}),
       });
       autonomousMemoryRunSequence += 1;
-      const runId = memoryIdentity("memory run id", options.memoryRunId ?? `autonomous:${route.task_digest.slice(0, 24)}:${autonomousMemoryRunSequence}`);
+      const runId = memoryIdentity("memory run id", options.memoryRunId ?? (options.learningEpisodeId ? `learning-memory:${options.learningEpisodeId}` : `autonomous:${route.task_digest.slice(0, 24)}:${autonomousMemoryRunSequence}`));
       const episodeId = memoryIdentity("memory episode id", `episode:${runId}`);
       const receipt = await preparation.store.recordEpisode({
         episode_id: episodeId,

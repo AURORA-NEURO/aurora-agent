@@ -708,6 +708,7 @@ export type {
   AutonomousLearningEpisodeStore,
   AutonomousLearningSettlement,
   AutonomousLearningSettlementMetadata,
+  AutonomousLearningMemoryEvaluationProjection,
   AutonomousLearningSettlementReceipt,
   AutonomousLearningSettlementReceiptStore,
   AutonomousLearningTrajectory,

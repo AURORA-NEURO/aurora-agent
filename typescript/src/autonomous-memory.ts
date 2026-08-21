@@ -100,6 +100,12 @@ export interface AutonomousMemoryQuery {
   tags?: readonly string[];
   statuses?: readonly AutonomousMemoryEpisodeStatus[];
   includeFailed?: boolean;
+  /** Ranking policy for bounded recall; planning prefers reviewed plans and evaluator quality. */
+  ranking?: "relevance" | "quality" | "planning";
+  /** Optional evaluator-quality floor. Unsettled episodes do not satisfy this filter. */
+  min_reward?: number;
+  /** Restrict recall to episodes whose metadata contains an accepted plan refinement digest. */
+  require_plan_refinement?: boolean;
   limit?: number;
 }
 
@@ -394,6 +400,10 @@ export class InMemoryAutonomousEpisodicMemory implements AutonomousEpisodicMemor
     const limit = query.limit ?? 8;
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > AUTONOMOUS_MEMORY_MAX_QUERY_LIMIT) throw new ArgumentError("memory query limit is outside its bounds");
     if (query.includeFailed !== undefined && typeof query.includeFailed !== "boolean") throw new ArgumentError("memory query includeFailed must be boolean");
+    const ranking = query.ranking ?? "relevance";
+    if (!["relevance", "quality", "planning"].includes(ranking)) throw new ArgumentError("memory query ranking is unsupported");
+    const minReward = query.min_reward === undefined ? undefined : boundedProbability("memory query min_reward", query.min_reward);
+    if (query.require_plan_refinement !== undefined && typeof query.require_plan_refinement !== "boolean") throw new ArgumentError("memory query require_plan_refinement must be boolean");
     const tags = new Set((query.tags ?? []).map((tag) => boundedString("memory query tag", tag, 128)));
     const statuses = new Set(query.statuses ?? []);
     for (const status of statuses) if (!["completed", "failed", "partial", "approval_required"].includes(status)) throw new ArgumentError("memory query contains an unsupported status");
@@ -412,10 +422,22 @@ export class InMemoryAutonomousEpisodicMemory implements AutonomousEpisodicMemor
       if (queryFacetSet.size && !episode.task_facets.some((facet) => queryFacetSet.has(facet))) return false;
       if (statuses.size && !statuses.has(episode.status)) return false;
       if (query.includeFailed === false && (episode.status === "failed" || episode.evaluation?.failed === true)) return false;
+      if (minReward !== undefined && (episode.evaluation === null || episode.evaluation.reward < minReward)) return false;
+      if (query.require_plan_refinement === true && !episode.digests.plan_refinement_digest) return false;
       if (tags.size && ![...tags].some((tag) => episode.tags.includes(tag))) return false;
       return true;
-    }).map((episode) => ({ score: (query.domain ? 20 : 0) + (query.capability ? 20 : 0) + (query.risk_class ? 10 : 0) + (query.task_family ? 20 : 0) + (query.context_digest ? 100 : 0) + (query.task_digest ? 100 : 0) + episode.task_facets.filter((facet) => queryFacetSet.has(facet)).length * 30 + [...tags].filter((tag) => episode.tags.includes(tag)).length * 5 + (episode.evaluation?.passed ? 2 : 0), episode }));
-    matches.sort((left, right) => right.score - left.score || right.episode.updated_at - left.episode.updated_at || left.episode.episode_id.localeCompare(right.episode.episode_id));
+    }).map((episode) => {
+      const relevance = (query.domain ? 20 : 0) + (query.capability ? 20 : 0) + (query.risk_class ? 10 : 0) + (query.task_family ? 20 : 0) + (query.context_digest ? 100 : 0) + (query.task_digest ? 100 : 0) + episode.task_facets.filter((facet) => queryFacetSet.has(facet)).length * 30 + [...tags].filter((tag) => episode.tags.includes(tag)).length * 5;
+      const quality = episode.evaluation?.reward ?? 0;
+      const hasPlan = episode.digests.plan_refinement_digest !== null && episode.digests.plan_refinement_digest !== undefined;
+      const score = ranking === "quality"
+        ? relevance + quality * 100 + (episode.evaluation?.passed ? 5 : 0)
+        : ranking === "planning"
+          ? relevance + (hasPlan ? 100 : 0) + (episode.evaluation ? 20 + quality * 100 : 0) + (episode.evaluation?.passed ? 5 : 0)
+          : relevance + (episode.evaluation?.passed ? 2 : 0);
+      return { score, quality, hasPlan, episode };
+    });
+    matches.sort((left, right) => right.score - left.score || right.quality - left.quality || Number(right.hasPlan) - Number(left.hasPlan) || right.episode.updated_at - left.episode.updated_at || left.episode.episode_id.localeCompare(right.episode.episode_id));
     return matches.slice(0, limit).map(({ episode }) => clone(episode));
   }
 
