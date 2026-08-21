@@ -291,6 +291,7 @@ export {
   AutonomousConnectorDispatchReceipt,
   AutonomousConnectorReceiptJournalEntry,
   InMemoryAutonomousConnectorReceiptJournal,
+  AutonomousConnectorReceiptJournalPersistenceCoordinator,
   AutonomousConnectorRuntime,
 } from "./autonomous-connectors.js";
 export type {
@@ -303,6 +304,7 @@ export type {
   AutonomousConnectorReceiptStore,
   AutonomousConnectorReceiptLookup,
   AutonomousConnectorReceiptJournalSnapshot,
+  AutonomousConnectorReceiptJournalPersistence,
   AutonomousConnectorDispatchResult,
 } from "./autonomous-connectors.js";
 export {
@@ -553,9 +555,20 @@ export type {
   AutonomousWorkflowSemanticRoutingOptions,
   AutonomousWorkflowSnapshotPersistence,
   AutonomousWorkflowSnapshotStore,
+  AutonomousWorkflowStageExecutionContext,
+  AutonomousWorkflowStageExecutor,
   AutonomousWorkflowStageOutcome,
   AutonomousWorkflowStageResult,
 } from "./workflow-execution.js";
+export {
+  autonomousConnectorMissionStepExecutor,
+  autonomousConnectorWorkflowStageExecutor,
+} from "./autonomous-connector-adapters.js";
+export type {
+  AutonomousConnectorPayloadRehydrator,
+  AutonomousMissionConnectorAdapterOptions,
+  AutonomousWorkflowConnectorAdapterOptions,
+} from "./autonomous-connector-adapters.js";
 export {
   AUTONOMOUS_MISSION_CHECKPOINT_SCHEMA,
   AUTONOMOUS_MISSION_EVENT_SCHEMA,

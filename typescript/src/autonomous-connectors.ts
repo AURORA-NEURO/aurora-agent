@@ -98,6 +98,11 @@ export interface AutonomousConnectorReceiptJournalSnapshot extends JsonObject {
   secret_material: "never_returned";
 }
 
+export interface AutonomousConnectorReceiptJournalPersistence {
+  read(): Promise<AutonomousConnectorReceiptJournalSnapshot | null> | AutonomousConnectorReceiptJournalSnapshot | null;
+  write(snapshot: AutonomousConnectorReceiptJournalSnapshot): Promise<void> | void;
+}
+
 function bytes(value: string): number {
   return new TextEncoder().encode(value).byteLength;
 }
@@ -641,7 +646,7 @@ export class InMemoryAutonomousConnectorReceiptJournal implements AutonomousConn
     return this.rows.filter((row) => row.sequence > afterSequence && (executionId === undefined || row.receipt.execution_id === executionId) && (connectorId === undefined || row.receipt.connector_id === connectorId)).slice(0, limit);
   }
 
-  verifyIntegrity(): JsonObject {
+  verifyIntegrity(): { schema: typeof AUTONOMOUS_CONNECTOR_RECEIPT_JOURNAL_SCHEMA; verified: true; entries: number; head_digest: string | null; retention: "metadata_only_hash_chained_no_request_or_payload"; secret_material: "never_returned" } {
     let previous: string | null = null;
     const identities = new Set<string>();
     for (const [index, row] of this.rows.entries()) {
@@ -675,6 +680,33 @@ export class InMemoryAutonomousConnectorReceiptJournal implements AutonomousConn
     }
     if ((snapshot.head_digest ?? null) !== (restored.rows.at(-1)?.entry_digest ?? null)) throw new ArgumentError("autonomous connector receipt journal snapshot head digest is invalid");
     this.rows.splice(0, this.rows.length, ...restored.rows);
+  }
+}
+
+/** Coordinates verified connector receipt snapshots with caller-owned durable storage. */
+export class AutonomousConnectorReceiptJournalPersistenceCoordinator {
+  readonly journal: InMemoryAutonomousConnectorReceiptJournal;
+  readonly persistence: AutonomousConnectorReceiptJournalPersistence;
+
+  constructor(journal: InMemoryAutonomousConnectorReceiptJournal, persistence: AutonomousConnectorReceiptJournalPersistence) {
+    if (!(journal instanceof InMemoryAutonomousConnectorReceiptJournal)) throw new ArgumentError("connector receipt persistence requires an in-memory receipt journal");
+    if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new ArgumentError("connector receipt persistence adapter is malformed");
+    this.journal = journal;
+    this.persistence = persistence;
+  }
+
+  async restore(): Promise<{ status: "empty" | "restored"; snapshot_digest: string | null; entries: number }> {
+    const snapshot = await this.persistence.read();
+    if (snapshot === null) return { status: "empty", snapshot_digest: null, entries: 0 };
+    this.journal.restore(snapshot);
+    const verified = this.journal.verifyIntegrity();
+    return { status: "restored", snapshot_digest: snapshot.snapshot_digest, entries: verified.entries };
+  }
+
+  async flush(): Promise<AutonomousConnectorReceiptJournalSnapshot> {
+    const snapshot = this.journal.snapshot();
+    await this.persistence.write(snapshot);
+    return snapshot;
   }
 }
 

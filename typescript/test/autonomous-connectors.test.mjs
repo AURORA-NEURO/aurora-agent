@@ -8,6 +8,7 @@ import {
   AutonomousConnectorRegistration,
   AutonomousConnectorRegistry,
   AutonomousConnectorRuntime,
+  AutonomousConnectorReceiptJournalPersistenceCoordinator,
   CredentialStore,
   InMemoryAutonomousConnectorReceiptJournal,
   LLMRuntime,
@@ -142,4 +143,25 @@ test("AutonomousAgent exposes connector coverage and selection without invoking 
   assert.equal(coverage.coverage.coding.status, "selected");
   const plan = agent.selectConnectors(["coding"], { capability: "evidence_read" });
   assert.equal(plan.complete, true);
+});
+
+test("connector receipt snapshots restore through a caller-owned persistence coordinator", async () => {
+  const registry = new AutonomousConnectorRegistry([
+    new AutonomousConnectorRegistration(manifest("connector-a", ["coding"]), async () => ({ ok: true })),
+  ]);
+  const journal = new InMemoryAutonomousConnectorReceiptJournal();
+  const runtime = new AutonomousConnectorRuntime(registry, { receiptStore: journal });
+  const plan = registry.selectForDomains(["coding"], { capability: "evidence_read" });
+  await runtime.dispatchFromPlan(plan, request({ selection_plan_digest: plan.plan_digest }));
+  let persisted = null;
+  const coordinator = new AutonomousConnectorReceiptJournalPersistenceCoordinator(journal, {
+    read: () => persisted,
+    write: (snapshot) => { persisted = structuredClone(snapshot); },
+  });
+  const snapshot = await coordinator.flush();
+  assert.equal(snapshot.entries.length, 1);
+  const restoredJournal = new InMemoryAutonomousConnectorReceiptJournal();
+  const restored = new AutonomousConnectorReceiptJournalPersistenceCoordinator(restoredJournal, { read: () => persisted, write: () => {} });
+  assert.deepEqual(await restored.restore(), { status: "restored", snapshot_digest: snapshot.snapshot_digest, entries: 1 });
+  assert.deepEqual(restoredJournal.verifyIntegrity(), journal.verifyIntegrity());
 });

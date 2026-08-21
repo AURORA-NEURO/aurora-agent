@@ -13,6 +13,7 @@ import type {
   AutonomousWorkflow,
   AutonomousWorkflowToolContext,
   AutonomousWorkflowStage,
+  AutonomousPromptChunk,
 } from "./autonomous.js";
 import { semanticRouteAutonomousTask } from "./autonomous-routing.js";
 import type { AutonomousSemanticRouteOptions, AutonomousSemanticRouteResult } from "./autonomous-routing.js";
@@ -143,6 +144,27 @@ export interface AutonomousWorkflowStageResult {
   validation_errors: string[];
 }
 
+/**
+ * Caller-owned execution seam for a durable workflow stage. The default path invokes the
+ * configured model runtime; adapters can replace that invocation with a reviewed connector,
+ * simulator, local worker, or another bounded execution surface without bypassing checkpoints.
+ */
+export interface AutonomousWorkflowStageExecutionContext {
+  job_id: string;
+  task_digest: string;
+  route: AutonomousRouteProposal;
+  blueprint: AutonomousTaskBlueprint;
+  workflow: AutonomousWorkflow;
+  stage: AutonomousWorkflowStage;
+  stage_attempt: number;
+  execution_contract_digest: string;
+  context: readonly AutonomousPromptChunk[];
+}
+
+export type AutonomousWorkflowStageExecutor = (
+  context: AutonomousWorkflowStageExecutionContext,
+) => Promise<AutonomousRunResult> | AutonomousRunResult;
+
 export interface AutonomousWorkflowExecutionResult {
   schema: typeof AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA;
   status: AutonomousWorkflowExecutionStatus;
@@ -182,6 +204,8 @@ export interface AutonomousWorkflowSemanticRoutingOptions extends Pick<Autonomou
 
 export interface AutonomousWorkflowExecutorOptions {
   learning?: AutonomousLearningController;
+  /** Optional caller-owned stage adapter. Its result is still validated and checkpointed here. */
+  stageExecutor?: AutonomousWorkflowStageExecutor;
 }
 
 export interface AutonomousDurableJobSubmitOptions extends AutonomousWorkflowExecuteOptions {
@@ -716,6 +740,7 @@ export class AutonomousWorkflowExecutor {
   readonly agent: AutonomousAgent;
   readonly store: AutonomousWorkflowCheckpointStore;
   readonly learning?: AutonomousLearningController;
+  readonly stageExecutor?: AutonomousWorkflowStageExecutor;
 
   constructor(agent: AutonomousAgent, store: AutonomousWorkflowCheckpointStore, options: AutonomousWorkflowExecutorOptions = {}) {
     if (!agent || typeof agent.blueprint !== "function" || typeof agent.run !== "function") throw new ArgumentError("workflow executor requires an AutonomousAgent");
@@ -723,6 +748,8 @@ export class AutonomousWorkflowExecutor {
     this.agent = agent;
     this.store = store;
     this.learning = options.learning;
+    if (options.stageExecutor !== undefined && typeof options.stageExecutor !== "function") throw new ArgumentError("workflow stageExecutor must be callable");
+    this.stageExecutor = options.stageExecutor;
   }
 
   async start(task: string, rawOptions: AutonomousWorkflowExecuteOptions = {}): Promise<AutonomousWorkflowExecutionResult> {
@@ -958,7 +985,9 @@ export class AutonomousWorkflowExecutor {
       ];
       let run: AutonomousRunResult;
       try {
-        run = await this.agent.run(`Execute workflow stage ${stage.id} for task: ${task}`, runOptions(options, stage, blueprint.workflow, context));
+        run = this.stageExecutor
+          ? await this.stageExecutor({ job_id: checkpoint.job_id, task_digest: blueprint.task_digest, route, blueprint, workflow: blueprint.workflow, stage, stage_attempt: checkpoint.generation + consumed, execution_contract_digest: contractDigest, context })
+          : await this.agent.run(`Execute workflow stage ${stage.id} for task: ${task}`, runOptions(options, stage, blueprint.workflow, context));
       } catch (error) {
         const failure = stageFailure(error);
         checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "failed", run_status: "exception", selection_digest: null, response_digest: null, output_bytes: 0, error_class: failure.error_class, error_code: failure.error_code, retryable: failure.retryable, status_code: failure.status_code, learning_episode_id: null }], "failed", contractDigest, checkpoint, stageOrder, planRefinementDigest);

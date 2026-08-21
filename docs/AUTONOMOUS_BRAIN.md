@@ -2862,6 +2862,60 @@ receipts, replay barriers, and evaluator-driven adaptive selection across all tw
 Connector completion is still not task-quality proof; explicit evidence evaluation remains the
 only source of learning credit.
 
+#### Binding connectors to durable workflow and mission execution
+
+The connector runtime is not a parallel orchestration system. TypeScript can bind it directly to
+the existing metadata-only workflow checkpoint and mission step executors:
+
+```typescript
+const stageExecutor = autonomousConnectorWorkflowStageExecutor({
+  runtime,
+  approved: true, // still requires the surrounding workflow approval gate
+  requestForStage: (stage) => ({
+    operation: "read_evidence",
+    subject_digest: callerSubjectDigest,
+    stage_id: stage.stage.id,
+  }),
+  // On a restart, recover from the caller-owned value store and verify its digest.
+  rehydratePayload: (receipt) => callerValues.get(receipt.payload_digest ?? "") ?? null,
+});
+
+const workflow = new AutonomousWorkflowExecutor(agent, checkpointStore, { stageExecutor });
+const execution = await workflow.start(task, {
+  domain: "science",
+  approveProviderCall: true,
+});
+
+const executeStep = autonomousConnectorMissionStepExecutor({
+  runtime,
+  approved: true,
+  requestForStep: (step) => ({
+    operation: "read_evidence",
+    subject_digest: step.arguments.subject_digest,
+    step_id: step.step.id,
+  }),
+});
+const mission = new AutonomousMissionExecutor({ catalogue, executeStep });
+```
+
+Each adapter derives bounded dispatch, execution, and call identities from the durable job or
+mission step, attempt number, argument digest, and execution-contract digest. The parent digest
+set includes the reviewed route/workflow or step contract plus the selection-plan digest. A plan
+is selected for the exact stage capability, verified against the live registry, and passed to
+`dispatchFromPlan`; an adapter cannot silently substitute a connector or widen a stage's domain.
+The workflow adapter projects connector observations into the existing structured stage contract,
+so blocked or partial evidence follows the same stage-review path as model output. The mission
+adapter returns strict step statuses and digest-only selection decisions, preserving the existing
+dependency-wave, output-budget, and learning boundaries.
+
+Connector payloads remain transient. On a metadata-only replay, the runtime returns a receipt and
+no payload; the optional `rehydratePayload` callback is the only way for an adapter to restore a
+caller-owned value, and the adapter verifies it against `payload_digest`. Missing or mismatched
+values produce workflow reconciliation failure or mission `reconciliation_required`, rather than
+silently re-invoking an external service. Approval refusals, scope refusals, executor errors,
+partial observations, and replay recovery are covered across every built-in domain by the local
+TypeScript test matrix.
+
 For the gateway-backed source connector path, use
 `create_autonomous_api_source_connector_executor(api_client)`. It translates a transient
 `{"plan": ..., "execution": ...}` request into the typed source-plan and source-execute requests,
