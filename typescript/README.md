@@ -648,6 +648,16 @@ caller result without invoking the provider again. The journal is still an orche
 not a transaction across the provider, evaluator, learning ledger, memory store, or external tools;
 those boundaries must keep their own idempotency and reconciliation records.
 
+Provider-assisted semantic routing is part of this restart boundary. If a worker stops before a
+route result exists, restored `route_pending` state refuses to implicitly replay the classifier:
+supply `rehydrateRoute` to reuse a caller-owned reviewed route, or explicitly set
+`retrySemanticRoutingOnRestart: true` to authorize one new route attempt under the original
+approval and selection gates. Once a route result exists, it is committed as a route receipt and
+must be rehydrated by its task/route digests before execution continues. The route task digest uses
+the canonical `{ task }` envelope; older raw-task digests are accepted only as a bounded migration
+path. Deterministic routing and an explicit `routeOverride` remain local and do not require a
+provider retry.
+
 When a controller is supplied, thrown semantic/provider dispatch failures, replan-transition
 failures, and controller-completion failures fail the shared execution before being rethrown unless
 the caller selects `executionLifecycle: "observe_only"` for an enclosing manager. Absent HTTP status

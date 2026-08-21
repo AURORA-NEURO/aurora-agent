@@ -1441,6 +1441,16 @@ identity. This makes the same restart and privacy contract apply uniformly to co
 science, biomedical, neuroscience, operations, enterprise, multi-agent, multimodal, evaluation,
 and explicit cross-domain work.
 
+Provider-assisted semantic routing follows the same fail-closed boundary. If the worker stops before
+the classifier returns a route, restored `route_pending` state does not silently replay that model
+call. The caller must either provide `rehydrateRoute` for a reviewed route held in its own result
+store or explicitly opt into `retrySemanticRoutingOnRestart: true`; the latter permits one new
+classifier attempt only under the original approval, model-selection, and budget gates. A completed
+route is persisted as a metadata-only route receipt and is rehydrated by its canonical task and
+route digests before execution. Older raw-task route digests remain readable only through a bounded
+migration check. Deterministic routes and explicit route overrides stay local and are not subject to
+provider replay.
+
 This cursor provides bounded restart coordination, not a distributed exactly-once transaction.
 The provider result store, learning controller, effect boundary, and external systems of record
 must use stable idempotency keys and reconcile a crash between their side effect and the cursor

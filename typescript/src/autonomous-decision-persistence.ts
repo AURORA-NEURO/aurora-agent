@@ -183,7 +183,7 @@ export async function validateAutonomousDecisionCycleState(value: unknown): Prom
   const previousStateDigest = boundedDigest("autonomous decision-cycle state previous_state_digest", value.previous_state_digest, true);
   const stateDigest = boundedDigest("autonomous decision-cycle state state_digest", value.state_digest)!;
   if ((generation === 1 && previousStateDigest !== null) || (generation > 1 && previousStateDigest === null)) throw new ArgumentError("autonomous decision-cycle state hash chain is malformed");
-  if (phase === "route_pending" && routeDigest !== null) throw new ArgumentError("route-pending decision state cannot contain a route digest");
+  if (phase === "route_pending" && routeDigest !== null && (selectionDigest !== null || outcomeDigest !== null || evaluationDigest !== null || learningEpisodeIds.length > 0 || settlementDigests.length > 0 || terminalStatus !== null)) throw new ArgumentError("route-pending decision route receipt cannot contain execution or terminal metadata");
   if (phase !== "route_pending" && routeDigest === null) throw new ArgumentError("decision state phase requires a route digest");
   if (["evaluation_pending", "settlement_pending", "terminal"].includes(phase) && outcomeDigest === null) throw new ArgumentError("decision state phase requires an outcome digest");
   if (phase === "settlement_pending" && (!value.evaluation_enabled || evaluationDigest === null)) throw new ArgumentError("settlement-pending decision state requires an evaluation digest");

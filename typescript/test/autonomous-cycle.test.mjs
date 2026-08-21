@@ -75,6 +75,41 @@ function failingCycleAgent() {
   return { agent, calls: () => calls };
 }
 
+function interruptedSemanticCycleAgent() {
+  let calls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("simulated semantic routing interruption");
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: "cycle answer" }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("cycle-provider", "https://cycle-semantic-interrupted.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm, { learner: new AutonomousOnlineLearner() });
+  agent.registerModel(candidate());
+  return { agent, calls: () => calls };
+}
+
+function retryingSemanticCycleAgent() {
+  let calls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("simulated semantic routing interruption");
+      if (calls === 2) {
+        return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify({ selected_domains: [{ domain: "coding", score: 0.94, rationale: "implementation" }], confidence: 0.94, abstain: false, abstain_reason: null }) }, finish_reason: "stop" }] });
+      }
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: "cycle answer" }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("cycle-provider", "https://cycle-semantic-retry.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm, { learner: new AutonomousOnlineLearner() });
+  agent.registerModel(candidate());
+  return { agent, calls: () => calls };
+}
+
 function toolLoopAgent(stopResponses = 0) {
   let calls = 0;
   const llm = new LLMRuntime({
@@ -195,6 +230,98 @@ test("ordinary decision cycles recover an execution boundary from caller-owned r
   assert.equal(resumed.status, "completed");
   assert.equal(resumed.run.response.text, "cycle answer");
   assert.equal(interrupted.calls(), 1);
+});
+
+test("semantic routing recovery requires explicit route reuse or an explicit retry", async () => {
+  const task = "Help with an unfamiliar coding migration after a worker restart.";
+  const routeSource = cycleAgent();
+  const route = await routeSource.agent.route(task, { domain: "coding" });
+  const interrupted = interruptedSemanticCycleAgent();
+  const stateStore = new InMemoryAutonomousDecisionCycleStateStore();
+  const base = {
+    semanticRouting: { enabled: true, approveProviderCall: true, allowCrossDomain: false, maxDomains: 1 },
+    approveProviderCall: true,
+    cycleId: "ordinary-semantic-interruption",
+    decisionStateStore: stateStore,
+  };
+  await assert.rejects(runAutonomousDecisionCycle(interrupted.agent, task, base), /provider transport failed/);
+  const pending = await stateStore.load("ordinary-semantic-interruption");
+  assert.equal(pending.phase, "route_pending");
+  assert.equal(pending.route_digest, null);
+  await assert.rejects(
+    runAutonomousDecisionCycle(interrupted.agent, task, base),
+    /rehydrateRoute or retrySemanticRoutingOnRestart/,
+  );
+  assert.equal(interrupted.calls(), 1, "an interrupted semantic route must not be implicitly replayed");
+
+  const resumed = await runAutonomousDecisionCycle(interrupted.agent, task, {
+    ...base,
+    rehydrateRoute: () => route,
+  });
+  assert.equal(resumed.status, "completed");
+  assert.equal(resumed.run.response.text, "cycle answer");
+  assert.equal(interrupted.calls(), 2, "route rehydration should leave only the execution provider call");
+  assert.equal((await stateStore.load("ordinary-semantic-interruption")).phase, "terminal");
+});
+
+test("semantic routing restart retry is an explicit opt-in", async () => {
+  const interrupted = retryingSemanticCycleAgent();
+  const stateStore = new InMemoryAutonomousDecisionCycleStateStore();
+  const task = "Help with an unfamiliar coding migration after a worker restart.";
+  const base = {
+    semanticRouting: { enabled: true, approveProviderCall: true, allowCrossDomain: false, maxDomains: 1 },
+    approveProviderCall: true,
+    cycleId: "ordinary-semantic-retry",
+    decisionStateStore: stateStore,
+  };
+  await assert.rejects(runAutonomousDecisionCycle(interrupted.agent, task, base), /provider transport failed/);
+  const resumed = await runAutonomousDecisionCycle(interrupted.agent, task, {
+    ...base,
+    retrySemanticRoutingOnRestart: true,
+  });
+  assert.equal(resumed.status, "completed");
+  assert.equal(resumed.route.primary_domain, "coding");
+  assert.equal(interrupted.calls(), 3, "explicit retry permits exactly one new route call before execution");
+  assert.equal((await stateStore.load("ordinary-semantic-retry")).phase, "terminal");
+});
+
+test("cross-domain semantic routing rehydrates once before bounded fan-out", async () => {
+  const task = "Help with an unfamiliar biomedical neuroscience study after a worker restart.";
+  const routeSource = cycleAgent();
+  const route = await routeSource.agent.route(task, { allowCrossDomain: true });
+  assert.equal(route.cross_domain, true);
+  const interrupted = interruptedSemanticCycleAgent();
+  const stateStore = new InMemoryAutonomousDecisionCycleStateStore();
+  const result = await (async () => {
+    await assert.rejects(
+      runAutonomousCrossDomainDecisionCycle(interrupted.agent, task, {
+        semanticRouting: { enabled: true, approveProviderCall: true, allowCrossDomain: true },
+        approveProviderCall: true,
+        cycleId: "cross-semantic-interruption",
+        decisionStateStore: stateStore,
+        subtasks: [
+          { id: "bio", domain: "biomedical", task: "Review the biomedical evidence." },
+          { id: "neuro", domain: "neuroscience", task: "Review the neuroscience evidence." },
+        ],
+      }),
+      /provider transport failed/,
+    );
+    return runAutonomousCrossDomainDecisionCycle(interrupted.agent, task, {
+      semanticRouting: { enabled: true, approveProviderCall: true, allowCrossDomain: true },
+      approveProviderCall: true,
+      synthesize: false,
+      cycleId: "cross-semantic-interruption",
+      decisionStateStore: stateStore,
+      rehydrateRoute: () => route,
+      subtasks: [
+        { id: "bio", domain: "biomedical", task: "Review the biomedical evidence." },
+        { id: "neuro", domain: "neuroscience", task: "Review the neuroscience evidence." },
+      ],
+    });
+  })();
+  assert.equal(result.status, "children_completed");
+  assert.equal(result.run.status, "children_completed");
+  assert.equal(interrupted.calls(), 3, "one rehydrated route must lead to exactly two specialist calls");
 });
 
 test("decision cycle preserves structured output and caller selection policy", async () => {

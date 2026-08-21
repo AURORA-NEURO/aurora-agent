@@ -2,6 +2,7 @@ import { ArgumentError, isObject } from "./errors.js";
 import { AutonomousCostBudget } from "./llm.js";
 import type { AutonomousExecutionController } from "./autonomous-execution.js";
 import {
+  AUTONOMOUS_ROUTE_SCHEMA,
   type AutonomousAgent,
   type AutonomousCrossDomainRunOptions,
   type AutonomousCrossDomainRunResult,
@@ -114,6 +115,8 @@ export interface AutonomousDecisionCyclePersistenceOptions {
   cycleId?: string;
   /** Metadata-only state store; task text, prompts, responses, and credentials stay caller-owned. */
   decisionStateStore?: AutonomousDecisionCycleStateStore;
+  /** Permit an explicit retry of an interrupted provider-assisted semantic route after restart. */
+  retrySemanticRoutingOnRestart?: boolean;
   /** Rehydrate a route that was already reviewed before the worker stopped. */
   rehydrateRoute?: (context: AutonomousDecisionCycleRehydrationContext) => AutonomousRouteProposal | Promise<AutonomousRouteProposal>;
   /** Rehydrate a provider outcome after a persisted execution boundary. */
@@ -269,6 +272,7 @@ interface DecisionPersistenceRuntime {
   readonly learningEnabled: boolean;
   readonly evaluationEnabled: boolean;
   readonly trajectoryId: string | null;
+  readonly restored: boolean;
   state: AutonomousDecisionCycleState;
 }
 
@@ -291,12 +295,13 @@ async function openDecisionPersistence(
   }
   if (options.cycleId === undefined) throw new ArgumentError("cycleId is required when decisionStateStore is configured");
   const cycleId = boundedDecisionCycleIdentifier("decision cycleId", options.cycleId);
-  const taskDigest = await digestJson(task);
+  const taskDigest = await digestJson({ task });
+  const legacyTaskDigest = await digestJson(task);
   const loadedRaw = await options.decisionStateStore.load(cycleId);
   const loaded = loadedRaw ? await validateAutonomousDecisionCycleState(loadedRaw) : null;
   if (loaded) {
-    if (loaded.cycle_id !== cycleId || loaded.task_digest !== taskDigest || loaded.mode !== mode || loaded.learning_enabled !== learningEnabled || loaded.evaluation_enabled !== evaluationEnabled || loaded.trajectory_id !== trajectoryId) throw new ArgumentError("persisted decision-cycle state does not match the requested contract");
-    return { store: options.decisionStateStore, cycleId, taskDigest, mode, learningEnabled, evaluationEnabled, trajectoryId, state: loaded };
+    if (loaded.cycle_id !== cycleId || (loaded.task_digest !== taskDigest && loaded.task_digest !== legacyTaskDigest) || loaded.mode !== mode || loaded.learning_enabled !== learningEnabled || loaded.evaluation_enabled !== evaluationEnabled || loaded.trajectory_id !== trajectoryId) throw new ArgumentError("persisted decision-cycle state does not match the requested contract");
+    return { store: options.decisionStateStore, cycleId, taskDigest, mode, learningEnabled, evaluationEnabled, trajectoryId, restored: true, state: loaded };
   }
   const state = await sealAutonomousDecisionCycleState({
     schema: AUTONOMOUS_DECISION_CYCLE_STATE_SCHEMA,
@@ -320,7 +325,7 @@ async function openDecisionPersistence(
     secret_material: "never_returned",
   });
   await options.decisionStateStore.save(state);
-  return { store: options.decisionStateStore, cycleId, taskDigest, mode, learningEnabled, evaluationEnabled, trajectoryId, state };
+  return { store: options.decisionStateStore, cycleId, taskDigest, mode, learningEnabled, evaluationEnabled, trajectoryId, restored: false, state };
 }
 
 async function commitDecisionPersistence(
@@ -365,9 +370,9 @@ async function rehydrateDecisionRoute(
   runtime: DecisionPersistenceRuntime,
   callback: AutonomousDecisionCyclePersistenceOptions["rehydrateRoute"],
 ): Promise<AutonomousRouteProposal> {
-  if (!callback || !runtime.state.route_digest) throw new ArgumentError("restart resume requires rehydrateRoute for the persisted decision route");
+  if (!callback) throw new ArgumentError("restart resume requires rehydrateRoute for the persisted decision route");
   const route = await callback(decisionRehydrationContext(runtime));
-  if (!route || route.route_digest !== runtime.state.route_digest) throw new ArgumentError("rehydrated decision route does not match the persisted route digest");
+  if (!route || route.schema !== AUTONOMOUS_ROUTE_SCHEMA || route.task_digest !== runtime.taskDigest || (runtime.state.route_digest !== null && route.route_digest !== runtime.state.route_digest)) throw new ArgumentError("rehydrated decision route does not match the persisted route identity");
   return route;
 }
 
@@ -670,7 +675,8 @@ export async function runAutonomousDecisionCycle(
   if (persistence?.state.phase === "terminal") {
     return await rehydrateDecisionResult(persistence, options.rehydrateResult) as AutonomousDecisionCycleResult;
   }
-  const persistedPhase = persistence && persistence.state.phase !== "route_pending" ? persistence.state.phase : null;
+  const persistedRoute = persistence?.restored === true && persistence.state.route_digest !== null;
+  const persistedPhase = persistence?.restored === true && (persistence.state.phase !== "route_pending" || persistedRoute) ? persistence.state.phase : null;
 
   let route: AutonomousRouteProposal;
   let semanticRoute: AutonomousSemanticRouteResult | null = null;
@@ -680,6 +686,10 @@ export async function runAutonomousDecisionCycle(
     if (persistedPhase === "execution_pending" || persistedPhase === "evaluation_pending" || persistedPhase === "settlement_pending") {
       rehydratedRun = await rehydrateDecisionRun(persistence!, options.rehydrateRun) as AutonomousRunResult;
     }
+  } else if (persistence?.restored === true && options.rehydrateRoute) {
+    route = await rehydrateDecisionRoute(persistence, options.rehydrateRoute);
+  } else if (persistence?.restored === true && options.semanticRouting?.enabled && options.retrySemanticRoutingOnRestart !== true) {
+    throw new ArgumentError("restart resume of provider-assisted semantic routing requires rehydrateRoute or retrySemanticRoutingOnRestart: true");
   } else if (options.semanticRouting?.enabled) {
     semanticRoute = await semanticRouteAutonomousTask(agent, task, {
       candidates: options.candidates,
@@ -715,6 +725,8 @@ export async function runAutonomousDecisionCycle(
   } else {
     route = await agent.route(task, { domain: options.domain, hints: options.hints, allowCrossDomain: options.allowCrossDomain });
   }
+
+  if (persistence && persistence.state.route_digest === null) await commitDecisionPersistence(persistence, { phase: "route_pending", route_digest: route.route_digest, selection_digest: null, outcome_digest: null, evaluation_digest: null, learning_episode_ids: [], settlement_digests: [], terminal_status: null });
 
   if (route.abstained || !route.primary_domain || route.cross_domain || route.selected_domains.length !== 1) {
     if (options.executionLifecycle !== "observe_only") await options.execution?.checkpoint({ status: "route_review_required", reason: "single_domain_route_review_required" });
@@ -1279,6 +1291,7 @@ export interface AutonomousCrossDomainDecisionCycleLearningOptions {
 export interface AutonomousCrossDomainDecisionCycleOptions extends Omit<AutonomousCrossDomainRunOptions, "learning"> {
   cycleId?: string;
   decisionStateStore?: AutonomousDecisionCycleStateStore;
+  retrySemanticRoutingOnRestart?: boolean;
   rehydrateRoute?: (context: AutonomousDecisionCycleRehydrationContext) => AutonomousRouteProposal | Promise<AutonomousRouteProposal>;
   rehydrateRun?: (context: AutonomousDecisionCycleRehydrationContext) => AutonomousRunResult | AutonomousCrossDomainRunResult | Promise<AutonomousRunResult | AutonomousCrossDomainRunResult>;
   rehydrateEvaluation?: (context: AutonomousDecisionCycleRehydrationContext) => AutonomousEvaluatorRewardInput | Record<string, AutonomousEvaluatorRewardInput> | Promise<AutonomousEvaluatorRewardInput | Record<string, AutonomousEvaluatorRewardInput>>;
@@ -1386,7 +1399,8 @@ export async function runAutonomousCrossDomainDecisionCycle(
   if (persistence?.state.phase === "terminal") {
     return await rehydrateDecisionResult(persistence, options.rehydrateResult) as AutonomousCrossDomainDecisionCycleResult;
   }
-  const persistedPhase = persistence && persistence.state.phase !== "route_pending" ? persistence.state.phase : null;
+  const persistedRoute = persistence?.restored === true && persistence.state.route_digest !== null;
+  const persistedPhase = persistence?.restored === true && (persistence.state.phase !== "route_pending" || persistedRoute) ? persistence.state.phase : null;
 
   let route: AutonomousRouteProposal;
   let semanticRoute: AutonomousSemanticRouteResult | null = null;
@@ -1396,6 +1410,10 @@ export async function runAutonomousCrossDomainDecisionCycle(
     if (persistedPhase === "execution_pending" || persistedPhase === "evaluation_pending" || persistedPhase === "settlement_pending") {
       rehydratedRun = await rehydrateDecisionRun(persistence!, options.rehydrateRun) as AutonomousCrossDomainRunResult;
     }
+  } else if (persistence?.restored === true && options.rehydrateRoute) {
+    route = await rehydrateDecisionRoute(persistence, options.rehydrateRoute);
+  } else if (persistence?.restored === true && options.semanticRouting?.enabled && options.retrySemanticRoutingOnRestart !== true) {
+    throw new ArgumentError("restart resume of provider-assisted semantic routing requires rehydrateRoute or retrySemanticRoutingOnRestart: true");
   } else if (options.semanticRouting?.enabled) {
     semanticRoute = await semanticRouteAutonomousTask(agent, task, {
       candidates: options.candidates,
@@ -1431,6 +1449,7 @@ export async function runAutonomousCrossDomainDecisionCycle(
   } else {
     route = await agent.route(task, { hints: options.hints, allowCrossDomain: options.allowCrossDomain ?? true });
   }
+  if (persistence && persistence.state.route_digest === null) await commitDecisionPersistence(persistence, { phase: "route_pending", route_digest: route.route_digest, selection_digest: null, outcome_digest: null, evaluation_digest: null, learning_episode_ids: [], trajectory_id: persistence?.trajectoryId ?? null, settlement_digests: [], terminal_status: null });
   if (route.abstained || !route.cross_domain || route.selected_domains.length < 2) {
     if (options.executionLifecycle !== "observe_only") await options.execution?.checkpoint({ status: "route_review_required", reason: "cross_domain_route_review_required" });
     const reviewed = crossReviewResult("route_review_required", route, semanticRoute);
