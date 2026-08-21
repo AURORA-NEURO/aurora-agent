@@ -1249,6 +1249,36 @@ executor store; the cycle result retains local provider results while exposing o
 evaluation and learning projections for persistence. Approval, blocked-stage recovery, effect
 reconciliation, credential rehydration, and provider selection remain caller-controlled gates.
 
+For a caller that wants the supervisor to make the retry decision from the evaluator result,
+set `automaticReplan: true`. When the evaluator does not pass a completed attempt and the caller
+did not already request a retry, the cycle derives a bounded instruction from missing, rejected,
+or below-threshold signal names, then applies the normal `maxReplans` ceiling. It never copies
+signal values, provider output, task text, credentials, or evaluator evidence into the instruction,
+and it cannot add tools, stages, permissions, effects, or claims. This makes the retry decision
+autonomous while leaving quality authority with the evaluator. An explicit `evaluator` override
+selects the cycle evaluator when no learning controller is present; with learning enabled it must
+be the controller's exact evaluator instance so settlement and decision use the same contract.
+
+Use `autonomousWorkflowEvaluatorForDomain(domain)` to obtain the exact content-addressed
+evaluator profile for any built-in domain without duplicating signal names or weights:
+
+```typescript
+const evaluator = await autonomousWorkflowEvaluatorForDomain("neuroscience");
+const cycle = await runAutonomousWorkflowCycle(task, executor, {
+  domain: "neuroscience",
+  evaluator,
+  automaticReplan: true,
+  maxReplans: 2,
+  approveProviderCall: true,
+  evaluate: (execution) => callerHeldOutEvidence(execution),
+});
+```
+
+Automatic replanning is still bounded and reviewable: a failed evaluator gate with
+`maxReplans: 0` returns `completed_without_replan` with a digest-only request, while a positive
+budget creates a fresh child checkpoint for each retry. This prevents a model's self-reported
+completion from silently becoming an unbounded autonomous loop.
+
 For process-restart recovery, pass `cycleId` and an `AutonomousWorkflowCycleStateStore`. The
 supervisor records hash-linked `execution_pending`, `evaluation_pending`,
 `settlement_pending`, `replan_handoff`, and `terminal` phases without storing

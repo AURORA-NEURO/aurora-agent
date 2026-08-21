@@ -13,6 +13,7 @@ import {
   InMemoryAutonomousWorkflowCheckpointStore,
   InMemoryAutonomousWorkflowCycleStateStore,
   LLMRuntime,
+  autonomousWorkflowEvaluatorForDomain,
   builtinAutonomousDomainProfiles,
   openaiCompatibleProvider,
   runAutonomousWorkflowCycle,
@@ -91,6 +92,62 @@ test("workflow cycle supervises every built-in domain with explicit evidence", a
     assert.equal(cycle.evaluations[0].status, "passed", profile.domain);
     assert.equal(cycle.evaluations[0].reward, 1, profile.domain);
   }
+});
+
+test("automatic evaluator replanning recovers every built-in domain without granting new authority", async () => {
+  const agent = await makeAgent();
+  const profiles = await builtinAutonomousDomainProfiles();
+  for (const profile of profiles) {
+    const evaluator = await autonomousWorkflowEvaluatorForDomain(profile.domain);
+    const executor = new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore());
+    let evaluations = 0;
+    const cycle = await runAutonomousWorkflowCycle(`Recover a failed ${profile.domain} workflow.`, executor, {
+      domain: profile.domain,
+      candidates: agent.models(),
+      approveProviderCall: true,
+      jobId: `automatic-replan-${profile.domain}`,
+      maxReplans: 1,
+      evaluator,
+      automaticReplan: true,
+      evaluate: async (execution) => {
+        const firstAttempt = evaluations === 0;
+        evaluations += 1;
+        return {
+          evidence: {
+            stages: execution.blueprint.workflow.stages.map((stage) => ({
+              stage_id: stage.id,
+              signals: Object.fromEntries(stage.evaluator_signals.map((signal) => [signal, firstAttempt ? 0 : 1])),
+            })),
+          },
+        };
+      },
+    });
+    assert.equal(cycle.status, "completed", profile.domain);
+    assert.equal(cycle.replan_count, 1, profile.domain);
+    assert.equal(cycle.attempts.length, 2, profile.domain);
+    assert.equal(cycle.evaluations[0].replan_requested, true, profile.domain);
+    assert.equal(cycle.evaluations[0].failure_class, "evaluator_gate_failed", profile.domain);
+    assert.match(cycle.evaluations[0].replan_instruction_digest, /^[0-9a-f]{64}$/, profile.domain);
+    assert.equal(cycle.evaluations[1].passed, true, profile.domain);
+  }
+});
+
+test("workflow cycle refuses evaluator drift between decision and delayed-credit settlement", async () => {
+  const agent = await makeAgent(true);
+  const learning = new AutonomousLearningController(agent);
+  const executor = new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore(), { learning });
+  const differentEvaluator = await autonomousWorkflowEvaluatorForDomain("coding", { evaluatorVersion: "different-rubric" });
+  await assert.rejects(
+    () => runAutonomousWorkflowCycle("Reject evaluator drift.", executor, {
+      domain: "coding",
+      candidates: agent.models(),
+      approveProviderCall: true,
+      evaluator: differentEvaluator,
+      learning: { controller: learning },
+      evaluate: async (execution) => ({ evidence: perfectEvidence(execution) }),
+    }),
+    /match the learning controller evaluator/,
+  );
 });
 
 test("workflow cycle composes semantic routing with durable stage supervision", async () => {

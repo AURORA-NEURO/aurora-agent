@@ -616,6 +616,7 @@ export {
   InMemoryAutonomousLearningStateStore,
   InMemoryAutonomousLearningTrajectoryStore,
   builtinAutonomousDomainEvaluatorProfiles,
+  autonomousWorkflowEvaluatorForDomain,
 } from "./autonomous-learning.js";
 export {
   AUTONOMOUS_SEMANTIC_ROUTE_SCHEMA,

@@ -592,6 +592,29 @@ export async function builtinAutonomousDomainEvaluatorProfiles(): Promise<Autono
   });
 }
 
+/**
+ * Construct the reviewed evaluator contract for one built-in domain.
+ *
+ * This is intentionally an async factory because the domain workflow catalogue is
+ * content-addressed. Callers can therefore select a domain evaluator without copying
+ * signal names or weights out of the catalogue, while the returned evaluator remains
+ * caller-owned and scores only explicit evidence packets.
+ */
+export async function autonomousWorkflowEvaluatorForDomain(
+  domain: AutonomousDomainName,
+  options: { evaluatorVersion?: string; passThreshold?: number; signalWeights?: Readonly<Record<string, number>> } = {},
+): Promise<AutonomousWorkflowEvaluator> {
+  if (!AUTONOMOUS_DOMAIN_NAMES.includes(domain)) throw new ArgumentError(`unsupported autonomous evaluator domain: ${domain}`);
+  const profile = (await builtinAutonomousDomainEvaluatorProfiles()).find((candidate) => candidate.domain === domain);
+  if (!profile) throw new ArgumentError(`no built-in evaluator profile exists for domain: ${domain}`);
+  return new AutonomousWorkflowEvaluator({
+    evaluatorId: profile.evaluator_id,
+    evaluatorVersion: options.evaluatorVersion ?? profile.evaluator_version,
+    passThreshold: options.passThreshold ?? profile.pass_threshold,
+    signalWeights: options.signalWeights ?? profile.signal_weights,
+  });
+}
+
 function meshMemberProjection(member: AutonomousEvaluatorMeshMember, value: AutonomousEvaluatorRewardInput): AutonomousEvaluatorMeshMemberProjection {
   assertRewardInput(value);
   return {

@@ -3261,6 +3261,21 @@ outputs, and disagreement produce a value-only refusal status; they never silent
 credit and never retain the underlying error or provider result. Because the mesh is defined over
 the shared run contract, the same policy applies to all twelve built-in domains.
 
+The TypeScript workflow supervisor can now make the retry transition automatically without making
+the evaluator less authoritative. `runAutonomousWorkflowCycle()` accepts
+`automaticReplan: true` with a bounded `maxReplans`; when a completed attempt fails its evaluator
+gate and the caller did not already request a retry, the cycle derives a screened transient
+instruction from missing, rejected, or below-threshold signal identifiers. It never includes
+signal values, evidence bodies, task text, provider output, credentials, or tool arguments. A
+retry receives a fresh child checkpoint and the reviewed workflow/tool/effect contract is carried
+forward unchanged. With `maxReplans: 0`, the request is exposed as `completed_without_replan`
+rather than dispatched. `autonomousWorkflowEvaluatorForDomain()` derives the exact evaluator ID,
+version, signal vocabulary, weights, and threshold from the content-addressed built-in profile,
+so all twelve domains use the same reviewed contract without copied configuration. When a
+learning controller is present, an explicit cycle evaluator must be that controller's same
+evaluator instance; evaluation and delayed-credit settlement therefore cannot silently use
+different rubrics.
+
 The Python façade exposes the same boundary as `AutonomousEvaluatorMesh`, a
 `BrainOutcomeEvaluator` adapter that can be passed directly to `evaluate_and_record`, workflow or
 mission learning, trajectory settlement, and value-only replay. Its members receive the same

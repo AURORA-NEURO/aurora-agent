@@ -102,6 +102,14 @@ export interface AutonomousWorkflowCycleOptions extends Omit<AutonomousWorkflowE
   learning?: AutonomousWorkflowCycleLearningOptions;
   /** Optional metadata-only restart ledger for evaluator and settlement boundaries. */
   stateStore?: AutonomousWorkflowCycleStateStore;
+  /** Explicit evaluator used for this cycle when no learning controller supplies one. */
+  evaluator?: AutonomousWorkflowEvaluator;
+  /**
+   * Automatically convert a failed evaluator gate into bounded retry guidance. The
+   * evaluator still owns the quality decision; this option only supplies a deterministic,
+   * metadata-safe replan request when the caller did not already provide one.
+   */
+  automaticReplan?: boolean;
   /** Rehydrate a full local execution when state persisted after provider work but before evaluation. */
   rehydrateExecution?: (context: AutonomousWorkflowCycleRehydrationContext) => AutonomousWorkflowExecutionResult | Promise<AutonomousWorkflowExecutionResult>;
   /** Rehydrate the exact evaluator packet after a settlement interruption. */
@@ -198,6 +206,40 @@ function normalizeCycleInput(value: unknown): AutonomousWorkflowCycleEvaluationI
   const feedbackDigest = boundedDigest("workflow cycle feedback_digest", value.feedback_digest, true);
   const failureClass = safeOptionalLabel("workflow cycle failure_class", value.failure_class);
   return { evidence: value.evidence as AutonomousWorkflowEvaluationInput, replan_requested: replanRequested, replan_instruction: instruction, feedback_digest: feedbackDigest, failure_class: failureClass };
+}
+
+function automaticReplanInput(
+  execution: AutonomousWorkflowExecutionResult,
+  evaluation: AutonomousWorkflowEvaluation,
+  input: AutonomousWorkflowCycleEvaluationInput,
+): AutonomousWorkflowCycleEvaluationInput {
+  if (input.replan_requested === true || execution.status !== "completed" || evaluation.passed) return input;
+  const deficientSignals = [
+    ...evaluation.missing_signals,
+    ...evaluation.rejected_signals,
+    ...Object.entries(evaluation.signal_scores)
+      .filter(([, score]) => score < evaluation.pass_threshold)
+      .map(([signal]) => signal),
+  ];
+  const signals = [...new Set(deficientSignals)].sort().slice(0, 64);
+  let signalText = "";
+  for (const signal of signals) {
+    const candidate = signalText ? `${signalText}, ${signal}` : signal;
+    const candidateInstruction = `Improve the declared evaluator signals before the next attempt: ${candidate}. Preserve the reviewed workflow, tools, budgets, approvals, and claim boundaries.`;
+    if (new TextEncoder().encode(candidateInstruction).byteLength > AUTONOMOUS_WORKFLOW_CYCLE_MAX_INSTRUCTION_BYTES) break;
+    signalText = candidate;
+  }
+  const instruction = screenReplanInstruction(
+    signalText.length > 0
+      ? `Improve the declared evaluator signals before the next attempt: ${signalText}. Preserve the reviewed workflow, tools, budgets, approvals, and claim boundaries.`
+      : "The evaluator gate did not pass. Re-check the declared completion evidence and preserve the reviewed workflow, tools, budgets, approvals, and claim boundaries.",
+  );
+  return {
+    ...input,
+    replan_requested: true,
+    replan_instruction: instruction,
+    failure_class: input.failure_class ?? "evaluator_gate_failed",
+  };
 }
 
 async function cycleProjection(evaluation: AutonomousWorkflowEvaluation, input: AutonomousWorkflowCycleEvaluationInput): Promise<AutonomousWorkflowCycleEvaluationProjection> {
@@ -446,11 +488,13 @@ function replanContextFromProjection(attempt: number, runtime: CyclePersistenceR
 export async function runAutonomousWorkflowCycle(task: string, executor: AutonomousWorkflowExecutor, options: AutonomousWorkflowCycleOptions): Promise<AutonomousWorkflowCycleResult> {
   if (!executor || typeof executor.start !== "function") throw new ArgumentError("workflow cycle requires an AutonomousWorkflowExecutor");
   if (!options || typeof options.evaluate !== "function") throw new ArgumentError("workflow cycle requires an evaluator callback");
+  if (options.evaluator !== undefined && typeof options.evaluator.evaluate !== "function") throw new ArgumentError("workflow cycle evaluator override is malformed");
   const taskText = boundedText("workflow cycle task", task, 32_000);
   const maxReplans = boundedCount("workflow cycle maxReplans", options.maxReplans ?? 0, AUTONOMOUS_WORKFLOW_CYCLE_MAX_REPLANS);
   const rootJobId = boundedIdentifier("workflow cycle jobId", options.jobId ?? options.cycleId ?? `workflow-cycle-${(await digestJson(taskText)).slice(0, 24)}`);
   if (maxReplans > 0 && rootJobId.length > 240) throw new ArgumentError("workflow cycle jobId is too long for bounded retry identities");
   const learning = options.learning?.controller ?? executor.learning;
+  if (options.evaluator !== undefined && learning && options.evaluator !== learning.evaluator) throw new ArgumentError("workflow cycle evaluator override must match the learning controller evaluator");
   const trajectoryPrefix = boundedTrajectoryPrefix(options.learning?.trajectoryIdPrefix ?? `workflow-cycle:${rootJobId}`);
   const persistence = await openCyclePersistence(options, taskText, rootJobId, maxReplans);
   if (persistence?.state.phase === "terminal") return persistedResult(persistence.state);
@@ -490,6 +534,8 @@ export async function runAutonomousWorkflowCycle(task: string, executor: Autonom
     evaluate: _evaluate,
     maxReplans: _maxReplans,
     stateStore: _stateStore,
+    evaluator: _evaluator,
+    automaticReplan: _automaticReplan,
     rehydrateExecution: _rehydrateExecution,
     rehydrateEvaluation: _rehydrateEvaluation,
     rehydrateReplanInstruction: _rehydrateReplanInstruction,
@@ -600,11 +646,12 @@ export async function runAutonomousWorkflowCycle(task: string, executor: Autonom
     }
 
     const resumedSettlement = phaseAtEntry === "settlement_pending";
-    const input = normalizeCycleInput(resumedSettlement
+    let input = normalizeCycleInput(resumedSettlement
       ? await (options.rehydrateEvaluation ? options.rehydrateEvaluation(rehydrationContext(persistence!)) : Promise.reject(new ArgumentError("workflow cycle restart requires rehydrateEvaluation after settlement interruption")))
       : await options.evaluate(execution));
-    const evaluator = learning?.evaluator ?? new AutonomousWorkflowEvaluator();
+    const evaluator = options.evaluator ?? learning?.evaluator ?? new AutonomousWorkflowEvaluator();
     const evaluation = await evaluator.evaluate(execution, input.evidence);
+    if (options.automaticReplan === true) input = automaticReplanInput(execution, evaluation, input);
     const projection = await cycleProjection(evaluation, input);
     if (resumedSettlement && persistence) {
       const priorProjection = evaluations.at(-1);
