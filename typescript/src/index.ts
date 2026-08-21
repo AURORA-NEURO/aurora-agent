@@ -213,6 +213,7 @@ export type {
   AutonomousPlanAndRunResult,
   AutonomousPlanAndRunStatus,
   AutonomousRunResult,
+  AutonomousMemoryRunProjection,
   AutonomousGoalStepResult,
   AutonomousGoalLearningStepResult,
   AutonomousRunStatus,

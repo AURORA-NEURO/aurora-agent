@@ -838,6 +838,17 @@ warning. `AutonomousMemoryPersistenceCoordinator` connects the store to a caller
 object-store adapter. Snapshots and event chains are content-addressed, and raw prompts, provider
 responses, tool payloads, credentials, and secret-shaped fields are rejected.
 
+The same loop is now available on ordinary `AutonomousAgent.run()` and `runCrossDomain()` calls:
+pass `memoryStore` on the agent or per run, and the façade derives bounded task-facet digests,
+retrieves relevant episodes before prompt assembly, and records one parent episode after the run.
+Cross-domain children and synthesis inherit the retrieved metadata without creating duplicate
+episodes. `memoryRunId` gives a caller a stable idempotency identity across restarts;
+`recordMemory: false` and `retrieveMemory: false` provide explicit composition controls. The
+returned `memory` projection contains only episode IDs, digests, event identity, and a redacted
+error class. Memory failures never turn an otherwise valid provider result into a fabricated
+success or silently widen authorization. Prior episodes remain advisory context: they cannot add
+tools, providers, permissions, effects, budgets, or factual authority.
+
 For bounded automatic recall, `taskFacetDigests(task)` projects short identifier-like task terms into
 at most 32 namespaced SHA-256 digests. The original task vocabulary is never stored. Callers may put
 those digests in `AutonomousMemoryEpisodeInput.task_facets` and query them through

@@ -1548,6 +1548,24 @@ under the original approval/budget contract. The cross-domain variant persists t
 while preserving exact specialist/synthesis episode coverage and delayed-credit trajectory
 identity, so partial fan-out cannot invent a synthesis reward.
 
+### TypeScript episodic recall on direct runs
+
+The TypeScript `AutonomousAgent` also closes the memory loop for direct callers, not only the
+durable decision-cycle façade. Supplying `memoryStore` on the agent or on `run()`/
+`runCrossDomain()` derives bounded task-facet digests, retrieves matching value-only episodes,
+and adds them to the prompt as low-priority advisory context. A completed or paused parent run
+then records one digest-only episode; cross-domain specialists and synthesis inherit the recalled
+projection but do not create child duplicates. `memoryRunId` is the caller-owned stable identity
+for restart-safe idempotency, while `retrieveMemory` and `recordMemory` are explicit controls for
+nested compositions.
+
+The returned `memory` projection contains only retrieved/recorded episode identities, digests,
+event identity, and a redacted error class. It never contains the task, prompt, provider response,
+credential, tool argument, or tool result. Memory is advisory and cannot widen a reviewed route,
+model candidate set, tool allow-list, budget, permission, or effect boundary. Retrieval and
+recording failures are reported in that projection without converting an otherwise valid provider
+outcome into a false success or replaying a provider call.
+
 ## Domain-aware autonomous task intake
 
 Applications that do not want to hand-assemble every prompt and plan can use the high-level

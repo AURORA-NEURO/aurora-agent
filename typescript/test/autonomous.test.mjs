@@ -17,6 +17,7 @@ import {
   AutonomousDomainToolRegistry,
   AutonomousDomainToolRuntime,
   AutonomousOnlineLearner,
+  InMemoryAutonomousEpisodicMemory,
   AUTONOMOUS_API_TOOL_ADAPTER_SCHEMA,
   AUTONOMOUS_CAPABILITY_PLAN_SCHEMA,
   AUTONOMOUS_CAPABILITY_EXECUTION_SCHEMA,
@@ -364,6 +365,145 @@ test("planAndRun applies the same accepted planning contract to cross-domain fan
   assert.equal(result.result.child_runs.every((child) => child.result.status === "completed"), true);
   assert.equal(calls.length, 4, "cross-domain planning dispatches one planner, two specialists, and one synthesis call");
   assert.ok(budget.snapshot().consumed_cost_units > 0);
+});
+
+test("ordinary runs close the episodic-memory retrieval and recording loop across every domain", async () => {
+  const memory = new InMemoryAutonomousEpisodicMemory();
+  const domains = {
+    coding: "debug this Rust repository",
+    browser: "navigate the browser and compare sources",
+    data: "validate this parquet dataset lineage",
+    science: "design a hypothesis experiment",
+    biomedical: "review patient treatment evidence",
+    neuroscience: "analyze EEG preprocessing",
+    operations: "plan a rollback after an outage",
+    enterprise: "review governance compliance ownership",
+    multi_agent: "delegate this subtask to a specialist agent",
+    multimodal: "inspect this image and transcript",
+    cross_domain: "perform an interdisciplinary synthesis",
+    evaluation: "run a benchmark holdout replay",
+  };
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      const body = JSON.parse(String(init.body));
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify({ answer: "transient-provider-output" }) }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("memory-provider", "https://memory-provider.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm, { memoryStore: memory });
+  agent.registerModel(candidate("memory-provider", "memory-model", ["reasoning", "code", "structured_output"]));
+
+  for (const [domain, task] of Object.entries(domains)) {
+    const result = await agent.run(task, {
+      domain,
+      approveProviderCall: false,
+      memoryRunId: `domain-${domain}`,
+      memoryLesson: `review:${domain}`,
+    });
+    assert.equal(result.status, "approval_required", domain);
+    assert.equal(result.memory.status, "recorded", domain);
+    assert.equal(result.memory.recorded_episode_id, `episode:domain-${domain}`, domain);
+  }
+  assert.equal((await memory.stats()).episodes, 12);
+  const snapshot = await memory.snapshot();
+  assert.doesNotMatch(JSON.stringify(snapshot), /transient-provider-output/);
+  assert.doesNotMatch(JSON.stringify(snapshot), /debug this Rust repository/);
+
+  const calls = [];
+  const retrievingLlm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      const body = JSON.parse(String(init.body));
+      calls.push(body);
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: "retrieved" }, finish_reason: "stop" }] });
+    },
+  });
+  retrievingLlm.registerProvider(openaiCompatibleProvider("memory-provider", "https://memory-provider.test", { requiresCredential: false }));
+  const retrievingAgent = new AutonomousAgent(retrievingLlm, { memoryStore: memory });
+  retrievingAgent.registerModel(candidate("memory-provider", "memory-model", ["reasoning", "code"]));
+  const retrieved = await retrievingAgent.run(domains.coding, {
+    domain: "coding",
+    approveProviderCall: true,
+    memoryRunId: "coding-retrieval",
+  });
+  assert.equal(retrieved.status, "completed");
+  assert.equal(retrieved.memory.status, "recorded");
+  assert.ok(retrieved.memory.retrieved_episode_ids.includes("episode:domain-coding"));
+  assert.ok(calls[0].messages.some((message) => message.content.includes("autonomous-memory-")), "retrieved memory must be visible to the prompt compiler");
+  assert.equal((await memory.verifyIntegrity()).episodes, 13);
+});
+
+test("cross-domain memory is retrieved once, shared with specialists and synthesis, and recorded once", async () => {
+  const memory = new InMemoryAutonomousEpisodicMemory();
+  const calls = [];
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      const body = JSON.parse(String(init.body));
+      calls.push(body);
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: "cross-domain" }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("cross-memory", "https://cross-memory.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm, { memoryStore: memory });
+  agent.registerModel(candidate("cross-memory", "cross-model", ["reasoning", "biomedical", "science", "coordination"]));
+  const seed = await agent.runCrossDomain("Research a biomedical neuroscience experiment with EEG patient evidence.", {
+    approveProviderCall: false,
+    allowCrossDomain: true,
+    memoryRunId: "cross-seed",
+    maxParallelChildren: 1,
+  });
+  assert.equal(seed.memory.status, "recorded");
+  const result = await agent.runCrossDomain("Research a biomedical neuroscience experiment with EEG patient evidence.", {
+    approveProviderCall: true,
+    allowCrossDomain: true,
+    memoryRunId: "cross-parent",
+    maxParallelChildren: 1,
+  });
+  assert.equal(result.status, "completed");
+  assert.equal(result.memory.status, "recorded");
+  assert.equal(result.memory.recorded_episode_id, "episode:cross-parent");
+  assert.ok(result.memory.retrieved_episode_ids.includes("episode:cross-seed"));
+  assert.equal(result.child_runs.length, 2);
+  assert.equal(calls.length, 3);
+  const providerMessagesWithMemory = calls.filter((body) => body.messages.some((message) => message.content.includes("autonomous-memory-")));
+  assert.equal(providerMessagesWithMemory.length, 3, "memory must flow to both specialists and synthesis");
+  assert.equal((await memory.stats()).episodes, 2);
+});
+
+test("episodic-memory failures remain explicit without changing the provider execution result", async () => {
+  const llm = new LLMRuntime({ credentials: new CredentialStore() });
+  const seed = new InMemoryAutonomousEpisodicMemory();
+  const retrievalFailure = {
+    retrieve: async () => { throw new Error("retrieval backend unavailable"); },
+    recordEpisode: seed.recordEpisode.bind(seed),
+    get: seed.get.bind(seed),
+  };
+  const retrievalAgent = new AutonomousAgent(llm, { memoryStore: retrievalFailure });
+  const retrievalResult = await retrievalAgent.run("debug a bounded coding task", {
+    domain: "coding",
+    approveProviderCall: false,
+    memoryRunId: "retrieval-failure",
+  });
+  assert.equal(retrievalResult.status, "approval_required");
+  assert.equal(retrievalResult.memory.status, "recorded");
+  assert.equal(retrievalResult.memory.error_class, "Error");
+
+  const recordFailure = {
+    retrieve: seed.retrieve.bind(seed),
+    recordEpisode: async () => { throw new Error("record backend unavailable"); },
+    get: seed.get.bind(seed),
+  };
+  const recordAgent = new AutonomousAgent(llm, { memoryStore: recordFailure });
+  const recordResult = await recordAgent.run("debug a bounded coding task", {
+    domain: "coding",
+    approveProviderCall: false,
+    memoryRunId: "record-failure",
+  });
+  assert.equal(recordResult.status, "approval_required");
+  assert.equal(recordResult.memory.status, "record_failed");
+  assert.equal(recordResult.memory.error_class, "Error");
 });
 
 test("provider planning refuses dependency-invalid proposals without retaining provider output", async () => {
