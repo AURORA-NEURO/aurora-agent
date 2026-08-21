@@ -54,9 +54,11 @@ function workflowStagePayload(init, fallbackStage = "stage") {
 
 test("workflow executor checkpoints stages, pauses at a bounded budget, and resumes by digest", async () => {
   let calls = 0;
+  const bodies = [];
   const llm = new LLMRuntime({
     credentials: new CredentialStore(),
     fetch: async (_url, init) => {
+      bodies.push(JSON.parse(String(init.body)));
       calls += 1;
       return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify(workflowStagePayload(init, `stage-${calls}`)) }, finish_reason: "stop" }] });
     },
@@ -75,6 +77,7 @@ test("workflow executor checkpoints stages, pauses at a bounded budget, and resu
   assert.equal(first.checkpoint.status, "paused");
   assert.equal(JSON.stringify(first.checkpoint).includes(task), false);
   assert.equal(calls, 2);
+  assert.match(JSON.stringify(bodies[1].messages), /evidence-scope/, "dependent stages receive bounded prior-stage evidence");
 
   const resumed = await executor.resume("workflow-job-1", task, { candidates: agent.models(), approveProviderCall: true, maxStages: 32 });
   assert.equal(resumed.status, "completed");
@@ -88,6 +91,41 @@ test("workflow executor checkpoints stages, pauses at a bounded budget, and resu
     assert.equal(resumed.events[index].sequence, resumed.events[index - 1].sequence + 1);
   }
   await assert.rejects(() => executor.resume("workflow-job-1", "A different task", { candidates: agent.models(), approveProviderCall: true }), /digest/);
+});
+
+test("workflow resume rehydrates caller-owned stage evidence by checkpoint digest", async () => {
+  let calls = 0;
+  const bodies = [];
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      bodies.push(JSON.parse(String(init.body)));
+      calls += 1;
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify(workflowStagePayload(init, `stage-${calls}`)) }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("workflow-rehydrate", "https://workflow-rehydrate.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  const candidate = { ...model(), provider: "workflow-rehydrate", model: "workflow-rehydrate-model" };
+  agent.registerModel(candidate);
+  const executor = new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore());
+  const task = "Resume this workflow with caller-owned evidence";
+  const first = await executor.start(task, { domain: "coding", jobId: "workflow-rehydrate-1", candidates: [candidate], approveProviderCall: true, maxStages: 1 });
+  const scopeOutput = first.stage_results[0].run.response.text;
+  await assert.rejects(
+    () => executor.resume("workflow-rehydrate-1", task, { candidates: [candidate], approveProviderCall: true, maxStages: 1, stageOutputs: { scope: "{}" } }),
+    /digest/,
+  );
+  assert.equal(calls, 1, "invalid rehydrated evidence must fail before provider dispatch");
+  const resumed = await executor.resume("workflow-rehydrate-1", task, {
+    candidates: [candidate],
+    approveProviderCall: true,
+    maxStages: 1,
+    stageOutputs: { scope: scopeOutput },
+  });
+  assert.equal(resumed.status, "paused");
+  assert.equal(calls, 2);
+  assert.match(JSON.stringify(bodies[1].messages), /evidence-scope/, "rehydrated evidence must reach the dependent stage");
 });
 
 test("accepted provider plan refinement is checkpoint-bound and required for replay", async () => {

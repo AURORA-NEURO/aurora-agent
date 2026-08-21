@@ -796,6 +796,13 @@ context, model policy, or approval decision. The executor creates a new checkpoi
 retains the prior failure in the hash-linked event history, and then retries the stage under the
 same provider, tool, credential, and effect gates.
 
+For a paused job resumed in a new process, pass exact caller-owned prior JSON responses through
+`stageOutputs: { [stageId]: rawJson }` when downstream stages need their dependency evidence. Each
+entry must belong to a completed checkpoint stage, match its stored response digest, and pass the
+same stage schema before it is placed into the next prompt. Missing entries remain metadata-only;
+the executor never invents evidence, and the raw response is never written to the checkpoint or
+learning state.
+
 New checkpoints persist only an `execution_contract_digest` for the effective candidates, selection
 limits, structured-output/schema requirement, tool definitions, failover limit, and enclosing
 execution policy. `resume()` refuses a changed digest before provider dispatch. Older checkpoints

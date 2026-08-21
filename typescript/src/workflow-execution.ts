@@ -156,6 +156,8 @@ export interface AutonomousWorkflowExecuteOptions extends AutonomousRunOptions {
   maxStages?: number;
   /** Explicitly permit re-dispatch of a stage whose provider declared it blocked/proposed/not_attempted. */
   retryBlocked?: boolean;
+  /** Caller-owned raw JSON responses for completed stages; each is digest-checked before reuse. */
+  stageOutputs?: Readonly<Record<string, string>>;
   /** A completed, non-review provider proposal that may reorder only existing workflow stages. */
   acceptedPlanRefinement?: AutonomousPlanRefinementResult;
   /** Explicitly bind a legacy checkpoint that predates execution-contract digests before continuing it. */
@@ -763,6 +765,67 @@ export class AutonomousWorkflowExecutor {
     return event;
   }
 
+  private async priorOutputs(
+    checkpoint: AutonomousWorkflowCheckpoint,
+    stageResults: readonly AutonomousWorkflowStageResult[],
+    stages: readonly AutonomousWorkflowStage[],
+    options: AutonomousWorkflowExecuteOptions,
+  ): Promise<Array<Record<string, unknown>>> {
+    const outputs = new Map<string, Record<string, unknown>>();
+    for (const entry of stageResults) {
+      outputs.set(entry.stage.id, {
+        stage_id: entry.stage.id,
+        output_digest: entry.output_digest,
+        output_bytes: entry.output_bytes,
+        structured_output: {
+          stage_id: entry.stage.id,
+          status: entry.declared_status,
+          evidence: entry.evidence,
+          uncertainty: entry.uncertainty,
+          notes: entry.notes,
+          next_actions: entry.next_actions,
+        },
+      });
+    }
+    const stageById = new Map(stages.map((stage) => [stage.id, stage]));
+    const completedOutcomes = new Map<string, AutonomousWorkflowStageOutcome>();
+    for (const outcome of checkpoint.stage_outcomes) {
+      if (outcome.status === "completed") completedOutcomes.set(outcome.stage_id, outcome);
+    }
+    const supplied = options.stageOutputs ?? {};
+    if (!isObject(supplied) || Object.keys(supplied).length > AUTONOMOUS_WORKFLOW_MAX_STAGES_PER_CALL) throw new ArgumentError("workflow stageOutputs exceed their bound");
+    for (const [stageId, raw] of Object.entries(supplied)) {
+      const stage = stageById.get(stageId);
+      if (!stage || !checkpoint.completed_stage_ids.includes(stageId)) throw new ArgumentError(`workflow stageOutputs contains a non-completed stage ${stageId}`);
+      if (typeof raw !== "string" || !raw || raw.includes("\u0000") || new TextEncoder().encode(raw).byteLength > 256 * 1024) throw new ArgumentError(`workflow stageOutputs.${stageId} is outside its bounded text contract`);
+      const outcome = completedOutcomes.get(stageId);
+      if (!outcome?.response_digest || await digestJson({ stage_id: stageId, output: raw }) !== outcome.response_digest) throw new ProviderRuntimeError(`rehydrated workflow stage output digest does not match checkpoint for ${stageId}`);
+      let structured: unknown;
+      try { structured = JSON.parse(raw); } catch { throw new ProviderRuntimeError(`rehydrated workflow stage output for ${stageId} is not valid JSON`); }
+      const validation = validateWorkflowStageOutput(stage, structured);
+      if (validation.errors.length > 0 || validation.declaredStatus !== "completed") throw new ProviderRuntimeError(`rehydrated workflow stage output for ${stageId} fails its stage contract`);
+      outputs.set(stageId, {
+        stage_id: stageId,
+        output_digest: outcome.response_digest,
+        output_bytes: new TextEncoder().encode(raw).byteLength,
+        structured_output: {
+          stage_id: stageId,
+          status: validation.declaredStatus,
+          evidence: validation.evidence,
+          uncertainty: validation.uncertainty,
+          notes: validation.notes,
+          next_actions: validation.nextActions,
+        },
+      });
+    }
+    for (const stageId of checkpoint.completed_stage_ids) {
+      if (outputs.has(stageId)) continue;
+      const outcome = completedOutcomes.get(stageId);
+      outputs.set(stageId, { stage_id: stageId, output_digest: outcome?.response_digest ?? null, output_bytes: outcome?.output_bytes ?? 0, structured_output: null });
+    }
+    return [...outputs.values()];
+  }
+
   private async drive(task: string, blueprint: AutonomousTaskBlueprint, initial: AutonomousWorkflowCheckpoint, options: AutonomousWorkflowExecuteOptions, contractDigest: string, acceptedPlan: AcceptedWorkflowPlan | null): Promise<AutonomousWorkflowExecutionResult> {
     const maxStages = boundedStageCount(options.maxStages);
     const retryBlocked = boundedRetryBlocked(options.retryBlocked);
@@ -793,7 +856,7 @@ export class AutonomousWorkflowExecutor {
       if (!stage) throw new ProviderRuntimeError(`workflow checkpoint references unknown stage ${checkpoint.next_stage_id}`);
       if (stage.depends_on.some((dependency) => !checkpoint.completed_stage_ids.includes(dependency))) throw new ProviderRuntimeError(`workflow stage ${stage.id} has incomplete dependencies`);
       consumed += 1;
-      const priorOutputs = stageResults.map((entry) => ({ stage_id: entry.stage.id, output_digest: entry.output_digest, output_bytes: entry.output_bytes }));
+      const priorOutputs = await this.priorOutputs(checkpoint, stageResults, stages, options);
       const context = [
         ...(options.context ?? []),
         { id: "workflow-checkpoint", content: JSON.stringify({ job_id: checkpoint.job_id, workflow_digest: checkpoint.workflow_digest, completed_stage_ids: checkpoint.completed_stage_ids, stage_outcomes: checkpoint.stage_outcomes, prior_outputs: priorOutputs }), required: true, priority: 100 },
