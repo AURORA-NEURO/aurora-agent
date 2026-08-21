@@ -767,13 +767,25 @@ projects thrown provider failures as redacted `error_code`, `retryable`, `status
 `error_class` metadata so workers can choose whether to retry or escalate without retaining the
 provider message or response body. A failed stage remains terminal until the caller explicitly
 rehydrates and chooses a new execution policy.
-requires caller-owned task and credential rehydration.
+Recovery always requires caller-owned task and credential rehydration.
 
 Workflow stage options use the same hard selection and output contract as direct agent runs:
 `maxCostPerMillionTokens`, `maxLatencyMs`, and `minQuality` are enforced before each provider
-dispatch, and `requireJson`/`responseSchema` are validated for each stage result. A checkpoint or
-previous stage admission does not authorize a later stage; readiness, capacity, approval, and output
-validation are repeated at the stage boundary.
+dispatch. Unlike a free-form direct run, the workflow owns the stage output contract and always
+requires structured JSON. Every stage must return exactly `stage_id`, `status`, `evidence`,
+`uncertainty`, `notes`, and `next_actions`; `stage_id` is bound to the current stage and only
+`status: "completed"` can advance the DAG. `proposed`, `blocked`, `not_attempted`, missing, or
+unsupported fields fail closed as a terminal `stage_not_completed` or `stage_output_invalid`
+checkpoint outcome. Caller `requireJson`/`responseSchema` options cannot weaken this contract.
+A checkpoint or previous stage admission does not authorize a later stage; readiness, capacity,
+approval, and output validation are repeated at the stage boundary.
+
+The structured stage result is also exposed locally through `stage_results`: bounded evidence,
+uncertainty, notes, next actions, the declared status, and validation errors are retained for the
+caller’s evaluator/learning boundary, while the durable checkpoint retains only digests and typed
+failure metadata. The built-in stage schema caps evidence and action arrays at 32 entries, each
+entry at 4,096 bytes, and notes at 16,000 bytes. This makes workflow completion an evidence-bearing
+state transition rather than an inference from provider transport success.
 
 New checkpoints persist only an `execution_contract_digest` for the effective candidates, selection
 limits, structured-output/schema requirement, tool definitions, failover limit, and enclosing

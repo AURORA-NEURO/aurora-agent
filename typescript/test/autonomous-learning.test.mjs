@@ -29,7 +29,7 @@ function candidate() {
   return {
     provider: "learning-provider",
     model: "learning-model",
-    capabilities: ["reasoning", "code", "science", "biomedical", "coordination", "data", "web", "operations", "enterprise", "multimodal", "evaluation"],
+    capabilities: ["reasoning", "code", "science", "biomedical", "coordination", "data", "web", "operations", "enterprise", "multimodal", "evaluation", "structured_output"],
     context_window_tokens: 32_000,
     max_output_tokens: 2_000,
     quality: 0.9,
@@ -39,10 +39,17 @@ function candidate() {
   };
 }
 
+function workflowStagePayload(init) {
+  let body = {};
+  try { body = JSON.parse(String(init?.body ?? "{}")); } catch { /* bounded fixture fallback */ }
+  const stageId = JSON.stringify(body.messages ?? []).match(/Execute workflow stage ([A-Za-z0-9_.:-]+)/)?.[1] ?? "stage";
+  return { stage_id: stageId, status: "completed", evidence: [`evidence-${stageId}`], uncertainty: [], notes: `verified ${stageId}`, next_actions: [] };
+}
+
 async function learningAgent() {
   const llm = new LLMRuntime({
     credentials: new CredentialStore(),
-    fetch: async () => jsonResponse({ choices: [{ message: { role: "assistant", content: "verified learning response" }, finish_reason: "stop" }] }),
+    fetch: async (_url, init) => jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify(workflowStagePayload(init)) }, finish_reason: "stop" }] }),
   });
   llm.registerProvider(openaiCompatibleProvider("learning-provider", "https://learning.test", { requiresCredential: false }));
   const agent = new AutonomousAgent(llm, { learner: new AutonomousOnlineLearner() });

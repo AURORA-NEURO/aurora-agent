@@ -27,7 +27,7 @@ function model() {
   return {
     provider: "workflow",
     model: "workflow-model",
-    capabilities: ["reasoning", "code", "coordination", "browser", "data", "science", "biomedical", "neuroscience", "operations", "enterprise", "multimodal", "evaluation"],
+    capabilities: ["reasoning", "code", "coordination", "browser", "data", "science", "biomedical", "neuroscience", "operations", "enterprise", "multimodal", "evaluation", "structured_output"],
     context_window_tokens: 32_000,
     max_output_tokens: 2_000,
     quality: 0.9,
@@ -37,13 +37,28 @@ function model() {
   };
 }
 
+function workflowStagePayload(init, fallbackStage = "stage") {
+  let body = {};
+  try { body = JSON.parse(String(init?.body ?? "{}")); } catch { /* the provider test still returns a bounded fixture */ }
+  const prompt = JSON.stringify(body.messages ?? []);
+  const stageId = prompt.match(/Execute workflow stage ([A-Za-z0-9_.:-]+)/)?.[1] ?? fallbackStage;
+  return {
+    stage_id: stageId,
+    status: "completed",
+    evidence: [`evidence-${stageId}`],
+    uncertainty: [],
+    notes: `completed ${stageId} with bounded test evidence`,
+    next_actions: [],
+  };
+}
+
 test("workflow executor checkpoints stages, pauses at a bounded budget, and resumes by digest", async () => {
   let calls = 0;
   const llm = new LLMRuntime({
     credentials: new CredentialStore(),
-    fetch: async () => {
+    fetch: async (_url, init) => {
       calls += 1;
-      return jsonResponse({ choices: [{ message: { role: "assistant", content: `stage-output-${calls}` }, finish_reason: "stop" }] });
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify(workflowStagePayload(init, `stage-${calls}`)) }, finish_reason: "stop" }] });
     },
   });
   llm.registerProvider(openaiCompatibleProvider("workflow", "https://workflow.test", { requiresCredential: false }));
@@ -79,9 +94,9 @@ test("accepted provider plan refinement is checkpoint-bound and required for rep
   let calls = 0;
   const llm = new LLMRuntime({
     credentials: new CredentialStore(),
-    fetch: async () => {
+    fetch: async (_url, init) => {
       calls += 1;
-      return jsonResponse({ choices: [{ message: { role: "assistant", content: `accepted-plan-stage-${calls}` }, finish_reason: "stop" }] });
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify(workflowStagePayload(init, `stage-${calls}`)) }, finish_reason: "stop" }] });
     },
   });
   llm.registerProvider(openaiCompatibleProvider("accepted-plan", "https://accepted-plan.test", { requiresCredential: false }));
@@ -149,9 +164,9 @@ test("workflow resume refuses a changed selection contract before provider dispa
   let calls = 0;
   const llm = new LLMRuntime({
     credentials: new CredentialStore(),
-    fetch: async () => {
+    fetch: async (_url, init) => {
       calls += 1;
-      return jsonResponse({ choices: [{ message: { role: "assistant", content: `contract-output-${calls}` }, finish_reason: "stop" }] });
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify(workflowStagePayload(init, `stage-${calls}`)) }, finish_reason: "stop" }] });
     },
   });
   llm.registerProvider(openaiCompatibleProvider("workflow", "https://workflow.test", { requiresCredential: false }));
@@ -173,9 +188,9 @@ test("legacy workflow checkpoints require explicit contract rebinding", async ()
   let calls = 0;
   const llm = new LLMRuntime({
     credentials: new CredentialStore(),
-    fetch: async () => {
+    fetch: async (_url, init) => {
       calls += 1;
-      return jsonResponse({ choices: [{ message: { role: "assistant", content: `legacy-output-${calls}` }, finish_reason: "stop" }] });
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify(workflowStagePayload(init, `stage-${calls}`)) }, finish_reason: "stop" }] });
     },
   });
   llm.registerProvider(openaiCompatibleProvider("workflow", "https://workflow.test", { requiresCredential: false }));
@@ -220,12 +235,12 @@ test("workflow stages preserve structured output and selection constraints", asy
     fetch: async (_url, init) => {
       bodies.push(JSON.parse(String(init.body)));
       calls += 1;
-      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify({ answer: `stage-${calls}` }) }, finish_reason: "stop" }] });
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify(workflowStagePayload(init, `stage-${calls}`)) }, finish_reason: "stop" }] });
     },
   });
   llm.registerProvider(openaiCompatibleProvider("workflow-structured", "https://workflow-structured.test", { requiresCredential: false, structuredOutputMode: "json_object" }));
   const agent = new AutonomousAgent(llm);
-  const structuredModel = { ...model(), provider: "workflow-structured", model: "workflow-structured-model", capabilities: [...model().capabilities, "structured_output"] };
+  const structuredModel = { ...model(), provider: "workflow-structured", model: "workflow-structured-model", capabilities: [...model().capabilities] };
   agent.registerModel(structuredModel);
   const responseSchema = { type: "object", additionalProperties: false, properties: { answer: { type: "string" } }, required: ["answer"] };
   const executor = new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore());
@@ -242,13 +257,20 @@ test("workflow stages preserve structured output and selection constraints", asy
     responseSchema,
   });
   assert.equal(result.status, "paused");
-  assert.deepEqual(result.stage_results[0].run.response.structured, { answer: "stage-1" });
+  assert.equal(result.stage_results[0].run.response.structured.stage_id, "scope");
+  assert.equal(result.stage_results[0].run.response.structured.status, "completed");
+  assert.deepEqual(result.stage_results[0].validation_errors, []);
   assert.deepEqual(bodies[0].response_format, { type: "json_object" });
-  await assert.rejects(
-    () => executor.resume("workflow-structured-1", "Implement this structured workflow.", { candidates: [structuredModel], approveProviderCall: true, maxStages: 32 }),
-    /execution contract/,
-  );
-  assert.equal(calls, 1, "structured-output contract mismatch must not dispatch a later stage");
+  const structuredResumed = await executor.resume("workflow-structured-1", "Implement this structured workflow.", {
+    candidates: [structuredModel],
+    approveProviderCall: true,
+    maxStages: 32,
+    maxCostPerMillionTokens: 10,
+    maxLatencyMs: 50,
+    minQuality: 0.9,
+  });
+  assert.equal(structuredResumed.status, "completed");
+  assert.equal(calls, 5, "workflow-owned stage schema must remain stable across resume");
 
   const refusedCalls = [];
   const refusedRuntime = new LLMRuntime({ credentials: new CredentialStore(), fetch: async (_url, init) => { refusedCalls.push(init); return jsonResponse({ choices: [{ message: { role: "assistant", content: "must not dispatch" }, finish_reason: "stop" }] }); } });
@@ -265,9 +287,9 @@ test("workflow checkpoint snapshots restore a paused job without admitting paylo
   let calls = 0;
   const llm = new LLMRuntime({
     credentials: new CredentialStore(),
-    fetch: async () => {
+    fetch: async (_url, init) => {
       calls += 1;
-      return jsonResponse({ choices: [{ message: { role: "assistant", content: `checkpoint-output-${calls}` }, finish_reason: "stop" }] });
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify(workflowStagePayload(init, `stage-${calls}`)) }, finish_reason: "stop" }] });
     },
   });
   llm.registerProvider(openaiCompatibleProvider("workflow", "https://workflow.test", { requiresCredential: false }));
@@ -309,7 +331,7 @@ test("workflow checkpoint snapshots restore a paused job without admitting paylo
 test("workflow stages share the caller execution admission boundary", async () => {
   const llm = new LLMRuntime({
     credentials: new CredentialStore(),
-    fetch: async () => jsonResponse({ choices: [{ message: { role: "assistant", content: "stage accounted" }, finish_reason: "stop" }] }),
+    fetch: async (_url, init) => jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify(workflowStagePayload(init)) }, finish_reason: "stop" }] }),
   });
   llm.registerProvider(openaiCompatibleProvider("workflow", "https://workflow.test", { requiresCredential: false }));
   const agent = new AutonomousAgent(llm);
@@ -380,11 +402,69 @@ test("workflow executor exposes approval pauses and checkpoint readiness for eve
   }
 });
 
+test("workflow executor runs every built-in single-domain workflow through the stage contract", async () => {
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify(workflowStagePayload(init)) }, finish_reason: "stop" }] }),
+  });
+  llm.registerProvider(openaiCompatibleProvider("all-domain-workflows", "https://all-domain-workflows.test", { requiresCredential: false }));
+  const profiles = (await builtinAutonomousDomainProfiles()).filter((profile) => profile.domain !== "cross_domain");
+  const capabilities = new Set(["reasoning", "structured_output"]);
+  for (const profile of profiles) {
+    for (const capability of profile.required_model_capabilities) capabilities.add(capability);
+    for (const stage of profile.workflow.stages) for (const capability of stage.required_capabilities) capabilities.add(capability);
+  }
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel({ ...model(), provider: "all-domain-workflows", model: "all-domain-workflows-model", capabilities: [...capabilities] });
+  for (const profile of profiles) {
+    const result = await new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore()).start(`Run a bounded ${profile.domain} workflow`, {
+      domain: profile.domain,
+      jobId: `all-domain-workflow-${profile.domain}`,
+      candidates: agent.models(),
+      approveProviderCall: true,
+      maxStages: 32,
+    });
+    assert.equal(result.status, "completed", profile.domain);
+    assert.equal(result.completed_stage_count, profile.workflow.stages.length, profile.domain);
+    assert.equal(result.stage_results.length, profile.workflow.stages.length, profile.domain);
+    assert.ok(result.stage_results.every((stage) => stage.declared_status === "completed" && stage.validation_errors.length === 0), profile.domain);
+  }
+});
+
+test("workflow executor fails closed when a provider reports a blocked stage", async () => {
+  let calls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      calls += 1;
+      const payload = workflowStagePayload(init);
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify({ ...payload, status: "blocked", uncertainty: ["required evidence is unavailable"] }) }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("blocked-stage", "https://blocked-stage.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel({ ...model(), provider: "blocked-stage", model: "blocked-stage-model" });
+  const result = await new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore()).start("Do not advance without evidence", {
+    domain: "coding",
+    jobId: "workflow-blocked-stage-1",
+    candidates: agent.models(),
+    approveProviderCall: true,
+    maxStages: 32,
+  });
+  assert.equal(result.status, "failed");
+  assert.equal(calls, 1);
+  assert.equal(result.completed_stage_count, 0);
+  assert.equal(result.stage_results[0].declared_status, "blocked");
+  assert.deepEqual(result.stage_results[0].validation_errors, []);
+  assert.equal(result.checkpoint.stage_outcomes.at(-1).error_class, "stage_not_completed");
+  assert.equal(result.checkpoint.next_stage_id, "scope");
+});
+
 test("accepted plan identity is validated for every single-domain workflow profile", async () => {
   const llm = new LLMRuntime({ credentials: new CredentialStore(), fetch: async () => { throw new Error("provider must not be called before approval"); } });
   llm.registerProvider(openaiCompatibleProvider("all-domain-plans", "https://all-domain-plans.test", { requiresCredential: false }));
   const agent = new AutonomousAgent(llm);
-  const allCapabilities = ["reasoning", "code", "web", "data", "science", "biomedical", "neuroscience", "coordination", "operations", "enterprise", "multimodal", "evaluation"];
+  const allCapabilities = ["reasoning", "code", "web", "data", "science", "biomedical", "neuroscience", "coordination", "operations", "enterprise", "multimodal", "evaluation", "structured_output"];
   const registered = { ...model(), provider: "all-domain-plans", model: "all-domain-plans-model", capabilities: allCapabilities };
   agent.registerModel(registered);
   const profiles = await builtinAutonomousDomainProfiles();
@@ -469,9 +549,9 @@ test("durable job controller sends only metadata, preserves server approval, and
   };
   const llm = new LLMRuntime({
     credentials: new CredentialStore(),
-    fetch: async () => {
+    fetch: async (_url, init) => {
       calls += 1;
-      return jsonResponse({ choices: [{ message: { role: "assistant", content: "stage complete" }, finish_reason: "stop" }] });
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify(workflowStagePayload(init)) }, finish_reason: "stop" }] });
     },
   });
   llm.registerProvider(openaiCompatibleProvider("workflow", "https://workflow.test", { requiresCredential: false }));

@@ -18,6 +18,7 @@ import type {
   BrainJobEventsResult,
   BrainJobRecord,
   BrainJobStatusResult,
+  JsonObject,
   JsonValue,
   RestToolResponse,
   AutonomousPlanRefinementResult,
@@ -37,6 +38,10 @@ export const AUTONOMOUS_WORKFLOW_MAX_SNAPSHOT_BYTES = 4 * 1024 * 1024;
 export type AutonomousWorkflowCheckpointStatus = "running" | "paused" | "completed" | "failed";
 export type AutonomousWorkflowExecutionStatus = "completed" | "paused" | "approval_required" | "failed" | "route_review_required";
 export type AutonomousWorkflowEventType = "started" | "stage_completed" | "checkpointed" | "approval_required" | "stage_failed" | "completed";
+export const AUTONOMOUS_WORKFLOW_STAGE_STATUSES = ["completed", "proposed", "blocked", "not_attempted"] as const;
+export type AutonomousWorkflowStageStatus = typeof AUTONOMOUS_WORKFLOW_STAGE_STATUSES[number];
+export const AUTONOMOUS_WORKFLOW_MAX_STAGE_EVIDENCE = 32;
+export const AUTONOMOUS_WORKFLOW_MAX_STAGE_TEXT_BYTES = 16_000;
 
 export interface AutonomousWorkflowStageOutcome {
   stage_id: string;
@@ -122,6 +127,12 @@ export interface AutonomousWorkflowStageResult {
   output_digest: string | null;
   output_bytes: number;
   learning_episode_id: string | null;
+  declared_status: AutonomousWorkflowStageStatus | null;
+  evidence: string[];
+  uncertainty: string[];
+  notes: string | null;
+  next_actions: string[];
+  validation_errors: string[];
 }
 
 export interface AutonomousWorkflowExecutionResult {
@@ -451,6 +462,69 @@ function responseText(run: AutonomousRunResult | null): string {
   return run.response.structured === null || run.response.structured === undefined ? "" : JSON.stringify(run.response.structured);
 }
 
+function workflowStageResponseSchema(stage: AutonomousWorkflowStage): JsonObject {
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      stage_id: { type: "string", enum: [stage.id] },
+      status: { type: "string", enum: [...AUTONOMOUS_WORKFLOW_STAGE_STATUSES] },
+      evidence: { type: "array", maxItems: AUTONOMOUS_WORKFLOW_MAX_STAGE_EVIDENCE, items: { type: "string", maxLength: 4_096 } },
+      uncertainty: { type: "array", maxItems: AUTONOMOUS_WORKFLOW_MAX_STAGE_EVIDENCE, items: { type: "string", maxLength: 4_096 } },
+      notes: { type: "string", maxLength: AUTONOMOUS_WORKFLOW_MAX_STAGE_TEXT_BYTES },
+      next_actions: { type: "array", maxItems: AUTONOMOUS_WORKFLOW_MAX_STAGE_EVIDENCE, items: { type: "string", maxLength: 4_096 } },
+    },
+    required: ["stage_id", "status", "evidence", "uncertainty", "notes", "next_actions"],
+  };
+}
+
+interface ValidatedWorkflowStageOutput {
+  declaredStatus: AutonomousWorkflowStageStatus | null;
+  evidence: string[];
+  uncertainty: string[];
+  notes: string | null;
+  nextActions: string[];
+  errors: string[];
+}
+
+function workflowStageStringArray(value: unknown, field: string, errors: string[]): string[] {
+  if (!Array.isArray(value)) {
+    errors.push(`${field} must be an array`);
+    return [];
+  }
+  if (value.length > AUTONOMOUS_WORKFLOW_MAX_STAGE_EVIDENCE) errors.push(`${field} exceeds ${AUTONOMOUS_WORKFLOW_MAX_STAGE_EVIDENCE} items`);
+  const values: string[] = [];
+  for (const [index, candidate] of value.slice(0, AUTONOMOUS_WORKFLOW_MAX_STAGE_EVIDENCE).entries()) {
+    if (typeof candidate !== "string" || new TextEncoder().encode(candidate).byteLength > 4_096 || candidate.includes("\u0000")) {
+      errors.push(`${field}[${index}] is outside its bounded text contract`);
+    } else {
+      values.push(candidate);
+    }
+  }
+  return values;
+}
+
+function validateWorkflowStageOutput(stage: AutonomousWorkflowStage, value: unknown): ValidatedWorkflowStageOutput {
+  const empty: ValidatedWorkflowStageOutput = { declaredStatus: null, evidence: [], uncertainty: [], notes: null, nextActions: [], errors: [] };
+  if (!isObject(value)) return { ...empty, errors: ["provider returned no structured workflow stage object"] };
+  const errors: string[] = [];
+  const allowed = new Set(["stage_id", "status", "evidence", "uncertainty", "notes", "next_actions"]);
+  if (Object.keys(value).some((key) => !allowed.has(key))) errors.push("structured workflow stage output contains unsupported fields");
+  if (value.stage_id !== stage.id) errors.push(`stage_id must equal ${stage.id}`);
+  const declaredStatus = AUTONOMOUS_WORKFLOW_STAGE_STATUSES.includes(value.status as AutonomousWorkflowStageStatus)
+    ? value.status as AutonomousWorkflowStageStatus
+    : null;
+  if (declaredStatus === null) errors.push("status is not a supported workflow stage status");
+  const evidence = workflowStageStringArray(value.evidence, "evidence", errors);
+  const uncertainty = workflowStageStringArray(value.uncertainty, "uncertainty", errors);
+  const nextActions = workflowStageStringArray(value.next_actions, "next_actions", errors);
+  const notes = typeof value.notes === "string" && !value.notes.includes("\u0000") && new TextEncoder().encode(value.notes).byteLength <= AUTONOMOUS_WORKFLOW_MAX_STAGE_TEXT_BYTES
+    ? value.notes
+    : null;
+  if (notes === null) errors.push("notes is outside its bounded text contract");
+  return { declaredStatus, evidence, uncertainty, notes, nextActions, errors };
+}
+
 function safeErrorClass(error: unknown): string {
   const candidate = error instanceof Error && typeof error.constructor?.name === "string" ? error.constructor.name : "UnknownError";
   return /^[A-Za-z0-9_.-]{1,128}$/.test(candidate) ? candidate : "UnknownError";
@@ -480,7 +554,6 @@ function workflowCandidateContract(candidate: NonNullable<AutonomousRunOptions["
 
 async function workflowExecutionContractDigest(agent: AutonomousAgent, options: AutonomousWorkflowExecuteOptions): Promise<string> {
   const candidates = options.candidates ? [...options.candidates] : agent.models();
-  const responseSchemaDigest = options.responseSchema === undefined ? null : await digestJson(options.responseSchema);
   const toolsDigest = options.tools === undefined ? null : await digestJson(options.tools.map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters })));
   const executionPolicyDigest = options.execution ? await options.execution.policy.digest() : null;
   return digestJson({
@@ -491,8 +564,10 @@ async function workflowExecutionContractDigest(agent: AutonomousAgent, options: 
     max_cost_per_million_tokens: options.maxCostPerMillionTokens ?? null,
     max_latency_ms: options.maxLatencyMs ?? null,
     min_quality: options.minQuality ?? null,
-    require_json: options.requireJson === true,
-    response_schema_digest: responseSchemaDigest,
+    // A workflow owns its stage contract. Caller schemas cannot weaken or replace it,
+    // so custom responseSchema/requireJson values do not create replay identities.
+    require_json: true,
+    response_schema_digest: "builtin-workflow-stage-contract-v1",
     temperature: options.temperature ?? null,
     tools_digest: toolsDigest,
     approve_effects: options.approveEffects === true,
@@ -548,8 +623,8 @@ function runOptions(options: AutonomousWorkflowExecuteOptions, stage: Autonomous
     maxCostPerMillionTokens: options.maxCostPerMillionTokens,
     maxLatencyMs: options.maxLatencyMs,
     minQuality: options.minQuality,
-    requireJson: options.requireJson,
-    responseSchema: options.responseSchema,
+    requireJson: true,
+    responseSchema: workflowStageResponseSchema(stage),
     temperature: options.temperature,
     tools: options.tools,
     authorizeAndExecute: options.authorizeAndExecute,
@@ -707,13 +782,26 @@ export class AutonomousWorkflowExecutor {
       const outputDigest = text ? await digestJson({ stage_id: stage.id, output: text }) : null;
       const selectionDigest = run.selection ? await digestJson(run.selection) : null;
       const outputBytes = new TextEncoder().encode(text).byteLength;
+      const validation = validateWorkflowStageOutput(stage, run.response?.structured);
       let learningEpisodeId: string | null = null;
-      if (run.status === "completed" && this.learning) {
+      if (run.status === "completed" && validation.errors.length === 0 && validation.declaredStatus === "completed" && this.learning) {
         const episodeId = `workflow:${checkpoint.job_id}:${stage.id}:g${checkpoint.generation + 1}`;
         const episode = await this.learning.prepareRun(run, { episodeId, runId: episodeId, stageId: stage.id, parentJobId: checkpoint.job_id, planRefinementDigest });
         learningEpisodeId = episode.episode_id;
       }
-      stageResults.push({ stage, run, output_digest: outputDigest, output_bytes: outputBytes, learning_episode_id: learningEpisodeId });
+      stageResults.push({
+        stage,
+        run,
+        output_digest: outputDigest,
+        output_bytes: outputBytes,
+        learning_episode_id: learningEpisodeId,
+        declared_status: validation.declaredStatus,
+        evidence: validation.evidence,
+        uncertainty: validation.uncertainty,
+        notes: validation.notes,
+        next_actions: validation.nextActions,
+        validation_errors: validation.errors,
+      });
       if (run.status === "approval_required") {
         checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "approval_required", run_status: run.status, selection_digest: selectionDigest, response_digest: null, output_bytes: 0, error_class: null, learning_episode_id: null }], "paused", contractDigest, checkpoint, stageOrder, planRefinementDigest);
         await this.store.save(checkpoint);
@@ -722,6 +810,13 @@ export class AutonomousWorkflowExecutor {
       }
       if (run.status !== "completed") {
         checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "failed", run_status: run.status, selection_digest: selectionDigest, response_digest: outputDigest, output_bytes: outputBytes, error_class: null, learning_episode_id: null }], "failed", contractDigest, checkpoint, stageOrder, planRefinementDigest);
+        await this.store.save(checkpoint);
+        await this.appendEvent(checkpoint.job_id, "stage_failed", stage.id, checkpoint);
+        return this.result("failed", checkpoint, blueprint, stageResults);
+      }
+      if (validation.errors.length > 0 || validation.declaredStatus !== "completed") {
+        const errorClass = validation.errors.length > 0 ? "stage_output_invalid" : "stage_not_completed";
+        checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "failed", run_status: run.status, selection_digest: selectionDigest, response_digest: outputDigest, output_bytes: outputBytes, error_class: errorClass, error_code: "invalid_response", retryable: false, status_code: null, learning_episode_id: null }], "failed", contractDigest, checkpoint, stageOrder, planRefinementDigest);
         await this.store.save(checkpoint);
         await this.appendEvent(checkpoint.job_id, "stage_failed", stage.id, checkpoint);
         return this.result("failed", checkpoint, blueprint, stageResults);
