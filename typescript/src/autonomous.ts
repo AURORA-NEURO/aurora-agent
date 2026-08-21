@@ -7,6 +7,15 @@ import {
 } from "./autonomous-activation.js";
 import { AutonomousBrainControlPlaneBridge, AutonomousModelHealthController, type AutonomousModelHealthStore } from "./autonomous-control.js";
 import type { AutonomousExecutionController } from "./autonomous-execution.js";
+import { AUTONOMOUS_CAPABILITY_BATCH_SCHEMA, AutonomousCapabilityRuntime, autonomousCapabilityRefusal } from "./autonomous-capabilities.js";
+import type {
+  AutonomousCapabilityBatchOptions,
+  AutonomousCapabilityBatchResult,
+  AutonomousCapabilityExecutionOptions,
+  AutonomousCapabilityExecutionRecord,
+  AutonomousCapabilityExecutionRequest,
+  AutonomousCapabilityExecutionResult,
+} from "./autonomous-capabilities.js";
 import { AutonomousEffectBoundary, AutonomousEffectReconciliationRequiredError, type AutonomousEffectExecutionContext } from "./autonomous-effects.js";
 import type { AutonomousLearningController } from "./autonomous-learning.js";
 import {
@@ -1839,7 +1848,16 @@ export class AutonomousDomainToolRegistry {
       for (const stage of profile.workflow.stages) {
         const bindings = toolProfile.bindings.filter((binding) => bindingSupportsStage(profile, stage, binding));
         const liveBindings = bindings.filter((binding) => this.has(binding.name));
-        const eligible = liveBindings.filter((binding) => (options.readOnlyOnly !== true || binding.read_only) && (allowedTools === null || allowedTools.has(binding.name)));
+        // Planning must not propose an adapter that the reviewed stage will reject at
+        // execution time. Read-only stages admit only read-only bindings, and stages without
+        // an approval gate cannot carry an approval-gated binding. This keeps capability
+        // selection and stage admission aligned instead of generating guaranteed refusals.
+        const eligible = liveBindings.filter((binding) => (
+          (options.readOnlyOnly !== true || binding.read_only)
+          && (!stage.read_only || binding.read_only)
+          && (stage.approval_required || !binding.approval_required)
+          && (allowedTools === null || allowedTools.has(binding.name))
+        ));
         const ranked = [...eligible].sort((left, right) => compareCapabilityScores(capabilityCandidateScore(tokens, requestedCapabilities, stage, left), capabilityCandidateScore(tokens, requestedCapabilities, stage, right)) || left.name.localeCompare(right.name));
         stageRows.push({ domain: profile.domain, stage, bindings, liveBindings, eligible, ranked });
       }
@@ -2440,6 +2458,7 @@ export class AutonomousAgent {
   private readonly effectBoundary?: AutonomousEffectBoundary;
   private domainToolRegistry?: AutonomousDomainToolRegistry;
   private domainToolRuntime?: AutonomousDomainToolRuntime;
+  private capabilityRuntime?: AutonomousCapabilityRuntime;
 
   constructor(llm: LLMRuntime, options: AutonomousAgentOptions = {}) {
     if (!(llm instanceof LLMRuntime)) throw new ProviderRuntimeError("AutonomousAgent requires an LLMRuntime");
@@ -2569,6 +2588,53 @@ export class AutonomousAgent {
       effectBoundary: options.effectBoundary ?? this.effectBoundary,
       workflowContext: options.workflowContext,
     }));
+  }
+
+  /**
+   * Execute one reviewed capability with a replayable, evaluator-facing result envelope.
+   * The returned `value` is transient; persist only `result.record` when building durable
+   * memory, learning, or workflow checkpoints.
+   */
+  async executeCapability(
+    request: AutonomousCapabilityExecutionRequest,
+    options: AutonomousCapabilityExecutionOptions = {},
+  ): Promise<AutonomousCapabilityExecutionResult> {
+    const runtime = await this.ensureCapabilityRuntime();
+    if (!runtime) return autonomousCapabilityRefusal(request, "authorization_required");
+    return runtime.execute(request, options);
+  }
+
+  /** Execute an ordered capability batch with explicit omissions after a terminal failure. */
+  async executeCapabilityBatch(
+    requests: readonly AutonomousCapabilityExecutionRequest[],
+    options: AutonomousCapabilityBatchOptions = {},
+  ): Promise<AutonomousCapabilityBatchResult> {
+    if (!Array.isArray(requests) || requests.length < 1 || requests.length > 64) throw new ArgumentError("capability batch must contain 1..=64 requests");
+    const runtime = await this.ensureCapabilityRuntime();
+    if (!runtime) {
+      const items = await Promise.all(requests.map(async (request, index) => {
+        const result = await autonomousCapabilityRefusal(request, "authorization_required");
+        return { index, request_digest: result.record.request_digest, result, omission_reason: null as null };
+      }));
+      return {
+        schema: AUTONOMOUS_CAPABILITY_BATCH_SCHEMA,
+        batch_digest: await digestJson(items.map((item) => item.result.record)),
+        status: "partial",
+        items,
+        completed_count: 0,
+        failed_count: items.length,
+        omitted_count: 0,
+        execution: "ordered_serial",
+        durable_projection: "records_and_digests_only",
+        secret_material: "never_returned",
+      };
+    }
+    return runtime.executeBatch(requests, options);
+  }
+
+  /** Return metadata-only capability records produced by this agent instance. */
+  capabilityExecutionEvidence(): AutonomousCapabilityExecutionRecord[] {
+    return this.capabilityRuntime?.executionEvidence() ?? [];
   }
 
   /** Return metadata-only adapter evidence collected by this agent; raw arguments/results are never exposed here. */
@@ -3700,8 +3766,22 @@ export class AutonomousAgent {
     if (this.domainToolRegistry) return this.domainToolRegistry;
     if (!this.toolCatalogue) return undefined;
     this.domainToolRegistry = await AutonomousDomainToolRegistry.create(this.toolCatalogue);
-    if (this.toolExecutor) this.domainToolRuntime = new AutonomousDomainToolRuntime(this.domainToolRegistry, this.toolExecutor, { approver: this.toolApprover, effectBoundary: this.effectBoundary });
+    if (this.toolExecutor) {
+      this.domainToolRuntime = new AutonomousDomainToolRuntime(this.domainToolRegistry, this.toolExecutor, { approver: this.toolApprover, effectBoundary: this.effectBoundary });
+      this.capabilityRuntime = new AutonomousCapabilityRuntime(this.domainToolRuntime, {
+        admitTool: (tool) => {
+          const gate = this.activationToolGate();
+          return gate === null || gate.has(tool) || "activation_required";
+        },
+      });
+    }
     return this.domainToolRegistry;
+  }
+
+  private async ensureCapabilityRuntime(): Promise<AutonomousCapabilityRuntime | undefined> {
+    if (this.capabilityRuntime) return this.capabilityRuntime;
+    await this.ensureToolRegistry();
+    return this.capabilityRuntime;
   }
 
   private toolRuntimeForRun(): AutonomousDomainToolRuntime | undefined {

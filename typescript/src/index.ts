@@ -227,6 +227,32 @@ export type {
   DomainToolExecutor,
 } from "./autonomous.js";
 export {
+  AUTONOMOUS_CAPABILITY_BATCH_SCHEMA,
+  AUTONOMOUS_CAPABILITY_EXECUTION_SCHEMA,
+  AUTONOMOUS_CAPABILITY_OBSERVATION_SCHEMA,
+  MAX_AUTONOMOUS_CAPABILITY_BATCH,
+  MAX_AUTONOMOUS_CAPABILITY_HISTORY,
+  MAX_AUTONOMOUS_CAPABILITY_OBSERVATIONS,
+  AutonomousCapabilityRuntime,
+  autonomousCapabilityRefusal,
+} from "./autonomous-capabilities.js";
+export type {
+  AutonomousCapabilityBatchItem,
+  AutonomousCapabilityBatchOptions,
+  AutonomousCapabilityBatchResult,
+  AutonomousCapabilityEvidenceStatus,
+  AutonomousCapabilityExecutionOptions,
+  AutonomousCapabilityExecutionRecord,
+  AutonomousCapabilityExecutionRequest,
+  AutonomousCapabilityExecutionResult,
+  AutonomousCapabilityExecutionStatus,
+  AutonomousCapabilityObservation,
+  AutonomousCapabilityObservationInput,
+  AutonomousCapabilityObservationKind,
+  AutonomousCapabilityObservationStatus,
+  AutonomousCapabilityReplayStatus,
+} from "./autonomous-capabilities.js";
+export {
   AUTONOMOUS_ACTIVATION_SCHEMA,
   AUTONOMOUS_ACTIVATION_STORE_SCHEMA,
   AUTONOMOUS_ACTIVATION_STATUSES,

@@ -325,6 +325,40 @@ is available when a caller-owned adapter or audit store needs to reproduce the e
 Legacy domain-only `authorizeAndExecute()` calls remain available for direct integrations, but
 durable workflow execution always uses the stricter stage-bound path.
 
+For an evaluator-ready adapter result, use `executeCapability()` or
+`AutonomousCapabilityRuntime` above the same runtime. The capability envelope requires an
+input digest, preserves workflow/stage identity, hashes arguments and transient output, and lets
+the caller project bounded observations such as provenance, measurements, limitations, and
+warnings. Only the returned `value` is transient; persist `result.record` and its
+`evidence_digest`. A completed adapter call still reports `missing_required_outputs` until the
+projector declares every stage evidence label, and `declared_for_evaluator` still does not mean
+the task passed. Repeated completed requests replay from a bounded in-memory idempotency cache;
+ordered batches make any stop-on-failure omissions explicit.
+
+```typescript
+const capability = await agent.executeCapability({
+  call_id: "coding-scope-1",
+  tool: "repository_catalog",
+  arguments: {},
+  workflow_context: {
+    domain: "coding",
+    workflow_id: blueprint.workflow.workflow_id,
+    workflow_digest: blueprint.workflow.workflow_digest,
+    stage_id: "scope",
+  },
+  input_digest: taskDigest,
+}, {
+  projectObservations: async (value) => [{
+    id: "repository-observed",
+    label: "scope",
+    kind: "fact",
+    status: "observed",
+    value_digest: await digestJson(value),
+  }],
+});
+// Durable storage: capability.record; transient application use: capability.value.
+```
+
 `AutonomousAgent` is the application-facing composition layer for the autonomous brain. It covers
 the twelve reviewed domains (`coding`, `browser`, `data`, `science`, `biomedical`,
 `neuroscience`, `operations`, `enterprise`, `multi_agent`, `multimodal`, `cross_domain`, and

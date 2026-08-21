@@ -1845,6 +1845,18 @@ arguments/results and do not claim that a domain task succeeded or that an exter
 The stage contract digest can be independently reproduced with
 `autonomousWorkflowStageContractDigest()` for caller-owned audit and replay stores.
 
+For a stronger adapter/evaluator boundary, `AutonomousAgent.executeCapability()` composes the
+same stage admission with `AutonomousCapabilityRuntime`. It requires a caller-declared input
+digest, retains only argument/output/evidence digests in the durable
+`AutonomousCapabilityExecutionRecord`, and returns the raw adapter value only as a transient
+`value` field. A caller-owned observation projector may declare bounded labels, provenance,
+measurements, confidence, and limitations; the runtime marks the record
+`missing_required_outputs` until the reviewed stage's full evidence-output set is declared.
+`declared_for_evaluator` is still an observation posture, not task success or external-world
+truth. Completed requests are replay-safe within a bounded in-memory cache, while
+`executeCapabilityBatch()` preserves ordered execution and records explicit omissions after a
+stop-on-failure decision. No provider key or raw prompt is needed by this layer.
+
 Every new checkpoint also carries `execution_contract_digest`, a digest-only projection of the
 effective candidate metadata, selection limits, output/schema requirement, tool definitions,
 failover limit, and enclosing execution-policy digest. `resume()` and an idempotent `start()` reject

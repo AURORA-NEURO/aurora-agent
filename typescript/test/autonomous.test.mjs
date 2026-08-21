@@ -6,11 +6,13 @@ import {
   AutonomousCapabilityActivation,
   AutonomousCapabilityActivationPersistenceCoordinator,
   AutonomousCapabilityActivationStore,
+  AutonomousCapabilityRuntime,
   AutonomousCostBudgetError,
   AutonomousDomainToolRegistry,
   AutonomousDomainToolRuntime,
   AutonomousOnlineLearner,
   AUTONOMOUS_CAPABILITY_PLAN_SCHEMA,
+  AUTONOMOUS_CAPABILITY_EXECUTION_SCHEMA,
   AUTONOMOUS_READINESS_SCHEMA,
   CredentialStore,
   LLMRuntime,
@@ -416,6 +418,112 @@ test("stage-bound adapter execution rejects a domain-valid but stage-incompatibl
   assert.equal(receipt.domain, "coding");
   assert.equal(receipt.stage_id, "inspect");
   assert.equal(receipt.capability, null);
+});
+
+test("capability execution produces replayable evidence envelopes across every built-in domain", async () => {
+  const profiles = await builtinAutonomousDomainProfiles();
+  const definitions = [...new Map(profiles.flatMap((profile) => profile.tool_profile.bindings.map((binding) => ({
+    name: binding.name,
+    description: `Capability ${binding.name}`,
+    inputSchema: { type: "object", additionalProperties: true },
+  }))).map((definition) => [definition.name, definition])).values()];
+  const registry = await AutonomousDomainToolRegistry.create(await ToolCatalogue.fromDefinitions(definitions));
+  let executions = 0;
+  const runtime = new AutonomousDomainToolRuntime(registry, async (binding) => { executions += 1; return { adapter: binding.name, ok: true }; });
+  const capabilities = new AutonomousCapabilityRuntime(runtime);
+
+  for (const profile of profiles) {
+    const plan = await registry.planForTask(`execute a reviewed ${profile.domain} capability`, { domains: [profile.domain], maxTools: 128 });
+    const coverage = plan.coverage.find((row) => row.domain === profile.domain && row.status === "selected");
+    assert.ok(coverage?.selected_tool, `${profile.domain} needs a selected capability`);
+    const stage = profile.workflow.stages.find((candidate) => candidate.id === coverage.stage_id);
+    const inputDigest = await digestJson({ domain: profile.domain, task: `execute ${profile.domain}` });
+    const result = await capabilities.execute({
+      call_id: `cap-${profile.domain}`,
+      tool: coverage.selected_tool,
+      arguments: {},
+      workflow_context: { domain: profile.domain, workflow_id: profile.workflow.workflow_id, workflow_digest: profile.workflow.workflow_digest, stage_id: stage.id },
+      input_digest: inputDigest,
+      subject_digest: await digestJson({ subject: profile.domain }),
+    }, { projectObservations: async (value) => {
+        const valueDigest = await digestJson(value);
+        return stage.evidence_outputs.map((label, index) => ({ id: `e-${index}`, label, kind: "fact", status: "observed", value_digest: valueDigest, confidence: 0.9 }));
+      }, approveEffects: true });
+    assert.equal(result.schema, AUTONOMOUS_CAPABILITY_EXECUTION_SCHEMA);
+    assert.equal(result.record.status, "completed", profile.domain);
+    assert.equal(result.record.domain, profile.domain);
+    assert.equal(result.record.stage_id, stage.id);
+    assert.equal(result.record.stage_contract_digest.length, 64);
+    assert.equal(result.record.evidence_status, "declared_for_evaluator");
+    assert.deepEqual(result.record.missing_evidence_outputs, []);
+    assert.equal(result.record.output_digest.length, 64);
+    assert.equal(result.value.ok, true);
+    assert.equal(Object.prototype.hasOwnProperty.call(result.record, "arguments"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(result.record, "value"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(result.record, "result"), false);
+    assert.match(JSON.stringify(result.record), /require evaluator and provenance review/);
+  }
+  assert.equal(executions, profiles.length);
+  assert.equal(capabilities.executionEvidence().length, profiles.length);
+});
+
+test("capability execution fails closed, replays completed work, and makes batch omissions explicit", async () => {
+  const profiles = await builtinAutonomousDomainProfiles();
+  const coding = profiles.find((profile) => profile.domain === "coding");
+  const plan = await AutonomousDomainToolRegistry.create(await ToolCatalogue.fromDefinitions(coding.tool_profile.bindings.map((row) => ({ name: row.name, description: row.name, inputSchema: { type: "object", additionalProperties: true } }))));
+  const selected = (await plan.planForTask("inspect and verify this coding repository", { domains: ["coding"], maxTools: 128 })).coverage.find((row) => row.domain === "coding" && row.status === "selected");
+  const binding = coding.tool_profile.bindings.find((row) => row.name === selected.selected_tool);
+  const registry = plan;
+  let executions = 0;
+  const runtime = new AutonomousDomainToolRuntime(registry, async () => { executions += 1; return { ok: true }; });
+  const capabilities = new AutonomousCapabilityRuntime(runtime);
+  const context = { domain: "coding", workflow_id: coding.workflow.workflow_id, workflow_digest: coding.workflow.workflow_digest, stage_id: selected.stage_id };
+  const base = { call_id: "replayable", tool: binding.name, arguments: {}, workflow_context: context, input_digest: await digestJson({ task: "inspect" }), replay_key: "replayable-key" };
+  const first = await capabilities.execute(base);
+  const replay = await capabilities.execute(base);
+  assert.equal(first.record.status, "completed");
+  assert.equal(replay.record.replay, "replayed");
+  assert.equal(executions, 1);
+  assert.equal(replay.record.output_digest, first.record.output_digest);
+
+  const wrongStage = await capabilities.execute({ ...base, call_id: "wrong-stage", replay_key: "wrong-stage", workflow_context: { ...context, stage_id: selected.stage_id === "implementation" ? "scope" : "implementation" } });
+  assert.equal(wrongStage.record.status, "refused");
+  assert.equal(executions, 1);
+
+  const batch = await capabilities.executeBatch([
+    { ...base, call_id: "batch-1", replay_key: "batch-1" },
+    { ...base, call_id: "batch-2", replay_key: "batch-2", workflow_context: { ...context, stage_id: selected.stage_id === "implementation" ? "scope" : "implementation" } },
+    { ...base, call_id: "batch-3", replay_key: "batch-3" },
+  ], { stopOnFailure: true });
+  assert.equal(batch.status, "partial");
+  assert.equal(batch.completed_count, 1);
+  assert.equal(batch.failed_count, 1);
+  assert.equal(batch.omitted_count, 1);
+  assert.equal(batch.items[2].omission_reason, "stopped_after_failure");
+  assert.equal(executions, 2);
+});
+
+test("AutonomousAgent exposes capability records through its activation-aware runtime", async () => {
+  const profiles = await builtinAutonomousDomainProfiles();
+  const coding = profiles.find((profile) => profile.domain === "coding");
+  const binding = coding.tool_profile.bindings.find((row) => row.name === "conformance_run");
+  const llm = new LLMRuntime({ credentials: new CredentialStore() });
+  let executions = 0;
+  const agent = new AutonomousAgent(llm, {
+    toolCatalogue: await ToolCatalogue.fromDefinitions([{ name: binding.name, description: "Conformance", inputSchema: { type: "object", additionalProperties: true } }]),
+    toolExecutor: async () => { executions += 1; return { checked: true }; },
+  });
+  const result = await agent.executeCapability({
+    call_id: "agent-capability",
+    tool: binding.name,
+    arguments: {},
+    workflow_context: { domain: "coding", workflow_id: coding.workflow.workflow_id, workflow_digest: coding.workflow.workflow_digest, stage_id: "scope" },
+    input_digest: await digestJson({ task: "conformance" }),
+  });
+  assert.equal(result.record.status, "completed");
+  assert.equal(executions, 1);
+  assert.equal(agent.capabilityExecutionEvidence().length, 1);
+  assert.equal(agent.toolExecutionEvidence().length, 1);
 });
 
 test("AutonomousAgent performs a real selected-provider tool loop with domain policy", async () => {
