@@ -53,6 +53,9 @@ capability-gated, prompts and mission plans are bounded, and external effects re
 approval. `BrainEpisodicMemory` provides optional restart-safe, hash-chained metadata memory.
 Automatic task runs derive bounded digest-only task facets for related-lesson retrieval, never
 persisting task text; explicit evaluator rewards remain the only learning authority.
+`AutonomousGoalLedger` adds the restart-safe objective layer above that memory: bounded attempts,
+criterion/evidence digests, blockers, optimistic revisions, and a hash-chained lifecycle work for
+every built-in domain without retaining goal text or provider payloads.
 `run_adaptive_mission_learning_cycle()` combines recall, evaluator reward, bandit state updates,
 and bounded pre-dispatch replanning without retaining provider text, tool arguments, or secrets.
 `BrainJobStore` adds resolver-backed leases and checkpoints for restart-safe learning jobs, while

@@ -606,6 +606,13 @@ authorization, or a replacement for evaluator feedback. Single- and cross-domain
 derive these facets automatically when no exact task digest or explicit facet query is supplied;
 caller-provided exact filters remain authoritative.
 
+`InMemoryAutonomousGoalLedger` supplies the objective layer above episodic recall. It carries a
+digest-only task identity, bounded criterion/evidence digests, attempt budget, blockers, next-action
+digest, optimistic revisions, and a hash-chained lifecycle across every built-in domain. Required
+criteria must be satisfied or explicitly waived before completion; snapshots can be flushed through
+`AutonomousGoalPersistenceCoordinator`, and raw goal text, prompts, responses, tools, and credentials
+are never retained.
+
 `InMemoryAutonomousModelHealthStore` adds the restart-safe selection feedback plane. It records
 separate value-only invocation and evaluator-quality observations, aggregates success/failure,
 latency, quality, and circuit projections per provider/model arm, and exposes a deterministic

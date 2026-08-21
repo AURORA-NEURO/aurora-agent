@@ -618,6 +618,28 @@ export {
   taskFacetDigests,
 } from "./autonomous-memory.js";
 export {
+  AUTONOMOUS_GOAL_EVENT_SCHEMA,
+  AUTONOMOUS_GOAL_MAX_BLOCKERS,
+  AUTONOMOUS_GOAL_MAX_CRITERIA,
+  AUTONOMOUS_GOAL_MAX_EVENTS,
+  AUTONOMOUS_GOAL_MAX_GOALS,
+  AUTONOMOUS_GOAL_RETENTION,
+  AUTONOMOUS_GOAL_SCHEMA,
+  AUTONOMOUS_GOAL_SNAPSHOT_SCHEMA,
+  AutonomousGoalPersistenceCoordinator,
+  InMemoryAutonomousGoalLedger,
+  goalTaskDigest,
+} from "./autonomous-goals.js";
+export type {
+  AutonomousGoalCriterion,
+  AutonomousGoalCriterionStatus,
+  AutonomousGoalEvent,
+  AutonomousGoalPersistence,
+  AutonomousGoalRecord,
+  AutonomousGoalSnapshot,
+  AutonomousGoalStatus,
+} from "./autonomous-goals.js";
+export {
   AUTONOMOUS_MODEL_HEALTH_EVENT_SCHEMA,
   AUTONOMOUS_MODEL_HEALTH_MAX_EVENTS,
   AUTONOMOUS_MODEL_HEALTH_MAX_QUERY_LIMIT,

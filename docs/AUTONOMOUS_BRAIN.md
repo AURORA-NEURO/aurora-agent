@@ -1899,6 +1899,23 @@ multi-tenant isolation should place the database behind its own encrypted storag
 backup, and retention controls; the SDK supplies bounded append/retrieval and provenance, not a
 distributed database or an identity authority.
 
+### Durable objective state across attempts
+
+`AutonomousGoalLedger` is the objective-level state boundary above episodic memory and below an
+application's orchestration policy. It stores a task digest, domain/capability/risk labels,
+bounded evaluator-owned criterion digests, attempt budget, blockers, next-action digest, and a
+small lifecycle state (`ready`, `running`, `paused`, `blocked`, `failed`, `completed`, or
+`cancelled`). It never stores the goal text, prompt, provider response, tool arguments, credentials,
+or raw criterion/evidence text. Every create/transition is optimistic-revision checked and appended
+to a hash-chained SQLite event log, so a worker can resume an objective without confusing a stale
+worker with current state.
+
+Completion is fail-closed: every required criterion must be `satisfied` or `waived`, and retrying
+after the bounded attempt budget is refused. Criterion evidence is caller/evaluator-owned and
+represented only by a digest. The ledger is intentionally domain-neutral; instantiate it with the
+same domain labels used by the built-in packs, then let the normal route, model selector, mission,
+workflow, evaluator, and bandit layers supply the domain-specific meaning and authorization.
+
 ## Resumable learning jobs
 
 For work that must survive a worker restart, `BrainJobStore` adds a separate orchestration journal.

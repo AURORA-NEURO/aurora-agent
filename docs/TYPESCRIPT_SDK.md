@@ -1498,6 +1498,13 @@ verified truth, or a substitute for evaluator settlement. Single- and cross-doma
 derive the facets from their transient task automatically when the caller does not provide an exact
 task digest or facet query; explicit caller filters remain authoritative.
 
+`InMemoryAutonomousGoalLedger` is the TypeScript objective boundary above episodic memory. It keeps
+only digest-only task identity, bounded criterion/evidence state, attempt budget, blockers,
+next-action digest, optimistic revisions, and a hash-chained lifecycle across all built-in domains.
+Completion refuses unresolved required criteria, and `AutonomousGoalPersistenceCoordinator` bridges
+content-addressed snapshots to an application-owned durable adapter. The ledger never retains goal
+text, prompts, provider responses, tool arguments, or credentials.
+
 ### Restart-safe model health and offline replay
 
 `InMemoryAutonomousModelHealthStore` is the TypeScript reference ledger for the selection feedback
