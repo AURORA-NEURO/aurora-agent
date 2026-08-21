@@ -996,6 +996,12 @@ from .fastq import FastqAdapter, FastqFinding, FastqParseError, FastqParseResult
 from .fhir import FhirAdapter, FhirAuditResult, FhirFinding, audit_fhir, parse_fhir_json, parse_fhir_ndjson
 from .gff3 import Gff3Adapter, Gff3Finding, Gff3ParseError, Gff3ParseResult, parse_gff3
 from .http_client import ApiClient, AsyncApiClient
+from .autonomous_api_adapter import (
+    AUTONOMOUS_API_TOOL_ADAPTER_SCHEMA,
+    AUTONOMOUS_API_TOOL_FAILURES,
+    AutonomousApiToolError,
+    create_autonomous_api_tool_executor,
+)
 from .models import Session, ToolResult
 from .mzml import MzmlAdapter, MzmlFinding, MzmlParseError, MzmlParseResult, parse_mzml
 from .pdb import PdbAdapter, PdbFinding, PdbParseError, PdbParseResult, parse_pdb
@@ -2745,6 +2751,10 @@ __all__ = [
     "MissionAuthorizationReceipt",
     "MissionToolAuthorizer",
     "ApiError",
+    "AUTONOMOUS_API_TOOL_ADAPTER_SCHEMA",
+    "AUTONOMOUS_API_TOOL_FAILURES",
+    "AutonomousApiToolError",
+    "create_autonomous_api_tool_executor",
     "AcceptanceResult",
     "AdapterDescriptor",
     "AdapterDescriptorReport",

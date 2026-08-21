@@ -47,6 +47,43 @@ failures raise `ApiError` with the status and structured payload;
 the client does not retry domain refusals or treat a transport `2xx` as scientific acceptance.
 See [`docs/HTTP_API.md`](../docs/HTTP_API.md) for the route and delivery contract.
 
+To connect the HTTP gateway to the autonomous domain runtime, compose the caller-configured
+client with an exact, reviewed catalogue. The bridge performs no `tools()` discovery during an
+agent call, accepts no key or credential argument, and preserves remote refusals as bounded typed
+failures. The registry still owns the explicit domain/capability/risk mapping:
+
+```python
+from prism_sdk import (
+    AutonomousDomainToolRegistry,
+    AutonomousDomainToolRuntime,
+    create_autonomous_api_tool_executor,
+)
+
+catalogue = api.tool_catalogue()  # snapshot, review, and bind exact names before dispatch
+registry = AutonomousDomainToolRegistry()
+registry.register_mcp_catalogue(
+    catalogue,
+    {
+        "modality_catalog": {
+            "domains": ["biomedical", "neuroscience"],
+            "capability": "modality_catalogue",
+        }
+    },
+    require_all=False,
+)
+runtime = AutonomousDomainToolRuntime(
+    registry,
+    executor=create_autonomous_api_tool_executor(api, catalogue=catalogue),
+    receipt_sink=lambda receipt: journal.append(receipt.to_dict()),
+)
+```
+
+`receipt_sink` is optional and caller-owned. It receives only the same digests, statuses, and
+execution identity retained by `runtime.receipts`; arguments, outputs, HTTP envelopes, and keys
+are never sent to it. A sink failure fails closed instead of turning a completed tool call into an
+unobserved success. The adapter and sink contract are exercised across all twelve built-in domain
+profiles, including refusal, malformed-response, transport, schema, and no-discovery paths.
+
 The provider runtime and [`AutonomousBrain`](../docs/AUTONOMOUS_BRAIN.md) add the caller-approved
 LLM boundary: BYOK credentials become short-lived opaque handles, model selection is health- and
 capability-gated, prompts and mission plans are bounded, and external effects require explicit

@@ -2707,6 +2707,24 @@ mission dispatch, hub locking, and adaptive acquisition execution remain in
 runtime/mission approval callback. Applying a safe plan row only composes provider-visible
 metadata—it does not execute a tool, grant the provider a credential, or authorize an effect.
 
+For a live HTTP gateway, Python also exposes
+`create_autonomous_api_tool_executor(api_client, catalogue=reviewed_catalogue)`. This is the
+production composition seam between `ApiClient` and `AutonomousDomainToolRuntime`: the caller
+configures the client and any credential session, snapshots and reviews the exact `ToolCatalogue`,
+then binds names to domain/capability/effect metadata. The adapter never accepts a key, performs
+discovery while executing, or treats HTTP success as domain success. It validates the checked
+envelope, extracts only `structuredContent`/`content` from a successful MCP result, and maps
+transport, schema, malformed-response, and remote-refusal paths to bounded
+`AutonomousApiToolError` categories.
+
+The runtime can additionally receive a caller-owned `receipt_sink`. The sink sees the metadata-only
+`AutonomousDomainToolReceipt` already retained locally—status, schema/argument/output digests,
+execution identity, domain, capability, and risk class. It never receives arguments, outputs,
+provider payloads, headers, or credentials. Sink errors fail closed, so an application can connect
+this seam to a durable journal or telemetry exporter without making durability an implicit SDK
+side effect. The Python adapter, exact catalogue gate, all twelve profiles, refusal paths, and
+receipt delivery behavior are covered by adversarial tests.
+
 For a UI or service that must survive a process restart, attach the redacted activation state to
 the agent. The activation snapshot tracks provider readiness, catalogue/profile/plan digests,
 approved exact tool names, pending review, and coverage for every built-in domain. It deliberately

@@ -1050,8 +1050,20 @@ class AutonomousDomainToolReceipt:
         }
 
 
+class _ReceiptSinkError(ArgumentError):
+    """Internal marker that prevents a receipt-delivery failure becoming tool success."""
+
+    def __init__(self) -> None:
+        super().__init__("domain tool receipt sink failed")
+
+
 class AutonomousDomainToolRuntime:
-    """Approval-aware adapter from provider intents to a caller-owned tool executor."""
+    """Approval-aware adapter from provider intents to a caller-owned tool executor.
+
+    ``receipt_sink`` is optional and caller-owned.  It receives the same metadata-only receipt
+    retained in ``receipts``; it never receives raw arguments, outputs, provider envelopes, or
+    credentials.  Sink failures are fail-closed and are not converted into ordinary tool output.
+    """
 
     def __init__(
         self,
@@ -1061,6 +1073,7 @@ class AutonomousDomainToolRuntime:
         approve: Callable[[AutonomousDomainTool, ProviderToolCall], bool] | None = None,
         auto_execute_read_only: bool = True,
         controller: AutonomousExecutionController | None = None,
+        receipt_sink: Callable[[AutonomousDomainToolReceipt], Any] | None = None,
         _receipt_store: list[AutonomousDomainToolReceipt] | None = None,
         _scope: tuple[str, str] | None = None,
     ) -> None:
@@ -1074,6 +1087,8 @@ class AutonomousDomainToolRuntime:
             raise ArgumentError("auto_execute_read_only must be a boolean")
         if controller is not None and not isinstance(controller, AutonomousExecutionController):
             raise ArgumentError("domain tool runtime controller must be an AutonomousExecutionController or None")
+        if receipt_sink is not None and not callable(receipt_sink):
+            raise ArgumentError("domain tool runtime receipt sink must be callable")
         if _receipt_store is not None and not isinstance(_receipt_store, list):
             raise ArgumentError("domain tool runtime receipt store must be a list or None")
         if _scope is not None:
@@ -1090,6 +1105,7 @@ class AutonomousDomainToolRuntime:
         self.approve = approve
         self.auto_execute_read_only = auto_execute_read_only
         self.controller = controller
+        self.receipt_sink = receipt_sink
         self._receipts = _receipt_store if _receipt_store is not None else []
         self._scope = _scope
 
@@ -1107,6 +1123,7 @@ class AutonomousDomainToolRuntime:
             approve=self.approve,
             auto_execute_read_only=self.auto_execute_read_only,
             controller=self.controller,
+            receipt_sink=self.receipt_sink,
             _receipt_store=self._receipts,
             _scope=(
                 resolved_execution_id,
@@ -1142,6 +1159,7 @@ class AutonomousDomainToolRuntime:
             approve=self.approve,
             auto_execute_read_only=self.auto_execute_read_only,
             controller=controller,
+            receipt_sink=self.receipt_sink,
             _receipt_store=self._receipts,
         )
 
@@ -1160,6 +1178,11 @@ class AutonomousDomainToolRuntime:
         receipt: AutonomousDomainToolReceipt,
     ) -> ProviderToolResult:
         self._receipts.append(receipt)
+        if self.receipt_sink is not None:
+            try:
+                self.receipt_sink(receipt)
+            except Exception as error:
+                raise _ReceiptSinkError from error
         return ProviderToolResult(call.call_id, dict(content), approved=approved, is_error=is_error)
 
     def __call__(self, calls: tuple[ProviderToolCall, ...]) -> tuple[ProviderToolResult, ...]:
@@ -1357,6 +1380,8 @@ class AutonomousDomainToolRuntime:
                         status="executed",
                         outcome_digest=content_digest(output if isinstance(output, Mapping) else {"result": output}),
                     )
+            except _ReceiptSinkError:
+                raise
             except Exception:
                 results.append(
                     self._result(

@@ -93,6 +93,40 @@ def test_runtime_auto_executes_read_only_and_refuses_unapproved_effects() -> Non
     assert executed[-1] == "release_apply"
 
 
+def test_runtime_publishes_metadata_only_receipts_to_a_caller_owned_sink() -> None:
+    registry = AutonomousDomainToolRegistry([_read_tool()])
+    published: list[dict[str, object]] = []
+    runtime = AutonomousDomainToolRuntime(
+        registry,
+        executor=lambda _tool, _arguments: {"status": "ok", "transient": "not-retained"},
+        receipt_sink=lambda receipt: published.append(receipt.to_dict()),
+    )
+
+    result = runtime((ProviderToolCall("sink-1", "workspace_status", {"scope": "repo"}),))
+
+    assert result[0].is_error is False
+    assert published == [runtime.receipts[0].to_dict()]
+    assert "repo" not in str(published)
+    assert "transient" not in str(published)
+    assert published[0]["retention"] == "metadata_only_no_arguments_or_outputs"
+
+
+def test_runtime_fails_closed_when_metadata_receipt_delivery_fails() -> None:
+    registry = AutonomousDomainToolRegistry([_read_tool()])
+
+    def failing_sink(_receipt: object) -> None:
+        raise RuntimeError("private sink detail must not escape")
+
+    runtime = AutonomousDomainToolRuntime(
+        registry,
+        executor=lambda _tool, _arguments: {"status": "ok"},
+        receipt_sink=failing_sink,
+    )
+
+    with pytest.raises(ArgumentError, match="receipt sink failed"):
+        runtime((ProviderToolCall("sink-fail", "workspace_status", {"scope": "repo"}),))
+
+
 def test_runtime_refuses_schema_mismatch_and_secret_shaped_arguments() -> None:
     registry = AutonomousDomainToolRegistry([_read_tool()])
     runtime = AutonomousDomainToolRuntime(registry, executor=lambda _tool, _arguments: {"status": "ok"})

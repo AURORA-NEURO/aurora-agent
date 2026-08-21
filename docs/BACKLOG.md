@@ -226,6 +226,12 @@ Python SDK backlog: heavyweight biological format adapters and the remaining nin
 ergonomics remain foreign or unimplemented rather than being inferred from the transport or
 authoring clients; bounded text VCF and benchmark distribution utilities are now concrete first
 steps above that boundary.
+The Python autonomous layer now also provides a reviewed-catalogue API executor bridge for all
+twelve domain profiles and a caller-owned metadata-only receipt sink. It keeps discovery,
+credential ingestion, approval, and domain interpretation outside the bridge, while bounded
+transport/refusal failures remain explicit. This is a composition seam over the existing gateway,
+not an external connector catalogue, durable queue, OTLP exporter, identity provider, or hosted
+worker; those broader runtime surfaces remain intentionally listed below.
 The domain-workflow handoff now also has a retained verification boundary: callers can validate
 catalogue/contract/binding identity, rerun mission preflight, and optionally replay the original
 instantiation request before re-review. The verifier is intentionally structural and non-executing;
