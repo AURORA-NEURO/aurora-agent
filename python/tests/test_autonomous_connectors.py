@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
 
 from prism_sdk import (
     AUTONOMOUS_CONNECTOR_DISPATCH_SCHEMA,
+    AUTONOMOUS_CONNECTOR_RECEIPT_ENTRY_SCHEMA,
     AUTONOMOUS_CONNECTOR_REGISTRY_SCHEMA,
     AUTONOMOUS_DOMAINS,
     AutonomousConnectorDispatchRequest,
     AutonomousConnectorObservation,
+    AutonomousConnectorReceiptJournal,
     AutonomousConnectorRegistration,
     AutonomousConnectorRegistry,
     AutonomousConnectorRuntime,
@@ -271,3 +274,86 @@ def test_api_source_connector_rejects_wrong_manifest_kind_without_network_discov
     )
     with pytest.raises(ArgumentError, match="kind"):
         executor(manifest, request)
+
+
+def test_connector_receipt_journal_rehydrates_without_reinvoking_external_connector(tmp_path) -> None:
+    calls: list[str] = []
+
+    def execute(_manifest, request):
+        calls.append(request["query"])
+        return {"observed": request["query"]}
+
+    path = tmp_path / "connector-receipts.jsonl"
+    registry = AutonomousConnectorRegistry([_registration("coding", execute)])
+    journal = AutonomousConnectorReceiptJournal(path)
+    runtime = AutonomousConnectorRuntime(registry, receipt_store=journal)
+    request = _request("coding")
+
+    first = runtime.dispatch(request)
+    replayed = runtime.dispatch(request)
+
+    assert first.replay == "fresh"
+    assert first.value == {"observed": "coding"}
+    assert replayed.replay == "replayed"
+    assert replayed.value is None
+    assert calls == ["coding"]
+    assert journal.verify_integrity()["entries"] == 1
+
+    reopened = AutonomousConnectorReceiptJournal(path)
+
+    def should_not_run(_manifest, _request):
+        raise AssertionError("rehydrated connector dispatch must not invoke the executor")
+
+    restarted = AutonomousConnectorRuntime(
+        AutonomousConnectorRegistry([_registration("coding", should_not_run)]),
+        receipt_store=reopened,
+    )
+    restored = restarted.dispatch(request)
+    assert restored.replay == "replayed"
+    assert restored.receipt == first.receipt
+    assert restored.value is None
+
+    retry = replace(
+        request,
+        dispatch_id="dispatch-coding-retry",
+        execution_id="execution-coding-retry",
+        call_id="call-coding-retry",
+        attempt_id="attempt-coding-retry",
+    )
+    retried = AutonomousConnectorRuntime(registry, receipt_store=reopened).dispatch(retry)
+    assert retried.replay == "fresh"
+    assert retried.value == {"observed": "coding"}
+    assert calls == ["coding", "coding"]
+    assert reopened.verify_integrity()["entries"] == 2
+
+
+def test_connector_receipt_journal_is_all_domain_bounded_and_tamper_evident(tmp_path) -> None:
+    journal = AutonomousConnectorReceiptJournal(tmp_path / "all-domains.jsonl")
+    registry = AutonomousConnectorRegistry(
+        [
+            _registration(
+                domain,
+                lambda _manifest, request, domain=domain: {"domain": domain, "query": request["query"]},
+            )
+            for domain in AUTONOMOUS_DOMAINS
+        ]
+    )
+    runtime = AutonomousConnectorRuntime(registry, receipt_store=journal)
+    results = [runtime.dispatch(_request(domain)) for domain in AUTONOMOUS_DOMAINS]
+
+    assert len(journal.receipts(limit=len(AUTONOMOUS_DOMAINS))) == len(AUTONOMOUS_DOMAINS)
+    assert journal.verify_integrity()["verified"] is True
+    assert all(row.to_dict()["schema"] == AUTONOMOUS_CONNECTOR_RECEIPT_ENTRY_SCHEMA for row in journal.receipts(limit=256))
+    assert all('"request":' not in json.dumps(row.to_dict()) for row in journal.receipts(limit=256))
+    assert all('"value":' not in json.dumps(row.to_dict()) for row in journal.receipts(limit=256))
+
+    duplicate = journal.append(results[0].receipt)
+    assert duplicate.receipt == results[0].receipt
+    with pytest.raises(ArgumentError, match="identity conflict"):
+        journal.append(replace(results[0].receipt, status="error", failure_class="executor_error"))
+
+    path = tmp_path / "all-domains.jsonl"
+    original = path.read_text(encoding="utf-8")
+    path.write_text(original.replace('"entry_digest":"', '"entry_digest":"0', 1), encoding="utf-8")
+    with pytest.raises(ArgumentError, match="digest"):
+        AutonomousConnectorReceiptJournal(path)

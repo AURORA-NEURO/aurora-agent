@@ -14,6 +14,10 @@ contains digests and identities—not the request, response, headers, or credent
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
+import os
+from pathlib import Path
+import threading
 from typing import Any, Callable, Mapping, Sequence
 
 from .authoring import content_digest
@@ -36,12 +40,17 @@ from .http_client import ApiClient
 AUTONOMOUS_CONNECTOR_REGISTRY_SCHEMA = "bioprism-python-autonomous-connector-registry/0.1"
 AUTONOMOUS_CONNECTOR_DISPATCH_SCHEMA = "bioprism-python-autonomous-connector-dispatch/0.1"
 AUTONOMOUS_CONNECTOR_RECEIPT_SCHEMA = "bioprism-python-autonomous-connector-receipt/0.1"
+AUTONOMOUS_CONNECTOR_RECEIPT_JOURNAL_SCHEMA = "bioprism-python-autonomous-connector-receipt-journal/0.1"
+AUTONOMOUS_CONNECTOR_RECEIPT_ENTRY_SCHEMA = "bioprism-python-autonomous-connector-receipt-entry/0.1"
 AUTONOMOUS_CONNECTOR_DISPATCH_STATUSES = ("observed", "partial", "refused", "error", "unknown")
 MAX_AUTONOMOUS_CONNECTORS = 256
 MAX_AUTONOMOUS_CONNECTOR_DOMAINS = len(AUTONOMOUS_DOMAIN_NAMES)
 MAX_AUTONOMOUS_CONNECTOR_REQUEST_BYTES = 2_000_000
 MAX_AUTONOMOUS_CONNECTOR_RESULT_BYTES = 2_000_000
 MAX_AUTONOMOUS_CONNECTOR_PARENT_DIGESTS = 128
+MAX_AUTONOMOUS_CONNECTOR_RECEIPT_JOURNAL_ENTRIES = 100_000
+MAX_AUTONOMOUS_CONNECTOR_RECEIPT_JOURNAL_BYTES = 50_000_000
+MAX_AUTONOMOUS_CONNECTOR_RECEIPT_ENTRY_BYTES = 24_000
 
 
 def _digest(name: str, value: Any, *, allow_none: bool = False) -> str | None:
@@ -368,16 +377,355 @@ class AutonomousConnectorDispatchReceipt:
         }
 
 
+def _connector_receipt_from_mapping(
+    value: AutonomousConnectorDispatchReceipt | Mapping[str, Any],
+) -> AutonomousConnectorDispatchReceipt:
+    if isinstance(value, AutonomousConnectorDispatchReceipt):
+        return AutonomousConnectorDispatchReceipt(
+            dispatch_id=value.dispatch_id,
+            execution_id=value.execution_id,
+            call_id=value.call_id,
+            connector_id=value.connector_id,
+            connector_version=value.connector_version,
+            provider=value.provider,
+            connector_kind=value.connector_kind,
+            manifest_digest=value.manifest_digest,
+            domains=value.domains,
+            capability=value.capability,
+            status=value.status,
+            request_digest=value.request_digest,
+            payload_digest=value.payload_digest,
+            parent_digests=value.parent_digests,
+            attempt_id=value.attempt_id,
+            failure_class=value.failure_class,
+        )
+    if not isinstance(value, Mapping):
+        raise ArgumentError("autonomous connector receipt must be a mapping or typed receipt")
+    expected = {
+        "schema",
+        "dispatch_id",
+        "execution_id",
+        "call_id",
+        "connector_id",
+        "connector_version",
+        "provider",
+        "connector_kind",
+        "manifest_digest",
+        "domains",
+        "capability",
+        "status",
+        "request_digest",
+        "payload_digest",
+        "parent_digests",
+        "attempt_id",
+        "failure_class",
+        "retention",
+        "secret_material",
+    }
+    if set(value) != expected:
+        raise ArgumentError("autonomous connector receipt contains unsupported or missing fields")
+    if value.get("schema") != AUTONOMOUS_CONNECTOR_RECEIPT_SCHEMA:
+        raise ArgumentError("autonomous connector receipt schema is invalid")
+    if value.get("retention") != "metadata_only_no_request_or_payload" or value.get("secret_material") != "never_returned":
+        raise ArgumentError("autonomous connector receipt retention is invalid")
+    domains = value.get("domains")
+    parents = value.get("parent_digests")
+    if not isinstance(domains, Sequence) or isinstance(domains, (str, bytes)):
+        raise ArgumentError("autonomous connector receipt domains are invalid")
+    if not isinstance(parents, Sequence) or isinstance(parents, (str, bytes)):
+        raise ArgumentError("autonomous connector receipt parent_digests are invalid")
+    return AutonomousConnectorDispatchReceipt(
+        dispatch_id=value.get("dispatch_id"),
+        execution_id=value.get("execution_id"),
+        call_id=value.get("call_id"),
+        connector_id=value.get("connector_id"),
+        connector_version=value.get("connector_version"),
+        provider=value.get("provider"),
+        connector_kind=value.get("connector_kind"),
+        manifest_digest=value.get("manifest_digest"),
+        domains=tuple(domains),
+        capability=value.get("capability"),
+        status=value.get("status"),
+        request_digest=value.get("request_digest"),
+        payload_digest=value.get("payload_digest"),
+        parent_digests=tuple(parents),
+        attempt_id=value.get("attempt_id"),
+        failure_class=value.get("failure_class"),
+    )
+
+
+def _connector_receipt_identity_digest(receipt: AutonomousConnectorDispatchReceipt) -> str:
+    return content_digest(
+        {
+            "schema": AUTONOMOUS_CONNECTOR_RECEIPT_ENTRY_SCHEMA,
+            "execution_id": receipt.execution_id,
+            "dispatch_id": receipt.dispatch_id,
+            "call_id": receipt.call_id,
+            "connector_id": receipt.connector_id,
+            "attempt_id": receipt.attempt_id,
+        }
+    )
+
+
+def _connector_dispatch_identity_digest(request: AutonomousConnectorDispatchRequest) -> str:
+    return content_digest(
+        {
+            "schema": AUTONOMOUS_CONNECTOR_RECEIPT_ENTRY_SCHEMA,
+            "execution_id": request.execution_id,
+            "dispatch_id": request.dispatch_id,
+            "call_id": request.call_id,
+            "connector_id": request.connector_id,
+            "attempt_id": request.attempt_id,
+        }
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousConnectorReceiptJournalEntry:
+    """One validated hash-chain row for a connector dispatch receipt."""
+
+    sequence: int
+    previous_entry_digest: str | None
+    receipt: AutonomousConnectorDispatchReceipt
+    receipt_identity_digest: str
+    entry_digest: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_CONNECTOR_RECEIPT_ENTRY_SCHEMA,
+            "sequence": self.sequence,
+            "previous_entry_digest": self.previous_entry_digest,
+            "receipt": self.receipt.to_dict(),
+            "receipt_identity_digest": self.receipt_identity_digest,
+            "entry_digest": self.entry_digest,
+            "retention": "metadata_only_hash_chained_no_request_or_payload",
+            "secret_material": "never_returned",
+        }
+
+
+def _connector_entry_from_mapping(value: Mapping[str, Any]) -> AutonomousConnectorReceiptJournalEntry:
+    expected = {
+        "schema",
+        "sequence",
+        "previous_entry_digest",
+        "receipt",
+        "receipt_identity_digest",
+        "entry_digest",
+        "retention",
+        "secret_material",
+    }
+    if not isinstance(value, Mapping) or set(value) != expected:
+        raise ArgumentError("autonomous connector receipt journal entry is malformed")
+    if value.get("schema") != AUTONOMOUS_CONNECTOR_RECEIPT_ENTRY_SCHEMA:
+        raise ArgumentError("autonomous connector receipt journal entry schema is invalid")
+    if value.get("retention") != "metadata_only_hash_chained_no_request_or_payload" or value.get("secret_material") != "never_returned":
+        raise ArgumentError("autonomous connector receipt journal entry retention is invalid")
+    sequence = value.get("sequence")
+    if not isinstance(sequence, int) or isinstance(sequence, bool) or not 1 <= sequence <= MAX_AUTONOMOUS_CONNECTOR_RECEIPT_JOURNAL_ENTRIES:
+        raise ArgumentError("autonomous connector receipt journal sequence is outside its bound")
+    previous = _digest(
+        "autonomous connector receipt journal previous_entry_digest",
+        value.get("previous_entry_digest"),
+        allow_none=True,
+    )
+    raw_receipt = value.get("receipt")
+    if not isinstance(raw_receipt, Mapping):
+        raise ArgumentError("autonomous connector receipt journal receipt is invalid")
+    receipt = _connector_receipt_from_mapping(raw_receipt)
+    identity = _digest(
+        "autonomous connector receipt journal receipt_identity_digest",
+        value.get("receipt_identity_digest"),
+    )
+    if identity != _connector_receipt_identity_digest(receipt):
+        raise ArgumentError("autonomous connector receipt journal identity digest is invalid")
+    entry_digest = _digest("autonomous connector receipt journal entry_digest", value.get("entry_digest"))
+    descriptor = {
+        "schema": AUTONOMOUS_CONNECTOR_RECEIPT_ENTRY_SCHEMA,
+        "sequence": sequence,
+        "previous_entry_digest": previous,
+        "receipt": receipt.to_dict(),
+        "receipt_identity_digest": identity,
+        "retention": "metadata_only_hash_chained_no_request_or_payload",
+        "secret_material": "never_returned",
+    }
+    if entry_digest != content_digest(descriptor):
+        raise ArgumentError("autonomous connector receipt journal entry digest is invalid")
+    return AutonomousConnectorReceiptJournalEntry(sequence, previous, receipt, identity, entry_digest)
+
+
+class AutonomousConnectorReceiptJournal:
+    """Bounded JSONL store that can be passed as a connector runtime receipt store."""
+
+    def __init__(
+        self,
+        path: str | os.PathLike[str],
+        *,
+        max_entries: int = MAX_AUTONOMOUS_CONNECTOR_RECEIPT_JOURNAL_ENTRIES,
+        max_bytes: int = MAX_AUTONOMOUS_CONNECTOR_RECEIPT_JOURNAL_BYTES,
+    ) -> None:
+        if not isinstance(path, (str, os.PathLike)) or not str(path):
+            raise ArgumentError("autonomous connector receipt journal path must be non-empty")
+        if isinstance(max_entries, bool) or not isinstance(max_entries, int) or not 1 <= max_entries <= MAX_AUTONOMOUS_CONNECTOR_RECEIPT_JOURNAL_ENTRIES:
+            raise ArgumentError("autonomous connector receipt journal max_entries is outside its bound")
+        if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or not 1 <= max_bytes <= MAX_AUTONOMOUS_CONNECTOR_RECEIPT_JOURNAL_BYTES:
+            raise ArgumentError("autonomous connector receipt journal max_bytes is outside its bound")
+        self.path = Path(path)
+        self.max_entries = max_entries
+        self.max_bytes = max_bytes
+        self._lock = threading.RLock()
+        with self._lock:
+            self._read_rows_locked()
+
+    def append(
+        self,
+        receipt: AutonomousConnectorDispatchReceipt | Mapping[str, Any],
+    ) -> AutonomousConnectorReceiptJournalEntry:
+        normalized = _connector_receipt_from_mapping(receipt)
+        identity = _connector_receipt_identity_digest(normalized)
+        with self._lock:
+            rows = self._read_rows_locked()
+            existing = next((row for row in rows if row.receipt_identity_digest == identity), None)
+            if existing is not None:
+                if content_digest(existing.receipt.to_dict()) == content_digest(normalized.to_dict()):
+                    return existing
+                raise ArgumentError("autonomous connector receipt journal identity conflict")
+            if len(rows) >= self.max_entries:
+                raise ArgumentError("autonomous connector receipt journal entry capacity is exhausted")
+            descriptor = {
+                "schema": AUTONOMOUS_CONNECTOR_RECEIPT_ENTRY_SCHEMA,
+                "sequence": len(rows) + 1,
+                "previous_entry_digest": rows[-1].entry_digest if rows else None,
+                "receipt": normalized.to_dict(),
+                "receipt_identity_digest": identity,
+                "retention": "metadata_only_hash_chained_no_request_or_payload",
+                "secret_material": "never_returned",
+            }
+            entry = AutonomousConnectorReceiptJournalEntry(
+                descriptor["sequence"],
+                descriptor["previous_entry_digest"],
+                normalized,
+                identity,
+                content_digest(descriptor),
+            )
+            line = json.dumps(entry.to_dict(), ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8") + b"\n"
+            if len(line) > MAX_AUTONOMOUS_CONNECTOR_RECEIPT_ENTRY_BYTES:
+                raise ArgumentError("autonomous connector receipt journal entry exceeds its byte bound")
+            current_size = self.path.stat().st_size if self.path.exists() else 0
+            if current_size + len(line) > self.max_bytes:
+                raise ArgumentError("autonomous connector receipt journal byte capacity is exhausted")
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with self.path.open("ab") as handle:
+                handle.write(line)
+                handle.flush()
+                os.fsync(handle.fileno())
+            return entry
+
+    def find(
+        self,
+        *,
+        execution_id: str,
+        dispatch_id: str,
+        call_id: str,
+        connector_id: str,
+        attempt_id: str | None = None,
+    ) -> AutonomousConnectorDispatchReceipt | None:
+        identity = content_digest(
+            {
+                "schema": AUTONOMOUS_CONNECTOR_RECEIPT_ENTRY_SCHEMA,
+                "execution_id": _identifier("autonomous connector journal execution_id", execution_id),
+                "dispatch_id": _identifier("autonomous connector journal dispatch_id", dispatch_id),
+                "call_id": _identifier("autonomous connector journal call_id", call_id),
+                "connector_id": _identifier("autonomous connector journal connector_id", connector_id),
+                "attempt_id": None if attempt_id is None else _identifier("autonomous connector journal attempt_id", attempt_id),
+            }
+        )
+        with self._lock:
+            for row in reversed(self._read_rows_locked()):
+                if row.receipt_identity_digest == identity:
+                    return row.receipt
+        return None
+
+    def receipts(
+        self,
+        *,
+        execution_id: str | None = None,
+        connector_id: str | None = None,
+        after_sequence: int = 0,
+        limit: int = 256,
+    ) -> tuple[AutonomousConnectorReceiptJournalEntry, ...]:
+        if execution_id is not None:
+            execution_id = _identifier("autonomous connector journal execution_id", execution_id)
+        if connector_id is not None:
+            connector_id = _identifier("autonomous connector journal connector_id", connector_id)
+        if not isinstance(after_sequence, int) or isinstance(after_sequence, bool) or after_sequence < 0:
+            raise ArgumentError("autonomous connector journal after_sequence must be non-negative")
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= self.max_entries:
+            raise ArgumentError("autonomous connector journal limit is outside its bound")
+        with self._lock:
+            rows = self._read_rows_locked()
+        return tuple(
+            row
+            for row in rows
+            if row.sequence > after_sequence
+            and (execution_id is None or row.receipt.execution_id == execution_id)
+            and (connector_id is None or row.receipt.connector_id == connector_id)
+        )[:limit]
+
+    def verify_integrity(self) -> dict[str, Any]:
+        with self._lock:
+            rows = self._read_rows_locked()
+        return {
+            "schema": AUTONOMOUS_CONNECTOR_RECEIPT_JOURNAL_SCHEMA,
+            "verified": True,
+            "entries": len(rows),
+            "head_digest": rows[-1].entry_digest if rows else None,
+            "retention": "metadata_only_hash_chained_no_request_or_payload",
+            "secret_material": "never_returned",
+        }
+
+    def _read_rows_locked(self) -> list[AutonomousConnectorReceiptJournalEntry]:
+        if not self.path.exists():
+            return []
+        if self.path.stat().st_size > self.max_bytes:
+            raise ArgumentError("autonomous connector receipt journal exceeds max_bytes")
+        rows: list[AutonomousConnectorReceiptJournalEntry] = []
+        identities: set[str] = set()
+        with self.path.open("rb") as handle:
+            for raw_line in handle:
+                if len(rows) >= self.max_entries:
+                    raise ArgumentError("autonomous connector receipt journal exceeds max_entries")
+                try:
+                    value = json.loads(raw_line.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                    raise ArgumentError("autonomous connector receipt journal contains invalid JSON") from error
+                if not isinstance(value, Mapping):
+                    raise ArgumentError("autonomous connector receipt journal line must be an object")
+                entry = _connector_entry_from_mapping(value)
+                expected_previous = rows[-1].entry_digest if rows else None
+                if entry.sequence != len(rows) + 1 or entry.previous_entry_digest != expected_previous:
+                    raise ArgumentError("autonomous connector receipt journal hash chain is invalid")
+                if entry.receipt_identity_digest in identities:
+                    raise ArgumentError("autonomous connector receipt journal contains duplicate identities")
+                identities.add(entry.receipt_identity_digest)
+                if len(json.dumps(entry.to_dict(), ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")) > MAX_AUTONOMOUS_CONNECTOR_RECEIPT_ENTRY_BYTES:
+                    raise ArgumentError("autonomous connector receipt journal entry exceeds its byte bound")
+                rows.append(entry)
+        return rows
+
+
 @dataclass(frozen=True, slots=True)
 class AutonomousConnectorDispatchResult:
     """Transient caller value paired with a durable-safe receipt."""
 
     receipt: AutonomousConnectorDispatchReceipt
     value: Any = None
+    replay: str = "fresh"
 
     def __post_init__(self) -> None:
         if not isinstance(self.receipt, AutonomousConnectorDispatchReceipt):
             raise ArgumentError("autonomous connector dispatch result receipt is invalid")
+        if self.replay not in {"fresh", "replayed"}:
+            raise ArgumentError("autonomous connector dispatch result replay is invalid")
         safe_value = _json_safe(
             "autonomous connector dispatch result value",
             self.value,
@@ -391,9 +739,17 @@ class AutonomousConnectorDispatchResult:
             "schema": AUTONOMOUS_CONNECTOR_DISPATCH_SCHEMA,
             "receipt": self.receipt.to_dict(),
             "value_present": self.value is not None,
+            "replay": self.replay,
             "retention": "receipt_metadata_only;value_transient",
             "secret_material": "never_returned",
         }
+
+
+@dataclass(slots=True)
+class _AutonomousConnectorInFlight:
+    request_digest: str
+    event: threading.Event
+    outcome: AutonomousConnectorDispatchResult | BaseException | None = None
 
 
 class AutonomousConnectorRuntime:
@@ -404,20 +760,74 @@ class AutonomousConnectorRuntime:
         registry: AutonomousConnectorRegistry,
         *,
         receipt_sink: Callable[[AutonomousConnectorDispatchReceipt], Any] | None = None,
+        receipt_store: Any | None = None,
     ) -> None:
         if not isinstance(registry, AutonomousConnectorRegistry):
             raise ArgumentError("autonomous connector runtime requires an AutonomousConnectorRegistry")
         if receipt_sink is not None and not callable(receipt_sink):
             raise ArgumentError("autonomous connector runtime receipt sink must be callable")
+        if receipt_store is not None and not all(
+            callable(getattr(receipt_store, name, None)) for name in ("append", "find")
+        ):
+            raise ArgumentError("autonomous connector runtime receipt store is malformed")
         self.registry = registry
         self.receipt_sink = receipt_sink
+        self.receipt_store = receipt_store
+        self._lock = threading.RLock()
+        self._inflight: dict[str, _AutonomousConnectorInFlight] = {}
 
     def dispatch(self, request: AutonomousConnectorDispatchRequest) -> AutonomousConnectorDispatchResult:
         if not isinstance(request, AutonomousConnectorDispatchRequest):
             raise ArgumentError("autonomous connector dispatch requires a typed request")
         registration = self.registry.resolve(request.connector_id)
-        manifest = registration.manifest
         request_digest = request.request_digest
+        replay = self._find_replay(request, registration, request_digest)
+        if replay is not None:
+            return replay
+        identity = _connector_dispatch_identity_digest(request)
+        with self._lock:
+            replay = self._find_replay(request, registration, request_digest)
+            if replay is not None:
+                return replay
+            pending = self._inflight.get(identity)
+            if pending is None:
+                pending = _AutonomousConnectorInFlight(request_digest, threading.Event())
+                self._inflight[identity] = pending
+                owner = True
+            else:
+                if pending.request_digest != request_digest:
+                    raise ArgumentError("autonomous connector dispatch identity conflicts with request metadata")
+                owner = False
+        if not owner:
+            pending.event.wait()
+            outcome = pending.outcome
+            if isinstance(outcome, BaseException):
+                raise outcome
+            if outcome is None:
+                raise ArgumentError("autonomous connector in-flight execution completed without an outcome")
+            return AutonomousConnectorDispatchResult(outcome.receipt, outcome.value, replay="replayed")
+        try:
+            outcome = self._dispatch_fresh(request, registration, request_digest)
+            with self._lock:
+                pending.outcome = outcome
+            return outcome
+        except BaseException as error:
+            with self._lock:
+                pending.outcome = error
+            raise
+        finally:
+            with self._lock:
+                if self._inflight.get(identity) is pending:
+                    self._inflight.pop(identity, None)
+                pending.event.set()
+
+    def _dispatch_fresh(
+        self,
+        request: AutonomousConnectorDispatchRequest,
+        registration: AutonomousConnectorRegistration,
+        request_digest: str,
+    ) -> AutonomousConnectorDispatchResult:
+        manifest = registration.manifest
         missing_domains = sorted(set(request.domains) - set(manifest.domains))
         if missing_domains:
             return self._finish(
@@ -465,6 +875,30 @@ class AutonomousConnectorRuntime:
             value=observation.value,
         )
 
+    def _find_replay(
+        self,
+        request: AutonomousConnectorDispatchRequest,
+        registration: AutonomousConnectorRegistration,
+        request_digest: str,
+    ) -> AutonomousConnectorDispatchResult | None:
+        if self.receipt_store is None:
+            return None
+        stored = self.receipt_store.find(
+            execution_id=request.execution_id,
+            dispatch_id=request.dispatch_id,
+            call_id=request.call_id,
+            connector_id=request.connector_id,
+            attempt_id=request.attempt_id,
+        )
+        if stored is None:
+            return None
+        receipt = _connector_receipt_from_mapping(stored)
+        if receipt.request_digest != request_digest:
+            raise ArgumentError("autonomous connector replay identity conflicts with request metadata")
+        if receipt.manifest_digest != registration.manifest_digest:
+            raise ArgumentError("autonomous connector replay manifest digest changed")
+        return AutonomousConnectorDispatchResult(receipt, None, replay="replayed")
+
     def _finish(
         self,
         request: AutonomousConnectorDispatchRequest,
@@ -495,12 +929,24 @@ class AutonomousConnectorRuntime:
             attempt_id=request.attempt_id,
             failure_class=failure_class,
         )
+        persisted_receipt = receipt
+        if self.receipt_store is not None:
+            try:
+                stored = self.receipt_store.append(receipt)
+                if isinstance(stored, AutonomousConnectorReceiptJournalEntry):
+                    persisted_receipt = stored.receipt
+                elif isinstance(stored, Mapping) and stored.get("schema") == AUTONOMOUS_CONNECTOR_RECEIPT_ENTRY_SCHEMA:
+                    persisted_receipt = _connector_entry_from_mapping(stored).receipt
+                elif stored is not None:
+                    persisted_receipt = _connector_receipt_from_mapping(stored)
+            except Exception as error:
+                raise ArgumentError("autonomous connector receipt store failed") from error
         if self.receipt_sink is not None:
             try:
-                self.receipt_sink(receipt)
+                self.receipt_sink(persisted_receipt)
             except Exception as error:
                 raise ArgumentError("autonomous connector receipt sink failed") from error
-        return AutonomousConnectorDispatchResult(receipt, value)
+        return AutonomousConnectorDispatchResult(persisted_receipt, value, replay="fresh")
 
 
 def create_autonomous_api_source_connector_executor(
@@ -575,17 +1021,24 @@ __all__ = [
     "AUTONOMOUS_CONNECTOR_REGISTRY_SCHEMA",
     "AUTONOMOUS_CONNECTOR_DISPATCH_SCHEMA",
     "AUTONOMOUS_CONNECTOR_RECEIPT_SCHEMA",
+    "AUTONOMOUS_CONNECTOR_RECEIPT_JOURNAL_SCHEMA",
+    "AUTONOMOUS_CONNECTOR_RECEIPT_ENTRY_SCHEMA",
     "AUTONOMOUS_CONNECTOR_DISPATCH_STATUSES",
     "MAX_AUTONOMOUS_CONNECTORS",
     "MAX_AUTONOMOUS_CONNECTOR_DOMAINS",
     "MAX_AUTONOMOUS_CONNECTOR_REQUEST_BYTES",
     "MAX_AUTONOMOUS_CONNECTOR_RESULT_BYTES",
     "MAX_AUTONOMOUS_CONNECTOR_PARENT_DIGESTS",
+    "MAX_AUTONOMOUS_CONNECTOR_RECEIPT_JOURNAL_ENTRIES",
+    "MAX_AUTONOMOUS_CONNECTOR_RECEIPT_JOURNAL_BYTES",
+    "MAX_AUTONOMOUS_CONNECTOR_RECEIPT_ENTRY_BYTES",
     "AutonomousConnectorRegistration",
     "AutonomousConnectorRegistry",
     "AutonomousConnectorDispatchRequest",
     "AutonomousConnectorObservation",
     "AutonomousConnectorDispatchReceipt",
+    "AutonomousConnectorReceiptJournalEntry",
+    "AutonomousConnectorReceiptJournal",
     "AutonomousConnectorDispatchResult",
     "AutonomousConnectorRuntime",
     "create_autonomous_api_source_connector_executor",

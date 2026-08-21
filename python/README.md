@@ -89,9 +89,9 @@ provide the corresponding caller-owned connector process. Register a typed
 `DomainEvidenceProviderConnectorManifest` and an executor that may close over a short-lived
 credential session; the runtime enforces exact manifest domains/capabilities and approval before
 calling it. The request and returned value are transient, while the dispatch receipt retains only
-request/payload/manifest digests and bounded failure classes. `AutonomousDomainToolReceiptJournal`
-can persist direct tool receipts as hash-chained JSONL with identity-conflict detection and safe
-replay deduplication:
+request/payload/manifest digests and bounded failure classes. `AutonomousConnectorReceiptJournal`
+can persist connector receipts as bounded, fsynced, hash-chained JSONL with identity-conflict
+detection and safe replay barriers:
 
 ```python
 from prism_sdk import (
@@ -99,11 +99,12 @@ from prism_sdk import (
     AutonomousConnectorRegistry,
     AutonomousConnectorRuntime,
     AutonomousConnectorRegistration,
-    AutonomousDomainToolReceiptJournal,
+    AutonomousConnectorReceiptJournal,
 )
 
 connector_registry = AutonomousConnectorRegistry([registration])
-connector_runtime = AutonomousConnectorRuntime(connector_registry)
+connector_journal = AutonomousConnectorReceiptJournal("state/connector-receipts.jsonl")
+connector_runtime = AutonomousConnectorRuntime(connector_registry, receipt_store=connector_journal)
 result = connector_runtime.dispatch(
     AutonomousConnectorDispatchRequest(
         dispatch_id="evidence-dispatch-1",
@@ -117,6 +118,12 @@ result = connector_runtime.dispatch(
     )
 )
 ```
+
+After a restart, dispatching the same execution/dispatch/call/attempt identity returns
+`result.replay == "replayed"` with `result.value is None`; the journal is a replay barrier, not a
+provider-response cache. A retry must deliberately use a new `attempt_id` (and normally a new
+dispatch/call identity). The journal never claims distributed exactly-once delivery: external
+provider idempotency and cross-process locking remain caller-owned.
 
 The registry never accepts a raw key and does not perform network I/O. A caller-owned executor
 can invoke the existing source-plan, provider-handoff, or external-payload APIs and return a

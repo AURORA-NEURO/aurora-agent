@@ -244,6 +244,11 @@ returned plan digest before retrieval and keeps connector scope separate from pr
 This makes the existing gateway usable from the autonomous runtime without turning it into a
 credential client or silently enabling discovery; concrete provider-specific adapters and external
 network/auth execution remain caller-owned.
+Connector dispatch now also accepts a caller-owned restart-safe receipt store. The bounded,
+fsynced connector JSONL journal verifies a hash chain, deduplicates exact identities, rejects
+conflicting outcomes, and returns a metadata-only replay barrier after restart; a new attempt
+identity is required for retry. It intentionally does not claim distributed exactly-once delivery,
+cross-process fencing, provider idempotency, or response caching.
 The domain-workflow handoff now also has a retained verification boundary: callers can validate
 catalogue/contract/binding identity, rerun mission preflight, and optionally replay the original
 instantiation request before re-review. The verifier is intentionally structural and non-executing;

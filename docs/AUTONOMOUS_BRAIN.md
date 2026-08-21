@@ -2742,7 +2742,14 @@ network I/O and accepts no raw key. A transient value is returned to the caller 
 `AutonomousConnectorDispatchReceipt` retains only request/payload/manifest digests, attempt
 identity, status, and bounded failure class. All twelve domains share the same registry, approval,
 and receipt contract; missing external services remain explicit rather than being simulated as
-successful evidence.
+successful evidence. Attach `AutonomousConnectorReceiptJournal(path)` as `receipt_store` when
+the dispatch process must survive restart. The bounded, fsynced JSONL journal verifies its full
+hash chain on open, rejects identity collisions and tampering, and stores no request or response.
+Reusing the same execution/dispatch/call/attempt identity returns a metadata-only
+`replay="replayed"` barrier with no transient value, so retrying an uncertain or failed provider
+call requires an explicit new `attempt_id`. This protects against silent duplicate work without
+claiming distributed exactly-once delivery; cross-process fencing and provider idempotency remain
+caller-owned.
 
 For the gateway-backed source connector path, use
 `create_autonomous_api_source_connector_executor(api_client)`. It translates a transient
