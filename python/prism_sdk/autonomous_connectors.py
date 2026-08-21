@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import math
 import os
 from pathlib import Path
 import threading
@@ -45,6 +46,7 @@ AUTONOMOUS_CONNECTOR_SELECTION_ROW_SCHEMA = "bioprism-python-autonomous-connecto
 AUTONOMOUS_CONNECTOR_RECEIPT_JOURNAL_SCHEMA = "bioprism-python-autonomous-connector-receipt-journal/0.1"
 AUTONOMOUS_CONNECTOR_RECEIPT_ENTRY_SCHEMA = "bioprism-python-autonomous-connector-receipt-entry/0.1"
 AUTONOMOUS_CONNECTOR_DISPATCH_STATUSES = ("observed", "partial", "refused", "error", "unknown")
+AUTONOMOUS_CONNECTOR_SELECTION_STRATEGIES = ("lexicographic_connector_id", "weighted_evidence")
 MAX_AUTONOMOUS_CONNECTORS = 256
 MAX_AUTONOMOUS_CONNECTOR_DOMAINS = len(AUTONOMOUS_DOMAIN_NAMES)
 MAX_AUTONOMOUS_CONNECTOR_REQUEST_BYTES = 2_000_000
@@ -53,6 +55,7 @@ MAX_AUTONOMOUS_CONNECTOR_PARENT_DIGESTS = 128
 MAX_AUTONOMOUS_CONNECTOR_RECEIPT_JOURNAL_ENTRIES = 100_000
 MAX_AUTONOMOUS_CONNECTOR_RECEIPT_JOURNAL_BYTES = 50_000_000
 MAX_AUTONOMOUS_CONNECTOR_RECEIPT_ENTRY_BYTES = 24_000
+MAX_AUTONOMOUS_CONNECTOR_SELECTION_SIGNAL_BYTES = 64_000
 
 
 def _digest(name: str, value: Any, *, allow_none: bool = False) -> str | None:
@@ -83,6 +86,97 @@ def _identifier_sequence(name: str, value: Any, *, maximum: int, allow_empty: bo
         seen.add(normalized)
         result.append(normalized)
     return tuple(result)
+
+
+def _bounded_selection_float(name: str, value: Any, *, minimum: float, maximum: float) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+        raise ArgumentError(f"{name} must be a finite number")
+    normalized = float(value)
+    if not minimum <= normalized <= maximum:
+        raise ArgumentError(f"{name} must be between {minimum} and {maximum}")
+    return normalized
+
+
+def _selection_signal_descriptor(connector_id: str, value: Mapping[str, Any] | None) -> dict[str, Any]:
+    connector_id = _identifier("autonomous connector selection signal connector_id", connector_id)
+    if value is None:
+        raw: Mapping[str, Any] = {}
+    elif isinstance(value, Mapping):
+        safe = _json_safe(
+            "autonomous connector selection signal",
+            dict(value),
+            maximum=MAX_AUTONOMOUS_CONNECTOR_SELECTION_SIGNAL_BYTES,
+        )
+        _reject_secret_fields(safe)
+        raw = safe
+    else:
+        raise ArgumentError("autonomous connector selection signal must be an object")
+    allowed = {
+        "eligible",
+        "health",
+        "success_rate",
+        "evaluator_reward",
+        "latency_ms",
+        "cost_per_million_tokens",
+    }
+    if set(raw).difference(allowed):
+        raise ArgumentError("autonomous connector selection signal contains unsupported fields")
+    eligible = raw.get("eligible", True)
+    if not isinstance(eligible, bool):
+        raise ArgumentError("autonomous connector selection signal eligible must be a boolean")
+    health = _bounded_selection_float(
+        "autonomous connector selection signal health",
+        raw.get("health", 0.5),
+        minimum=0.0,
+        maximum=1.0,
+    )
+    success_rate = _bounded_selection_float(
+        "autonomous connector selection signal success_rate",
+        raw.get("success_rate", health),
+        minimum=0.0,
+        maximum=1.0,
+    )
+    evaluator_reward = _bounded_selection_float(
+        "autonomous connector selection signal evaluator_reward",
+        raw.get("evaluator_reward", 0.0),
+        minimum=-1.0,
+        maximum=1.0,
+    )
+    latency = raw.get("latency_ms")
+    if latency is not None:
+        latency = _bounded_selection_float(
+            "autonomous connector selection signal latency_ms",
+            latency,
+            minimum=0.0,
+            maximum=86_400_000.0,
+        )
+    cost = raw.get("cost_per_million_tokens")
+    if cost is not None:
+        cost = _bounded_selection_float(
+            "autonomous connector selection signal cost_per_million_tokens",
+            cost,
+            minimum=0.0,
+            maximum=1_000_000.0,
+        )
+    latency_score = 0.5 if latency is None else 1.0 / (1.0 + latency / 1_000.0)
+    cost_score = 0.5 if cost is None else 1.0 / (1.0 + cost / 100.0)
+    score = (
+        0.35 * health
+        + 0.25 * success_rate
+        + 0.25 * ((evaluator_reward + 1.0) / 2.0)
+        + 0.10 * latency_score
+        + 0.05 * cost_score
+    )
+    return {
+        "connector_id": connector_id,
+        "eligible": eligible,
+        "health": health,
+        "success_rate": success_rate,
+        "evaluator_reward": evaluator_reward,
+        "latency_ms": latency,
+        "cost_per_million_tokens": cost,
+        "score": score,
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +228,8 @@ class AutonomousConnectorSelectionRow:
     candidate_ids: tuple[str, ...]
     candidate_manifest_digests: tuple[str, ...]
     reason: str
+    candidate_scores: tuple[float, ...] = ()
+    candidate_eligible: tuple[bool, ...] = ()
 
     def __post_init__(self) -> None:
         _identifier("autonomous connector selection row domain", self.domain)
@@ -156,18 +252,45 @@ class AutonomousConnectorSelectionRow:
         )
         if len(candidate_ids) != len(candidate_digests):
             raise ArgumentError("autonomous connector selection row candidates and digests must align")
+        if self.candidate_scores:
+            candidate_scores = tuple(
+                _bounded_selection_float(
+                    "autonomous connector selection row candidate score",
+                    score,
+                    minimum=0.0,
+                    maximum=1.0,
+                )
+                for score in self.candidate_scores
+            )
+            if len(candidate_scores) != len(candidate_ids):
+                raise ArgumentError("autonomous connector selection row scores must align with candidates")
+        else:
+            candidate_scores = tuple(0.0 for _ in candidate_ids)
+        if self.candidate_eligible:
+            if any(not isinstance(eligible, bool) for eligible in self.candidate_eligible):
+                raise ArgumentError("autonomous connector selection row eligibility must be boolean")
+            candidate_eligible = tuple(self.candidate_eligible)
+            if len(candidate_eligible) != len(candidate_ids):
+                raise ArgumentError("autonomous connector selection row eligibility must align with candidates")
+        else:
+            candidate_eligible = tuple(True for _ in candidate_ids)
         if self.status == "selected":
             if self.connector_id is None or self.manifest_digest is None:
                 raise ArgumentError("selected connector row requires connector and manifest identities")
             if self.connector_id not in candidate_ids:
                 raise ArgumentError("selected connector row must select a candidate")
-            if candidate_digests[candidate_ids.index(self.connector_id)] != self.manifest_digest:
+            selected_index = candidate_ids.index(self.connector_id)
+            if not candidate_eligible[selected_index]:
+                raise ArgumentError("selected connector row cannot select an ineligible candidate")
+            if candidate_digests[selected_index] != self.manifest_digest:
                 raise ArgumentError("selected connector row manifest digest does not match its candidate")
         elif self.connector_id is not None or self.manifest_digest is not None:
             raise ArgumentError("missing connector row cannot select a connector")
         _identifier("autonomous connector selection row reason", self.reason)
         object.__setattr__(self, "candidate_ids", candidate_ids)
         object.__setattr__(self, "candidate_manifest_digests", candidate_digests)
+        object.__setattr__(self, "candidate_scores", candidate_scores)
+        object.__setattr__(self, "candidate_eligible", candidate_eligible)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -178,6 +301,8 @@ class AutonomousConnectorSelectionRow:
             "manifest_digest": self.manifest_digest,
             "candidate_ids": list(self.candidate_ids),
             "candidate_manifest_digests": list(self.candidate_manifest_digests),
+            "candidate_scores": list(self.candidate_scores),
+            "candidate_eligible": list(self.candidate_eligible),
             "reason": self.reason,
             "retention": "metadata_only_manifest_catalogue",
             "secret_material": "never_returned",
@@ -193,6 +318,8 @@ def _selection_row_from_mapping(value: Mapping[str, Any]) -> AutonomousConnector
         "manifest_digest",
         "candidate_ids",
         "candidate_manifest_digests",
+        "candidate_scores",
+        "candidate_eligible",
         "reason",
         "retention",
         "secret_material",
@@ -206,6 +333,12 @@ def _selection_row_from_mapping(value: Mapping[str, Any]) -> AutonomousConnector
     raw_digests = value.get("candidate_manifest_digests")
     if not isinstance(raw_digests, Sequence) or isinstance(raw_digests, (str, bytes)):
         raise ArgumentError("autonomous connector selection row candidate digests are invalid")
+    raw_scores = value.get("candidate_scores")
+    raw_eligible = value.get("candidate_eligible")
+    if not isinstance(raw_scores, Sequence) or isinstance(raw_scores, (str, bytes)):
+        raise ArgumentError("autonomous connector selection row candidate scores are invalid")
+    if not isinstance(raw_eligible, Sequence) or isinstance(raw_eligible, (str, bytes)):
+        raise ArgumentError("autonomous connector selection row candidate eligibility is invalid")
     return AutonomousConnectorSelectionRow(
         domain=value.get("domain"),
         status=value.get("status"),
@@ -214,6 +347,8 @@ def _selection_row_from_mapping(value: Mapping[str, Any]) -> AutonomousConnector
         candidate_ids=value.get("candidate_ids"),
         candidate_manifest_digests=tuple(raw_digests),
         reason=value.get("reason"),
+        candidate_scores=tuple(raw_scores),
+        candidate_eligible=tuple(raw_eligible),
     )
 
 
@@ -226,6 +361,7 @@ class AutonomousConnectorSelectionPlan:
     registry_digest: str
     rows: tuple[AutonomousConnectorSelectionRow, ...]
     strategy: str = "lexicographic_connector_id"
+    signal_digest: str | None = None
 
     def __post_init__(self) -> None:
         domains = _sequence(
@@ -238,13 +374,15 @@ class AutonomousConnectorSelectionPlan:
         if self.capability is not None:
             _identifier("autonomous connector selection plan capability", self.capability)
         _digest("autonomous connector selection plan registry_digest", self.registry_digest)
+        if self.strategy not in AUTONOMOUS_CONNECTOR_SELECTION_STRATEGIES:
+            raise ArgumentError("autonomous connector selection plan strategy is invalid")
+        _digest("autonomous connector selection plan signal_digest", self.signal_digest, allow_none=True)
         if not isinstance(self.rows, Sequence) or isinstance(self.rows, (str, bytes)) or len(self.rows) != len(domains):
             raise ArgumentError("autonomous connector selection plan rows must align with domains")
         if any(not isinstance(row, AutonomousConnectorSelectionRow) for row in self.rows):
             raise ArgumentError("autonomous connector selection plan rows must be typed")
         if tuple(row.domain for row in self.rows) != domains:
             raise ArgumentError("autonomous connector selection plan row domains are out of order")
-        _identifier("autonomous connector selection plan strategy", self.strategy)
         object.__setattr__(self, "domains", domains)
         object.__setattr__(self, "rows", tuple(self.rows))
 
@@ -264,6 +402,7 @@ class AutonomousConnectorSelectionPlan:
             "registry_digest": self.registry_digest,
             "rows": [row.to_dict() for row in self.rows],
             "strategy": self.strategy,
+            "signal_digest": self.signal_digest,
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -285,6 +424,7 @@ class AutonomousConnectorSelectionPlan:
             "registry_digest",
             "rows",
             "strategy",
+            "signal_digest",
             "complete",
             "plan_digest",
             "execution",
@@ -308,6 +448,7 @@ class AutonomousConnectorSelectionPlan:
             registry_digest=value.get("registry_digest"),
             rows=tuple(_selection_row_from_mapping(row) for row in raw_rows),
             strategy=value.get("strategy"),
+            signal_digest=value.get("signal_digest"),
         )
         if value.get("complete") is not plan.complete:
             raise ArgumentError("autonomous connector selection plan completeness is invalid")
@@ -318,9 +459,19 @@ class AutonomousConnectorSelectionPlan:
     def verify(self, registry: "AutonomousConnectorRegistry") -> "AutonomousConnectorSelectionPlan":
         if not isinstance(registry, AutonomousConnectorRegistry):
             raise ArgumentError("autonomous connector selection plan verification requires a registry")
-        expected = registry.select_for_domains(self.domains, capability=self.capability)
-        if expected.plan_digest != self.plan_digest:
+        if registry.digest != self.registry_digest:
             raise ArgumentError("autonomous connector selection plan is stale or tampered")
+        for row in self.rows:
+            candidates = tuple(
+                registration
+                for registration in registry.registrations()
+                if row.domain in registration.manifest.domains
+                and (self.capability is None or self.capability in registration.manifest.capabilities)
+            )
+            if tuple(item.connector_id for item in candidates) != row.candidate_ids:
+                raise ArgumentError("autonomous connector selection plan candidate set changed")
+            if tuple(item.manifest_digest for item in candidates) != row.candidate_manifest_digests:
+                raise ArgumentError("autonomous connector selection plan manifest set changed")
         return self
 
 
@@ -405,6 +556,8 @@ class AutonomousConnectorRegistry:
         domains: Sequence[str],
         *,
         capability: str | None = None,
+        strategy: str = "lexicographic_connector_id",
+        selection_signals: Mapping[str, Mapping[str, Any]] | None = None,
     ) -> AutonomousConnectorSelectionPlan:
         requested = _sequence(
             "autonomous connector selection domains",
@@ -415,6 +568,26 @@ class AutonomousConnectorRegistry:
             raise ArgumentError("autonomous connector selection contains an unsupported domain")
         if capability is not None:
             capability = _identifier("autonomous connector selection capability", capability)
+        if strategy not in AUTONOMOUS_CONNECTOR_SELECTION_STRATEGIES:
+            raise ArgumentError("autonomous connector selection strategy is invalid")
+        if strategy == "lexicographic_connector_id" and selection_signals is not None:
+            raise ArgumentError("lexicographic connector selection cannot consume selection signals")
+        normalized_signals: dict[str, dict[str, Any]] = {}
+        if selection_signals is not None:
+            if not isinstance(selection_signals, Mapping):
+                raise ArgumentError("autonomous connector selection signals must be an object")
+            for connector_id, raw_signal in selection_signals.items():
+                normalized_id = _identifier("autonomous connector selection signal connector_id", connector_id)
+                if normalized_id not in self._connectors:
+                    raise ArgumentError("autonomous connector selection signal names an unknown connector")
+                normalized_signals[normalized_id] = _selection_signal_descriptor(normalized_id, raw_signal)
+        if strategy == "weighted_evidence" and selection_signals is None:
+            raise ArgumentError("weighted connector selection requires selection_signals")
+        signal_digest = (
+            content_digest([normalized_signals[key] for key in sorted(normalized_signals)])
+            if strategy == "weighted_evidence"
+            else None
+        )
         rows: list[AutonomousConnectorSelectionRow] = []
         for domain in requested:
             candidates = [
@@ -425,7 +598,29 @@ class AutonomousConnectorRegistry:
             ]
             candidate_ids = tuple(item.connector_id for item in candidates)
             candidate_digests = tuple(item.manifest_digest for item in candidates)
-            selected = candidates[0] if candidates else None
+            descriptors = tuple(
+                normalized_signals.get(connector_id)
+                or _selection_signal_descriptor(connector_id, None)
+                for connector_id in candidate_ids
+            )
+            candidate_scores = tuple(
+                descriptor["score"] if strategy == "weighted_evidence" else 0.0
+                for descriptor in descriptors
+            )
+            candidate_eligible = tuple(
+                descriptor["eligible"] if strategy == "weighted_evidence" else True
+                for descriptor in descriptors
+            )
+            eligible_indexes = [index for index, eligible in enumerate(candidate_eligible) if eligible]
+            if strategy == "weighted_evidence":
+                selected_index = (
+                    sorted(eligible_indexes, key=lambda index: (-candidate_scores[index], candidate_ids[index]))[0]
+                    if eligible_indexes
+                    else None
+                )
+            else:
+                selected_index = eligible_indexes[0] if eligible_indexes else None
+            selected = None if selected_index is None else candidates[selected_index]
             rows.append(
                 AutonomousConnectorSelectionRow(
                     domain=domain,
@@ -434,7 +629,13 @@ class AutonomousConnectorRegistry:
                     manifest_digest=None if selected is None else selected.manifest_digest,
                     candidate_ids=candidate_ids,
                     candidate_manifest_digests=candidate_digests,
-                    reason="lexicographic_connector_id" if selected is not None else "no_matching_connector",
+                    reason=(
+                        strategy
+                        if selected is not None
+                        else ("no_matching_connector" if not candidates else "no_eligible_connector")
+                    ),
+                    candidate_scores=candidate_scores,
+                    candidate_eligible=candidate_eligible,
                 )
             )
         return AutonomousConnectorSelectionPlan(
@@ -442,6 +643,24 @@ class AutonomousConnectorRegistry:
             capability=capability,
             registry_digest=self.digest,
             rows=tuple(rows),
+            strategy=strategy,
+            signal_digest=signal_digest,
+        )
+
+    def select_adaptive_for_domains(
+        self,
+        domains: Sequence[str],
+        *,
+        capability: str,
+        selection_signals: Mapping[str, Mapping[str, Any]],
+    ) -> AutonomousConnectorSelectionPlan:
+        """Select connectors using explicit caller/evaluator evidence with deterministic ties."""
+
+        return self.select_for_domains(
+            domains,
+            capability=capability,
+            strategy="weighted_evidence",
+            selection_signals=selection_signals,
         )
 
     @property
@@ -1316,6 +1535,7 @@ __all__ = [
     "AUTONOMOUS_CONNECTOR_DISPATCH_SCHEMA",
     "AUTONOMOUS_CONNECTOR_SELECTION_PLAN_SCHEMA",
     "AUTONOMOUS_CONNECTOR_SELECTION_ROW_SCHEMA",
+    "AUTONOMOUS_CONNECTOR_SELECTION_STRATEGIES",
     "AUTONOMOUS_CONNECTOR_RECEIPT_SCHEMA",
     "AUTONOMOUS_CONNECTOR_RECEIPT_JOURNAL_SCHEMA",
     "AUTONOMOUS_CONNECTOR_RECEIPT_ENTRY_SCHEMA",
@@ -1328,6 +1548,7 @@ __all__ = [
     "MAX_AUTONOMOUS_CONNECTOR_RECEIPT_JOURNAL_ENTRIES",
     "MAX_AUTONOMOUS_CONNECTOR_RECEIPT_JOURNAL_BYTES",
     "MAX_AUTONOMOUS_CONNECTOR_RECEIPT_ENTRY_BYTES",
+    "MAX_AUTONOMOUS_CONNECTOR_SELECTION_SIGNAL_BYTES",
     "AutonomousConnectorRegistration",
     "AutonomousConnectorRegistry",
     "AutonomousConnectorSelectionRow",

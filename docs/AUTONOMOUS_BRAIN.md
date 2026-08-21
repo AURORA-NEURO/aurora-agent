@@ -2768,6 +2768,15 @@ called. This gives the brain a reproducible routing decision that can later acce
 health, cost, latency, or evaluator ranking inputs without allowing an opaque callback to bypass
 approval or scope checks.
 
+For adaptive routing, pass explicit per-connector signals to
+`select_adaptive_for_domains()`: bounded health and success rates, an evaluator reward in
+`[-1, 1]`, latency, cost, and an eligibility flag. The runtime uses fixed weights, deterministic
+connector-ID tie-breaking, and a signal digest; it does not infer reward from transport success,
+silently learn from provider responses, or allow a signal to authorize an effect. The high-level
+`AutonomousAgent` exposes this same reviewed path through `connector_catalogue()`,
+`connector_selection_plan()`, and `dispatch_connector()`, so domain applications do not need to
+rebuild the routing gate independently.
+
 For a UI or service that must survive a process restart, attach the redacted activation state to
 the agent. The activation snapshot tracks provider readiness, catalogue/profile/plan digests,
 approved exact tool names, pending review, and coverage for every built-in domain. It deliberately

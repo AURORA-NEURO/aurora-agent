@@ -58,6 +58,14 @@ from .domain_tools import (
     builtin_autonomous_domain_tool_profiles,
     plan_mcp_catalogue_bindings,
 )
+from .autonomous_connectors import (
+    AUTONOMOUS_CONNECTOR_REGISTRY_SCHEMA,
+    AutonomousConnectorDispatchRequest,
+    AutonomousConnectorDispatchResult,
+    AutonomousConnectorRegistry,
+    AutonomousConnectorRuntime,
+    AutonomousConnectorSelectionPlan,
+)
 from .autonomous_capabilities import (
     AutonomousCapabilityExecutionResult,
     AutonomousCapabilityJournalStore,
@@ -10590,6 +10598,8 @@ class AutonomousAgent:
         execution_journal: AutonomousExecutionJournal | None = None,
         execution_policy: AutonomousExecutionPolicy | Mapping[str, Any] | None = None,
         credential_provisioner: CredentialProvisioner | None = None,
+        connector_registry: AutonomousConnectorRegistry | None = None,
+        connector_runtime: AutonomousConnectorRuntime | None = None,
     ) -> None:
         if not isinstance(runtime, LLMRuntime):
             raise BrainRunError("runtime must be an LLMRuntime")
@@ -10624,6 +10634,16 @@ class AutonomousAgent:
             raise BrainRunError("execution_journal must be an AutonomousExecutionJournal or None")
         if credential_provisioner is not None and not isinstance(credential_provisioner, CredentialProvisioner):
             raise BrainRunError("credential_provisioner must be a CredentialProvisioner or None")
+        if connector_registry is not None and not isinstance(connector_registry, AutonomousConnectorRegistry):
+            raise BrainRunError("connector_registry must be an AutonomousConnectorRegistry or None")
+        if connector_runtime is not None and not isinstance(connector_runtime, AutonomousConnectorRuntime):
+            raise BrainRunError("connector_runtime must be an AutonomousConnectorRuntime or None")
+        if (
+            connector_registry is not None
+            and connector_runtime is not None
+            and connector_runtime.registry is not connector_registry
+        ):
+            raise BrainRunError("connector_runtime registry must be the same registry supplied to the agent")
         if execution_policy is None:
             resolved_execution_policy = None
         elif isinstance(execution_policy, AutonomousExecutionPolicy):
@@ -10653,6 +10673,10 @@ class AutonomousAgent:
         self.activation = activation or AutonomousCapabilityActivation()
         self.execution_journal = execution_journal
         self.execution_policy = resolved_execution_policy
+        self.connector_registry = connector_registry or (
+            connector_runtime.registry if connector_runtime is not None else None
+        )
+        self.connector_runtime = connector_runtime
         if tool_runtime is not None:
             self.tool_runtime = tool_runtime
         elif tool_registry is not None and hasattr(workspace, "tool") and callable(getattr(workspace, "tool")):
@@ -11147,6 +11171,67 @@ class AutonomousAgent:
             "registered_tool_count": len(registered),
             "execution": "metadata_only; registration_is_not_authorization",
         }
+
+    def connector_catalogue(self) -> dict[str, Any]:
+        """Return the redacted caller-owned connector catalogue, if one is configured."""
+
+        if self.connector_registry is None:
+            return {
+                "schema": AUTONOMOUS_CONNECTOR_REGISTRY_SCHEMA,
+                "digest": None,
+                "connectors": [],
+                "connector_count": 0,
+                "execution": "metadata_only;no_connector_registry_configured",
+                "secret_material": "never_returned",
+            }
+        return self.connector_registry.to_dict()
+
+    def connector_selection_plan(
+        self,
+        domains: Sequence[str],
+        *,
+        capability: str | None = None,
+        selection_signals: Mapping[str, Mapping[str, Any]] | None = None,
+    ) -> AutonomousConnectorSelectionPlan:
+        """Build a review-only connector route plan through the configured registry.
+
+        Supplying ``selection_signals`` opts into weighted evidence selection; the signals are
+        caller/evaluator-owned and are reduced to bounded scores and a digest in the plan. This
+        method never invokes a connector or grants approval.
+        """
+
+        if self.connector_registry is None:
+            raise BrainRunError("connector registry is not configured")
+        try:
+            if selection_signals is None:
+                return self.connector_registry.select_for_domains(domains, capability=capability)
+            if capability is None:
+                raise BrainRunError("adaptive connector selection requires capability")
+            return self.connector_registry.select_adaptive_for_domains(
+                domains,
+                capability=capability,
+                selection_signals=selection_signals,
+            )
+        except (ArgumentError, BrainRunError):
+            raise
+        except Exception as error:
+            raise BrainRunError("connector selection planning failed") from error
+
+    def dispatch_connector(
+        self,
+        plan: AutonomousConnectorSelectionPlan | Mapping[str, Any],
+        request: AutonomousConnectorDispatchRequest,
+    ) -> AutonomousConnectorDispatchResult:
+        """Dispatch one connector only through a configured, plan-verifying runtime."""
+
+        if self.connector_runtime is None:
+            raise BrainRunError("connector runtime is not configured")
+        try:
+            return self.connector_runtime.dispatch_from_plan(plan, request)
+        except (ArgumentError, BrainRunError):
+            raise
+        except Exception as error:
+            raise BrainRunError("connector dispatch failed") from error
 
     def capability_portfolio(
         self,

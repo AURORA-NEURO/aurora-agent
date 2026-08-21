@@ -11,6 +11,7 @@ from prism_sdk import (
     AUTONOMOUS_CONNECTOR_RECEIPT_ENTRY_SCHEMA,
     AUTONOMOUS_CONNECTOR_REGISTRY_SCHEMA,
     AUTONOMOUS_DOMAINS,
+    AutonomousAgent,
     AutonomousConnectorDispatchRequest,
     AutonomousConnectorObservation,
     AutonomousConnectorReceiptJournal,
@@ -22,6 +23,7 @@ from prism_sdk import (
     DomainEvidenceSourceExecutionRequest,
     DomainEvidenceSourcePlanRequest,
     DomainEvidenceProviderConnectorManifest,
+    LLMRuntime,
     builtin_autonomous_domain_tool_profiles,
     content_digest,
     create_autonomous_api_source_connector_executor,
@@ -77,6 +79,16 @@ def test_connector_registry_plans_and_dispatches_every_builtin_domain() -> None:
     assert selection.complete is True
     assert tuple(row.domain for row in selection.rows) == tuple(AUTONOMOUS_DOMAINS)
     assert all(row.connector_id == f"connector-{domain}" for row, domain in zip(selection.rows, AUTONOMOUS_DOMAINS))
+    adaptive = registry.select_adaptive_for_domains(
+        AUTONOMOUS_DOMAINS,
+        capability="evidence_read",
+        selection_signals={
+            f"connector-{domain}": {"health": 0.75, "success_rate": 0.8, "evaluator_reward": 0.2}
+            for domain in AUTONOMOUS_DOMAINS
+        },
+    )
+    assert adaptive.complete is True
+    assert adaptive.signal_digest is not None
 
     published = []
     runtime = AutonomousConnectorRuntime(registry, receipt_sink=published.append)
@@ -145,6 +157,91 @@ def test_connector_selection_plan_is_deterministic_reviewable_and_bound_to_dispa
         plan.verify(registry)
 
 
+def test_connector_adaptive_selection_uses_explicit_evidence_and_deterministic_ties() -> None:
+    primary = _registration("coding", lambda _manifest, _request: {"selected": "primary"})
+    secondary_manifest = DomainEvidenceProviderConnectorManifest(
+        connector_id="connector-coding-z",
+        version="v1",
+        provider="caller-managed-secondary",
+        connector_kind="provider_api",
+        domains=("coding",),
+        capabilities=("evidence_read",),
+    )
+    secondary = AutonomousConnectorRegistration(
+        secondary_manifest,
+        lambda _manifest, _request: {"selected": "secondary"},
+    )
+    registry = AutonomousConnectorRegistry([primary, secondary])
+    signals = {
+        "connector-coding": {
+            "health": 0.2,
+            "success_rate": 0.2,
+            "evaluator_reward": -1.0,
+            "latency_ms": 10_000,
+            "cost_per_million_tokens": 1_000,
+        },
+        "connector-coding-z": {
+            "health": 0.9,
+            "success_rate": 0.95,
+            "evaluator_reward": 0.8,
+            "latency_ms": 10,
+            "cost_per_million_tokens": 1,
+        },
+    }
+    plan = registry.select_adaptive_for_domains(
+        ("coding",),
+        capability="evidence_read",
+        selection_signals=signals,
+    )
+
+    row = plan.rows[0]
+    assert plan.strategy == "weighted_evidence"
+    assert plan.signal_digest is not None
+    assert row.connector_id == "connector-coding-z"
+    assert row.candidate_scores[1] > row.candidate_scores[0]
+    assert row.candidate_eligible == (True, True)
+    assert AutonomousConnectorSelectionPlan.from_mapping(plan.to_dict()) == plan
+    assert plan.verify(registry) is plan
+
+    request = AutonomousConnectorDispatchRequest(
+        dispatch_id="adaptive-dispatch",
+        execution_id="adaptive-execution",
+        call_id="adaptive-call",
+        connector_id="connector-coding-z",
+        domains=("coding",),
+        capability="evidence_read",
+        request={"query": "adaptive"},
+        selection_plan_digest=plan.plan_digest,
+        approved=True,
+    )
+    result = AutonomousConnectorRuntime(registry).dispatch_from_plan(plan, request)
+    assert result.value == {"selected": "secondary"}
+
+    ineligible_plan = registry.select_adaptive_for_domains(
+        ("coding",),
+        capability="evidence_read",
+        selection_signals={
+            "connector-coding": {"eligible": False, "health": 1.0},
+            "connector-coding-z": {"eligible": True, "health": 0.1},
+        },
+    )
+    assert ineligible_plan.rows[0].connector_id == "connector-coding-z"
+    assert ineligible_plan.rows[0].candidate_eligible == (False, True)
+
+    with pytest.raises(ArgumentError, match="credential"):
+        registry.select_adaptive_for_domains(
+            ("coding",),
+            capability="evidence_read",
+            selection_signals={"connector-coding": {"api_key": "must-not-enter"}},
+        )
+    with pytest.raises(ArgumentError, match="between"):
+        registry.select_adaptive_for_domains(
+            ("coding",),
+            capability="evidence_read",
+            selection_signals={"connector-coding": {"evaluator_reward": 2}},
+        )
+
+
 def test_connector_selection_plan_reports_missing_domains_without_authorizing_dispatch() -> None:
     registry = AutonomousConnectorRegistry([_registration("coding", lambda _manifest, _request: {"ok": True})])
     plan = registry.select_for_domains(("coding", "science"), capability="evidence_read")
@@ -159,6 +256,31 @@ def test_connector_selection_plan_reports_missing_domains_without_authorizing_di
     )
     with pytest.raises(ArgumentError, match="does not select"):
         AutonomousConnectorRuntime(registry).dispatch_from_plan(plan, request)
+
+
+def test_autonomous_agent_exposes_connector_planning_and_plan_bound_dispatch() -> None:
+    registry = AutonomousConnectorRegistry([_registration("coding", lambda _manifest, _request: {"agent": True})])
+    runtime = AutonomousConnectorRuntime(registry)
+    agent = AutonomousAgent(
+        object(),
+        LLMRuntime(),
+        connector_registry=registry,
+        connector_runtime=runtime,
+    )
+
+    assert agent.connector_catalogue()["connector_count"] == 1
+    plan = agent.connector_selection_plan(("coding",), capability="evidence_read")
+    request = replace(_request("coding"), selection_plan_digest=plan.plan_digest)
+    result = agent.dispatch_connector(plan, request)
+    assert result.value == {"agent": True}
+
+    adaptive = agent.connector_selection_plan(
+        ("coding",),
+        capability="evidence_read",
+        selection_signals={"connector-coding": {"health": 0.9, "evaluator_reward": 0.75}},
+    )
+    assert adaptive.strategy == "weighted_evidence"
+    assert agent.connector_catalogue()["secret_material"] == "never_returned"
 
 
 def test_connector_runtime_keeps_approval_scope_and_executor_errors_explicit() -> None:

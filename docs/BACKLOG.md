@@ -253,6 +253,10 @@ Connector planning now also emits a typed deterministic selection plan across th
 domains and capability. It retains candidate/manifest digests, binds the registry snapshot, and
 requires the reviewed plan digest before dispatch; health, cost, latency, and evaluator-ranked
 selection remain explicit caller-owned inputs rather than hidden heuristics.
+The adaptive selector now accepts only bounded caller/evaluator signals for health, success rate,
+latency, cost, evaluator reward, and eligibility. It records normalized scores and a signal digest,
+uses fixed weights with deterministic tie-breaking, and is exposed through `AutonomousAgent` so
+the façade can plan and dispatch the same reviewed route without introducing a second policy.
 The domain-workflow handoff now also has a retained verification boundary: callers can validate
 catalogue/contract/binding identity, rerun mission preflight, and optionally replay the original
 instantiation request before re-review. The verifier is intentionally structural and non-executing;

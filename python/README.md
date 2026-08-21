@@ -134,7 +134,14 @@ all candidate and manifest digests for review, and binds the registry snapshot t
 `dispatch_from_plan()` re-verifies the live registry and requires the request's
 `selection_plan_digest`; a changed manifest, missing domain, or connector mismatch fails before the
 executor is called. This is deliberately deterministic and inspectable—provider health, cost,
-latency, and evaluator-driven connector ranking can be layered on later as caller-owned plan inputs.
+latency, and evaluator-driven connector ranking are caller-owned plan inputs when supplied.
+When those inputs are available, pass bounded per-connector `selection_signals` to
+`select_adaptive_for_domains()` (health, success rate, evaluator reward in `[-1, 1]`, latency,
+cost, and eligibility). The weighted score is deterministic, ties resolve by connector ID, and the
+plan retains only normalized scores, eligibility, and a signal digest. `AutonomousAgent` exposes
+the same process through `connector_selection_plan()`, `connector_catalogue()`, and
+`dispatch_connector()`; the façade still never accepts a key or turns evaluator reward into
+authorization.
 
 The registry never accepts a raw key and does not perform network I/O. A caller-owned executor
 can invoke the existing source-plan, provider-handoff, or external-payload APIs and return a
