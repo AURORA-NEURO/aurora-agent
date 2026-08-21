@@ -288,6 +288,7 @@ export class AutonomousCapabilityRuntime {
   private readonly admitTool?: (tool: string) => boolean | string;
   private readonly journal?: AutonomousCapabilityJournalStore;
   private readonly cache = new Map<string, CachedExecution>();
+  private readonly inFlight = new Map<string, Promise<AutonomousCapabilityExecutionResult>>();
   private readonly rehydratedByRequest = new Map<string, AutonomousCapabilityExecutionRecord>();
   private readonly rehydratedByReplayKey = new Map<string, AutonomousCapabilityExecutionRecord>();
   private readonly history: AutonomousCapabilityExecutionRecord[] = [];
@@ -306,6 +307,26 @@ export class AutonomousCapabilityRuntime {
   }
 
   async execute(request: AutonomousCapabilityExecutionRequest, options: AutonomousCapabilityExecutionOptions = {}): Promise<AutonomousCapabilityExecutionResult> {
+    const normalized = normalizeRequest(request);
+    const requestDigest = await this.requestDigest(normalized);
+    const replayKeyDigest = normalized.replay_key === null ? null : await digestJson(normalized.replay_key);
+    const cacheKey = replayKeyDigest ?? requestDigest;
+    const pending = this.inFlight.get(cacheKey);
+    if (pending) {
+      const result = await pending;
+      if (result.record.request_digest !== requestDigest) throw new ProviderRuntimeError("capability replay key collides with different in-flight request metadata");
+      return copyResult(result, "replayed");
+    }
+    const execution = this.executeFresh(request, options);
+    this.inFlight.set(cacheKey, execution);
+    try {
+      return await execution;
+    } finally {
+      if (this.inFlight.get(cacheKey) === execution) this.inFlight.delete(cacheKey);
+    }
+  }
+
+  private async executeFresh(request: AutonomousCapabilityExecutionRequest, options: AutonomousCapabilityExecutionOptions = {}): Promise<AutonomousCapabilityExecutionResult> {
     const normalized = normalizeRequest(request);
     const argumentsDigest = await digestJson(normalized.arguments);
     const replayKeyDigest = normalized.replay_key === null ? null : await digestJson(normalized.replay_key);

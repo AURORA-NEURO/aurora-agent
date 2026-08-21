@@ -493,9 +493,18 @@ test("capability execution fails closed, replays completed work, and makes batch
   assert.equal(executions, 1);
   assert.equal(replay.record.output_digest, first.record.output_digest);
 
+  const concurrentRequest = { ...base, call_id: "concurrent", replay_key: "concurrent-key" };
+  const [concurrentFirst, concurrentReplay] = await Promise.all([
+    capabilities.execute(concurrentRequest),
+    capabilities.execute(concurrentRequest),
+  ]);
+  assert.equal(concurrentFirst.record.status, "completed");
+  assert.equal(concurrentReplay.record.replay, "replayed");
+  assert.equal(executions, 2, "identical concurrent requests must share one adapter dispatch");
+
   const wrongStage = await capabilities.execute({ ...base, call_id: "wrong-stage", replay_key: "wrong-stage", workflow_context: { ...context, stage_id: selected.stage_id === "implementation" ? "scope" : "implementation" } });
   assert.equal(wrongStage.record.status, "refused");
-  assert.equal(executions, 1);
+  assert.equal(executions, 2);
 
   const batch = await capabilities.executeBatch([
     { ...base, call_id: "batch-1", replay_key: "batch-1" },
@@ -507,7 +516,7 @@ test("capability execution fails closed, replays completed work, and makes batch
   assert.equal(batch.failed_count, 1);
   assert.equal(batch.omitted_count, 1);
   assert.equal(batch.items[2].omission_reason, "stopped_after_failure");
-  assert.equal(executions, 2);
+  assert.equal(executions, 3);
 });
 
 test("capability journal rehydrates replay identity without retaining adapter values", async () => {
