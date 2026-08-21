@@ -387,6 +387,19 @@ store. If the transient value is required, the caller must retain it in a separa
 application store and bind that store to its own digest/provenance policy; the autonomous runtime
 will not redispatch a completed capability merely to reconstruct a discarded value.
 
+Direct capability learning has the same restart discipline. `evaluateCapabilityExecution()` and
+`evaluateCapabilityExecutions()` pass only a metadata projection to the caller-owned evaluator,
+then settle an explicit reward through the local bandit callback. Provide an
+`InMemoryAutonomousCapabilityLearningSettlementStore` in tests or implement
+`AutonomousCapabilityLearningSettlementStore` over the application database. The in-memory store
+also implements `AutonomousCapabilityLearningSnapshotStore`: its bounded receipt snapshot is
+SHA-256 bound, validates every nested settlement and next-state digest, rejects duplicate keys,
+and can be flushed/restored with `AutonomousCapabilityLearningPersistenceCoordinator`. A replay
+loads the receipt and adopts its persisted next bandit state without re-running the evaluator or
+crediting the arm twice. Learning snapshots contain value-level reward and bandit metadata only;
+capability arguments, adapter values, prompts, responses, credentials, and raw evaluator evidence
+are rejected at the persistence boundary.
+
 `AutonomousAgent` is the application-facing composition layer for the autonomous brain. It covers
 the twelve reviewed domains (`coding`, `browser`, `data`, `science`, `biomedical`,
 `neuroscience`, `operations`, `enterprise`, `multi_agent`, `multimodal`, `cross_domain`, and

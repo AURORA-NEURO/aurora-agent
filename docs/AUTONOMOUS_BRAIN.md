@@ -2873,6 +2873,19 @@ adapter, rerun the evaluator, or increment the arm twice. Batch settlement is or
 select a model/tool arm per record, so direct capabilities and provider decision cycles can feed
 the same adaptation surface without retaining private execution values.
 
+The TypeScript settlement store is restart-capable, not merely an in-process replay cache. Its
+`AutonomousCapabilityLearningSnapshot` is a bounded, canonical SHA-256 image of sorted value-only
+receipts. Snapshot validation checks exact schema keys, receipt identity, nested settlement
+digests, next-bandit-state digests, duplicate settlement keys, capacity, and the explicit
+`capability_payloads_excluded` retention marker before any row is restored. Applications pair an
+`AutonomousCapabilityLearningSnapshotStore` with
+`AutonomousCapabilityLearningPersistenceCoordinator` to read/write the image through their own
+transactional database or object store. A failed or tampered restore is rejected before replacing
+the live map, and a malformed receipt returned by a custom store is validated again before it can
+be used as an idempotent replay barrier. The twelve built-in domains therefore share one
+restart/replay contract while keeping adapter values and raw evaluator evidence outside the
+learning journal.
+
 For an effectful tool, provide `tool_runtime=AutonomousDomainToolRuntime(...)` with an approval
 callback, or replace the default workspace adapter with an application executor that enforces
 identity, scope, idempotency, and operator policy. The agent never derives approval from the model,

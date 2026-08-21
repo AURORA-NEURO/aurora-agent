@@ -10,6 +10,8 @@ import {
   AutonomousCapabilityPersistenceError,
   AutonomousCapabilityRuntime,
   InMemoryAutonomousCapabilityLearningSettlementStore,
+  AutonomousCapabilityLearningPersistenceCoordinator,
+  validateAutonomousCapabilityLearningSnapshot,
   AutonomousCostBudgetError,
   AutonomousDomainToolRegistry,
   AutonomousDomainToolRuntime,
@@ -514,10 +516,12 @@ test("capability outcomes settle metadata-only evaluator credit across every dom
     assert.equal(result.record.status, "completed", profile.domain);
     results.push(result);
   }
+  let evaluatorCalls = 0;
   const evaluator = {
     evaluator_id: "capability-quality",
     evaluator_version: "2026-08-21",
     evaluate(input) {
+      evaluatorCalls += 1;
       assert.equal(input.value, undefined);
       assert.equal(input.arguments, undefined);
       assert.equal(input.response, undefined);
@@ -534,23 +538,50 @@ test("capability outcomes settle metadata-only evaluator credit across every dom
   assert.equal(settled.settlements.length, profiles.length);
   assert.equal(learner.snapshot().generation, profiles.length);
   assert.equal(new Set(learner.snapshot().arms.map((arm) => arm.arm_id)).size, profiles.length);
+  assert.equal(evaluatorCalls, profiles.length);
   assert.doesNotMatch(JSON.stringify(settled), /must never enter learning/);
+
+  let persistedSnapshot = null;
+  const persistence = new AutonomousCapabilityLearningPersistenceCoordinator(store, {
+    read: () => persistedSnapshot,
+    write: (snapshot) => { persistedSnapshot = structuredClone(snapshot); },
+  });
+  const flushed = await persistence.flush();
+  assert.equal(flushed.receipts.length, profiles.length);
+  assert.doesNotMatch(JSON.stringify(flushed), /must never enter learning/);
+  const restoredStore = new InMemoryAutonomousCapabilityLearningSettlementStore();
+  const restoredPersistence = new AutonomousCapabilityLearningPersistenceCoordinator(restoredStore, {
+    read: () => persistedSnapshot,
+    write: () => {},
+  });
+  const restoredSnapshot = await restoredPersistence.restore();
+  assert.equal(restoredSnapshot?.snapshot_digest, flushed.snapshot_digest);
+  const tamperedSnapshot = structuredClone(flushed);
+  tamperedSnapshot.snapshot_digest = "0".repeat(64);
+  await assert.rejects(() => validateAutonomousCapabilityLearningSnapshot(tamperedSnapshot), /digest/);
+  await assert.rejects(() => restoredStore.restore(tamperedSnapshot), /digest/);
+  assert.equal((await restoredStore.snapshot()).snapshot_digest, flushed.snapshot_digest);
+  const tamperedReceipt = structuredClone(flushed);
+  tamperedReceipt.receipts[0].settlement.reward = 0;
+  await assert.rejects(() => validateAutonomousCapabilityLearningSnapshot(tamperedReceipt), /digest/);
 
   const restartedLearner = new AutonomousOnlineLearner();
   const restarted = new AutonomousAgent(new LLMRuntime({ credentials: new CredentialStore() }), {
     toolCatalogue: catalogue,
     toolExecutor: async () => ({ ok: true }),
     learner: restartedLearner,
-    capabilityLearningSettlementStore: store,
+    capabilityLearningSettlementStore: restoredStore,
   });
-  const replay = await restarted.evaluateCapabilityExecution(results[0], {
+  const replayed = await restarted.evaluateCapabilityExecutions(results, {
     evaluator,
-    callerEvidence: { quality_gate: "passed" },
-    armId: `local-model:${results[0].record.domain}`,
+    evidence: Object.fromEntries(results.map((result) => [result.record.request_digest, { quality_gate: "passed" }])),
+    armIdFor: (record) => `local-model:${record.domain}`,
   });
-  assert.equal(replay.idempotent_replay, true);
-  assert.equal(restartedLearner.snapshot().generation, 1);
-  assert.equal(replay.next_state.arms[0].pulls, 1);
+  assert.equal(replayed.settlements.length, profiles.length);
+  assert.equal(replayed.settlements.every((settlement) => settlement.idempotent_replay), true);
+  assert.equal(evaluatorCalls, profiles.length);
+  assert.equal(restartedLearner.snapshot().generation, profiles.length);
+  assert.equal(replayed.settlements[0].next_state.arms[0].pulls, 1);
 
   const uncertain = { ...results[0].record, status: "reconciliation_required", output_digest: null, output_bytes: 0, observations: [], evidence_digest: null, evidence_status: "not_evaluated", missing_evidence_outputs: [...results[0].record.required_evidence_outputs] };
   await assert.rejects(() => agent.evaluateCapabilityExecution(uncertain, { evaluator, callerEvidence: { quality_gate: "failed" }, armId: "local-model:reconciled" }), /reconciliation_required/);

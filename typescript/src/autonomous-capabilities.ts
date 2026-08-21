@@ -23,7 +23,10 @@ export const MAX_AUTONOMOUS_CAPABILITY_HISTORY = 512;
 export const MAX_AUTONOMOUS_CAPABILITY_OBSERVATIONS = 128;
 export const AUTONOMOUS_CAPABILITY_LEARNING_SETTLEMENT_SCHEMA = "bioprism-typescript-autonomous-capability-learning-settlement/0.1" as const;
 export const AUTONOMOUS_CAPABILITY_LEARNING_RECEIPT_SCHEMA = "bioprism-typescript-autonomous-capability-learning-receipt/0.1" as const;
+export const AUTONOMOUS_CAPABILITY_LEARNING_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-capability-learning-snapshot/0.1" as const;
 export const MAX_AUTONOMOUS_CAPABILITY_LEARNING_EVIDENCE_BYTES = 256_000;
+export const MAX_AUTONOMOUS_CAPABILITY_LEARNING_RECEIPTS = 8_192;
+export const MAX_AUTONOMOUS_CAPABILITY_LEARNING_SNAPSHOT_BYTES = 4_000_000;
 
 export type AutonomousCapabilityExecutionStatus = "completed" | "approval_required" | "reconciliation_required" | "refused" | "failed";
 export type AutonomousCapabilityReplayStatus = "fresh" | "replayed";
@@ -218,6 +221,27 @@ export interface AutonomousCapabilityLearningSettlementReceipt extends JsonObjec
 export interface AutonomousCapabilityLearningSettlementStore {
   load(settlementKey: string): Promise<AutonomousCapabilityLearningSettlementReceipt | null> | AutonomousCapabilityLearningSettlementReceipt | null;
   save(receipt: AutonomousCapabilityLearningSettlementReceipt): Promise<void> | void;
+}
+
+/** Digest-bound restart image for the metadata-only capability learning receipt journal. */
+export interface AutonomousCapabilityLearningSnapshot extends JsonObject {
+  schema: typeof AUTONOMOUS_CAPABILITY_LEARNING_SNAPSHOT_SCHEMA;
+  receipts: AutonomousCapabilityLearningSettlementReceipt[];
+  retention: "value_only;capability_payloads_excluded";
+  secret_material: "never_returned";
+  snapshot_digest: string;
+}
+
+/** A settlement store with caller-owned restart snapshots. */
+export interface AutonomousCapabilityLearningSnapshotStore extends AutonomousCapabilityLearningSettlementStore {
+  snapshot(): Promise<AutonomousCapabilityLearningSnapshot>;
+  restore(snapshot: AutonomousCapabilityLearningSnapshot): Promise<void> | void;
+}
+
+/** Adapter contract for SQLite, Postgres, IndexedDB, object storage, or another durable owner. */
+export interface AutonomousCapabilityLearningSnapshotPersistence {
+  read(): Promise<AutonomousCapabilityLearningSnapshot | null> | AutonomousCapabilityLearningSnapshot | null;
+  write(snapshot: AutonomousCapabilityLearningSnapshot): Promise<void> | void;
 }
 
 export interface AutonomousCapabilityLearningRewardUpdate {
@@ -507,23 +531,186 @@ function cloneCapabilitySettlement(value: AutonomousCapabilityLearningSettlement
   return { ...structuredClone(value), idempotent_replay: idempotentReplay };
 }
 
+const CAPABILITY_LEARNING_SETTLEMENT_KEYS = [
+  "schema", "status", "request_digest", "execution_record_digest", "settlement_key", "settlement_digest", "arm_id",
+  "evaluator_id", "evaluator_version", "reward", "passed", "failed", "feedback_digest", "failure_class",
+  "caller_evidence_digest", "outcome_digest", "next_state", "next_state_digest", "idempotent_replay", "retention", "secret_material",
+] as const;
+
+const CAPABILITY_LEARNING_RECEIPT_KEYS = [
+  "schema", "settlement_key", "request_digest", "execution_record_digest", "evaluator_id", "evaluator_version",
+  "settlement_digest", "settlement", "retention", "secret_material",
+] as const;
+
+const CAPABILITY_LEARNING_SNAPSHOT_KEYS = ["schema", "receipts", "retention", "secret_material", "snapshot_digest"] as const;
+
+function exactCapabilityLearningKeys(value: JsonObject, allowed: readonly string[], name: string): void {
+  const expected = new Set(allowed);
+  if (Object.keys(value).some((key) => !expected.has(key)) || allowed.some((key) => !Object.prototype.hasOwnProperty.call(value, key))) throw new ArgumentError(`${name} contains unsupported or missing fields`);
+}
+
+function capabilityLearningJsonBytes(value: unknown, name: string, maximum: number): void {
+  let encoded: string | undefined;
+  try {
+    encoded = JSON.stringify(value);
+  } catch {
+    throw new ArgumentError(`${name} must be JSON serializable`);
+  }
+  if (typeof encoded !== "string" || bytes(encoded) > maximum) throw new ArgumentError(`${name} exceeds its byte capacity`);
+}
+
+async function validateCapabilityLearningSettlement(value: unknown): Promise<AutonomousCapabilityLearningSettlement> {
+  if (!isObject(value)) throw new ArgumentError("capability learning settlement must be an object");
+  exactCapabilityLearningKeys(value, CAPABILITY_LEARNING_SETTLEMENT_KEYS, "capability learning settlement");
+  if (value.schema !== AUTONOMOUS_CAPABILITY_LEARNING_SETTLEMENT_SCHEMA || value.status !== "settled") throw new ArgumentError("capability learning settlement schema is invalid");
+  if (value.retention !== "value_only;capability_payloads_excluded" || value.secret_material !== "never_returned") throw new ArgumentError("capability learning settlement retention markers are invalid");
+  const requestDigest = digestOrNull("capability learning settlement request_digest", value.request_digest);
+  const executionRecordDigest = digestOrNull("capability learning settlement execution_record_digest", value.execution_record_digest);
+  const settlementKey = boundedText("capability learning settlement settlement_key", value.settlement_key, 256);
+  const settlementDigest = digestOrNull("capability learning settlement settlement_digest", value.settlement_digest);
+  const armId = boundedText("capability learning settlement arm_id", value.arm_id, 512);
+  const evaluatorId = boundedIdentifier("capability learning settlement evaluator_id", value.evaluator_id);
+  const evaluatorVersion = boundedIdentifier("capability learning settlement evaluator_version", value.evaluator_version);
+  if (typeof value.reward !== "number" || !Number.isFinite(value.reward) || value.reward < -1 || value.reward > 1) throw new ArgumentError("capability learning settlement reward is outside [-1, 1]");
+  if (typeof value.passed !== "boolean" || typeof value.failed !== "boolean" || (value.passed && value.failed)) throw new ArgumentError("capability learning settlement outcome flags are contradictory");
+  const feedbackDigest = digestOrNull("capability learning settlement feedback_digest", value.feedback_digest);
+  const failureClass = value.failure_class === null ? null : boundedIdentifier("capability learning settlement failure_class", value.failure_class);
+  const callerEvidenceDigest = digestOrNull("capability learning settlement caller_evidence_digest", value.caller_evidence_digest);
+  const outcomeDigest = digestOrNull("capability learning settlement outcome_digest", value.outcome_digest);
+  const nextState = await boundedCapabilityLearningMetadata(value.next_state, "capability learning settlement next_state") as BrainBanditState;
+  const nextStateDigest = digestOrNull("capability learning settlement next_state_digest", value.next_state_digest);
+  if (!nextStateDigest || await digestJson(nextState) !== nextStateDigest) throw new ArgumentError("capability learning settlement next_state_digest does not match next_state");
+  if (typeof value.idempotent_replay !== "boolean") throw new ArgumentError("capability learning settlement idempotent_replay must be boolean");
+  const { settlement_digest: observed, ...descriptor } = value;
+  if (!settlementDigest || await digestJson(descriptor) !== observed) throw new ArgumentError("capability learning settlement digest does not match");
+  const normalized = {
+    schema: AUTONOMOUS_CAPABILITY_LEARNING_SETTLEMENT_SCHEMA,
+    status: "settled" as const,
+    request_digest: requestDigest!,
+    execution_record_digest: executionRecordDigest!,
+    settlement_key: settlementKey,
+    settlement_digest: settlementDigest,
+    arm_id: armId,
+    evaluator_id: evaluatorId,
+    evaluator_version: evaluatorVersion,
+    reward: value.reward,
+    passed: value.passed,
+    failed: value.failed,
+    feedback_digest: feedbackDigest,
+    failure_class: failureClass,
+    caller_evidence_digest: callerEvidenceDigest!,
+    outcome_digest: outcomeDigest!,
+    next_state: structuredClone(nextState),
+    next_state_digest: nextStateDigest!,
+    idempotent_replay: value.idempotent_replay,
+    retention: "value_only;capability_payloads_excluded" as const,
+    secret_material: "never_returned" as const,
+  } satisfies AutonomousCapabilityLearningSettlement;
+  capabilityLearningJsonBytes(normalized, "capability learning settlement", MAX_AUTONOMOUS_CAPABILITY_LEARNING_EVIDENCE_BYTES);
+  return normalized;
+}
+
+/** Validate a persisted capability-learning receipt, including its nested settlement digest. */
+export async function validateAutonomousCapabilityLearningSettlementReceipt(value: unknown): Promise<AutonomousCapabilityLearningSettlementReceipt> {
+  if (!isObject(value)) throw new ArgumentError("capability learning settlement receipt must be an object");
+  exactCapabilityLearningKeys(value, CAPABILITY_LEARNING_RECEIPT_KEYS, "capability learning settlement receipt");
+  if (value.schema !== AUTONOMOUS_CAPABILITY_LEARNING_RECEIPT_SCHEMA || value.retention !== "value_only;capability_payloads_excluded" || value.secret_material !== "never_returned") throw new ArgumentError("capability learning settlement receipt markers are invalid");
+  const settlementKey = boundedText("capability learning receipt settlement_key", value.settlement_key, 256);
+  const requestDigest = digestOrNull("capability learning receipt request_digest", value.request_digest);
+  const executionRecordDigest = digestOrNull("capability learning receipt execution_record_digest", value.execution_record_digest);
+  const evaluatorId = boundedIdentifier("capability learning receipt evaluator_id", value.evaluator_id);
+  const evaluatorVersion = boundedIdentifier("capability learning receipt evaluator_version", value.evaluator_version);
+  const settlementDigest = digestOrNull("capability learning receipt settlement_digest", value.settlement_digest);
+  const settlement = await validateCapabilityLearningSettlement(value.settlement);
+  if (settlement.idempotent_replay || settlement.settlement_key !== settlementKey || settlement.request_digest !== requestDigest || settlement.execution_record_digest !== executionRecordDigest || settlement.evaluator_id !== evaluatorId || settlement.evaluator_version !== evaluatorVersion || settlement.settlement_digest !== settlementDigest) throw new ArgumentError("capability learning receipt identity does not match its settlement");
+  const normalized = {
+    schema: AUTONOMOUS_CAPABILITY_LEARNING_RECEIPT_SCHEMA,
+    settlement_key: settlementKey,
+    request_digest: requestDigest!,
+    execution_record_digest: executionRecordDigest!,
+    evaluator_id: evaluatorId,
+    evaluator_version: evaluatorVersion,
+    settlement_digest: settlementDigest!,
+    settlement,
+    retention: "value_only;capability_payloads_excluded" as const,
+    secret_material: "never_returned" as const,
+  } satisfies AutonomousCapabilityLearningSettlementReceipt;
+  capabilityLearningJsonBytes(normalized, "capability learning settlement receipt", MAX_AUTONOMOUS_CAPABILITY_LEARNING_EVIDENCE_BYTES);
+  return normalized;
+}
+
+/** Validate and re-hash a complete capability-learning restart image. */
+export async function validateAutonomousCapabilityLearningSnapshot(value: unknown): Promise<AutonomousCapabilityLearningSnapshot> {
+  if (!isObject(value)) throw new ArgumentError("capability learning snapshot must be an object");
+  exactCapabilityLearningKeys(value, CAPABILITY_LEARNING_SNAPSHOT_KEYS, "capability learning snapshot");
+  if (value.schema !== AUTONOMOUS_CAPABILITY_LEARNING_SNAPSHOT_SCHEMA || value.retention !== "value_only;capability_payloads_excluded" || value.secret_material !== "never_returned") throw new ArgumentError("capability learning snapshot markers are invalid");
+  const snapshotDigest = digestOrNull("capability learning snapshot snapshot_digest", value.snapshot_digest);
+  if (!Array.isArray(value.receipts) || value.receipts.length > MAX_AUTONOMOUS_CAPABILITY_LEARNING_RECEIPTS) throw new ArgumentError("capability learning snapshot receipt capacity is exhausted");
+  const receipts: AutonomousCapabilityLearningSettlementReceipt[] = [];
+  const keys = new Set<string>();
+  for (const candidate of value.receipts) {
+    const receipt = await validateAutonomousCapabilityLearningSettlementReceipt(candidate);
+    if (keys.has(receipt.settlement_key)) throw new ArgumentError("capability learning snapshot contains duplicate settlement keys");
+    keys.add(receipt.settlement_key);
+    receipts.push(receipt);
+  }
+  const descriptor = { schema: AUTONOMOUS_CAPABILITY_LEARNING_SNAPSHOT_SCHEMA, receipts, retention: "value_only;capability_payloads_excluded" as const, secret_material: "never_returned" as const };
+  if (!snapshotDigest || await digestJson(descriptor) !== snapshotDigest) throw new ArgumentError("capability learning snapshot digest does not match");
+  const normalized = { ...descriptor, snapshot_digest: snapshotDigest } satisfies AutonomousCapabilityLearningSnapshot;
+  capabilityLearningJsonBytes(normalized, "capability learning snapshot", MAX_AUTONOMOUS_CAPABILITY_LEARNING_SNAPSHOT_BYTES);
+  return normalized;
+}
+
 /** Process-local default store; production callers should provide a durable implementation. */
-export class InMemoryAutonomousCapabilityLearningSettlementStore implements AutonomousCapabilityLearningSettlementStore {
+export class InMemoryAutonomousCapabilityLearningSettlementStore implements AutonomousCapabilityLearningSnapshotStore {
   private readonly receipts = new Map<string, AutonomousCapabilityLearningSettlementReceipt>();
 
-  load(settlementKey: string): AutonomousCapabilityLearningSettlementReceipt | null {
+  async load(settlementKey: string): Promise<AutonomousCapabilityLearningSettlementReceipt | null> {
     const key = boundedText("capability settlement key", settlementKey, 256);
     const receipt = this.receipts.get(key);
-    return receipt ? structuredClone(receipt) : null;
+    return receipt ? validateAutonomousCapabilityLearningSettlementReceipt(structuredClone(receipt)) : null;
   }
 
-  save(receipt: AutonomousCapabilityLearningSettlementReceipt): void {
-    if (!isObject(receipt) || receipt.schema !== AUTONOMOUS_CAPABILITY_LEARNING_RECEIPT_SCHEMA) throw new ArgumentError("capability learning settlement receipt is malformed");
-    const key = boundedText("capability settlement key", receipt.settlement_key, 256);
+  async save(receipt: AutonomousCapabilityLearningSettlementReceipt): Promise<void> {
+    const normalized = await validateAutonomousCapabilityLearningSettlementReceipt(receipt);
+    const key = boundedText("capability settlement key", normalized.settlement_key, 256);
     const prior = this.receipts.get(key);
-    if (prior && (prior.request_digest !== receipt.request_digest || prior.execution_record_digest !== receipt.execution_record_digest || prior.settlement_digest !== receipt.settlement_digest)) throw new ArgumentError(`capability settlement ${key} conflicts with an existing identity`);
-    if (!prior && this.receipts.size >= 8_192) throw new ArgumentError("capability learning settlement store is full");
-    this.receipts.set(key, structuredClone(receipt));
+    if (prior && (prior.request_digest !== normalized.request_digest || prior.execution_record_digest !== normalized.execution_record_digest || prior.settlement_digest !== normalized.settlement_digest)) throw new ArgumentError(`capability settlement ${key} conflicts with an existing identity`);
+    if (!prior && this.receipts.size >= MAX_AUTONOMOUS_CAPABILITY_LEARNING_RECEIPTS) throw new ArgumentError("capability learning settlement store is full");
+    this.receipts.set(key, structuredClone(normalized));
+  }
+
+  async snapshot(): Promise<AutonomousCapabilityLearningSnapshot> {
+    const receipts = [] as AutonomousCapabilityLearningSettlementReceipt[];
+    for (const receipt of [...this.receipts.values()].sort((left, right) => left.settlement_key.localeCompare(right.settlement_key))) receipts.push(await validateAutonomousCapabilityLearningSettlementReceipt(structuredClone(receipt)));
+    const descriptor = { schema: AUTONOMOUS_CAPABILITY_LEARNING_SNAPSHOT_SCHEMA, receipts, retention: "value_only;capability_payloads_excluded" as const, secret_material: "never_returned" as const };
+    return validateAutonomousCapabilityLearningSnapshot({ ...descriptor, snapshot_digest: await digestJson(descriptor) });
+  }
+
+  async restore(snapshot: AutonomousCapabilityLearningSnapshot): Promise<void> {
+    const validated = await validateAutonomousCapabilityLearningSnapshot(snapshot);
+    this.receipts.clear();
+    for (const receipt of validated.receipts) this.receipts.set(receipt.settlement_key, structuredClone(receipt));
+  }
+}
+
+/** Coordinates capability-learning restart images with caller-owned durable storage. */
+export class AutonomousCapabilityLearningPersistenceCoordinator {
+  constructor(readonly store: AutonomousCapabilityLearningSnapshotStore, readonly persistence: AutonomousCapabilityLearningSnapshotPersistence) {
+    if (!store || typeof store.snapshot !== "function" || typeof store.restore !== "function") throw new ArgumentError("capability learning persistence requires a snapshot-capable store");
+    if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new ArgumentError("capability learning persistence adapter is malformed");
+  }
+
+  async restore(): Promise<AutonomousCapabilityLearningSnapshot | null> {
+    const snapshot = await this.persistence.read();
+    if (snapshot) await this.store.restore(snapshot);
+    return snapshot;
+  }
+
+  async flush(): Promise<AutonomousCapabilityLearningSnapshot> {
+    const snapshot = await this.store.snapshot();
+    await this.persistence.write(snapshot);
+    return snapshot;
   }
 }
 
@@ -543,7 +730,8 @@ export async function settleAutonomousCapabilityLearning(
   const settlementKey = boundedText("capability settlement key", options.idempotencyKey ?? await digestJson({ schema: AUTONOMOUS_CAPABILITY_LEARNING_SETTLEMENT_SCHEMA, request_digest: record.request_digest, execution_record_digest: input.execution_record_digest, evaluator_id: options.evaluator.evaluator_id, evaluator_version: options.evaluator.evaluator_version, input_digest: inputDigest }), 256);
   const store = options.settlementStore ?? new InMemoryAutonomousCapabilityLearningSettlementStore();
   if (!store || typeof store.load !== "function" || typeof store.save !== "function") throw new ArgumentError("capability learning settlement store is malformed");
-  const prior = await store.load(settlementKey);
+  const loadedPrior = await store.load(settlementKey);
+  const prior = loadedPrior ? await validateAutonomousCapabilityLearningSettlementReceipt(loadedPrior) : null;
   if (prior) {
     if (prior.request_digest !== record.request_digest || prior.execution_record_digest !== input.execution_record_digest || prior.evaluator_id !== options.evaluator.evaluator_id || prior.evaluator_version !== options.evaluator.evaluator_version) throw new ArgumentError(`capability settlement ${settlementKey} conflicts with a different identity`);
     return cloneCapabilitySettlement(prior.settlement, true);
@@ -569,7 +757,8 @@ export async function settleAutonomousCapabilityLearning(
   try {
     await store.save(receipt);
   } catch (error) {
-    const observed = await store.load(settlementKey);
+    const loadedObserved = await store.load(settlementKey);
+    const observed = loadedObserved ? await validateAutonomousCapabilityLearningSettlementReceipt(loadedObserved) : null;
     if (!observed || observed.settlement_digest !== settlement.settlement_digest) throw error;
     return cloneCapabilitySettlement(observed.settlement, true);
   }
