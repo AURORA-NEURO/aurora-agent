@@ -110,6 +110,8 @@ MAX_MODEL_SELECTION_AUDIT_INPUT_RANKING = 512
 MAX_MODEL_SELECTION_AUDIT_REASON_BYTES = 512
 MODEL_SELECTION_AUDIT_SCHEMA = "bioprism-brain-selection-audit/0.1"
 BRAIN_EVALUATOR_REPLAY_SCHEMA = "bioprism-brain-evaluator-replay/0.1"
+BRAIN_EVALUATOR_MESH_SCHEMA = "bioprism-python-autonomous-evaluator-mesh/0.1"
+AUTONOMOUS_EVALUATOR_MESH_SCHEMA = BRAIN_EVALUATOR_MESH_SCHEMA
 BRAIN_LEARNING_EPISODE_SCHEMA = "bioprism-brain-learning-episode/0.1"
 BRAIN_LEARNING_TRAJECTORY_SCHEMA = "bioprism-brain-learning-trajectory/0.1"
 BRAIN_CONTEXT_LEARNING_STATE_SCHEMA = "bioprism-brain-context-learning-state/0.1"
@@ -6882,3 +6884,322 @@ class BrainOutcomeEvaluator:
             replay_metadata=replay,
         )
         return decision, report
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousEvaluatorMeshResult:
+    """Value-only quorum result for independent evaluator decisions.
+
+    A mesh result intentionally contains no evaluator exception, instruction, provider output, or
+    evidence packet.  It is an audit projection: disagreement and member failure are first-class
+    outcomes and cannot be averaged into a reward that would train the bandit.
+    """
+
+    schema: str
+    status: str
+    evaluator_id: str
+    evaluator_version: str
+    reward: float | None
+    passed: bool | None
+    failed: bool
+    replan_requested: bool
+    feedback_digest: str | None
+    evidence_digest: str | None
+    failure_class: str | None
+    reward_spread: float | None
+    max_reward_spread: float
+    member_results: tuple[Mapping[str, Any], ...]
+    member_results_digest: str
+    mesh_digest: str
+    retention: str = "value_only_evaluator_mesh"
+    secret_material: str = "never_returned"
+
+    def _descriptor(self) -> dict[str, Any]:
+        return {
+            "schema": self.schema,
+            "status": self.status,
+            "evaluator_id": self.evaluator_id,
+            "evaluator_version": self.evaluator_version,
+            "reward": self.reward,
+            "passed": self.passed,
+            "failed": self.failed,
+            "replan_requested": self.replan_requested,
+            "feedback_digest": self.feedback_digest,
+            "evidence_digest": self.evidence_digest,
+            "failure_class": self.failure_class,
+            "reward_spread": self.reward_spread,
+            "max_reward_spread": self.max_reward_spread,
+            "member_results": [dict(member) for member in self.member_results],
+            "member_results_digest": self.member_results_digest,
+            "retention": self.retention,
+            "secret_material": self.secret_material,
+        }
+
+    def __post_init__(self) -> None:
+        if self.schema != BRAIN_EVALUATOR_MESH_SCHEMA:
+            raise BrainRunError("evaluator mesh result has an invalid schema")
+        if self.status not in {"accepted", "disagreement", "member_error"}:
+            raise BrainRunError("evaluator mesh result has an invalid status")
+        BrainEvaluatorDecision(
+            evaluator_id=self.evaluator_id,
+            evaluator_version=self.evaluator_version,
+            reward=0.0 if self.reward is None else self.reward,
+            passed=False if self.passed is None else self.passed,
+            failed=self.failed,
+            feedback_digest=self.feedback_digest,
+            failure_class=self.failure_class,
+            evidence_digest=self.evidence_digest,
+            replan_requested=self.replan_requested,
+            replan_instruction=None,
+        )
+        if self.reward is not None and not -1.0 <= float(self.reward) <= 1.0:
+            raise BrainRunError("evaluator mesh reward must be within [-1, 1]")
+        if self.reward_spread is not None and not 0.0 <= float(self.reward_spread) <= 2.0:
+            raise BrainRunError("evaluator mesh reward_spread must be within [0, 2]")
+        if not isinstance(self.max_reward_spread, (int, float)) or isinstance(self.max_reward_spread, bool) or not 0.0 <= float(self.max_reward_spread) <= 1.0:
+            raise BrainRunError("evaluator mesh max_reward_spread must be within [0, 1]")
+        if not isinstance(self.member_results, Sequence) or isinstance(self.member_results, (str, bytes)) or not 2 <= len(self.member_results) <= 8:
+            raise BrainRunError("evaluator mesh result must contain between 2 and 8 member results")
+        BrainLearningLedger._assert_safe(self.member_results)
+        if self.status == "accepted" and (self.reward is None or self.passed is None):
+            raise BrainRunError("accepted evaluator mesh result must contain reward and passed")
+        if self.status != "accepted" and (self.reward is not None or self.passed is not None):
+            raise BrainRunError("refused evaluator mesh result cannot contain learning credit")
+        member_ids: set[str] = set()
+        allowed_member_fields = {
+            "evaluator_id",
+            "evaluator_version",
+            "reward",
+            "passed",
+            "failed",
+            "replan_requested",
+            "feedback_digest",
+            "evidence_digest",
+            "failure_class",
+            "decision_digest",
+        }
+        for member in self.member_results:
+            if not isinstance(member, Mapping) or set(member).difference(allowed_member_fields):
+                raise BrainRunError("evaluator mesh member result contains unsupported fields")
+            member_id = member.get("evaluator_id")
+            member_version = member.get("evaluator_version")
+            if not isinstance(member_id, str) or not member_id.strip() or not isinstance(member_version, str) or not member_version.strip() or member_id in member_ids:
+                raise BrainRunError("evaluator mesh member identity is malformed or duplicated")
+            member_ids.add(member_id)
+            reward = member.get("reward")
+            passed = member.get("passed")
+            if reward is None or passed is None:
+                if member.get("failure_class") not in {"evaluator_member_error", "evaluator_member_invalid"}:
+                    raise BrainRunError("evaluator mesh member refusal is missing its failure class")
+            else:
+                BrainEvaluatorDecision(
+                    evaluator_id=member_id,
+                    evaluator_version=member_version,
+                    reward=reward,
+                    passed=passed,
+                    failed=member.get("failed", not passed),
+                    feedback_digest=member.get("feedback_digest"),
+                    failure_class=member.get("failure_class"),
+                    evidence_digest=member.get("evidence_digest"),
+                    replan_requested=member.get("replan_requested", False),
+                )
+            decision_digest = member.get("decision_digest")
+            if decision_digest is not None:
+                without_digest = dict(member)
+                without_digest.pop("decision_digest", None)
+                if decision_digest != _json_digest(without_digest):
+                    raise BrainRunError("evaluator mesh member decision_digest is invalid")
+        if not _valid_digest(self.member_results_digest) or _json_digest(list(self.member_results)) != self.member_results_digest:
+            raise BrainRunError("evaluator mesh member_results_digest is invalid")
+        if self.retention != "value_only_evaluator_mesh" or self.secret_material != "never_returned":
+            raise BrainRunError("evaluator mesh retention markers are invalid")
+        if self.mesh_digest != _json_digest(self._descriptor()):
+            raise BrainRunError("evaluator mesh mesh_digest is invalid")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {**self._descriptor(), "mesh_digest": self.mesh_digest}
+
+
+class AutonomousEvaluatorMesh(BrainOutcomeEvaluator):
+    """Gate Python learning credit on agreement from bounded independent evaluators.
+
+    The class is a normal :class:`BrainOutcomeEvaluator`, so it can be passed directly to
+    ``evaluate_and_record``, workflow learning, trajectory settlement, mission learning, or
+    offline value-only replay.  Each member receives the same projected evaluator input.  A
+    member exception or disagreement raises at the learning boundary; callers can inspect the
+    value-only refusal with :meth:`evaluate_detailed` without granting credit.
+    """
+
+    def __init__(
+        self,
+        members: Sequence[BrainOutcomeEvaluator],
+        *,
+        evaluator_id: str = "python-evaluator-mesh",
+        evaluator_version: str = "0.1",
+        max_reward_spread: float = 0.1,
+    ) -> None:
+        if not isinstance(members, Sequence) or isinstance(members, (str, bytes)) or not 2 <= len(members) <= 8:
+            raise BrainRunError("evaluator mesh requires between 2 and 8 independent members")
+        if not isinstance(max_reward_spread, (int, float)) or isinstance(max_reward_spread, bool) or not 0.0 <= float(max_reward_spread) <= 1.0:
+            raise BrainRunError("evaluator mesh max_reward_spread must be within [0, 1]")
+        normalized = tuple(members)
+        if any(not isinstance(member, BrainOutcomeEvaluator) for member in normalized):
+            raise BrainRunError("evaluator mesh members must be BrainOutcomeEvaluator instances")
+        identities = [(member.evaluator_id, member.evaluator_version) for member in normalized]
+        if len({identity[0] for identity in identities}) != len(identities):
+            raise BrainRunError("evaluator mesh member evaluator_id values must be unique")
+        self.members = normalized
+        self.max_reward_spread = float(max_reward_spread)
+        super().__init__(
+            lambda _input: {"reward": 0.0, "passed": False},
+            evaluator_id=evaluator_id,
+            evaluator_version=evaluator_version,
+        )
+
+    @staticmethod
+    def _projection(member: BrainOutcomeEvaluator, decision: BrainEvaluatorDecision) -> dict[str, Any]:
+        projection = {
+            "evaluator_id": member.evaluator_id,
+            "evaluator_version": member.evaluator_version,
+            "reward": float(decision.reward),
+            "passed": decision.passed,
+            "failed": decision.failed,
+            "replan_requested": decision.replan_requested,
+            "feedback_digest": decision.feedback_digest,
+            "evidence_digest": decision.evidence_digest,
+            "failure_class": decision.failure_class,
+        }
+        projection["decision_digest"] = _json_digest(projection)
+        return projection
+
+    def _evaluate_input(self, evaluation_input: Mapping[str, Any]) -> AutonomousEvaluatorMeshResult:
+        if not isinstance(evaluation_input, Mapping):
+            raise BrainRunError("evaluator mesh input must be a mapping")
+        expected_evidence_digest = evaluation_input.get("evidence_digest")
+        if expected_evidence_digest is not None and not _valid_digest(expected_evidence_digest):
+            raise BrainRunError("evaluator mesh input evidence_digest is malformed")
+        projections: list[dict[str, Any]] = []
+        for member in self.members:
+            try:
+                decision = member._assess_input(evaluation_input)
+                projections.append(self._projection(member, decision))
+            except Exception:
+                projections.append(
+                    {
+                        "evaluator_id": member.evaluator_id,
+                        "evaluator_version": member.evaluator_version,
+                        "reward": None,
+                        "passed": None,
+                        "failed": True,
+                        "replan_requested": True,
+                        "feedback_digest": None,
+                        "evidence_digest": None,
+                        "failure_class": "evaluator_member_error",
+                        "decision_digest": None,
+                    }
+                )
+        member_results_digest = _json_digest(projections)
+        member_error = any(item["failure_class"] == "evaluator_member_error" for item in projections)
+        status = "accepted"
+        reward: float | None = None
+        passed: bool | None = None
+        failed = False
+        replan_requested = False
+        failure_class: str | None = None
+        reward_spread: float | None = None
+        if member_error:
+            status = "member_error"
+            failed = True
+            replan_requested = True
+            failure_class = "evaluator_mesh_member_error"
+        else:
+            rewards = [float(item["reward"]) for item in projections]
+            reward_spread = round(max(rewards) - min(rewards), 12)
+            first = projections[0]
+            agreement = all(
+                item["passed"] == first["passed"]
+                and item["failed"] == first["failed"]
+                and item["replan_requested"] == first["replan_requested"]
+                and item["failure_class"] == first["failure_class"]
+                for item in projections
+            ) and reward_spread <= self.max_reward_spread
+            if agreement:
+                reward = round(sum(rewards) / len(rewards), 12)
+                passed = bool(first["passed"])
+                failed = bool(first["failed"])
+                replan_requested = bool(first["replan_requested"])
+                failure_class = first["failure_class"]
+            else:
+                status = "disagreement"
+                failed = True
+                replan_requested = True
+                failure_class = "evaluator_disagreement"
+        descriptor = {
+            "schema": BRAIN_EVALUATOR_MESH_SCHEMA,
+            "status": status,
+            "evaluator_id": self.evaluator_id,
+            "evaluator_version": self.evaluator_version,
+            "reward": reward,
+            "passed": passed,
+            "failed": failed,
+            "replan_requested": replan_requested,
+            "feedback_digest": member_results_digest,
+            "evidence_digest": expected_evidence_digest,
+            "failure_class": failure_class,
+            "reward_spread": reward_spread,
+            "max_reward_spread": self.max_reward_spread,
+            "member_results": projections,
+            "member_results_digest": member_results_digest,
+            "retention": "value_only_evaluator_mesh",
+            "secret_material": "never_returned",
+        }
+        return AutonomousEvaluatorMeshResult(
+            **descriptor,
+            mesh_digest=_json_digest(descriptor),
+        )
+
+    def evaluate_detailed(
+        self,
+        result: BrainRunResult | BrainToolLoopResult | BrainMissionResult,
+        *,
+        evidence: Mapping[str, Any] | None = None,
+    ) -> AutonomousEvaluatorMeshResult:
+        """Return the bounded mesh projection without granting or recording learning credit."""
+
+        return self._evaluate_input(build_brain_evaluation_input(result, evidence=evidence))
+
+    def evaluate_detailed_value_only_input(self, evaluation_input: Mapping[str, Any]) -> AutonomousEvaluatorMeshResult:
+        """Evaluate a caller-rehydrated projected input without provider access."""
+
+        if not isinstance(evaluation_input, Mapping):
+            raise BrainRunError("evaluator mesh value-only input must be a mapping")
+        BrainLearningLedger._assert_safe(evaluation_input)
+        try:
+            encoded = json.dumps(
+                dict(evaluation_input),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        except (TypeError, ValueError) as error:
+            raise BrainRunError("evaluator mesh value-only input must be JSON-safe") from error
+        if len(encoded) > MAX_BRAIN_EVALUATOR_INPUT_BYTES:
+            raise BrainRunError("evaluator mesh value-only input exceeds the bounded size")
+        return self._evaluate_input(json.loads(encoded.decode("utf-8")))
+
+    def _assess_input(self, evaluation_input: Mapping[str, Any]) -> BrainEvaluatorDecision:
+        mesh = self._evaluate_input(evaluation_input)
+        if mesh.status != "accepted" or mesh.reward is None or mesh.passed is None:
+            raise BrainRunError(f"evaluator mesh refused learning credit: {mesh.failure_class or mesh.status}")
+        return BrainEvaluatorDecision(
+            evaluator_id=self.evaluator_id,
+            evaluator_version=self.evaluator_version,
+            reward=mesh.reward,
+            passed=mesh.passed,
+            failed=mesh.failed,
+            feedback_digest=mesh.feedback_digest,
+            failure_class=mesh.failure_class,
+            evidence_digest=mesh.evidence_digest,
+            replan_requested=mesh.replan_requested,
+        )

@@ -65,6 +65,12 @@ domain/capability/risk/task-family digest selects a nested contextual arm ledger
 remain only a cold-start prior. Evaluator settlement sends the digest and bounded context identity
 through `brain_outcome_record`; replay receipts bind that identity, so reward from one domain cannot
 silently update another domain's model policy.
+`AutonomousEvaluatorMesh` is a drop-in `BrainOutcomeEvaluator` for higher-assurance runs: it calls
+two through eight caller-owned evaluator members over the same projected input, accepts only bounded
+reward spread plus pass/fail, failure-class, and replan agreement, and refuses bandit credit on
+disagreement or member error. Its detailed result and value-only replay seam retain member identities
+and digests only, so the same quorum gate applies to provider runs, tool loops, missions, workflows,
+and all twelve autonomous domain contexts.
 
 Approval-required missions are never completed as proposals: the worker parks them in
 `waiting_approval`, records only a request digest and bounded scope, and requeues them only after

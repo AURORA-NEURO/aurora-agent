@@ -2715,6 +2715,15 @@ outputs, and disagreement produce a value-only refusal status; they never silent
 credit and never retain the underlying error or provider result. Because the mesh is defined over
 the shared run contract, the same policy applies to all twelve built-in domains.
 
+The Python façade exposes the same boundary as `AutonomousEvaluatorMesh`, a
+`BrainOutcomeEvaluator` adapter that can be passed directly to `evaluate_and_record`, workflow or
+mission learning, trajectory settlement, and value-only replay. Its members receive the same
+projected evaluator input, including the canonical evidence digest, while the returned decision
+contains only the mesh identity, bounded reward, status, and digests. `evaluate_detailed()` lets an
+operator retain a refusal projection for review without turning disagreement or a member exception
+into a learner update. This makes independent quality signals usable at the actual Python learning
+boundary rather than leaving consensus as an audit-only helper.
+
 ## Structured decisions and multi-step work
 
 `AutonomousBrain.run_mission(...)` is the bridge from a model response to the existing mission
