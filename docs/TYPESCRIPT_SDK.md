@@ -1907,6 +1907,18 @@ projections and digests suitable for persistence. Each attempt is independently 
 the caller-owned workflow checkpoint store; approval, blocked-stage retry, effect reconciliation,
 and task/credential rehydration remain explicit worker decisions.
 
+The supervisor can also persist its orchestration boundary. Supply `cycleId` plus an
+`AutonomousWorkflowCycleStateStore` to retain hash-linked phase metadata across process restarts.
+The state ledger records only task/workflow/outcome/evaluator/settlement digests, bounded status
+labels, episode IDs, trajectory IDs, and checkpoint identities. It rejects payload-bearing fields,
+credential-shaped material, missing required metadata, digest drift, generation forks, and
+snapshot tampering. `rehydrateExecution` is required for an interrupted provider outcome,
+`rehydrateEvaluation` is required after an evaluation has been recorded but settlement did not
+finish, and `rehydrateReplanInstruction` is required for a transient evaluator handoff. Each
+rehydrated value is screened and compared with the persisted digest before any provider or learner
+boundary is crossed. `InMemoryAutonomousWorkflowCycleStateStore` is a bounded reference store;
+`AutonomousWorkflowCyclePersistenceCoordinator` connects it to caller-owned durable storage.
+
 ### Durable job-controller handoff
 
 `AutonomousDurableJobController` provides the concrete handoff between those two planes. Its

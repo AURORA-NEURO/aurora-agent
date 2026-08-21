@@ -10,6 +10,7 @@ import {
   InMemoryAutonomousLearningEpisodeStore,
   InMemoryAutonomousLearningTrajectoryStore,
   InMemoryAutonomousWorkflowCheckpointStore,
+  InMemoryAutonomousWorkflowCycleStateStore,
   LLMRuntime,
   builtinAutonomousDomainProfiles,
   openaiCompatibleProvider,
@@ -145,4 +146,164 @@ test("workflow cycle refuses credential-shaped evaluator guidance before another
     /credential-shaped material/,
   );
   assert.equal(calls, 1);
+});
+
+test("workflow cycle persists the evaluator boundary and rehydrates without replaying provider work", async () => {
+  let providerCalls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      providerCalls += 1;
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify(stagePayload(init)) }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("cycle-provider", "https://cycle.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel(model());
+  const checkpointStore = new InMemoryAutonomousWorkflowCheckpointStore();
+  const cycleStore = new InMemoryAutonomousWorkflowCycleStateStore();
+  const executor = new AutonomousWorkflowExecutor(agent, checkpointStore);
+  const task = "Persist this coding workflow evaluator boundary.";
+  let capturedExecution;
+  await assert.rejects(
+    () => runAutonomousWorkflowCycle(task, executor, {
+      domain: "coding",
+      candidates: agent.models(),
+      approveProviderCall: true,
+      cycleId: "persistent-cycle-1",
+      jobId: "persistent-workflow-1",
+      stateStore: cycleStore,
+      evaluate: async (execution) => {
+        capturedExecution = execution;
+        throw new Error("simulated evaluator interruption");
+      },
+    }),
+    /simulated evaluator interruption/,
+  );
+  assert.equal(providerCalls, 5);
+  const pending = await cycleStore.load("persistent-cycle-1");
+  assert.equal(pending.phase, "evaluation_pending");
+  assert.equal(JSON.stringify(pending).includes(task), false);
+  assert.equal(JSON.stringify(pending).includes("evidence-scope"), false);
+
+  const resumed = await runAutonomousWorkflowCycle(task, executor, {
+    domain: "coding",
+    candidates: agent.models(),
+    approveProviderCall: true,
+    cycleId: "persistent-cycle-1",
+    jobId: "persistent-workflow-1",
+    stateStore: cycleStore,
+    rehydrateExecution: async (context) => {
+      assert.equal(context.phase, "evaluation_pending");
+      return capturedExecution;
+    },
+    evaluate: async (execution) => ({ evidence: perfectEvidence(execution) }),
+  });
+  assert.equal(resumed.status, "completed");
+  assert.equal(resumed.attempts.length, 1);
+  assert.equal(providerCalls, 5, "rehydrating the evaluator boundary must not dispatch another provider call");
+
+  const terminal = await cycleStore.load("persistent-cycle-1");
+  assert.equal(terminal.phase, "terminal");
+  assert.equal(terminal.evaluations.length, 1);
+  const replayed = await runAutonomousWorkflowCycle(task, executor, {
+    domain: "coding",
+    candidates: agent.models(),
+    approveProviderCall: true,
+    cycleId: "persistent-cycle-1",
+    jobId: "persistent-workflow-1",
+    stateStore: cycleStore,
+    evaluate: async () => { throw new Error("terminal replay must not evaluate"); },
+  });
+  assert.equal(replayed.final, null);
+  assert.equal(replayed.status, "completed");
+  assert.equal(providerCalls, 5);
+});
+
+test("workflow cycle state snapshots are digest-bound and metadata-only", async () => {
+  const store = new InMemoryAutonomousWorkflowCycleStateStore();
+  const persistence = {
+    value: null,
+    async read() { return this.value; },
+    async write(snapshot) { this.value = snapshot; },
+  };
+  // A cycle state is produced by the supervisor; this adapter test uses a completed cycle to
+  // verify the production snapshot bridge without retaining the private execution response.
+  const agent = await makeAgent();
+  const executor = new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore());
+  await runAutonomousWorkflowCycle("Snapshot this coding cycle.", executor, {
+    domain: "coding",
+    candidates: agent.models(),
+    approveProviderCall: true,
+    cycleId: "snapshot-cycle-1",
+    jobId: "snapshot-workflow-1",
+    stateStore: store,
+    evaluate: async (execution) => ({ evidence: perfectEvidence(execution) }),
+  });
+  const coordinator = new (await import("../dist/index.js")).AutonomousWorkflowCyclePersistenceCoordinator(store, persistence);
+  const flushed = await coordinator.flush();
+  assert.equal(flushed.retention, "metadata_only");
+  assert.equal(JSON.stringify(persistence.value).includes("Snapshot this coding cycle"), false);
+  const restoredStore = new InMemoryAutonomousWorkflowCycleStateStore();
+  const restoredCoordinator = new (await import("../dist/index.js")).AutonomousWorkflowCyclePersistenceCoordinator(restoredStore, persistence);
+  const restored = await restoredCoordinator.restore();
+  assert.equal(restored.restored, true);
+  assert.equal(restored.cycles, 1);
+  const tampered = structuredClone(persistence.value);
+  tampered.states[0].terminal_status = "failed";
+  persistence.value = tampered;
+  await assert.rejects(() => restoredCoordinator.restore(), /digest/);
+});
+
+test("workflow cycle rehydrates screened evaluator guidance from a restart handoff", async () => {
+  const agent = await makeAgent();
+  const checkpointStore = new InMemoryAutonomousWorkflowCheckpointStore();
+  const cycleStore = new InMemoryAutonomousWorkflowCycleStateStore();
+  const executor = new AutonomousWorkflowExecutor(agent, checkpointStore);
+  const originalStart = executor.start.bind(executor);
+  let starts = 0;
+  executor.start = async (...args) => {
+    starts += 1;
+    if (starts === 2) throw new Error("simulated worker interruption after replan handoff");
+    return originalStart(...args);
+  };
+  const task = "Restart this evaluator-guided coding workflow.";
+  await assert.rejects(
+    () => runAutonomousWorkflowCycle(task, executor, {
+      domain: "coding",
+      candidates: agent.models(),
+      approveProviderCall: true,
+      cycleId: "handoff-cycle-1",
+      jobId: "handoff-workflow-1",
+      maxReplans: 1,
+      stateStore: cycleStore,
+      evaluate: async (execution) => ({
+        evidence: perfectEvidence(execution),
+        replan_requested: true,
+        replan_instruction: "Add an independent verification pass.",
+      }),
+    }),
+    /simulated worker interruption/,
+  );
+  const handoff = await cycleStore.load("handoff-cycle-1");
+  assert.equal(handoff.phase, "execution_pending");
+  executor.start = originalStart;
+  const resumed = await runAutonomousWorkflowCycle(task, executor, {
+    domain: "coding",
+    candidates: agent.models(),
+    approveProviderCall: true,
+    cycleId: "handoff-cycle-1",
+    jobId: "handoff-workflow-1",
+    maxReplans: 1,
+    stateStore: cycleStore,
+    rehydrateReplanInstruction: async (context) => {
+      assert.equal(context.phase, "execution_pending");
+      return "Add an independent verification pass.";
+    },
+    evaluate: async (execution) => ({ evidence: perfectEvidence(execution) }),
+  });
+  assert.equal(resumed.status, "completed");
+  assert.equal(resumed.attempts.length, 2);
+  assert.equal(resumed.evaluations.length, 2);
+  assert.equal((await cycleStore.load("handoff-cycle-1")).phase, "terminal");
 });

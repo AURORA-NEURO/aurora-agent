@@ -624,6 +624,29 @@ export type {
   AutonomousWorkflowCycleResult,
 } from "./autonomous-workflow-cycle.js";
 export {
+  AUTONOMOUS_WORKFLOW_CYCLE_STATE_SCHEMA,
+  AUTONOMOUS_WORKFLOW_CYCLE_SNAPSHOT_SCHEMA,
+  AUTONOMOUS_WORKFLOW_CYCLE_MAX_ATTEMPTS,
+  AUTONOMOUS_WORKFLOW_CYCLE_MAX_STATES,
+  AUTONOMOUS_WORKFLOW_CYCLE_MAX_SNAPSHOT_BYTES,
+  AutonomousWorkflowCyclePersistenceError,
+  InMemoryAutonomousWorkflowCycleStateStore,
+  AutonomousWorkflowCyclePersistenceCoordinator,
+  sealAutonomousWorkflowCycleState,
+  validateAutonomousWorkflowCycleState,
+  validateAutonomousWorkflowCycleSnapshot,
+} from "./autonomous-workflow-cycle-persistence.js";
+export type {
+  AutonomousWorkflowCyclePersistencePhase,
+  AutonomousWorkflowCycleAttemptState,
+  AutonomousWorkflowCycleState,
+  AutonomousWorkflowCycleStateStore,
+  AutonomousWorkflowCycleSnapshot,
+  AutonomousWorkflowCycleSnapshotStore,
+  AutonomousWorkflowCycleSnapshotPersistence,
+  AutonomousWorkflowCycleRehydrationContext,
+} from "./autonomous-workflow-cycle-persistence.js";
+export {
   AUTONOMOUS_MEMORY_EVENT_SCHEMA,
   AUTONOMOUS_MEMORY_MAX_EPISODES,
   AUTONOMOUS_MEMORY_MAX_EVENTS,

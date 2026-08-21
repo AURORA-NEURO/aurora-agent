@@ -884,6 +884,17 @@ executor store; the cycle result retains local provider results while exposing o
 evaluation and learning projections for persistence. Approval, blocked-stage recovery, effect
 reconciliation, credential rehydration, and provider selection remain caller-controlled gates.
 
+For process-restart recovery, pass `cycleId` and an `AutonomousWorkflowCycleStateStore`. The
+supervisor records hash-linked `execution_pending`, `evaluation_pending`,
+`settlement_pending`, `replan_handoff`, and `terminal` phases without storing
+task text, prompts, provider output, evaluator evidence, or transient instructions. A worker
+must supply `rehydrateExecution` after provider work has completed, `rehydrateEvaluation` after a
+settlement interruption, and `rehydrateReplanInstruction` after evaluator handoff. Every callback
+is checked against the persisted outcome/evidence/instruction digests before the supervisor can
+continue. `InMemoryAutonomousWorkflowCycleStateStore` and
+`AutonomousWorkflowCyclePersistenceCoordinator` provide the bounded reference snapshot bridge
+for a caller-owned durable adapter.
+
 When a deployment also needs a server-visible queue, `AutonomousDurableJobController` bridges that
 local worker to the value-only `brain_job_submit`, `brain_job_status`, `brain_job_events`, and
 `brain_job_approval` operations. Submission sends only an idempotency key, task/spec digest,
