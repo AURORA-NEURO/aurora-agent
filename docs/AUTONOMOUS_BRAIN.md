@@ -2426,6 +2426,44 @@ is reviewed. `ready` means that provider readiness and the approved metadata pat
 does not mean that an external effect is approved. `agent.activation_state()` and the
 `activation` member of `agent.readiness()` are UI-safe status projections only.
 
+The TypeScript façade now exposes the same activation lifecycle rather than leaving tool
+admission as an application convention. A typical keyless startup sequence is:
+
+```typescript
+const activation = new AutonomousCapabilityActivation({ activationId: "workspace-01" });
+const agent = new AutonomousAgent(llm, {
+  activation,
+  toolCatalogue: liveCatalogue,
+  toolExecutor: executeCallerOwnedTool,
+});
+
+const posture = await agent.refreshActivation(); // no provider/tool calls
+const registry = await AutonomousDomainToolRegistry.create(liveCatalogue);
+const plan = await registry.plan();
+renderActivationReview({ posture, plan });
+
+agent.approveActivationBindings(
+  plan,
+  selectedReadOnlyNames,
+  liveCatalogue.definitions.length,
+);
+
+const store = new AutonomousCapabilityActivationStore();
+await agent.saveActivation(store);
+await new AutonomousCapabilityActivationPersistenceCoordinator(
+  store,
+  callerOwnedJsonPersistence,
+).flush();
+```
+
+`refreshActivation()` projects opaque provider readiness, computes one exact plan across all twelve
+domains, and records only hashes, counts, statuses, and approved names. The runtime applies the
+resulting allow-list to registry tools, caller-supplied `tools`, custom authorizers, and direct
+tool execution. An activation plan never grants a provider credential or effect authority. A
+catalogue/profile/plan digest change clears approvals and produces `stale`; `revokeActivation()`
+closes every tool admission path. Restoring a snapshot restores metadata only—provider keys must
+be collected again through the normal BYOK flow.
+
 ### Domain execution plans: the runtime handoff
 
 Activation state is compiled into an explicit, non-executing domain execution plan. This is the

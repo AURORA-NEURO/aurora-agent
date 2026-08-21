@@ -3,6 +3,9 @@ import { test } from "node:test";
 
 import {
   AutonomousAgent,
+  AutonomousCapabilityActivation,
+  AutonomousCapabilityActivationPersistenceCoordinator,
+  AutonomousCapabilityActivationStore,
   AutonomousCostBudgetError,
   AutonomousDomainToolRegistry,
   AutonomousDomainToolRuntime,
@@ -945,5 +948,115 @@ test("readiness reports exact live tool metadata while keeping registration non-
   assert.equal(coding.missing_tools.includes(binding.name), false);
   assert.ok(coding.missing_tools.length > 0);
   assert.equal(report.execution, "not_started; no_provider_or_tool_calls");
+  assert.equal(fetchCalls, 0);
+});
+
+test("activation is a redacted digest-bound lifecycle across all twelve domains", async () => {
+  let now = 100;
+  const activation = new AutonomousCapabilityActivation({ activationId: "activation-test", clock: () => now });
+  assert.equal(activation.state.status, "created");
+  activation.recordProviderStatuses([{
+    provider: "local",
+    provider_registered: true,
+    requires_credential: false,
+    credential_ready: true,
+    credential: { ready: true, active_handles: 0 },
+    next_action: "ready",
+    secret_material: "never_returned",
+  }]);
+
+  const profiles = await builtinAutonomousDomainProfiles();
+  const definitions = [...new Map(profiles.map((profile) => {
+    const binding = profile.tool_profile.bindings[0];
+    return [binding.name, { name: binding.name, description: `Activation ${binding.name}`, inputSchema: { type: "object", additionalProperties: true } }];
+  })).values()];
+  const catalogue = await ToolCatalogue.fromDefinitions(definitions);
+  const registry = await AutonomousDomainToolRegistry.create(catalogue, profiles.map((profile) => profile.tool_profile));
+  const plan = await registry.plan();
+  assert.equal(plan.domains.length, 12);
+  assert.equal(plan.coverage.length, 12);
+  assert.equal(plan.plan_digest.length, 64);
+
+  now += 10;
+  const reviewed = activation.recordBindingPlan(plan);
+  assert.equal(reviewed.domain_statuses.length, 12);
+  assert.equal(reviewed.plan_digest, plan.plan_digest);
+  const proposed = plan.proposed_bindings.map((binding) => binding.name);
+  assert.ok(proposed.length > 0);
+  const approved = activation.approveBindings(plan, [proposed[0]], definitions.length);
+  assert.deepEqual(approved.approved_tools, [proposed[0]]);
+  assert.equal(approved.authorization, "status_only; does_not_grant_provider_or_tool_authority");
+  assert.equal(approved.secret_material, "never_returned");
+  assert.doesNotMatch(JSON.stringify(approved), /api_key|Bearer|sk-[A-Za-z0-9]/i);
+  assert.throws(() => activation.recordProviderStatuses([{ provider: "local", api_key: "must-not-enter-state" }]), /unsupported fields/);
+
+  const store = new AutonomousCapabilityActivationStore();
+  await store.save(approved);
+  const snapshot = await store.snapshot();
+  let persisted = null;
+  const persistence = {
+    read: () => persisted,
+    write: (value) => { persisted = structuredClone(value); },
+  };
+  const coordinator = new AutonomousCapabilityActivationPersistenceCoordinator(store, persistence);
+  const receipt = await coordinator.flush();
+  assert.equal(receipt.state_digest, approved.state_digest);
+  assert.equal(receipt.retention, "metadata_only");
+
+  const restoredStore = new AutonomousCapabilityActivationStore();
+  const restored = new AutonomousCapabilityActivation({ activationId: "activation-test", clock: () => now });
+  const restoreCoordinator = new AutonomousCapabilityActivationPersistenceCoordinator(restoredStore, persistence);
+  const restoreReceipt = await restoreCoordinator.restore();
+  assert.equal(restoreReceipt.restored, true);
+  assert.deepEqual((await restoredStore.load()).state_digest, approved.state_digest);
+  restored.restore(await restoredStore.load());
+  assert.deepEqual(restored.state.approved_tools, approved.approved_tools);
+  await assert.rejects(() => restoredStore.restore({ ...snapshot, snapshot_digest: "0".repeat(64) }), /digest/);
+
+  now += 10;
+  activation.revoke("caller_revoked_for_test");
+  assert.equal(activation.state.status, "revoked");
+  assert.throws(() => activation.approveBindings(plan, [proposed[0]]), /revoked/);
+});
+
+test("agent activation refreshes keylessly and blocks unapproved custom tool calls", async () => {
+  let fetchCalls = 0;
+  let executions = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      fetchCalls += 1;
+      throw new Error("activation readiness must not contact providers");
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("local", "https://activation.invalid", { requiresCredential: false }));
+  const profiles = await builtinAutonomousDomainProfiles();
+  const capabilities = [...new Set(profiles.flatMap((profile) => profile.required_model_capabilities))];
+  const binding = profiles.find((profile) => profile.domain === "coding").tool_profile.bindings.find((row) => row.name === "repository_catalog");
+  const catalogue = await ToolCatalogue.fromDefinitions([{ name: binding.name, description: "Read repository metadata", inputSchema: { type: "object", additionalProperties: true } }]);
+  const activation = new AutonomousCapabilityActivation({ activationId: "agent-activation", clock: () => 200 });
+  const agent = new AutonomousAgent(llm, {
+    activation,
+    toolCatalogue: catalogue,
+    toolExecutor: async (tool) => { executions += 1; return { tool: tool.name, ok: true }; },
+  });
+  agent.registerModel(candidate("local", "local-model", capabilities));
+
+  const state = await agent.refreshActivation();
+  assert.equal(state.domain_statuses.length, 12);
+  const registry = await AutonomousDomainToolRegistry.create(catalogue, profiles.map((profile) => profile.tool_profile));
+  const plan = await registry.plan();
+  agent.approveActivationBindings(plan, [binding.name], 1);
+  const report = await agent.readiness();
+  assert.equal(report.activation.approved_tools[0], binding.name);
+  assert.equal(report.activation.plan_digest, plan.plan_digest);
+
+  const results = await agent.executeToolCalls([
+    { id: "approved", name: binding.name, arguments: {} },
+    { id: "blocked", name: "repository_impact_analysis", arguments: {} },
+  ], { domains: ["coding"], approveEffects: true });
+  assert.equal(results.find((row) => row.callId === "approved").approved, true);
+  assert.equal(results.find((row) => row.callId === "blocked").content.status, "activation_required");
+  assert.equal(executions, 1);
   assert.equal(fetchCalls, 0);
 });

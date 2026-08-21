@@ -197,6 +197,62 @@ context identity; provider transport success is never converted into evaluator r
 is digest-addressed under `bioprism-autonomous-agent-readiness/0.1`, contains no task text or
 provider payload, and can be rendered directly by a setup or operations screen.
 
+### Keyless capability activation and restart-safe tool admission
+
+Readiness is descriptive; activation is the explicit lifecycle that turns a reviewed catalogue
+into a narrow runtime allow-list. `AutonomousCapabilityActivation` records provider posture,
+catalogue/profile/plan digests, twelve domain coverage rows, proposed bindings, approvals,
+revision, and a state digest. It never stores a key, opaque credential handle, secret-manager
+reference, task, prompt, provider response, tool arguments, or tool output. `ready` means that the
+metadata path is approved; it does not authorize external effects or replace live provider checks.
+
+The application flow is:
+
+1. Register provider transports and model metadata; collect the user's key through
+   `ProviderOnboarding`/`CredentialSession` and pass only the opaque handle at invocation.
+2. Call `refreshActivation()` to record the keyless readiness audit and exact all-domain tool
+   plan. This performs no provider or tool call.
+3. Show the plan digest, coverage, missing tools, pending review tools, and proposed read-only
+   names. Approve only names from that exact plan with `approveActivationBindings()`.
+4. Persist the redacted state through a caller-owned adapter. On restart, restore metadata and
+   collect credentials again; never restore a credential from activation state.
+5. The agent enforces approved names for live tools, explicit `tools`, custom authorizers, and
+   direct `executeToolCalls()` calls. A changed catalogue, profile, or plan invalidates prior
+   approvals and becomes `stale`; `revokeActivation()` closes the gate immediately.
+
+```typescript
+const activation = new AutonomousCapabilityActivation({ activationId: "workspace-01" });
+const agent = new AutonomousAgent(llm, {
+  activation,
+  toolCatalogue: liveCatalogue,
+  toolExecutor: executeCallerOwnedTool,
+});
+
+const posture = await agent.refreshActivation();
+const registry = await AutonomousDomainToolRegistry.create(liveCatalogue);
+const plan = await registry.plan();
+// Render posture.status, plan.plan_digest, plan.coverage, and plan.review_required_tools.
+agent.approveActivationBindings(
+  plan,
+  plan.proposed_bindings.map((binding) => binding.name),
+  liveCatalogue.definitions.length,
+);
+
+const activationStore = new AutonomousCapabilityActivationStore();
+await agent.saveActivation(activationStore);
+const persistence = new AutonomousCapabilityActivationPersistenceCoordinator(
+  activationStore,
+  callerOwnedJsonPersistence,
+);
+await persistence.flush();
+```
+
+The activation snapshot is bounded and SHA-256 sealed. It rejects unknown or secret-shaped fields,
+duplicate providers/tools/domains, unsupported domains, oversized metadata, invalid revisions,
+stale digests, and tampered persistence envelopes. Provider projection accepts only readiness
+metadata such as registration, circuit, credential count, and next action; the key value itself is
+structurally unrepresentable in activation state.
+
 `AutonomousAgent` is the application-facing composition layer for the autonomous brain. It covers
 the twelve reviewed domains (`coding`, `browser`, `data`, `science`, `biomedical`,
 `neuroscience`, `operations`, `enterprise`, `multi_agent`, `multimodal`, `cross_domain`, and

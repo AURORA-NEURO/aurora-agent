@@ -215,6 +215,33 @@ export type {
   DomainToolExecutor,
 } from "./autonomous.js";
 export {
+  AUTONOMOUS_ACTIVATION_SCHEMA,
+  AUTONOMOUS_ACTIVATION_STORE_SCHEMA,
+  AUTONOMOUS_ACTIVATION_STATUSES,
+  MAX_ACTIVATION_PROVIDERS,
+  MAX_ACTIVATION_TOOLS,
+  MAX_ACTIVATION_DOMAINS,
+  MAX_ACTIVATION_STATE_BYTES,
+  MAX_ACTIVATION_STORE_BYTES,
+  MAX_ACTIVATION_ERROR_BYTES,
+  AutonomousActivationError,
+  AutonomousCapabilityActivation,
+  AutonomousCapabilityActivationStore,
+  AutonomousCapabilityActivationPersistenceCoordinator,
+  autonomousBindingPlanDigest,
+  validateAutonomousCapabilityActivationState,
+  validateAutonomousCapabilityActivationSnapshot,
+} from "./autonomous-activation.js";
+export type {
+  AutonomousActivationStatus,
+  AutonomousActivationProviderStatus,
+  AutonomousActivationDomainStatus,
+  AutonomousCapabilityActivationState,
+  AutonomousCapabilityActivationSnapshot,
+  AutonomousCapabilityActivationPersistence,
+  AutonomousCapabilityActivationSnapshotStore,
+} from "./autonomous-activation.js";
+export {
   AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_SCHEMA,
   AUTONOMOUS_CROSS_DOMAIN_EVENT_SCHEMA,
   AUTONOMOUS_CROSS_DOMAIN_EXECUTION_CONTRACT_SCHEMA,

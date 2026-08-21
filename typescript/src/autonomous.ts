@@ -1,5 +1,10 @@
 import { ArgumentError, ProviderRuntimeError, isObject } from "./errors.js";
 import type { ApiClient } from "./client.js";
+import {
+  AutonomousCapabilityActivation,
+  type AutonomousCapabilityActivationSnapshotStore,
+  type AutonomousCapabilityActivationState,
+} from "./autonomous-activation.js";
 import { AutonomousBrainControlPlaneBridge, AutonomousModelHealthController, type AutonomousModelHealthStore } from "./autonomous-control.js";
 import type { AutonomousExecutionController } from "./autonomous-execution.js";
 import { AutonomousEffectBoundary, AutonomousEffectReconciliationRequiredError, type AutonomousEffectExecutionContext } from "./autonomous-effects.js";
@@ -379,6 +384,7 @@ export interface AutonomousReadinessReport extends JsonObject {
   model_health: JsonObject;
   learning: JsonObject;
   tooling: JsonObject;
+  activation: AutonomousCapabilityActivationState;
   next_actions: string[];
   readiness_state: AutonomousReadinessState;
   execution: "not_started; no_provider_or_tool_calls";
@@ -523,6 +529,8 @@ export interface AutonomousAgentOptions {
   /** Optional caller-owned durable effect ledger used for idempotency and restart reconciliation. */
   effectBoundary?: AutonomousEffectBoundary;
   learner?: AutonomousOnlineLearner;
+  /** Optional caller-owned activation state machine; keys and raw prompts never enter its state. */
+  activation?: AutonomousCapabilityActivation;
 }
 
 /** Caller-owned controls for one provider-assisted planning proposal. */
@@ -1866,6 +1874,7 @@ export function contextualSelector(client: ApiClient, options: { requestOptions?
 export class AutonomousAgent {
   readonly llm: LLMRuntime;
   readonly runtime: AutonomousRuntime;
+  readonly activation: AutonomousCapabilityActivation;
   readonly modelHealthController?: AutonomousModelHealthController;
   readonly modelHealthBridge?: AutonomousBrainControlPlaneBridge;
   readonly learner?: AutonomousOnlineLearner;
@@ -1884,9 +1893,11 @@ export class AutonomousAgent {
     if (options.toolCatalogue !== undefined && !(options.toolCatalogue instanceof ToolCatalogue)) throw new ArgumentError("AutonomousAgent toolCatalogue must be a ToolCatalogue");
     if (options.toolExecutor !== undefined && typeof options.toolExecutor !== "function") throw new ArgumentError("AutonomousAgent toolExecutor must be callable");
     if (options.effectBoundary !== undefined && !(options.effectBoundary instanceof AutonomousEffectBoundary)) throw new ArgumentError("AutonomousAgent effectBoundary must be an AutonomousEffectBoundary");
+    if (options.activation !== undefined && !(options.activation instanceof AutonomousCapabilityActivation)) throw new ArgumentError("AutonomousAgent activation must be an AutonomousCapabilityActivation");
     this.llm = llm;
     this.apiClient = options.apiClient;
     this.learner = options.learner;
+    this.activation = options.activation ?? new AutonomousCapabilityActivation();
     this.modelHealthController = options.modelHealthStore === undefined ? undefined : new AutonomousModelHealthController(options.modelHealthStore);
     if (options.modelHealthBridge !== undefined && !(options.modelHealthBridge instanceof AutonomousBrainControlPlaneBridge)) throw new ArgumentError("AutonomousAgent modelHealthBridge must be an AutonomousBrainControlPlaneBridge");
     this.modelHealthBridge = options.modelHealthBridge;
@@ -1919,6 +1930,58 @@ export class AutonomousAgent {
     return [...this.modelsById.values()].sort((left, right) => `${left.provider}/${left.model}`.localeCompare(`${right.provider}/${right.model}`)).map((candidate) => ({ ...candidate, capabilities: candidate.capabilities ? [...candidate.capabilities] : undefined }));
   }
 
+  /** Return the redacted activation state without exposing caller credentials or transient prompts. */
+  activationState(): AutonomousCapabilityActivationState {
+    return this.activation.state;
+  }
+
+  /** Record provider onboarding posture; this never accepts or persists a key value. */
+  recordActivationProviderStatuses(statuses: readonly JsonObject[]): AutonomousCapabilityActivationState {
+    return this.activation.recordProviderStatuses(statuses);
+  }
+
+  /** Record the exact catalogue/profile binding plan that a caller may review and approve. */
+  recordActivationBindingPlan(plan: AutonomousDomainToolPlan): AutonomousCapabilityActivationState {
+    return this.activation.recordBindingPlan(plan);
+  }
+
+  /**
+   * Recompute the local readiness audit and exact all-domain binding plan into activation state.
+   * The operation is keyless: readiness reads opaque credential status only and performs no
+   * discovery, provider call, tool call, prompt dispatch, or external effect.
+   */
+  async refreshActivation(options: { candidates?: readonly AutonomousModelCandidate[]; estimatedInputTokens?: number; requestedOutputTokens?: number } = {}): Promise<AutonomousCapabilityActivationState> {
+    const report = await this.readiness(options);
+    this.activation.recordProviderStatuses(report.providers);
+    const registry = await this.ensureToolRegistry();
+    if (registry) this.activation.recordBindingPlan(await registry.plan());
+    else this.activation.recordRegisteredTools(0);
+    return this.activation.state;
+  }
+
+  /** Approve only proposed read-only bindings from the previously recorded, digest-bound plan. */
+  approveActivationBindings(plan: AutonomousDomainToolPlan, approvedTools: readonly string[], registeredToolCount?: number): AutonomousCapabilityActivationState {
+    return this.activation.approveBindings(plan, approvedTools, registeredToolCount ?? this.activation.state.registered_tool_count);
+  }
+
+  /** Persist the redacted activation state through a caller-owned store. */
+  async saveActivation(store: AutonomousCapabilityActivationSnapshotStore): Promise<void> {
+    if (!store || typeof store.save !== "function") throw new ArgumentError("activation store must implement save");
+    await store.save(this.activation.state);
+  }
+
+  /** Restore redacted activation state through a caller-owned store; null means no state existed. */
+  async restoreActivation(store: AutonomousCapabilityActivationSnapshotStore): Promise<AutonomousCapabilityActivationState | null> {
+    if (!store || typeof store.load !== "function") throw new ArgumentError("activation store must implement load");
+    const state = await store.load();
+    return state === null ? null : this.activation.restore(state);
+  }
+
+  /** Revoke the activation and immediately close all tool admission paths. */
+  revokeActivation(reason?: string): AutonomousCapabilityActivationState {
+    return this.activation.revoke(reason);
+  }
+
   /**
    * Execute an already-bound set of domain tool calls through the same registry, approval, and
    * effect boundary used by provider tool loops. Higher-level durable orchestrators use this
@@ -1944,12 +2007,12 @@ export class AutonomousAgent {
         content: { status: "authorization_required", tool: call.name, secret_material: "never_returned" },
       }));
     }
-    return runtime.authorizeAndExecute(calls, {
+    return this.dispatchActivatedToolCalls(calls, (allowed) => runtime.authorizeAndExecute(allowed, {
       domains: options.domains,
       approveEffects: options.approveEffects,
       execution: options.execution,
       effectBoundary: options.effectBoundary ?? this.effectBoundary,
-    });
+    }));
   }
 
   /** Discover live provider model metadata and atomically reconcile it into this agent's catalogue. */
@@ -2097,9 +2160,14 @@ export class AutonomousAgent {
     for (const row of providerRows) if (row.next_action !== "ready") nextActions.add(`${row.next_action}: ${row.provider}`);
     if (!this.toolCatalogue) nextActions.add("attach a live ToolCatalogue to compute exact domain-tool coverage");
     if (!this.learner) nextActions.add("attach AutonomousOnlineLearner and settle only explicit evaluator rewards");
+    const activation = this.activation.state;
+    if (activation.status === "created" || activation.status === "provider_pending" || activation.status === "catalogue_pending") nextActions.add("refresh activation metadata, then review and explicitly approve proposed bindings");
+    if (activation.status === "review_required" || activation.status === "partially_activated") nextActions.add("review the digest-bound activation plan and approve only the intended read-only bindings");
+    if (activation.status === "stale") nextActions.add("reconcile the changed catalogue before approving or invoking tools");
+    if (activation.status === "revoked") nextActions.add("create a new activation after explicit caller review");
     const distinctStates = new Set(domainRows.map((row) => row.state));
     const readinessState: AutonomousReadinessState = distinctStates.size === 1 ? [...distinctStates][0]! : "partial";
-    const descriptor = { schema: AUTONOMOUS_READINESS_SCHEMA, providers: providerRows, models: [...modelRows].sort((left, right) => `${left.provider}/${left.model}`.localeCompare(`${right.provider}/${right.model}`)), domains: domainRows, workflows: profiles.map((profile) => profile.workflow), domain_packs: domainPacks, model_capability_coverage: { domain_count: capabilityRows.length, rows: capabilityRows, evidence_posture: "static_caller_declared_capabilities_only" }, model_health: this.llm.modelHealthSnapshot(), learning, tooling: { configured: this.toolCatalogue !== undefined, catalogue_digest: this.toolCatalogue?.digest ?? null, available_tool_count: toolNames.size, execution: "catalogue_metadata_only; registration_is_not_authorization" }, next_actions: [...nextActions].sort(), readiness_state: readinessState, execution: "not_started; no_provider_or_tool_calls" as const, credential_posture: "caller_supplied_opaque_handles" as const, secret_material: "never_returned" as const };
+    const descriptor = { schema: AUTONOMOUS_READINESS_SCHEMA, providers: providerRows, models: [...modelRows].sort((left, right) => `${left.provider}/${left.model}`.localeCompare(`${right.provider}/${right.model}`)), domains: domainRows, workflows: profiles.map((profile) => profile.workflow), domain_packs: domainPacks, model_capability_coverage: { domain_count: capabilityRows.length, rows: capabilityRows, evidence_posture: "static_caller_declared_capabilities_only" }, model_health: this.llm.modelHealthSnapshot(), learning, tooling: { configured: this.toolCatalogue !== undefined, catalogue_digest: this.toolCatalogue?.digest ?? null, available_tool_count: toolNames.size, execution: "catalogue_metadata_only; registration_is_not_authorization", activation_status: activation.status }, activation, next_actions: [...nextActions].sort(), readiness_state: readinessState, execution: "not_started; no_provider_or_tool_calls" as const, credential_posture: "caller_supplied_opaque_handles" as const, secret_material: "never_returned" as const };
     return { ...descriptor, readiness_digest: await digestJson(descriptor) };
   }
 
@@ -2412,7 +2480,7 @@ export class AutonomousAgent {
     if (!candidates.length) throw new ProviderRuntimeError("autonomous run requires at least one registered model candidate");
     const selectedDomains = route.selected_domains.length ? route.selected_domains : [route.primary_domain];
     if (options.tools && this.toolCatalogue && this.toolExecutor) await this.ensureToolRegistry();
-    const tools = options.tools ?? await this.liveTools(selectedDomains);
+    const tools = options.tools === undefined ? await this.liveTools(selectedDomains) : this.filterActivatedTools(options.tools);
     const messages: ProviderMessage[] = blueprint.prompt.messages.map((message) => ({ role: message.role, content: message.content }));
     const requiredCapabilities = [...blueprint.required_capabilities];
     if (options.requireJson === true && !requiredCapabilities.includes("structured_output")) requiredCapabilities.push("structured_output");
@@ -2432,7 +2500,11 @@ export class AutonomousAgent {
     const feedbackObserver = composeInvocationObservers(options.observer, healthObserver, remoteHealthObserver);
     if (tools.length || options.authorizeAndExecute || this.toolRuntimeForRun()) {
       const toolRuntime = this.toolRuntimeForRun();
-      const authorizeAndExecute = options.authorizeAndExecute ?? (toolRuntime ? (calls: ProviderToolCall[]) => toolRuntime.authorizeAndExecute(calls, { domains: selectedDomains, approveEffects: options.approveEffects, execution: options.execution, effectBoundary: options.effectBoundary ?? this.effectBoundary }) : async (calls: ProviderToolCall[]) => calls.map((call) => ({ callId: call.id, approved: false, isError: true, content: { status: "authorization_required", tool: call.name, secret_material: "never_returned" } })));
+      const authorizeAndExecute = options.authorizeAndExecute
+        ? (calls: ProviderToolCall[]) => this.dispatchActivatedToolCalls(calls, options.authorizeAndExecute!)
+        : (toolRuntime
+          ? (calls: ProviderToolCall[]) => this.dispatchActivatedToolCalls(calls, (allowed) => toolRuntime.authorizeAndExecute(allowed, { domains: selectedDomains, approveEffects: options.approveEffects, execution: options.execution, effectBoundary: options.effectBoundary ?? this.effectBoundary }))
+          : async (calls: ProviderToolCall[]) => calls.map((call) => ({ callId: call.id, approved: false, isError: true, content: { status: "authorization_required", tool: call.name, secret_material: "never_returned" } })));
       const toolReadOnly = options.toolReadOnly ?? (async (call: ProviderToolCall): Promise<boolean> => this.domainToolRegistry?.binding(call.name, selectedDomains)?.risk_class === "read_only");
       const loop = await this.runtime.invokeToolLoop(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, authorizeAndExecute, signal: options.signal, observer: feedbackObserver, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined, toolReadOnly });
       const status: AutonomousRunStatus = loop.loop.status === "completed" ? "completed" : loop.loop.status === "authorization_required" ? "approval_required" : loop.loop.status === "reconciliation_required" ? "reconciliation_required" : "turn_limit_reached";
@@ -2642,14 +2714,46 @@ export class AutonomousAgent {
     return this.learner.update(update);
   }
 
+  /** Return the explicit activation gate; before a plan exists, tool admission remains caller-owned. */
+  private activationToolGate(): ReadonlySet<string> | null {
+    const state = this.activation.state;
+    if (state.plan_digest === null && state.status !== "revoked" && state.status !== "stale") return null;
+    return new Set(state.approved_tools);
+  }
+
+  private filterActivatedTools(tools: readonly ProviderTool[]): ProviderTool[] {
+    const gate = this.activationToolGate();
+    return gate === null ? [...tools] : tools.filter((tool) => gate.has(tool.name));
+  }
+
+  private filterActivatedToolNames(names: readonly string[]): string[] {
+    const gate = this.activationToolGate();
+    return gate === null ? [...names] : names.filter((name) => gate.has(name));
+  }
+
+  private async dispatchActivatedToolCalls(
+    calls: readonly ProviderToolCall[],
+    authorize: (allowed: ProviderToolCall[]) => ProviderToolResult[] | Promise<ProviderToolResult[]>,
+  ): Promise<ProviderToolResult[]> {
+    const gate = this.activationToolGate();
+    if (gate === null) return authorize([...calls]);
+    const allowed = calls.filter((call) => gate.has(call.name));
+    const blocked = new Set(calls.filter((call) => !gate.has(call.name)).map((call) => call.id));
+    const results = allowed.length ? await authorize(allowed) : [];
+    const resultById = new Map(results.map((result) => [result.callId, result]));
+    return calls.map((call) => blocked.has(call.id)
+      ? { callId: call.id, approved: false, isError: true, content: { status: "activation_required", tool: call.name, activation_status: this.activation.state.status, activation_plan_digest: this.activation.state.plan_digest, secret_material: "never_returned" } }
+      : resultById.get(call.id) ?? { callId: call.id, approved: false, isError: true, content: { status: "authorization_result_missing", tool: call.name, secret_material: "never_returned" } });
+  }
+
   private async liveToolNames(domains: readonly AutonomousDomainName[]): Promise<string[]> {
     const registry = await this.ensureToolRegistry();
-    return registry ? (await registry.plan(domains)).available_curated_tools : [];
+    return registry ? this.filterActivatedToolNames((await registry.plan(domains)).available_curated_tools) : [];
   }
 
   private async liveTools(domains: readonly AutonomousDomainName[]): Promise<ProviderTool[]> {
     const registry = await this.ensureToolRegistry();
-    return registry ? registry.toolsFor(domains) : [];
+    return registry ? this.filterActivatedTools(registry.toolsFor(domains)) : [];
   }
 
   private async ensureToolRegistry(): Promise<AutonomousDomainToolRegistry | undefined> {
