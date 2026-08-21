@@ -510,8 +510,12 @@ export async function runAutonomousWorkflowCycle(task: string, executor: Autonom
         terminal_status: null,
       });
     }
+    const semanticRouting = attemptNumber === startAttempt && domain === undefined
+      ? workflowBaseOptions.semanticRouting
+      : undefined;
     const executionOptions: AutonomousWorkflowExecuteOptions = {
       ...workflowBaseOptions,
+      semanticRouting,
       ...(domain === undefined ? {} : { domain }),
       jobId,
       context,

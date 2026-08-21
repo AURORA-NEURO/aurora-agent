@@ -1366,10 +1366,13 @@ export async function routeAutonomousTask(
 }
 
 /** Validate a caller-owned route handoff before it can influence local planning. */
-async function assertRouteOverride(task: string, route: AutonomousRouteProposal): Promise<AutonomousRouteProposal> {
+export async function validateAutonomousRouteOverride(task: string, route: AutonomousRouteProposal): Promise<AutonomousRouteProposal> {
   if (!isObject(route) || route.schema !== AUTONOMOUS_ROUTE_SCHEMA || typeof route.task_digest !== "string") throw new ArgumentError("autonomous route override is malformed");
   const expectedTaskDigest = await digestJson({ task: boundedText("autonomous route override task", task, 32_000) });
   if (route.task_digest !== expectedTaskDigest) throw new ArgumentError("autonomous route override does not match the task digest");
+  if (typeof route.route_digest !== "string" || !/^[0-9a-f]{64}$/.test(route.route_digest)) throw new ArgumentError("autonomous route override has an invalid route digest");
+  const { route_digest: _routeDigest, ...routeDescriptor } = route;
+  if (await digestJson(routeDescriptor) !== route.route_digest) throw new ArgumentError("autonomous route override route digest does not match its metadata");
   if (!Array.isArray(route.selected_domains) || route.selected_domains.length > AUTONOMOUS_DOMAIN_NAMES.length || route.selected_domains.some((domain) => !AUTONOMOUS_DOMAIN_NAMES.includes(domain))) throw new ArgumentError("autonomous route override contains unsupported domains");
   if (route.primary_domain !== null && !AUTONOMOUS_DOMAIN_NAMES.includes(route.primary_domain)) throw new ArgumentError("autonomous route override has an unsupported primary domain");
   if (!route.abstained && (!route.primary_domain || !route.selected_domains.includes(route.primary_domain))) throw new ArgumentError("autonomous route override must bind a selected primary domain");
@@ -3520,7 +3523,7 @@ export class AutonomousAgent {
     const taskText = boundedText("autonomous task", task, 32_000);
     validateAutonomousStructuredOutputOptions(options);
     const costBudget = resolveAutonomousCostBudget(options);
-    const route = options.routeOverride ? await assertRouteOverride(taskText, options.routeOverride) : await this.route(taskText, { domain: options.domain, hints: options.hints, allowCrossDomain: options.allowCrossDomain });
+    const route = options.routeOverride ? await validateAutonomousRouteOverride(taskText, options.routeOverride) : await this.route(taskText, { domain: options.domain, hints: options.hints, allowCrossDomain: options.allowCrossDomain });
     if (route.cross_domain && options.domain === undefined) {
       const cross = await this.runCrossDomain(taskText, { ...options, maxTotalCostUnits: undefined, costBudget });
       return {
@@ -3585,7 +3588,7 @@ export class AutonomousAgent {
     const taskText = boundedText("cross-domain task", task, 32_000);
     validateAutonomousStructuredOutputOptions(options);
     const costBudget = resolveAutonomousCostBudget(options);
-    const route = options.routeOverride ? await assertRouteOverride(taskText, options.routeOverride) : await this.route(taskText, { hints: options.hints, allowCrossDomain: options.allowCrossDomain });
+    const route = options.routeOverride ? await validateAutonomousRouteOverride(taskText, options.routeOverride) : await this.route(taskText, { hints: options.hints, allowCrossDomain: options.allowCrossDomain });
     const learning = this.learner ? "online_bandit_feedback_available" as const : "provider_health_feedback_only" as const;
     if (route.abstained || !route.cross_domain || route.selected_domains.length < 2) {
       return { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: "route_review_required", route, blueprint: null, child_runs: [], synthesis: null, completed_children: 0, total_children: route.selected_domains.length, partial: false, plan_refinement_digest: null, learning_episode_ids: [], learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };

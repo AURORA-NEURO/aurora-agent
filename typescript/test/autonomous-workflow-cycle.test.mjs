@@ -92,6 +92,40 @@ test("workflow cycle supervises every built-in domain with explicit evidence", a
   }
 });
 
+test("workflow cycle composes semantic routing with durable stage supervision", async () => {
+  let calls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      calls += 1;
+      let body = {};
+      try { body = JSON.parse(String(init?.body ?? "{}")); } catch { /* bounded fixture fallback */ }
+      const isRouter = JSON.stringify(body.messages ?? []).includes("bounded autonomous task router");
+      const content = isRouter
+        ? JSON.stringify({ selected_domains: [{ domain: "coding", score: 0.99, rationale: "The request is a coding workflow." }], confidence: 0.99, abstain: false, abstain_reason: null })
+        : JSON.stringify(stagePayload(init));
+      return jsonResponse({ choices: [{ message: { role: "assistant", content }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("semantic-cycle-provider", "https://semantic-cycle.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  const candidate = { ...model(), provider: "semantic-cycle-provider", model: "semantic-cycle-model" };
+  agent.registerModel(candidate);
+  const executor = new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore());
+  const cycle = await runAutonomousWorkflowCycle("Help with an unfamiliar coding migration.", executor, {
+    candidates: [candidate],
+    semanticRouting: { enabled: true, approveProviderCall: true, allowCrossDomain: false, maxDomains: 1 },
+    approveProviderCall: true,
+    jobId: "semantic-cycle-1",
+    evaluate: async (execution) => ({ evidence: perfectEvidence(execution) }),
+  });
+  assert.equal(cycle.status, "completed");
+  assert.equal(cycle.final.route.primary_domain, "coding");
+  assert.equal(cycle.final.semantic_route_status, "completed");
+  assert.equal(cycle.final.checkpoint.route_digest, cycle.final.route.route_digest);
+  assert.equal(calls, 6, "the cycle should route once and execute the five coding stages");
+});
+
 test("workflow cycle gives the evaluator a bounded replan path and settles stage trajectories", async () => {
   const agent = await makeAgent(true);
   const episodes = new InMemoryAutonomousLearningEpisodeStore();

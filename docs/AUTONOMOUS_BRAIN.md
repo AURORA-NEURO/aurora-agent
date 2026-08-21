@@ -793,6 +793,30 @@ requires the same identity; omitting it or substituting a different proposal fai
 provider dispatch. Without explicit acceptance, TypeScript retains declaration order and no plan
 digest is persisted.
 
+The durable single-domain executor can also compose the provider-assisted semantic router for
+ambiguous intake. Set `semanticRouting.enabled` with its own `approveProviderCall` and keep the
+ordinary `approveProviderCall` gate for stage execution. The returned route is a hypothesis bound
+to the reviewed catalogue; disagreement, abstention, malformed output, or a cross-domain result
+returns `route_review_required` before a stage is dispatched. New checkpoints retain the route
+digest, and a caller-owned `routeOverride` is validated against both the task digest and its own
+route metadata. When a worker resumes an existing job, the persisted domain and workflow identity
+are authoritative, so the semantic classifier is not replayed implicitly. This applies to every
+reviewed single-domain profile, including coding, browser, data, science, biomedical,
+neuroscience, operations, enterprise, multi-agent, multimodal, and evaluation.
+
+```typescript
+const first = await executor.start(task, {
+  candidates: agent.models(),
+  semanticRouting: { enabled: true, approveProviderCall: true, allowCrossDomain: false },
+  approveProviderCall: true,
+  maxStages: 2,
+});
+const resumed = await executor.resume(first.job_id, task, {
+  candidates: agent.models(),
+  approveProviderCall: true,
+});
+```
+
 The TypeScript façade also exposes a restart-safe cross-domain executor for work that cannot fit
 inside one process call. `AutonomousCrossDomainExecutor` is intentionally separate from the
 one-shot `runCrossDomain()` convenience method. Each invocation consumes a bounded step budget:

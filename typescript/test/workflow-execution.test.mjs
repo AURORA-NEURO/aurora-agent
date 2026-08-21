@@ -94,6 +94,102 @@ test("workflow executor checkpoints stages, pauses at a bounded budget, and resu
   await assert.rejects(() => executor.resume("workflow-job-1", "A different task", { candidates: agent.models(), approveProviderCall: true }), /digest/);
 });
 
+test("durable workflows use approved semantic routing once and persist the route identity", async () => {
+  let calls = 0;
+  const bodies = [];
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      bodies.push(JSON.parse(String(init.body)));
+      calls += 1;
+      const isRouter = JSON.stringify(bodies.at(-1).messages ?? []).includes("bounded autonomous task router");
+      const content = isRouter
+        ? JSON.stringify({ selected_domains: [{ domain: "coding", score: 0.98, rationale: "The task is a coding migration." }], confidence: 0.98, abstain: false, abstain_reason: null })
+        : JSON.stringify(workflowStagePayload(init, `stage-${calls}`));
+      return jsonResponse({ choices: [{ message: { role: "assistant", content }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("semantic-workflow", "https://semantic-workflow.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  const candidate = { ...model(), provider: "semantic-workflow", model: "semantic-workflow-model" };
+  agent.registerModel(candidate);
+  const store = new InMemoryAutonomousWorkflowCheckpointStore();
+  const executor = new AutonomousWorkflowExecutor(agent, store);
+  const task = "Help with an unfamiliar coding migration after a worker restart.";
+
+  const first = await executor.start(task, {
+    jobId: "workflow-semantic-1",
+    candidates: [candidate],
+    semanticRouting: { enabled: true, approveProviderCall: true, allowCrossDomain: false, maxDomains: 1 },
+    approveProviderCall: true,
+    maxStages: 1,
+  });
+  assert.equal(first.status, "paused");
+  assert.equal(first.semantic_route_status, "completed");
+  assert.equal(first.route.primary_domain, "coding");
+  assert.equal(first.checkpoint.route_digest, first.route.route_digest);
+  assert.equal(calls, 2, "one semantic route call plus one stage call");
+  assert.match(JSON.stringify(bodies[0].messages), /bounded autonomous task router/);
+
+  const resumed = await executor.resume("workflow-semantic-1", task, { candidates: [candidate], approveProviderCall: true, maxStages: 32 });
+  assert.equal(resumed.status, "completed");
+  assert.equal(resumed.semantic_route_status, null, "resume uses the persisted domain without replaying the semantic classifier");
+  assert.equal(calls, 6);
+});
+
+test("durable semantic routing remains review-only until its separate approval is granted", async () => {
+  let calls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => { calls += 1; return jsonResponse({ choices: [{ message: { role: "assistant", content: "must not dispatch" }, finish_reason: "stop" }] }); },
+  });
+  llm.registerProvider(openaiCompatibleProvider("semantic-review", "https://semantic-review.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  const candidate = { ...model(), provider: "semantic-review", model: "semantic-review-model" };
+  agent.registerModel(candidate);
+  const executor = new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore());
+  const result = await executor.start("Classify this unfamiliar coding migration.", {
+    jobId: "workflow-semantic-review-1",
+    candidates: [candidate],
+    semanticRouting: { enabled: true, approveProviderCall: false },
+    approveProviderCall: true,
+  });
+  assert.equal(result.status, "route_review_required");
+  assert.equal(result.semantic_route_status, "approval_required");
+  assert.equal(result.checkpoint, null);
+  assert.equal(calls, 0);
+});
+
+test("durable workflows honor route handoffs and reject a changed persisted route identity", async () => {
+  let calls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      calls += 1;
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify(workflowStagePayload(init, `stage-${calls}`)) }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("route-handoff", "https://route-handoff.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  const candidate = { ...model(), provider: "route-handoff", model: "route-handoff-model" };
+  agent.registerModel(candidate);
+  const executor = new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore());
+  const task = "Apply this coding migration through the durable workflow.";
+  const route = await agent.route(task, { domain: "coding" });
+  const first = await executor.start(task, { routeOverride: route, jobId: "workflow-route-handoff-1", candidates: [candidate], approveProviderCall: true, maxStages: 1 });
+  assert.equal(first.status, "paused");
+  assert.equal(first.route.route_digest, route.route_digest);
+  assert.equal(first.checkpoint.route_digest, route.route_digest);
+  const { route_digest: _routeDigest, ...routeDescriptor } = route;
+  const changedDescriptor = { ...routeDescriptor, confidence: 0.75 };
+  const changedRoute = { ...changedDescriptor, route_digest: await digestJson(changedDescriptor) };
+  await assert.rejects(
+    () => executor.resume("workflow-route-handoff-1", task, { routeOverride: changedRoute, candidates: [candidate], approveProviderCall: true }),
+    /persisted route digest/,
+  );
+  assert.equal(calls, 1, "route identity mismatch must fail before provider stage dispatch");
+});
+
 test("workflow resume rehydrates caller-owned stage evidence by checkpoint digest", async () => {
   let calls = 0;
   const bodies = [];

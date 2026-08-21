@@ -1,7 +1,7 @@
 import { ArgumentError, CredentialError, ProviderRuntimeError } from "./errors.js";
 import type { ProviderErrorCode } from "./errors.js";
 import type { ApiClient } from "./client.js";
-import { AUTONOMOUS_DOMAIN_NAMES } from "./autonomous.js";
+import { AUTONOMOUS_DOMAIN_NAMES, validateAutonomousRouteOverride } from "./autonomous.js";
 import type { AutonomousLearningController } from "./autonomous-learning.js";
 import type {
   AutonomousAgent,
@@ -14,6 +14,9 @@ import type {
   AutonomousWorkflowToolContext,
   AutonomousWorkflowStage,
 } from "./autonomous.js";
+import { semanticRouteAutonomousTask } from "./autonomous-routing.js";
+import type { AutonomousSemanticRouteOptions, AutonomousSemanticRouteResult } from "./autonomous-routing.js";
+import { AutonomousCostBudget } from "./llm.js";
 import { digestJson } from "./tooling.js";
 import type {
   BrainJobApprovalResult,
@@ -39,6 +42,7 @@ export const AUTONOMOUS_WORKFLOW_MAX_SNAPSHOT_BYTES = 4 * 1024 * 1024;
 
 export type AutonomousWorkflowCheckpointStatus = "running" | "paused" | "completed" | "failed";
 export type AutonomousWorkflowExecutionStatus = "completed" | "paused" | "approval_required" | "failed" | "stage_blocked" | "stage_proposed" | "stage_not_attempted" | "route_review_required";
+export type AutonomousWorkflowSemanticRouteStatus = AutonomousSemanticRouteResult["status"];
 export type AutonomousWorkflowEventType = "started" | "stage_completed" | "checkpointed" | "approval_required" | "stage_failed" | "completed";
 export const AUTONOMOUS_WORKFLOW_STAGE_STATUSES = ["completed", "proposed", "blocked", "not_attempted"] as const;
 export type AutonomousWorkflowStageStatus = typeof AUTONOMOUS_WORKFLOW_STAGE_STATUSES[number];
@@ -68,6 +72,8 @@ export interface AutonomousWorkflowCheckpoint {
   workflow_id: string;
   workflow_digest: string;
   plan_digest: string;
+  /** Digest of the route actually approved for this workflow, when one was supplied. */
+  route_digest?: string | null;
   completed_stage_ids: string[];
   next_stage_id: string | null;
   stage_outcomes: AutonomousWorkflowStageOutcome[];
@@ -143,6 +149,8 @@ export interface AutonomousWorkflowExecutionResult {
   job_id: string | null;
   blueprint: AutonomousTaskBlueprint | null;
   checkpoint: AutonomousWorkflowCheckpoint | null;
+  route: AutonomousRouteProposal | null;
+  semantic_route_status: AutonomousWorkflowSemanticRouteStatus | null;
   events: AutonomousWorkflowEvent[];
   stage_results: AutonomousWorkflowStageResult[];
   completed_stage_count: number;
@@ -164,6 +172,12 @@ export interface AutonomousWorkflowExecuteOptions extends AutonomousRunOptions {
   acceptedPlanRefinement?: AutonomousPlanRefinementResult;
   /** Explicitly bind a legacy checkpoint that predates execution-contract digests before continuing it. */
   rebindLegacyExecutionContract?: boolean;
+  /** Optional provider-assisted routing policy. Routing remains review-only and is separately approved. */
+  semanticRouting?: AutonomousWorkflowSemanticRoutingOptions;
+}
+
+export interface AutonomousWorkflowSemanticRoutingOptions extends Pick<AutonomousSemanticRouteOptions, "approveProviderCall" | "minSemanticConfidence" | "maxDomains" | "allowCrossDomain" | "maxOutputTokens" | "maxProviderFailovers"> {
+  enabled?: boolean;
 }
 
 export interface AutonomousWorkflowExecutorOptions {
@@ -223,7 +237,7 @@ function workflowBoundedInteger(value: unknown, label: string, maximum: number, 
 
 async function validateWorkflowCheckpoint(value: unknown): Promise<AutonomousWorkflowCheckpoint> {
   if (!isObject(value)) throw new ArgumentError("workflow checkpoint must be an object");
-  exactKeys(value, ["schema", "job_id", "task_digest", "domain", "workflow_id", "workflow_digest", "plan_digest", "completed_stage_ids", "next_stage_id", "stage_outcomes", "generation", "status", "plan_refinement_digest", "execution_contract_digest", "previous_checkpoint_digest", "checkpoint_digest", "retention", "secret_material"], "workflow checkpoint");
+  exactKeys(value, ["schema", "job_id", "task_digest", "domain", "workflow_id", "workflow_digest", "plan_digest", "route_digest", "completed_stage_ids", "next_stage_id", "stage_outcomes", "generation", "status", "plan_refinement_digest", "execution_contract_digest", "previous_checkpoint_digest", "checkpoint_digest", "retention", "secret_material"], "workflow checkpoint");
   if (value.schema !== AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA || value.retention !== "metadata_only;task_prompt_response_and_credentials_not_retained" || value.secret_material !== "never_returned") throw new ArgumentError("workflow checkpoint metadata markers are invalid");
   const jobId = boundedJobId(value.job_id);
   const taskDigest = workflowDigest(value.task_digest, "workflow task_digest")!;
@@ -231,6 +245,8 @@ async function validateWorkflowCheckpoint(value: unknown): Promise<AutonomousWor
   const workflowId = workflowLabel(value.workflow_id, "workflow workflow_id");
   const workflowDigestValue = workflowDigest(value.workflow_digest, "workflow workflow_digest")!;
   const planDigest = workflowDigest(value.plan_digest, "workflow plan_digest")!;
+  const hasRouteDigest = Object.prototype.hasOwnProperty.call(value, "route_digest");
+  const routeDigest = hasRouteDigest ? workflowDigest(value.route_digest, "workflow route_digest", true) : null;
   if (!Array.isArray(value.completed_stage_ids) || value.completed_stage_ids.length > AUTONOMOUS_WORKFLOW_MAX_STAGES_PER_CALL) throw new ArgumentError("workflow completed_stage_ids exceed their bound");
   const completedStageIds = value.completed_stage_ids.map((stageId) => workflowLabel(stageId, "workflow completed stage id", 256));
   if (new Set(completedStageIds).size !== completedStageIds.length) throw new ArgumentError("workflow completed_stage_ids must be unique");
@@ -280,6 +296,7 @@ async function validateWorkflowCheckpoint(value: unknown): Promise<AutonomousWor
     workflow_id: workflowId,
     workflow_digest: workflowDigestValue,
     plan_digest: planDigest,
+    ...(hasRouteDigest ? { route_digest: routeDigest } : {}),
     completed_stage_ids: completedStageIds,
     next_stage_id: nextStageId,
     stage_outcomes: stageOutcomes,
@@ -516,6 +533,11 @@ function workflowStageStringArray(value: unknown, field: string, errors: string[
   return values;
 }
 
+function workflowTaskText(task: unknown): string {
+  if (typeof task !== "string" || !task.trim() || task.includes("\u0000") || new TextEncoder().encode(task).byteLength > 32_000) throw new ArgumentError("workflow task is outside its bounded text contract");
+  return task;
+}
+
 function validateWorkflowStageOutput(stage: AutonomousWorkflowStage, value: unknown): ValidatedWorkflowStageOutput {
   const empty: ValidatedWorkflowStageOutput = { declaredStatus: null, evidence: [], uncertainty: [], notes: null, nextActions: [], errors: [] };
   if (!isObject(value)) return { ...empty, errors: ["provider returned no structured workflow stage object"] };
@@ -590,6 +612,7 @@ async function workflowExecutionContractDigest(agent: AutonomousAgent, options: 
     max_cost_per_million_tokens: options.maxCostPerMillionTokens ?? null,
     max_latency_ms: options.maxLatencyMs ?? null,
     min_quality: options.minQuality ?? null,
+    aggregate_cost_limit: options.costBudget?.maxCostUnits ?? options.maxTotalCostUnits ?? null,
     // A workflow owns its stage contract. Caller schemas cannot weaken or replace it,
     // so custom responseSchema/requireJson values do not create replay identities.
     require_json: true,
@@ -602,10 +625,22 @@ async function workflowExecutionContractDigest(agent: AutonomousAgent, options: 
   });
 }
 
+function normalizeWorkflowCostOptions<T extends AutonomousWorkflowExecuteOptions>(options: T): T {
+  if (options.costBudget !== undefined && !(options.costBudget instanceof AutonomousCostBudget)) throw new ArgumentError("costBudget must be an AutonomousCostBudget");
+  if (options.costBudget !== undefined && options.maxTotalCostUnits !== undefined) throw new ArgumentError("costBudget and maxTotalCostUnits cannot both be supplied");
+  if (options.costBudget !== undefined || options.maxTotalCostUnits === undefined) return options;
+  return { ...options, maxTotalCostUnits: undefined, costBudget: new AutonomousCostBudget(options.maxTotalCostUnits) } as T;
+}
+
 interface AcceptedWorkflowPlan {
   priority_stage_ids: string[];
   focus_stage_ids: string[];
   refinement_digest: string;
+}
+
+interface WorkflowRouteResolution {
+  route: AutonomousRouteProposal;
+  semantic_status: AutonomousWorkflowSemanticRouteStatus | null;
 }
 
 /** Validate an accepted provider proposal before it can affect scheduling or checkpoint state. */
@@ -656,6 +691,8 @@ function runOptions(options: AutonomousWorkflowExecuteOptions, stage: Autonomous
     maxCostPerMillionTokens: options.maxCostPerMillionTokens,
     maxLatencyMs: options.maxLatencyMs,
     minQuality: options.minQuality,
+    maxTotalCostUnits: options.costBudget ? undefined : options.maxTotalCostUnits,
+    costBudget: options.costBudget,
     requireJson: true,
     responseSchema: workflowStageResponseSchema(stage),
     temperature: options.temperature,
@@ -688,36 +725,43 @@ export class AutonomousWorkflowExecutor {
     this.learning = options.learning;
   }
 
-  async start(task: string, options: AutonomousWorkflowExecuteOptions = {}): Promise<AutonomousWorkflowExecutionResult> {
-    const route = await this.agent.route(task, { domain: options.domain, hints: options.hints });
-    if (route.abstained || !route.primary_domain || route.cross_domain) return this.routeReviewResult();
-    const blueprintEnvelope = await this.agent.blueprint(task, { domain: route.primary_domain, capability: options.capability, context: options.context, hints: options.hints, maxInputTokens: options.maxInputTokens, tools: options.tools?.map((tool) => tool.name) });
+  async start(task: string, rawOptions: AutonomousWorkflowExecuteOptions = {}): Promise<AutonomousWorkflowExecutionResult> {
+    const options = normalizeWorkflowCostOptions(rawOptions);
+    const taskText = workflowTaskText(task);
+    const taskDigest = await digestJson({ task: taskText });
+    const jobId = boundedJobId(options.jobId ?? `workflow-${taskDigest.slice(0, 24)}`);
+    const existing = await this.store.load(jobId);
+    const routeResolution = existing
+      ? await this.resolveExistingRoute(taskText, existing, options)
+      : await this.resolveStartRoute(taskText, options);
+    const route = routeResolution.route;
+    if (routeResolution.semantic_status !== null && routeResolution.semantic_status !== "completed") return this.routeReviewResult(route, routeResolution.semantic_status);
+    if (route.abstained || !route.primary_domain || route.cross_domain) return this.routeReviewResult(route, routeResolution.semantic_status);
+    const blueprintEnvelope = await this.agent.blueprint(taskText, { domain: route.primary_domain, capability: options.capability, context: options.context, hints: options.hints, maxInputTokens: options.maxInputTokens, tools: options.tools?.map((tool) => tool.name) });
     const blueprint = blueprintEnvelope.blueprint;
-    if (!blueprint) return this.routeReviewResult();
+    if (!blueprint) return this.routeReviewResult(route, routeResolution.semantic_status);
     const acceptedPlan = await acceptedWorkflowPlan(blueprint, options.acceptedPlanRefinement);
     const contractDigest = await workflowExecutionContractDigest(this.agent, options);
-    const jobId = boundedJobId(options.jobId ?? `workflow-${route.task_digest.slice(0, 24)}`);
-    const existing = await this.store.load(jobId);
     if (existing) {
       if (existing.task_digest !== blueprint.task_digest || existing.workflow_digest !== blueprint.workflow.workflow_digest) throw new ArgumentError("workflow job already exists with a different task or workflow");
       const bound = await this.bindExecutionContract(existing, blueprint, options, contractDigest, acceptedPlan);
       const planBound = await this.bindPlanRefinement(bound, blueprint, acceptedPlan, contractDigest);
-      return this.drive(task, blueprint, planBound, options, contractDigest, acceptedPlan);
+      return this.drive(taskText, blueprint, planBound, options, contractDigest, acceptedPlan, route, routeResolution.semantic_status);
     }
-    const initial = await this.makeCheckpoint(jobId, blueprint, [], [], "running", contractDigest, null, acceptedPlan?.priority_stage_ids, acceptedPlan?.refinement_digest ?? null);
+    const initial = await this.makeCheckpoint(jobId, blueprint, [], [], "running", contractDigest, null, acceptedPlan?.priority_stage_ids, acceptedPlan?.refinement_digest ?? null, route.route_digest);
     await this.store.save(initial);
     await this.appendEvent(jobId, "started", null, initial);
-    return this.drive(task, blueprint, initial, options, contractDigest, acceptedPlan);
+    return this.drive(taskText, blueprint, initial, options, contractDigest, acceptedPlan, route, routeResolution.semantic_status);
   }
 
-  async resume(jobId: string, task: string, options: Omit<AutonomousWorkflowExecuteOptions, "jobId"> = {}): Promise<AutonomousWorkflowExecutionResult> {
+  async resume(jobId: string, task: string, rawOptions: Omit<AutonomousWorkflowExecuteOptions, "jobId"> = {}): Promise<AutonomousWorkflowExecutionResult> {
+    const options = normalizeWorkflowCostOptions(rawOptions);
     const normalizedJobId = boundedJobId(jobId);
     const checkpoint = await this.store.load(normalizedJobId);
     if (!checkpoint) throw new ArgumentError(`workflow job ${normalizedJobId} was not found; caller must rehydrate from its durable store`);
-    const route = await this.agent.route(task, { domain: checkpoint.domain, hints: options.hints });
-    if (route.abstained || !route.primary_domain || route.primary_domain !== checkpoint.domain) throw new ProviderRuntimeError("workflow rehydration route does not match the checkpoint domain");
-    if (route.task_digest !== checkpoint.task_digest) throw new ProviderRuntimeError("workflow rehydration task digest does not match the checkpoint");
-    const blueprintEnvelope = await this.agent.blueprint(task, { domain: checkpoint.domain, capability: options.capability, context: options.context, hints: options.hints, maxInputTokens: options.maxInputTokens, tools: options.tools?.map((tool) => tool.name) });
+    const taskText = workflowTaskText(task);
+    const route = (await this.resolveExistingRoute(taskText, checkpoint, options)).route;
+    const blueprintEnvelope = await this.agent.blueprint(taskText, { domain: checkpoint.domain, capability: options.capability, context: options.context, hints: options.hints, maxInputTokens: options.maxInputTokens, tools: options.tools?.map((tool) => tool.name) });
     const blueprint = blueprintEnvelope.blueprint;
     if (!blueprint || blueprint.workflow.workflow_digest !== checkpoint.workflow_digest || blueprint.plan.plan_digest !== checkpoint.plan_digest) throw new ProviderRuntimeError("workflow rehydration blueprint digest does not match the checkpoint");
     const acceptedPlan = await acceptedWorkflowPlan(blueprint, options.acceptedPlanRefinement);
@@ -725,20 +769,60 @@ export class AutonomousWorkflowExecutor {
     const contractDigest = await workflowExecutionContractDigest(this.agent, contractOptions);
     const bound = await this.bindExecutionContract(checkpoint, blueprint, contractOptions, contractDigest, acceptedPlan);
     const planBound = await this.bindPlanRefinement(bound, blueprint, acceptedPlan, contractDigest);
-    return this.drive(task, blueprint, planBound, contractOptions, contractDigest, acceptedPlan);
+    return this.drive(taskText, blueprint, planBound, contractOptions, contractDigest, acceptedPlan, route, null);
   }
 
   async events(jobId: string, after = 0, limit = AUTONOMOUS_WORKFLOW_MAX_EVENTS): Promise<AutonomousWorkflowEvent[]> {
     return this.store.events(boundedJobId(jobId), after, limit);
   }
 
-  private routeReviewResult(): AutonomousWorkflowExecutionResult {
-    return { schema: AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA, status: "route_review_required", job_id: null, blueprint: null, checkpoint: null, events: [], stage_results: [], completed_stage_count: 0, total_stage_count: 0, plan_refinement_digest: null, learning_episode_ids: [], recovery: "caller_rehydrates_task_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only" };
+  private async resolveStartRoute(task: string, options: AutonomousWorkflowExecuteOptions): Promise<WorkflowRouteResolution> {
+    if (options.routeOverride) return { route: await validateAutonomousRouteOverride(task, options.routeOverride), semantic_status: null };
+    if (!options.semanticRouting?.enabled) return { route: await this.agent.route(task, { domain: options.domain, hints: options.hints }), semantic_status: null };
+    if (options.domain !== undefined) throw new ArgumentError("semantic workflow routing cannot replace an explicit caller domain");
+    const semantic = await semanticRouteAutonomousTask(this.agent, task, {
+      candidates: options.candidates,
+      credential: options.credential,
+      credentialFor: options.credentialFor,
+      hints: options.hints,
+      approveProviderCall: options.semanticRouting.approveProviderCall,
+      minSemanticConfidence: options.semanticRouting.minSemanticConfidence,
+      maxDomains: options.semanticRouting.maxDomains,
+      allowCrossDomain: options.semanticRouting.allowCrossDomain ?? false,
+      maxOutputTokens: options.semanticRouting.maxOutputTokens,
+      maxCostPerMillionTokens: options.maxCostPerMillionTokens,
+      maxLatencyMs: options.maxLatencyMs,
+      minQuality: options.minQuality,
+      maxTotalCostUnits: options.costBudget ? undefined : options.maxTotalCostUnits,
+      costBudget: options.costBudget,
+      execution: options.execution,
+      executionAttempt: options.executionAttempt,
+      maxProviderFailovers: options.semanticRouting.maxProviderFailovers ?? options.maxProviderFailovers,
+      executionLifecycle: options.executionLifecycle,
+      signal: options.signal,
+      observer: options.observer,
+    });
+    return { route: semantic.route, semantic_status: semantic.status };
   }
 
-  private async makeCheckpoint(jobId: string, blueprint: AutonomousTaskBlueprint, completed: string[], outcomes: AutonomousWorkflowStageOutcome[], status: AutonomousWorkflowCheckpointStatus, executionContractDigest: string, previous: AutonomousWorkflowCheckpoint | null, stageOrder: readonly string[] = blueprint.workflow.stages.map((stage) => stage.id), planRefinementDigest: string | null = previous?.plan_refinement_digest ?? null): Promise<AutonomousWorkflowCheckpoint> {
+  private async resolveExistingRoute(task: string, checkpoint: AutonomousWorkflowCheckpoint, options: AutonomousWorkflowExecuteOptions): Promise<WorkflowRouteResolution> {
+    if (options.semanticRouting?.enabled && !options.routeOverride) throw new ArgumentError("existing workflow checkpoints require routeOverride to change provider-assisted routing; semantic routing is never replayed implicitly");
+    const route = options.routeOverride
+      ? await validateAutonomousRouteOverride(task, options.routeOverride)
+      : await this.agent.route(task, { domain: checkpoint.domain, hints: options.hints });
+    if (route.abstained || !route.primary_domain || route.primary_domain !== checkpoint.domain || route.cross_domain) throw new ProviderRuntimeError("workflow rehydration route does not match the checkpoint domain");
+    if (route.task_digest !== checkpoint.task_digest) throw new ProviderRuntimeError("workflow rehydration task digest does not match the checkpoint");
+    if (options.routeOverride && checkpoint.route_digest !== undefined && checkpoint.route_digest !== null && route.route_digest !== checkpoint.route_digest) throw new ProviderRuntimeError("workflow route override does not match the persisted route digest");
+    return { route, semantic_status: null };
+  }
+
+  private routeReviewResult(route: AutonomousRouteProposal | null = null, semanticStatus: AutonomousWorkflowSemanticRouteStatus | null = null): AutonomousWorkflowExecutionResult {
+    return { schema: AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA, status: "route_review_required", job_id: null, blueprint: null, checkpoint: null, route, semantic_route_status: semanticStatus, events: [], stage_results: [], completed_stage_count: 0, total_stage_count: 0, plan_refinement_digest: null, learning_episode_ids: [], recovery: "caller_rehydrates_task_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only" };
+  }
+
+  private async makeCheckpoint(jobId: string, blueprint: AutonomousTaskBlueprint, completed: string[], outcomes: AutonomousWorkflowStageOutcome[], status: AutonomousWorkflowCheckpointStatus, executionContractDigest: string, previous: AutonomousWorkflowCheckpoint | null, stageOrder: readonly string[] = blueprint.workflow.stages.map((stage) => stage.id), planRefinementDigest: string | null = previous?.plan_refinement_digest ?? null, routeDigest: string | null = previous?.route_digest ?? null): Promise<AutonomousWorkflowCheckpoint> {
     const next = stageOrder.find((stageId) => !completed.includes(stageId)) ?? null;
-    const descriptor = { schema: AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA, job_id: jobId, task_digest: blueprint.task_digest, domain: blueprint.domain_profile.domain, workflow_id: blueprint.workflow.workflow_id, workflow_digest: blueprint.workflow.workflow_digest, plan_digest: blueprint.plan.plan_digest, completed_stage_ids: completed, next_stage_id: next, stage_outcomes: outcomes, generation: (previous?.generation ?? 0) + 1, status, plan_refinement_digest: planRefinementDigest, execution_contract_digest: executionContractDigest, previous_checkpoint_digest: previous?.checkpoint_digest ?? null, retention: "metadata_only;task_prompt_response_and_credentials_not_retained" as const, secret_material: "never_returned" as const };
+    const descriptor = { schema: AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA, job_id: jobId, task_digest: blueprint.task_digest, domain: blueprint.domain_profile.domain, workflow_id: blueprint.workflow.workflow_id, workflow_digest: blueprint.workflow.workflow_digest, plan_digest: blueprint.plan.plan_digest, route_digest: routeDigest, completed_stage_ids: completed, next_stage_id: next, stage_outcomes: outcomes, generation: (previous?.generation ?? 0) + 1, status, plan_refinement_digest: planRefinementDigest, execution_contract_digest: executionContractDigest, previous_checkpoint_digest: previous?.checkpoint_digest ?? null, retention: "metadata_only;task_prompt_response_and_credentials_not_retained" as const, secret_material: "never_returned" as const };
     return { ...descriptor, checkpoint_digest: await digestJson(descriptor) };
   }
 
@@ -835,7 +919,7 @@ export class AutonomousWorkflowExecutor {
     return [...outputs.values()];
   }
 
-  private async drive(task: string, blueprint: AutonomousTaskBlueprint, initial: AutonomousWorkflowCheckpoint, options: AutonomousWorkflowExecuteOptions, contractDigest: string, acceptedPlan: AcceptedWorkflowPlan | null): Promise<AutonomousWorkflowExecutionResult> {
+  private async drive(task: string, blueprint: AutonomousTaskBlueprint, initial: AutonomousWorkflowCheckpoint, options: AutonomousWorkflowExecuteOptions, contractDigest: string, acceptedPlan: AcceptedWorkflowPlan | null, route: AutonomousRouteProposal, semanticStatus: AutonomousWorkflowSemanticRouteStatus | null): Promise<AutonomousWorkflowExecutionResult> {
     const maxStages = boundedStageCount(options.maxStages);
     const retryBlocked = boundedRetryBlocked(options.retryBlocked);
     let checkpoint = initial;
@@ -844,9 +928,9 @@ export class AutonomousWorkflowExecutor {
     const stageOrder = acceptedPlan?.priority_stage_ids ?? stages.map((stage) => stage.id);
     const planRefinementDigest = acceptedPlan?.refinement_digest ?? checkpoint.plan_refinement_digest ?? null;
     let consumed = 0;
-    if (checkpoint.status === "completed") return this.result("completed", checkpoint, blueprint, stageResults);
+    if (checkpoint.status === "completed") return this.result("completed", checkpoint, blueprint, stageResults, route, semanticStatus);
     const previousBlockedStatus = blockedWorkflowExecutionStatus(checkpoint.stage_outcomes.at(-1)?.error_class ?? null);
-    if (previousBlockedStatus && !retryBlocked) return this.result(previousBlockedStatus, checkpoint, blueprint, stageResults);
+    if (previousBlockedStatus && !retryBlocked) return this.result(previousBlockedStatus, checkpoint, blueprint, stageResults, route, semanticStatus);
     if (previousBlockedStatus && retryBlocked) {
       // Preserve the prior blocked checkpoint/event chain, but remove its active outcome from
       // the new attempt so a successful retry can complete without duplicating one stage row.
@@ -858,7 +942,7 @@ export class AutonomousWorkflowExecutor {
       checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, checkpoint.stage_outcomes, "paused", contractDigest, checkpoint, stageOrder, planRefinementDigest);
       await this.store.save(checkpoint);
       await this.appendEvent(checkpoint.job_id, "approval_required", checkpoint.next_stage_id, checkpoint);
-      return this.result("approval_required", checkpoint, blueprint, stageResults);
+      return this.result("approval_required", checkpoint, blueprint, stageResults, route, semanticStatus);
     }
     while (checkpoint.next_stage_id && consumed < maxStages) {
       const stage = stages.find((candidate) => candidate.id === checkpoint.next_stage_id);
@@ -880,7 +964,7 @@ export class AutonomousWorkflowExecutor {
         checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "failed", run_status: "exception", selection_digest: null, response_digest: null, output_bytes: 0, error_class: failure.error_class, error_code: failure.error_code, retryable: failure.retryable, status_code: failure.status_code, learning_episode_id: null }], "failed", contractDigest, checkpoint, stageOrder, planRefinementDigest);
         await this.store.save(checkpoint);
         await this.appendEvent(checkpoint.job_id, "stage_failed", stage.id, checkpoint);
-        return this.result("failed", checkpoint, blueprint, stageResults);
+        return this.result("failed", checkpoint, blueprint, stageResults, route, semanticStatus);
       }
       const text = responseText(run);
       const outputDigest = text ? await digestJson({ stage_id: stage.id, output: text }) : null;
@@ -910,20 +994,20 @@ export class AutonomousWorkflowExecutor {
         checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "approval_required", run_status: run.status, selection_digest: selectionDigest, response_digest: null, output_bytes: 0, error_class: null, learning_episode_id: null }], "paused", contractDigest, checkpoint, stageOrder, planRefinementDigest);
         await this.store.save(checkpoint);
         await this.appendEvent(checkpoint.job_id, "approval_required", stage.id, checkpoint);
-        return this.result("approval_required", checkpoint, blueprint, stageResults);
+        return this.result("approval_required", checkpoint, blueprint, stageResults, route, semanticStatus);
       }
       if (run.status !== "completed") {
         checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "failed", run_status: run.status, selection_digest: selectionDigest, response_digest: outputDigest, output_bytes: outputBytes, error_class: null, learning_episode_id: null }], "failed", contractDigest, checkpoint, stageOrder, planRefinementDigest);
         await this.store.save(checkpoint);
         await this.appendEvent(checkpoint.job_id, "stage_failed", stage.id, checkpoint);
-        return this.result("failed", checkpoint, blueprint, stageResults);
+        return this.result("failed", checkpoint, blueprint, stageResults, route, semanticStatus);
       }
       if (validation.errors.length > 0 || validation.declaredStatus !== "completed") {
         const errorClass = validation.errors.length > 0 ? "stage_output_invalid" : blockedWorkflowErrorClass(validation.declaredStatus) ?? "stage_not_completed";
         checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "failed", run_status: run.status, selection_digest: selectionDigest, response_digest: outputDigest, output_bytes: outputBytes, error_class: errorClass, error_code: "invalid_response", retryable: false, status_code: null, learning_episode_id: null }], "failed", contractDigest, checkpoint, stageOrder, planRefinementDigest);
         await this.store.save(checkpoint);
         await this.appendEvent(checkpoint.job_id, "stage_failed", stage.id, checkpoint);
-        return this.result(blockedWorkflowExecutionStatus(errorClass) ?? "failed", checkpoint, blueprint, stageResults);
+        return this.result(blockedWorkflowExecutionStatus(errorClass) ?? "failed", checkpoint, blueprint, stageResults, route, semanticStatus);
       }
       const completed = [...checkpoint.completed_stage_ids, stage.id];
       const outcomes = [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "completed" as const, run_status: run.status, selection_digest: selectionDigest, response_digest: outputDigest, output_bytes: outputBytes, error_class: null, learning_episode_id: learningEpisodeId }];
@@ -932,15 +1016,15 @@ export class AutonomousWorkflowExecutor {
       await this.store.save(checkpoint);
       await this.appendEvent(checkpoint.job_id, nextStatus === "completed" ? "completed" : "stage_completed", stage.id, checkpoint);
     }
-    if (checkpoint.status === "completed") return this.result("completed", checkpoint, blueprint, stageResults);
+    if (checkpoint.status === "completed") return this.result("completed", checkpoint, blueprint, stageResults, route, semanticStatus);
     checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, checkpoint.stage_outcomes, "paused", contractDigest, checkpoint, stageOrder, planRefinementDigest);
     await this.store.save(checkpoint);
     await this.appendEvent(checkpoint.job_id, "checkpointed", checkpoint.next_stage_id, checkpoint);
-    return this.result("paused", checkpoint, blueprint, stageResults);
+    return this.result("paused", checkpoint, blueprint, stageResults, route, semanticStatus);
   }
 
-  private async result(status: AutonomousWorkflowExecutionStatus, checkpoint: AutonomousWorkflowCheckpoint, blueprint: AutonomousTaskBlueprint, stageResults: AutonomousWorkflowStageResult[]): Promise<AutonomousWorkflowExecutionResult> {
-    return { schema: AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA, status, job_id: checkpoint.job_id, blueprint, checkpoint, events: await this.store.events(checkpoint.job_id, 0, AUTONOMOUS_WORKFLOW_MAX_EVENTS), stage_results: stageResults, completed_stage_count: checkpoint.completed_stage_ids.length, total_stage_count: blueprint.workflow.stages.length, plan_refinement_digest: checkpoint.plan_refinement_digest ?? null, learning_episode_ids: checkpoint.stage_outcomes.flatMap((outcome) => outcome.learning_episode_id ? [outcome.learning_episode_id] : []), recovery: "caller_rehydrates_task_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only" };
+  private async result(status: AutonomousWorkflowExecutionStatus, checkpoint: AutonomousWorkflowCheckpoint, blueprint: AutonomousTaskBlueprint, stageResults: AutonomousWorkflowStageResult[], route: AutonomousRouteProposal, semanticStatus: AutonomousWorkflowSemanticRouteStatus | null): Promise<AutonomousWorkflowExecutionResult> {
+    return { schema: AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA, status, job_id: checkpoint.job_id, blueprint, checkpoint, route, semantic_route_status: semanticStatus, events: await this.store.events(checkpoint.job_id, 0, AUTONOMOUS_WORKFLOW_MAX_EVENTS), stage_results: stageResults, completed_stage_count: checkpoint.completed_stage_ids.length, total_stage_count: blueprint.workflow.stages.length, plan_refinement_digest: checkpoint.plan_refinement_digest ?? null, learning_episode_ids: checkpoint.stage_outcomes.flatMap((outcome) => outcome.learning_episode_id ? [outcome.learning_episode_id] : []), recovery: "caller_rehydrates_task_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only" };
   }
 }
 
@@ -1004,7 +1088,7 @@ export class AutonomousDurableJobController {
     const normalizedJobId = boundedJobId(jobId);
     const server = await this.status(normalizedJobId);
     if (server.job.state === "waiting_approval") {
-      return { schema: AUTONOMOUS_DURABLE_JOB_SCHEMA, job: server.job, local: { schema: AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA, status: "approval_required", job_id: normalizedJobId, blueprint: null, checkpoint: null, events: [], stage_results: [], completed_stage_count: 0, total_stage_count: 0, plan_refinement_digest: null, learning_episode_ids: [], recovery: "caller_rehydrates_task_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only" }, server_job_posture: "control_plane_projection;completion_requires_external_worker_reconciliation", private_spec: "caller_owned;task_prompt_response_and_credentials_not_sent_to_control_plane" };
+      return { schema: AUTONOMOUS_DURABLE_JOB_SCHEMA, job: server.job, local: { schema: AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA, status: "approval_required", job_id: normalizedJobId, blueprint: null, checkpoint: null, route: null, semantic_route_status: null, events: [], stage_results: [], completed_stage_count: 0, total_stage_count: 0, plan_refinement_digest: null, learning_episode_ids: [], recovery: "caller_rehydrates_task_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only" }, server_job_posture: "control_plane_projection;completion_requires_external_worker_reconciliation", private_spec: "caller_owned;task_prompt_response_and_credentials_not_sent_to_control_plane" };
     }
     if (server.job.state !== "queued") throw new ProviderRuntimeError(`brain job ${normalizedJobId} is not executable in state ${server.job.state}`);
     if (!AUTONOMOUS_DOMAIN_NAMES.includes(server.job.domain as AutonomousDomainName)) throw new ProviderRuntimeError(`brain job ${normalizedJobId} has an unsupported autonomous domain`);

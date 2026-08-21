@@ -173,6 +173,7 @@ export {
   compileAutonomousPlan,
   contextualSelector,
   routeAutonomousTask,
+  validateAutonomousRouteOverride,
   acceptedCrossDomainPlan,
   autonomousWorkflowStageContractDigest,
 } from "./autonomous.js";
@@ -468,6 +469,8 @@ export type {
   AutonomousWorkflowExecutorOptions,
   AutonomousWorkflowExecutionResult,
   AutonomousWorkflowExecutionStatus,
+  AutonomousWorkflowSemanticRouteStatus,
+  AutonomousWorkflowSemanticRoutingOptions,
   AutonomousWorkflowSnapshotPersistence,
   AutonomousWorkflowSnapshotStore,
   AutonomousWorkflowStageOutcome,

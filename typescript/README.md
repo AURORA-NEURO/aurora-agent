@@ -950,7 +950,31 @@ operation was lost, and this flag must not be used as a substitute for an idempo
 external reconciliation record.
 
 For resumable single-domain workflows, `AutonomousWorkflowExecutor` turns the reviewed workflow
-DAG into bounded stage calls. It checkpoints after each completed stage, pauses after
+DAG into bounded stage calls. For ambiguous intake, set `semanticRouting.enabled` and approve
+that classifier separately from `approveProviderCall`; the resulting route is exposed on the
+execution result and its `route_digest` is stored in every new checkpoint. The executor accepts
+an already-reviewed `routeOverride` as a digest-checked handoff, and a resumed job uses its
+persisted domain/workflow identity without replaying the semantic classifier. Semantic routing is
+still a routing hypothesis: disagreement, abstention, malformed output, or cross-domain selection
+returns `route_review_required` before a stage is dispatched. This same path is available for all
+reviewed single-domain profiles, including coding, browser, data, science, biomedical,
+neuroscience, operations, enterprise, multi-agent, multimodal, and evaluation.
+
+```typescript
+const first = await executor.start(task, {
+  candidates: agent.models(),
+  semanticRouting: { enabled: true, approveProviderCall: true, allowCrossDomain: false },
+  approveProviderCall: true,
+  maxStages: 2,
+});
+// Persist only first.checkpoint; it contains route/workflow digests, never task or provider text.
+const resumed = await executor.resume(first.job_id, task, {
+  candidates: agent.models(),
+  approveProviderCall: true,
+});
+```
+
+The executor checkpoints after each completed stage, pauses after
 `maxStages`, records a metadata-only event chain, and resumes only when the caller supplies the
 original task and the rebuilt workflow/plan digests match. `InMemoryAutonomousWorkflowCheckpointStore`
 is suitable for tests and small workers; production applications should implement
