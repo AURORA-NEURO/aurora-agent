@@ -10,6 +10,14 @@ import type { AutonomousExecutionController } from "./autonomous-execution.js";
 import { AutonomousEffectBoundary, AutonomousEffectReconciliationRequiredError, type AutonomousEffectExecutionContext } from "./autonomous-effects.js";
 import type { AutonomousLearningController } from "./autonomous-learning.js";
 import {
+  runAutonomousCrossDomainReplanCycle,
+  runAutonomousReplanCycle,
+  type AutonomousCrossDomainReplanCycleOptions,
+  type AutonomousCrossDomainReplanCycleResult,
+  type AutonomousReplanCycleOptions,
+  type AutonomousReplanCycleResult,
+} from "./autonomous-cycle.js";
+import {
   AUTONOMOUS_GOAL_RETENTION,
   AUTONOMOUS_GOAL_STEP_SCHEMA,
   InMemoryAutonomousGoalLedger,
@@ -78,6 +86,7 @@ export const AUTONOMOUS_DOMAIN_TOOL_REGISTRY_SCHEMA = "bioprism-typescript-auton
 export const AUTONOMOUS_DOMAIN_TOOL_PLAN_SCHEMA = "bioprism-typescript-autonomous-domain-tool-plan/0.1" as const;
 export const AUTONOMOUS_CAPABILITY_PLAN_SCHEMA = "bioprism-typescript-autonomous-capability-plan/0.1" as const;
 export const AUTONOMOUS_LEARNING_SCHEMA = "bioprism-typescript-autonomous-online-learning/0.1" as const;
+export const AUTONOMOUS_GOAL_LEARNING_SCHEMA = "bioprism-typescript-autonomous-goal-learning/0.1" as const;
 export const AUTONOMOUS_CROSS_DOMAIN_SCHEMA = "bioprism-typescript-autonomous-cross-domain/0.1" as const;
 export const AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA = "bioprism-typescript-autonomous-cross-domain-result/0.1" as const;
 export const AUTONOMOUS_MODEL_REFRESH_SCHEMA = "bioprism-typescript-autonomous-model-refresh/0.1" as const;
@@ -556,6 +565,48 @@ export interface AutonomousGoalStepResult {
   progress_digest: string | null;
   retention: typeof AUTONOMOUS_GOAL_RETENTION;
   secret_material: "never_returned";
+}
+
+/** Goal settlement plus the bounded evaluator/learning cycle that produced it. */
+export interface AutonomousGoalLearningStepResult {
+  schema: typeof AUTONOMOUS_GOAL_LEARNING_SCHEMA;
+  goal: AutonomousGoalRecord;
+  result: AutonomousRunResult | AutonomousCrossDomainRunResult | null;
+  result_status: string;
+  goal_status: AutonomousGoalStatus;
+  outcome_digest: string;
+  evaluator_digest: string | null;
+  learning_state_digest: string | null;
+  progress_digest: string | null;
+  learning_mode: "single_domain_replan" | "cross_domain_replan";
+  cycle: AutonomousReplanCycleResult | AutonomousCrossDomainReplanCycleResult;
+  retention: typeof AUTONOMOUS_GOAL_RETENTION;
+  secret_material: "never_returned";
+}
+
+async function goalLearningSettlementProjection(value: unknown): Promise<JsonObject> {
+  if (!isObject(value)) return {};
+  const assessment: JsonObject | null = isObject(value.assessment)
+    ? Object.fromEntries(Object.entries(value.assessment).filter(([key]) => ["evaluator_id", "evaluator_version", "reward", "passed", "failed", "failure_class", "feedback_digest", "evidence_digest"].includes(key))) as JsonObject
+    : null;
+  const nextState = isObject(value.next_state) ? { next_state_digest: await digestJson(value.next_state) } : {};
+  if (isObject(value.trajectory)) {
+    const trajectory = value.trajectory;
+    const settlements = Array.isArray(trajectory.settlements)
+      ? await Promise.all(trajectory.settlements.map((item) => goalLearningSettlementProjection(item)))
+      : [];
+    return {
+      trajectory_digest: typeof trajectory.trajectory_digest === "string" ? trajectory.trajectory_digest : null,
+      settlement_digest: typeof trajectory.settlement_digest === "string" ? trajectory.settlement_digest : null,
+      settlements,
+    };
+  }
+  const episode = isObject(value.episode) ? value.episode : null;
+  return {
+    episode_id: episode && typeof episode.episode_id === "string" ? episode.episode_id : null,
+    assessment,
+    ...nextState,
+  };
 }
 
 export interface AutonomousCrossDomainChildRun {
@@ -2830,6 +2881,170 @@ export class AutonomousAgent {
       throw error;
     }
     return { schema: AUTONOMOUS_GOAL_STEP_SCHEMA, goal: updated, result, result_status: resultStatus, goal_status: updated.status, outcome_digest: outcomeDigest, evaluator_digest: updated.evaluator_digest, learning_state_digest: updated.learning_state_digest, progress_digest: updated.progress_digest, retention: AUTONOMOUS_GOAL_RETENTION, secret_material: "never_returned" };
+  }
+
+  /**
+   * Run a durable single-domain goal through evaluator-guided online learning and bounded
+   * replanning. The learning controller receives the evaluator packet; the goal ledger receives
+   * only digests of the resulting value projection and stable cycle identity.
+   */
+  async runGoalLearningStep(
+    goalStore: InMemoryAutonomousGoalLedger,
+    goalId: string,
+    task: string,
+    domain: AutonomousDomainName,
+    options: {
+      evaluate: AutonomousReplanCycleOptions["evaluate"];
+      learning?: AutonomousReplanCycleOptions["learning"];
+      maxReplans?: number;
+      cycleId?: string;
+      goalCriteria?: readonly AutonomousGoalCriterion[];
+      goalMaxAttempts?: number;
+      goalCapability?: string | null;
+      goalRiskClass?: string | null;
+      criterionUpdates?: readonly JsonObject[];
+      settlementMetadata?: AutonomousGoalSettlementMetadata;
+      runOptions?: Omit<AutonomousReplanCycleOptions, "evaluate" | "learning" | "maxReplans" | "cycleId">;
+    },
+  ): Promise<AutonomousGoalLearningStepResult> {
+    if (!(goalStore instanceof InMemoryAutonomousGoalLedger)) throw new ArgumentError("goalStore must be an InMemoryAutonomousGoalLedger");
+    if (!AUTONOMOUS_DOMAIN_NAMES.includes(domain)) throw new ArgumentError("goal domain is unsupported");
+    if (!options || typeof options.evaluate !== "function") throw new ArgumentError("goal learning requires an evaluator callback");
+    const taskText = boundedText("goal learning task", task, 32_000);
+    const runOptions = options.runOptions ?? {};
+    const settlementMetadata = options.settlementMetadata ?? {};
+    for (const [name, value] of Object.entries(settlementMetadata)) {
+      if (!["evaluator_digest", "learning_state_digest", "progress_digest"].includes(name)) throw new ArgumentError(`unsupported goal settlement metadata: ${name}`);
+      if (value !== null && value !== undefined && (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value))) throw new ArgumentError(`goal settlement ${name} must be a digest or null`);
+    }
+    if (options.cycleId !== undefined && (typeof options.cycleId !== "string" || !options.cycleId.trim() || options.cycleId.length > 256 || !/^[A-Za-z0-9_.:-]+$/.test(options.cycleId))) throw new ArgumentError("goal learning cycleId must be a bounded identifier");
+    const taskDigest = goalTaskDigest(taskText);
+    const requestedCapability = options.goalCapability ?? runOptions.capability ?? null;
+    const requestedRiskClass = options.goalRiskClass ?? null;
+    let current = goalStore.get(goalId);
+    if (current === null) {
+      current = goalStore.create({ goal_id: goalId, task_digest: taskDigest, domain, capability: requestedCapability, risk_class: requestedRiskClass, criteria: options.goalCriteria ?? [], max_attempts: options.goalMaxAttempts ?? 8 });
+    } else {
+      if (current.task_digest !== taskDigest || current.domain !== domain) throw new ArgumentError("goal identity does not match the requested task or domain");
+      if (requestedCapability !== null && current.capability !== requestedCapability) throw new ArgumentError("goal capability does not match the requested capability");
+      if (requestedRiskClass !== null && current.risk_class !== requestedRiskClass) throw new ArgumentError("goal risk class does not match the requested risk class");
+    }
+    if (current.status === "completed" || current.status === "cancelled") throw new ArgumentError("goal is already terminal");
+    if (current.status === "blocked" || current.status === "failed") current = goalStore.transition(current.goal_id, "ready", { expected_revision: current.revision });
+    const running = goalStore.transition(current.goal_id, "running", { expected_revision: current.revision });
+    let cycle: AutonomousReplanCycleResult;
+    try {
+      cycle = await runAutonomousReplanCycle(this, taskText, {
+        ...runOptions,
+        domain,
+        evaluate: options.evaluate,
+        learning: options.learning,
+        maxReplans: options.maxReplans ?? 0,
+        ...(options.cycleId === undefined ? {} : { cycleId: options.cycleId }),
+      });
+    } catch (error) {
+      goalStore.transition(running.goal_id, "failed", { expected_revision: running.revision, blockers: [`exception:${error instanceof Error ? error.constructor.name : "UnknownError"}`], next_action_digest: goalTaskDigest("goal-retry"), outcome_digest: await digestJson({ goal_id: running.goal_id, attempt: running.attempt, result_status: "learning_cycle_exception" }) });
+      throw error;
+    }
+    const finalAttempt = cycle.attempts[cycle.attempts.length - 1] ?? null;
+    const result = cycle.final?.run ?? null;
+    const resultStatus = cycle.status;
+    const outcomeDigest = await digestJson({ goal_id: running.goal_id, attempt: running.attempt, result_status: resultStatus, cycle_outcome_digest: finalAttempt?.outcome_digest ?? null });
+    const generatedEvaluatorDigest = await digestJson({ evaluations: cycle.evaluations });
+    const generatedLearningDigest = await digestJson({ learning_episode_ids: cycle.learning_episode_ids, settlements: await Promise.all(cycle.settlements.map((settlement) => goalLearningSettlementProjection(settlement))) });
+    const generatedProgressDigest = await digestJson({ cycle_id: options.cycleId ?? null, replan_count: cycle.replan_count, attempts: cycle.attempts.map((attempt) => ({ attempt: attempt.attempt, status: attempt.status, outcome_digest: attempt.outcome_digest, evaluation_digest: attempt.evaluation_digest })) });
+    let settled = running;
+    let updated: AutonomousGoalRecord;
+    try {
+      if (options.criterionUpdates && options.criterionUpdates.length) settled = goalStore.updateCriteria(running.goal_id, options.criterionUpdates, { expected_revision: running.revision });
+      const evaluatorDigest = settlementMetadata.evaluator_digest ?? generatedEvaluatorDigest;
+      const learningDigest = settlementMetadata.learning_state_digest ?? generatedLearningDigest;
+      const progressDigest = settlementMetadata.progress_digest ?? generatedProgressDigest;
+      const goalStatus = goalStatusForResult(resultStatus, settled.criteria.every((criterion) => !criterion.required || criterion.status === "satisfied" || criterion.status === "waived"));
+      updated = goalStore.transition(settled.goal_id, goalStatus, { expected_revision: settled.revision, blockers: goalStatus === "completed" ? [] : [`result:${resultStatus}`], next_action_digest: goalStatus === "completed" ? null : goalTaskDigest(`goal-next:${resultStatus}`), outcome_digest: outcomeDigest, evaluator_digest: evaluatorDigest, learning_state_digest: learningDigest, progress_digest: progressDigest });
+    } catch (error) {
+      goalStore.transition(settled.goal_id, "blocked", { expected_revision: settled.revision, blockers: [`settlement:${error instanceof Error ? error.constructor.name : "UnknownError"}`], next_action_digest: goalTaskDigest("goal-settlement-review"), outcome_digest: outcomeDigest });
+      throw error;
+    }
+    return { schema: AUTONOMOUS_GOAL_LEARNING_SCHEMA, goal: updated, result, result_status: resultStatus, goal_status: updated.status, outcome_digest: outcomeDigest, evaluator_digest: updated.evaluator_digest, learning_state_digest: updated.learning_state_digest, progress_digest: updated.progress_digest, learning_mode: "single_domain_replan", cycle, retention: AUTONOMOUS_GOAL_RETENTION, secret_material: "never_returned" };
+  }
+
+  /** Run a durable cross-domain goal through evaluator-guided fan-out/fan-in replanning. */
+  async runCrossDomainGoalLearningStep(
+    goalStore: InMemoryAutonomousGoalLedger,
+    goalId: string,
+    task: string,
+    options: {
+      evaluate: AutonomousCrossDomainReplanCycleOptions["evaluate"];
+      learning?: AutonomousCrossDomainReplanCycleOptions["learning"];
+      maxReplans?: number;
+      cycleId?: string;
+      goalCriteria?: readonly AutonomousGoalCriterion[];
+      goalMaxAttempts?: number;
+      goalCapability?: string | null;
+      goalRiskClass?: string | null;
+      criterionUpdates?: readonly JsonObject[];
+      settlementMetadata?: AutonomousGoalSettlementMetadata;
+      runOptions?: Omit<AutonomousCrossDomainReplanCycleOptions, "evaluate" | "learning" | "maxReplans" | "cycleId">;
+    },
+  ): Promise<AutonomousGoalLearningStepResult> {
+    if (!(goalStore instanceof InMemoryAutonomousGoalLedger)) throw new ArgumentError("goalStore must be an InMemoryAutonomousGoalLedger");
+    if (!options || typeof options.evaluate !== "function") throw new ArgumentError("cross-domain goal learning requires an evaluator callback");
+    const taskText = boundedText("cross-domain goal learning task", task, 32_000);
+    const runOptions = options.runOptions ?? {};
+    const settlementMetadata = options.settlementMetadata ?? {};
+    for (const [name, value] of Object.entries(settlementMetadata)) {
+      if (!["evaluator_digest", "learning_state_digest", "progress_digest"].includes(name)) throw new ArgumentError(`unsupported goal settlement metadata: ${name}`);
+      if (value !== null && value !== undefined && (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value))) throw new ArgumentError(`goal settlement ${name} must be a digest or null`);
+    }
+    if (options.cycleId !== undefined && (typeof options.cycleId !== "string" || !options.cycleId.trim() || options.cycleId.length > 256 || !/^[A-Za-z0-9_.:-]+$/.test(options.cycleId))) throw new ArgumentError("cross-domain goal learning cycleId must be a bounded identifier");
+    const taskDigest = goalTaskDigest(taskText);
+    const requestedCapability = options.goalCapability ?? runOptions.capability ?? null;
+    const requestedRiskClass = options.goalRiskClass ?? null;
+    let current = goalStore.get(goalId);
+    if (current === null) current = goalStore.create({ goal_id: goalId, task_digest: taskDigest, domain: "cross_domain", capability: requestedCapability, risk_class: requestedRiskClass, criteria: options.goalCriteria ?? [], max_attempts: options.goalMaxAttempts ?? 8 });
+    else {
+      if (current.task_digest !== taskDigest || current.domain !== "cross_domain") throw new ArgumentError("cross-domain goal identity does not match the requested task");
+      if (requestedCapability !== null && current.capability !== requestedCapability) throw new ArgumentError("goal capability does not match the requested capability");
+      if (requestedRiskClass !== null && current.risk_class !== requestedRiskClass) throw new ArgumentError("goal capability does not match the requested risk class");
+    }
+    if (current.status === "completed" || current.status === "cancelled") throw new ArgumentError("goal is already terminal");
+    if (current.status === "blocked" || current.status === "failed") current = goalStore.transition(current.goal_id, "ready", { expected_revision: current.revision });
+    const running = goalStore.transition(current.goal_id, "running", { expected_revision: current.revision });
+    let cycle: AutonomousCrossDomainReplanCycleResult;
+    try {
+      cycle = await runAutonomousCrossDomainReplanCycle(this, taskText, {
+        ...runOptions,
+        evaluate: options.evaluate,
+        learning: options.learning,
+        maxReplans: options.maxReplans ?? 0,
+        ...(options.cycleId === undefined ? {} : { cycleId: options.cycleId }),
+      });
+    } catch (error) {
+      goalStore.transition(running.goal_id, "failed", { expected_revision: running.revision, blockers: [`exception:${error instanceof Error ? error.constructor.name : "UnknownError"}`], next_action_digest: goalTaskDigest("goal-retry"), outcome_digest: await digestJson({ goal_id: running.goal_id, attempt: running.attempt, result_status: "learning_cycle_exception" }) });
+      throw error;
+    }
+    const finalAttempt = cycle.attempts[cycle.attempts.length - 1] ?? null;
+    const result = cycle.final?.run ?? null;
+    const resultStatus = cycle.status;
+    const outcomeDigest = await digestJson({ goal_id: running.goal_id, attempt: running.attempt, result_status: resultStatus, cycle_outcome_digest: finalAttempt?.outcome_digest ?? null });
+    const generatedEvaluatorDigest = await digestJson({ evaluations: cycle.evaluations });
+    const generatedLearningDigest = await digestJson({ learning_episode_ids: cycle.learning_episode_ids, settlements: await Promise.all(cycle.settlements.map((settlement) => goalLearningSettlementProjection(settlement))) });
+    const generatedProgressDigest = await digestJson({ cycle_id: options.cycleId ?? null, replan_count: cycle.replan_count, attempts: cycle.attempts.map((attempt) => ({ attempt: attempt.attempt, status: attempt.status, outcome_digest: attempt.outcome_digest, evaluation_digest: attempt.evaluation_digest, trajectory_id: attempt.trajectory_id })) });
+    let settled = running;
+    let updated: AutonomousGoalRecord;
+    try {
+      if (options.criterionUpdates && options.criterionUpdates.length) settled = goalStore.updateCriteria(running.goal_id, options.criterionUpdates, { expected_revision: running.revision });
+      const evaluatorDigest = settlementMetadata.evaluator_digest ?? generatedEvaluatorDigest;
+      const learningDigest = settlementMetadata.learning_state_digest ?? generatedLearningDigest;
+      const progressDigest = settlementMetadata.progress_digest ?? generatedProgressDigest;
+      const goalStatus = goalStatusForResult(resultStatus, settled.criteria.every((criterion) => !criterion.required || criterion.status === "satisfied" || criterion.status === "waived"));
+      updated = goalStore.transition(settled.goal_id, goalStatus, { expected_revision: settled.revision, blockers: goalStatus === "completed" ? [] : [`result:${resultStatus}`], next_action_digest: goalStatus === "completed" ? null : goalTaskDigest(`goal-next:${resultStatus}`), outcome_digest: outcomeDigest, evaluator_digest: evaluatorDigest, learning_state_digest: learningDigest, progress_digest: progressDigest });
+    } catch (error) {
+      goalStore.transition(settled.goal_id, "blocked", { expected_revision: settled.revision, blockers: [`settlement:${error instanceof Error ? error.constructor.name : "UnknownError"}`], next_action_digest: goalTaskDigest("goal-settlement-review"), outcome_digest: outcomeDigest });
+      throw error;
+    }
+    return { schema: AUTONOMOUS_GOAL_LEARNING_SCHEMA, goal: updated, result, result_status: resultStatus, goal_status: updated.status, outcome_digest: outcomeDigest, evaluator_digest: updated.evaluator_digest, learning_state_digest: updated.learning_state_digest, progress_digest: updated.progress_digest, learning_mode: "cross_domain_replan", cycle, retention: AUTONOMOUS_GOAL_RETENTION, secret_material: "never_returned" };
   }
 
   async run(task: string, options: AutonomousRunOptions = {}): Promise<AutonomousRunResult> {

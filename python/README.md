@@ -61,6 +61,11 @@ route, planning, model-selection, provider, evaluator, and approval lifecycle, r
 runtime output only transiently and persisting a value-only settlement.
 `run_cross_domain_goal_step(...)` applies the same contract to specialist fan-out and synthesis,
 retaining only outcome, evaluator, learning-state, and progress digests.
+`run_goal_learning_step(...)` and `run_cross_domain_goal_learning_step(...)` connect those durable
+goals to the existing online, trajectory, and bounded replan learners. They feed explicit
+evaluator rewards into the bandit and persist only digests of evaluator decisions, next state, and
+attempt identities; `cycle_id` is value-only correlation metadata. Model candidates, memory,
+approval, and opaque credential handles still come from the caller, and no raw key is accepted.
 `run_adaptive_mission_learning_cycle()` combines recall, evaluator reward, bandit state updates,
 and bounded pre-dispatch replanning without retaining provider text, tool arguments, or secrets.
 `BrainJobStore` adds resolver-backed leases and checkpoints for restart-safe learning jobs, while

@@ -484,6 +484,17 @@ online-learning path for coding, browser, data, science, biomedical, neuroscienc
 enterprise, multi-agent, multimodal, evaluation, and cross-domain profiles; it does not infer a
 reward from HTTP success or from the model's own claims.
 
+The durable objective adapter closes the loop between these learners and goal state. Use
+`AutonomousTaskOrchestrator.run_goal_learning_step(...)` for a single-domain goal and
+`run_cross_domain_goal_learning_step(...)` for fan-out/fan-in goals. Both select the existing
+online, trajectory, or bounded replan learner, pass explicit evaluator evidence into the bandit,
+and settle the goal from three value-only digests: evaluator decisions, the next bandit state,
+and progress/attempt identities. A caller-provided `cycle_id` is hashed into progress state so a
+restart can correlate the same logical objective without putting task text, provider output,
+replan instructions, credentials, or raw evidence in the goal ledger. The learning runner still
+requires the normal model candidates, opaque credential handles, provider approval, and memory
+boundaries; this adapter never creates or accepts a raw API key.
+
 For multi-step credit assignment, use `brain.prepare_learning_trajectory(...)` to group ordered
 provider, tool-loop, or mission results into a bounded value-only trajectory. A later evaluator can
 settle it with `BrainOutcomeEvaluator.evaluate_trajectory(...)`; step `i` receives a clamped

@@ -135,6 +135,7 @@ AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_SCHEMA = "bioprism-python-autonomous-cross-do
 AUTONOMOUS_CROSS_DOMAIN_STEP_SCHEMA = "bioprism-python-autonomous-cross-domain-step/0.1"
 AUTONOMOUS_WORKFLOW_EVALUATOR_SCHEMA = "bioprism-python-autonomous-workflow-evaluator/0.1"
 AUTONOMOUS_CROSS_DOMAIN_LEARNING_SCHEMA = "bioprism-python-autonomous-cross-domain-learning/0.1"
+AUTONOMOUS_GOAL_LEARNING_SCHEMA = "bioprism-python-autonomous-goal-learning/0.1"
 AUTONOMOUS_CROSS_DOMAIN_REPLAN_SCHEMA = "bioprism-python-autonomous-cross-domain-replan/0.1"
 AUTONOMOUS_CROSS_DOMAIN_REPLAN_CONTEXT_SCHEMA = "bioprism-python-autonomous-cross-domain-replan-context/0.1"
 AUTONOMOUS_CROSS_DOMAIN_REPLAN_CHECKPOINT_SCHEMA = "bioprism-python-autonomous-cross-domain-replan-checkpoint/0.1"
@@ -5094,6 +5095,156 @@ class AutonomousLearningResult:
         }
 
 
+def _goal_learning_value_projection(result: Any, *, cycle_id: str | None = None) -> dict[str, Any]:
+    """Project any learning result into bounded identities safe for goal settlement.
+
+    This deliberately does not call ``to_dict`` on the result: several caller-visible result
+    objects contain transient provider responses and evaluator instructions. Only status,
+    bounded decision fields, trajectory identities, and the safe bandit state are eligible for
+    durable goal digests.
+    """
+
+    def value(value: Any, name: str, default: Any = None) -> Any:
+        if isinstance(value, Mapping):
+            return value.get(name, default)
+        return getattr(value, name, default)
+
+    def decision_projection(item: Any) -> dict[str, Any]:
+        decision = value(item, "decision", item)
+        if not isinstance(decision, Mapping) and not hasattr(decision, "to_dict"):
+            decision = {}
+        if hasattr(decision, "to_dict"):
+            decision = decision.to_dict()
+        if not isinstance(decision, Mapping):
+            decision = {}
+        projection: dict[str, Any] = {
+            key: decision.get(key)
+            for key in (
+                "evaluator_id",
+                "evaluator_version",
+                "reward",
+                "passed",
+                "failed",
+                "failure_class",
+                "evidence_digest",
+                "replan_requested",
+            )
+            if key in decision
+        }
+        instruction = decision.get("replan_instruction_digest")
+        if instruction is None and isinstance(decision.get("replan_instruction"), str):
+            instruction = content_digest(decision["replan_instruction"])
+        if instruction is not None:
+            _route_digest(instruction, "goal learning replan instruction digest")
+            projection["replan_instruction_digest"] = instruction
+        recording = value(item, "recording")
+        if isinstance(recording, Mapping):
+            for key in ("status", "trajectory_id", "trajectory_step", "credited_reward"):
+                if key in recording:
+                    projection[key] = recording[key]
+        return projection
+
+    evaluations_raw = value(result, "evaluations", None)
+    if evaluations_raw is None:
+        evaluations_raw = []
+        candidate_attempts = value(result, "attempts", ())
+        if isinstance(candidate_attempts, Sequence) and not isinstance(candidate_attempts, (str, bytes)):
+            for candidate_attempt in candidate_attempts:
+                attempt_evaluations = value(candidate_attempt, "evaluations", ())
+                if isinstance(attempt_evaluations, Sequence) and not isinstance(attempt_evaluations, (str, bytes)):
+                    evaluations_raw.extend(attempt_evaluations)
+    evaluations = [decision_projection(item) for item in evaluations_raw] if isinstance(evaluations_raw, Sequence) and not isinstance(evaluations_raw, (str, bytes)) else []
+    state = value(result, "bandit_state", None)
+    if not isinstance(state, Mapping):
+        state = value(value(result, "final"), "bandit_state", {})
+    if not isinstance(state, Mapping):
+        state = {}
+    BrainLearningLedger._assert_safe(state)
+    attempts_raw = value(result, "attempts", ())
+    attempts: list[dict[str, Any]] = []
+    if isinstance(attempts_raw, Sequence) and not isinstance(attempts_raw, (str, bytes)):
+        for index, attempt in enumerate(attempts_raw, start=1):
+            attempt_status = value(attempt, "status")
+            run_id = value(attempt, "run_id")
+            if run_id is None:
+                run_id = value(value(attempt, "final_result"), "run_id")
+            attempts.append(
+                {
+                    "attempt": index,
+                    "status": attempt_status if isinstance(attempt_status, str) else None,
+                    "identity_digest": None if run_id is None else content_digest({"run_id": run_id}),
+                }
+            )
+    cross = value(result, "cross_domain")
+    if cross is not None:
+        children = value(cross, "child_results", ())
+        if isinstance(children, Sequence) and not isinstance(children, (str, bytes)):
+            attempts.append(
+                {
+                    "attempt": len(attempts) + 1,
+                    "status": value(cross, "status"),
+                    "identity_digest": content_digest(
+                        {
+                            "child_statuses": [value(child, "status") for child in children],
+                            "synthesis_status": value(value(cross, "synthesis_result"), "status"),
+                        }
+                    ),
+                }
+            )
+    replan_count = value(result, "replan_count", 0)
+    if not isinstance(replan_count, int) or isinstance(replan_count, bool) or replan_count < 0:
+        replan_count = 0
+    progress: dict[str, Any] = {
+        "status": value(result, "status"),
+        "replan_count": replan_count,
+        "attempts": attempts,
+        "evaluation_count": len(evaluations),
+    }
+    if cycle_id is not None:
+        progress["cycle_identity_digest"] = content_digest({"cycle_id": cycle_id})
+    return {
+        "status": value(result, "status"),
+        "evaluations": evaluations,
+        "bandit_state": dict(state),
+        "progress": progress,
+    }
+
+
+def _goal_learning_settlement_metadata(result: Any, *, cycle_id: str | None = None) -> dict[str, str]:
+    """Return only the three digest identities accepted by the durable goal ledger."""
+
+    projection = _goal_learning_value_projection(result, cycle_id=cycle_id)
+    return {
+        "evaluator_digest": content_digest({"evaluations": projection["evaluations"]}),
+        "learning_state_digest": content_digest({"bandit_state": projection["bandit_state"]}),
+        "progress_digest": content_digest(projection["progress"]),
+    }
+
+
+def _merge_goal_settlement_metadata(
+    metadata: Mapping[str, Any],
+    factory: Callable[[Any], Mapping[str, Any]] | None,
+    result: Any,
+) -> dict[str, Any]:
+    merged = dict(metadata)
+    if factory is not None:
+        if not callable(factory):
+            raise BrainRunError("settlement_metadata_factory must be callable or None")
+        generated = factory(result)
+        if not isinstance(generated, Mapping):
+            raise BrainRunError("settlement_metadata_factory must return a mapping")
+        for key, value in generated.items():
+            if key not in {"evaluator_digest", "learning_state_digest", "progress_digest"}:
+                raise BrainRunError("settlement_metadata_factory returned unsupported metadata: " + str(key))
+            if value is not None:
+                _route_digest(value, f"goal settlement {key}")
+            if key in merged and merged[key] is not None and value is not None and merged[key] != value:
+                raise BrainRunError(f"goal settlement {key} conflicts with generated learning metadata")
+            if key not in merged or merged[key] is None:
+                merged[key] = value
+    return merged
+
+
 class AutonomousTaskOrchestrator:
     """Compose domain intake with adaptive execution and optional online learning."""
 
@@ -6906,6 +7057,8 @@ class AutonomousTaskOrchestrator:
         criterion_updates: Sequence[Mapping[str, Any]] = (),
         settlement_metadata: Mapping[str, Any] | None = None,
         run_options: Mapping[str, Any] | None = None,
+        run_callable: Callable[..., Any] | None = None,
+        settlement_metadata_factory: Callable[[Any], Mapping[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Run one bounded attempt while advancing a durable objective lifecycle.
 
@@ -6980,7 +7133,13 @@ class AutonomousTaskOrchestrator:
             raise BrainRunError("goal lifecycle admission failed") from error
 
         try:
-            result = self.run(task=task, domain=domain, **options)
+            if run_callable is not None and not callable(run_callable):
+                raise BrainRunError("run_callable must be callable or None")
+            result = (
+                self.run(task=task, domain=domain, **options)
+                if run_callable is None
+                else run_callable(task=task, domain=domain, **options)
+            )
         except Exception as error:
             try:
                 exception_status = f"exception:{type(error).__name__}"
@@ -7011,6 +7170,21 @@ class AutonomousTaskOrchestrator:
         outcome_digest = content_digest(
             {"goal_id": running.goal_id, "attempt": running.attempt, "result_status": result_status}
         )
+        try:
+            metadata = _merge_goal_settlement_metadata(metadata, settlement_metadata_factory, result)
+        except BrainRunError:
+            try:
+                goal_store.transition(
+                    running.goal_id,
+                    "blocked",
+                    expected_revision=running.revision,
+                    blockers=("settlement:metadata_factory",),
+                    next_action_digest=goal_task_digest("goal-settlement-review"),
+                    outcome_digest=outcome_digest,
+                )
+            except AutonomousGoalError as transition_error:
+                raise BrainRunError("goal metadata settlement failed and could not be checkpointed") from transition_error
+            raise
         evaluator_digest = metadata.get("evaluator_digest")
         settled = running
         try:
@@ -7085,6 +7259,8 @@ class AutonomousTaskOrchestrator:
         criterion_updates: Sequence[Mapping[str, Any]] = (),
         settlement_metadata: Mapping[str, Any] | None = None,
         run_options: Mapping[str, Any] | None = None,
+        run_callable: Callable[..., Any] | None = None,
+        settlement_metadata_factory: Callable[[Any], Mapping[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Run one bounded cross-domain fan-out/fan-in attempt under a durable goal."""
 
@@ -7152,7 +7328,13 @@ class AutonomousTaskOrchestrator:
             raise BrainRunError("cross-domain goal lifecycle admission failed") from error
 
         try:
-            result = self.run_cross_domain(task=task, subtasks=subtasks, **options)
+            if run_callable is not None and not callable(run_callable):
+                raise BrainRunError("run_callable must be callable or None")
+            result = (
+                self.run_cross_domain(task=task, subtasks=subtasks, **options)
+                if run_callable is None
+                else run_callable(task=task, subtasks=subtasks, **options)
+            )
         except Exception as error:
             try:
                 exception_status = f"exception:{type(error).__name__}"
@@ -7183,6 +7365,21 @@ class AutonomousTaskOrchestrator:
         outcome_digest = content_digest(
             {"goal_id": running.goal_id, "attempt": running.attempt, "result_status": result_status}
         )
+        try:
+            metadata = _merge_goal_settlement_metadata(metadata, settlement_metadata_factory, result)
+        except BrainRunError:
+            try:
+                goal_store.transition(
+                    running.goal_id,
+                    "blocked",
+                    expected_revision=running.revision,
+                    blockers=("settlement:metadata_factory",),
+                    next_action_digest=goal_task_digest("goal-settlement-review"),
+                    outcome_digest=outcome_digest,
+                )
+            except AutonomousGoalError as transition_error:
+                raise BrainRunError("cross-domain goal metadata settlement failed and could not be checkpointed") from transition_error
+            raise
         settled = running
         evaluator_digest = metadata.get("evaluator_digest")
         progress_digest = metadata.get("progress_digest")
@@ -7259,6 +7456,167 @@ class AutonomousTaskOrchestrator:
             "retention": GOAL_RETENTION,
             "secret_material": "never_returned",
         }
+
+    def run_goal_learning_step(
+        self,
+        *,
+        goal_store: AutonomousGoalLedger,
+        goal_id: str,
+        task: str,
+        domain: str,
+        bandit_state: Mapping[str, Any],
+        memory: BrainEpisodicMemory | None = None,
+        evaluator: BrainOutcomeEvaluator | None = None,
+        evaluator_registry: DomainEvaluatorRegistry | None = None,
+        evidence: Mapping[str, Any] | None = None,
+        ledger: BrainLearningLedger | None = None,
+        learning_mode: str = "online",
+        max_replans: int = 1,
+        cycle_id: str | None = None,
+        goal_criteria: Sequence[AutonomousGoalCriterion | Mapping[str, Any]] = (),
+        goal_max_attempts: int = 8,
+        criterion_updates: Sequence[Mapping[str, Any]] = (),
+        settlement_metadata: Mapping[str, Any] | None = None,
+        run_options: Mapping[str, Any] | None = None,
+        memory_tags: Sequence[str] = (),
+    ) -> dict[str, Any]:
+        """Run one goal attempt through the real online-learning loop.
+
+        ``learning_mode`` is ``online`` for immediate bandit credit or ``replan`` when the caller
+        wants bounded evaluator-requested retries. Cross-domain goals additionally expose a
+        delayed-credit trajectory mode. The goal ledger receives only digests derived from
+        evaluator projections, the next bandit state,
+        and stable attempt identities. Model candidates and opaque credentials remain transient
+        inputs to the selected runner.
+        """
+
+        if learning_mode not in {"online", "replan"}:
+            raise BrainRunError("goal learning_mode must be online or replan")
+        if not isinstance(bandit_state, Mapping):
+            raise BrainRunError("goal learning bandit_state must be a mapping")
+        BrainLearningLedger._assert_safe(bandit_state)
+        if not isinstance(run_options, Mapping) and run_options is not None:
+            raise BrainRunError("goal learning run_options must be a mapping or None")
+        options = {} if run_options is None else dict(run_options)
+        if any(name in options for name in ("task", "domain", "learn", "bandit_state")):
+            raise BrainRunError("goal learning run_options cannot override task, domain, learn, or bandit_state")
+        options["model_candidates"] = options.get("model_candidates", ())
+        options["credentials"] = options.get("credentials", {})
+        options["bandit_state"] = bandit_state
+        options["memory"] = memory if memory is not None else options.get("memory")
+        options["ledger"] = ledger if ledger is not None else options.get("ledger")
+        options["memory_tags"] = tuple(memory_tags)
+        options["learn"] = True
+        if evaluator is not None:
+            options["evaluator"] = evaluator
+        if evaluator_registry is not None:
+            options["evaluator_registry"] = evaluator_registry
+        if evidence is not None:
+            options["evidence"] = evidence
+        options["max_replans"] = max_replans
+        if cycle_id is not None:
+            _identifier("goal learning cycle_id", cycle_id)
+
+        def runner(**runner_options: Any) -> Any:
+            return self.run_learning(
+                task=runner_options.pop("task"),
+                domain=runner_options.pop("domain"),
+                **runner_options,
+            )
+
+        return self.run_goal_step(
+            goal_store=goal_store,
+            goal_id=goal_id,
+            task=task,
+            domain=domain,
+            goal_criteria=goal_criteria,
+            goal_max_attempts=goal_max_attempts,
+            criterion_updates=criterion_updates,
+            settlement_metadata=settlement_metadata,
+            run_options=options,
+            run_callable=runner,
+            settlement_metadata_factory=lambda result: _goal_learning_settlement_metadata(result, cycle_id=cycle_id),
+        )
+
+    def run_cross_domain_goal_learning_step(
+        self,
+        *,
+        goal_store: AutonomousGoalLedger,
+        goal_id: str,
+        task: str,
+        subtasks: Sequence[Mapping[str, Any]],
+        bandit_state: Mapping[str, Any],
+        memory: BrainEpisodicMemory | None = None,
+        evaluator: Any = None,
+        evidence: Mapping[str, Mapping[str, Any]] | None = None,
+        ledger: BrainLearningLedger | None = None,
+        learning_mode: str = "online",
+        max_replans: int = 1,
+        cycle_id: str | None = None,
+        goal_criteria: Sequence[AutonomousGoalCriterion | Mapping[str, Any]] = (),
+        goal_max_attempts: int = 8,
+        criterion_updates: Sequence[Mapping[str, Any]] = (),
+        settlement_metadata: Mapping[str, Any] | None = None,
+        run_options: Mapping[str, Any] | None = None,
+        memory_tags: Sequence[str] = (),
+    ) -> dict[str, Any]:
+        """Run one cross-domain goal through sequential, trajectory, or replan learning."""
+
+        if learning_mode not in {"online", "trajectory", "replan"}:
+            raise BrainRunError("cross-domain goal learning_mode must be online, trajectory, or replan")
+        if not isinstance(bandit_state, Mapping):
+            raise BrainRunError("cross-domain goal learning bandit_state must be a mapping")
+        BrainLearningLedger._assert_safe(bandit_state)
+        if not isinstance(run_options, Mapping) and run_options is not None:
+            raise BrainRunError("cross-domain goal learning run_options must be a mapping or None")
+        options = {} if run_options is None else dict(run_options)
+        if any(name in options for name in ("task", "subtasks", "bandit_state")):
+            raise BrainRunError("cross-domain goal learning run_options cannot override task, subtasks, or bandit_state")
+        options["model_candidates"] = options.get("model_candidates", ())
+        options["credentials"] = options.get("credentials", {})
+        options["bandit_state"] = bandit_state
+        options["memory"] = memory if memory is not None else options.get("memory")
+        options["ledger"] = ledger if ledger is not None else options.get("ledger")
+        options["memory_tags"] = tuple(memory_tags)
+        if evaluator is not None:
+            options["evaluator"] = evaluator
+        if evidence is not None:
+            options["evidence"] = evidence
+        if learning_mode == "replan":
+            options["max_replans"] = max_replans
+        if cycle_id is not None:
+            _identifier("cross-domain goal learning cycle_id", cycle_id)
+            options.setdefault("run_id", cycle_id)
+            if learning_mode in {"trajectory", "replan"}:
+                options.setdefault("trajectory_id", cycle_id)
+
+        if learning_mode == "online":
+            runner_function = self.run_cross_domain_learning
+        elif learning_mode == "trajectory":
+            runner_function = self.run_cross_domain_trajectory_learning
+        else:
+            runner_function = self.run_cross_domain_replan_learning
+
+        def runner(**runner_options: Any) -> Any:
+            return runner_function(
+                task=runner_options.pop("task"),
+                subtasks=runner_options.pop("subtasks"),
+                **runner_options,
+            )
+
+        return self.run_cross_domain_goal_step(
+            goal_store=goal_store,
+            goal_id=goal_id,
+            task=task,
+            subtasks=subtasks,
+            goal_criteria=goal_criteria,
+            goal_max_attempts=goal_max_attempts,
+            criterion_updates=criterion_updates,
+            settlement_metadata=settlement_metadata,
+            run_options=options,
+            run_callable=runner,
+            settlement_metadata_factory=lambda result: _goal_learning_settlement_metadata(result, cycle_id=cycle_id),
+        )
 
     def run(
         self,

@@ -224,6 +224,94 @@ def test_cross_domain_goal_execution_wrapper_persists_fanout_progress_without_pa
         assert ledger.verify_integrity()["ok"] is True
 
 
+def test_goal_learning_wrapper_settles_value_only_bandit_and_replan_identities(tmp_path: Path) -> None:
+    orchestrator = object.__new__(AutonomousTaskOrchestrator)
+    learning_result = SimpleNamespace(
+        status="completed",
+        bandit_state={"generation": 4, "arms": [{"arm_id": "model-a", "pulls": 2}]},
+        evaluations=[
+            {
+                "decision": {
+                    "evaluator_id": "coding-quality",
+                    "evaluator_version": "v1",
+                    "reward": 1.0,
+                    "passed": True,
+                    "failed": False,
+                    "replan_requested": False,
+                    "replan_instruction": "transient provider-shaped guidance must not persist",
+                },
+                "recording": {"status": "settled", "credited_reward": 1.0},
+            }
+        ],
+        attempts=[SimpleNamespace(status="completed", run_id="cycle-42-attempt-0")],
+        replan_count=0,
+    )
+    observed = {}
+
+    def run_learning(**kwargs):
+        observed.update(kwargs)
+        return learning_result
+
+    orchestrator.run_learning = run_learning
+    with AutonomousGoalLedger(str(tmp_path / "goal-learning.sqlite3")) as ledger:
+        completed = orchestrator.run_goal_learning_step(
+            goal_store=ledger,
+            goal_id="learning-goal",
+            task="adapt model selection for a coding review",
+            domain="coding",
+            bandit_state={"generation": 3, "arms": [{"arm_id": "model-a", "pulls": 1}]},
+            learning_mode="replan",
+            max_replans=2,
+            cycle_id="cycle-42",
+            goal_criteria=[{"criterion_id": "quality", "criterion_digest": _digest("quality")}],
+            criterion_updates=[{"criterion_id": "quality", "status": "satisfied", "evidence_digest": _digest("quality receipt")}],
+        )
+        assert completed["goal_status"] == "completed"
+        assert completed["goal"]["learning_state_digest"] is not None
+        assert completed["goal"]["evaluator_digest"] is not None
+        assert completed["goal"]["progress_digest"] is not None
+        assert observed["learn"] is True
+        assert "run_id" not in observed
+        serialized = json.dumps([record.to_dict() for record in ledger.list(limit=1)], sort_keys=True)
+        assert "adapt model selection" not in serialized
+        assert "transient provider-shaped guidance" not in serialized
+        assert ledger.verify_integrity()["ok"] is True
+
+
+def test_cross_domain_goal_learning_wrapper_selects_online_runner_without_provider_keys(tmp_path: Path) -> None:
+    orchestrator = object.__new__(AutonomousTaskOrchestrator)
+    result = SimpleNamespace(
+        status="completed",
+        bandit_state={"generation": 2},
+        evaluations=[{"decision": {"evaluator_id": "cross", "evaluator_version": "v1", "reward": 0.8, "passed": True}}],
+        cross_domain=SimpleNamespace(
+            status="completed",
+            child_results=(SimpleNamespace(status="completed"), SimpleNamespace(status="completed")),
+            synthesis_result=SimpleNamespace(status="completed"),
+        ),
+    )
+    calls = []
+    orchestrator.run_cross_domain_learning = lambda **kwargs: (calls.append(kwargs) or result)
+    subtasks = [{"domain": "coding", "task": "inspect"}, {"domain": "science", "task": "compare"}]
+    with AutonomousGoalLedger(str(tmp_path / "cross-learning.sqlite3")) as ledger:
+        completed = orchestrator.run_cross_domain_goal_learning_step(
+            goal_store=ledger,
+            goal_id="cross-learning-goal",
+            task="coordinate adaptive cross-domain review",
+            subtasks=subtasks,
+            bandit_state={"generation": 1},
+            learning_mode="online",
+            cycle_id="cross-cycle-7",
+        )
+        assert completed["goal_status"] == "completed"
+        assert calls and calls[0]["bandit_state"] == {"generation": 1}
+        serialized = json.dumps([record.to_dict() for record in ledger.list(limit=1)], sort_keys=True)
+        assert "coordinate adaptive" not in serialized
+        assert "inspect" not in serialized
+        assert "compare" not in serialized
+        assert ledger.verify_integrity()["ok"] is True
+
+
 def test_goal_digest_contract_matches_the_typescript_reference() -> None:
     with AutonomousGoalLedger(":memory:", clock=lambda: 100) as ledger:
         record = ledger.create(

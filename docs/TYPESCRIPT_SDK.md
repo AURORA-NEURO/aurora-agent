@@ -1520,6 +1520,17 @@ evaluator, learning-state, and progress digests; child prompts, specialist respo
 payloads, and credentials remain transient. This lets application-owned evaluator and bandit
 settlement resume by digest without allowing provider completion to bypass required criteria.
 
+`AutonomousAgent.runGoalLearningStep(...)` and
+`runCrossDomainGoalLearningStep(...)` bind the objective ledger directly to the existing
+evaluator-guided replan cycles. They invoke `prepareRun()`/`settleRun()` or
+`prepareRun()`/`settleCrossDomain()` on the caller's `AutonomousLearningController`, then persist
+only evaluator, learning-settlement, and attempt-progress digests. Set `cycleId` together with a
+caller-owned `stateStore` when restart rehydration is required; the cycle persistence store keeps
+the resumable metadata while the goal ledger keeps the cross-process objective identity. The
+returned cycle is transient and may contain the current provider result, but neither that result,
+the task, evaluator instructions, credentials, nor raw evidence is copied into the goal snapshot.
+Provider approval and opaque BYOK credential gates remain mandatory.
+
 ### Restart-safe model health and offline replay
 
 `InMemoryAutonomousModelHealthStore` is the TypeScript reference ledger for the selection feedback

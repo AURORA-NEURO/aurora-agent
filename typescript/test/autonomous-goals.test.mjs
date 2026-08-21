@@ -4,10 +4,15 @@ import { test } from "node:test";
 import {
   AutonomousGoalPersistenceCoordinator,
   AutonomousAgent,
+  AutonomousLearningController,
+  AutonomousOnlineLearner,
+  CredentialStore,
+  InMemoryAutonomousCycleReplanStateStore,
   InMemoryAutonomousGoalLedger,
   LLMRuntime,
   builtinAutonomousDomainProfiles,
   goalTaskDigest,
+  openaiCompatibleProvider,
 } from "../dist/index.js";
 
 test("goal execution wrapper advances approval, completion, terminal replay, and failure states", async () => {
@@ -149,6 +154,76 @@ test("cross-domain goal execution wrapper persists fan-out progress without payl
     criterionUpdates: [{ criterion_id: "synthesis", status: "satisfied", evidence_digest: goalTaskDigest("synthesis receipt") }],
   });
   assert.equal(completed.goal_status, "completed");
+  assert.equal(ledger.verifyIntegrity().ok, true);
+});
+
+test("goal learning wrapper settles evaluator and bandit projections without an API key", async () => {
+  const runtime = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: "value-only answer" }, finish_reason: "stop" }] }), { status: 200, headers: { "content-type": "application/json" } }),
+  });
+  runtime.registerProvider(openaiCompatibleProvider("goal-learning-provider", "https://goal-learning.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(runtime, { learner: new AutonomousOnlineLearner() });
+  agent.registerModel({ provider: "goal-learning-provider", model: "goal-learning-model", capabilities: ["reasoning", "code"], context_window_tokens: 16_000, max_output_tokens: 2_000, quality: 0.9, latency_ms: 50, cost_per_million_tokens: 1, reliability: 0.95 });
+  const learning = new AutonomousLearningController(agent);
+  const ledger = new InMemoryAutonomousGoalLedger();
+  const result = await agent.runGoalLearningStep(ledger, "goal-learning", "adapt a coding review strategy", "coding", {
+    cycleId: "goal-cycle-1",
+    learning: { controller: learning, episodePrefix: "goal-learning" },
+    runOptions: { approveProviderCall: true, stateStore: new InMemoryAutonomousCycleReplanStateStore() },
+    evaluate: () => ({ evaluator_id: "coding-reviewer", evaluator_version: "1", reward: 0.9, passed: true, replan_requested: false }),
+    goalCriteria: [{ criterion_id: "quality", criterion_digest: goalTaskDigest("quality") }],
+    criterionUpdates: [{ criterion_id: "quality", status: "satisfied", evidence_digest: goalTaskDigest("quality receipt") }],
+  });
+  assert.equal(result.goal_status, "completed");
+  assert.equal(result.learning_mode, "single_domain_replan");
+  assert.ok(result.evaluator_digest);
+  assert.ok(result.learning_state_digest);
+  assert.ok(result.progress_digest);
+  assert.equal(result.cycle.learning_episode_ids.length, 1);
+  const serialized = JSON.stringify(ledger.snapshot());
+  assert.equal(serialized.includes("adapt a coding review strategy"), false);
+  assert.equal(serialized.includes("value-only answer"), false);
+  assert.equal(serialized.includes("goal-cycle-1"), false);
+  assert.equal(ledger.verifyIntegrity().ok, true);
+});
+
+test("cross-domain goal learning wrapper settles specialist trajectory projections", async () => {
+  const runtime = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: "cross-domain value-only answer" }, finish_reason: "stop" }] }), { status: 200, headers: { "content-type": "application/json" } }),
+  });
+  runtime.registerProvider(openaiCompatibleProvider("cross-goal-learning-provider", "https://cross-goal-learning.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(runtime, { learner: new AutonomousOnlineLearner() });
+  agent.registerModel({ provider: "cross-goal-learning-provider", model: "cross-goal-learning-model", capabilities: ["reasoning", "science", "biomedical", "neuroscience", "code", "web", "data", "coordination", "operations", "enterprise", "multimodal", "evaluation", "structured_output"], context_window_tokens: 32_000, max_output_tokens: 2_000, quality: 0.9, latency_ms: 50, cost_per_million_tokens: 1, reliability: 0.95 });
+  const learning = new AutonomousLearningController(agent);
+  const ledger = new InMemoryAutonomousGoalLedger();
+  const subtasks = [{ id: "bio", domain: "biomedical", task: "Review biomedical evidence." }, { id: "neuro", domain: "neuroscience", task: "Review neuroscience evidence." }];
+  const result = await agent.runCrossDomainGoalLearningStep(ledger, "cross-goal-learning", "coordinate biomedical neuroscience evidence review", {
+    cycleId: "cross-goal-cycle-1",
+    learning: { controller: learning, episodePrefix: "cross-goal-learning", trajectoryIdPrefix: "cross-goal-trajectory" },
+    runOptions: { approveProviderCall: true, stateStore: new InMemoryAutonomousCycleReplanStateStore(), subtasks },
+    evaluate: (run) => ({
+      evaluator_id: "cross-domain-reviewer",
+      evaluator_version: "1",
+      reward: 0.8,
+      passed: true,
+      replan_requested: false,
+      rewards: Object.fromEntries(run.learning_episode_ids.map((episodeId) => [episodeId, { evaluator_id: "cross-domain-reviewer", evaluator_version: "1", reward: 0.8, passed: true }])),
+    }),
+    goalCriteria: [{ criterion_id: "synthesis", criterion_digest: goalTaskDigest("synthesis") }],
+    criterionUpdates: [{ criterion_id: "synthesis", status: "satisfied", evidence_digest: goalTaskDigest("synthesis receipt") }],
+  });
+  assert.equal(result.goal_status, "completed");
+  assert.equal(result.learning_mode, "cross_domain_replan");
+  assert.equal(result.cycle.learning_episode_ids.length, 3);
+  assert.ok(result.evaluator_digest);
+  assert.ok(result.learning_state_digest);
+  assert.ok(result.progress_digest);
+  const serialized = JSON.stringify(ledger.snapshot());
+  assert.equal(serialized.includes("coordinate biomedical"), false);
+  assert.equal(serialized.includes("cross-domain value-only answer"), false);
+  assert.equal(serialized.includes("cross-goal-cycle-1"), false);
   assert.equal(ledger.verifyIntegrity().ok, true);
 });
 

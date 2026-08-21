@@ -617,6 +617,12 @@ provider runtime, turns approval/partial/failure/completion outcomes into resuma
 keeps the runtime result transient while persisting only a value-only outcome digest.
 `runCrossDomainGoalStep(...)` applies the same lifecycle to specialist fan-out and synthesis and
 retains only outcome, evaluator, learning-state, and progress digests.
+`runGoalLearningStep(...)` and `runCrossDomainGoalLearningStep(...)` bind the same goal ledger to
+the evaluator-guided replan cycles and `AutonomousLearningController`; the goal snapshot stores
+only evaluator, learning-settlement, and progress digests. Supply a stable `cycleId` plus a
+caller-owned cycle `stateStore` for restart rehydration. Provider responses, task text, evaluator
+instructions, credentials, and evidence remain transient, and provider approval is still
+required.
 
 `InMemoryAutonomousModelHealthStore` adds the restart-safe selection feedback plane. It records
 separate value-only invocation and evaluator-quality observations, aggregates success/failure,
