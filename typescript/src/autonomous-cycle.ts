@@ -26,6 +26,7 @@ import type {
   AutonomousMemoryEvaluationInput,
   AutonomousMemoryQuery,
 } from "./autonomous-memory.js";
+import { taskFacetDigests } from "./autonomous-memory.js";
 import { digestJson } from "./tooling.js";
 import type { BrainEvaluatorAssessment, JsonObject } from "./types.js";
 import {
@@ -131,11 +132,12 @@ interface RecalledMemory {
   promptChunk: AutonomousPromptChunk | null;
 }
 
-async function recallMemory(memory: AutonomousDecisionCycleMemoryOptions | undefined, route: AutonomousRouteProposal): Promise<RecalledMemory> {
+async function recallMemory(memory: AutonomousDecisionCycleMemoryOptions | undefined, route: AutonomousRouteProposal, task: string): Promise<RecalledMemory> {
   if (!memory) return { episodes: [], projection: emptyMemoryProjection(), promptChunk: null };
   if (!memory.store || typeof memory.store.retrieve !== "function" || typeof memory.store.recordEpisode !== "function") throw new ArgumentError("autonomous cycle memory store is malformed");
   const query: AutonomousMemoryQuery = { ...(memory.query ?? {}) };
   if (query.domain === undefined && !route.cross_domain && route.primary_domain) query.domain = route.primary_domain;
+  if (query.task_digest === undefined && query.task_facets === undefined) query.task_facets = taskFacetDigests(task);
   if (memory.limit !== undefined) query.limit = memory.limit;
   const episodes = await memory.store.retrieve(query);
   const recallDigest = await digestJson(episodes.map((episode) => ({ episode_id: episode.episode_id, episode_digest: episode.episode_digest, evaluation_digest: episode.evaluation?.evaluation_digest ?? null })));
@@ -161,7 +163,7 @@ function withMemoryContext(context: readonly AutonomousPromptChunk[] | undefined
   return [...(context ?? []), ...(memoryChunk ? [memoryChunk] : [])];
 }
 
-async function memoryPacketForRun(memory: AutonomousDecisionCycleMemoryOptions, run: AutonomousRunResult, episodeId: string): Promise<AutonomousMemoryEpisode | null> {
+async function memoryPacketForRun(memory: AutonomousDecisionCycleMemoryOptions, run: AutonomousRunResult, episodeId: string, task: string): Promise<AutonomousMemoryEpisode | null> {
   if (!run.blueprint || !run.selection?.selected_model) return null;
   const outcomeDigest = await digestJson({ status: run.status, route_digest: run.route.route_digest, selection: run.selection, response: run.response });
   await memory.store.recordEpisode({
@@ -170,6 +172,7 @@ async function memoryPacketForRun(memory: AutonomousDecisionCycleMemoryOptions, 
     result_kind: "autonomous_decision_cycle",
     status: run.status === "completed" ? "completed" : run.status === "approval_required" ? "approval_required" : run.status === "child_failed" || run.status === "cross_domain_partial" ? "partial" : "failed",
     task_digest: run.blueprint.task_digest,
+    task_facets: taskFacetDigests(task),
     context: { domain: run.blueprint.domain_profile.domain, capability: run.blueprint.selection_context.capability, risk_class: run.blueprint.domain_profile.risk_class, task_family: run.blueprint.selection_context.task_family ?? null },
     context_digest: run.blueprint.learning_context_digest,
     selected_model: run.selection.selected_model,
@@ -504,7 +507,7 @@ export async function runAutonomousDecisionCycle(
     if (options.executionLifecycle !== "observe_only") await options.execution?.checkpoint({ status: "route_review_required", reason: "single_domain_route_review_required" });
     return reviewResult("route_review_required", route, semanticRoute);
   }
-  const recalledMemory = await recallMemory(options.memory, route);
+  const recalledMemory = await recallMemory(options.memory, route, task);
   let run: AutonomousRunResult;
   try {
     run = await agent.run(task, runOptions(options, route, recalledMemory.promptChunk, costBudget));
@@ -535,7 +538,7 @@ export async function runAutonomousDecisionCycle(
     const memoryProjection = recalledMemory.projection;
     if (options.memory) {
       const memoryEpisodeId = options.memory.episodeId ?? `memory:${learningEpisodeId ?? `${run.blueprint!.task_digest}:${run.blueprint!.prompt.prompt_digest}`}`;
-      const memoryEpisode = await memoryPacketForRun(options.memory, run, memoryEpisodeId);
+      const memoryEpisode = await memoryPacketForRun(options.memory, run, memoryEpisodeId, task);
       if (memoryEpisode) {
         memoryProjection.recorded_episode_ids.push(memoryEpisode.episode_id);
         if (settlement) {
@@ -1161,7 +1164,7 @@ export async function runAutonomousCrossDomainDecisionCycle(
     return crossReviewResult("route_review_required", route, semanticRoute);
   }
 
-  const recalledMemory = await recallMemory(options.memory, route);
+  const recalledMemory = await recallMemory(options.memory, route, task);
   let run: AutonomousCrossDomainRunResult;
   try {
     run = await agent.runCrossDomain(task, crossRunOptions(options, route, recalledMemory.promptChunk, costBudget));
@@ -1191,7 +1194,7 @@ export async function runAutonomousCrossDomainDecisionCycle(
         const explicitSingleId = options.memory.episodeId && completedRuns.length === 1 ? options.memory.episodeId : null;
         const prefix = options.memory.episodePrefix ?? options.memory.episodeId ?? "memory:cross";
         const memoryEpisodeId = explicitSingleId ?? `${prefix}:${learningEpisodeId ?? `${childRun.blueprint?.task_digest ?? index}:${childRun.blueprint?.prompt.prompt_digest ?? index}`}`;
-        const memoryEpisode = await memoryPacketForRun(options.memory, childRun, memoryEpisodeId);
+        const memoryEpisode = await memoryPacketForRun(options.memory, childRun, memoryEpisodeId, task);
         if (!memoryEpisode) continue;
         memoryProjection.recorded_episode_ids.push(memoryEpisode.episode_id);
         const settlementItem = settlement?.trajectory.settlements.find((item) => item.episode.episode_id === learningEpisodeId);

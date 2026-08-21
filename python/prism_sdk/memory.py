@@ -29,8 +29,20 @@ MAX_MEMORY_LABEL_BYTES = 256
 MAX_MEMORY_LESSON_BYTES = 4_096
 MAX_MEMORY_TAGS = 64
 MAX_MEMORY_TAG_BYTES = 128
+MAX_MEMORY_TASK_FACETS = 32
+MAX_MEMORY_TASK_FACET_TOKEN_BYTES = 32
 MAX_MEMORY_CONTEXT_KEYS = 32
 MAX_MEMORY_PROVENANCE_BYTES = 16_000
+
+_TASK_FACET_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_-]{2,31}", re.IGNORECASE)
+_TASK_FACET_STOPWORDS = frozenset(
+    {
+        "about", "after", "again", "also", "and", "are", "before", "between", "can",
+        "could", "from", "have", "into", "just", "more", "need", "only", "should",
+        "that", "the", "their", "then", "there", "these", "this", "through", "using",
+        "want", "what", "when", "with", "would",
+    }
+)
 
 
 class BrainMemoryError(RuntimeError):
@@ -58,6 +70,72 @@ def _valid_digest(value: Any) -> bool:
     return isinstance(value, str) and len(value) == 64 and all(
         character in "0123456789abcdef" for character in value
     )
+
+
+def task_facet_digests(task: str) -> tuple[str, ...]:
+    """Derive bounded local task facets without retaining the task or its vocabulary.
+
+    Facets are intentionally a weak lexical retrieval signal, not embeddings, semantic truth, or
+    an authorization input.  Only short identifier-like tokens are considered; URL-like,
+    credential-shaped, and long free-form values are ignored.  The returned SHA-256 digests are
+    namespaced so a memory database never stores the original token text.
+    """
+
+    if not isinstance(task, str) or not task.strip() or "\x00" in task:
+        raise BrainMemoryError("task facets require a non-empty NUL-free task")
+    if len(task.encode("utf-8")) > MAX_MEMORY_PROVENANCE_BYTES:
+        raise BrainMemoryError("task facets task exceeds the bounded size")
+    tokens: set[str] = set()
+    for match in _TASK_FACET_TOKEN_RE.finditer(task.lower()):
+        token = match.group(0)
+        if token in _TASK_FACET_STOPWORDS or len(token.encode("utf-8")) > MAX_MEMORY_TASK_FACET_TOKEN_BYTES:
+            continue
+        # Do not fingerprint obvious secret-bearing or high-entropy fragments.  These are not
+        # useful routing concepts and should never become durable derived metadata.
+        if token.startswith(
+            (
+                "api_key",
+                "apikey",
+                "bearer",
+                "token",
+                "secret",
+                "password",
+                "gsk_",
+                "sk-",
+                "rk-",
+                "pk-",
+                "ghp_",
+                "xoxb-",
+                "aiza",
+            )
+        ):
+            continue
+        if len(token) >= 24 or (len(token) >= 16 and ("_" in token or "-" in token)):
+            continue
+        if token.count("_") > 4 or token.count("-") > 4:
+            continue
+        tokens.add(token)
+        if len(tokens) >= MAX_MEMORY_TASK_FACETS:
+            break
+    return tuple(
+        sorted(
+            hashlib.sha256(f"bioprism-task-facet/0.1:{token}".encode("utf-8")).hexdigest()
+            for token in tokens
+        )
+    )
+
+
+def _normalize_task_facets(value: Any, *, name: str) -> tuple[str, ...]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise BrainMemoryError(f"{name} must be a string sequence")
+    if len(value) > MAX_MEMORY_TASK_FACETS:
+        raise BrainMemoryError(f"{name} exceeds the {MAX_MEMORY_TASK_FACETS}-facet bound")
+    facets: set[str] = set()
+    for facet in value:
+        if not _valid_digest(facet):
+            raise BrainMemoryError(f"{name} must contain lowercase SHA-256 digests")
+        facets.add(facet)
+    return tuple(sorted(facets))
 
 
 def _bounded_string(value: Any, *, name: str, maximum: int) -> str:
@@ -167,6 +245,7 @@ class MemoryQuery:
     capability: str | None = None
     risk_class: str | None = None
     task_digest: str | None = None
+    task_facets: tuple[str, ...] = ()
     tags: tuple[str, ...] = ()
     statuses: tuple[str, ...] = ()
     include_failed: bool = True
@@ -182,6 +261,8 @@ class MemoryQuery:
                 _bounded_string(value, name=f"query.{name}", maximum=MAX_MEMORY_LABEL_BYTES)
         if self.task_digest is not None and not _valid_digest(self.task_digest):
             raise BrainMemoryError("query.task_digest must be a lowercase SHA-256 digest")
+        self_facets = _normalize_task_facets(self.task_facets, name="query.task_facets")
+        object.__setattr__(self, "task_facets", self_facets)
         for name, values in (("tags", self.tags), ("statuses", self.statuses)):
             if not isinstance(values, tuple) or len(values) > MAX_MEMORY_TAGS:
                 raise BrainMemoryError(f"query.{name} must be a bounded tuple")
@@ -205,6 +286,7 @@ class MemoryQuery:
             "capability",
             "risk_class",
             "task_digest",
+            "task_facets",
             "tags",
             "statuses",
             "include_failed",
@@ -223,6 +305,7 @@ class MemoryQuery:
             capability=value.get("capability"),
             risk_class=value.get("risk_class"),
             task_digest=value.get("task_digest"),
+            task_facets=_normalize_task_facets(value.get("task_facets", ()), name="query.task_facets"),
             tags=tuple_field("tags"),
             statuses=tuple_field("statuses"),
             include_failed=value.get("include_failed", True),
@@ -235,6 +318,7 @@ class MemoryQuery:
             "capability": self.capability,
             "risk_class": self.risk_class,
             "task_digest": self.task_digest,
+            "task_facets": list(self.task_facets),
             "tags": list(self.tags),
             "statuses": list(self.statuses),
             "include_failed": self.include_failed,
@@ -282,6 +366,7 @@ class BrainEpisodicMemory:
         "result_kind",
         "status",
         "task_digest",
+        "task_facets",
         "context",
         "selected_model",
         "digests",
@@ -358,6 +443,7 @@ class BrainEpisodicMemory:
                     domain TEXT,
                     capability TEXT,
                     risk_class TEXT,
+                    task_facets_json TEXT NOT NULL DEFAULT '[]',
                     tags_json TEXT NOT NULL,
                     packet_json TEXT NOT NULL,
                     evaluation_json TEXT,
@@ -371,6 +457,18 @@ class BrainEpisodicMemory:
                 CREATE INDEX IF NOT EXISTS memory_episodes_task_idx
                     ON memory_episodes(task_digest);
                 """
+            )
+            columns = {
+                str(row[1])
+                for row in self._connection.execute("PRAGMA table_info(memory_episodes)").fetchall()
+            }
+            if "task_facets_json" not in columns:
+                # Existing 0.1 stores remain readable and gain the new derived index lazily.
+                self._connection.execute(
+                    "ALTER TABLE memory_episodes ADD COLUMN task_facets_json TEXT NOT NULL DEFAULT '[]'"
+                )
+            self._connection.execute(
+                "CREATE INDEX IF NOT EXISTS memory_episodes_facets_idx ON memory_episodes(task_facets_json)"
             )
 
     def close(self) -> None:
@@ -429,9 +527,9 @@ class BrainEpisodicMemory:
                     """
                     INSERT INTO memory_episodes (
                         episode_id, run_id, result_kind, status, task_digest, domain, capability,
-                        risk_class, tags_json, packet_json, evaluation_json, record_sequence,
+                        risk_class, task_facets_json, tags_json, packet_json, evaluation_json, record_sequence,
                         record_digest, created_ns, updated_ns
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
                     """,
                     (
                         episode_id,
@@ -442,6 +540,7 @@ class BrainEpisodicMemory:
                         domain if isinstance(domain, str) else None,
                         capability if isinstance(capability, str) else None,
                         risk_class if isinstance(risk_class, str) else None,
+                        _canonical(normalized["task_facets"]),
                         _canonical(normalized["tags"]),
                         _canonical(normalized),
                         receipt.sequence,
@@ -533,6 +632,7 @@ class BrainEpisodicMemory:
                 capability=resolved.capability,
                 risk_class=resolved.risk_class,
                 task_digest=resolved.task_digest,
+                task_facets=resolved.task_facets,
                 tags=resolved.tags,
                 statuses=resolved.statuses,
                 include_failed=resolved.include_failed,
@@ -544,6 +644,7 @@ class BrainEpisodicMemory:
             ).fetchall()
         ranked: list[tuple[int, int, dict[str, Any]]] = []
         query_tags = set(resolved.tags)
+        query_facets = set(resolved.task_facets)
         for row in rows:
             if resolved.domain is not None and row["domain"] != resolved.domain:
                 continue
@@ -552,6 +653,13 @@ class BrainEpisodicMemory:
             if resolved.risk_class is not None and row["risk_class"] != resolved.risk_class:
                 continue
             if resolved.task_digest is not None and row["task_digest"] != resolved.task_digest:
+                continue
+            try:
+                row_facets = set(json.loads(row["task_facets_json"]))
+            except (TypeError, ValueError, json.JSONDecodeError) as error:
+                raise BrainMemoryError("episodic memory task facet index contains invalid JSON") from error
+            facet_overlap = len(query_facets.intersection(row_facets))
+            if query_facets and facet_overlap == 0:
                 continue
             if resolved.statuses and row["status"] not in resolved.statuses:
                 continue
@@ -567,6 +675,7 @@ class BrainEpisodicMemory:
             score = 0
             if resolved.task_digest is not None:
                 score += 100
+            score += 30 * facet_overlap
             if resolved.domain is not None:
                 score += 20
             if resolved.capability is not None:
@@ -690,6 +799,9 @@ class BrainEpisodicMemory:
             "result_kind": _bounded_string(packet.get("result_kind"), name="result_kind", maximum=MAX_MEMORY_LABEL_BYTES),
             "status": _bounded_string(packet.get("status"), name="status", maximum=MAX_MEMORY_LABEL_BYTES),
             "task_digest": packet.get("task_digest"),
+            "task_facets": list(
+                _normalize_task_facets(packet.get("task_facets", ()), name="episode.task_facets")
+            ),
             "context": _safe_value(packet.get("context", {})),
             "selected_model": _safe_value(packet.get("selected_model", {})),
             "digests": _safe_digest_map(packet.get("digests")),
@@ -782,6 +894,7 @@ class BrainEpisodicMemory:
             "result_kind": row["result_kind"],
             "status": row["status"],
             "task_digest": row["task_digest"],
+            "task_facets": packet.get("task_facets", []),
             "context": packet.get("context", {}),
             "selected_model": packet.get("selected_model", {}),
             "digests": packet.get("digests", {}),

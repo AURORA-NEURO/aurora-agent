@@ -35,7 +35,7 @@ from .llm_runtime import (
 )
 from .errors import ArgumentError
 from .mission import MissionPolicy, MissionRequest
-from .memory import BrainEpisodicMemory, BrainMemoryError, MemoryQuery
+from .memory import BrainEpisodicMemory, BrainMemoryError, MemoryQuery, task_facet_digests
 from .tooling import ToolCatalogue, ToolSchemaError
 from .autonomy_persistence import AutonomousExecutionController
 from .autonomy_provider import AutonomousProviderInvocationSession
@@ -2374,6 +2374,7 @@ class AutonomousBrain:
             "result_kind": result_kind,
             "status": status,
             "task_digest": hashlib.sha256(task.encode("utf-8")).hexdigest(),
+            "task_facets": list(task_facet_digests(task)),
             "context": context_copy,
             "selected_model": selected_model,
             "digests": digests,

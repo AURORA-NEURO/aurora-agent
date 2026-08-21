@@ -610,10 +610,12 @@ export {
   AUTONOMOUS_MEMORY_MAX_EVENTS,
   AUTONOMOUS_MEMORY_MAX_QUERY_LIMIT,
   AUTONOMOUS_MEMORY_MAX_TAGS,
+  AUTONOMOUS_MEMORY_MAX_TASK_FACETS,
   AUTONOMOUS_MEMORY_SCHEMA,
   AUTONOMOUS_MEMORY_SNAPSHOT_SCHEMA,
   AutonomousMemoryPersistenceCoordinator,
   InMemoryAutonomousEpisodicMemory,
+  taskFacetDigests,
 } from "./autonomous-memory.js";
 export {
   AUTONOMOUS_MODEL_HEALTH_EVENT_SCHEMA,

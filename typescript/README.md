@@ -598,6 +598,14 @@ warning. `AutonomousMemoryPersistenceCoordinator` connects the store to a caller
 object-store adapter. Snapshots and event chains are content-addressed, and raw prompts, provider
 responses, tool payloads, credentials, and secret-shaped fields are rejected.
 
+For bounded automatic recall, `taskFacetDigests(task)` projects short identifier-like task terms into
+at most 32 namespaced SHA-256 digests. The original task vocabulary is never stored. Callers may put
+those digests in `AutonomousMemoryEpisodeInput.task_facets` and query them through
+`AutonomousMemoryQuery.task_facets`; matching is a weak lexical relevance signal, not semantic truth,
+authorization, or a replacement for evaluator feedback. Single- and cross-domain decision cycles
+derive these facets automatically when no exact task digest or explicit facet query is supplied;
+caller-provided exact filters remain authoritative.
+
 `InMemoryAutonomousModelHealthStore` adds the restart-safe selection feedback plane. It records
 separate value-only invocation and evaluator-quality observations, aggregates success/failure,
 latency, quality, and circuit projections per provider/model arm, and exposes a deterministic

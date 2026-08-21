@@ -1490,6 +1490,14 @@ SHA-256 snapshot digest plus the event hash chain. `AutonomousMemoryPersistenceC
 bridges the store to an application-owned SQLite, Postgres, IndexedDB, or object-store adapter;
 the SDK does not select a filesystem or persist provider secrets.
 
+For automatic task-family hints, `taskFacetDigests(task)` derives at most 32 short identifier-like
+terms as namespaced SHA-256 digests. Store the resulting `task_facets` on an episode and supply them
+on a query to apply a deterministic, weak lexical relevance gate without retaining the original task
+vocabulary. Facets are only retrieval hints: they are not embeddings, authorization evidence,
+verified truth, or a substitute for evaluator settlement. Single- and cross-domain decision cycles
+derive the facets from their transient task automatically when the caller does not provide an exact
+task digest or facet query; explicit caller filters remain authoritative.
+
 ### Restart-safe model health and offline replay
 
 `InMemoryAutonomousModelHealthStore` is the TypeScript reference ledger for the selection feedback

@@ -31,6 +31,7 @@ from prism_sdk import (
     AutonomousRoutingHoldoutCase,
     AutonomousRoutingHoldoutEvaluator,
     AutonomousTaskRouter,
+    AutonomousTaskOrchestrator,
     AutonomousWorkflowRegistry,
     CompositeDomainEvaluator,
     DomainEvaluatorRegistry,
@@ -55,6 +56,7 @@ from prism_sdk import (
     builtin_autonomous_domain_evaluator_profiles,
     openai_provider,
     content_digest,
+    task_facet_digests,
 )
 
 
@@ -1985,6 +1987,52 @@ def test_run_autonomous_learning_records_explicit_reward_and_only_metadata_in_me
         server.shutdown()
         thread.join(timeout=2)
         server.server_close()
+
+
+def test_automatic_memory_recall_uses_task_facets_instead_of_recent_unrelated_episodes(tmp_path: Path):
+    memory = BrainEpisodicMemory(tmp_path / "facet-recall.sqlite3")
+    related_task = "review the release evidence and validate the implementation contract"
+    unrelated_task = "compare imaging modalities and quantify signal reproducibility"
+
+    def packet(episode_id: str, task: str) -> dict[str, object]:
+        return {
+            "episode_id": episode_id,
+            "run_id": f"{episode_id}-run",
+            "result_kind": "provider",
+            "status": "completed_without_replan",
+            "task_digest": hashlib.sha256(task.encode()).hexdigest(),
+            "task_facets": task_facet_digests(task),
+            "context": {
+                "domain": "coding",
+                "capability": "review",
+                "risk_class": "research",
+            },
+            "selected_model": {"provider": "openai", "model": "test-model"},
+            "digests": {"selection_digest": "a" * 64},
+            "route": {},
+            "tags": [],
+            "lesson": "Use explicit evidence.",
+            "provenance": {},
+        }
+
+    memory.record_episode(packet("related", related_task))
+    memory.record_episode(packet("unrelated", unrelated_task))
+    brain = AutonomousBrain(object(), LLMRuntime(), memory=memory)
+    store, recalled = AutonomousTaskOrchestrator._memory(
+        brain,
+        memory,
+        None,
+        8,
+        task=related_task,
+        domain="coding",
+        capability="review",
+        risk_class="research",
+    )
+    assert store is memory
+    assert [row["episode_id"] for row in recalled] == ["related"]
+    assert related_task not in json.dumps(recalled)
+    assert unrelated_task not in json.dumps(recalled)
+    memory.close()
 
 
 def test_run_autonomous_tool_loop_executes_only_through_caller_callback():

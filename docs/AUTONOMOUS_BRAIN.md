@@ -1830,8 +1830,14 @@ failover useful while preventing duplicate external effects.
 
 `BrainEpisodicMemory` provides a restart-safe memory boundary for applications that want the
 agent to improve across jobs. It stores only a caller-authored packet of run identity, context
-labels, model identity, digests, bounded tags, safe lessons, and provenance. It never accepts raw
-tasks, prompts, provider responses, tool arguments, credentials, headers, or secret-shaped fields.
+labels, model identity, digests, bounded tags, digest-only task facets, safe lessons, and
+provenance. It never accepts raw tasks, prompts, provider responses, tool arguments, credentials,
+headers, or secret-shaped fields. The Python automatic execution façade derives at most 32
+short identifier-like task facets locally and stores only their namespaced SHA-256 digests. When
+the caller does not provide an exact memory query, those facets plus the selected domain,
+capability, and risk class form a relevance gate, so unrelated recent episodes are not injected
+into a new prompt. This is bounded lexical retrieval—not an embedding index, truth claim, or
+authorization signal.
 Episode records and evaluator updates are separate append-only SQLite events linked by a SHA-256
 previous-digest chain:
 
@@ -1886,7 +1892,9 @@ dispatch; after `execute=true` has been sent, the cycle returns
 claims, route candidates, credentials, or approval gates.
 
 Memory can be independently inspected with `memory.retrieve(...)`, `memory.get(episode_id)`,
-`memory.stats()`, and `memory.verify_integrity()`. A deployment that needs stronger durability or
+`memory.stats()`, and `memory.verify_integrity()`. `task_facet_digests(task)` exposes the same
+deterministic digest projection for an explicit `MemoryQuery(task_facets=...)`; the original task
+vocabulary is never returned by that helper. A deployment that needs stronger durability or
 multi-tenant isolation should place the database behind its own encrypted storage, authorization,
 backup, and retention controls; the SDK supplies bounded append/retrieval and provenance, not a
 distributed database or an identity authority.

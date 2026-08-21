@@ -16,7 +16,12 @@ from prism_sdk.brain import (
     BrainRunResult,
 )
 from prism_sdk.llm_runtime import LLMRuntime
-from prism_sdk.memory import BrainEpisodicMemory, BrainMemoryError, MemoryQuery
+from prism_sdk.memory import (
+    BrainEpisodicMemory,
+    BrainMemoryError,
+    MemoryQuery,
+    task_facet_digests,
+)
 
 
 def _digest(value: str) -> str:
@@ -49,6 +54,94 @@ def _packet(*, episode_id: str, domain: str = "engineering", status: str = "miss
 
 
 class BrainMemoryTests(unittest.TestCase):
+    def test_digest_only_task_facets_retrieve_related_work_without_retaining_vocabulary(self) -> None:
+        related_task = "review the release evidence and validate the implementation contract"
+        unrelated_task = "compare imaging modalities and quantify signal reproducibility"
+        related_facets = task_facet_digests(related_task)
+        self.assertTrue(related_facets)
+        self.assertEqual(related_facets, task_facet_digests(related_task))
+        self.assertNotIn("release", json.dumps(related_facets))
+
+        with TemporaryDirectory() as directory:
+            memory = BrainEpisodicMemory(f"{directory}/episodes.sqlite3")
+            memory.record_episode(
+                {
+                    **_packet(episode_id="episode-related", domain="engineering"),
+                    "task_digest": _digest(related_task),
+                    "task_facets": related_facets,
+                }
+            )
+            memory.record_episode(
+                {
+                    **_packet(episode_id="episode-unrelated", domain="engineering"),
+                    "task_digest": _digest(unrelated_task),
+                    "task_facets": task_facet_digests(unrelated_task),
+                }
+            )
+            recalled = memory.retrieve(
+                MemoryQuery(
+                    domain="engineering",
+                    task_facets=related_facets,
+                    limit=4,
+                )
+            )
+            self.assertEqual([row["episode_id"] for row in recalled], ["episode-related"])
+            self.assertEqual(recalled[0]["task_facets"], list(related_facets))
+            self.assertNotIn(related_task, json.dumps(recalled))
+            self.assertNotIn(unrelated_task, json.dumps(recalled))
+            self.assertTrue(memory.verify_integrity()["ok"])
+            memory.close()
+
+    def test_legacy_memory_schema_migrates_the_derived_facet_index(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = f"{directory}/legacy.sqlite3"
+            connection = sqlite3.connect(path)
+            connection.executescript(
+                """
+                CREATE TABLE memory_events (
+                    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_type TEXT NOT NULL,
+                    episode_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    previous_digest TEXT NOT NULL,
+                    event_digest TEXT NOT NULL UNIQUE,
+                    created_ns INTEGER NOT NULL
+                );
+                CREATE TABLE memory_episodes (
+                    episode_id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL,
+                    result_kind TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    task_digest TEXT NOT NULL,
+                    domain TEXT,
+                    capability TEXT,
+                    risk_class TEXT,
+                    tags_json TEXT NOT NULL,
+                    packet_json TEXT NOT NULL,
+                    evaluation_json TEXT,
+                    record_sequence INTEGER NOT NULL,
+                    record_digest TEXT NOT NULL,
+                    created_ns INTEGER NOT NULL,
+                    updated_ns INTEGER NOT NULL
+                );
+                """
+            )
+            connection.commit()
+            connection.close()
+            with BrainEpisodicMemory(path) as memory:
+                columns = {
+                    row[1]
+                    for row in memory._connection.execute("PRAGMA table_info(memory_episodes)").fetchall()
+                }
+                self.assertIn("task_facets_json", columns)
+                memory.record_episode(
+                    {
+                        **_packet(episode_id="migrated"),
+                        "task_facets": task_facet_digests("release evidence validation"),
+                    }
+                )
+                self.assertTrue(memory.verify_integrity()["ok"])
+
     def test_memory_persists_queries_evaluations_and_integrity_across_restart(self) -> None:
         with TemporaryDirectory() as directory:
             path = f"{directory}/episodes.sqlite3"

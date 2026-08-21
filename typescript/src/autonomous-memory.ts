@@ -1,5 +1,5 @@
 import { ArgumentError } from "./errors.js";
-import { digestCanonicalJsonText, digestJson } from "./tooling.js";
+import { digestBytesSync, digestCanonicalJsonText, digestJson } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
 export const AUTONOMOUS_MEMORY_SCHEMA = "bioprism-typescript-autonomous-episodic-memory/0.1" as const;
@@ -8,6 +8,7 @@ export const AUTONOMOUS_MEMORY_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous
 export const AUTONOMOUS_MEMORY_MAX_EPISODES = 4_096;
 export const AUTONOMOUS_MEMORY_MAX_EVENTS = 16_384;
 export const AUTONOMOUS_MEMORY_MAX_TAGS = 64;
+export const AUTONOMOUS_MEMORY_MAX_TASK_FACETS = 32;
 export const AUTONOMOUS_MEMORY_MAX_QUERY_LIMIT = 128;
 
 const PRIVATE_RETENTION = "value_only_hash_chained;task_prompt_response_tool_payloads_and_credentials_not_retained" as const;
@@ -41,6 +42,7 @@ export interface AutonomousMemoryEpisode extends JsonObject {
   result_kind: string;
   status: AutonomousMemoryEpisodeStatus;
   task_digest: string;
+  task_facets: string[];
   context: { domain: string; capability: string; risk_class: string; task_family: string | null };
   context_digest: string;
   selected_model: { provider: string; model: string } | null;
@@ -63,6 +65,8 @@ export interface AutonomousMemoryEpisodeInput {
   result_kind: string;
   status: AutonomousMemoryEpisodeStatus;
   task_digest: string;
+  /** Optional namespaced SHA-256 facets derived locally from transient task text. */
+  task_facets?: readonly string[];
   context: { domain: string; capability: string; risk_class: string; task_family?: string | null };
   /** Optional caller-supplied identity; when omitted it is derived and retained. */
   context_digest?: string | null;
@@ -92,6 +96,7 @@ export interface AutonomousMemoryQuery {
   task_family?: string | null;
   context_digest?: string;
   task_digest?: string;
+  task_facets?: readonly string[];
   tags?: readonly string[];
   statuses?: readonly AutonomousMemoryEpisodeStatus[];
   includeFailed?: boolean;
@@ -186,6 +191,33 @@ function boundedDigest(name: string, value: unknown, allowNull = false): string 
   if (value === null && allowNull) return null;
   if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new ArgumentError(`${name} must be a lowercase SHA-256 digest`);
   return value;
+}
+
+const TASK_FACET_STOPWORDS = new Set([
+  "about", "after", "again", "also", "and", "are", "before", "between", "can", "could",
+  "from", "have", "into", "just", "more", "need", "only", "should", "that", "the", "their",
+  "then", "there", "these", "this", "through", "using", "want", "what", "when", "with", "would",
+]);
+
+/** Derive a bounded, digest-only lexical retrieval signal without retaining task vocabulary. */
+export function taskFacetDigests(task: string): string[] {
+  if (typeof task !== "string" || !task.trim() || task.includes("\u0000") || new TextEncoder().encode(task).byteLength > 16_000) throw new ArgumentError("task facets task is outside its bounds");
+  const tokens = new Set<string>();
+  for (const match of task.toLowerCase().matchAll(/[a-z0-9][a-z0-9_-]{2,31}/g)) {
+    const token = match[0];
+    if (TASK_FACET_STOPWORDS.has(token)) continue;
+    if (token.startsWith("api_key") || token.startsWith("apikey") || token.startsWith("bearer") || token.startsWith("token") || token.startsWith("secret") || token.startsWith("password") || token.startsWith("gsk_") || token.startsWith("sk-") || token.startsWith("rk-") || token.startsWith("pk-") || token.startsWith("ghp_") || token.startsWith("xoxb-") || token.startsWith("aiza")) continue;
+    if (token.length >= 24 || (token.length >= 16 && (token.includes("_") || token.includes("-")))) continue;
+    if ((token.match(/_/g)?.length ?? 0) > 4 || (token.match(/-/g)?.length ?? 0) > 4) continue;
+    tokens.add(token);
+    if (tokens.size >= AUTONOMOUS_MEMORY_MAX_TASK_FACETS) break;
+  }
+  return [...tokens].sort().map((token) => digestBytesSync(new TextEncoder().encode(`bioprism-task-facet/0.1:${token}`))).sort();
+}
+
+function normalizeTaskFacets(value: unknown, name: string): string[] {
+  if (!Array.isArray(value) || value.length > AUTONOMOUS_MEMORY_MAX_TASK_FACETS) throw new ArgumentError(`${name} is outside its bounded facet contract`);
+  return [...new Set(value.map((facet) => boundedDigest(name, facet)!))].sort();
 }
 
 function normalizeMemoryContext(context: AutonomousMemoryEpisodeInput["context"]): { domain: string; capability: string; risk_class: string; task_family: string | null } {
@@ -312,7 +344,8 @@ export class InMemoryAutonomousEpisodicMemory implements AutonomousEpisodicMemor
     const normalizedProvenance = Object.fromEntries(Object.entries(provenance).map(([key, value]) => [boundedIdentifier("memory provenance key", key), boundedString("memory provenance value", value, 512)]));
     const route = normalizeRoute(input.route);
     const digests = normalizeDigests(input.digests);
-    const core = { schema: AUTONOMOUS_MEMORY_SCHEMA, episode_id: episodeId, run_id: boundedIdentifier("memory run_id", input.run_id), result_kind: boundedIdentifier("memory result_kind", input.result_kind), status: input.status, task_digest: taskDigest, context: normalizedContext, context_digest: contextDigest, selected_model: selectedModel, digests, route, tags, lesson, provenance: normalizedProvenance, retention: PRIVATE_RETENTION, secret_material: "never_returned" as const };
+    const taskFacets = normalizeTaskFacets(input.task_facets ?? [], "memory task_facets");
+    const core = { schema: AUTONOMOUS_MEMORY_SCHEMA, episode_id: episodeId, run_id: boundedIdentifier("memory run_id", input.run_id), result_kind: boundedIdentifier("memory result_kind", input.result_kind), status: input.status, task_digest: taskDigest, task_facets: taskFacets, context: normalizedContext, context_digest: contextDigest, selected_model: selectedModel, digests, route, tags, lesson, provenance: normalizedProvenance, retention: PRIVATE_RETENTION, secret_material: "never_returned" as const };
     const episodeDigest = await digestJson(core);
     const existing = this.episodes.get(episodeId);
     if (existing) {
@@ -365,6 +398,8 @@ export class InMemoryAutonomousEpisodicMemory implements AutonomousEpisodicMemor
     const statuses = new Set(query.statuses ?? []);
     for (const status of statuses) if (!["completed", "failed", "partial", "approval_required"].includes(status)) throw new ArgumentError("memory query contains an unsupported status");
     const taskDigest = query.task_digest === undefined ? undefined : boundedDigest("memory query task_digest", query.task_digest)!;
+    const taskFacets = normalizeTaskFacets(query.task_facets ?? [], "memory query task_facets");
+    const queryFacetSet = new Set(taskFacets);
     const contextDigest = query.context_digest === undefined ? undefined : boundedDigest("memory query context_digest", query.context_digest)!;
     const taskFamily = query.task_family === undefined || query.task_family === null ? query.task_family : boundedIdentifier("memory query task_family", query.task_family);
     const matches = [...this.episodes.values()].filter((episode) => {
@@ -374,11 +409,12 @@ export class InMemoryAutonomousEpisodicMemory implements AutonomousEpisodicMemor
       if (taskFamily !== undefined && episode.context.task_family !== taskFamily) return false;
       if (contextDigest !== undefined && episode.context_digest !== contextDigest) return false;
       if (taskDigest !== undefined && episode.task_digest !== taskDigest) return false;
+      if (queryFacetSet.size && !episode.task_facets.some((facet) => queryFacetSet.has(facet))) return false;
       if (statuses.size && !statuses.has(episode.status)) return false;
       if (query.includeFailed === false && (episode.status === "failed" || episode.evaluation?.failed === true)) return false;
       if (tags.size && ![...tags].some((tag) => episode.tags.includes(tag))) return false;
       return true;
-    }).map((episode) => ({ score: (query.domain ? 20 : 0) + (query.capability ? 20 : 0) + (query.risk_class ? 10 : 0) + (query.task_family ? 20 : 0) + (query.context_digest ? 100 : 0) + (query.task_digest ? 100 : 0) + [...tags].filter((tag) => episode.tags.includes(tag)).length * 5 + (episode.evaluation?.passed ? 2 : 0), episode }));
+    }).map((episode) => ({ score: (query.domain ? 20 : 0) + (query.capability ? 20 : 0) + (query.risk_class ? 10 : 0) + (query.task_family ? 20 : 0) + (query.context_digest ? 100 : 0) + (query.task_digest ? 100 : 0) + episode.task_facets.filter((facet) => queryFacetSet.has(facet)).length * 30 + [...tags].filter((tag) => episode.tags.includes(tag)).length * 5 + (episode.evaluation?.passed ? 2 : 0), episode }));
     matches.sort((left, right) => right.score - left.score || right.episode.updated_at - left.episode.updated_at || left.episode.episode_id.localeCompare(right.episode.episode_id));
     return matches.slice(0, limit).map(({ episode }) => clone(episode));
   }

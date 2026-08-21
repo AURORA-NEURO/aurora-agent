@@ -11,6 +11,7 @@ import {
   LLMRuntime,
   builtinAutonomousDomainProfiles,
   digestJson,
+  taskFacetDigests,
   openaiCompatibleProvider,
   runAutonomousCrossDomainDecisionCycle,
   runAutonomousDecisionCycle,
@@ -93,6 +94,29 @@ test("episodic memory records value-only episodes, evaluates them, queries every
   await assert.rejects(memory.recordEpisode({ ...(await episodeInput("coding", "context-mismatch")), context_digest: "0".repeat(64) }), /does not match its context identity/);
 });
 
+test("episodic memory retrieves related digest-only task facets without retaining task vocabulary", async () => {
+  const memory = new InMemoryAutonomousEpisodicMemory();
+  const relatedTask = "review release evidence and validate implementation contract";
+  const unrelatedTask = "compare imaging modalities and quantify signal reproducibility";
+  const relatedFacets = taskFacetDigests(relatedTask);
+  assert.ok(relatedFacets.length > 0);
+  assert.equal(JSON.stringify(relatedFacets).includes("release"), false);
+  const related = await episodeInput("coding", "related-facets");
+  related.task_digest = await digestJson({ task: relatedTask });
+  related.task_facets = relatedFacets;
+  const unrelated = await episodeInput("coding", "unrelated-facets");
+  unrelated.task_digest = await digestJson({ task: unrelatedTask });
+  unrelated.task_facets = taskFacetDigests(unrelatedTask);
+  await memory.recordEpisode(related);
+  await memory.recordEpisode(unrelated);
+  const recalled = await memory.retrieve({ domain: "coding", task_facets: relatedFacets, limit: 4 });
+  assert.deepEqual(recalled.map((episode) => episode.episode_id), ["related-facets"]);
+  assert.deepEqual(recalled[0].task_facets, relatedFacets);
+  assert.equal(JSON.stringify(recalled).includes(relatedTask), false);
+  assert.equal(JSON.stringify(recalled).includes(unrelatedTask), false);
+  assert.equal((await memory.verifyIntegrity()).episodes, 2);
+});
+
 test("episodic memory snapshots restore integrity and refuse tampering", async () => {
   const memory = new InMemoryAutonomousEpisodicMemory();
   await memory.recordEpisode(await episodeInput("science", "science-memory"));
@@ -128,6 +152,11 @@ test("decision cycles recall memory into the next prompt and persist only digest
   assert.deepEqual(first.memory.recorded_episode_ids, ["memory-cycle-1"]);
   assert.deepEqual(first.memory.evaluation_recorded_episode_ids, ["memory-cycle-1"]);
   assert.equal(JSON.stringify(memory.get("memory-cycle-1")).includes(task), false);
+  assert.deepEqual(memory.get("memory-cycle-1").task_facets, taskFacetDigests(task));
+  const unrelated = await episodeInput("coding", "memory-cycle-unrelated");
+  unrelated.task_digest = await digestJson({ task: "compare imaging modalities and quantify reproducibility" });
+  unrelated.task_facets = taskFacetDigests("compare imaging modalities and quantify reproducibility");
+  await memory.recordEpisode(unrelated);
 
   const second = await runAutonomousDecisionCycle(agent, task, {
     domain: "coding",

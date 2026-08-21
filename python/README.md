@@ -50,7 +50,9 @@ See [`docs/HTTP_API.md`](../docs/HTTP_API.md) for the route and delivery contrac
 The provider runtime and [`AutonomousBrain`](../docs/AUTONOMOUS_BRAIN.md) add the caller-approved
 LLM boundary: BYOK credentials become short-lived opaque handles, model selection is health- and
 capability-gated, prompts and mission plans are bounded, and external effects require explicit
-approval. `BrainEpisodicMemory` provides optional restart-safe, hash-chained metadata memory;
+approval. `BrainEpisodicMemory` provides optional restart-safe, hash-chained metadata memory.
+Automatic task runs derive bounded digest-only task facets for related-lesson retrieval, never
+persisting task text; explicit evaluator rewards remain the only learning authority.
 `run_adaptive_mission_learning_cycle()` combines recall, evaluator reward, bandit state updates,
 and bounded pre-dispatch replanning without retaining provider text, tool arguments, or secrets.
 `BrainJobStore` adds resolver-backed leases and checkpoints for restart-safe learning jobs, while

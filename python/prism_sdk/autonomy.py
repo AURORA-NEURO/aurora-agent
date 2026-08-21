@@ -94,7 +94,7 @@ from .llm_runtime import (
     ProviderConfig,
     ProviderTool,
 )
-from .memory import BrainEpisodicMemory, BrainMemoryError, MemoryQuery
+from .memory import BrainEpisodicMemory, BrainMemoryError, MemoryQuery, task_facet_digests
 from .mission import MissionPolicy
 from .tooling import ToolCatalogue, ToolDefinition
 
@@ -6478,6 +6478,11 @@ class AutonomousTaskOrchestrator:
         memory: BrainEpisodicMemory | None,
         memory_query: MemoryQuery | Mapping[str, Any] | None,
         memory_limit: int,
+        *,
+        task: str,
+        domain: str,
+        capability: str | None,
+        risk_class: str | None,
     ) -> tuple[BrainEpisodicMemory | None, tuple[Mapping[str, Any], ...]]:
         store = memory if memory is not None else brain.memory
         if store is None:
@@ -6486,8 +6491,36 @@ class AutonomousTaskOrchestrator:
             raise BrainRunError("memory must be a BrainEpisodicMemory or None")
         if not isinstance(memory_limit, int) or isinstance(memory_limit, bool) or not 1 <= memory_limit <= MAX_AUTONOMY_MEMORY_ITEMS:
             raise BrainRunError(f"memory_limit must be between 1 and {MAX_AUTONOMY_MEMORY_ITEMS}")
+        query = memory_query
+        if query is None:
+            query = MemoryQuery(
+                domain=domain,
+                capability=capability,
+                risk_class=risk_class,
+                task_facets=task_facet_digests(task),
+                limit=memory_limit,
+            )
+        elif isinstance(query, Mapping):
+            # Explicit filters remain caller-owned, but an ordinary metadata query should not
+            # silently fall back to unrelated recent episodes.  Exact task-digest/facet queries
+            # are left untouched; otherwise add local digest-only facets as a relevance gate.
+            normalized_query = dict(query)
+            if "task_digest" not in normalized_query and "task_facets" not in normalized_query:
+                normalized_query["task_facets"] = list(task_facet_digests(task))
+            query = normalized_query
+        elif isinstance(query, MemoryQuery) and query.task_digest is None and not query.task_facets:
+            query = MemoryQuery(
+                domain=query.domain,
+                capability=query.capability,
+                risk_class=query.risk_class,
+                task_facets=task_facet_digests(task),
+                tags=query.tags,
+                statuses=query.statuses,
+                include_failed=query.include_failed,
+                limit=query.limit,
+            )
         try:
-            episodes = tuple(store.retrieve(memory_query, limit=memory_limit))
+            episodes = tuple(store.retrieve(query, limit=memory_limit))
         except BrainMemoryError as error:
             raise BrainRunError("autonomous memory retrieval failed") from error
         return store, episodes
@@ -6913,7 +6946,16 @@ class AutonomousTaskOrchestrator:
         route/mission executor; dispatch still requires ``approve_mission_dispatch=True``.
         """
 
-        store, recalled = self._memory(self.brain, memory, memory_query, memory_limit)
+        store, recalled = self._memory(
+            self.brain,
+            memory,
+            memory_query,
+            memory_limit,
+            task=task,
+            domain=domain,
+            capability=capability,
+            risk_class=risk_class,
+        )
         blueprint = self.prepare(
             task=task,
             domain=domain,
