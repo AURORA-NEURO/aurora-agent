@@ -1857,6 +1857,15 @@ truth. Completed requests are replay-safe within a bounded in-memory cache, whil
 `executeCapabilityBatch()` preserves ordered execution and records explicit omissions after a
 stop-on-failure decision. No provider key or raw prompt is needed by this layer.
 
+The live transport path is also first-class: when `AutonomousAgent` receives both an `ApiClient`
+and the exact `ToolCatalogue` used for planning, it creates
+`createAutonomousApiToolExecutor()` unless the caller supplies a custom executor. Each dispatch
+uses `ApiClient.toolChecked()` against that snapshot, so the workflow registry remains the first
+authorization boundary and the API/MCP refusal envelope remains distinguishable from a returned
+capability value. The bridge does not discover tools, accept key values, or retain transport
+payloads; user credentials remain inside the caller-owned `ApiClient` session. Custom local,
+queue-backed, sandboxed, or cross-language executors can still be supplied explicitly.
+
 Every new checkpoint also carries `execution_contract_digest`, a digest-only projection of the
 effective candidate metadata, selection limits, output/schema requirement, tool definitions,
 failover limit, and enclosing execution-policy digest. `resume()` and an idempotent `start()` reject

@@ -253,6 +253,11 @@ export type {
   AutonomousCapabilityReplayStatus,
 } from "./autonomous-capabilities.js";
 export {
+  AUTONOMOUS_API_TOOL_ADAPTER_SCHEMA,
+  createAutonomousApiToolExecutor,
+} from "./autonomous-api-adapter.js";
+export type { AutonomousApiToolExecutorOptions } from "./autonomous-api-adapter.js";
+export {
   AUTONOMOUS_ACTIVATION_SCHEMA,
   AUTONOMOUS_ACTIVATION_STORE_SCHEMA,
   AUTONOMOUS_ACTIVATION_STATUSES,

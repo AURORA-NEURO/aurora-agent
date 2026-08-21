@@ -720,6 +720,14 @@ automatically; reversible or external-effect tools remain review rows and
 authorization, tool arguments/results are bounded and secret-shaped values are refused, and
 receipts retain metadata and digests rather than hidden payloads.
 
+When an application supplies both `apiClient` and `toolCatalogue` but omits `toolExecutor`,
+`AutonomousAgent` automatically installs `createAutonomousApiToolExecutor()`. The bridge calls
+the already-reviewed catalogue through `ApiClient.toolChecked()` and preserves the API/MCP
+refusal envelope as a typed runtime failure; it performs no tool discovery and never accepts or
+stores key material. The caller's `ApiClient` remains responsible for its own user credential or
+session. Supply `toolExecutor` explicitly when a local adapter, queue, sandbox, or Python/Rust
+boundary should own dispatch instead.
+
 The selector can be supplied directly, backed by `AutonomousOnlineLearner`, or bridged to
 `ApiClient.brainModelSelectContextual()`. The bridge sends only model descriptors, health,
 domain/capability/risk context, and bounded digests—not credentials, prompt transcripts, tool

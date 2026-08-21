@@ -1,5 +1,6 @@
 import { ArgumentError, ProviderRuntimeError, isObject } from "./errors.js";
 import type { ApiClient } from "./client.js";
+import { createAutonomousApiToolExecutor } from "./autonomous-api-adapter.js";
 import {
   AutonomousCapabilityActivation,
   type AutonomousCapabilityActivationSnapshotStore,
@@ -2475,7 +2476,9 @@ export class AutonomousAgent {
     if (options.modelHealthBridge !== undefined && !(options.modelHealthBridge instanceof AutonomousBrainControlPlaneBridge)) throw new ArgumentError("AutonomousAgent modelHealthBridge must be an AutonomousBrainControlPlaneBridge");
     this.modelHealthBridge = options.modelHealthBridge;
     this.toolCatalogue = options.toolCatalogue;
-    this.toolExecutor = options.toolExecutor;
+    this.toolExecutor = options.toolExecutor ?? (this.apiClient && this.toolCatalogue
+      ? createAutonomousApiToolExecutor(this.apiClient, { catalogue: this.toolCatalogue })
+      : undefined);
     this.toolApprover = options.toolApprover;
     this.effectBoundary = options.effectBoundary;
     const selector = options.selector ?? (this.modelHealthController ? this.modelHealthController.selector() : options.learner ? (request: AutonomousSelectionRequest) => options.learner!.select(request) : options.apiClient ? contextualSelector(options.apiClient) : this.modelHealthBridge ? this.modelHealthBridge.selector() : undefined);

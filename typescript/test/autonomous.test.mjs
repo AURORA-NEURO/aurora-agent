@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  ApiClient,
   AutonomousAgent,
   AutonomousCapabilityActivation,
   AutonomousCapabilityActivationPersistenceCoordinator,
@@ -11,6 +12,7 @@ import {
   AutonomousDomainToolRegistry,
   AutonomousDomainToolRuntime,
   AutonomousOnlineLearner,
+  AUTONOMOUS_API_TOOL_ADAPTER_SCHEMA,
   AUTONOMOUS_CAPABILITY_PLAN_SCHEMA,
   AUTONOMOUS_CAPABILITY_EXECUTION_SCHEMA,
   AUTONOMOUS_READINESS_SCHEMA,
@@ -22,6 +24,7 @@ import {
   compileAutonomousPlan,
   digestCanonicalJsonTextSync,
   digestJson,
+  createAutonomousApiToolExecutor,
   openaiCompatibleProvider,
   routeAutonomousTask,
 } from "../dist/index.js";
@@ -524,6 +527,49 @@ test("AutonomousAgent exposes capability records through its activation-aware ru
   assert.equal(executions, 1);
   assert.equal(agent.capabilityExecutionEvidence().length, 1);
   assert.equal(agent.toolExecutionEvidence().length, 1);
+});
+
+test("ApiClient is a key-agnostic live executor bridge for reviewed capability calls", async () => {
+  const profiles = await builtinAutonomousDomainProfiles();
+  const definitions = [...new Map(profiles.flatMap((profile) => profile.tool_profile.bindings.map((binding) => ({ name: binding.name, description: binding.name, inputSchema: { type: "object", additionalProperties: true } }))).map((definition) => [definition.name, definition])).values()];
+  let transportCalls = 0;
+  const client = new ApiClient({
+    baseUrl: "https://prism.test",
+    fetch: async (url, init) => {
+      transportCalls += 1;
+      const tool = new URL(String(url)).pathname.split("/").at(-1);
+      assert.equal(typeof tool, "string");
+      assert.equal(typeof JSON.parse(String(init.body)), "object");
+      return jsonResponse({ ok: true, tool, request_id: `api-call-${transportCalls}`, guarantee: "bounded", mcp: { result: { structuredContent: { checked: true, source: "api", tool } } } });
+    },
+  });
+  const catalogue = await ToolCatalogue.fromDefinitions(definitions);
+  const explicitExecutor = createAutonomousApiToolExecutor(client, { catalogue });
+  assert.equal(typeof explicitExecutor, "function");
+  const llm = new LLMRuntime({ credentials: new CredentialStore() });
+  const agent = new AutonomousAgent(llm, { apiClient: client, toolCatalogue: catalogue });
+  const registry = await AutonomousDomainToolRegistry.create(catalogue);
+  for (const profile of profiles) {
+    const plan = await registry.planForTask(`exercise the live ${profile.domain} API capability`, { domains: [profile.domain], maxTools: 128 });
+    const coverage = plan.coverage.find((row) => row.domain === profile.domain && row.status === "selected");
+    assert.ok(coverage?.selected_tool, `${profile.domain} must have a stage-compatible API tool`);
+    const stage = profile.workflow.stages.find((candidate) => candidate.id === coverage.stage_id);
+    const result = await agent.executeCapability({
+      call_id: `api-${profile.domain}`,
+      tool: coverage.selected_tool,
+      arguments: {},
+      workflow_context: { domain: profile.domain, workflow_id: profile.workflow.workflow_id, workflow_digest: profile.workflow.workflow_digest, stage_id: stage.id },
+      input_digest: await digestJson({ task: `live API bridge ${profile.domain}` }),
+    });
+    assert.equal(result.record.status, "completed", profile.domain);
+    assert.equal(result.value.checked, true, profile.domain);
+    assert.equal(result.value.tool, coverage.selected_tool, profile.domain);
+    assert.equal(result.record.domain, profile.domain);
+    assert.equal(result.record.secret_material, "never_returned");
+    assert.equal(JSON.stringify(result.record).includes("bearer"), false);
+  }
+  assert.equal(transportCalls, profiles.length);
+  assert.equal(AUTONOMOUS_API_TOOL_ADAPTER_SCHEMA, "bioprism-typescript-autonomous-api-tool-adapter/0.1");
 });
 
 test("AutonomousAgent performs a real selected-provider tool loop with domain policy", async () => {
