@@ -29,9 +29,9 @@ export const AUTONOMOUS_CROSS_DOMAIN_MAX_EVENTS = 256;
 export const AUTONOMOUS_CROSS_DOMAIN_MAX_JOBS = 1_024;
 export const AUTONOMOUS_CROSS_DOMAIN_MAX_SNAPSHOT_BYTES = 4 * 1024 * 1024;
 
-export type AutonomousCrossDomainCheckpointStatus = "children_pending" | "synthesis_pending" | "paused" | "completed" | "failed";
+export type AutonomousCrossDomainCheckpointStatus = "children_pending" | "synthesis_pending" | "paused" | "reconciliation_required" | "completed" | "failed";
 export type AutonomousCrossDomainExecutionStatus = "completed" | "paused" | "approval_required" | "reconciliation_required" | "failed" | "route_review_required";
-export type AutonomousCrossDomainEventType = "started" | "child_completed" | "checkpointed" | "approval_required" | "reconciliation_required" | "synthesis_completed" | "failed" | "completed";
+export type AutonomousCrossDomainEventType = "started" | "child_completed" | "checkpointed" | "approval_required" | "reconciliation_required" | "reconciliation_retry_authorized" | "synthesis_completed" | "failed" | "completed";
 
 export interface AutonomousCrossDomainCheckpoint {
   schema: typeof AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_SCHEMA;
@@ -151,6 +151,11 @@ export interface AutonomousCrossDomainExecuteOptions extends AutonomousCrossDoma
   rebindLegacyExecutionContract?: boolean;
   /** Rehydrate raw child results from caller-owned durable storage before the next step. */
   resolveChildResult?: AutonomousCrossDomainChildResultResolver;
+  /**
+   * Reconciliation is a quarantine, not an implicit retry policy. Set this only after the
+   * caller has inspected the effect/provider system and determined that replay is safe.
+   */
+  retryReconciliation?: boolean;
 }
 
 export interface AutonomousCrossDomainExecutorOptions {
@@ -231,7 +236,7 @@ async function validateCheckpoint(value: unknown): Promise<AutonomousCrossDomain
   if (synthesisResultDigest !== null && completed.length !== execution.length) throw new ArgumentError("cross-domain checkpoint cannot contain synthesis before all children");
   const generation = boundedInteger(value.generation, "cross-domain checkpoint generation", Number.MAX_SAFE_INTEGER, 1);
   const status = value.status;
-  if (status !== "children_pending" && status !== "synthesis_pending" && status !== "paused" && status !== "completed" && status !== "failed") throw new ArgumentError("cross-domain checkpoint status is invalid");
+  if (status !== "children_pending" && status !== "synthesis_pending" && status !== "paused" && status !== "reconciliation_required" && status !== "completed" && status !== "failed") throw new ArgumentError("cross-domain checkpoint status is invalid");
   if (status === "completed" && synthesisResultDigest === null) throw new ArgumentError("completed cross-domain checkpoint must contain synthesis digest");
   if (status === "completed" && nextChildId !== null) throw new ArgumentError("completed cross-domain checkpoint cannot have a next child");
   if (status === "synthesis_pending" && (completed.length !== execution.length || nextChildId !== null)) throw new ArgumentError("synthesis_pending checkpoint must have all children and no next child");
@@ -267,7 +272,7 @@ async function validateEvent(value: unknown): Promise<AutonomousCrossDomainEvent
   const sequence = boundedInteger(value.sequence, "cross-domain event sequence", Number.MAX_SAFE_INTEGER, 1);
   const jobId = boundedId(value.job_id, "cross-domain event job_id");
   const eventType = value.event_type;
-  if (!["started", "child_completed", "checkpointed", "approval_required", "reconciliation_required", "synthesis_completed", "failed", "completed"].includes(String(eventType))) throw new ArgumentError("cross-domain event type is invalid");
+  if (!["started", "child_completed", "checkpointed", "approval_required", "reconciliation_required", "reconciliation_retry_authorized", "synthesis_completed", "failed", "completed"].includes(String(eventType))) throw new ArgumentError("cross-domain event type is invalid");
   const itemId = value.item_id === null ? null : boundedId(value.item_id, "cross-domain event item_id");
   const phase = value.phase;
   if (phase !== "child" && phase !== "synthesis" && phase !== "lifecycle") throw new ArgumentError("cross-domain event phase is invalid");
@@ -419,9 +424,15 @@ function boundedSteps(value: unknown, total: number): number {
   return value as number;
 }
 
+function boundedBoolean(value: unknown, label: string): boolean | undefined {
+  if (value !== undefined && typeof value !== "boolean") throw new ArgumentError(`${label} must be a boolean`);
+  return value as boolean | undefined;
+}
+
 function validateDurableOptions(options: AutonomousCrossDomainExecuteOptions): void {
   if (options.maxParallelChildren !== undefined && options.maxParallelChildren !== 1) throw new ArgumentError("durable cross-domain execution is sequential; maxParallelChildren must be 1 or omitted");
   if (options.allowPartial === true) throw new ArgumentError("durable cross-domain execution does not synthesize partial children; use synthesize: false and resume the failed child explicitly");
+  boundedBoolean(options.retryReconciliation, "cross-domain retryReconciliation");
 }
 
 function crossPlanRefinement(options: AutonomousCrossDomainExecuteOptions): AutonomousCrossDomainPlanRefinementResult | undefined {
@@ -623,9 +634,18 @@ export class AutonomousCrossDomainExecutor {
     const maxSteps = boundedSteps(options.maxSteps, order.length);
     const stepResults: AutonomousCrossDomainStepResult[] = [];
     const learningEpisodeIds: string[] = [];
-    const localResults = await this.hydrateChildren(checkpoint.job_id, checkpoint, blueprint, options);
     const planRefinementDigest = acceptedPlan?.refinement_digest ?? checkpoint.plan_refinement_digest ?? null;
     if (checkpoint.status === "completed") return this.result("completed", route, blueprint, checkpoint, stepResults, learningEpisodeIds);
+    if (checkpoint.status === "reconciliation_required") {
+      if (options.retryReconciliation !== true) {
+        return this.result("reconciliation_required", route, blueprint, checkpoint, stepResults, learningEpisodeIds);
+      }
+      const retryStatus: AutonomousCrossDomainCheckpointStatus = checkpoint.next_child_id === null ? "synthesis_pending" : "children_pending";
+      checkpoint = await this.makeCheckpointFromExisting(checkpoint, retryStatus, contractDigest, planRefinementDigest, null);
+      await this.store.save(checkpoint);
+      await this.appendEvent(checkpoint.job_id, "reconciliation_retry_authorized", checkpoint.next_child_id ?? "synthesis", checkpoint.next_child_id === null ? "synthesis" : "child", checkpoint);
+    }
+    const localResults = await this.hydrateChildren(checkpoint.job_id, checkpoint, blueprint, options);
     if (options.approveProviderCall !== true) {
       checkpoint = await this.makeCheckpointFromExisting(checkpoint, "paused", contractDigest, planRefinementDigest, checkpoint.synthesis_result_digest);
       await this.store.save(checkpoint);
@@ -667,7 +687,7 @@ export class AutonomousCrossDomainExecutor {
           return this.result("approval_required", route, blueprint, checkpoint, stepResults, learningEpisodeIds);
         }
         if (run.status === "reconciliation_required") {
-          checkpoint = await this.makeCheckpointFromExisting(checkpoint, "paused", contractDigest, planRefinementDigest, null);
+          checkpoint = await this.makeCheckpointFromExisting(checkpoint, "reconciliation_required", contractDigest, planRefinementDigest, null);
           await this.store.save(checkpoint);
           await this.appendEvent(checkpoint.job_id, "reconciliation_required", childId, "child", checkpoint);
           return this.result("reconciliation_required", route, blueprint, checkpoint, stepResults, learningEpisodeIds);
@@ -725,7 +745,7 @@ export class AutonomousCrossDomainExecutor {
         return this.result("approval_required", route, blueprint, checkpoint, stepResults, learningEpisodeIds);
       }
       if (synthesis.status === "reconciliation_required") {
-        checkpoint = await this.makeCheckpointFromExisting(checkpoint, "paused", contractDigest, planRefinementDigest, null);
+        checkpoint = await this.makeCheckpointFromExisting(checkpoint, "reconciliation_required", contractDigest, planRefinementDigest, null);
         await this.store.save(checkpoint);
         await this.appendEvent(checkpoint.job_id, "reconciliation_required", "synthesis", "synthesis", checkpoint);
         return this.result("reconciliation_required", route, blueprint, checkpoint, stepResults, learningEpisodeIds, undefined, synthesis);

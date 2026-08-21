@@ -118,6 +118,7 @@ test("durable cross-domain execution pauses before dispatch and refuses a tamper
   const executor = new AutonomousCrossDomainExecutor(agent, store);
   await assert.rejects(executor.start(task, { candidates: agent.models(), subtasks, maxParallelChildren: 2 }), /sequential/);
   await assert.rejects(executor.start(task, { candidates: agent.models(), subtasks, allowPartial: true }), /does not synthesize partial/);
+  await assert.rejects(executor.start(task, { candidates: agent.models(), subtasks, retryReconciliation: "yes" }), /must be a boolean/);
   const gated = await executor.start(task, { candidates: agent.models(), subtasks, approveProviderCall: false, jobId: "durable-cross-approval", maxSteps: 1 });
   assert.equal(gated.status, "approval_required");
   assert.equal(gated.checkpoint.status, "paused");
@@ -133,4 +134,94 @@ test("durable cross-domain execution pauses before dispatch and refuses a tamper
     /result digest does not match/,
   );
   assert.equal(calls(), 1, "digest refusal must happen before the next provider dispatch");
+});
+
+test("durable cross-domain child reconciliation is quarantined until an explicit retry decision", async () => {
+  const { agent, calls } = makeAgent();
+  let runCalls = 0;
+  const controlledAgent = {
+    models: () => agent.models(),
+    route: (...args) => agent.route(...args),
+    blueprint: (...args) => agent.blueprint(...args),
+    run: async (...args) => {
+      runCalls += 1;
+      if (runCalls === 1) return { status: "reconciliation_required", response: null };
+      return agent.run(...args);
+    },
+  };
+  const store = new InMemoryAutonomousCrossDomainCheckpointStore();
+  const executor = new AutonomousCrossDomainExecutor(controlledAgent, store);
+  const options = { candidates: agent.models(), subtasks, approveProviderCall: true, maxSteps: 1, jobId: "durable-cross-child-reconcile" };
+
+  const first = await executor.start(task, options);
+  assert.equal(first.status, "reconciliation_required");
+  assert.equal(first.checkpoint.status, "reconciliation_required");
+  assert.equal(runCalls, 1);
+  assert.equal(calls(), 0);
+
+  const held = await executor.resume("durable-cross-child-reconcile", task, { ...options, jobId: undefined });
+  assert.equal(held.status, "reconciliation_required");
+  assert.equal(held.checkpoint.generation, first.checkpoint.generation);
+  assert.equal(runCalls, 1, "ordinary resume must not replay an uncertain child");
+  assert.equal(calls(), 0);
+
+  const retried = await executor.resume("durable-cross-child-reconcile", task, { ...options, jobId: undefined, retryReconciliation: true });
+  assert.equal(retried.status, "paused");
+  assert.equal(retried.checkpoint.status, "paused");
+  assert.ok(retried.checkpoint.next_child_id);
+  assert.ok(retried.checkpoint.generation > first.checkpoint.generation);
+  assert.equal(runCalls, 2);
+  assert.equal(calls(), 1);
+  assert.ok(retried.events.some((event) => event.event_type === "reconciliation_retry_authorized"));
+});
+
+test("durable cross-domain synthesis reconciliation is quarantined before child rehydration", async () => {
+  const { agent, calls } = makeAgent();
+  let runCalls = 0;
+  const controlledAgent = {
+    models: () => agent.models(),
+    route: (...args) => agent.route(...args),
+    blueprint: (...args) => agent.blueprint(...args),
+    run: async (...args) => {
+      runCalls += 1;
+      if (runCalls === 3) return { status: "reconciliation_required", response: null };
+      return agent.run(...args);
+    },
+  };
+  const store = new InMemoryAutonomousCrossDomainCheckpointStore();
+  const executor = new AutonomousCrossDomainExecutor(controlledAgent, store);
+  const options = { candidates: agent.models(), subtasks, approveProviderCall: true, maxSteps: 2, jobId: "durable-cross-synthesis-reconcile" };
+  const first = await executor.start(task, options);
+  const children = new Map(first.step_results.map((step) => [step.item_id, step.run]));
+  assert.equal(first.completed_children, 2);
+  assert.equal(calls(), 2);
+
+  const resolveChildResult = (childId) => children.get(childId) ?? null;
+  const blocked = await executor.resume("durable-cross-synthesis-reconcile", task, { ...options, jobId: undefined, maxSteps: 1, resolveChildResult });
+  assert.equal(blocked.status, "reconciliation_required");
+  assert.equal(blocked.checkpoint.status, "reconciliation_required");
+  assert.equal(runCalls, 3);
+  assert.equal(calls(), 2);
+
+  let resolverCalls = 0;
+  const held = await executor.resume("durable-cross-synthesis-reconcile", task, {
+    ...options,
+    jobId: undefined,
+    maxSteps: 1,
+    resolveChildResult: () => {
+      resolverCalls += 1;
+      throw new Error("reconciliation gate should run before child rehydration");
+    },
+  });
+  assert.equal(held.status, "reconciliation_required");
+  assert.equal(resolverCalls, 0);
+  assert.equal(runCalls, 3);
+  assert.equal(calls(), 2);
+
+  const completed = await executor.resume("durable-cross-synthesis-reconcile", task, { ...options, jobId: undefined, maxSteps: 1, resolveChildResult, retryReconciliation: true });
+  assert.equal(completed.status, "completed");
+  assert.equal(completed.checkpoint.status, "completed");
+  assert.equal(completed.synthesis.response.text, "durable synthesis");
+  assert.equal(runCalls, 4);
+  assert.equal(calls(), 3);
 });

@@ -756,6 +756,16 @@ integrity-checked snapshots and a caller-owned persistence adapter through
 `AutonomousCrossDomainPersistenceCoordinator`; production workers can implement the same store
 interface over their durable database or queue.
 
+An uncertain child or synthesis dispatch is different from an ordinary pause: it creates a
+`reconciliation_required` checkpoint and a metadata-only `reconciliation_required` event. A
+normal `resume()` returns that quarantine without rehydrating completed child payloads or calling
+the provider again. After the caller inspects its effect ledger or provider system of record and
+decides that replay is safe, it must pass `retryReconciliation: true`; the executor then creates
+one or more new hash-linked checkpoint generations, records `reconciliation_retry_authorized`,
+and re-enters the ordinary approval and execution gates. The SDK does not infer that an uncertain
+operation was lost, and this flag must not be used as a substitute for an idempotency key or an
+external reconciliation record.
+
 For resumable single-domain workflows, `AutonomousWorkflowExecutor` turns the reviewed workflow
 DAG into bounded stage calls. It checkpoints after each completed stage, pauses after
 `maxStages`, records a metadata-only event chain, and resumes only when the caller supplies the

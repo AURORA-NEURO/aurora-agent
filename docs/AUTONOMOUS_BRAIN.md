@@ -816,6 +816,18 @@ caller-owned child results. This gives TypeScript and Python the same operationa
 steps, digest-bound replay, caller-owned payload retention, and no claim that a checkpoint itself
 authorizes external effects.
 
+An uncertain provider or effect outcome is a separate durable quarantine. The TypeScript executor
+records `reconciliation_required` in the checkpoint rather than collapsing it into `paused`; the
+next ordinary resume returns the same status before child-result rehydration and before provider
+dispatch. This ordering matters after a crash because even rehydrating private child values can be
+unnecessary work, while replaying the uncertain child or synthesis call can duplicate an external
+effect. A caller that has inspected its own effect journal/system of record and established that a
+retry is safe must opt in with `retryReconciliation: true`. The executor records a new linked
+checkpoint generation and a `reconciliation_retry_authorized` event, then applies the normal
+approval, model, credential, budget, tool, and effect gates again. The flag is an explicit replay
+decision, not proof that the original dispatch did not happen; idempotency and reconciliation
+remain application responsibilities.
+
 For long-running fan-out, `BrainWorker` can execute one provider or tool-loop child per lease and
 then one synthesis call. Submit a normal `BrainJobStore` packet with a caller-owned resolver and
 select `execution_kind="cross_domain"`:
