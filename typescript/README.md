@@ -824,6 +824,38 @@ const next = first.next_wave === null
   : await missionExecutor.resume(mission, { approveProviderCall: true });
 ```
 
+To connect provider-backed steps to delayed-credit learning, give the adapter the same
+`AutonomousLearningController` used by direct runs. Successful steps receive stable episode IDs;
+approval, refusal, failed, and uncertain-effect steps do not create episodes. The mission
+checkpoint retains only those IDs, while the controller stores the selected arm and outcome
+digests in its caller-owned learning store:
+
+```typescript
+const learning = new AutonomousLearningController(agent, {
+  episodes: durableEpisodeStore,
+  trajectories: durableTrajectoryStore,
+});
+const missionExecutor = new AutonomousMissionExecutor({
+  catalogue: liveCatalogue,
+  checkpointStore: durableMissionStore,
+  resultStore: callerOwnedResultStore,
+  executeStep: agentMissionStepExecutor(agent, { learning: { adapter: learning } }),
+});
+const execution = await missionExecutor.resume(mission, { approveProviderCall: true });
+const rewards = evaluatorRewardsFor(execution); // caller-owned evaluator; exact episode IDs required
+const settlement = await settleAutonomousMissionLearning(execution, learning, {
+  trajectoryId: "mission-42-trajectory-0",
+  rewards,
+});
+```
+
+`settleAutonomousMissionLearning()` includes only successful episode IDs from the durable
+checkpoint, requires an exact evaluator reward for each, and applies the existing bounded
+discounted return-to-go logic. It never infers reward from HTTP success, tool completion, model
+confidence, or mission status. Replaying the same completed run with the same episode identity is
+idempotent; a different run identity is rejected as an episode conflict rather than silently
+overwriting learning evidence.
+
 The local executor is an orchestration boundary, not a claim of exactly-once delivery: effectful
 steps must still use an idempotency-aware effect adapter, and an uncertain effect must be resolved
 before the mission can progress. `onStepOutcome` is an optional caller-owned hook for evaluator

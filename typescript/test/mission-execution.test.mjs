@@ -6,6 +6,8 @@ import {
   AutonomousMissionExecutor,
   InMemoryAutonomousMissionCheckpointStore,
   InMemoryAutonomousMissionResultStore,
+  agentMissionStepExecutor,
+  settleAutonomousMissionLearning,
   ToolCatalogue,
 } from "../dist/index.js";
 
@@ -169,4 +171,86 @@ test("approval and uncertain-effect step states remain resumable", async () => {
   assert.equal(second.status, "succeeded");
   assert.equal(second.completed_steps, 1);
   assert.equal(calls, 2);
+});
+
+test("mission learning linkage is metadata-only and requires exact evaluator coverage", async () => {
+  const step = {
+    id: "learned-step",
+    domain: "coding",
+    capability: "verification",
+    objective: "run a bounded learning-linked operation",
+    tool: "mission_probe",
+    arguments: { value: "private-input" },
+  };
+  const executor = new AutonomousMissionExecutor({
+    catalogue: await catalogue(),
+    executeStep: async () => ({ status: "succeeded", value: { private_output: "not-in-checkpoint" }, learning_episode_id: "episode-mission-1" }),
+  });
+  const execution = await executor.start(mission([step]), { approveProviderCall: true });
+  assert.equal(execution.status, "succeeded");
+  assert.equal(execution.checkpoint.step_states["learned-step"].learning_episode_id, "episode-mission-1");
+  assert.equal(JSON.stringify(execution.checkpoint).includes("private_output"), false);
+  assert.equal(JSON.stringify(execution.checkpoint).includes("private-input"), false);
+
+  const calls = [];
+  const learning = {
+    async prepareTrajectory(ids, options) {
+      calls.push({ kind: "prepare", ids, options });
+      return { trajectory_id: options.trajectoryId, steps: ids.map((episode_id, index) => ({ index, episode_id })) };
+    },
+    async settleTrajectory(trajectoryId, rewards, options) {
+      calls.push({ kind: "settle", trajectoryId, rewards, options });
+      return { trajectory: { trajectory_id: trajectoryId, status: "settled" }, settlements: [], return_to_go: {} };
+    },
+  };
+  const settled = await settleAutonomousMissionLearning(execution, learning, {
+    trajectoryId: "mission-trajectory-1",
+    rewards: { "episode-mission-1": { evaluator_id: "reviewer", evaluator_version: "1", reward: 0.8, passed: true } },
+  });
+  assert.deepEqual(settled.episode_ids, ["episode-mission-1"]);
+  assert.equal(calls[0].kind, "prepare");
+  assert.equal(calls[1].kind, "settle");
+  await assert.rejects(() => settleAutonomousMissionLearning(execution, learning, {
+    trajectoryId: "mission-trajectory-missing-reward",
+    rewards: {},
+  }), /cover exactly every successful learning episode/);
+});
+
+test("agent mission adapter prepares learning only after the exact tool call completes", async () => {
+  const prepared = [];
+  const agent = {
+    async executeToolCalls(calls) {
+      return calls.map((call) => ({ callId: call.id, approved: true, isError: false, content: { accepted: true } }));
+    },
+    async run(_task, options) {
+      await options.authorizeAndExecute([{ id: "call-1", name: "mission_probe", arguments: { value: "private-input" } }]);
+      return { status: "completed", response: { structured: { answer: "private-response" } } };
+    },
+  };
+  const adapter = agentMissionStepExecutor(agent, {
+    learning: {
+      adapter: {
+        async prepareRun(_run, options) {
+          prepared.push(options);
+          return { episode_id: options.episodeId };
+        },
+      },
+    },
+  });
+  const result = await adapter({
+    mission_id: "mission-adapter-1",
+    goal: "exercise exact adapter contract",
+    wave: 0,
+    step: { id: "step-1", domain: "coding", capability: "testing", objective: "invoke the probe", tool: "mission_probe", arguments: {} },
+    arguments: { value: "private-input" },
+    dependency_outputs: {},
+    execution_attempt: 1,
+    resumed: false,
+  });
+  assert.equal(result.status, "succeeded");
+  assert.equal(result.learning_episode_id, "mission:mission-adapter-1:step-1");
+  assert.equal(result.value.accepted, true);
+  assert.equal(prepared.length, 1);
+  assert.equal(prepared[0].stageId, "step-1");
+  assert.equal(prepared[0].parentJobId, "mission-adapter-1");
 });

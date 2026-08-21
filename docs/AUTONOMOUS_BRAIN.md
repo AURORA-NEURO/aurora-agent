@@ -1000,10 +1000,17 @@ For model-backed steps, `agentMissionStepExecutor()` composes this scheduler wit
 adapter screens every tool call against the exact mission tool name and the digest of the
 resolved arguments. This keeps planning and model choice flexible while preventing a provider
 from adding a tool, changing a bound argument, or turning a mission proposal into new authority.
-For deterministic adapters, applications can provide `executeStep` directly. The optional
-`onStepOutcome` callback is the correct place to connect explicit evaluator signals to the online
-bandit or trajectory learner; network success, latency, or a completed HTTP request is never
-treated as an implicit reward.
+For deterministic adapters, applications can provide `executeStep` directly. For model-backed
+learning, pass the existing `AutonomousLearningController` as the adapter's `learning` option.
+Each completed provider step creates a stable, idempotent episode identity derived from the
+mission and step unless the caller supplies an ID function; the checkpoint stores only that ID.
+`settleAutonomousMissionLearning()` reconstructs the ordered successful episode list from the
+checkpoint, requires an exact caller-supplied evaluator reward packet, and delegates discounted
+return-to-go credit to the same online bandit used by direct, workflow, and cross-domain runs.
+Approval pauses, refusals, failures, recovery states, and uncertain effects never create reward
+episodes. The optional `onStepOutcome` callback remains useful for custom evaluator orchestration,
+but network success, latency, model confidence, or a completed HTTP request is never treated as an
+implicit reward.
 
 The durable surface is intentionally metadata-only. Checkpoints and hash-chained events retain
 mission/step IDs, contract digests, statuses, attempt numbers, bounded failure classes, result

@@ -1,5 +1,5 @@
 import { ArgumentError, ProviderRuntimeError, isObject } from "./errors.js";
-import { AUTONOMOUS_DOMAIN_NAMES, type AutonomousAgent, type AutonomousDomainName, type AutonomousRunOptions } from "./autonomous.js";
+import { AUTONOMOUS_DOMAIN_NAMES, type AutonomousAgent, type AutonomousDomainName, type AutonomousRunOptions, type AutonomousRunResult } from "./autonomous.js";
 import { AutonomousEffectReconciliationRequiredError, type AutonomousEffectBoundary } from "./autonomous-effects.js";
 import { digestJson, ToolCatalogue } from "./tooling.js";
 import { preflightMission } from "./mission.js";
@@ -12,6 +12,12 @@ import type {
   MissionPreflightResult,
 } from "./types.js";
 import type { ProviderTool, ProviderToolCall, ProviderToolResult } from "./llm.js";
+import type {
+  AutonomousEvaluatorRewardInput,
+  AutonomousLearningEpisode,
+  AutonomousLearningTrajectory,
+  AutonomousTrajectorySettlement,
+} from "./autonomous-learning.js";
 
 /**
  * Local mission execution is deliberately separate from the remote `agent_mission` transport.
@@ -19,10 +25,10 @@ import type { ProviderTool, ProviderToolCall, ProviderToolResult } from "./llm.j
  * embedding application a restart-safe executor that composes the same preflight contract with
  * a caller-owned step adapter. Raw arguments and outputs never enter the durable checkpoint.
  */
-export const AUTONOMOUS_MISSION_EXECUTION_SCHEMA = "bioprism-typescript-autonomous-mission-execution/0.1" as const;
-export const AUTONOMOUS_MISSION_CHECKPOINT_SCHEMA = "bioprism-typescript-autonomous-mission-checkpoint/0.1" as const;
+export const AUTONOMOUS_MISSION_EXECUTION_SCHEMA = "bioprism-typescript-autonomous-mission-execution/0.2" as const;
+export const AUTONOMOUS_MISSION_CHECKPOINT_SCHEMA = "bioprism-typescript-autonomous-mission-checkpoint/0.2" as const;
 export const AUTONOMOUS_MISSION_EVENT_SCHEMA = "bioprism-typescript-autonomous-mission-event/0.1" as const;
-export const AUTONOMOUS_MISSION_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-mission-snapshot/0.1" as const;
+export const AUTONOMOUS_MISSION_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-mission-snapshot/0.2" as const;
 export const AUTONOMOUS_MISSION_TRACE_SCHEMA_VERSION = "bioprism-typescript-autonomous-mission-trace/0.1" as const;
 
 export const AUTONOMOUS_MISSION_EVENT_TYPES = [
@@ -115,6 +121,8 @@ export interface AutonomousMissionStepExecutionResult {
   detail?: string | null;
   effect_ids?: string[];
   run_status?: string | null;
+  /** Value-only learning linkage; the episode itself is stored by the learning adapter. */
+  learning_episode_id?: string | null;
 }
 
 export type AutonomousMissionStepExecutor = (
@@ -147,6 +155,7 @@ export interface AutonomousMissionStepCheckpoint {
   output_bytes: number;
   error_class: string | null;
   run_status: string | null;
+  learning_episode_id: string | null;
   attempt: number;
   last_event_sequence: number;
 }
@@ -246,7 +255,39 @@ export interface AutonomousMissionStepResult {
   output_bytes: number;
   error_class: string | null;
   run_status: string | null;
+  learning_episode_id: string | null;
   attempt: number;
+}
+
+/**
+ * Narrow adapter contract for connecting mission outcomes to the existing online learner.
+ * Implementations may be local, remote, or backed by a durable database; this module never
+ * stores provider responses or evaluator evidence in a mission checkpoint.
+ */
+export interface AutonomousMissionLearningAdapter {
+  prepareRun(
+    result: AutonomousRunResult,
+    options: { episodeId: string; runId?: string; stageId?: string; parentJobId?: string; planRefinementDigest?: string | null },
+  ): Promise<AutonomousLearningEpisode> | AutonomousLearningEpisode;
+  prepareTrajectory(
+    episodeIds: readonly string[],
+    options: { trajectoryId: string; discount?: number },
+  ): Promise<AutonomousLearningTrajectory> | AutonomousLearningTrajectory;
+  settleTrajectory(
+    trajectoryId: string,
+    rewards: Record<string, AutonomousEvaluatorRewardInput>,
+    options?: { remote?: boolean },
+  ): Promise<AutonomousTrajectorySettlement> | AutonomousTrajectorySettlement;
+}
+
+export interface AutonomousMissionLearningSettlement extends JsonObject {
+  schema: "bioprism-typescript-autonomous-mission-learning-settlement/0.1";
+  mission_id: string;
+  trajectory_id: string;
+  episode_ids: string[];
+  settlement: AutonomousTrajectorySettlement;
+  retention: "value_only_learning_projection";
+  secret_material: "never_returned";
 }
 
 export interface AutonomousMissionExecuteOptions {
@@ -378,11 +419,14 @@ function normalizeStepResult(value: unknown): AutonomousMissionStepExecutionResu
     detail: boundedDetail(value.detail),
     effect_ids: Array.isArray(value.effect_ids) ? value.effect_ids.filter((id): id is string => typeof id === "string").slice(0, 32) : [],
     run_status: safeLabel(value.run_status, "unknown"),
+    learning_episode_id: value.learning_episode_id === undefined || value.learning_episode_id === null
+      ? null
+      : boundedIdentifier("learning_episode_id", value.learning_episode_id),
   };
 }
 
 function stepState(status: AutonomousMissionStepStatus = "pending"): AutonomousMissionStepCheckpoint {
-  return { status, result_digest: null, output_bytes: 0, error_class: null, run_status: null, attempt: 0, last_event_sequence: 0 };
+  return { status, result_digest: null, output_bytes: 0, error_class: null, run_status: null, learning_episode_id: null, attempt: 0, last_event_sequence: 0 };
 }
 
 function policyOf(mission: AgentMissionArgs): AgentMissionPolicy {
@@ -428,6 +472,7 @@ async function validateCheckpoint(value: unknown): Promise<AutonomousMissionChec
     boundedInteger(`mission checkpoint ${id}.last_event_sequence`, state.last_event_sequence, AUTONOMOUS_MISSION_MAX_EVENTS);
     if (state.error_class !== null && typeof state.error_class !== "string") throw new AutonomousMissionExecutionError(`mission checkpoint ${id}.error_class is malformed`);
     if (state.run_status !== null && typeof state.run_status !== "string") throw new AutonomousMissionExecutionError(`mission checkpoint ${id}.run_status is malformed`);
+    if (state.learning_episode_id !== null) boundedIdentifier(`mission checkpoint ${id}.learning_episode_id`, state.learning_episode_id);
     if (state.error_class !== null && safeLabel(state.error_class, "UnclassifiedStepFailure") !== state.error_class) throw new AutonomousMissionExecutionError(`mission checkpoint ${id}.error_class is not a safe label`);
     if (state.run_status !== null && safeLabel(state.run_status, "unknown") !== state.run_status) throw new AutonomousMissionExecutionError(`mission checkpoint ${id}.run_status is not a safe label`);
   }
@@ -820,7 +865,7 @@ export class AutonomousMissionExecutor {
     }
     const resultDigest = await digestJson(execution.value);
     await this.resultStore.save(mission.mission_id, step.id, execution.value, resultDigest);
-    const completed = await this.setStepState(started, step, "succeeded", null, outputBytes, null, execution.run_status ?? null, attempt, resultDigest, currentTotal);
+    const completed = await this.setStepState(started, step, "succeeded", null, outputBytes, null, execution.run_status ?? null, attempt, resultDigest, currentTotal, execution.learning_episode_id ?? null);
     await this.appendEvent(completed, "step.completed", wave, step, "succeeded", null, outputBytes, argumentsDigest);
     return { checkpoint: completed, result: this.localResult(step, completed.step_states[step.id] as AutonomousMissionStepCheckpoint, execution.value) };
   }
@@ -831,10 +876,10 @@ export class AutonomousMissionExecutor {
     return { checkpoint: updated, result: this.localResult(step, updated.step_states[step.id] as AutonomousMissionStepCheckpoint, null) };
   }
 
-  private async setStepState(checkpoint: AutonomousMissionCheckpoint, step: AgentMissionStep, status: AutonomousMissionStepStatus, errorClass: string | null, outputBytes: number, detail: string | null, runStatus: string | null, attempt: number, resultDigest: string | null = null, totalOutputBytes = checkpoint.output_bytes): Promise<AutonomousMissionCheckpoint> {
+  private async setStepState(checkpoint: AutonomousMissionCheckpoint, step: AgentMissionStep, status: AutonomousMissionStepStatus, errorClass: string | null, outputBytes: number, detail: string | null, runStatus: string | null, attempt: number, resultDigest: string | null = null, totalOutputBytes = checkpoint.output_bytes, learningEpisodeId: string | null = null): Promise<AutonomousMissionCheckpoint> {
     const states = clone(checkpoint.step_states);
     const previous = states[step.id] ?? stepState();
-    states[step.id] = { status, result_digest: resultDigest ?? previous.result_digest, output_bytes: outputBytes, error_class: errorClass, run_status: runStatus, attempt, last_event_sequence: previous.last_event_sequence };
+    states[step.id] = { status, result_digest: resultDigest ?? previous.result_digest, output_bytes: outputBytes, error_class: errorClass, run_status: runStatus, learning_episode_id: learningEpisodeId ?? previous.learning_episode_id, attempt, last_event_sequence: previous.last_event_sequence };
     const completed = Object.entries(states).filter(([, state]) => state.status === "succeeded").map(([id]) => id).filter((id) => !checkpoint.completed_step_ids.includes(id));
     const next = [...checkpoint.completed_step_ids, ...completed];
     const nextWave = this.nextPendingWave({ ...checkpoint, step_states: states, completed_step_ids: next });
@@ -869,7 +914,7 @@ export class AutonomousMissionExecutor {
   }
 
   private localResult(step: AgentMissionStep, state: AutonomousMissionStepCheckpoint, value: JsonValue | null): AutonomousMissionStepResult {
-    return { step: clone(step), status: state.status, value: value === null ? null : clone(value), result_digest: state.result_digest, output_bytes: state.output_bytes, error_class: state.error_class, run_status: state.run_status, attempt: state.attempt };
+    return { step: clone(step), status: state.status, value: value === null ? null : clone(value), result_digest: state.result_digest, output_bytes: state.output_bytes, error_class: state.error_class, run_status: state.run_status, learning_episode_id: state.learning_episode_id, attempt: state.attempt };
   }
 
   private async result(status: AutonomousMissionStatus, preflight: MissionPreflightResult, checkpoint: AutonomousMissionCheckpoint | null, localResults: AutonomousMissionStepResult[]): Promise<AutonomousMissionExecutionResult> {
@@ -877,6 +922,60 @@ export class AutonomousMissionExecutor {
     const states = checkpoint ? Object.values(checkpoint.step_states) : [];
     return { schema: AUTONOMOUS_MISSION_EXECUTION_SCHEMA, status, mission_id: preflight.mission_id, preflight, checkpoint, events, results: localResults, completed_steps: checkpoint?.completed_step_ids.length ?? 0, total_steps: preflight.ordered_steps.length, succeeded_steps: states.filter((state) => state.status === "succeeded").length, refused_steps: states.filter((state) => state.status === "refused").length, blocked_steps: states.filter((state) => state.status === "blocked").length, failed_steps: states.filter((state) => state.status === "failed").length, cancelled_steps: states.filter((state) => state.status === "cancelled").length, returned_bytes: checkpoint?.output_bytes ?? 0, next_wave: checkpoint?.next_wave ?? null, recovery: "caller_rehydrates_raw_results_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only", secret_material: "never_returned" };
   }
+}
+
+/**
+ * Prepare and settle exactly the successful learning episodes present in a mission checkpoint.
+ * This helper deliberately accepts evaluator rewards from the caller; it never treats execution
+ * success, provider confidence, or a tool response as a reward signal.
+ */
+export async function settleAutonomousMissionLearning(
+  execution: AutonomousMissionExecutionResult,
+  learning: AutonomousMissionLearningAdapter,
+  options: {
+    trajectoryId: string;
+    discount?: number;
+    rewards: Record<string, AutonomousEvaluatorRewardInput>;
+    remote?: boolean;
+  },
+): Promise<AutonomousMissionLearningSettlement> {
+  if (!execution || !isObject(execution)) throw new ArgumentError("mission learning settlement requires an execution result");
+  if (!learning || typeof learning.prepareTrajectory !== "function" || typeof learning.settleTrajectory !== "function") throw new ArgumentError("mission learning adapter is malformed");
+  if (!options || !isObject(options)) throw new ArgumentError("mission learning settlement options are required");
+  const trajectoryId = boundedIdentifier("mission trajectoryId", options.trajectoryId);
+  if (!isObject(options.rewards)) throw new ArgumentError("mission learning rewards must be an object keyed by episode ID");
+  const checkpoint = execution.checkpoint;
+  const episodeIds: string[] = [];
+  for (const stepId of checkpoint?.ordered_steps ?? []) {
+    const state = checkpoint?.step_states[stepId];
+    if (state?.status === "succeeded" && state.learning_episode_id !== null) {
+      const episodeId = boundedIdentifier(`mission ${stepId}.learning_episode_id`, state.learning_episode_id);
+      if (!episodeIds.includes(episodeId)) episodeIds.push(episodeId);
+    }
+  }
+  for (const result of execution.results) {
+    if (result.status === "succeeded" && result.learning_episode_id !== null) {
+      const episodeId = boundedIdentifier(`mission ${result.step.id}.learning_episode_id`, result.learning_episode_id);
+      if (!episodeIds.includes(episodeId)) episodeIds.push(episodeId);
+    }
+  }
+  if (!episodeIds.length) throw new ArgumentError("mission execution has no successful learning episodes");
+  const trajectory = await learning.prepareTrajectory(episodeIds, { trajectoryId, discount: options.discount });
+  if (trajectory.trajectory_id !== trajectoryId) throw new AutonomousMissionExecutionError("learning adapter returned a mismatched trajectory identity");
+  const trajectoryEpisodeIds = trajectory.steps.map((step) => boundedIdentifier("trajectory episodeId", step.episode_id));
+  if (trajectoryEpisodeIds.length !== episodeIds.length || trajectoryEpisodeIds.some((id, index) => id !== episodeIds[index])) throw new AutonomousMissionExecutionError("learning adapter changed mission episode order");
+  const rewardKeys = Object.keys(options.rewards);
+  if (rewardKeys.length !== episodeIds.length || rewardKeys.some((id) => !episodeIds.includes(id))) throw new ArgumentError("mission learning rewards must cover exactly every successful learning episode");
+  const settlement = await learning.settleTrajectory(trajectoryId, options.rewards, { remote: options.remote });
+  return {
+    schema: "bioprism-typescript-autonomous-mission-learning-settlement/0.1",
+    mission_id: boundedIdentifier("mission_id", execution.mission_id),
+    trajectory_id: trajectoryId,
+    episode_ids: [...episodeIds],
+    settlement,
+    retention: "value_only_learning_projection",
+    secret_material: "never_returned",
+  };
 }
 
 /**
@@ -889,6 +988,12 @@ export function agentMissionStepExecutor(agent: AutonomousAgent, options: {
   run?: Omit<AutonomousRunOptions, "domain" | "capability" | "tools" | "authorizeAndExecute" | "context" | "approveProviderCall" | "signal">;
   approveEffects?: boolean;
   signal?: AbortSignal;
+  learning?: {
+    adapter: AutonomousMissionLearningAdapter;
+    episodeId?: (context: AutonomousMissionStepExecutionContext) => string;
+    runId?: (context: AutonomousMissionStepExecutionContext) => string;
+    planRefinementDigest?: string | null;
+  };
 } = {}): AutonomousMissionStepExecutor {
   if (!agent || typeof agent.run !== "function" || typeof agent.executeToolCalls !== "function") throw new ArgumentError("agent mission adapter requires an AutonomousAgent");
   return async (context) => {
@@ -920,6 +1025,20 @@ export function agentMissionStepExecutor(agent: AutonomousAgent, options: {
     if (run.status === "approval_required" || run.tool_loop?.status === "authorization_required") return { status: "approval_required", run_status: run.status };
     if (!sawExpectedCall) return { status: "refused", run_status: run.status, detail: "provider did not invoke the mission step's exact tool contract" };
     if (run.status !== "completed") return { status: "failed", run_status: run.status, detail: "provider run did not complete" };
-    return { status: "succeeded", value: toolOutput ?? run.response?.structured ?? run.response?.text ?? null, run_status: run.status };
+    let learningEpisodeId: string | null = null;
+    if (options.learning) {
+      if (!options.learning.adapter || typeof options.learning.adapter.prepareRun !== "function") throw new ArgumentError("mission learning adapter is malformed");
+      const episodeId = boundedIdentifier("mission learning episodeId", options.learning.episodeId?.(context) ?? `mission:${context.mission_id}:${context.step.id}`);
+      const episode = await options.learning.adapter.prepareRun(run, {
+        episodeId,
+        runId: options.learning.runId?.(context) ?? episodeId,
+        stageId: context.step.id,
+        parentJobId: context.mission_id,
+        planRefinementDigest: options.learning.planRefinementDigest,
+      });
+      if (!episode || boundedIdentifier("prepared learning episodeId", episode.episode_id) !== episodeId) throw new AutonomousMissionExecutionError("learning adapter returned a mismatched episode identity");
+      learningEpisodeId = episodeId;
+    }
+    return { status: "succeeded", value: toolOutput ?? run.response?.structured ?? run.response?.text ?? null, run_status: run.status, learning_episode_id: learningEpisodeId };
   };
 }

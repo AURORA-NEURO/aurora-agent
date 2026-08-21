@@ -375,6 +375,7 @@ export {
   InMemoryAutonomousMissionCheckpointStore,
   InMemoryAutonomousMissionResultStore,
   agentMissionStepExecutor,
+  settleAutonomousMissionLearning,
   validateAutonomousMissionSnapshot,
 } from "./mission-execution.js";
 export type {
@@ -385,6 +386,8 @@ export type {
   AutonomousMissionExecuteOptions,
   AutonomousMissionExecutionResult,
   AutonomousMissionExecutorOptions,
+  AutonomousMissionLearningAdapter,
+  AutonomousMissionLearningSettlement,
   AutonomousMissionPersistence,
   AutonomousMissionResultStore,
   AutonomousMissionSnapshot,

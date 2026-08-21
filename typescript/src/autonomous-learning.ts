@@ -653,6 +653,11 @@ export class AutonomousLearningController {
       secret_material: "never_returned" as const,
     };
     const episode = { ...descriptor, episode_digest: await digestJson(descriptor) };
+    const prior = await this.episodes.load(episodeId);
+    if (prior) {
+      if (prior.episode_digest !== episode.episode_digest) throw new ArgumentError(`learning episode ${episodeId} conflicts with an existing identity`);
+      return clone(prior);
+    }
     this.episodes.save(episode);
     return clone(episode);
   }

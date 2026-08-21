@@ -130,6 +130,8 @@ test("learning episodes rehydrate by digest and settle through the local bandit"
   assert.equal(episode.plan_refinement_digest, "a".repeat(64));
   assert.equal(Object.prototype.hasOwnProperty.call(episode, "response"), false);
   assert.equal(JSON.stringify(episode).includes("verified learning response"), false);
+  const replayed = await controller.prepareRun(run, { episodeId: "episode-local-1", planRefinementDigest: "a".repeat(64) });
+  assert.deepEqual(replayed, episode);
   const settlement = await controller.settleRun("episode-local-1", {
     evaluator_id: "coding-reviewer",
     evaluator_version: "1",
