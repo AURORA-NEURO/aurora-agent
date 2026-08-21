@@ -10,6 +10,7 @@ export const LLM_RUNTIME_SCHEMA = "bioprism-typescript-llm-runtime/0.1" as const
 export const PROVIDER_OBSERVATION_SCHEMA = "bioprism-typescript-llm-provider-observation/0.1" as const;
 export const CREDENTIAL_ONBOARDING_SCHEMA = "bioprism-typescript-llm-credential-onboarding/0.1" as const;
 export const PROVIDER_MODEL_DISCOVERY_SCHEMA = "bioprism-typescript-llm-provider-model-discovery/0.1" as const;
+export const LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA = "bioprism-typescript-llm-runtime-health-snapshot/0.1" as const;
 
 export const MAX_PROVIDER_MESSAGE_BYTES = 2_000_000;
 export const MAX_PROVIDER_REQUEST_BYTES = 8_000_000;
@@ -26,6 +27,9 @@ export const MAX_CREDENTIAL_PROVISIONING_PROVIDERS = 128;
 export const MAX_CREDENTIAL_SOURCE_LABEL_BYTES = 256;
 export const AUTONOMOUS_COST_BUDGET_MAX_COST_UNITS = 1_000_000;
 export const CREDENTIAL_PROVISIONING_SCHEMA = "bioprism-llm-credential-provisioning/0.1" as const;
+export const MAX_LLM_RUNTIME_HEALTH_PROVIDERS = 128;
+export const MAX_LLM_RUNTIME_HEALTH_MODELS = 2_048;
+export const MAX_LLM_RUNTIME_HEALTH_SNAPSHOT_BYTES = 1_000_000;
 const STRUCTURED_SCHEMA_TYPES = new Set(["object", "array", "string", "number", "integer", "boolean", "null"]);
 
 export type ProviderProtocol = "openai_responses" | "openai_chat_completions" | "anthropic_messages";
@@ -675,6 +679,48 @@ export interface ProviderHealth extends JsonObject {
   /** Optional persisted evaluator-quality projection supplied by a caller-owned health ledger. */
   quality_mean?: number | null;
   quality_observations?: number;
+}
+
+/** Redacted transport counters and circuit state for one configured provider. */
+export interface LLMRuntimeProviderHealthSnapshot extends JsonObject {
+  provider: string;
+  attempts: number;
+  successes: number;
+  failures: number;
+  total_latency_ms: number;
+  last_latency_ms: number | null;
+  last_model: string | null;
+  last_status_code: number | null;
+  consecutive_failures: number;
+  circuit_opened_until: number | null;
+}
+
+/** Redacted transport counters for one provider/model arm. */
+export interface LLMRuntimeModelHealthSnapshot extends JsonObject {
+  provider: string;
+  model: string;
+  attempts: number;
+  successes: number;
+  failures: number;
+  total_latency_ms: number;
+  last_latency_ms: number | null;
+  last_model: string | null;
+  last_status_code: number | null;
+}
+
+/** Restart-safe provider transport health; credentials and task payloads are never retained. */
+export interface LLMRuntimeHealthSnapshot extends JsonObject {
+  schema: typeof LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA;
+  providers: LLMRuntimeProviderHealthSnapshot[];
+  models: LLMRuntimeModelHealthSnapshot[];
+  snapshot_digest: string;
+  retention: "transport_health_metadata_only_hash_bound";
+  secret_material: "never_returned";
+}
+
+export interface LLMRuntimeHealthPersistence {
+  read(): Promise<LLMRuntimeHealthSnapshot | null> | LLMRuntimeHealthSnapshot | null;
+  write(snapshot: LLMRuntimeHealthSnapshot): Promise<void> | void;
 }
 
 interface HealthState {
@@ -1680,14 +1726,105 @@ export class LLMRuntime {
   modelHealthSnapshot(): Record<string, ProviderHealth> {
     const result: Record<string, ProviderHealth> = {};
     for (const [arm, health] of [...this.modelHealthState.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-      const separator = arm.indexOf("/");
-      const provider = separator < 0 ? arm : arm.slice(0, separator);
-      const model = separator < 0 ? arm : arm.slice(separator + 1);
+      const { provider, model } = splitProviderModelArm(arm, this.providers.keys());
       const circuit = this.circuits.get(provider) ?? { consecutiveFailures: 0, openedUntil: null };
       const open = circuit.openedUntil !== null && circuit.openedUntil > this.clock();
       result[arm] = { ...healthProjection(provider, health, open ? "open" : "closed", circuit.consecutiveFailures, true), model };
     }
     return result;
+  }
+
+  /** Seal provider transport health without retaining prompts, responses, headers, or credentials. */
+  async snapshotHealth(): Promise<LLMRuntimeHealthSnapshot> {
+    const providers = [...this.providers.keys()].sort().map((provider) => {
+      const state = this.providerHealthState.get(provider) ?? emptyHealth();
+      const circuit = this.circuits.get(provider) ?? { consecutiveFailures: 0, openedUntil: null };
+      return {
+        provider,
+        attempts: state.attempts,
+        successes: state.successes,
+        failures: state.failures,
+        total_latency_ms: state.totalLatencyMs,
+        last_latency_ms: state.lastLatencyMs,
+        last_model: state.lastModel,
+        last_status_code: state.lastStatusCode,
+        consecutive_failures: circuit.consecutiveFailures,
+        circuit_opened_until: circuit.openedUntil,
+      };
+    });
+    const models = [...this.modelHealthState.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([arm, state]) => {
+      const { provider, model } = splitProviderModelArm(arm, this.providers.keys());
+      return {
+        provider,
+        model,
+        attempts: state.attempts,
+        successes: state.successes,
+        failures: state.failures,
+        total_latency_ms: state.totalLatencyMs,
+        last_latency_ms: state.lastLatencyMs,
+        last_model: state.lastModel,
+        last_status_code: state.lastStatusCode,
+      };
+    });
+    const body = { schema: LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA, providers, models, retention: "transport_health_metadata_only_hash_bound" as const, secret_material: "never_returned" as const };
+    return structuredClone({ ...body, snapshot_digest: await digestJson(body) });
+  }
+
+  /** Restore validated provider transport health atomically; providers must already be registered. */
+  async restoreHealth(raw: unknown): Promise<void> {
+    const snapshot = await validateLLMRuntimeHealthSnapshot(raw);
+    for (const row of snapshot.providers) if (!this.providers.has(row.provider)) throw new ProviderRuntimeError(`cannot restore health for unregistered provider ${row.provider}`);
+    for (const row of snapshot.models) if (!this.providers.has(row.provider)) throw new ProviderRuntimeError(`cannot restore model health for unregistered provider ${row.provider}`);
+    const providers = new Map<string, HealthState>();
+    const circuits = new Map<string, CircuitState>();
+    for (const provider of this.providers.keys()) {
+      providers.set(provider, emptyHealth());
+      circuits.set(provider, { consecutiveFailures: 0, openedUntil: null });
+    }
+    for (const row of snapshot.providers) {
+      providers.set(row.provider, {
+        attempts: row.attempts,
+        successes: row.successes,
+        failures: row.failures,
+        totalLatencyMs: row.total_latency_ms,
+        lastLatencyMs: row.last_latency_ms,
+        lastModel: row.last_model,
+        lastStatusCode: row.last_status_code,
+      });
+      circuits.set(row.provider, { consecutiveFailures: row.consecutive_failures, openedUntil: row.circuit_opened_until });
+    }
+    const models = new Map<string, HealthState>();
+    for (const row of snapshot.models) models.set(`${row.provider}/${row.model}`, {
+      attempts: row.attempts,
+      successes: row.successes,
+      failures: row.failures,
+      totalLatencyMs: row.total_latency_ms,
+      lastLatencyMs: row.last_latency_ms,
+      lastModel: row.last_model,
+      lastStatusCode: row.last_status_code,
+    });
+    this.providerHealthState.clear();
+    for (const [provider, state] of providers) this.providerHealthState.set(provider, state);
+    this.circuits.clear();
+    for (const [provider, circuit] of circuits) this.circuits.set(provider, circuit);
+    this.modelHealthState.clear();
+    for (const [arm, state] of models) this.modelHealthState.set(arm, state);
+  }
+
+  async saveHealth(persistence: LLMRuntimeHealthPersistence): Promise<LLMRuntimeHealthSnapshot> {
+    if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new ArgumentError("LLM runtime health persistence adapter is malformed");
+    const snapshot = await this.snapshotHealth();
+    await persistence.write(snapshot);
+    return snapshot;
+  }
+
+  async restorePersistedHealth(persistence: LLMRuntimeHealthPersistence): Promise<LLMRuntimeHealthSnapshot | null> {
+    if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new ArgumentError("LLM runtime health persistence adapter is malformed");
+    const raw = await persistence.read();
+    if (raw === null) return null;
+    const snapshot = await validateLLMRuntimeHealthSnapshot(raw);
+    await this.restoreHealth(snapshot);
+    return snapshot;
   }
 
   async invoke(
@@ -2058,6 +2195,124 @@ export class LLMRuntime {
   }
 }
 
+function runtimeHealthKeys(name: string, value: JsonObject, allowed: readonly string[]): void {
+  const accepted = new Set(allowed);
+  if (Object.keys(value).some((key) => !accepted.has(key))) throw new ProviderRuntimeError(`${name} contains unsupported or secret-shaped metadata`);
+}
+
+function boundedHealthCount(name: string, value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 0 || (value as number) > Number.MAX_SAFE_INTEGER) throw new ProviderRuntimeError(`${name} is outside its bounded health contract`);
+  return value as number;
+}
+
+function boundedHealthMetric(name: string, value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > Number.MAX_SAFE_INTEGER) throw new ProviderRuntimeError(`${name} is outside its bounded health contract`);
+  return value;
+}
+
+function boundedHealthTimestamp(name: string, value: unknown): number | null {
+  if (value === null) return null;
+  return boundedHealthMetric(name, value);
+}
+
+function boundedHealthModel(name: string, value: unknown): string | null {
+  if (value === null) return null;
+  return boundedIdentifier(name, value, 512);
+}
+
+interface NormalizedRuntimeHealthCounts {
+  attempts: number;
+  successes: number;
+  failures: number;
+  total_latency_ms: number;
+  last_latency_ms: number | null;
+  last_model: string | null;
+  last_status_code: number | null;
+}
+
+function normalizeRuntimeHealthCounts(name: string, value: JsonObject): NormalizedRuntimeHealthCounts {
+  const attempts = boundedHealthCount(`${name} attempts`, value.attempts);
+  const successes = boundedHealthCount(`${name} successes`, value.successes);
+  const failures = boundedHealthCount(`${name} failures`, value.failures);
+  if (successes + failures !== attempts) throw new ProviderRuntimeError(`${name} attempts do not equal successes plus failures`);
+  return {
+    attempts,
+    successes,
+    failures,
+    total_latency_ms: boundedHealthMetric(`${name} total_latency_ms`, value.total_latency_ms),
+    last_latency_ms: value.last_latency_ms === null ? null : boundedHealthMetric(`${name} last_latency_ms`, value.last_latency_ms),
+    last_model: boundedHealthModel(`${name} last_model`, value.last_model),
+    last_status_code: value.last_status_code === null ? null : boundedHealthCount(`${name} last_status_code`, value.last_status_code),
+  };
+}
+
+function normalizeRuntimeProviderHealthSnapshot(value: unknown): LLMRuntimeProviderHealthSnapshot {
+  if (!isObject(value)) throw new ProviderRuntimeError("LLM runtime provider health row must be an object");
+  const row = value as unknown as JsonObject;
+  runtimeHealthKeys("LLM runtime provider health row", row, ["provider", "attempts", "successes", "failures", "total_latency_ms", "last_latency_ms", "last_model", "last_status_code", "consecutive_failures", "circuit_opened_until"]);
+  const counts = normalizeRuntimeHealthCounts("LLM runtime provider health row", row);
+  const provider = boundedIdentifier("LLM runtime provider health provider", row.provider, 128);
+  return {
+    provider,
+    ...counts,
+    consecutive_failures: boundedHealthCount("LLM runtime provider health consecutive_failures", row.consecutive_failures),
+    circuit_opened_until: boundedHealthTimestamp("LLM runtime provider health circuit_opened_until", row.circuit_opened_until),
+  };
+}
+
+function normalizeRuntimeModelHealthSnapshot(value: unknown): LLMRuntimeModelHealthSnapshot {
+  if (!isObject(value)) throw new ProviderRuntimeError("LLM runtime model health row must be an object");
+  const row = value as unknown as JsonObject;
+  runtimeHealthKeys("LLM runtime model health row", row, ["provider", "model", "attempts", "successes", "failures", "total_latency_ms", "last_latency_ms", "last_model", "last_status_code"]);
+  const counts = normalizeRuntimeHealthCounts("LLM runtime model health row", row);
+  return { provider: boundedIdentifier("LLM runtime model health provider", row.provider, 128), model: boundedIdentifier("LLM runtime model health model", row.model, 512), ...counts };
+}
+
+export async function validateLLMRuntimeHealthSnapshot(value: unknown): Promise<LLMRuntimeHealthSnapshot> {
+  if (!isObject(value)) throw new ProviderRuntimeError("LLM runtime health snapshot must be an object");
+  const snapshotValue = value as unknown as JsonObject;
+  runtimeHealthKeys("LLM runtime health snapshot", snapshotValue, ["schema", "providers", "models", "snapshot_digest", "retention", "secret_material"]);
+  if (snapshotValue.schema !== LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA || snapshotValue.retention !== "transport_health_metadata_only_hash_bound" || snapshotValue.secret_material !== "never_returned") throw new ProviderRuntimeError("LLM runtime health snapshot markers are invalid");
+  if (!Array.isArray(snapshotValue.providers) || snapshotValue.providers.length > MAX_LLM_RUNTIME_HEALTH_PROVIDERS) throw new ProviderRuntimeError("LLM runtime health snapshot provider capacity is exceeded");
+  if (!Array.isArray(snapshotValue.models) || snapshotValue.models.length > MAX_LLM_RUNTIME_HEALTH_MODELS) throw new ProviderRuntimeError("LLM runtime health snapshot model capacity is exceeded");
+  const providers = snapshotValue.providers.map(normalizeRuntimeProviderHealthSnapshot);
+  const models = snapshotValue.models.map(normalizeRuntimeModelHealthSnapshot);
+  const providerIds = new Set<string>();
+  for (const row of providers) {
+    if (providerIds.has(row.provider)) throw new ProviderRuntimeError(`LLM runtime health snapshot contains duplicate provider ${row.provider}`);
+    providerIds.add(row.provider);
+  }
+  const modelIds = new Set<string>();
+  for (const row of models) {
+    const id = `${row.provider}/${row.model}`;
+    if (modelIds.has(id)) throw new ProviderRuntimeError(`LLM runtime health snapshot contains duplicate model ${id}`);
+    modelIds.add(id);
+  }
+  const snapshotDigest = typeof snapshotValue.snapshot_digest === "string" && /^[0-9a-f]{64}$/.test(snapshotValue.snapshot_digest) ? snapshotValue.snapshot_digest : null;
+  if (!snapshotDigest) throw new ProviderRuntimeError("LLM runtime health snapshot digest is malformed");
+  const descriptor = { schema: LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA, providers, models, retention: "transport_health_metadata_only_hash_bound" as const, secret_material: "never_returned" as const };
+  if (await digestJson(descriptor) !== snapshotDigest) throw new ProviderRuntimeError("LLM runtime health snapshot digest mismatch");
+  const snapshot = { ...descriptor, snapshot_digest: snapshotDigest };
+  if (bytes(JSON.stringify(snapshot) ?? "") > MAX_LLM_RUNTIME_HEALTH_SNAPSHOT_BYTES) throw new ProviderRuntimeError("LLM runtime health snapshot exceeds its byte capacity");
+  return structuredClone(snapshot);
+}
+
+/** Connect LLM transport-health snapshots to a caller-owned durable adapter. */
+export class LLMRuntimeHealthPersistenceCoordinator {
+  constructor(readonly runtime: LLMRuntime, readonly persistence: LLMRuntimeHealthPersistence) {
+    if (!runtime || typeof runtime.snapshotHealth !== "function" || typeof runtime.restoreHealth !== "function") throw new ArgumentError("LLM runtime health persistence requires an LLMRuntime");
+    if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new ArgumentError("LLM runtime health persistence adapter is malformed");
+  }
+
+  async restore(): Promise<LLMRuntimeHealthSnapshot | null> {
+    return this.runtime.restorePersistedHealth(this.persistence);
+  }
+
+  async flush(): Promise<LLMRuntimeHealthSnapshot> {
+    return this.runtime.saveHealth(this.persistence);
+  }
+}
+
 function estimatedProviderCostUnits(candidate: AutonomousModelCandidate | undefined, request: ProviderRequest): number {
   if (!candidate) return 0;
   const estimatedInputTokens = Math.max(1, Math.ceil(request.messages.reduce((sum, message) => sum + bytes(message.content), 0) / 4));
@@ -2404,6 +2659,13 @@ export function rankAutonomousModels(request: AutonomousSelectionRequest): Auton
 
 function emptyHealth(): HealthState {
   return { attempts: 0, successes: 0, failures: 0, totalLatencyMs: 0, lastLatencyMs: null, lastModel: null, lastStatusCode: null };
+}
+
+function splitProviderModelArm(arm: string, providerNames: Iterable<string>): { provider: string; model: string } {
+  const provider = [...providerNames].sort((left, right) => right.length - left.length || left.localeCompare(right)).find((candidate) => arm.startsWith(`${candidate}/`));
+  if (provider) return { provider, model: arm.slice(provider.length + 1) };
+  const separator = arm.indexOf("/");
+  return { provider: separator < 0 ? arm : arm.slice(0, separator), model: separator < 0 ? arm : arm.slice(separator + 1) };
 }
 
 function healthProjection(provider: string, state: HealthState, circuit: "closed" | "open", consecutiveFailures: number, requiresCredential: boolean): ProviderHealth {

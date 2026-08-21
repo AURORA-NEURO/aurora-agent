@@ -538,7 +538,7 @@ async function validateCheckpoint(value: unknown): Promise<AutonomousMissionChec
   if (!Array.isArray(checkpoint.ordered_steps) || !Array.isArray(checkpoint.waves) || !isObject(checkpoint.step_states)) throw new AutonomousMissionExecutionError("mission checkpoint graph metadata is malformed");
   if (checkpoint.ordered_steps.length > AUTONOMOUS_MISSION_MAX_STEPS_PER_CALL || checkpoint.waves.length > AUTONOMOUS_MISSION_MAX_STEPS_PER_CALL) throw new AutonomousMissionExecutionError("mission checkpoint exceeds its step capacity");
   const ids = new Set<string>();
-  for (const id of checkpoint.ordered_steps) { boundedIdentifier("mission checkpoint step id", id); if (!ids.add(id)) throw new AutonomousMissionExecutionError("mission checkpoint contains duplicate step ids"); }
+  for (const id of checkpoint.ordered_steps) { boundedIdentifier("mission checkpoint step id", id); if (ids.has(id)) throw new AutonomousMissionExecutionError("mission checkpoint contains duplicate step ids"); ids.add(id); }
   if (Object.keys(checkpoint.step_states).some((id) => !ids.has(id))) throw new AutonomousMissionExecutionError("mission checkpoint contains an unknown step state");
   if (!Array.isArray(checkpoint.completed_step_ids) || checkpoint.completed_step_ids.some((id) => !ids.has(id))) throw new AutonomousMissionExecutionError("mission checkpoint completed steps are malformed");
   if (checkpoint.next_wave !== null) boundedInteger("mission checkpoint next_wave", checkpoint.next_wave, AUTONOMOUS_MISSION_MAX_STEPS_PER_CALL);
@@ -594,7 +594,7 @@ export async function validateAutonomousMissionSnapshot(value: unknown): Promise
   if (!Array.isArray(snapshot.checkpoints) || !Array.isArray(snapshot.event_rows) || snapshot.checkpoints.length > AUTONOMOUS_MISSION_MAX_JOBS || snapshot.event_rows.length > AUTONOMOUS_MISSION_MAX_EVENTS) throw new AutonomousMissionExecutionError("mission snapshot capacity is exhausted");
   const checkpoints: AutonomousMissionCheckpoint[] = [];
   const ids = new Set<string>();
-  for (const raw of snapshot.checkpoints) { const checkpoint = await validateCheckpoint(raw); if (!ids.add(checkpoint.mission_id)) throw new AutonomousMissionExecutionError("mission snapshot contains duplicate checkpoints"); checkpoints.push(checkpoint); }
+  for (const raw of snapshot.checkpoints) { const checkpoint = await validateCheckpoint(raw); if (ids.has(checkpoint.mission_id)) throw new AutonomousMissionExecutionError("mission snapshot contains duplicate checkpoints"); ids.add(checkpoint.mission_id); checkpoints.push(checkpoint); }
   const events: AutonomousMissionEvent[] = [];
   for (const raw of snapshot.event_rows) { const event = await validateEvent(raw); if (!ids.has(event.mission_id)) throw new AutonomousMissionExecutionError("mission snapshot event has no checkpoint"); events.push(event); }
   const priorByMission = new Map<string, AutonomousMissionEvent>();

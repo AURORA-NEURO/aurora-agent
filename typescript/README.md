@@ -956,6 +956,23 @@ erasing a healthy provider's catalogue when another provider is unavailable. The
 catalogue feeds every built-in domain, workflow, cross-domain, mission, and goal invocation through
 the same capability and health gates.
 
+The catalogue can also cross a process restart without serializing a key or provider response. Call
+`agent.snapshotModels()` (or `AutonomousModelCataloguePersistenceCoordinator.flush()`) to write a
+SHA-256-bound projection containing only validated model ids, capabilities, capacities, caller-owned
+quality/cost/latency priors, and credential-required/enabled flags. On startup, call `restore()` before
+readiness or execution. Restoration validates the snapshot, catalogue digest, snapshot digest, model
+bounds, duplicate ids, and allowed metadata keys before replacing the live map atomically; a rejected
+or tampered snapshot cannot partially change selection inputs. Use a caller-owned JSON/SQLite/IndexedDB/
+Postgres adapter and resolve credentials again after restart—the snapshot's `secret_material` marker is
+an assertion, not a key store.
+
+Provider transport health has its own ledger. `LLMRuntimeHealthPersistenceCoordinator` persists
+only bounded provider/model counters, last status metadata, and circuit-open deadlines. Restore it
+after registering the same provider transports; unknown providers are refused and the current
+runtime is replaced only after the complete snapshot verifies. This state is intentionally not
+task quality or evaluator reward: the model-health ledger remains the separate source for quality
+feedback, and credentials are collected into a fresh process-local session after restart.
+
 Learning episodes can only be prepared from a completed autonomous run; approval pauses, provider
 refusals, child failures, and tool-loop limits cannot be converted into evaluator or bandit credit.
 Trajectory settlement is resumable after a later episode failure: matching already-settled reward

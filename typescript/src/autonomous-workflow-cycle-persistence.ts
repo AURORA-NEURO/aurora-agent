@@ -251,7 +251,10 @@ export async function validateAutonomousWorkflowCycleState(value: unknown): Prom
   if (!Array.isArray(value.attempts) || value.attempts.length > maxReplans + 1) throw new AutonomousWorkflowCyclePersistenceError("workflow cycle state attempts exceed capacity");
   const attempts = value.attempts.map(validateAttempt);
   const attemptNumbers = new Set<number>();
-  for (const item of attempts) if (!attemptNumbers.add(item.attempt)) throw new AutonomousWorkflowCyclePersistenceError("workflow cycle state attempts contain duplicates");
+  for (const item of attempts) {
+    if (attemptNumbers.has(item.attempt)) throw new AutonomousWorkflowCyclePersistenceError("workflow cycle state attempts contain duplicates");
+    attemptNumbers.add(item.attempt);
+  }
   if (attempts.some((item) => item.attempt > attempt)) throw new AutonomousWorkflowCyclePersistenceError("workflow cycle state contains a future attempt");
   if (attempts.some((item, index) => item.attempt !== index + 1)) throw new AutonomousWorkflowCyclePersistenceError("workflow cycle state attempts are not contiguous");
   if (!Array.isArray(value.evaluations) || value.evaluations.length > maxReplans + 1) throw new AutonomousWorkflowCyclePersistenceError("workflow cycle state evaluations exceed capacity");

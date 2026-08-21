@@ -12,11 +12,13 @@ import {
   AutonomousExecutionController,
   InMemoryAutonomousExecutionJournal,
   LLMRuntime,
+  LLMRuntimeHealthPersistenceCoordinator,
   ProviderRuntimeError,
   anthropicProvider,
   openaiCompatibleProvider,
   openaiProvider,
   providerModelsToCandidates,
+  validateLLMRuntimeHealthSnapshot,
 } from "../dist/index.js";
 
 function jsonResponse(payload, status = 200, headers = {}) {
@@ -470,6 +472,58 @@ test("retryable provider errors open a circuit and prevent the next dispatch", a
   assert.equal(calls, 1);
   assert.equal(runtime.providerStatus("unstable").circuit, "open");
   assert.equal(runtime.providerStatus("unstable").failures, 2);
+});
+
+test("LLM transport health survives restart without restoring credentials or dispatching an open circuit", async () => {
+  let sourceCalls = 0;
+  const source = new LLMRuntime({
+    credentials: new CredentialStore(),
+    clock: () => 1_000,
+    fetch: async () => {
+      sourceCalls += 1;
+      return jsonResponse({ error: "busy" }, 503);
+    },
+  });
+  const config = openaiCompatibleProvider("restart-health", "https://restart-health.test", {
+    requiresCredential: false,
+    maxAttempts: 1,
+    circuitBreakerFailureThreshold: 1,
+    circuitBreakerResetMs: 60_000,
+  });
+  source.registerProvider(config);
+  await assert.rejects(source.invoke("restart-health", request("restart-model")), /503/);
+  assert.equal(sourceCalls, 1);
+
+  let persisted = null;
+  const persistence = { read: () => persisted, write: (snapshot) => { persisted = structuredClone(snapshot); } };
+  const snapshot = await new LLMRuntimeHealthPersistenceCoordinator(source, persistence).flush();
+  assert.equal(snapshot.providers[0].attempts, 1);
+  assert.equal(snapshot.providers[0].failures, 1);
+  assert.equal(snapshot.providers[0].consecutive_failures, 1);
+  assert.equal(JSON.stringify(snapshot).includes("authorization"), false);
+
+  let restoredCalls = 0;
+  const restarted = new LLMRuntime({
+    credentials: new CredentialStore(),
+    clock: () => 1_000,
+    fetch: async () => {
+      restoredCalls += 1;
+      throw new Error("restored open circuit must not dispatch");
+    },
+  });
+  restarted.registerProvider(config);
+  const restored = await new LLMRuntimeHealthPersistenceCoordinator(restarted, persistence).restore();
+  assert.equal(restored?.snapshot_digest, snapshot.snapshot_digest);
+  assert.equal(restarted.providerStatus("restart-health").circuit, "open");
+  assert.equal(restarted.providerStatus("restart-health").attempts, 1);
+  await assert.rejects(restarted.invoke("restart-health", request("restart-model")), (error) => error instanceof ProviderRuntimeError && error.circuitOpen);
+  assert.equal(restoredCalls, 0);
+
+  const tampered = structuredClone(snapshot);
+  tampered.providers[0].attempts = 99;
+  tampered.providers[0].successes = 98;
+  await assert.rejects(validateLLMRuntimeHealthSnapshot(tampered), /digest mismatch/);
+  assert.equal(restarted.providerStatus("restart-health").attempts, 2);
 });
 
 test("autonomous runtime gates candidates on provider readiness and feeds health back to selection", async () => {

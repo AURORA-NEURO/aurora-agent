@@ -124,10 +124,13 @@ export const AUTONOMOUS_CROSS_DOMAIN_SCHEMA = "bioprism-typescript-autonomous-cr
 export const AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA = "bioprism-typescript-autonomous-cross-domain-result/0.1" as const;
 export const AUTONOMOUS_MODEL_REFRESH_SCHEMA = "bioprism-typescript-autonomous-model-refresh/0.1" as const;
 export const AUTONOMOUS_MODEL_CATALOGUE_REFRESH_SCHEMA = "bioprism-typescript-autonomous-model-catalogue-refresh/0.1" as const;
+export const AUTONOMOUS_MODEL_CATALOGUE_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-model-catalogue-snapshot/0.1" as const;
 export const AUTONOMOUS_READINESS_SCHEMA = "bioprism-autonomous-agent-readiness/0.1" as const;
 export const AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN = 8;
 export const AUTONOMOUS_CROSS_DOMAIN_MAX_CONCURRENCY = 4;
 export const AUTONOMOUS_MODEL_CATALOGUE_REFRESH_MAX_PROVIDERS = 32;
+export const AUTONOMOUS_MODEL_CATALOGUE_MAX_MODELS = 128;
+export const AUTONOMOUS_MODEL_CATALOGUE_MAX_SNAPSHOT_BYTES = 1_000_000;
 const AUTONOMOUS_BANDIT_MAX_ARMS = 512;
 
 export const AUTONOMOUS_DOMAIN_NAMES = [
@@ -828,6 +831,22 @@ export interface AutonomousModelCatalogueRefreshResult {
   secret_material: "never_returned";
 }
 
+/** Restart-safe model metadata; credentials, prompts, responses, and raw catalogues are excluded. */
+export interface AutonomousModelCatalogueSnapshot extends JsonObject {
+  schema: typeof AUTONOMOUS_MODEL_CATALOGUE_SNAPSHOT_SCHEMA;
+  models: AutonomousModelCandidate[];
+  catalogue_digest: string;
+  snapshot_digest: string;
+  retention: "model_metadata_only_hash_bound";
+  secret_material: "never_returned";
+}
+
+/** Caller-owned durable adapter for a model catalogue snapshot. */
+export interface AutonomousModelCataloguePersistence {
+  read(): Promise<AutonomousModelCatalogueSnapshot | null> | AutonomousModelCatalogueSnapshot | null;
+  write(snapshot: AutonomousModelCatalogueSnapshot): Promise<void> | void;
+}
+
 export interface AutonomousRunOptions {
   domain?: AutonomousDomainName;
   /** Internal reviewed-stage identity; workflow executors populate this before provider dispatch. */
@@ -1382,6 +1401,13 @@ function boundedText(name: string, value: unknown, maximum: number): string {
   return value;
 }
 
+function boundedModelMetric(name: string, value: unknown, minimum: number, maximum: number, integer = false): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < minimum || value > maximum || (integer && !Number.isSafeInteger(value))) {
+    throw new ArgumentError(`${name} is outside its bounded model contract`);
+  }
+  return value;
+}
+
 function boundedIdentifier(name: string, value: unknown): string {
   const text = boundedText(name, value, 256);
   if (!/^[A-Za-z0-9_.-]+$/.test(text)) throw new ArgumentError(`${name} must be a bounded identifier`);
@@ -1401,6 +1427,8 @@ function validateAutonomousStructuredOutputOptions(options: Pick<AutonomousRunOp
 
 function normalizeAutonomousModelCandidate(candidate: AutonomousModelCandidate): AutonomousModelCandidate {
   if (!isObject(candidate)) throw new ArgumentError("autonomous model candidate must be an object");
+  const allowedKeys = new Set(["provider", "model", "capabilities", "context_window_tokens", "max_output_tokens", "quality", "latency_ms", "cost_per_million_tokens", "reliability", "requires_credential", "enabled"]);
+  if (Object.keys(candidate).some((key) => !allowedKeys.has(key))) throw new ArgumentError("autonomous model candidate contains unsupported or secret-shaped metadata");
   const provider = boundedText("autonomous model provider", candidate.provider, 128);
   const model = boundedText("autonomous model id", candidate.model, 512);
   let capabilities: string[] | undefined;
@@ -1409,7 +1437,63 @@ function normalizeAutonomousModelCandidate(candidate: AutonomousModelCandidate):
     capabilities = candidate.capabilities.map((capability) => boundedText("autonomous model capability", capability, 128));
     if (new Set(capabilities).size !== capabilities.length) throw new ArgumentError("autonomous model capabilities contain duplicates");
   }
-  return { ...candidate, provider, model, ...(capabilities ? { capabilities } : {}) };
+  const contextWindow = boundedModelMetric("autonomous model context_window_tokens", candidate.context_window_tokens, 1, 100_000_000, true);
+  const maxOutput = boundedModelMetric("autonomous model max_output_tokens", candidate.max_output_tokens, 1, 10_000_000, true);
+  const quality = boundedModelMetric("autonomous model quality", candidate.quality, 0, 1);
+  const latency = boundedModelMetric("autonomous model latency_ms", candidate.latency_ms, 0, 10 * 60_000);
+  const cost = boundedModelMetric("autonomous model cost_per_million_tokens", candidate.cost_per_million_tokens, 0, 1_000_000_000);
+  const reliability = boundedModelMetric("autonomous model reliability", candidate.reliability, 0, 1);
+  if (candidate.requires_credential !== undefined && typeof candidate.requires_credential !== "boolean") throw new ArgumentError("autonomous model requires_credential must be boolean");
+  if (candidate.enabled !== undefined && typeof candidate.enabled !== "boolean") throw new ArgumentError("autonomous model enabled must be boolean");
+  return {
+    provider,
+    model,
+    ...(capabilities ? { capabilities } : {}),
+    context_window_tokens: contextWindow,
+    max_output_tokens: maxOutput,
+    quality,
+    latency_ms: latency,
+    cost_per_million_tokens: cost,
+    reliability,
+    ...(candidate.requires_credential === undefined ? {} : { requires_credential: candidate.requires_credential }),
+    ...(candidate.enabled === undefined ? {} : { enabled: candidate.enabled }),
+  };
+}
+
+function boundedModelDigest(name: string, value: unknown): string {
+  const digest = boundedText(name, value, 64);
+  if (!/^[0-9a-f]{64}$/.test(digest)) throw new ArgumentError(`${name} must be a lowercase SHA-256 digest`);
+  return digest;
+}
+
+/** Validate and canonicalize a restart snapshot before it can touch the live catalogue. */
+export async function validateAutonomousModelCatalogueSnapshot(value: unknown): Promise<AutonomousModelCatalogueSnapshot> {
+  if (!isObject(value)) throw new ArgumentError("autonomous model catalogue snapshot must be an object");
+  const allowedKeys = new Set(["schema", "models", "catalogue_digest", "snapshot_digest", "retention", "secret_material"]);
+  if (Object.keys(value).some((key) => !allowedKeys.has(key))) throw new ArgumentError("autonomous model catalogue snapshot contains unsupported metadata");
+  if (value.schema !== AUTONOMOUS_MODEL_CATALOGUE_SNAPSHOT_SCHEMA || value.retention !== "model_metadata_only_hash_bound" || value.secret_material !== "never_returned") throw new ArgumentError("autonomous model catalogue snapshot markers are invalid");
+  if (!Array.isArray(value.models) || value.models.length > AUTONOMOUS_MODEL_CATALOGUE_MAX_MODELS) throw new ArgumentError("autonomous model catalogue snapshot exceeds its model capacity");
+  const models = value.models.map((candidate) => normalizeAutonomousModelCandidate(candidate as AutonomousModelCandidate));
+  const ids = new Set<string>();
+  for (const candidate of models) {
+    const id = `${candidate.provider}/${candidate.model}`;
+    if (ids.has(id)) throw new ArgumentError(`autonomous model catalogue snapshot contains duplicate model ${id}`);
+    ids.add(id);
+  }
+  const catalogueDigest = boundedModelDigest("autonomous model catalogue snapshot catalogue_digest", value.catalogue_digest);
+  if (await digestJson(models) !== catalogueDigest) throw new ArgumentError("autonomous model catalogue snapshot catalogue digest mismatch");
+  const descriptor = {
+    schema: AUTONOMOUS_MODEL_CATALOGUE_SNAPSHOT_SCHEMA,
+    models,
+    catalogue_digest: catalogueDigest,
+    retention: "model_metadata_only_hash_bound" as const,
+    secret_material: "never_returned" as const,
+  };
+  const snapshotDigest = boundedModelDigest("autonomous model catalogue snapshot snapshot_digest", value.snapshot_digest);
+  if (await digestJson(descriptor) !== snapshotDigest) throw new ArgumentError("autonomous model catalogue snapshot digest mismatch");
+  const snapshot = { ...descriptor, snapshot_digest: snapshotDigest };
+  if (bytes(JSON.stringify(snapshot)) > AUTONOMOUS_MODEL_CATALOGUE_MAX_SNAPSHOT_BYTES) throw new ArgumentError("autonomous model catalogue snapshot exceeds its byte capacity");
+  return structuredClone(snapshot);
 }
 
 function normalizedCrossDomainConcurrency(value: number | undefined, totalChildren: number): number {
@@ -2775,12 +2859,13 @@ export class AutonomousAgent {
   }
 
   registerModels(candidates: readonly AutonomousModelCandidate[], options: { replaceExisting?: boolean } = {}): AutonomousModelCandidate[] {
-    if (!Array.isArray(candidates) || !candidates.length || candidates.length > 128) throw new ArgumentError("autonomous model catalogue must contain 1..=128 candidates");
+    if (!Array.isArray(candidates) || !candidates.length || candidates.length > AUTONOMOUS_MODEL_CATALOGUE_MAX_MODELS) throw new ArgumentError(`autonomous model catalogue must contain 1..=${AUTONOMOUS_MODEL_CATALOGUE_MAX_MODELS} candidates`);
     const normalized = candidates.map((candidate) => normalizeAutonomousModelCandidate(candidate));
     const batchIds = new Set<string>();
     for (const candidate of normalized) {
       const id = `${candidate.provider}/${candidate.model}`;
-      if (!batchIds.add(id)) throw new ArgumentError(`autonomous model ${id} is duplicated in the registration batch`);
+      if (batchIds.has(id)) throw new ArgumentError(`autonomous model ${id} is duplicated in the registration batch`);
+      batchIds.add(id);
       if (this.modelsById.has(id) && options.replaceExisting !== true) throw new ArgumentError(`autonomous model ${id} is already registered`);
     }
     for (const candidate of normalized) this.modelsById.set(`${candidate.provider}/${candidate.model}`, candidate);
@@ -2789,6 +2874,48 @@ export class AutonomousAgent {
 
   models(): AutonomousModelCandidate[] {
     return [...this.modelsById.values()].sort((left, right) => `${left.provider}/${left.model}`.localeCompare(`${right.provider}/${right.model}`)).map((candidate) => ({ ...candidate, capabilities: candidate.capabilities ? [...candidate.capabilities] : undefined }));
+  }
+
+  /** Seal the current catalogue as a redacted, content-addressed restart projection. */
+  async snapshotModels(): Promise<AutonomousModelCatalogueSnapshot> {
+    const models = this.models();
+    const body = {
+      schema: AUTONOMOUS_MODEL_CATALOGUE_SNAPSHOT_SCHEMA,
+      models,
+      catalogue_digest: await digestJson(models),
+      retention: "model_metadata_only_hash_bound" as const,
+      secret_material: "never_returned" as const,
+    };
+    const snapshot = { ...body, snapshot_digest: await digestJson(body) };
+    if (bytes(JSON.stringify(snapshot) ?? "") > AUTONOMOUS_MODEL_CATALOGUE_MAX_SNAPSHOT_BYTES) throw new ArgumentError("autonomous model catalogue snapshot exceeds its byte capacity");
+    return structuredClone(snapshot);
+  }
+
+  /** Restore a catalogue only after full validation; a rejected snapshot leaves live state unchanged. */
+  async restoreModels(raw: unknown): Promise<void> {
+    const snapshot = await validateAutonomousModelCatalogueSnapshot(raw);
+    const next = new Map<string, AutonomousModelCandidate>();
+    for (const candidate of snapshot.models) next.set(`${candidate.provider}/${candidate.model}`, structuredClone(candidate));
+    this.modelsById.clear();
+    for (const [id, candidate] of next) this.modelsById.set(id, candidate);
+  }
+
+  /** Persist the current catalogue through a caller-owned adapter. */
+  async saveModelCatalogue(persistence: AutonomousModelCataloguePersistence): Promise<AutonomousModelCatalogueSnapshot> {
+    if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new ArgumentError("model catalogue persistence adapter is malformed");
+    const snapshot = await this.snapshotModels();
+    await persistence.write(snapshot);
+    return snapshot;
+  }
+
+  /** Restore the catalogue from a caller-owned adapter; null means no restart state exists. */
+  async restoreModelCatalogue(persistence: AutonomousModelCataloguePersistence): Promise<AutonomousModelCatalogueSnapshot | null> {
+    if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new ArgumentError("model catalogue persistence adapter is malformed");
+    const raw = await persistence.read();
+    if (raw === null) return null;
+    const snapshot = await validateAutonomousModelCatalogueSnapshot(raw);
+    await this.restoreModels(snapshot);
+    return snapshot;
   }
 
   /** Return the redacted activation state without exposing caller credentials or transient prompts. */
@@ -3121,11 +3248,12 @@ export class AutonomousAgent {
       if (!Number.isSafeInteger(value) || value < 1 || value > 10_000_000) throw new ArgumentError(`autonomous readiness ${name} is outside its bounds`);
     }
     const candidates = (options.candidates === undefined ? this.models() : [...options.candidates].map(normalizeAutonomousModelCandidate));
-    if (candidates.length > 128) throw new ArgumentError("autonomous readiness candidates must contain at most 128 models");
+    if (candidates.length > AUTONOMOUS_MODEL_CATALOGUE_MAX_MODELS) throw new ArgumentError(`autonomous readiness candidates must contain at most ${AUTONOMOUS_MODEL_CATALOGUE_MAX_MODELS} models`);
     const candidateIds = new Set<string>();
     for (const candidate of candidates) {
       const id = `${candidate.provider}/${candidate.model}`;
-      if (!candidateIds.add(id)) throw new ArgumentError(`autonomous readiness model ${id} is duplicated`);
+      if (candidateIds.has(id)) throw new ArgumentError(`autonomous readiness model ${id} is duplicated`);
+      candidateIds.add(id);
     }
     const profiles = await builtinAutonomousDomainProfiles();
     const metadataByProvider = new Map(this.llm.providerMetadata().map((row) => [String(row.provider), row]));
@@ -4475,5 +4603,21 @@ export class AutonomousAgent {
 
   private toolRuntimeForRun(): AutonomousDomainToolRuntime | undefined {
     return this.domainToolRuntime;
+  }
+}
+
+/** Flushes/restores the agent's model catalogue through SQLite, IndexedDB, Postgres, or another caller adapter. */
+export class AutonomousModelCataloguePersistenceCoordinator {
+  constructor(readonly agent: AutonomousAgent, readonly persistence: AutonomousModelCataloguePersistence) {
+    if (!agent || typeof agent.snapshotModels !== "function" || typeof agent.restoreModels !== "function") throw new ArgumentError("model catalogue persistence requires an AutonomousAgent");
+    if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new ArgumentError("model catalogue persistence adapter is malformed");
+  }
+
+  async restore(): Promise<AutonomousModelCatalogueSnapshot | null> {
+    return this.agent.restoreModelCatalogue(this.persistence);
+  }
+
+  async flush(): Promise<AutonomousModelCatalogueSnapshot> {
+    return this.agent.saveModelCatalogue(this.persistence);
   }
 }

@@ -251,7 +251,8 @@ export async function validateAutonomousCycleReplanState(value: unknown): Promis
   const attempts = state.attempts.map(validateAttempt);
   const seenAttempts = new Set<number>();
   for (const attempt of attempts) {
-    if (!seenAttempts.add(attempt.attempt) || attempt.attempt > state.attempt) throw new AutonomousCyclePersistenceError("autonomous cycle state contains duplicate or future attempts");
+    if (seenAttempts.has(attempt.attempt) || attempt.attempt > state.attempt) throw new AutonomousCyclePersistenceError("autonomous cycle state contains duplicate or future attempts");
+    seenAttempts.add(attempt.attempt);
   }
   if (attempts.some((attempt, index) => attempt.attempt !== index + 1)) throw new AutonomousCyclePersistenceError("autonomous cycle attempts are not contiguous");
   for (let index = 0; index < state.evaluations.length; index += 1) {
@@ -351,7 +352,8 @@ export async function validateAutonomousCycleReplanSnapshot(value: unknown): Pro
   const ids = new Set<string>();
   for (const raw of snapshot.states) {
     const state = await validateAutonomousCycleReplanState(raw);
-    if (!ids.add(state.cycle_id)) throw new AutonomousCyclePersistenceError("autonomous cycle snapshot contains duplicate cycle IDs");
+    if (ids.has(state.cycle_id)) throw new AutonomousCyclePersistenceError("autonomous cycle snapshot contains duplicate cycle IDs");
+    ids.add(state.cycle_id);
     states.push(state);
   }
   boundedDigest("autonomous cycle snapshot snapshot_digest", snapshot.snapshot_digest);

@@ -236,7 +236,8 @@ export async function validateAutonomousDecisionCycleSnapshot(value: unknown): P
   const ids = new Set<string>();
   for (const candidate of value.states) {
     const state = await validateAutonomousDecisionCycleState(candidate);
-    if (!ids.add(state.cycle_id)) throw new ArgumentError("autonomous decision-cycle snapshot contains duplicate cycle IDs");
+    if (ids.has(state.cycle_id)) throw new ArgumentError("autonomous decision-cycle snapshot contains duplicate cycle IDs");
+    ids.add(state.cycle_id);
     states.push(state);
   }
   const snapshotDigest = boundedDigest("autonomous decision-cycle snapshot snapshot_digest", value.snapshot_digest)!;

@@ -2453,6 +2453,27 @@ provider produces a redacted `partial` result without deleting healthy arms; the
 then feeds the same capability, credential, health, and learning gates for all twelve domains,
 workflow stages, cross-domain children, missions, and goals.
 
+The TypeScript façade also exposes a restart-safe model projection through
+`AutonomousModelCataloguePersistenceCoordinator`. `flush()` persists only normalized model
+metadata and caller-owned priors, sealed by both a catalogue digest and a snapshot digest;
+credentials, prompts, provider responses, raw inventory, and resolver references are structurally
+excluded. `restore()` validates the full envelope, rejects duplicate or unsupported/secret-shaped
+fields, and replaces the catalogue only after every row verifies. A failed restore leaves the
+previous catalogue untouched. Applications can connect the persistence interface to a durable JSON
+record, SQLite, IndexedDB, or another transactional store, then re-resolve user credentials into a
+fresh in-memory session after restart. The restored catalogue is the same source used by readiness,
+selection, workflow execution, cross-domain fan-out, mission execution, and goal learning across
+all twelve built-in domains.
+
+Provider transport health is persisted separately through
+`LLMRuntimeHealthPersistenceCoordinator`. Its digest-bound projection contains only bounded
+attempt/success/failure counters, latency/status metadata, and circuit deadlines; it never contains
+credentials, headers, prompts, responses, tool payloads, or evaluator rewards. Register the same
+provider transports before restoring it. Unknown providers, duplicate rows, inconsistent counters,
+secret-shaped fields, and tampered digests fail closed without mutating the live runtime. This
+transport ledger informs circuit and failover continuity, while the existing model-health ledger
+continues to own evaluator-quality feedback and selection adaptation.
+
 All use the same `ProviderRequest` and `ProviderResponse` contract. The runtime does not follow
 redirects, does not allow plain HTTP unless explicitly enabled for local/test use, bounds response
 bytes, retries only classified transient failures, opens a per-provider circuit after repeated

@@ -658,7 +658,8 @@ export async function validateAutonomousMissionReplanState(value: unknown): Prom
   const attempts = state.attempts.map(validateAttempt);
   const attemptIds = new Set<number>();
   for (const attempt of attempts) {
-    if (!attemptIds.add(attempt.attempt) || attempt.attempt > state.attempt) throw new AutonomousMissionReplanError("mission replan state contains duplicate or future attempts");
+    if (attemptIds.has(attempt.attempt) || attempt.attempt > state.attempt) throw new AutonomousMissionReplanError("mission replan state contains duplicate or future attempts");
+    attemptIds.add(attempt.attempt);
     if (attempt.mission_id !== expectedMissionId(state.root_mission_id, attempt.attempt)) throw new AutonomousMissionReplanError("mission replan state attempt identity is inconsistent with its root");
   }
   const attemptRouteDigests = [...new Set(attempts.map((attempt) => attempt.route_digest ?? null).filter((digest): digest is string => digest !== null))];
@@ -717,7 +718,8 @@ export async function validateAutonomousMissionReplanSnapshot(value: unknown): P
   const ids = new Set<string>();
   for (const raw of snapshot.states) {
     const state = await validateAutonomousMissionReplanState(raw);
-    if (!ids.add(state.root_mission_id)) throw new AutonomousMissionReplanError("mission replan snapshot contains duplicate roots");
+    if (ids.has(state.root_mission_id)) throw new AutonomousMissionReplanError("mission replan snapshot contains duplicate roots");
+    ids.add(state.root_mission_id);
     states.push(state);
   }
   states.sort((left, right) => left.root_mission_id.localeCompare(right.root_mission_id));

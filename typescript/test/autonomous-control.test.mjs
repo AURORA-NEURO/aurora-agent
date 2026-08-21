@@ -6,12 +6,14 @@ import {
   AutonomousBrainControlPlaneBridge,
   AutonomousModelHealthController,
   AutonomousModelHealthPersistenceCoordinator,
+  AutonomousModelCataloguePersistenceCoordinator,
   AutonomousOfflineReplayEngine,
   InMemoryAutonomousModelHealthStore,
   LLMRuntime,
   builtinAutonomousDomainEvaluatorProfiles,
   autonomousReplayEvidenceDigest,
   openaiCompatibleProvider,
+  validateAutonomousModelCatalogueSnapshot,
 } from "../dist/index.js";
 
 const digest = "a".repeat(64);
@@ -67,6 +69,38 @@ test("health snapshots restore through a caller adapter and refuse tampering", a
   const tampered = structuredClone(snapshot);
   tampered.events[0].observation.status = "tampered";
   await assert.rejects(restored.restore(tampered), /snapshot digest mismatch/);
+});
+
+test("model catalogue snapshots survive restart and fail closed atomically", async () => {
+  const source = new AutonomousAgent(new LLMRuntime({ fetch: async () => new Response("{}", { status: 200 }) }));
+  source.registerModel({ provider: "catalogue-provider", model: "catalogue-model", capabilities: ["reasoning", "code"], context_window_tokens: 32_000, max_output_tokens: 2_000, quality: 0.9, latency_ms: 100, cost_per_million_tokens: 1, reliability: 0.95, requires_credential: true, enabled: true });
+  let persisted = null;
+  const persistence = { read: () => persisted, write: (snapshot) => { persisted = structuredClone(snapshot); } };
+  const snapshot = await new AutonomousModelCataloguePersistenceCoordinator(source, persistence).flush();
+  assert.equal(snapshot.models.length, 1);
+  assert.equal(JSON.stringify(snapshot).includes("api_key"), false);
+  assert.equal(JSON.stringify(snapshot).includes("catalogue-provider"), true);
+
+  const restarted = new AutonomousAgent(new LLMRuntime({ fetch: async () => new Response("{}", { status: 200 }) }));
+  restarted.registerModel({ provider: "stale-provider", model: "stale-model", capabilities: ["reasoning"], context_window_tokens: 16_000, max_output_tokens: 1_000, quality: 0.5, latency_ms: 200, cost_per_million_tokens: 10, reliability: 0.5 });
+  const restored = await new AutonomousModelCataloguePersistenceCoordinator(restarted, persistence).restore();
+  assert.equal(restored?.snapshot_digest, snapshot.snapshot_digest);
+  assert.deepEqual(restarted.models().map((model) => `${model.provider}/${model.model}`), ["catalogue-provider/catalogue-model"]);
+  assert.equal((await restarted.readiness()).domains.length, 12);
+
+  const beforeTamper = restarted.models();
+  const tampered = structuredClone(snapshot);
+  tampered.models[0].model = "tampered-model";
+  await assert.rejects(restarted.restoreModels(tampered), /catalogue digest mismatch/);
+  assert.deepEqual(restarted.models(), beforeTamper);
+
+  const duplicate = structuredClone(snapshot);
+  duplicate.models.push(structuredClone(duplicate.models[0]));
+  await assert.rejects(validateAutonomousModelCatalogueSnapshot(duplicate), /duplicate model/);
+
+  const secretShaped = structuredClone(snapshot);
+  secretShaped.models[0].api_key = "must-not-enter-metadata";
+  await assert.rejects(validateAutonomousModelCatalogueSnapshot(secretShaped), /unsupported or secret-shaped metadata/);
 });
 
 test("persisted health drives selection and invocation observers without provider payloads", async () => {

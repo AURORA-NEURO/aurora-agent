@@ -304,7 +304,8 @@ async function validateSnapshot(value: unknown): Promise<AutonomousCrossDomainCh
   const jobIds = new Set<string>();
   for (const candidate of value.checkpoints) {
     const checkpoint = await validateCheckpoint(candidate);
-    if (!jobIds.add(checkpoint.job_id)) throw new ArgumentError("cross-domain snapshot contains duplicate jobs");
+    if (jobIds.has(checkpoint.job_id)) throw new ArgumentError("cross-domain snapshot contains duplicate jobs");
+    jobIds.add(checkpoint.job_id);
     checkpoints.push(checkpoint);
   }
   if (!Array.isArray(value.event_rows) || value.event_rows.length > checkpoints.length) throw new ArgumentError("cross-domain snapshot event rows are malformed");
@@ -314,7 +315,8 @@ async function validateSnapshot(value: unknown): Promise<AutonomousCrossDomainCh
     if (!isObject(rawRow)) throw new ArgumentError("cross-domain snapshot event row must be an object");
     exactKeys(rawRow, ["job_id", "events"], "cross-domain snapshot event row");
     const jobId = boundedId(rawRow.job_id, "cross-domain snapshot event row job_id");
-    if (!jobIds.has(jobId) || !eventJobs.add(jobId) || !Array.isArray(rawRow.events) || rawRow.events.length > AUTONOMOUS_CROSS_DOMAIN_MAX_EVENTS) throw new ArgumentError("cross-domain snapshot event row is invalid");
+    if (!jobIds.has(jobId) || eventJobs.has(jobId) || !Array.isArray(rawRow.events) || rawRow.events.length > AUTONOMOUS_CROSS_DOMAIN_MAX_EVENTS) throw new ArgumentError("cross-domain snapshot event row is invalid");
+    eventJobs.add(jobId);
     const events: AutonomousCrossDomainEvent[] = [];
     let previous: AutonomousCrossDomainEvent | undefined;
     for (const candidate of rawRow.events) {
