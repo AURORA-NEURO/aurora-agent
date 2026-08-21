@@ -1014,11 +1014,15 @@ implicit reward.
 
 The durable surface is intentionally metadata-only. Checkpoints and hash-chained events retain
 mission/step IDs, contract digests, statuses, attempt numbers, bounded failure classes, result
-digests, output byte counts, and the next wave. They do not retain task text, prompt messages,
-credentials, provider responses, tool arguments, or raw tool outputs. Production deployments
-should use a transactional checkpoint store and a separately access-controlled result store, flush
-snapshots through `AutonomousMissionPersistenceCoordinator`, and rehydrate both the credential
-session and required result values before resuming.
+digests, output byte counts, the next wave, and (for model-backed steps) a digest-only decision
+receipt containing the route, plan, prompt, selected provider, selected model, and selection
+digests. They do not retain task text, prompt messages, credentials, provider responses, tool
+arguments, or raw tool outputs. Production deployments should use a transactional checkpoint
+store and a separately access-controlled result store, flush snapshots through
+`AutonomousMissionPersistenceCoordinator`, and rehydrate both the credential session and required
+result values before resuming. The decision receipt is an audit correlation, not a replay
+authorization: the live catalogue, credentials, approval, budget, and effect boundary are
+revalidated on every resumed step.
 
 `BrainRunResult.to_dict()` and `build_brain_evaluation_input()` expose these redacted provider
 receipts to an explicit evaluator. Transport health continues to flow through

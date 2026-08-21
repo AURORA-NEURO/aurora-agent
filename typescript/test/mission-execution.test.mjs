@@ -218,13 +218,20 @@ test("mission learning linkage is metadata-only and requires exact evaluator cov
 
 test("agent mission adapter prepares learning only after the exact tool call completes", async () => {
   const prepared = [];
+  const step = { id: "step-1", domain: "coding", capability: "testing", objective: "invoke the probe", tool: "mission_probe", arguments: { value: "private-input" } };
   const agent = {
     async executeToolCalls(calls) {
       return calls.map((call) => ({ callId: call.id, approved: true, isError: false, content: { accepted: true } }));
     },
     async run(_task, options) {
       await options.authorizeAndExecute([{ id: "call-1", name: "mission_probe", arguments: { value: "private-input" } }]);
-      return { status: "completed", response: { structured: { answer: "private-response" } } };
+      return {
+        status: "completed",
+        selection: { selected_model: { provider: "mission-provider", model: "mission-model" } },
+        route: { route_digest: "a".repeat(64) },
+        blueprint: { plan: { plan_digest: "b".repeat(64) }, prompt: { prompt_digest: "c".repeat(64) } },
+        response: { structured: { answer: "private-response" } },
+      };
     },
   };
   const adapter = agentMissionStepExecutor(agent, {
@@ -241,7 +248,7 @@ test("agent mission adapter prepares learning only after the exact tool call com
     mission_id: "mission-adapter-1",
     goal: "exercise exact adapter contract",
     wave: 0,
-    step: { id: "step-1", domain: "coding", capability: "testing", objective: "invoke the probe", tool: "mission_probe", arguments: {} },
+    step,
     arguments: { value: "private-input" },
     dependency_outputs: {},
     execution_attempt: 1,
@@ -250,7 +257,18 @@ test("agent mission adapter prepares learning only after the exact tool call com
   assert.equal(result.status, "succeeded");
   assert.equal(result.learning_episode_id, "mission:mission-adapter-1:step-1");
   assert.equal(result.value.accepted, true);
+  assert.equal(result.decision.provider, "mission-provider");
+  assert.equal(result.decision.model, "mission-model");
+  assert.equal(result.decision.route_digest, "a".repeat(64));
+  assert.equal(result.decision.plan_digest, "b".repeat(64));
+  assert.equal(result.decision.prompt_digest, "c".repeat(64));
   assert.equal(prepared.length, 1);
   assert.equal(prepared[0].stageId, "step-1");
   assert.equal(prepared[0].parentJobId, "mission-adapter-1");
+
+  const durable = new AutonomousMissionExecutor({ catalogue: await catalogue(), executeStep: adapter });
+  const execution = await durable.start(mission([step]), { approveProviderCall: true });
+  assert.equal(execution.status, "succeeded");
+  assert.equal(execution.checkpoint.step_states["step-1"].decision.provider, "mission-provider");
+  assert.equal(execution.checkpoint.step_states["step-1"].decision.plan_digest, "b".repeat(64));
 });

@@ -25,10 +25,10 @@ import type {
  * embedding application a restart-safe executor that composes the same preflight contract with
  * a caller-owned step adapter. Raw arguments and outputs never enter the durable checkpoint.
  */
-export const AUTONOMOUS_MISSION_EXECUTION_SCHEMA = "bioprism-typescript-autonomous-mission-execution/0.2" as const;
-export const AUTONOMOUS_MISSION_CHECKPOINT_SCHEMA = "bioprism-typescript-autonomous-mission-checkpoint/0.2" as const;
+export const AUTONOMOUS_MISSION_EXECUTION_SCHEMA = "bioprism-typescript-autonomous-mission-execution/0.3" as const;
+export const AUTONOMOUS_MISSION_CHECKPOINT_SCHEMA = "bioprism-typescript-autonomous-mission-checkpoint/0.3" as const;
 export const AUTONOMOUS_MISSION_EVENT_SCHEMA = "bioprism-typescript-autonomous-mission-event/0.1" as const;
-export const AUTONOMOUS_MISSION_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-mission-snapshot/0.2" as const;
+export const AUTONOMOUS_MISSION_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-mission-snapshot/0.3" as const;
 export const AUTONOMOUS_MISSION_TRACE_SCHEMA_VERSION = "bioprism-typescript-autonomous-mission-trace/0.1" as const;
 
 export const AUTONOMOUS_MISSION_EVENT_TYPES = [
@@ -82,6 +82,16 @@ export type AutonomousMissionEventType = typeof AUTONOMOUS_MISSION_EVENT_TYPES[n
 export type AutonomousMissionStatus = typeof AUTONOMOUS_MISSION_STATUSES[number];
 export type AutonomousMissionStepStatus = typeof AUTONOMOUS_MISSION_STEP_STATUSES[number];
 
+/** Digest-only receipt of the planning and model-selection decisions for one mission step. */
+export interface AutonomousMissionStepDecision extends JsonObject {
+  selection_digest: string | null;
+  provider: string | null;
+  model: string | null;
+  route_digest: string | null;
+  plan_digest: string | null;
+  prompt_digest: string | null;
+}
+
 export class AutonomousMissionExecutionError extends ArgumentError {
   override readonly name: string = "AutonomousMissionExecutionError";
 }
@@ -123,6 +133,8 @@ export interface AutonomousMissionStepExecutionResult {
   run_status?: string | null;
   /** Value-only learning linkage; the episode itself is stored by the learning adapter. */
   learning_episode_id?: string | null;
+  /** Digest-only route/plan/prompt/model receipt; raw provider material is never returned here. */
+  decision?: AutonomousMissionStepDecision | null;
 }
 
 export type AutonomousMissionStepExecutor = (
@@ -156,6 +168,7 @@ export interface AutonomousMissionStepCheckpoint {
   error_class: string | null;
   run_status: string | null;
   learning_episode_id: string | null;
+  decision: AutonomousMissionStepDecision | null;
   attempt: number;
   last_event_sequence: number;
 }
@@ -256,6 +269,7 @@ export interface AutonomousMissionStepResult {
   error_class: string | null;
   run_status: string | null;
   learning_episode_id: string | null;
+  decision: AutonomousMissionStepDecision | null;
   attempt: number;
 }
 
@@ -408,6 +422,19 @@ function pointerSet(root: JsonObject, pointer: string, value: JsonValue): JsonOb
   return result;
 }
 
+function normalizeDecision(value: unknown): AutonomousMissionStepDecision | null {
+  if (value === undefined || value === null) return null;
+  if (!isObject(value)) throw new AutonomousMissionExecutionError("step decision metadata must be an object");
+  return {
+    selection_digest: boundedDigest("step decision selection_digest", value.selection_digest, true),
+    provider: safeLabel(value.provider, "unknown"),
+    model: safeLabel(value.model, "unknown"),
+    route_digest: boundedDigest("step decision route_digest", value.route_digest, true),
+    plan_digest: boundedDigest("step decision plan_digest", value.plan_digest, true),
+    prompt_digest: boundedDigest("step decision prompt_digest", value.prompt_digest, true),
+  };
+}
+
 function normalizeStepResult(value: unknown): AutonomousMissionStepExecutionResult {
   if (!isObject(value)) throw new AutonomousMissionExecutionError("step executor must return an object");
   const status = value.status;
@@ -422,11 +449,12 @@ function normalizeStepResult(value: unknown): AutonomousMissionStepExecutionResu
     learning_episode_id: value.learning_episode_id === undefined || value.learning_episode_id === null
       ? null
       : boundedIdentifier("learning_episode_id", value.learning_episode_id),
+    decision: normalizeDecision(value.decision),
   };
 }
 
 function stepState(status: AutonomousMissionStepStatus = "pending"): AutonomousMissionStepCheckpoint {
-  return { status, result_digest: null, output_bytes: 0, error_class: null, run_status: null, learning_episode_id: null, attempt: 0, last_event_sequence: 0 };
+  return { status, result_digest: null, output_bytes: 0, error_class: null, run_status: null, learning_episode_id: null, decision: null, attempt: 0, last_event_sequence: 0 };
 }
 
 function policyOf(mission: AgentMissionArgs): AgentMissionPolicy {
@@ -473,6 +501,7 @@ async function validateCheckpoint(value: unknown): Promise<AutonomousMissionChec
     if (state.error_class !== null && typeof state.error_class !== "string") throw new AutonomousMissionExecutionError(`mission checkpoint ${id}.error_class is malformed`);
     if (state.run_status !== null && typeof state.run_status !== "string") throw new AutonomousMissionExecutionError(`mission checkpoint ${id}.run_status is malformed`);
     if (state.learning_episode_id !== null) boundedIdentifier(`mission checkpoint ${id}.learning_episode_id`, state.learning_episode_id);
+    if (state.decision !== null && await digestJson(normalizeDecision(state.decision)) !== await digestJson(state.decision)) throw new AutonomousMissionExecutionError(`mission checkpoint ${id}.decision is malformed`);
     if (state.error_class !== null && safeLabel(state.error_class, "UnclassifiedStepFailure") !== state.error_class) throw new AutonomousMissionExecutionError(`mission checkpoint ${id}.error_class is not a safe label`);
     if (state.run_status !== null && safeLabel(state.run_status, "unknown") !== state.run_status) throw new AutonomousMissionExecutionError(`mission checkpoint ${id}.run_status is not a safe label`);
   }
@@ -865,7 +894,7 @@ export class AutonomousMissionExecutor {
     }
     const resultDigest = await digestJson(execution.value);
     await this.resultStore.save(mission.mission_id, step.id, execution.value, resultDigest);
-    const completed = await this.setStepState(started, step, "succeeded", null, outputBytes, null, execution.run_status ?? null, attempt, resultDigest, currentTotal, execution.learning_episode_id ?? null);
+    const completed = await this.setStepState(started, step, "succeeded", null, outputBytes, null, execution.run_status ?? null, attempt, resultDigest, currentTotal, execution.learning_episode_id ?? null, execution.decision ?? null);
     await this.appendEvent(completed, "step.completed", wave, step, "succeeded", null, outputBytes, argumentsDigest);
     return { checkpoint: completed, result: this.localResult(step, completed.step_states[step.id] as AutonomousMissionStepCheckpoint, execution.value) };
   }
@@ -876,10 +905,10 @@ export class AutonomousMissionExecutor {
     return { checkpoint: updated, result: this.localResult(step, updated.step_states[step.id] as AutonomousMissionStepCheckpoint, null) };
   }
 
-  private async setStepState(checkpoint: AutonomousMissionCheckpoint, step: AgentMissionStep, status: AutonomousMissionStepStatus, errorClass: string | null, outputBytes: number, detail: string | null, runStatus: string | null, attempt: number, resultDigest: string | null = null, totalOutputBytes = checkpoint.output_bytes, learningEpisodeId: string | null = null): Promise<AutonomousMissionCheckpoint> {
+  private async setStepState(checkpoint: AutonomousMissionCheckpoint, step: AgentMissionStep, status: AutonomousMissionStepStatus, errorClass: string | null, outputBytes: number, detail: string | null, runStatus: string | null, attempt: number, resultDigest: string | null = null, totalOutputBytes = checkpoint.output_bytes, learningEpisodeId: string | null = null, decision: AutonomousMissionStepDecision | null = null): Promise<AutonomousMissionCheckpoint> {
     const states = clone(checkpoint.step_states);
     const previous = states[step.id] ?? stepState();
-    states[step.id] = { status, result_digest: resultDigest ?? previous.result_digest, output_bytes: outputBytes, error_class: errorClass, run_status: runStatus, learning_episode_id: learningEpisodeId ?? previous.learning_episode_id, attempt, last_event_sequence: previous.last_event_sequence };
+    states[step.id] = { status, result_digest: resultDigest ?? previous.result_digest, output_bytes: outputBytes, error_class: errorClass, run_status: runStatus, learning_episode_id: learningEpisodeId ?? previous.learning_episode_id, decision: decision ?? previous.decision, attempt, last_event_sequence: previous.last_event_sequence };
     const completed = Object.entries(states).filter(([, state]) => state.status === "succeeded").map(([id]) => id).filter((id) => !checkpoint.completed_step_ids.includes(id));
     const next = [...checkpoint.completed_step_ids, ...completed];
     const nextWave = this.nextPendingWave({ ...checkpoint, step_states: states, completed_step_ids: next });
@@ -914,7 +943,7 @@ export class AutonomousMissionExecutor {
   }
 
   private localResult(step: AgentMissionStep, state: AutonomousMissionStepCheckpoint, value: JsonValue | null): AutonomousMissionStepResult {
-    return { step: clone(step), status: state.status, value: value === null ? null : clone(value), result_digest: state.result_digest, output_bytes: state.output_bytes, error_class: state.error_class, run_status: state.run_status, learning_episode_id: state.learning_episode_id, attempt: state.attempt };
+    return { step: clone(step), status: state.status, value: value === null ? null : clone(value), result_digest: state.result_digest, output_bytes: state.output_bytes, error_class: state.error_class, run_status: state.run_status, learning_episode_id: state.learning_episode_id, decision: state.decision, attempt: state.attempt };
   }
 
   private async result(status: AutonomousMissionStatus, preflight: MissionPreflightResult, checkpoint: AutonomousMissionCheckpoint | null, localResults: AutonomousMissionStepResult[]): Promise<AutonomousMissionExecutionResult> {
@@ -1025,6 +1054,14 @@ export function agentMissionStepExecutor(agent: AutonomousAgent, options: {
     if (run.status === "approval_required" || run.tool_loop?.status === "authorization_required") return { status: "approval_required", run_status: run.status };
     if (!sawExpectedCall) return { status: "refused", run_status: run.status, detail: "provider did not invoke the mission step's exact tool contract" };
     if (run.status !== "completed") return { status: "failed", run_status: run.status, detail: "provider run did not complete" };
+    const decision: AutonomousMissionStepDecision = {
+      selection_digest: run.selection ? await digestJson(run.selection) : null,
+      provider: safeLabel(run.selection?.selected_model?.provider, "unknown"),
+      model: safeLabel(run.selection?.selected_model?.model, "unknown"),
+      route_digest: typeof run.route?.route_digest === "string" ? boundedDigest("mission route_digest", run.route.route_digest) : null,
+      plan_digest: typeof run.blueprint?.plan?.plan_digest === "string" ? boundedDigest("mission plan_digest", run.blueprint.plan.plan_digest) : null,
+      prompt_digest: typeof run.blueprint?.prompt?.prompt_digest === "string" ? boundedDigest("mission prompt_digest", run.blueprint.prompt.prompt_digest) : null,
+    };
     let learningEpisodeId: string | null = null;
     if (options.learning) {
       if (!options.learning.adapter || typeof options.learning.adapter.prepareRun !== "function") throw new ArgumentError("mission learning adapter is malformed");
@@ -1039,6 +1076,6 @@ export function agentMissionStepExecutor(agent: AutonomousAgent, options: {
       if (!episode || boundedIdentifier("prepared learning episodeId", episode.episode_id) !== episodeId) throw new AutonomousMissionExecutionError("learning adapter returned a mismatched episode identity");
       learningEpisodeId = episodeId;
     }
-    return { status: "succeeded", value: toolOutput ?? run.response?.structured ?? run.response?.text ?? null, run_status: run.status, learning_episode_id: learningEpisodeId };
+    return { status: "succeeded", value: toolOutput ?? run.response?.structured ?? run.response?.text ?? null, run_status: run.status, learning_episode_id: learningEpisodeId, decision };
   };
 }

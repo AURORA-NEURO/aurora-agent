@@ -394,6 +394,7 @@ export type {
   AutonomousMissionSnapshotStore,
   AutonomousMissionStatus,
   AutonomousMissionStepCheckpoint,
+  AutonomousMissionStepDecision,
   AutonomousMissionStepExecutionContext,
   AutonomousMissionStepExecutionResult,
   AutonomousMissionStepExecutor,

@@ -788,8 +788,9 @@ stores a provider secret, or assumes that a serialized snapshot is authorization
   checkpoint, validates all twelve built-in domains, executes dependency waves with serial or
   bounded parallel scheduling, resolves RFC 6901 bindings from caller-owned result storage, and
   emits a hash-chained metadata-only trace. The checkpoint stores step status, output byte counts,
-  result digests, retry state, and the next wave; it never stores task arguments, raw outputs,
-  prompts, credentials, or provider bodies.
+  result digests, retry state, the next wave, and a digest-only route/plan/prompt/model-selection
+  decision receipt; it never stores task arguments, raw outputs, prompts, credentials, or provider
+  bodies.
 - `InMemoryAutonomousMissionCheckpointStore` is a deterministic reference store; production
   callers should implement `AutonomousMissionCheckpointStore` over their own transactional storage
   and pair it with `AutonomousMissionPersistenceCoordinator` for snapshot flush/restore. Raw step
