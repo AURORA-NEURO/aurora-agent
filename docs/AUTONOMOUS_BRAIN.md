@@ -118,6 +118,54 @@ application owns authentication, TLS, CSRF protection, tenancy, rate limits, and
 permissions. The SDK owns the sensitive part after intake—non-echo collection helpers, bounded
 in-memory lifetime, opaque handles, provider matching, expiry/revocation, and redacted readiness.
 
+### Credentialless local transport for development and deterministic evaluation
+
+Applications that bring their own local model, test double, or policy-controlled inference service
+can register an explicit `in_memory` provider transport. This is the supported way to exercise the
+complete brain without an API key or a network socket; it is not an implicit fallback and it does
+not make a remote provider credentialless.
+
+```python
+from prism_sdk import LLMRuntime, ProviderRequest
+
+runtime = LLMRuntime()
+runtime.register_in_memory_provider(
+    "offline",
+    lambda request: {
+        "output_text": "bounded local answer",
+        "usage": {"input_tokens": 8, "output_tokens": 4},
+    },
+)
+
+response = runtime.invoke(
+    "offline",
+    ProviderRequest(
+        model="offline-model",
+        messages=({"role": "user", "content": "Prepare a bounded next step."},),
+    ),
+)
+```
+
+The handler receives a provider-neutral `ProviderRequest` and may return a bounded string,
+response mapping, or `ProviderResponse`. The runtime immediately projects that value into the
+same redacted `ProviderResponse` contract used by HTTP adapters. It enforces the requested model,
+successful status, response and usage limits, structured-output schema, exact requested tool names,
+continuation identity, and provider-neutral stream event shape. A stream handler can emit typed
+`ProviderStreamEvent` values; without one, the runtime supplies a one-response text/tool/done
+stream for deterministic local callers. A model-discovery handler may return a bounded
+`{"data": [...]}` inventory, which is projected to `ProviderModelDescriptor` values and still
+requires explicit caller-supplied routing priors before a model enters `ModelCatalogue`.
+
+The local path remains inside the normal runtime gates: circuit state, retry policy, invocation
+observers, provider/model health, tool-loop authorization, execution accounting, and brain-level
+model selection are unchanged. Handler payloads are never copied to `raw`, health records, plans,
+learning state, or receipts; local responses expose only the schema marker
+`bioprism-llm-in-memory-provider/0.1` and `transport: caller_owned`. Because the transport is
+explicitly registered, `ProviderOnboarding.status("offline")` is ready without a credential while
+remote providers continue to require the normal BYOK lifecycle. This makes it suitable for offline
+CI, replay fixtures, local model bridges, and all-domain contract tests, but production deployments
+should register a real authenticated transport or a caller-owned adapter instead.
+
 ### Non-interactive deployment bootstrap
 
 When no person enters a key, the deployment should register a source resolver during service

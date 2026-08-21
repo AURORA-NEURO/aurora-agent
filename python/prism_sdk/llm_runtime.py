@@ -32,7 +32,7 @@ from pathlib import Path
 import secrets
 import threading
 import time
-from typing import Any, Callable, Iterator, Mapping, Protocol, Sequence
+from typing import Any, Callable, Iterable, Iterator, Mapping, Protocol, Sequence
 from urllib.parse import urlsplit
 
 
@@ -57,6 +57,7 @@ PROVIDER_HEALTH_LEDGER_SCHEMA = "bioprism-llm-provider-health-ledger/0.1"
 CREDENTIAL_ONBOARDING_SCHEMA = "bioprism-llm-credential-onboarding/0.1"
 CREDENTIAL_PROVISIONING_SCHEMA = "bioprism-llm-credential-provisioning/0.1"
 PROVIDER_MODEL_DISCOVERY_SCHEMA = "bioprism-llm-provider-model-discovery/0.1"
+IN_MEMORY_PROVIDER_SCHEMA = "bioprism-llm-in-memory-provider/0.1"
 MAX_MODEL_CANDIDATES = 512
 MAX_MODEL_METADATA_BYTES = 256_000
 MAX_PROVIDER_HEALTH_RECORDS = 16_384
@@ -568,6 +569,7 @@ class ProviderConfig:
     circuit_breaker_reset_seconds: float = 30.0
     models_path: str | None = None
     structured_output_mode: str = "json_schema"
+    transport: "InMemoryProvider | None" = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not self.provider or "/" in self.provider or " " in self.provider:
@@ -578,6 +580,8 @@ class ProviderConfig:
             raise ProviderError(
                 "structured_output_mode must be json_schema, json_object, or disabled"
             )
+        if self.transport is not None and not callable(getattr(self.transport, "invoke", None)):
+            raise ProviderError("provider transport must expose a callable invoke method")
         parsed = urlsplit(self.base_url)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise ProviderError("base_url must be an absolute http(s) URL")
@@ -638,6 +642,7 @@ class ProviderConfig:
             "circuit_breaker_failure_threshold": self.circuit_breaker_failure_threshold,
             "circuit_breaker_reset_seconds": self.circuit_breaker_reset_seconds,
             "structured_output_mode": self.structured_output_mode,
+            "transport": "in_memory" if self.transport is not None else "http",
         }
 
 
@@ -1916,6 +1921,239 @@ class ProviderResponse:
         }
 
 
+class InMemoryProvider:
+    """Credentialless provider transport for deterministic local execution and tests.
+
+    The handler receives the same provider-neutral :class:`ProviderRequest` that the HTTP
+    boundary receives and may return a :class:`ProviderResponse`, a text string, or a bounded
+    response mapping.  The runtime re-normalizes the result, strips handler-owned raw payloads,
+    validates requested tool names and structured output, and then applies its normal circuit,
+    observation, admission, and tool-loop behavior.
+
+    This is intentionally an explicit transport, not a fake credential or an implicit fallback.
+    It is useful for local models, deterministic fixtures, and offline development; production
+    applications should register a real provider configuration or their own authenticated
+    transport.
+    """
+
+    def __init__(
+        self,
+        provider: str,
+        handler: Callable[[ProviderRequest], ProviderResponse | Mapping[str, Any] | str],
+        *,
+        stream_handler: Callable[[ProviderRequest], Iterable[ProviderStreamEvent]] | None = None,
+        model_discovery_handler: Callable[[], Mapping[str, Any]] | None = None,
+    ) -> None:
+        if (
+            not isinstance(provider, str)
+            or not provider.strip()
+            or "/" in provider
+            or " " in provider
+        ):
+            raise ProviderError("in-memory provider must be a path-safe identifier")
+        if not callable(handler):
+            raise ProviderError("in-memory provider handler must be callable")
+        if stream_handler is not None and not callable(stream_handler):
+            raise ProviderError("in-memory provider stream_handler must be callable or None")
+        if model_discovery_handler is not None and not callable(model_discovery_handler):
+            raise ProviderError("in-memory provider model_discovery_handler must be callable or None")
+        self.provider = provider
+        self._handler = handler
+        self._stream_handler = stream_handler
+        self._model_discovery_handler = model_discovery_handler
+
+    def invoke(self, request: ProviderRequest) -> ProviderResponse:
+        if not isinstance(request, ProviderRequest):
+            raise ProviderError("in-memory provider received a malformed request")
+        try:
+            value = self._handler(request)
+        except ProviderError as error:
+            raise ProviderError(
+                "in-memory provider handler failed",
+                retryable=error.retryable,
+                status_code=error.status_code,
+                circuit_open=error.circuit_open,
+            ) from error
+        except Exception as error:
+            raise ProviderError("in-memory provider handler failed") from error
+        return self._normalize_response(value, request)
+
+    def stream(self, request: ProviderRequest) -> Iterator[ProviderStreamEvent]:
+        if not isinstance(request, ProviderRequest):
+            raise ProviderError("in-memory provider received a malformed stream request")
+        if self._stream_handler is not None:
+            try:
+                events = self._stream_handler(request)
+                if not isinstance(events, Iterable) or isinstance(events, (str, bytes)):
+                    raise ProviderError("in-memory provider stream handler must return an iterable")
+                for event in events:
+                    if not isinstance(event, ProviderStreamEvent):
+                        raise ProviderError("in-memory provider stream handler returned a malformed event")
+                    if event.provider != self.provider or event.model != request.model:
+                        raise ProviderError("in-memory provider stream event identity does not match request")
+                    yield event
+                return
+            except ProviderError as error:
+                raise ProviderError(
+                    "in-memory provider stream handler failed",
+                    retryable=error.retryable,
+                    status_code=error.status_code,
+                    circuit_open=error.circuit_open,
+                ) from error
+            except Exception as error:
+                raise ProviderError("in-memory provider stream handler failed") from error
+
+        response = self.invoke(request)
+        sequence = 0
+        if response.text:
+            yield ProviderStreamEvent(
+                provider=self.provider,
+                model=request.model,
+                sequence=sequence,
+                event_type="in_memory.text",
+                request_id=response.request_id,
+                text_delta=response.text,
+                usage=response.usage,
+            )
+            sequence += 1
+        for call in response.tool_calls:
+            yield ProviderStreamEvent(
+                provider=self.provider,
+                model=request.model,
+                sequence=sequence,
+                event_type="in_memory.tool_call",
+                request_id=response.request_id,
+                tool_call=call,
+            )
+            sequence += 1
+        yield ProviderStreamEvent(
+            provider=self.provider,
+            model=request.model,
+            sequence=sequence,
+            event_type="in_memory.done",
+            request_id=response.request_id,
+            usage=response.usage,
+            done=True,
+        )
+
+    def discover_models(self) -> Mapping[str, Any]:
+        if self._model_discovery_handler is None:
+            raise ProviderError("in-memory provider has no model discovery handler")
+        try:
+            value = self._model_discovery_handler()
+        except ProviderError as error:
+            raise ProviderError(
+                "in-memory provider model discovery failed",
+                retryable=error.retryable,
+                status_code=error.status_code,
+                circuit_open=error.circuit_open,
+            ) from error
+        except Exception as error:
+            raise ProviderError("in-memory provider model discovery failed") from error
+        if not isinstance(value, Mapping):
+            raise ProviderError("in-memory provider model discovery must return an object")
+        _bounded_json_bytes(value, MAX_PROVIDER_MODEL_DISCOVERY_BYTES, "in-memory model discovery")
+        return dict(value)
+
+    def _normalize_response(
+        self,
+        value: ProviderResponse | Mapping[str, Any] | str,
+        request: ProviderRequest,
+    ) -> ProviderResponse:
+        if isinstance(value, ProviderResponse):
+            source: Mapping[str, Any] = {
+                "provider": value.provider,
+                "model": value.model,
+                "text": value.text,
+                "status_code": value.status_code,
+                "request_id": value.request_id,
+                "usage": value.usage,
+                "structured": value.structured,
+                "tool_calls": value.tool_calls,
+                "provider_output_items": value.provider_output_items,
+            }
+        elif isinstance(value, str):
+            source = {"text": value}
+        elif isinstance(value, Mapping):
+            source = value
+        else:
+            raise ProviderError("in-memory provider handler returned an unsupported response")
+
+        has_envelope = any(
+            key in source
+            for key in ("provider", "model", "text", "output_text", "status_code", "usage", "tool_calls")
+        )
+        if not has_envelope:
+            source = {"text": json.dumps(dict(source), ensure_ascii=False, separators=(",", ":")), "structured": dict(source)}
+        provider = source.get("provider", self.provider)
+        model = source.get("model", request.model)
+        if provider not in {self.provider, "", None} or model != request.model:
+            raise ProviderError("in-memory provider response identity does not match request")
+        status_code = source.get("status_code", 200)
+        if not isinstance(status_code, int) or isinstance(status_code, bool) or not 200 <= status_code < 300:
+            raise ProviderError("in-memory provider response status is not successful")
+        text = source.get("text", source.get("output_text", ""))
+        if not isinstance(text, str) or len(text.encode("utf-8")) > MAX_MESSAGE_CHARS:
+            raise ProviderError("in-memory provider response text is outside its bound")
+        usage = source.get("usage", {})
+        if not isinstance(usage, Mapping):
+            raise ProviderError("in-memory provider response usage must be an object")
+        _bounded_json_bytes(usage, 256_000, "in-memory provider usage")
+        request_id = source.get("request_id")
+        if request_id is not None and (not isinstance(request_id, str) or len(request_id.encode("utf-8")) > 512):
+            raise ProviderError("in-memory provider request_id is outside its bound")
+        raw_calls = source.get("tool_calls", ())
+        if isinstance(raw_calls, (str, bytes)) or not isinstance(raw_calls, Sequence):
+            raise ProviderError("in-memory provider tool_calls must be a sequence")
+        tool_calls: list[ProviderToolCall] = []
+        for raw_call in raw_calls:
+            if isinstance(raw_call, ProviderToolCall):
+                call = raw_call
+            elif isinstance(raw_call, Mapping):
+                arguments = raw_call.get("arguments", {})
+                if isinstance(arguments, str):
+                    try:
+                        arguments = json.loads(arguments)
+                    except (TypeError, json.JSONDecodeError) as error:
+                        raise ProviderError("in-memory provider tool call arguments are invalid JSON") from error
+                call = ProviderToolCall(
+                    call_id=raw_call.get("call_id", raw_call.get("id", "")),
+                    name=raw_call.get("name", ""),
+                    arguments=arguments,
+                )
+            else:
+                raise ProviderError("in-memory provider tool_calls contain an invalid value")
+            tool_calls.append(call)
+        allowed_tool_names = {tool.name for tool in request.tools}
+        if tool_calls and (not allowed_tool_names or any(call.name not in allowed_tool_names for call in tool_calls)):
+            raise ProviderError("in-memory provider returned an unrequested tool call")
+        structured = source.get("structured")
+        if tool_calls:
+            structured = None
+        else:
+            validated = _validate_structured_response(text, request)
+            if request.require_json or request.response_schema is not None:
+                structured = validated
+        output_items = source.get("provider_output_items", ())
+        if isinstance(output_items, (str, bytes)) or not isinstance(output_items, Sequence):
+            raise ProviderError("in-memory provider output items must be a sequence")
+        if any(not isinstance(item, Mapping) for item in output_items):
+            raise ProviderError("in-memory provider output items must contain mappings")
+        _bounded_json_bytes(output_items, MAX_RESPONSE_BYTES, "in-memory provider output items")
+        return ProviderResponse(
+            provider=self.provider,
+            model=request.model,
+            text=text,
+            status_code=status_code,
+            request_id=request_id,
+            usage=dict(usage),
+            raw={"schema": IN_MEMORY_PROVIDER_SCHEMA, "transport": "caller_owned"},
+            structured=structured,
+            tool_calls=tuple(tool_calls),
+            provider_output_items=tuple(dict(item) for item in output_items),
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class ProviderStreamEvent:
     """A bounded provider-neutral projection of one SSE event.
@@ -2224,6 +2462,49 @@ class LLMRuntime:
         with self._observation_lock:
             self._provider_observations.setdefault(config.provider, _ProviderObservationState())
 
+    def register_in_memory_provider(
+        self,
+        provider: str,
+        handler: Callable[[ProviderRequest], ProviderResponse | Mapping[str, Any] | str],
+        *,
+        stream_handler: Callable[[ProviderRequest], Iterable[ProviderStreamEvent]] | None = None,
+        model_discovery_handler: Callable[[], Mapping[str, Any]] | None = None,
+        protocol: str = "openai_responses",
+        structured_output_mode: str = "json_schema",
+        max_attempts: int = 1,
+        retry_backoff_seconds: float = 0.0,
+        circuit_breaker_failure_threshold: int = 3,
+        circuit_breaker_reset_seconds: float = 30.0,
+    ) -> ProviderConfig:
+        """Register an explicit local provider without a credential or network socket.
+
+        The resulting config is credentialless by construction and still travels through the
+        same ``invoke``/stream/tool-loop path as a remote provider. This is intended for local
+        model bridges, deterministic development fixtures, and offline end-to-end verification.
+        It is never selected implicitly: callers must register the provider and its model arm.
+        """
+
+        transport = InMemoryProvider(
+            provider,
+            handler,
+            stream_handler=stream_handler,
+            model_discovery_handler=model_discovery_handler,
+        )
+        config = ProviderConfig(
+            provider=provider,
+            base_url="https://in-memory.invalid",
+            protocol=protocol,
+            requires_credential=False,
+            max_attempts=max_attempts,
+            retry_backoff_seconds=retry_backoff_seconds,
+            circuit_breaker_failure_threshold=circuit_breaker_failure_threshold,
+            circuit_breaker_reset_seconds=circuit_breaker_reset_seconds,
+            structured_output_mode=structured_output_mode,
+            transport=transport,
+        )
+        self.register_provider(config)
+        return config
+
     def provider_metadata(self) -> list[dict[str, Any]]:
         return [self._providers[name].to_metadata() for name in sorted(self._providers)]
 
@@ -2372,6 +2653,25 @@ class LLMRuntime:
             raise ProviderError(f"provider {provider!r} is not configured")
         if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= MAX_PROVIDER_DISCOVERED_MODELS:
             raise ProviderError("model discovery limit is outside its bounds")
+        if config.transport is not None:
+            payload = config.transport.discover_models()
+            rows = payload.get("data")
+            if not isinstance(rows, list):
+                raise ProviderError("provider model inventory must contain a data array")
+            descriptors: list[ProviderModelDescriptor] = []
+            seen: set[str] = set()
+            for row in rows[:limit]:
+                try:
+                    descriptor = ProviderModelDescriptor.from_mapping(provider, row)
+                except ProviderError:
+                    continue
+                if descriptor.model in seen:
+                    continue
+                seen.add(descriptor.model)
+                descriptors.append(descriptor)
+            if rows and not descriptors:
+                raise ProviderError("provider model inventory contained no valid model rows")
+            return tuple(sorted(descriptors, key=lambda descriptor: descriptor.arm_id))
         secret: SecretValue | None = None
         if config.requires_credential:
             if credential is None:
@@ -2806,6 +3106,16 @@ class LLMRuntime:
         headers: Mapping[str, str],
         request: ProviderRequest,
     ) -> Iterator[ProviderStreamEvent]:
+        if config.transport is not None:
+            try:
+                yield from config.transport.stream(request)
+            except ProviderError:
+                raise
+            except Exception as error:
+                raise ProviderError(
+                    "provider stream transport failed; credential material was discarded"
+                ) from error
+            return
         host, port, path, scheme = config.endpoint
         try:
             encoded = json.dumps(body, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
@@ -3106,6 +3416,15 @@ class LLMRuntime:
         headers: Mapping[str, str],
         request: ProviderRequest,
     ) -> ProviderResponse:
+        if config.transport is not None:
+            try:
+                return config.transport.invoke(request)
+            except ProviderError:
+                raise
+            except Exception as error:
+                raise ProviderError(
+                    "provider transport failed; credential material was discarded"
+                ) from error
         host, port, path, scheme = config.endpoint
         try:
             encoded = json.dumps(body, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
