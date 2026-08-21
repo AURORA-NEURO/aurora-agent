@@ -3,13 +3,13 @@ import { digestJson } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
 /** Metadata-only state for a single provider decision cycle. */
-export const AUTONOMOUS_DECISION_CYCLE_STATE_SCHEMA = "bioprism-typescript-autonomous-decision-cycle-state/0.1" as const;
-export const AUTONOMOUS_DECISION_CYCLE_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-decision-cycle-snapshot/0.1" as const;
+export const AUTONOMOUS_DECISION_CYCLE_STATE_SCHEMA = "bioprism-typescript-autonomous-decision-cycle-state/0.2" as const;
+export const AUTONOMOUS_DECISION_CYCLE_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-decision-cycle-snapshot/0.2" as const;
 export const AUTONOMOUS_DECISION_CYCLE_MAX_STATES = 8_192;
 export const AUTONOMOUS_DECISION_CYCLE_MAX_SNAPSHOT_BYTES = 8_000_000;
 
 export type AutonomousDecisionCycleMode = "single_domain" | "cross_domain";
-export type AutonomousDecisionCyclePhase = "route_pending" | "execution_pending" | "evaluation_pending" | "settlement_pending" | "terminal";
+export type AutonomousDecisionCyclePhase = "route_pending" | "planning_pending" | "execution_pending" | "evaluation_pending" | "settlement_pending" | "terminal";
 
 export interface AutonomousDecisionCycleState extends JsonObject {
   schema: typeof AUTONOMOUS_DECISION_CYCLE_STATE_SCHEMA;
@@ -20,6 +20,7 @@ export interface AutonomousDecisionCycleState extends JsonObject {
   evaluation_enabled: boolean;
   phase: AutonomousDecisionCyclePhase;
   route_digest: string | null;
+  plan_refinement_digest: string | null;
   selection_digest: string | null;
   outcome_digest: string | null;
   evaluation_digest: string | null;
@@ -62,6 +63,7 @@ export interface AutonomousDecisionCycleRehydrationContext extends JsonObject {
   evaluation_enabled: boolean;
   phase: AutonomousDecisionCyclePhase;
   route_digest: string | null;
+  plan_refinement_digest: string | null;
   selection_digest: string | null;
   outcome_digest: string | null;
   evaluation_digest: string | null;
@@ -131,7 +133,7 @@ function assertNoPrivateShape(value: unknown, name: string): void {
 }
 
 const STATE_KEYS = [
-  "schema", "cycle_id", "task_digest", "mode", "learning_enabled", "evaluation_enabled", "phase", "route_digest", "selection_digest",
+  "schema", "cycle_id", "task_digest", "mode", "learning_enabled", "evaluation_enabled", "phase", "route_digest", "plan_refinement_digest", "selection_digest",
   "outcome_digest", "evaluation_digest", "learning_episode_ids", "trajectory_id", "settlement_digests", "terminal_status", "generation", "previous_state_digest",
   "state_digest", "retention", "secret_material",
 ] as const;
@@ -169,9 +171,10 @@ export async function validateAutonomousDecisionCycleState(value: unknown): Prom
   const taskDigest = boundedDigest("autonomous decision-cycle state task_digest", value.task_digest)!;
   if (value.mode !== "single_domain" && value.mode !== "cross_domain") throw new ArgumentError("autonomous decision-cycle state mode is invalid");
   if (typeof value.learning_enabled !== "boolean" || typeof value.evaluation_enabled !== "boolean") throw new ArgumentError("autonomous decision-cycle learning flags are invalid");
-  if (!["route_pending", "execution_pending", "evaluation_pending", "settlement_pending", "terminal"].includes(value.phase as string)) throw new ArgumentError("autonomous decision-cycle state phase is invalid");
+  if (!["route_pending", "planning_pending", "execution_pending", "evaluation_pending", "settlement_pending", "terminal"].includes(value.phase as string)) throw new ArgumentError("autonomous decision-cycle state phase is invalid");
   const phase = value.phase as AutonomousDecisionCyclePhase;
   const routeDigest = boundedDigest("autonomous decision-cycle state route_digest", value.route_digest, true);
+  const planRefinementDigest = boundedDigest("autonomous decision-cycle state plan_refinement_digest", value.plan_refinement_digest, true);
   const selectionDigest = boundedDigest("autonomous decision-cycle state selection_digest", value.selection_digest, true);
   const outcomeDigest = boundedDigest("autonomous decision-cycle state outcome_digest", value.outcome_digest, true);
   const evaluationDigest = boundedDigest("autonomous decision-cycle state evaluation_digest", value.evaluation_digest, true);
@@ -183,8 +186,9 @@ export async function validateAutonomousDecisionCycleState(value: unknown): Prom
   const previousStateDigest = boundedDigest("autonomous decision-cycle state previous_state_digest", value.previous_state_digest, true);
   const stateDigest = boundedDigest("autonomous decision-cycle state state_digest", value.state_digest)!;
   if ((generation === 1 && previousStateDigest !== null) || (generation > 1 && previousStateDigest === null)) throw new ArgumentError("autonomous decision-cycle state hash chain is malformed");
-  if (phase === "route_pending" && routeDigest !== null && (selectionDigest !== null || outcomeDigest !== null || evaluationDigest !== null || learningEpisodeIds.length > 0 || settlementDigests.length > 0 || terminalStatus !== null)) throw new ArgumentError("route-pending decision route receipt cannot contain execution or terminal metadata");
+  if (phase === "route_pending" && routeDigest !== null && (planRefinementDigest !== null || selectionDigest !== null || outcomeDigest !== null || evaluationDigest !== null || learningEpisodeIds.length > 0 || settlementDigests.length > 0 || terminalStatus !== null)) throw new ArgumentError("route-pending decision route receipt cannot contain planning, execution, or terminal metadata");
   if (phase !== "route_pending" && routeDigest === null) throw new ArgumentError("decision state phase requires a route digest");
+  if (phase === "planning_pending" && (selectionDigest !== null || outcomeDigest !== null || evaluationDigest !== null || learningEpisodeIds.length > 0 || settlementDigests.length > 0 || terminalStatus !== null)) throw new ArgumentError("planning-pending decision state cannot contain execution or terminal metadata");
   if (["evaluation_pending", "settlement_pending", "terminal"].includes(phase) && outcomeDigest === null) throw new ArgumentError("decision state phase requires an outcome digest");
   if (phase === "settlement_pending" && (!value.evaluation_enabled || evaluationDigest === null)) throw new ArgumentError("settlement-pending decision state requires an evaluation digest");
   if (!value.evaluation_enabled && evaluationDigest !== null) throw new ArgumentError("decision state cannot retain an evaluation digest when evaluation is disabled");
@@ -203,6 +207,7 @@ export async function validateAutonomousDecisionCycleState(value: unknown): Prom
     mode: value.mode,
     phase,
     route_digest: routeDigest,
+    plan_refinement_digest: planRefinementDigest,
     selection_digest: selectionDigest,
     outcome_digest: outcomeDigest,
     evaluation_digest: evaluationDigest,

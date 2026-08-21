@@ -1459,12 +1459,20 @@ bounded replan variants, `runAutonomousReplanCycle()` and
 limit. A replan can add only a screened transient instruction; it cannot widen the reviewed route,
 capability, tool set, budget, model gate, credential scope, effect authority, or domain set.
 
+The same cycle APIs can run provider planning as an explicit phase before invocation. A caller sets
+`providerPlanning` and receives a `plan_review_required` result containing a caller-owned,
+dependency-closed proposal; no execution provider is dispatched until the caller supplies it as
+`acceptedSingleDomainPlanRefinement` or `acceptedCrossDomainPlanRefinement`. Setting `acceptPlan:
+true` is the convenience form for accepting a fresh proposal in the same call. Planning and
+execution approvals remain separate, and one `AutonomousCostBudget` can charge both phases against
+one aggregate ceiling.
+
 The replan façade accepts a stable caller-owned `cycleId` and an
 `AutonomousCycleReplanStateStore`. The metadata-only state machine is:
 
 ```text
 execution_pending
-       │ provider outcome is available
+       │ accepted plan and provider outcome are available
        ▼
 evaluation_pending
        │ evaluator projection is persisted
@@ -1481,7 +1489,7 @@ replan_handoff      terminal
 ```
 
 Every state is content-addressed and generation-linked to its predecessor. The state table keeps
-only the task digest, mode, attempt/status rows, route/selection/outcome/evaluation digests,
+only the task digest, mode, attempt/status rows, route/plan/selection/outcome/evaluation digests,
 learning episode and trajectory IDs, settlement digests, context digests, and bounded terminal
 status. It explicitly rejects task text, prompts, provider messages, tool arguments, evaluator
 instructions, credentials, raw evaluator evidence, and raw learning payloads. Snapshot restore
@@ -1501,11 +1509,16 @@ duplicate provider call. `InMemoryAutonomousCycleReplanStateStore` is a referenc
 The ordinary decision-cycle entry points have a separate, smaller cursor for callers that do not
 need replanning. `InMemoryAutonomousDecisionCycleStateStore` and
 `AutonomousDecisionCyclePersistenceCoordinator` expose `route_pending`, `execution_pending`,
-`evaluation_pending`, `settlement_pending`, and `terminal` phases for both single-domain and
+`planning_pending`, `evaluation_pending`, `settlement_pending`, and `terminal` phases for both single-domain and
 cross-domain cycles. A stable `cycleId` is required when persistence is enabled. The cursor keeps
-only task/route/selection/outcome/evaluator/episode/trajectory/settlement digests and bounded
+only task/route/plan/selection/outcome/evaluator/episode/trajectory/settlement digests and bounded
 status metadata; it never stores the task, prompt, plan, provider response, tool arguments,
 credentials, evaluator evidence, or final private result.
+
+When a replan cycle pauses for plan review, its outer metadata ledger remains `execution_pending`
+and stores the proposal digest on the attempt. This is a resumable approval boundary, not a claim
+that execution happened. The next worker must rehydrate the reviewed route and provide the exact
+accepted proposal before the cycle can dispatch; digest mismatches fail closed.
 
 Ordinary-cycle recovery is callback-driven as well: `rehydrateRoute` restores a reviewed route,
 `rehydrateRun` supplies a caller-owned provider result after an execution boundary,

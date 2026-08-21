@@ -3,8 +3,8 @@ import { digestJson } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
 /** Durable metadata for evaluator-guided autonomous decision-cycle replanning. */
-export const AUTONOMOUS_CYCLE_REPLAN_STATE_SCHEMA = "bioprism-typescript-autonomous-cycle-replan-state/0.1" as const;
-export const AUTONOMOUS_CYCLE_REPLAN_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-cycle-replan-snapshot/0.1" as const;
+export const AUTONOMOUS_CYCLE_REPLAN_STATE_SCHEMA = "bioprism-typescript-autonomous-cycle-replan-state/0.2" as const;
+export const AUTONOMOUS_CYCLE_REPLAN_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-cycle-replan-snapshot/0.2" as const;
 export const AUTONOMOUS_CYCLE_REPLAN_MAX_REPLANS = 3;
 export const AUTONOMOUS_CYCLE_REPLAN_MAX_ATTEMPTS = AUTONOMOUS_CYCLE_REPLAN_MAX_REPLANS + 1;
 export const AUTONOMOUS_CYCLE_REPLAN_MAX_STATES = 4_096;
@@ -29,6 +29,7 @@ export interface AutonomousCycleReplanAttemptState extends JsonObject {
   status: string;
   run_status: string | null;
   route_digest: string | null;
+  plan_refinement_digest: string | null;
   selection_digest: string | null;
   outcome_digest: string | null;
   evaluation_digest: string | null;
@@ -49,6 +50,7 @@ export interface AutonomousCycleReplanState extends JsonObject {
   attempt: number;
   phase: AutonomousCycleReplanPhase;
   route_digest: string | null;
+  plan_refinement_digest: string | null;
   outcome_digest: string | null;
   evaluation_digest: string | null;
   replan_instruction_digest: string | null;
@@ -95,6 +97,7 @@ export interface AutonomousCycleReplanRehydrationContext {
   mode: AutonomousCycleReplanMode;
   attempt: number;
   route_digest: string | null;
+  plan_refinement_digest: string | null;
   outcome_digest: string | null;
   evaluation_digest: string | null;
   replan_instruction_digest: string | null;
@@ -198,6 +201,7 @@ function attemptDescriptor(value: AutonomousCycleReplanAttemptState): JsonObject
     status: value.status,
     run_status: value.run_status,
     route_digest: value.route_digest,
+    plan_refinement_digest: value.plan_refinement_digest,
     selection_digest: value.selection_digest,
     outcome_digest: value.outcome_digest,
     evaluation_digest: value.evaluation_digest,
@@ -209,11 +213,12 @@ function attemptDescriptor(value: AutonomousCycleReplanAttemptState): JsonObject
 function validateAttempt(value: unknown, index: number): AutonomousCycleReplanAttemptState {
   if (!isObject(value)) throw new AutonomousCyclePersistenceError(`autonomous cycle attempt ${index} must be an object`);
   const attempt = value as unknown as AutonomousCycleReplanAttemptState;
-  assertKnownKeys(`autonomous cycle attempt ${index}`, attempt, ["attempt", "status", "run_status", "route_digest", "selection_digest", "outcome_digest", "evaluation_digest", "learning_episode_ids", "trajectory_id"]);
+  assertKnownKeys(`autonomous cycle attempt ${index}`, attempt, ["attempt", "status", "run_status", "route_digest", "plan_refinement_digest", "selection_digest", "outcome_digest", "evaluation_digest", "learning_episode_ids", "trajectory_id"]);
   boundedCount(`autonomous cycle attempt ${index}.attempt`, attempt.attempt, AUTONOMOUS_CYCLE_REPLAN_MAX_ATTEMPTS, 1);
   boundedIdentifier(`autonomous cycle attempt ${index}.status`, attempt.status);
   if (attempt.run_status !== null) boundedIdentifier(`autonomous cycle attempt ${index}.run_status`, attempt.run_status);
   boundedDigest(`autonomous cycle attempt ${index}.route_digest`, attempt.route_digest, true);
+  boundedDigest(`autonomous cycle attempt ${index}.plan_refinement_digest`, attempt.plan_refinement_digest, true);
   boundedDigest(`autonomous cycle attempt ${index}.selection_digest`, attempt.selection_digest, true);
   boundedDigest(`autonomous cycle attempt ${index}.outcome_digest`, attempt.outcome_digest, true);
   boundedDigest(`autonomous cycle attempt ${index}.evaluation_digest`, attempt.evaluation_digest, true);
@@ -227,7 +232,7 @@ function validateAttempt(value: unknown, index: number): AutonomousCycleReplanAt
 export async function validateAutonomousCycleReplanState(value: unknown): Promise<AutonomousCycleReplanState> {
   if (!isObject(value)) throw new AutonomousCyclePersistenceError("autonomous cycle state must be an object");
   const state = value as unknown as AutonomousCycleReplanState;
-  assertKnownKeys("autonomous cycle state", state, ["schema", "cycle_id", "task_digest", "mode", "max_replans", "attempt", "phase", "route_digest", "outcome_digest", "evaluation_digest", "replan_instruction_digest", "terminal_status", "attempts", "evaluations", "learning_episode_ids", "settlement_digests", "trajectory_ids", "context_digests", "generation", "previous_state_digest", "state_digest", "retention", "secret_material"]);
+  assertKnownKeys("autonomous cycle state", state, ["schema", "cycle_id", "task_digest", "mode", "max_replans", "attempt", "phase", "route_digest", "plan_refinement_digest", "outcome_digest", "evaluation_digest", "replan_instruction_digest", "terminal_status", "attempts", "evaluations", "learning_episode_ids", "settlement_digests", "trajectory_ids", "context_digests", "generation", "previous_state_digest", "state_digest", "retention", "secret_material"]);
   if (state.schema !== AUTONOMOUS_CYCLE_REPLAN_STATE_SCHEMA || state.retention !== "metadata_only_hash_chained_no_private_payloads" || state.secret_material !== "never_returned") throw new AutonomousCyclePersistenceError("autonomous cycle state retention markers are invalid");
   boundedIdentifier("autonomous cycle state cycle_id", state.cycle_id);
   boundedDigest("autonomous cycle state task_digest", state.task_digest);
@@ -236,6 +241,7 @@ export async function validateAutonomousCycleReplanState(value: unknown): Promis
   boundedCount("autonomous cycle state attempt", state.attempt, AUTONOMOUS_CYCLE_REPLAN_MAX_ATTEMPTS, 1);
   if (!(state.phase === "execution_pending" || state.phase === "evaluation_pending" || state.phase === "settlement_pending" || state.phase === "replan_handoff" || state.phase === "terminal")) throw new AutonomousCyclePersistenceError("autonomous cycle state phase is invalid");
   boundedDigest("autonomous cycle state route_digest", state.route_digest, true);
+  boundedDigest("autonomous cycle state plan_refinement_digest", state.plan_refinement_digest, true);
   boundedDigest("autonomous cycle state outcome_digest", state.outcome_digest, true);
   boundedDigest("autonomous cycle state evaluation_digest", state.evaluation_digest, true);
   boundedDigest("autonomous cycle state replan_instruction_digest", state.replan_instruction_digest, true);

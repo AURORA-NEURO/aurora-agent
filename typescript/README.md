@@ -576,6 +576,37 @@ self-report never become reinforcement automatically. Cross-domain cycles contin
 `runCrossDomain()` and `settleCrossDomain()` so specialist and synthesis episodes retain delayed
 credit separately.
 
+Both decision-cycle entry points can insert provider planning directly into this durable loop. Set
+`providerPlanning` to request a proposal and set `acceptPlan: true` only after accepting a completed,
+dependency-safe proposal. A review pause returns `plan_review_required` with no execution dispatch:
+
+```typescript
+const reviewed = await runAutonomousDecisionCycle(agent, task, {
+  domain: "coding",
+  cycleId: "job-2026-08-21-0001",
+  decisionStateStore: stateStore,
+  providerPlanning: { approveProviderCall: true },
+  approveProviderCall: true,
+});
+
+const completed = await runAutonomousDecisionCycle(agent, task, {
+  domain: "coding",
+  cycleId: "job-2026-08-21-0001",
+  decisionStateStore: stateStore,
+  rehydrateRoute: () => reviewed.route,
+  acceptedSingleDomainPlanRefinement: reviewed.plan_refinement,
+  approveProviderCall: true,
+});
+```
+
+The ordinary cursor adds `planning_pending` and retains only `plan_refinement_digest`. The proposal,
+task, planner transcript, and credentials remain caller-owned. A restart with a persisted planning
+digest must provide the exact accepted proposal; its task, base-plan, workflow/dependency, and
+SHA-256 identity are checked before execution. Cross-domain cycles apply the same rule to existing
+child ids and carry the accepted digest through specialist fan-out and synthesis. Planning and
+execution can share one `AutonomousCostBudget`, keeping the planner inside the caller's aggregate
+ceiling.
+
 `runAutonomousReplanCycle()` adds the bounded adaptive control loop for callers that want the
 evaluator to decide whether one answer deserves another attempt. Each completed attempt is sent
 to a caller-owned evaluator that returns reward/pass/failure metadata plus `replan_requested` and,
@@ -611,6 +642,11 @@ task or mode contracts, stale generations, unsupported fields, credential-shaped
 payload keys, oversized snapshots, and digest tampering. The same options work on
 `runAutonomousCrossDomainReplanCycle()`; its state also records the exact specialist/synthesis
 episode and trajectory identities.
+
+When `providerPlanning` is enabled on a replan cycle, a plan-review pause is represented as an
+`execution_pending` attempt with a `plan_refinement_digest`; this keeps the outer ledger resumable
+without claiming that execution occurred. The next call must supply the matching accepted proposal
+before the attempt can dispatch.
 
 After a restart, private material is supplied only through explicit rehydrators. `rehydrateRun`
 restores a completed provider outcome when evaluation or settlement was interrupted;
@@ -653,8 +689,8 @@ await snapshotStore.flush();
 ```
 
 The state machine is deliberately smaller than a result store. It advances through
-`route_pending`, `execution_pending`, `evaluation_pending`, `settlement_pending`, and `terminal`,
-retaining only task, route, selection, provider-outcome, evaluator, episode, trajectory, and
+`route_pending`, `planning_pending`, `execution_pending`, `evaluation_pending`, `settlement_pending`, and `terminal`,
+retaining only task, route, plan, selection, provider-outcome, evaluator, episode, trajectory, and
 settlement digests plus bounded statuses and a hash-chain generation. Task text, prompts, plans,
 provider responses, tool arguments, credentials, evaluator evidence, and final result objects remain
 caller-owned. Snapshot validation is atomic, digest-bound, capacity-limited, duplicate-ID aware,

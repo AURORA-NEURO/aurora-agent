@@ -7,6 +7,7 @@ import {
   InMemoryAutonomousExecutionJournal,
   AutonomousLearningController,
   AutonomousOnlineLearner,
+  AutonomousCostBudget,
   CredentialStore,
   AutonomousDecisionCyclePersistenceCoordinator,
   InMemoryAutonomousDecisionCycleStateStore,
@@ -20,6 +21,29 @@ import {
   validateAutonomousDecisionCycleSnapshot,
   validateAutonomousCycleReplanSnapshot,
 } from "../dist/index.js";
+
+function providerPlanningCycleAgent() {
+  let calls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      calls += 1;
+      const body = JSON.parse(String(init.body));
+      const planningMessage = body.messages.find((message) => message.content.startsWith("Context planning-contract:\n"));
+      if (planningMessage) {
+        const contract = JSON.parse(planningMessage.content.slice("Context planning-contract:\n".length));
+        const ids = (contract.stage_catalogue ?? contract.child_catalogue).map((row) => row.id);
+        const focusField = contract.stage_catalogue ? "focus_stage_ids" : "focus_child_ids";
+        return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify({ priority_order: ids, [focusField]: ids.slice(0, 1), review_required: false, confidence: 0.98, abstain: false }) }, finish_reason: "stop" }] });
+      }
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: "cycle execution after accepted plan" }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("cycle-provider", "https://cycle-planner.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel(candidate());
+  return { agent, calls: () => calls };
+}
 
 function jsonResponse(payload) {
   return new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
@@ -148,6 +172,145 @@ test("decision cycle connects approval, invocation, evaluator settlement, and ba
   assert.equal(result.settlement.next_state.generation, 1);
   assert.equal(calls(), 1);
   assert.equal(JSON.stringify(result.settlement).includes(task), false);
+});
+
+test("decision-cycle provider planning pauses, persists a digest, and resumes only with the accepted proposal", async () => {
+  const { agent, calls } = providerPlanningCycleAgent();
+  const stateStore = new InMemoryAutonomousDecisionCycleStateStore();
+  const task = "Debug this coding repository and report verified tests.";
+  const reviewed = await runAutonomousDecisionCycle(agent, task, {
+    domain: "coding",
+    cycleId: "planned-decision-cycle",
+    decisionStateStore: stateStore,
+    providerPlanning: { approveProviderCall: true },
+    approveProviderCall: true,
+  });
+  assert.equal(reviewed.status, "plan_review_required");
+  assert.equal(reviewed.plan_refinement.status, "completed");
+  assert.equal(reviewed.run, null);
+  const pending = await stateStore.load("planned-decision-cycle");
+  assert.equal(pending.phase, "planning_pending");
+  assert.equal(pending.plan_refinement_digest.length, 64);
+  assert.equal(calls(), 1);
+  await assert.rejects(
+    () => runAutonomousDecisionCycle(agent, task, {
+      domain: "coding",
+      cycleId: "planned-decision-cycle",
+      decisionStateStore: stateStore,
+      rehydrateRoute: () => reviewed.route,
+      approveProviderCall: true,
+    }),
+    /rehydrate the accepted single-domain plan refinement/,
+  );
+  const resumed = await runAutonomousDecisionCycle(agent, task, {
+    domain: "coding",
+    cycleId: "planned-decision-cycle",
+    decisionStateStore: stateStore,
+    rehydrateRoute: () => reviewed.route,
+    acceptedSingleDomainPlanRefinement: reviewed.plan_refinement,
+    approveProviderCall: true,
+  });
+  assert.equal(resumed.status, "completed");
+  assert.equal(resumed.run.plan_refinement_digest, pending.plan_refinement_digest);
+  assert.equal(resumed.plan_refinement.status, "completed");
+  assert.equal(resumed.run.response.text, "cycle execution after accepted plan");
+  assert.equal(calls(), 2, "restart resumes the accepted proposal without replaying the planner");
+  const terminal = await stateStore.load("planned-decision-cycle");
+  assert.equal(terminal.phase, "terminal");
+  assert.equal(terminal.plan_refinement_digest, pending.plan_refinement_digest);
+});
+
+test("provider-planned decision cycles apply the same reviewed contract to every single-domain profile", async () => {
+  const { agent } = providerPlanningCycleAgent();
+  const tasks = {
+    coding: "debug this repository and verify the tests",
+    browser: "research current sources and compare citations",
+    data: "validate dataset schema lineage and quality",
+    science: "design a reproducible hypothesis experiment",
+    biomedical: "review biomedical evidence with safety boundaries",
+    neuroscience: "analyze EEG preprocessing and signal confounds",
+    operations: "prepare an outage rollback runbook",
+    enterprise: "review governance compliance ownership",
+    multi_agent: "delegate this specialist subtask and synthesize findings",
+    multimodal: "inspect this image transcript and evidence gaps",
+    evaluation: "run a benchmark holdout replay and report uncertainty",
+  };
+  for (const [domain, task] of Object.entries(tasks)) {
+    const result = await runAutonomousDecisionCycle(agent, task, {
+      domain,
+      providerPlanning: { approveProviderCall: true },
+      acceptPlan: true,
+      approveProviderCall: true,
+    });
+    assert.equal(result.status, "completed", domain);
+    assert.equal(result.plan_refinement.status, "completed", domain);
+    assert.equal(result.run.plan_refinement_digest.length, 64, domain);
+  }
+});
+
+test("cross-domain decision-cycle planning persists and rehydrates the accepted fan-out proposal", async () => {
+  const { agent, calls } = providerPlanningCycleAgent();
+  const stateStore = new InMemoryAutonomousDecisionCycleStateStore();
+  const task = "Research a biomedical neuroscience experiment with EEG patient evidence.";
+  const reviewed = await runAutonomousCrossDomainDecisionCycle(agent, task, {
+    allowCrossDomain: true,
+    cycleId: "planned-cross-domain-cycle",
+    decisionStateStore: stateStore,
+    providerPlanning: { approveProviderCall: true },
+    approveProviderCall: true,
+    maxParallelChildren: 1,
+  });
+  assert.equal(reviewed.status, "plan_review_required");
+  assert.equal(reviewed.plan_refinement.status, "completed");
+  const pending = await stateStore.load("planned-cross-domain-cycle");
+  assert.equal(pending.phase, "planning_pending");
+  assert.equal(pending.plan_refinement_digest.length, 64);
+  const resumed = await runAutonomousCrossDomainDecisionCycle(agent, task, {
+    allowCrossDomain: true,
+    cycleId: "planned-cross-domain-cycle",
+    decisionStateStore: stateStore,
+    rehydrateRoute: () => reviewed.route,
+    acceptedCrossDomainPlanRefinement: reviewed.plan_refinement,
+    approveProviderCall: true,
+    maxParallelChildren: 1,
+  });
+  assert.equal(resumed.status, "completed");
+  assert.equal(resumed.run.plan_refinement_digest, pending.plan_refinement_digest);
+  assert.equal(resumed.run.child_runs.length, 2);
+  assert.equal(calls(), 4, "one planner plus two specialists and one synthesis call");
+});
+
+test("replan-cycle planning review is resumable through its outer metadata-only ledger", async () => {
+  const { agent, calls } = providerPlanningCycleAgent();
+  const stateStore = new InMemoryAutonomousCycleReplanStateStore();
+  const task = "Debug this coding repository and report verified tests.";
+  const reviewed = await runAutonomousReplanCycle(agent, task, {
+    domain: "coding",
+    cycleId: "planned-replan-cycle",
+    stateStore,
+    maxReplans: 0,
+    providerPlanning: { approveProviderCall: true },
+    approveProviderCall: true,
+    evaluate: () => ({ evaluator_id: "cycle-reviewer", evaluator_version: "1", reward: 1, passed: true, replan_requested: false }),
+  });
+  assert.equal(reviewed.status, "plan_review_required");
+  assert.equal(reviewed.attempts[0].plan_refinement_digest.length, 64);
+  const pending = await stateStore.load("planned-replan-cycle");
+  assert.equal(pending.phase, "execution_pending");
+  assert.equal(pending.plan_refinement_digest, reviewed.attempts[0].plan_refinement_digest);
+  const resumed = await runAutonomousReplanCycle(agent, task, {
+    domain: "coding",
+    cycleId: "planned-replan-cycle",
+    stateStore,
+    maxReplans: 0,
+    rehydrateRoute: () => reviewed.final.route,
+    acceptedSingleDomainPlanRefinement: reviewed.final.plan_refinement,
+    approveProviderCall: true,
+    evaluate: () => ({ evaluator_id: "cycle-reviewer", evaluator_version: "1", reward: 1, passed: true, replan_requested: false }),
+  });
+  assert.equal(resumed.status, "completed");
+  assert.equal(resumed.final.run.plan_refinement_digest, pending.plan_refinement_digest);
+  assert.equal(calls(), 2, "replan restart resumes execution without replaying provider planning");
 });
 
 test("ordinary decision cycles persist a metadata-only restart barrier across every built-in domain", async () => {
