@@ -928,6 +928,17 @@ const next = await executor.resume("research-2026-01", task, {
 });
 ```
 
+Durable fan-out can also begin with provider-assisted semantic routing by setting
+`semanticRouting.enabled`. Routing approval is separate from child/synthesis approval, and the
+result exposes `semantic_route_status` plus the reviewed route. The route is passed into blueprint
+construction through a digest-checked `routeOverride`, so provider-selected child domains cannot
+silently fall back to a different deterministic fan-out. New checkpoints bind the exact route
+digest. On restart, a semantic route must be rehydrated through the caller-owned `routeOverride`;
+the executor refuses to replay the classifier implicitly because the route digest alone cannot
+reconstruct its selected-domain evidence. Provider disagreement, abstention, invalid output, and
+approval refusal all stop before child dispatch. This preserves the same route-bound behavior for
+fan-outs that combine any of the reviewed domain profiles.
+
 Before continuation, the executor rehydrates exactly the checkpointed ordered prefix and checks
 each result digest, child task digest, and optional output digest. A mismatch fails before the
 next provider dispatch. Approval pauses preserve the same `next_child_id`; they do not advance

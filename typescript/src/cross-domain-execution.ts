@@ -3,6 +3,7 @@ import {
   acceptedCrossDomainPlan,
   AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN,
   AUTONOMOUS_CROSS_DOMAIN_SCHEMA,
+  validateAutonomousRouteOverride,
   type AutonomousAcceptedCrossDomainPlan,
   type AutonomousAgent,
   type AutonomousCrossDomainBlueprint,
@@ -14,6 +15,8 @@ import {
   type AutonomousRunResult,
 } from "./autonomous.js";
 import type { AutonomousLearningController } from "./autonomous-learning.js";
+import { semanticRouteAutonomousTask } from "./autonomous-routing.js";
+import type { AutonomousSemanticRouteOptions, AutonomousSemanticRouteResult } from "./autonomous-routing.js";
 import { AutonomousCostBudget, type AutonomousModelCandidate } from "./llm.js";
 import { digestJson } from "./tooling.js";
 import type { AutonomousCrossDomainPlanRefinementResult, JsonObject } from "./types.js";
@@ -31,6 +34,7 @@ export const AUTONOMOUS_CROSS_DOMAIN_MAX_SNAPSHOT_BYTES = 4 * 1024 * 1024;
 
 export type AutonomousCrossDomainCheckpointStatus = "children_pending" | "synthesis_pending" | "paused" | "reconciliation_required" | "completed" | "failed";
 export type AutonomousCrossDomainExecutionStatus = "completed" | "paused" | "approval_required" | "reconciliation_required" | "failed" | "route_review_required";
+export type AutonomousCrossDomainSemanticRouteStatus = AutonomousSemanticRouteResult["status"];
 export type AutonomousCrossDomainEventType = "started" | "child_completed" | "checkpointed" | "approval_required" | "reconciliation_required" | "reconciliation_retry_authorized" | "synthesis_completed" | "failed" | "completed";
 
 export interface AutonomousCrossDomainCheckpoint {
@@ -120,6 +124,7 @@ export interface AutonomousCrossDomainExecutionResult {
   status: AutonomousCrossDomainExecutionStatus;
   job_id: string | null;
   route: AutonomousRouteProposal | null;
+  semantic_route_status: AutonomousCrossDomainSemanticRouteStatus | null;
   blueprint: AutonomousCrossDomainBlueprint | null;
   checkpoint: AutonomousCrossDomainCheckpoint | null;
   events: AutonomousCrossDomainEvent[];
@@ -156,6 +161,12 @@ export interface AutonomousCrossDomainExecuteOptions extends AutonomousCrossDoma
    * caller has inspected the effect/provider system and determined that replay is safe.
    */
   retryReconciliation?: boolean;
+  /** Optional provider-assisted routing policy. Routing remains review-only and is separately approved. */
+  semanticRouting?: AutonomousCrossDomainSemanticRoutingOptions;
+}
+
+export interface AutonomousCrossDomainSemanticRoutingOptions extends Pick<AutonomousSemanticRouteOptions, "approveProviderCall" | "minSemanticConfidence" | "maxDomains" | "allowCrossDomain" | "maxOutputTokens" | "maxProviderFailovers"> {
+  enabled?: boolean;
 }
 
 export interface AutonomousCrossDomainExecutorOptions {
@@ -452,6 +463,18 @@ async function executionContractDigest(agent: AutonomousAgent, options: Autonomo
   return digestJson({ schema: AUTONOMOUS_CROSS_DOMAIN_EXECUTION_CONTRACT_SCHEMA, candidates_digest: await digestJson(candidates.map(candidateContract)), max_input_tokens: options.maxInputTokens ?? null, max_output_tokens: options.maxOutputTokens ?? null, max_cost_per_million_tokens: options.maxCostPerMillionTokens ?? null, max_latency_ms: options.maxLatencyMs ?? null, min_quality: options.minQuality ?? null, max_total_cost_units: options.maxTotalCostUnits ?? null, cost_budget_max: options.costBudget?.maxCostUnits ?? null, require_json: options.requireJson === true, response_schema_digest: responseSchemaDigest, tools_digest: toolsDigest, approve_effects: options.approveEffects === true, max_provider_failovers: options.maxProviderFailovers ?? null, execution_policy_digest: executionPolicyDigest });
 }
 
+function normalizeCrossDomainCostOptions<T extends AutonomousCrossDomainExecuteOptions>(options: T): T {
+  if (options.costBudget !== undefined && !(options.costBudget instanceof AutonomousCostBudget)) throw new ArgumentError("costBudget must be an AutonomousCostBudget");
+  if (options.costBudget !== undefined && options.maxTotalCostUnits !== undefined) throw new ArgumentError("costBudget and maxTotalCostUnits cannot both be supplied");
+  if (options.costBudget !== undefined || options.maxTotalCostUnits === undefined) return options;
+  return { ...options, maxTotalCostUnits: undefined, costBudget: new AutonomousCostBudget(options.maxTotalCostUnits) } as T;
+}
+
+interface CrossDomainRouteResolution {
+  route: AutonomousRouteProposal;
+  semantic_status: AutonomousCrossDomainSemanticRouteStatus | null;
+}
+
 function validCrossBlueprint(value: unknown): value is AutonomousCrossDomainBlueprint {
   if (!isObject(value) || value.schema !== AUTONOMOUS_CROSS_DOMAIN_SCHEMA || typeof value.task_digest !== "string" || typeof value.plan_digest !== "string" || !Array.isArray(value.child_ids) || !Array.isArray(value.child_blueprints) || !isObject(value.synthesis_blueprint)) return false;
   if (value.child_ids.length < 2 || value.child_ids.length > AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN || value.child_ids.some((id) => typeof id !== "string" || !id.trim()) || new Set(value.child_ids).size !== value.child_ids.length) return false;
@@ -492,41 +515,44 @@ export class AutonomousCrossDomainExecutor {
     this.learning = options.learning;
   }
 
-  async start(task: string, options: AutonomousCrossDomainExecuteOptions = {}): Promise<AutonomousCrossDomainExecutionResult> {
+  async start(task: string, rawOptions: AutonomousCrossDomainExecuteOptions = {}): Promise<AutonomousCrossDomainExecutionResult> {
+    const options = normalizeCrossDomainCostOptions(rawOptions);
     validateDurableOptions(options);
     const taskText = boundedTask(task);
     const expectedTaskDigest = await digestJson({ task: taskText });
-    if (options.routeOverride && options.routeOverride.task_digest !== expectedTaskDigest) throw new ArgumentError("cross-domain route override does not match the task digest");
-    const route = options.routeOverride ? options.routeOverride : await this.agent.route(taskText, { domain: options.domain, hints: options.hints, allowCrossDomain: true });
-    if (route.abstained || !route.cross_domain || route.selected_domains.length < 2) return this.routeReviewResult(route);
+    const jobId = boundedId(options.jobId ?? `cross-${expectedTaskDigest.slice(0, 24)}`, "cross-domain jobId");
+    const existing = await this.store.load(jobId);
+    const routeResolution = existing
+      ? await this.resolveExistingRoute(taskText, existing, options)
+      : await this.resolveStartRoute(taskText, options);
+    const route = routeResolution.route;
+    if (routeResolution.semantic_status !== null && routeResolution.semantic_status !== "completed") return this.routeReviewResult(route, routeResolution.semantic_status);
+    if (route.abstained || !route.cross_domain || route.selected_domains.length < 2) return this.routeReviewResult(route, routeResolution.semantic_status);
     const blueprint = await this.resolveBlueprint(taskText, route, options);
     const refinement = crossPlanRefinement(options);
     const acceptedPlan = await acceptedCrossDomainPlan(blueprint, refinement);
     const contractDigest = await executionContractDigest(this.agent, options);
-    const jobId = boundedId(options.jobId ?? `cross-${route.task_digest.slice(0, 24)}`, "cross-domain jobId");
-    const existing = await this.store.load(jobId);
     if (existing) {
       this.assertCheckpointIdentity(existing, route, blueprint);
       const bound = await this.bindExecutionContract(existing, contractDigest, options.rebindLegacyExecutionContract === true);
       const planBound = await this.bindPlanRefinement(bound, acceptedPlan, blueprint, contractDigest);
-      return this.drive(taskText, route, blueprint, planBound, options, contractDigest, acceptedPlan);
+      return this.drive(taskText, route, blueprint, planBound, options, contractDigest, acceptedPlan, routeResolution.semantic_status);
     }
     const order = acceptedPlan?.priority_child_ids ?? [...blueprint.child_ids];
     const initial = await this.makeCheckpoint(jobId, route, blueprint, order, [], {}, "children_pending", null, contractDigest, acceptedPlan?.refinement_digest ?? null, null);
     await this.store.save(initial);
     await this.appendEvent(jobId, "started", null, "lifecycle", initial);
-    return this.drive(taskText, route, blueprint, initial, options, contractDigest, acceptedPlan);
+    return this.drive(taskText, route, blueprint, initial, options, contractDigest, acceptedPlan, routeResolution.semantic_status);
   }
 
-  async resume(jobId: string, task: string, options: Omit<AutonomousCrossDomainExecuteOptions, "jobId"> = {}): Promise<AutonomousCrossDomainExecutionResult> {
+  async resume(jobId: string, task: string, rawOptions: Omit<AutonomousCrossDomainExecuteOptions, "jobId"> = {}): Promise<AutonomousCrossDomainExecutionResult> {
+    const options = normalizeCrossDomainCostOptions(rawOptions);
     validateDurableOptions(options);
     const taskText = boundedTask(task);
     const normalizedJobId = boundedId(jobId, "cross-domain jobId");
     const checkpoint = await this.store.load(normalizedJobId);
     if (!checkpoint) throw new ArgumentError(`cross-domain job ${normalizedJobId} was not found; caller must rehydrate from its durable store`);
-    if (options.routeOverride && options.routeOverride.task_digest !== checkpoint.task_digest) throw new ArgumentError("cross-domain route override does not match the checkpoint task digest");
-    const route = options.routeOverride ? options.routeOverride : await this.agent.route(taskText, { domain: options.domain, hints: options.hints, allowCrossDomain: true });
-    if (route.abstained || !route.cross_domain || route.task_digest !== checkpoint.task_digest || route.route_digest !== checkpoint.route_digest) throw new ProviderRuntimeError("cross-domain rehydration route does not match the checkpoint");
+    const route = (await this.resolveExistingRoute(taskText, checkpoint, options)).route;
     const blueprint = await this.resolveBlueprint(taskText, route, options, checkpoint);
     this.assertCheckpointIdentity(checkpoint, route, blueprint);
     const refinement = crossPlanRefinement(options);
@@ -535,11 +561,49 @@ export class AutonomousCrossDomainExecutor {
     const contractDigest = await executionContractDigest(this.agent, contractOptions);
     const bound = await this.bindExecutionContract(checkpoint, contractDigest, options.rebindLegacyExecutionContract === true);
     const planBound = await this.bindPlanRefinement(bound, acceptedPlan, blueprint, contractDigest);
-    return this.drive(taskText, route, blueprint, planBound, contractOptions, contractDigest, acceptedPlan);
+    return this.drive(taskText, route, blueprint, planBound, contractOptions, contractDigest, acceptedPlan, null);
   }
 
   async events(jobId: string, after = 0, limit = AUTONOMOUS_CROSS_DOMAIN_MAX_EVENTS): Promise<AutonomousCrossDomainEvent[]> {
     return this.store.events(boundedId(jobId, "cross-domain jobId"), after, limit);
+  }
+
+  private async resolveStartRoute(task: string, options: AutonomousCrossDomainExecuteOptions): Promise<CrossDomainRouteResolution> {
+    if (options.routeOverride) return { route: await validateAutonomousRouteOverride(task, options.routeOverride), semantic_status: null };
+    if (!options.semanticRouting?.enabled) return { route: await this.agent.route(task, { domain: options.domain, hints: options.hints, allowCrossDomain: true }), semantic_status: null };
+    if (options.domain !== undefined) throw new ArgumentError("semantic cross-domain routing cannot replace an explicit caller domain");
+    const semantic = await semanticRouteAutonomousTask(this.agent, task, {
+      candidates: options.candidates,
+      credential: options.credential,
+      credentialFor: options.credentialFor,
+      hints: options.hints,
+      approveProviderCall: options.semanticRouting.approveProviderCall,
+      minSemanticConfidence: options.semanticRouting.minSemanticConfidence,
+      maxDomains: options.semanticRouting.maxDomains,
+      allowCrossDomain: options.semanticRouting.allowCrossDomain ?? true,
+      maxOutputTokens: options.semanticRouting.maxOutputTokens,
+      maxCostPerMillionTokens: options.maxCostPerMillionTokens,
+      maxLatencyMs: options.maxLatencyMs,
+      minQuality: options.minQuality,
+      maxTotalCostUnits: undefined,
+      costBudget: options.costBudget,
+      execution: options.execution,
+      executionAttempt: options.executionAttempt,
+      maxProviderFailovers: options.semanticRouting.maxProviderFailovers ?? options.maxProviderFailovers,
+      executionLifecycle: options.executionLifecycle,
+      signal: options.signal,
+      observer: options.observer,
+    });
+    return { route: semantic.route, semantic_status: semantic.status };
+  }
+
+  private async resolveExistingRoute(task: string, checkpoint: AutonomousCrossDomainCheckpoint, options: AutonomousCrossDomainExecuteOptions): Promise<CrossDomainRouteResolution> {
+    if (options.semanticRouting?.enabled && !options.routeOverride) throw new ArgumentError("existing cross-domain checkpoints require routeOverride to change provider-assisted routing; semantic routing is never replayed implicitly");
+    const route = options.routeOverride
+      ? await validateAutonomousRouteOverride(task, options.routeOverride)
+      : await this.agent.route(task, { domain: options.domain, hints: options.hints, allowCrossDomain: true });
+    if (route.abstained || !route.cross_domain || route.selected_domains.length < 2 || route.task_digest !== checkpoint.task_digest || route.route_digest !== checkpoint.route_digest) throw new ProviderRuntimeError("cross-domain rehydration route does not match the checkpoint");
+    return { route, semantic_status: null };
   }
 
   private async resolveBlueprint(task: string, route: AutonomousRouteProposal, options: AutonomousCrossDomainExecuteOptions, checkpoint?: AutonomousCrossDomainCheckpoint): Promise<AutonomousCrossDomainBlueprint> {
@@ -548,7 +612,7 @@ export class AutonomousCrossDomainExecutor {
       if (options.blueprint.task_digest !== route.task_digest) throw new ProviderRuntimeError("cross-domain execution blueprint task does not match the route");
       return options.blueprint;
     }
-    const envelope = await this.agent.blueprint(task, { domain: options.domain, capability: options.capability, context: options.context, hints: options.hints, maxInputTokens: options.maxInputTokens, tools: options.tools?.map((tool) => tool.name), subtasks: options.subtasks });
+    const envelope = await this.agent.blueprint(task, { routeOverride: route, domain: options.domain, capability: options.capability, context: options.context, hints: options.hints, maxInputTokens: options.maxInputTokens, tools: options.tools?.map((tool) => tool.name), subtasks: options.subtasks });
     const blueprint = envelope.cross_domain_blueprint;
     if (!blueprint || !validCrossBlueprint(blueprint)) throw new ProviderRuntimeError("cross-domain blueprint could not be prepared");
     if (blueprint.task_digest !== route.task_digest || (checkpoint && blueprint.plan_digest !== checkpoint.base_plan_digest)) throw new ProviderRuntimeError("cross-domain rehydration blueprint digest does not match the checkpoint");
@@ -600,8 +664,8 @@ export class AutonomousCrossDomainExecutor {
     await this.store.appendEvent({ ...descriptor, event_digest: await digestJson(descriptor) });
   }
 
-  private routeReviewResult(route: AutonomousRouteProposal): AutonomousCrossDomainExecutionResult {
-    return { schema: AUTONOMOUS_CROSS_DOMAIN_EXECUTION_SCHEMA, status: "route_review_required", job_id: null, route, blueprint: null, checkpoint: null, events: [], step_results: [], synthesis: null, completed_children: 0, total_children: route.selected_domains.length, plan_refinement_digest: null, error: null, learning_episode_ids: [], recovery: "caller_rehydrates_task_credentials_and_completed_child_results", retention: "provider_responses_local;checkpoint_metadata_and_outcome_digests_only" };
+  private routeReviewResult(route: AutonomousRouteProposal, semanticStatus: AutonomousCrossDomainSemanticRouteStatus | null = null): AutonomousCrossDomainExecutionResult {
+    return { schema: AUTONOMOUS_CROSS_DOMAIN_EXECUTION_SCHEMA, status: "route_review_required", job_id: null, route, semantic_route_status: semanticStatus, blueprint: null, checkpoint: null, events: [], step_results: [], synthesis: null, completed_children: 0, total_children: route.selected_domains.length, plan_refinement_digest: null, error: null, learning_episode_ids: [], recovery: "caller_rehydrates_task_credentials_and_completed_child_results", retention: "provider_responses_local;checkpoint_metadata_and_outcome_digests_only" };
   }
 
   private async hydrateChildren(jobId: string, checkpoint: AutonomousCrossDomainCheckpoint, blueprint: AutonomousCrossDomainBlueprint, options: AutonomousCrossDomainExecuteOptions): Promise<Map<string, AutonomousRunResult>> {
@@ -628,17 +692,18 @@ export class AutonomousCrossDomainExecutor {
     return results;
   }
 
-  private async drive(task: string, route: AutonomousRouteProposal, blueprint: AutonomousCrossDomainBlueprint, initial: AutonomousCrossDomainCheckpoint, options: AutonomousCrossDomainExecuteOptions, contractDigest: string, acceptedPlan: AutonomousAcceptedCrossDomainPlan | null): Promise<AutonomousCrossDomainExecutionResult> {
+  private async drive(task: string, route: AutonomousRouteProposal, blueprint: AutonomousCrossDomainBlueprint, initial: AutonomousCrossDomainCheckpoint, options: AutonomousCrossDomainExecuteOptions, contractDigest: string, acceptedPlan: AutonomousAcceptedCrossDomainPlan | null, semanticStatus: AutonomousCrossDomainSemanticRouteStatus | null): Promise<AutonomousCrossDomainExecutionResult> {
     let checkpoint = initial;
     const order = checkpoint.execution_child_ids;
     const maxSteps = boundedSteps(options.maxSteps, order.length);
     const stepResults: AutonomousCrossDomainStepResult[] = [];
     const learningEpisodeIds: string[] = [];
     const planRefinementDigest = acceptedPlan?.refinement_digest ?? checkpoint.plan_refinement_digest ?? null;
-    if (checkpoint.status === "completed") return this.result("completed", route, blueprint, checkpoint, stepResults, learningEpisodeIds);
+    const finish = (status: AutonomousCrossDomainExecutionStatus, error?: AutonomousCrossDomainErrorMetadata, synthesis: AutonomousRunResult | null = null): Promise<AutonomousCrossDomainExecutionResult> => this.result(status, route, blueprint, checkpoint, stepResults, learningEpisodeIds, error, synthesis, semanticStatus);
+    if (checkpoint.status === "completed") return finish("completed");
     if (checkpoint.status === "reconciliation_required") {
       if (options.retryReconciliation !== true) {
-        return this.result("reconciliation_required", route, blueprint, checkpoint, stepResults, learningEpisodeIds);
+        return finish("reconciliation_required");
       }
       const retryStatus: AutonomousCrossDomainCheckpointStatus = checkpoint.next_child_id === null ? "synthesis_pending" : "children_pending";
       checkpoint = await this.makeCheckpointFromExisting(checkpoint, retryStatus, contractDigest, planRefinementDigest, null);
@@ -650,7 +715,7 @@ export class AutonomousCrossDomainExecutor {
       checkpoint = await this.makeCheckpointFromExisting(checkpoint, "paused", contractDigest, planRefinementDigest, checkpoint.synthesis_result_digest);
       await this.store.save(checkpoint);
       await this.appendEvent(checkpoint.job_id, "approval_required", checkpoint.next_child_id, checkpoint.next_child_id === null ? "synthesis" : "child", checkpoint);
-      return this.result("approval_required", route, blueprint, checkpoint, stepResults, learningEpisodeIds);
+      return finish("approval_required");
     }
     const costBudget = options.costBudget ?? (options.maxTotalCostUnits === undefined ? undefined : new AutonomousCostBudget(options.maxTotalCostUnits));
     const learning = this.learning ?? options.learning;
@@ -671,7 +736,7 @@ export class AutonomousCrossDomainExecutor {
           checkpoint = await this.makeCheckpointFromExisting(checkpoint, "failed", contractDigest, planRefinementDigest, null);
           await this.store.save(checkpoint);
           await this.appendEvent(checkpoint.job_id, "failed", childId, "child", checkpoint);
-          return this.result("failed", route, blueprint, checkpoint, stepResults, learningEpisodeIds, metadata);
+          return finish("failed", metadata);
         }
         const text = responseText(run);
         const outputDigest = text ? await digestJson({ output: text }) : null;
@@ -684,19 +749,19 @@ export class AutonomousCrossDomainExecutor {
           checkpoint = await this.makeCheckpointFromExisting(checkpoint, "paused", contractDigest, planRefinementDigest, null);
           await this.store.save(checkpoint);
           await this.appendEvent(checkpoint.job_id, "approval_required", childId, "child", checkpoint);
-          return this.result("approval_required", route, blueprint, checkpoint, stepResults, learningEpisodeIds);
+          return finish("approval_required");
         }
         if (run.status === "reconciliation_required") {
           checkpoint = await this.makeCheckpointFromExisting(checkpoint, "reconciliation_required", contractDigest, planRefinementDigest, null);
           await this.store.save(checkpoint);
           await this.appendEvent(checkpoint.job_id, "reconciliation_required", childId, "child", checkpoint);
-          return this.result("reconciliation_required", route, blueprint, checkpoint, stepResults, learningEpisodeIds);
+          return finish("reconciliation_required");
         }
         if (run.status !== "completed") {
           checkpoint = await this.makeCheckpointFromExisting(checkpoint, "failed", contractDigest, planRefinementDigest, null);
           await this.store.save(checkpoint);
           await this.appendEvent(checkpoint.job_id, "failed", childId, "child", checkpoint);
-          return this.result("failed", route, blueprint, checkpoint, stepResults, learningEpisodeIds);
+          return finish("failed");
         }
         localResults.set(childId, run);
         this.resultCache.set(checkpoint.job_id, localResults);
@@ -709,7 +774,7 @@ export class AutonomousCrossDomainExecutor {
         stepResults[step] = { ...stepResults[step]!, completed_child_ids: [...completed], child_result_digests: { ...digests } };
         continue;
       }
-      if (options.synthesize === false) return this.result("paused", route, blueprint, checkpoint, stepResults, learningEpisodeIds);
+      if (options.synthesize === false) return finish("paused");
       const synthesisMessage = blueprint.synthesis_blueprint.prompt.messages.find((candidate) => candidate.source_id === "task");
       if (!synthesisMessage) throw new ProviderRuntimeError("cross-domain synthesis has no bounded task message");
       const synthesisContext: AutonomousPromptChunk[] = [
@@ -731,7 +796,7 @@ export class AutonomousCrossDomainExecutor {
         checkpoint = await this.makeCheckpointFromExisting(checkpoint, "failed", contractDigest, planRefinementDigest, null);
         await this.store.save(checkpoint);
         await this.appendEvent(checkpoint.job_id, "failed", "synthesis", "synthesis", checkpoint);
-        return this.result("failed", route, blueprint, checkpoint, stepResults, learningEpisodeIds, errorMetadata(error));
+        return finish("failed", errorMetadata(error));
       }
       const synthesisText = responseText(synthesis);
       const synthesisOutputDigest = synthesisText ? await digestJson({ output: synthesisText }) : null;
@@ -742,25 +807,25 @@ export class AutonomousCrossDomainExecutor {
         checkpoint = await this.makeCheckpointFromExisting(checkpoint, "paused", contractDigest, planRefinementDigest, null);
         await this.store.save(checkpoint);
         await this.appendEvent(checkpoint.job_id, "approval_required", "synthesis", "synthesis", checkpoint);
-        return this.result("approval_required", route, blueprint, checkpoint, stepResults, learningEpisodeIds);
+        return finish("approval_required");
       }
       if (synthesis.status === "reconciliation_required") {
         checkpoint = await this.makeCheckpointFromExisting(checkpoint, "reconciliation_required", contractDigest, planRefinementDigest, null);
         await this.store.save(checkpoint);
         await this.appendEvent(checkpoint.job_id, "reconciliation_required", "synthesis", "synthesis", checkpoint);
-        return this.result("reconciliation_required", route, blueprint, checkpoint, stepResults, learningEpisodeIds, undefined, synthesis);
+        return finish("reconciliation_required", undefined, synthesis);
       }
       if (synthesis.status !== "completed") {
         checkpoint = await this.makeCheckpointFromExisting(checkpoint, "failed", contractDigest, planRefinementDigest, null);
         await this.store.save(checkpoint);
         await this.appendEvent(checkpoint.job_id, "failed", "synthesis", "synthesis", checkpoint);
-        return this.result("failed", route, blueprint, checkpoint, stepResults, learningEpisodeIds);
+        return finish("failed");
       }
       checkpoint = await this.makeCheckpoint(checkpoint.job_id, route, blueprint, order, checkpoint.completed_child_ids, checkpoint.child_result_digests, "completed", checkpoint, contractDigest, planRefinementDigest, await digestJson(synthesis));
       await this.store.save(checkpoint);
       await this.appendEvent(checkpoint.job_id, "synthesis_completed", "synthesis", "synthesis", checkpoint);
       await this.appendEvent(checkpoint.job_id, "completed", null, "lifecycle", checkpoint);
-      return this.result("completed", route, blueprint, checkpoint, stepResults, learningEpisodeIds, undefined, synthesis);
+      return finish("completed", undefined, synthesis);
     }
     const status: AutonomousCrossDomainExecutionStatus = checkpoint.status === "completed" ? "completed" : "paused";
     if (checkpoint.status !== "completed") {
@@ -768,10 +833,10 @@ export class AutonomousCrossDomainExecutor {
       await this.store.save(checkpoint);
       await this.appendEvent(checkpoint.job_id, "checkpointed", checkpoint.next_child_id, checkpoint.next_child_id === null ? "synthesis" : "child", checkpoint);
     }
-    return this.result(status, route, blueprint, checkpoint, stepResults, learningEpisodeIds);
+    return finish(status);
   }
 
-  private async result(status: AutonomousCrossDomainExecutionStatus, route: AutonomousRouteProposal, blueprint: AutonomousCrossDomainBlueprint, checkpoint: AutonomousCrossDomainCheckpoint, stepResults: AutonomousCrossDomainStepResult[], learningEpisodeIds: string[], error: AutonomousCrossDomainErrorMetadata | undefined = undefined, synthesis: AutonomousRunResult | null = null): Promise<AutonomousCrossDomainExecutionResult> {
-    return { schema: AUTONOMOUS_CROSS_DOMAIN_EXECUTION_SCHEMA, status, job_id: checkpoint.job_id, route, blueprint, checkpoint, events: await this.store.events(checkpoint.job_id, 0, AUTONOMOUS_CROSS_DOMAIN_MAX_EVENTS), step_results: stepResults, synthesis, completed_children: checkpoint.completed_child_ids.length, total_children: checkpoint.execution_child_ids.length, plan_refinement_digest: checkpoint.plan_refinement_digest, error: error ?? null, learning_episode_ids: [...learningEpisodeIds], recovery: "caller_rehydrates_task_credentials_and_completed_child_results", retention: "provider_responses_local;checkpoint_metadata_and_outcome_digests_only" };
+  private async result(status: AutonomousCrossDomainExecutionStatus, route: AutonomousRouteProposal, blueprint: AutonomousCrossDomainBlueprint, checkpoint: AutonomousCrossDomainCheckpoint, stepResults: AutonomousCrossDomainStepResult[], learningEpisodeIds: string[], error: AutonomousCrossDomainErrorMetadata | undefined = undefined, synthesis: AutonomousRunResult | null = null, semanticStatus: AutonomousCrossDomainSemanticRouteStatus | null = null): Promise<AutonomousCrossDomainExecutionResult> {
+    return { schema: AUTONOMOUS_CROSS_DOMAIN_EXECUTION_SCHEMA, status, job_id: checkpoint.job_id, route, semantic_route_status: semanticStatus, blueprint, checkpoint, events: await this.store.events(checkpoint.job_id, 0, AUTONOMOUS_CROSS_DOMAIN_MAX_EVENTS), step_results: stepResults, synthesis, completed_children: checkpoint.completed_child_ids.length, total_children: checkpoint.execution_child_ids.length, plan_refinement_digest: checkpoint.plan_refinement_digest, error: error ?? null, learning_episode_ids: [...learningEpisodeIds], recovery: "caller_rehydrates_task_credentials_and_completed_child_results", retention: "provider_responses_local;checkpoint_metadata_and_outcome_digests_only" };
   }
 }

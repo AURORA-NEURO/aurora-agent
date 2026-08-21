@@ -50,6 +50,99 @@ const subtasks = [
   { id: "neuro", domain: "neuroscience", task: "Analyze the EEG neuroscience design and signal limits." },
 ];
 
+test("durable cross-domain execution composes semantic routing with route-bound restart recovery", async () => {
+  let calls = 0;
+  const bodies = [];
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      calls += 1;
+      let body = {};
+      try { body = JSON.parse(String(init?.body ?? "{}")); } catch { /* bounded fixture fallback */ }
+      bodies.push(body);
+      const isRouter = JSON.stringify(body.messages ?? []).includes("bounded autonomous task router");
+      const content = isRouter
+        ? JSON.stringify({
+          selected_domains: [
+            { domain: "biomedical", score: 0.98, rationale: "The task contains biomedical evidence and safety review." },
+            { domain: "neuroscience", score: 0.96, rationale: "The task contains EEG and neuroscience analysis." },
+          ],
+          confidence: 0.98,
+          abstain: false,
+          abstain_reason: null,
+        })
+        : calls === 4 ? "semantic durable synthesis" : `semantic durable child ${calls}`;
+      return jsonResponse(content);
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("semantic-durable-cross", "https://semantic-durable-cross.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  const candidate = { ...model(), provider: "semantic-durable-cross", model: "semantic-durable-cross-model" };
+  agent.registerModel(candidate);
+  const store = new InMemoryAutonomousCrossDomainCheckpointStore();
+  const executor = new AutonomousCrossDomainExecutor(agent, store);
+  const first = await executor.start(task, {
+    jobId: "semantic-durable-cross-1",
+    candidates: [candidate],
+    subtasks,
+    semanticRouting: { enabled: true, approveProviderCall: true, allowCrossDomain: true, maxDomains: 2 },
+    approveProviderCall: true,
+    maxSteps: 2,
+  });
+  assert.equal(first.status, "paused");
+  assert.equal(first.semantic_route_status, "completed");
+  assert.equal(first.route.route_digest, first.checkpoint.route_digest);
+  assert.equal(first.completed_children, 2);
+  assert.equal(calls, 3, "one semantic route call plus two child calls");
+  assert.match(JSON.stringify(bodies[0].messages), /bounded autonomous task router/);
+
+  const childResults = new Map(first.step_results.map((step) => [step.item_id, step.run]));
+  const changedDescriptor = { ...(({ route_digest: _routeDigest, ...descriptor }) => descriptor)(first.route), confidence: 0.75 };
+  const changedRoute = { ...changedDescriptor, route_digest: await digestJson(changedDescriptor) };
+  await assert.rejects(
+    () => executor.resume("semantic-durable-cross-1", task, { routeOverride: changedRoute, candidates: [candidate], subtasks, approveProviderCall: true, maxSteps: 1, resolveChildResult: (id) => childResults.get(id) ?? null }),
+    /checkpoint/,
+  );
+  assert.equal(calls, 3, "a changed route identity must fail before synthesis dispatch");
+
+  const completed = await executor.resume("semantic-durable-cross-1", task, {
+    routeOverride: first.route,
+    candidates: [candidate],
+    subtasks,
+    approveProviderCall: true,
+    maxSteps: 1,
+    resolveChildResult: (id) => childResults.get(id) ?? null,
+  });
+  assert.equal(completed.status, "completed");
+  assert.equal(completed.semantic_route_status, null, "restart consumes the reviewed route handoff without replaying classification");
+  assert.equal(completed.synthesis.response.text, "semantic durable synthesis");
+  assert.equal(calls, 4);
+});
+
+test("durable cross-domain semantic routing remains review-only until classifier approval", async () => {
+  let calls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => { calls += 1; return jsonResponse("must not dispatch"); },
+  });
+  llm.registerProvider(openaiCompatibleProvider("semantic-cross-review", "https://semantic-cross-review.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  const candidate = { ...model(), provider: "semantic-cross-review", model: "semantic-cross-review-model" };
+  agent.registerModel(candidate);
+  const executor = new AutonomousCrossDomainExecutor(agent, new InMemoryAutonomousCrossDomainCheckpointStore());
+  const result = await executor.start(task, {
+    jobId: "semantic-cross-review-1",
+    candidates: [candidate],
+    subtasks,
+    semanticRouting: { enabled: true, approveProviderCall: false },
+    approveProviderCall: true,
+  });
+  assert.equal(result.status, "route_review_required");
+  assert.equal(result.semantic_route_status, "approval_required");
+  assert.equal(result.checkpoint, null);
+  assert.equal(calls, 0);
+});
+
 test("durable cross-domain execution advances one bounded step and rehydrates caller-owned children", async () => {
   const { agent, calls } = makeAgent();
   const preview = await agent.blueprint(task, { subtasks });

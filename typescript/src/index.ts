@@ -352,6 +352,8 @@ export type {
   AutonomousCrossDomainExecuteOptions,
   AutonomousCrossDomainExecutionResult,
   AutonomousCrossDomainExecutionStatus,
+  AutonomousCrossDomainSemanticRouteStatus,
+  AutonomousCrossDomainSemanticRoutingOptions,
   AutonomousCrossDomainErrorMetadata,
   AutonomousCrossDomainEvent,
   AutonomousCrossDomainEventType,

@@ -827,6 +827,16 @@ chain is predecessor-linked and snapshot-verifiable. Prompts, task text, BYOK ha
 responses, tool arguments, evaluator evidence, and raw provider errors remain in the application
 process or a caller-owned result resolver.
 
+For ambiguous fan-out, the durable executor accepts `semanticRouting.enabled` with a separate
+classifier approval. The semantic result is carried into blueprint construction through a
+task- and route-digest-validated `routeOverride`, so selected child domains cannot be replaced by
+a different deterministic route. Every new checkpoint binds the exact route digest. During
+restart, the caller must rehydrate that reviewed route; the executor refuses to replay semantic
+classification implicitly because the checkpoint intentionally stores only the route identity,
+not the private classifier evidence. Disagreement, abstention, malformed output, and missing
+classifier approval remain `route_review_required` before child dispatch. This preserves the same
+route-bound contract for fan-outs spanning any reviewed domain pair.
+
 The continuation boundary is deliberately strict. Before dispatching another child, the executor
 requires the caller to rehydrate exactly the completed ordered prefix and verifies each result
 digest against the checkpoint; optional child-envelope task/output digests are checked as a second
