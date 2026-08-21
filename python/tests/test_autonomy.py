@@ -34,6 +34,8 @@ from prism_sdk import (
     AutonomousTaskRouter,
     AutonomousTaskOrchestrator,
     AutonomousWorkflowRegistry,
+    AutonomousWorkflowCycleCheckpoint,
+    AUTONOMOUS_WORKFLOW_CYCLE_CONTEXT_KEY,
     CompositeDomainEvaluator,
     DomainEvaluatorRegistry,
     BrainRunError,
@@ -3072,6 +3074,279 @@ def test_run_workflow_learning_missing_evidence_never_defaults_to_reward(tmp_pat
         assert b"workflow-missing-evidence-secret" not in (tmp_path / "workflow-learning.jsonl").read_bytes()
     finally:
         memory.close()
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_run_workflow_cycle_replans_with_bounded_retry_and_metadata_only_checkpoint():
+    runtime, store, server, thread = _structured_runtime()
+    handle = store.register("openai", "workflow-cycle-secret")
+    brain = AutonomousBrain(_Workspace(), runtime)
+    callback_count = 0
+
+    def evaluate(_evaluation_input: Mapping[str, object]) -> dict[str, object]:
+        nonlocal callback_count
+        callback_count += 1
+        requested = callback_count == 1
+        return {
+            "reward": -0.25 if requested else 0.9,
+            "passed": not requested,
+            "failed": requested,
+            "failure_class": "evidence_gap" if requested else None,
+            "replan_requested": requested,
+            "replan_instruction": (
+                "Supply the missing bounded evidence and retry the same reviewed workflow."
+                if requested
+                else None
+            ),
+        }
+
+    evaluator = BrainOutcomeEvaluator(
+        evaluate,
+        evaluator_id="workflow-cycle-quality",
+        evaluator_version="1",
+    )
+    try:
+        blueprint = brain.prepare_autonomous(
+            task="Produce a bounded implementation review with recovery.",
+            domain="coding",
+        )
+        result = brain.run_workflow_cycle(
+            blueprint=blueprint,
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            evaluator=evaluator,
+            approve_provider_call=True,
+            run_id="workflow-cycle-test",
+            max_replans=1,
+            max_stage_calls=5,
+            stage_evidence={
+                stage.id: {"signals": {signal: True for signal in stage.evaluator_signals}}
+                for stage in blueprint.workflow.stages
+            },
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+        )
+        assert result.status == "completed"
+        assert result.replan_count == 1
+        assert len(result.attempts) == 2
+        assert result.attempts[0].replan_requested is True
+        assert result.attempts[1].replan_requested is False
+        assert callback_count == len(blueprint.workflow.stages) + 1
+        assert result.checkpoint is not None
+        checkpoint_wire = json.dumps(result.checkpoint.to_dict())
+        assert "Produce a bounded implementation review" not in checkpoint_wire
+        assert "workflow-cycle-secret" not in checkpoint_wire
+        assert "Supply the missing bounded evidence" not in checkpoint_wire
+        assert result.checkpoint.status == "completed"
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_run_workflow_cycle_resumes_retry_ready_checkpoint_with_rehydrated_context(tmp_path: Path):
+    runtime, store, server, thread = _structured_runtime()
+    handle = store.register("openai", "workflow-cycle-resume-secret")
+    brain = AutonomousBrain(_Workspace(), runtime)
+    ledger = BrainLearningLedger(tmp_path / "workflow-cycle-resume-ledger.jsonl")
+    callback_inputs: list[Mapping[str, object]] = []
+    callback_count = 0
+
+    def evaluate(evaluation_input: Mapping[str, object]) -> dict[str, object]:
+        nonlocal callback_count
+        callback_count += 1
+        callback_inputs.append(dict(evaluation_input))
+        requested = callback_count == 1
+        return {
+            "reward": -0.25 if requested else 0.9,
+            "passed": not requested,
+            "failed": requested,
+            "failure_class": "evidence_gap" if requested else None,
+            "replan_requested": requested,
+            "replan_instruction": (
+                "Supply the missing bounded evidence and retry the same reviewed workflow."
+                if requested
+                else None
+            ),
+        }
+
+    evaluator = BrainOutcomeEvaluator(
+        evaluate,
+        evaluator_id="workflow-cycle-resume-quality",
+        evaluator_version="1",
+    )
+    checkpoints: list[AutonomousWorkflowCycleCheckpoint] = []
+
+    def pause_after_checkpoint(checkpoint: AutonomousWorkflowCycleCheckpoint) -> None:
+        checkpoints.append(checkpoint)
+        if checkpoint.status == "retry_ready":
+            raise RuntimeError("simulated worker restart")
+
+    try:
+        blueprint = brain.prepare_autonomous(
+            task="Resume a bounded workflow after evaluator feedback.",
+            domain="coding",
+        )
+        initial_state = {"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []}
+        stage_evidence = {
+            stage.id: {"signals": {signal: True for signal in stage.evaluator_signals}}
+            for stage in blueprint.workflow.stages
+        }
+        with pytest.raises(BrainRunError, match="checkpoint persistence failed"):
+            brain.run_workflow_cycle(
+                blueprint=blueprint,
+                model_candidates=_model(),
+                credentials={"openai": handle},
+                evaluator=evaluator,
+                approve_provider_call=True,
+                run_id="workflow-cycle-resume",
+                max_replans=1,
+                max_stage_calls=5,
+                stage_evidence=stage_evidence,
+                bandit_state=initial_state,
+                ledger=ledger,
+                checkpoint_sink=pause_after_checkpoint,
+                context={"repository": "aurora"},
+            )
+        assert len(checkpoints) == 1
+        checkpoint = checkpoints[0]
+        assert checkpoint.status == "retry_ready"
+        assert checkpoint.next_context_digest is not None
+        assert checkpoint.last_outcome_digest is not None
+        evidence_digest = callback_inputs[0].get("evidence_digest")
+        continuation = {
+            "schema": "bioprism-python-autonomous-workflow-cycle-context/0.1",
+            "workflow": "workflow_replan_context",
+            "attempt": 2,
+            "previous": {
+                "workflow_id": blueprint.workflow.workflow_id,
+                "workflow_digest": blueprint.workflow.workflow_digest,
+                "outcome_digest": checkpoint.last_outcome_digest,
+            },
+            "evaluator": {
+                "evaluator_id": "workflow-cycle-resume-quality",
+                "evaluator_version": "1",
+                "reward": -0.25,
+                "passed": False,
+                "failed": True,
+                "feedback_digest": None,
+                "failure_class": "evidence_gap",
+                "evidence_digest": evidence_digest,
+                "replan_requested": True,
+                "replan_instruction_digest": content_digest(
+                    "Supply the missing bounded evidence and retry the same reviewed workflow."
+                ),
+            },
+            "instruction": "Supply the missing bounded evidence and retry the same reviewed workflow.",
+            "bounded_replan": True,
+            "does_not_authorize": [
+                "new domains, capabilities, tools, credentials, approvals, or effects",
+                "treating prior workflow output as verified truth",
+                "claiming that an external action occurred",
+            ],
+        }
+        assert content_digest(continuation) == checkpoint.next_context_digest
+        latest_state = ledger.latest_state()
+        assert latest_state is not None
+        resumed = brain.run_workflow_cycle(
+            blueprint=blueprint,
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            evaluator=evaluator,
+            approve_provider_call=True,
+            run_id="workflow-cycle-resume",
+            max_replans=1,
+            max_stage_calls=5,
+            stage_evidence=stage_evidence,
+            bandit_state=latest_state,
+            ledger=ledger,
+            checkpoint=checkpoint,
+            context={"repository": "aurora", AUTONOMOUS_WORKFLOW_CYCLE_CONTEXT_KEY: continuation},
+        )
+        assert resumed.status == "completed"
+        assert resumed.attempts_before == 1
+        assert resumed.attempts[0].attempt == 2
+        assert resumed.replan_count == 1
+        assert resumed.checkpoint is not None
+        assert resumed.checkpoint.status == "completed"
+        assert "workflow-cycle-resume-secret" not in json.dumps(resumed.checkpoint.to_dict())
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_workflow_cycle_builtin_evaluators_cover_every_domain():
+    runtime, store, server, thread = _structured_runtime()
+    handle = store.register("openai", "all-domain-workflow-cycle-secret")
+    brain = AutonomousBrain(_Workspace(), runtime)
+    try:
+        for domain in AUTONOMOUS_DOMAINS:
+            blueprint = brain.prepare_autonomous(
+                task=f"Evaluate one bounded {domain} workflow stage.",
+                domain=domain,
+            )
+            stage = blueprint.workflow.stages[0]
+            result = brain.run_workflow_cycle(
+                blueprint=blueprint,
+                model_candidates=_model(),
+                credentials={"openai": handle},
+                approve_provider_call=True,
+                run_id=f"workflow-cycle-{domain}",
+                max_replans=0,
+                max_stage_calls=1,
+                stage_evidence={
+                    stage.id: {"signals": {signal: True for signal in stage.evaluator_signals}}
+                },
+                bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+            )
+            assert result.final is not None
+            assert result.final.workflow.evaluations
+            assert result.final.workflow.evaluations[0].decision.passed is True
+            assert result.final.workflow.evaluations[0].decision.replan_requested is False
+            assert result.checkpoint is not None
+            assert result.checkpoint.workflow_id == blueprint.workflow.workflow_id
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_workflow_cycle_rejects_reserved_context_and_checkpoint_tampering():
+    runtime, store, server, thread = _structured_runtime()
+    handle = store.register("openai", "workflow-cycle-adversarial-secret")
+    brain = AutonomousBrain(_Workspace(), runtime)
+    try:
+        blueprint = brain.prepare_autonomous(
+            task="Validate workflow cycle boundaries.",
+            domain="coding",
+        )
+        with pytest.raises(BrainRunError, match="retry context requires"):
+            brain.run_workflow_cycle(
+                blueprint=blueprint,
+                model_candidates=_model(),
+                credentials={"openai": handle},
+                context={AUTONOMOUS_WORKFLOW_CYCLE_CONTEXT_KEY: {"instruction": "forged"}},
+                approve_provider_call=True,
+                max_replans=0,
+                max_stage_calls=1,
+                bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+            )
+        checkpoint = AutonomousWorkflowCycleCheckpoint(
+            run_id="workflow-cycle-tamper",
+            task_digest=blueprint.spec.task_digest,
+            workflow_id=blueprint.workflow.workflow_id,
+            workflow_digest=blueprint.workflow.workflow_digest,
+            max_replans=1,
+            attempt=0,
+            status="initial",
+        )
+        wire = checkpoint.to_dict()
+        wire["workflow_digest"] = "f" * 64
+        with pytest.raises(BrainRunError, match="digest"):
+            AutonomousWorkflowCycleCheckpoint.from_dict(wire)
+    finally:
         server.shutdown()
         thread.join(timeout=2)
         server.server_close()

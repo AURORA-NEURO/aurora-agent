@@ -66,6 +66,17 @@ goals to the existing online, trajectory, and bounded replan learners. They feed
 evaluator rewards into the bandit and persist only digests of evaluator decisions, next state, and
 attempt identities; `cycle_id` is value-only correlation metadata. Model candidates, memory,
 approval, and opaque credential handles still come from the caller, and no raw key is accepted.
+`run_workflow_learning(...)` remains a report-only stage learner: a failed evaluator can request a
+replan, but it never silently replays a provider call. Applications that explicitly want bounded
+automatic recovery can call `run_workflow_cycle(...)` on `AutonomousBrain`,
+`AutonomousTaskOrchestrator`, or `AutonomousAgent`. A cycle retries the complete prepared
+workflow under the same exact route, model candidates, opaque credentials, reviewed tool set,
+approval boundary, and execution controller. Only a failed evaluator decision can request the
+next attempt, and the cycle has a hard three-replan ceiling. Its `AutonomousWorkflowCycleCheckpoint`
+contains task/workflow/attempt/outcome/bandit digests only; the caller must rehydrate the protected
+retry context after a restart because raw task text, provider responses, credentials, tool
+arguments, and evaluator instructions are never persisted. This cycle is tested against every
+built-in autonomous domain.
 `run_adaptive_mission_learning_cycle()` combines recall, evaluator reward, bandit state updates,
 and bounded pre-dispatch replanning without retaining provider text, tool arguments, or secrets.
 `BrainJobStore` adds resolver-backed leases and checkpoints for restart-safe learning jobs, while

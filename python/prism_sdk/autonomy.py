@@ -8294,6 +8294,7 @@ class AutonomousTaskOrchestrator:
         tool_choice: str | None = None,
         max_provider_failovers: int = 2,
         tool_loop_options: Mapping[str, Any] | None = None,
+        context: Mapping[str, Any] | None = None,
         execution_plan_context: Mapping[str, Any] | None = None,
         execution_controller: AutonomousExecutionController | None = None,
     ) -> AutonomousWorkflowRun:
@@ -8325,6 +8326,10 @@ class AutonomousTaskOrchestrator:
             if not isinstance(execution_plan_context, Mapping):
                 raise BrainRunError("workflow execution_plan_context must be a mapping or None")
             _safe_json("workflow execution_plan_context", execution_plan_context, maximum=MAX_AUTONOMOUS_EXECUTION_PLAN_BYTES)
+        if context is not None:
+            if not isinstance(context, Mapping):
+                raise BrainRunError("workflow context must be a mapping or None")
+            _safe_json("workflow context", context, maximum=MAX_AUTONOMY_CONTEXT_BYTES)
         plan_priority, plan_refinement_digest, plan_focus_stage_ids = self._accepted_workflow_plan(
             blueprint,
             accepted_plan_refinement,
@@ -8477,6 +8482,8 @@ class AutonomousTaskOrchestrator:
             }
             if execution_plan_context is not None:
                 stage_context[_AUTONOMOUS_EXECUTION_PLAN_CONTEXT_KEY] = dict(execution_plan_context)
+            if context is not None:
+                stage_context["caller_context"] = dict(context)
             stage_context[_AUTONOMOUS_WORKFLOW_STAGE_PLAN_CONTEXT_KEY] = stage_execution_plan.to_dict()
             stage_provider_tools = tuple(
                 tool for tool in provider_tools
@@ -8874,6 +8881,18 @@ class AutonomousTaskOrchestrator:
             memory_receipts=tuple(receipts),
             replan_requested=should_replan,
         )
+
+    def run_workflow_cycle(self, **kwargs: Any) -> "AutonomousWorkflowCycleResult":
+        """Run a bounded evaluator-guided workflow retry cycle.
+
+        The implementation lives in a small companion module to keep this composition class
+        readable and to avoid importing the cycle result types into the hot execution path.
+        Importing lazily also keeps the public package import graph acyclic.
+        """
+
+        from .workflow_cycle import run_workflow_cycle
+
+        return run_workflow_cycle(self, **kwargs)
 
     def run_workflow_trajectory_learning(
         self,
@@ -13671,6 +13690,50 @@ class AutonomousAgent:
         )
         try:
             result = self.orchestrator.run_workflow_learning(
+                blueprint=blueprint,
+                model_candidates=candidates,
+                credentials=resolved_credentials,
+                **options,
+            )
+        except Exception as error:
+            self._finish_execution(execution_controller, error=error)
+            raise
+        self._finish_execution(execution_controller, result=result)
+        return result
+
+    def run_workflow_cycle(
+        self,
+        *,
+        blueprint: AutonomousTaskBlueprint,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> "AutonomousWorkflowCycleResult":
+        """Run a bounded evaluator-guided workflow recovery cycle.
+
+        The cycle remains explicit and opt-in.  Provider credentials are still supplied as
+        opaque handles or a live credential session, and every retry is finalized through the
+        same execution controller used by ordinary workflow calls.
+        """
+
+        options = dict(kwargs)
+        options["bandit_state"] = self.learning_state() if bandit_state is None else bandit_state
+        candidates, resolved_credentials, options, execution_controller = self._execution_inputs(
+            credentials=credentials,
+            model_candidates=model_candidates,
+            options=options,
+            tool_domains=(blueprint.spec.domain,),
+            task=blueprint.spec.task,
+            resume_learning=False,
+            attach_execution_plan_context=False,
+            execution_id=execution_id,
+            resume_execution=resume_execution,
+        )
+        try:
+            result = self.orchestrator.run_workflow_cycle(
                 blueprint=blueprint,
                 model_candidates=candidates,
                 credentials=resolved_credentials,

@@ -443,6 +443,43 @@ one explicit evaluator update per completed stage and resumes from the latest le
 the caller supplies an override. This keeps single-task, staged, and cross-domain execution on
 the same authorization, BYOK, model-selection, and learning boundaries.
 
+For applications that want the evaluator to drive a bounded recovery loop, use the explicit
+`run_workflow_cycle()` entry point. It is intentionally separate from `run_workflow_learning()`:
+ordinary learning reports `replan_requested` and never silently replays a provider call, while a
+cycle opts into a fresh complete workflow attempt only after a failed evaluator decision. Each
+retry reuses the prepared blueprint, exact model candidates, opaque credential handles, reviewed
+route/tool policy, provider approval, and execution controller. The evaluator instruction is
+inserted only into a reserved transient context packet and cannot authorize a new domain,
+capability, tool, credential, approval, or effect.
+
+```python
+cycle = agent.run_workflow_cycle(
+    blueprint=blueprint,
+    credentials={"openai": openai_handle},
+    model_candidates=catalogue.candidates(),
+    evaluator=domain_evaluator,
+    bandit_state=bandit_state,
+    stage_evidence=caller_owned_stage_evidence,
+    max_replans=2,
+    approve_provider_call=True,
+    run_id="review-123",
+)
+
+# Persist only this metadata checkpoint in the job store. Rehydrate the transient retry packet
+# and the latest caller-owned bandit state before resuming a retry_ready checkpoint.
+if cycle.checkpoint is not None:
+    job_store.save(cycle.checkpoint.to_dict())
+```
+
+The cycle has a hard three-replan ceiling and returns `completed`, `completed_without_replan`,
+`replan_limit_reached`, or `execution_blocked`. Its checkpoint stores task/workflow identities,
+attempt IDs, outcome digests, evaluator-instruction digests, and bandit-state digests only; it
+never stores task text, provider responses, tool arguments, credentials, or the raw evaluator
+instruction. On restart, the caller must supply the matching protected retry context and bandit
+state digest. The implementation and checkpoint contract are shared by the low-level
+`AutonomousBrain`, `AutonomousTaskOrchestrator`, and application-facing `AutonomousAgent`, and
+the recovery path is covered across all twelve built-in domains.
+
 For a real delayed-feedback deployment, call `brain.prepare_learning_episode(result, ledger=ledger)`
 immediately after a provider, tool-loop, or mission result. The ledger stores a bounded evaluator
 projection, the selected arm, and digest-bound identity only; it does not store the provider

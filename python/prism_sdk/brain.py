@@ -2246,6 +2246,13 @@ class AutonomousBrain:
 
         return AutonomousTaskOrchestrator(self).run_workflow_learning(**kwargs)
 
+    def run_workflow_cycle(self, **kwargs: Any) -> Any:
+        """Run an explicit bounded evaluator-guided workflow recovery cycle."""
+
+        from .autonomy import AutonomousTaskOrchestrator
+
+        return AutonomousTaskOrchestrator(self).run_workflow_cycle(**kwargs)
+
     def run_workflow_trajectory_learning(self, **kwargs: Any) -> Any:
         """Execute workflow stages and assign delayed discounted credit across the trajectory."""
 
