@@ -469,6 +469,13 @@ invalid epsilon values, non-finite rewards, disabled arms, and empty eligible se
 policy choice remains routing evidence—not permission, truth, or a claim of biological
 reinforcement learning.
 
+Model selection also supports an optional `min_selection_confidence` floor. The kernel computes a
+bounded normalized separation between the top two eligible ranks (a unique eligible model is
+confidence `1.0`) and returns `abstained_low_selection_confidence` when the floor is not met.
+Python and TypeScript forward the same floor before provider dispatch, so ambiguous model priors
+become a review state rather than an overconfident call. This confidence is rank stability only,
+never a probability that the selected model's answer is correct.
+
 ### Provider-free automatic domain routing
 
 Explicit `run(..., domain=...)` remains the strongest integration boundary, but an application does

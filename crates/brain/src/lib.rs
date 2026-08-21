@@ -262,6 +262,10 @@ pub struct ModelSelectionRequest {
     pub max_latency_ms: Option<u64>,
     #[serde(default)]
     pub min_quality: Option<f64>,
+    /// Optional normalized rank-separation floor. When supplied, the kernel abstains instead of
+    /// selecting a nearly tied candidate. This is a routing-stability gate, not answer accuracy.
+    #[serde(default)]
+    pub min_selection_confidence: Option<f64>,
     pub models: Vec<ModelDescriptor>,
     #[serde(default)]
     pub observations: Vec<ModelObservation>,
@@ -439,6 +443,9 @@ pub struct ModelSelectionReport {
     pub selected_model: Option<ModelDescriptor>,
     pub selected_model_id: Option<String>,
     pub ranking: Vec<ModelCandidateScore>,
+    pub eligible_model_count: usize,
+    pub selection_confidence: f64,
+    pub min_selection_confidence: Option<f64>,
     pub selection_status: String,
     pub decision_digest: String,
     pub does_not_claim: Vec<String>,
@@ -479,6 +486,14 @@ pub fn select_model(request: &ModelSelectionRequest) -> Result<ModelSelectionRep
     request.weights.validate()?;
     if let Some(min_quality) = request.min_quality {
         finite_range(min_quality, "min_quality", 0.0, 1.0)?;
+    }
+    if let Some(min_selection_confidence) = request.min_selection_confidence {
+        finite_range(
+            min_selection_confidence,
+            "min_selection_confidence",
+            0.0,
+            1.0,
+        )?;
     }
 
     let mut observations = BTreeMap::new();
@@ -623,9 +638,25 @@ pub fn select_model(request: &ModelSelectionRequest) -> Result<ModelSelectionRep
             })
             .then_with(|| left.model_id.cmp(&right.model_id))
     });
+    let eligible_scores = ranking
+        .iter()
+        .filter(|candidate| candidate.eligible)
+        .collect::<Vec<_>>();
+    let eligible_model_count = eligible_scores.len();
+    let selection_confidence = match eligible_scores.as_slice() {
+        [] => 0.0,
+        [_] => 1.0,
+        [top, runner_up, ..] => ((top.score - runner_up.score)
+            / (1.0 + top.score.abs() + runner_up.score.abs()))
+        .clamp(0.0, 1.0),
+    };
+    let confidence_abstention = request
+        .min_selection_confidence
+        .is_some_and(|threshold| selection_confidence < threshold);
     let selected_model_id = ranking
         .iter()
         .find(|candidate| candidate.eligible)
+        .filter(|_| !confidence_abstention)
         .map(|candidate| candidate.model_id.clone());
     let selected_model = selected_model_id.as_ref().and_then(|id| {
         request
@@ -636,6 +667,8 @@ pub fn select_model(request: &ModelSelectionRequest) -> Result<ModelSelectionRep
     });
     let selection_status = if selected_model_id.is_some() {
         "selected"
+    } else if confidence_abstention {
+        "abstained_low_selection_confidence"
     } else {
         "refused_no_eligible_model"
     };
@@ -645,10 +678,15 @@ pub fn select_model(request: &ModelSelectionRequest) -> Result<ModelSelectionRep
         selected_model,
         selected_model_id,
         ranking,
+        eligible_model_count,
+        selection_confidence,
+        min_selection_confidence: request.min_selection_confidence,
         selection_status: selection_status.into(),
         decision_digest: String::new(),
         does_not_claim: vec![
             "model quality priors are caller-supplied and are not an evaluation result".into(),
+            "selection confidence measures normalized rank separation, not answer correctness"
+                .into(),
             "selection does not authenticate a provider or redeem a credential".into(),
             "selection does not execute a model call or verify a future answer".into(),
         ],
@@ -2233,6 +2271,7 @@ mod tests {
             max_cost_per_million_tokens: Some(100),
             max_latency_ms: None,
             min_quality: None,
+            min_selection_confidence: None,
             models: vec![
                 model("a", "cheap", 0.7, 1),
                 model("b", "expensive", 0.99, 1000),
@@ -2246,6 +2285,58 @@ mod tests {
         assert!(report.selected_model_id.is_none());
         assert!(report.ranking.iter().all(|candidate| !candidate.eligible));
         assert_eq!(report.selection_status, "refused_no_eligible_model");
+    }
+
+    #[test]
+    fn model_selection_abstains_on_low_rank_separation_when_requested() {
+        let report = select_model(&ModelSelectionRequest {
+            task: "ambiguous model choice".into(),
+            required_capabilities: vec!["reasoning".into()],
+            input_tokens: 100,
+            requested_output_tokens: 100,
+            max_cost_per_million_tokens: None,
+            max_latency_ms: None,
+            min_quality: None,
+            min_selection_confidence: Some(0.1),
+            models: vec![model("a", "first", 0.8, 10), model("b", "second", 0.8, 10)],
+            observations: Vec::new(),
+            weights: SelectionWeights::default(),
+            provider_health: BTreeMap::new(),
+            model_health: BTreeMap::new(),
+        })
+        .unwrap();
+        assert_eq!(report.eligible_model_count, 2);
+        assert_eq!(report.selection_confidence, 0.0);
+        assert_eq!(report.min_selection_confidence, Some(0.1));
+        assert!(report.selected_model_id.is_none());
+        assert_eq!(
+            report.selection_status,
+            "abstained_low_selection_confidence"
+        );
+
+        let unique = select_model(&ModelSelectionRequest {
+            min_selection_confidence: Some(0.1),
+            models: vec![model("a", "only", 0.8, 10)],
+            ..ModelSelectionRequest {
+                task: "unique model choice".into(),
+                required_capabilities: vec!["reasoning".into()],
+                input_tokens: 100,
+                requested_output_tokens: 100,
+                max_cost_per_million_tokens: None,
+                max_latency_ms: None,
+                min_quality: None,
+                min_selection_confidence: None,
+                models: Vec::new(),
+                observations: Vec::new(),
+                weights: SelectionWeights::default(),
+                provider_health: BTreeMap::new(),
+                model_health: BTreeMap::new(),
+            }
+        })
+        .unwrap();
+        assert_eq!(unique.selection_confidence, 1.0);
+        assert_eq!(unique.min_selection_confidence, Some(0.1));
+        assert_eq!(unique.selected_model_id.as_deref(), Some("a/only"));
     }
 
     #[test]
@@ -2265,6 +2356,7 @@ mod tests {
             max_cost_per_million_tokens: None,
             max_latency_ms: None,
             min_quality: None,
+            min_selection_confidence: None,
             models: vec![
                 model("a", "global", 0.8, 10),
                 model("b", "context", 0.8, 10),
@@ -2345,6 +2437,7 @@ mod tests {
             max_cost_per_million_tokens: None,
             max_latency_ms: None,
             min_quality: None,
+            min_selection_confidence: None,
             models: vec![model("a", "open", 0.99, 1), model("b", "ready", 0.7, 2)],
             observations: Vec::new(),
             weights: SelectionWeights::default(),
@@ -2393,6 +2486,7 @@ mod tests {
             max_cost_per_million_tokens: None,
             max_latency_ms: None,
             min_quality: None,
+            min_selection_confidence: None,
             models: vec![
                 model("a", "degraded", 0.9, 1),
                 model("b", "healthy", 0.9, 1),
@@ -2438,6 +2532,7 @@ mod tests {
             max_cost_per_million_tokens: None,
             max_latency_ms: None,
             min_quality: None,
+            min_selection_confidence: None,
             models: vec![model("a", "model", 0.9, 1)],
             observations: Vec::new(),
             weights: SelectionWeights::default(),

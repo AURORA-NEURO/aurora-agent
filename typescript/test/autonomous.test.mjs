@@ -579,6 +579,50 @@ test("online learner adapts only from explicit evaluator rewards", async () => {
   assert.throws(() => learner.select({ ...request, min_quality: 2 }), /min_quality is outside its bounds/);
 });
 
+test("selection confidence abstains on ambiguous ranking across every built-in domain", () => {
+  const domains = ["coding", "browser", "data", "science", "biomedical", "neuroscience", "operations", "enterprise", "multi_agent", "multimodal", "cross_domain", "evaluation"];
+  for (const domain of domains) {
+    const learner = new AutonomousOnlineLearner();
+    const decision = learner.select({
+      task: `choose a model for ${domain}`,
+      domain,
+      capability: "reasoning",
+      risk_class: "review_required",
+      required_capabilities: ["reasoning"],
+      estimated_input_tokens: 10,
+      requested_output_tokens: 50,
+      min_selection_confidence: 0.1,
+      candidates: [candidate("a", "same-prior"), candidate("b", "same-prior")],
+      provider_health: {
+        a: { provider: "a", circuit: "closed", credential_required: false, credential_ready: true },
+        b: { provider: "b", circuit: "closed", credential_required: false, credential_ready: true },
+      },
+      model_health: {},
+    });
+    assert.equal(decision.selected_model, null, domain);
+    assert.equal(decision.selection_confidence, 0, domain);
+    assert.equal(decision.min_selection_confidence, 0.1, domain);
+    assert.match(decision.abstention_reason, /selection confidence/, domain);
+  }
+  assert.throws(() => learnerSelectConfidenceFailure(), /min_selection_confidence is outside its bounds/);
+});
+
+function learnerSelectConfidenceFailure() {
+  return new AutonomousOnlineLearner().select({
+    task: "invalid confidence",
+    domain: "coding",
+    capability: "implementation",
+    risk_class: "engineering_change",
+    required_capabilities: ["reasoning"],
+    estimated_input_tokens: 10,
+    requested_output_tokens: 50,
+    min_selection_confidence: 2,
+    candidates: [candidate("a", "one")],
+    provider_health: { a: { provider: "a", circuit: "closed", credential_required: false, credential_ready: true } },
+    model_health: {},
+  });
+}
+
 test("autonomous invocation preserves learner exploration and ranking evidence", async () => {
   const llm = new LLMRuntime({
     credentials: new CredentialStore(),

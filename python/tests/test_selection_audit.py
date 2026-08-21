@@ -52,6 +52,8 @@ def test_selection_audit_explains_gates_exploration_and_routing_stability_withou
             "selection_status": "selected",
             "selected_model": {"provider": "openai", "model": "strong"},
             "decision_digest": "d" * 64,
+            "selection_confidence": 0.019,
+            "min_selection_confidence": 0.1,
             "ranking": _ranking(),
         }
     )
@@ -70,6 +72,8 @@ def test_selection_audit_explains_gates_exploration_and_routing_stability_withou
     assert audit["exploration"]["unseen_eligible_count"] == 1  # type: ignore[index]
     assert audit["stability"]["runner_up_model_id"] == "anthropic/explore"  # type: ignore[index]
     assert 0 < audit["stability"]["routing_confidence"] < 1  # type: ignore[operator,index]
+    assert audit["stability"]["kernel_selection_confidence"] == 0.019  # type: ignore[index]
+    assert audit["stability"]["kernel_selection_confidence_floor"] == 0.1  # type: ignore[index]
     assert "private task material" not in json.dumps(audit)
     assert "transport success is not task reward" in audit["does_not_claim"]
 

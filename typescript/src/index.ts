@@ -42,6 +42,7 @@ export {
   AutonomousRuntime,
   LLMRuntime,
   rankAutonomousModels,
+  autonomousSelectionConfidence,
   ProviderOnboarding,
   anthropicProvider,
   deepseekProvider,

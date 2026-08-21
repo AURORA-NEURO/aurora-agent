@@ -75,7 +75,10 @@ and all twelve autonomous domain contexts.
 The shared caller-owned bandit state supports `ucb1`, `epsilon_greedy`, and deterministic
 `thompson_sampling` policies. Thompson selection forms a fractional Beta posterior from explicit
 evaluator rewards, emits posterior metadata for audit/replay, and still respects capability,
-cost, credential, circuit, and approval gates. Provider transport success never becomes reward.
+cost, credential, circuit, and approval gates. Adaptive model selection also accepts an optional
+`min_selection_confidence` floor; near-tied eligible ranks fail closed with a typed abstention
+instead of becoming an overconfident provider call. The value is routing stability, not answer
+correctness. Provider transport success never becomes reward.
 
 Approval-required missions are never completed as proposals: the worker parks them in
 `waiting_approval`, records only a request digest and bounded scope, and requeues them only after

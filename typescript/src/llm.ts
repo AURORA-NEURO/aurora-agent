@@ -587,6 +587,8 @@ export interface AutonomousSelectionRequest extends JsonObject {
   max_latency_ms?: number | null;
   /** Hard caller-owned quality floor applied before utility ranking. */
   min_quality?: number | null;
+  /** Optional normalized rank-separation floor; ambiguous selections abstain. */
+  min_selection_confidence?: number | null;
   /** Whether the provider response must be valid JSON at the transport boundary. */
   require_json?: boolean;
   candidates: AutonomousModelCandidate[];
@@ -607,6 +609,10 @@ export interface AutonomousSelectionDecision extends JsonObject {
   strategy: "deterministic_health_utility" | "caller_selector";
   ranking: AutonomousModelRanking[];
   abstention_reason: string | null;
+  /** Normalized separation of the top eligible candidates; never answer correctness. */
+  selection_confidence?: number;
+  /** Caller-supplied confidence floor retained for auditability. */
+  min_selection_confidence?: number | null;
   exploration_draw?: number | null;
   exploration_taken?: boolean;
 }
@@ -622,6 +628,7 @@ export interface AutonomousExecutionPlan {
   maxCostPerMillionTokens?: number;
   maxLatencyMs?: number;
   minQuality?: number;
+  minSelectionConfidence?: number;
   candidates: readonly AutonomousModelCandidate[];
   request: ProviderRequest;
 }
@@ -2063,8 +2070,13 @@ export class AutonomousRuntime {
   async select(plan: AutonomousExecutionPlan, options: { excludedProviders?: readonly string[] } = {}): Promise<AutonomousSelectionDecision> {
     const request = this.selectionRequest(plan, options.excludedProviders);
     const ranking = this.rank(request);
+    const selectionConfidence = autonomousSelectionConfidence(ranking);
+    const minimumConfidence = request.min_selection_confidence ?? null;
     if (!ranking.some((row) => row.eligible)) {
-      return { selected_model: null, strategy: this.selector ? "caller_selector" : "deterministic_health_utility", ranking, abstention_reason: ranking.flatMap((row) => row.reasons).join("; ") || "no eligible model candidate" };
+      return { selected_model: null, strategy: this.selector ? "caller_selector" : "deterministic_health_utility", ranking, abstention_reason: ranking.flatMap((row) => row.reasons).join("; ") || "no eligible model candidate", selection_confidence: selectionConfidence, min_selection_confidence: minimumConfidence };
+    }
+    if (minimumConfidence !== null && selectionConfidence < minimumConfidence) {
+      return { selected_model: null, strategy: this.selector ? "caller_selector" : "deterministic_health_utility", ranking, abstention_reason: `selection confidence ${selectionConfidence.toFixed(6)} is below caller floor ${minimumConfidence.toFixed(6)}`, selection_confidence: selectionConfidence, min_selection_confidence: minimumConfidence };
     }
     if (this.selector) {
       const selected = await this.selector(request);
@@ -2072,14 +2084,14 @@ export class AutonomousRuntime {
       const projectedRanking = selectorRankingProjection(selected.ranking, ranking);
       const exploration = selectorExplorationProjection(selected);
       const selectedModel = selected.selected_model;
-      if (selectedModel === null) return { selected_model: null, strategy: "caller_selector", ranking: projectedRanking, abstention_reason: typeof selected.abstention_reason === "string" ? selected.abstention_reason : "caller selector abstained", ...exploration };
+      if (selectedModel === null) return { selected_model: null, strategy: "caller_selector", ranking: projectedRanking, abstention_reason: typeof selected.abstention_reason === "string" ? selected.abstention_reason : "caller selector abstained", selection_confidence: selectionConfidence, min_selection_confidence: minimumConfidence, ...exploration };
       if (!isObject(selectedModel) || typeof selectedModel.provider !== "string" || typeof selectedModel.model !== "string") throw new ProviderRuntimeError("autonomous selector returned an invalid selected_model");
       const chosen = ranking.find((row) => row.provider === selectedModel.provider && row.model === selectedModel.model);
       if (!chosen || !chosen.eligible) throw new ProviderRuntimeError("autonomous selector chose an ineligible model");
-      return { selected_model: { provider: chosen.provider, model: chosen.model }, strategy: "caller_selector", ranking: projectedRanking, abstention_reason: null, ...exploration };
+      return { selected_model: { provider: chosen.provider, model: chosen.model }, strategy: "caller_selector", ranking: projectedRanking, abstention_reason: null, selection_confidence: selectionConfidence, min_selection_confidence: minimumConfidence, ...exploration };
     }
     const chosen = ranking.find((row) => row.eligible);
-    return { selected_model: chosen ? { provider: chosen.provider, model: chosen.model } : null, strategy: "deterministic_health_utility", ranking, abstention_reason: chosen ? null : "no eligible model candidate" };
+    return { selected_model: chosen ? { provider: chosen.provider, model: chosen.model } : null, strategy: "deterministic_health_utility", ranking, abstention_reason: chosen ? null : "no eligible model candidate", selection_confidence: selectionConfidence, min_selection_confidence: minimumConfidence };
   }
 
   async invoke(
@@ -2211,6 +2223,7 @@ export class AutonomousRuntime {
       max_cost_per_million_tokens: plan.maxCostPerMillionTokens,
       max_latency_ms: plan.maxLatencyMs,
       min_quality: plan.minQuality,
+      min_selection_confidence: plan.minSelectionConfidence,
     });
     const excluded = new Set(excludedProviders.map((provider) => boundedIdentifier("excluded provider", provider, 128)));
     const candidates = plan.candidates.map((candidate) => {
@@ -2255,6 +2268,7 @@ export class AutonomousRuntime {
       max_cost_per_million_tokens: plan.maxCostPerMillionTokens ?? null,
       max_latency_ms: plan.maxLatencyMs ?? null,
       min_quality: plan.minQuality ?? null,
+      min_selection_confidence: plan.minSelectionConfidence ?? null,
       require_json: plan.request.requireJson === true,
       candidates,
       provider_health: providerHealth,
@@ -2290,11 +2304,12 @@ function selectorExplorationProjection(value: JsonObject): Pick<AutonomousSelect
   };
 }
 
-function validateSelectionConstraints(request: Pick<AutonomousSelectionRequest, "max_cost_per_million_tokens" | "max_latency_ms" | "min_quality">): void {
+function validateSelectionConstraints(request: Pick<AutonomousSelectionRequest, "max_cost_per_million_tokens" | "max_latency_ms" | "min_quality" | "min_selection_confidence">): void {
   const constraints: Array<[string, unknown, number]> = [
     ["max_cost_per_million_tokens", request.max_cost_per_million_tokens, 1_000_000_000],
     ["max_latency_ms", request.max_latency_ms, 10 * 60_000],
     ["min_quality", request.min_quality, 1],
+    ["min_selection_confidence", request.min_selection_confidence, 1],
   ];
   for (const [name, value, maximum] of constraints) {
     if (value === undefined || value === null) continue;
@@ -2302,6 +2317,16 @@ function validateSelectionConstraints(request: Pick<AutonomousSelectionRequest, 
       throw new ProviderRuntimeError(`autonomous selection ${name} is outside its bounds`);
     }
   }
+}
+
+/** Return normalized separation of the top eligible ranks, never answer correctness. */
+export function autonomousSelectionConfidence(ranking: readonly AutonomousModelRanking[]): number {
+  const eligible = ranking.filter((row) => row.eligible).sort((left, right) => right.score - left.score || left.provider.localeCompare(right.provider) || left.model.localeCompare(right.model));
+  if (eligible.length === 0) return 0;
+  if (eligible.length === 1) return 1;
+  const top = eligible[0] as AutonomousModelRanking;
+  const runnerUp = eligible[1] as AutonomousModelRanking;
+  return Math.max(0, Math.min(1, (top.score - runnerUp.score) / (1 + Math.abs(top.score) + Math.abs(runnerUp.score))));
 }
 
 function validateSelectionOutputRequirements(request: Pick<AutonomousSelectionRequest, "require_json">): void {

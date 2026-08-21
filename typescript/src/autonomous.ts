@@ -23,6 +23,7 @@ import {
   LLMRuntime,
   providerModelsToCandidates,
   rankAutonomousModels,
+  autonomousSelectionConfidence,
   type AutonomousModelCandidateDefaults,
   type ProviderModelDiscovery,
 } from "./llm.js";
@@ -470,6 +471,7 @@ export interface AutonomousProviderPlanningOptions {
   maxCostPerMillionTokens?: number;
   maxLatencyMs?: number;
   minQuality?: number;
+  minSelectionConfidence?: number;
   approveProviderCall?: boolean;
   runId?: string;
   temperature?: number;
@@ -514,6 +516,8 @@ export interface AutonomousRunOptions {
   maxLatencyMs?: number;
   /** Refuse candidates below this caller-owned quality prior. */
   minQuality?: number;
+  /** Abstain when eligible model ranking separation is below this normalized floor. */
+  minSelectionConfidence?: number;
   /** Aggregate estimated spend ceiling shared by nested provider calls in this run. */
   maxTotalCostUnits?: number;
   /** Share a caller-owned aggregate budget across fan-out, synthesis, retries, or cycles. */
@@ -1088,6 +1092,7 @@ async function prepareProviderPlanning(
       maxCostPerMillionTokens: options.maxCostPerMillionTokens,
       maxLatencyMs: options.maxLatencyMs,
       minQuality: options.minQuality,
+      minSelectionConfidence: options.minSelectionConfidence,
       candidates: options.candidates ?? [],
       request,
     },
@@ -1424,6 +1429,7 @@ function validateOnlineSelectionConstraints(request: AutonomousSelectionRequest)
     ["max_cost_per_million_tokens", request.max_cost_per_million_tokens, 1_000_000_000],
     ["max_latency_ms", request.max_latency_ms, 10 * 60_000],
     ["min_quality", request.min_quality, 1],
+    ["min_selection_confidence", request.min_selection_confidence, 1],
   ];
   for (const [name, value, maximum] of constraints) {
     if (value === undefined || value === null) continue;
@@ -1629,11 +1635,18 @@ export class AutonomousOnlineLearner {
       ...disabledRanking,
       ...canonicalRanking.filter((row) => !row.eligible),
     ];
+    const selectionConfidence = autonomousSelectionConfidence(
+      scoredEligible.map((row) => ({ provider: row.candidate.provider, model: row.candidate.model, score: Number(row.score.toFixed(12)), eligible: true, reasons: [] })),
+    );
     if (!selected) {
       const reasons = ranking.flatMap((row) => row.reasons).join("; ");
-      return { selected_model: null, strategy: "caller_selector", ranking, abstention_reason: `online learner found no eligible candidate${reasons ? `: ${reasons}` : ""}`, exploration_draw: explorationDraw, exploration_taken: false };
+      return { selected_model: null, strategy: "caller_selector", ranking, abstention_reason: `online learner found no eligible candidate${reasons ? `: ${reasons}` : ""}`, selection_confidence: selectionConfidence, min_selection_confidence: request.min_selection_confidence ?? null, exploration_draw: explorationDraw, exploration_taken: false };
     }
-    return { selected_model: { provider: selected.candidate.provider, model: selected.candidate.model }, strategy: "caller_selector", ranking, abstention_reason: null, exploration_draw: explorationDraw, exploration_taken: explorationTaken || this.policy.strategy === "thompson_sampling" };
+    const minimumConfidence = request.min_selection_confidence ?? null;
+    if (minimumConfidence !== null && selectionConfidence < minimumConfidence) {
+      return { selected_model: null, strategy: "caller_selector", ranking, abstention_reason: `selection confidence ${selectionConfidence.toFixed(6)} is below caller floor ${minimumConfidence.toFixed(6)}`, selection_confidence: selectionConfidence, min_selection_confidence: minimumConfidence, exploration_draw: explorationDraw, exploration_taken: false };
+    }
+    return { selected_model: { provider: selected.candidate.provider, model: selected.candidate.model }, strategy: "caller_selector", ranking, abstention_reason: null, selection_confidence: selectionConfidence, min_selection_confidence: minimumConfidence, exploration_draw: explorationDraw, exploration_taken: explorationTaken || this.policy.strategy === "thompson_sampling" };
   }
 
   /** Apply an explicit evaluator reward. Provider success alone is not treated as task quality. */
@@ -1752,6 +1765,7 @@ export function contextualSelector(client: ApiClient, options: { requestOptions?
       max_cost_per_million_tokens: request.max_cost_per_million_tokens ?? null,
       max_latency_ms: request.max_latency_ms ?? null,
       min_quality: request.min_quality ?? null,
+      min_selection_confidence: request.min_selection_confidence ?? null,
       models,
       provider_health: Object.fromEntries(Object.entries(request.provider_health).map(([provider, health]) => [provider, { registered: true, circuit: health.circuit, credential_ready: health.credential_ready, eligible: health.eligible, attempts: health.attempts, successes: health.successes, failures: health.failures, success_rate: health.success_rate, mean_latency_ms: health.mean_latency_ms }] as [string, BrainProviderHealth])),
       model_health: Object.fromEntries(Object.entries(request.model_health).map(([arm, health]) => [arm, { attempts: health.attempts, successes: health.successes, failures: health.failures, success_rate: health.success_rate, mean_latency_ms: health.mean_latency_ms, last_latency_ms: health.last_latency_ms, circuit: health.circuit }])),
@@ -1771,6 +1785,8 @@ export function contextualSelector(client: ApiClient, options: { requestOptions?
       strategy: "caller_selector",
       ranking: [],
       abstention_reason: selected ? null : matches.length > 1 ? "contextual selector returned an ambiguous model id" : selection.selection_status || "contextual selector abstained",
+      selection_confidence: typeof selection.selection_confidence === "number" ? selection.selection_confidence : undefined,
+      min_selection_confidence: typeof selection.min_selection_confidence === "number" ? selection.min_selection_confidence : request.min_selection_confidence ?? null,
     };
   };
 }
@@ -2236,7 +2252,7 @@ export class AutonomousAgent {
       tools: tools.length ? tools : undefined,
       toolChoice: tools.length ? "auto" : undefined,
     };
-    const executionPlan = { task: taskText, domain: blueprint.domain_profile.domain, capability: options.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class, taskFamily: blueprint.selection_context.task_family ?? undefined, learningContextDigest: blueprint.learning_context_digest, requiredCapabilities, maxCostPerMillionTokens: options.maxCostPerMillionTokens, maxLatencyMs: options.maxLatencyMs, minQuality: options.minQuality, candidates, request };
+    const executionPlan = { task: taskText, domain: blueprint.domain_profile.domain, capability: options.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class, taskFamily: blueprint.selection_context.task_family ?? undefined, learningContextDigest: blueprint.learning_context_digest, requiredCapabilities, maxCostPerMillionTokens: options.maxCostPerMillionTokens, maxLatencyMs: options.maxLatencyMs, minQuality: options.minQuality, minSelectionConfidence: options.minSelectionConfidence, candidates, request };
     const healthObserver = this.modelHealthController?.observer({ domain: blueprint.domain_profile.domain, capability: executionPlan.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class });
     const remoteHealthObserver = this.modelHealthBridge?.observer({ domain: blueprint.domain_profile.domain, capability: executionPlan.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class });
     const feedbackObserver = composeInvocationObservers(options.observer, healthObserver, remoteHealthObserver);
@@ -2312,6 +2328,7 @@ export class AutonomousAgent {
         maxCostPerMillionTokens: options.maxCostPerMillionTokens,
         maxLatencyMs: options.maxLatencyMs,
         minQuality: options.minQuality,
+        minSelectionConfidence: options.minSelectionConfidence,
         requireJson: options.requireJson,
         responseSchema: options.responseSchema,
         temperature: options.temperature,
@@ -2407,6 +2424,7 @@ export class AutonomousAgent {
       maxCostPerMillionTokens: options.maxCostPerMillionTokens,
       maxLatencyMs: options.maxLatencyMs,
       minQuality: options.minQuality,
+      minSelectionConfidence: options.minSelectionConfidence,
       requireJson: options.requireJson,
       responseSchema: options.responseSchema,
       temperature: options.temperature,

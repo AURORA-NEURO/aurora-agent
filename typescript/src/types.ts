@@ -161,6 +161,8 @@ export interface BrainModelSelectionArgs extends JsonObject {
   max_cost_per_million_tokens?: number | null;
   max_latency_ms?: number | null;
   min_quality?: number | null;
+  /** Optional normalized rank-separation floor; below it the kernel abstains. */
+  min_selection_confidence?: number | null;
   models: BrainModelDescriptor[];
   observations?: BrainModelObservation[];
   weights?: JsonObject;
@@ -184,6 +186,8 @@ export interface BrainModelSelectionResult extends JsonObject {
   selected_model: BrainModelDescriptor | null;
   selected_model_id: string | null;
   ranking: BrainModelCandidateScore[];
+  eligible_model_count?: number;
+  selection_confidence?: number;
   selection_status: string;
   decision_digest: string;
   does_not_claim: string[];

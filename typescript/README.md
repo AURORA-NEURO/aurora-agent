@@ -197,9 +197,12 @@ malformed output remain explicit refusals. Routing still requires `approveProvid
 never authorizes a tool, effect, or domain claim.
 
 Model selection accepts caller-owned hard gates through `maxCostPerMillionTokens`, `maxLatencyMs`,
-and `minQuality`. The same gates are enforced by local health-aware ranking, contextual
+`minQuality`, and the optional `minSelectionConfidence` rank-separation floor. The same gates are
+enforced by local health-aware ranking, contextual
 Rust/Python selection, and `AutonomousOnlineLearner` before a model can be chosen. Refused models
-remain explainable in the ranking; an empty eligible set fails closed before provider dispatch.
+remain explainable in the ranking; near-tied eligible models can now abstain with normalized
+selection-confidence evidence, and an empty eligible set fails closed before provider dispatch.
+Selection confidence is routing stability, not answer correctness.
 
 For aggregate control over a composed run, pass `maxTotalCostUnits` or create one
 `AutonomousCostBudget` and pass it through the composed boundary. The shared budget covers

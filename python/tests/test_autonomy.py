@@ -2159,6 +2159,33 @@ def test_supplied_bandit_state_changes_the_next_adaptive_model_choice():
         server.server_close()
 
 
+def test_selection_confidence_floor_is_forwarded_for_every_builtin_domain():
+    runtime, credentials, server, thread = _runtime()
+    brain = AutonomousBrain(_Workspace(), runtime)
+    handle = credentials.register("openai", "confidence-floor-secret")
+    try:
+        for domain in AUTONOMOUS_DOMAINS:
+            request = brain.build_adaptive_model_selection(
+                task=f"choose a model for {domain}",
+                model_candidates=_model(),
+                credentials={"openai": handle},
+                min_selection_confidence=0.35,
+            )
+            assert request["min_selection_confidence"] == 0.35
+            assert request["models"][0]["provider"] == "openai"  # type: ignore[index]
+        with pytest.raises(BrainRunError, match="min_selection_confidence"):
+            brain.build_adaptive_model_selection(
+                task="invalid confidence floor",
+                model_candidates=_model(),
+                credentials={"openai": handle},
+                min_selection_confidence=1.1,
+            )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
 def test_run_autonomous_tool_loop_learning_records_loop_metadata_only(tmp_path: Path):
     runtime, store, server, thread = _runtime()
     workspace = _Workspace()

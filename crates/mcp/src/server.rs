@@ -35772,7 +35772,7 @@ pub fn tool_definitions() -> Vec<Value> {
     let definitions = vec![
         json!({
             "name": "brain_model_select",
-            "description": "Select an available provider/model from explicit capability, context-window, quality, latency, cost, reliability, and caller-owned online-learning observations. Every rejected candidate remains visible. This tool accepts no API key, opens no network connection, and does not claim that a future model response will be correct.",
+            "description": "Select an available provider/model from explicit capability, context-window, quality, latency, cost, reliability, and caller-owned online-learning observations. An optional min_selection_confidence floor abstains on near-tied eligible ranks. Every rejected candidate remains visible, along with normalized rank-separation confidence. This tool accepts no API key, opens no network connection, and does not claim that a future model response will be correct.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -35783,6 +35783,7 @@ pub fn tool_definitions() -> Vec<Value> {
                     "max_cost_per_million_tokens": { "type": ["integer", "null"] },
                     "max_latency_ms": { "type": ["integer", "null"] },
                     "min_quality": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+                    "min_selection_confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "Optional normalized rank-separation floor; below it the selector abstains." },
                     "models": { "type": "array", "minItems": 1, "maxItems": 256 },
                     "observations": { "type": "array", "maxItems": 256 },
                     "weights": { "type": "object" },

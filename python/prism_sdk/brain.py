@@ -1519,6 +1519,26 @@ def build_model_selection_audit(selection: Mapping[str, Any]) -> dict[str, Any]:
     selection_status = selection.get("selection_status")
     if not isinstance(selection_status, str) or not selection_status.strip():
         selection_status = "selected" if selected is not None else "refused_no_eligible_model"
+    kernel_selection_confidence = selection.get("selection_confidence")
+    if kernel_selection_confidence is not None:
+        if (
+            isinstance(kernel_selection_confidence, bool)
+            or not isinstance(kernel_selection_confidence, (int, float))
+            or not math.isfinite(float(kernel_selection_confidence))
+            or not 0.0 <= float(kernel_selection_confidence) <= 1.0
+        ):
+            raise BrainRunError("model selection selection_confidence must be within [0, 1]")
+        kernel_selection_confidence = float(kernel_selection_confidence)
+    kernel_threshold = selection.get("min_selection_confidence")
+    if kernel_threshold is not None:
+        if (
+            isinstance(kernel_threshold, bool)
+            or not isinstance(kernel_threshold, (int, float))
+            or not math.isfinite(float(kernel_threshold))
+            or not 0.0 <= float(kernel_threshold) <= 1.0
+        ):
+            raise BrainRunError("model selection min_selection_confidence must be within [0, 1]")
+        kernel_threshold = float(kernel_threshold)
 
     audit_without_digest: dict[str, Any] = {
         "schema": MODEL_SELECTION_AUDIT_SCHEMA,
@@ -1547,6 +1567,8 @@ def build_model_selection_audit(selection: Mapping[str, Any]) -> dict[str, Any]:
             "score_margin": margin,
             "observation_coverage": observation_coverage,
             "routing_confidence": routing_confidence,
+            "kernel_selection_confidence": kernel_selection_confidence,
+            "kernel_selection_confidence_floor": kernel_threshold,
             "confidence_basis": "score_margin_and_observation_coverage_heuristic",
         },
         "does_not_claim": [
@@ -2476,6 +2498,7 @@ class AutonomousBrain:
         max_cost_per_million_tokens: int | None = None,
         max_latency_ms: int | None = None,
         min_quality: float | None = None,
+        min_selection_confidence: float | None = None,
         selection_overrides: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Build a live model-selection request from registered transports and learned state.
@@ -2514,6 +2537,13 @@ class AutonomousBrain:
             or not 0 <= min_quality <= 1
         ):
             raise BrainRunError("min_quality must be within [0, 1] or None")
+        if min_selection_confidence is not None and (
+            not isinstance(min_selection_confidence, (int, float))
+            or isinstance(min_selection_confidence, bool)
+            or not math.isfinite(float(min_selection_confidence))
+            or not 0.0 <= float(min_selection_confidence) <= 1.0
+        ):
+            raise BrainRunError("min_selection_confidence must be within [0, 1] or None")
         if ledger is not None and not isinstance(ledger, BrainLearningLedger):
             raise BrainRunError("ledger must be a BrainLearningLedger or None")
         if bandit_state is not None:
@@ -2809,6 +2839,8 @@ class AutonomousBrain:
             request["max_latency_ms"] = max_latency_ms
         if min_quality is not None:
             request["min_quality"] = min_quality
+        if min_selection_confidence is not None:
+            request["min_selection_confidence"] = float(min_selection_confidence)
         if context is not None:
             request["context"] = dict(context)
             request["contextual_observations"] = scoped_observations
@@ -2908,6 +2940,7 @@ class AutonomousBrain:
         max_cost_per_million_tokens: int | None = None,
         max_latency_ms: int | None = None,
         min_quality: float | None = None,
+        min_selection_confidence: float | None = None,
         selection_overrides: Mapping[str, Any] | None = None,
         approve_provider_call: bool = False,
         run_id: str | None = None,
@@ -2940,6 +2973,7 @@ class AutonomousBrain:
             max_cost_per_million_tokens=max_cost_per_million_tokens,
             max_latency_ms=max_latency_ms,
             min_quality=min_quality,
+            min_selection_confidence=min_selection_confidence,
             selection_overrides=selection_overrides,
         )
         effective_contextual_observations = (
