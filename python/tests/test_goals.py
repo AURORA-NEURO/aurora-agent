@@ -1,4 +1,5 @@
 import json
+import hashlib
 import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
@@ -159,9 +160,16 @@ def test_goal_execution_wrapper_completes_criteria_and_records_failures(tmp_path
             task="settle an evidence review",
             domain="evaluation",
             criterion_updates=[{"criterion_id": "evidence", "status": "satisfied", "evidence_digest": _digest("receipt")}],
+            settlement_metadata={
+                "learning_state_digest": _digest("bandit state"),
+                "progress_digest": _digest("evaluation progress"),
+            },
         )
         assert completed["goal_status"] == "completed"
         assert completed["goal"]["attempt"] == 2
+        assert completed["goal"]["evaluator_digest"] is not None
+        assert completed["goal"]["learning_state_digest"] == _digest("bandit state")
+        assert completed["goal"]["progress_digest"] == _digest("evaluation progress")
 
         orchestrator.run = lambda **_: (_ for _ in ()).throw(RuntimeError("synthetic provider failure"))
         with pytest.raises(RuntimeError, match="synthetic provider failure"):
@@ -172,6 +180,47 @@ def test_goal_execution_wrapper_completes_criteria_and_records_failures(tmp_path
                 domain="operations",
             )
         assert ledger.get("failed-goal").status == "failed"
+        assert ledger.verify_integrity()["ok"] is True
+
+
+def test_cross_domain_goal_execution_wrapper_persists_fanout_progress_without_payloads(tmp_path: Path) -> None:
+    orchestrator = object.__new__(AutonomousTaskOrchestrator)
+    orchestrator.run_cross_domain = lambda **_: SimpleNamespace(
+        status="approval_required",
+        child_results=(),
+        completed_children=0,
+        total_children=2,
+    )
+    subtasks = [{"domain": "coding", "task": "inspect"}, {"domain": "science", "task": "compare"}]
+    with AutonomousGoalLedger(str(tmp_path / "cross-domain-execution.sqlite3")) as ledger:
+        paused = orchestrator.run_cross_domain_goal_step(
+            goal_store=ledger,
+            goal_id="cross-domain-goal",
+            task="coordinate a bounded cross-domain review",
+            subtasks=subtasks,
+            goal_criteria=[{"criterion_id": "synthesis", "criterion_digest": _digest("synthesis")}],
+        )
+        assert paused["goal_status"] == "paused"
+        assert paused["goal"]["domain"] == "cross_domain"
+        assert paused["progress_digest"] is not None
+        serialized = json.dumps(ledger.list(domain="cross_domain", limit=1)[0].to_dict(), sort_keys=True)
+        assert "inspect" not in serialized
+        assert "compare" not in serialized
+
+        orchestrator.run_cross_domain = lambda **_: SimpleNamespace(
+            status="completed",
+            child_results=(SimpleNamespace(status="completed"),),
+            completed_children=2,
+            total_children=2,
+        )
+        completed = orchestrator.run_cross_domain_goal_step(
+            goal_store=ledger,
+            goal_id="cross-domain-goal",
+            task="coordinate a bounded cross-domain review",
+            subtasks=subtasks,
+            criterion_updates=[{"criterion_id": "synthesis", "status": "satisfied", "evidence_digest": _digest("synthesis receipt")}],
+        )
+        assert completed["goal_status"] == "completed"
         assert ledger.verify_integrity()["ok"] is True
 
 
@@ -187,7 +236,7 @@ def test_goal_digest_contract_matches_the_typescript_reference() -> None:
             max_attempts=2,
         )
     assert goal_task_digest("parity task") == "75c9dd12cec986f5aa50dcab2416229220e8c2b3e28283c550fb7fad9c8d9841"
-    assert record.state_digest == "3d90744da6795394cde9323d93c03b22fccef0de32810a4fdc8fd39f81b8496b"
+    assert record.state_digest == "553312b08e201b99e81f39761bec11ed2127a9b7873f8e07859d867cdd1912cc"
 
 
 def test_goal_ledger_detects_tampered_state_and_event(tmp_path: Path) -> None:
@@ -207,3 +256,25 @@ def test_goal_ledger_detects_tampered_state_and_event(tmp_path: Path) -> None:
     with AutonomousGoalLedger(str(path)) as ledger:
         with pytest.raises(AutonomousGoalError, match="hash chain"):
             ledger.verify_integrity()
+
+
+def test_goal_ledger_migrates_pre_settlement_value_only_state(tmp_path: Path) -> None:
+    path = tmp_path / "legacy-goals.sqlite3"
+    with AutonomousGoalLedger(str(path), clock=lambda: 10) as ledger:
+        record = ledger.create(goal_id="legacy", task_digest=_digest("legacy task"), domain="coding")
+        legacy = record.to_dict()
+        for field in ("outcome_digest", "evaluator_digest", "learning_state_digest", "progress_digest"):
+            legacy.pop(field, None)
+        legacy_payload = {key: value for key, value in legacy.items() if key not in {"state_digest", "retention", "secret_material"}}
+        legacy["state_digest"] = hashlib.sha256(
+            json.dumps(legacy_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+        ).hexdigest()
+        ledger._connection.execute(
+            "UPDATE autonomous_goals SET state_json = ?, state_digest = ? WHERE goal_id = ?",
+            (json.dumps(legacy, sort_keys=True), legacy["state_digest"], "legacy"),
+        )
+    with AutonomousGoalLedger(str(path)) as restored:
+        migrated = restored.get("legacy")
+        assert migrated is not None
+        assert migrated.outcome_digest is None
+        assert restored.verify_integrity()["ok"] is True

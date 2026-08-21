@@ -6904,6 +6904,7 @@ class AutonomousTaskOrchestrator:
         goal_criteria: Sequence[AutonomousGoalCriterion | Mapping[str, Any]] = (),
         goal_max_attempts: int = 8,
         criterion_updates: Sequence[Mapping[str, Any]] = (),
+        settlement_metadata: Mapping[str, Any] | None = None,
         run_options: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Run one bounded attempt while advancing a durable objective lifecycle.
@@ -6918,6 +6919,18 @@ class AutonomousTaskOrchestrator:
             raise BrainRunError("goal_store must be an AutonomousGoalLedger")
         if not isinstance(run_options, Mapping) and run_options is not None:
             raise BrainRunError("run_options must be a mapping or None")
+        if not isinstance(settlement_metadata, Mapping) and settlement_metadata is not None:
+            raise BrainRunError("settlement_metadata must be a mapping or None")
+        metadata = {} if settlement_metadata is None else dict(settlement_metadata)
+        unknown_metadata = sorted(set(metadata).difference({"evaluator_digest", "learning_state_digest", "progress_digest"}))
+        if unknown_metadata:
+            raise BrainRunError("unsupported goal settlement metadata: " + ", ".join(unknown_metadata))
+        for metadata_name, metadata_value in metadata.items():
+            if metadata_value is not None:
+                try:
+                    _route_digest(metadata_value, f"goal settlement {metadata_name}")
+                except BrainRunError as error:
+                    raise BrainRunError(f"goal settlement {metadata_name} must be a digest or None") from error
         options = {} if run_options is None else dict(run_options)
         if "task" in options or "domain" in options:
             raise BrainRunError("run_options cannot override goal task or domain")
@@ -6944,13 +6957,19 @@ class AutonomousTaskOrchestrator:
                 if risk_class is not None and current.risk_class != risk_class:
                     raise BrainRunError("goal risk_class does not match the requested risk class")
             if current.status in {"completed", "cancelled"}:
+                terminal_outcome_digest = content_digest(
+                    {"goal_id": current.goal_id, "attempt": current.attempt, "result_status": "terminal"}
+                )
                 return {
                     "schema": GOAL_STEP_SCHEMA,
                     "goal": current.to_dict(),
                     "result": None,
                     "result_status": "terminal",
                     "goal_status": current.status,
-                    "outcome_digest": content_digest({"goal_id": current.goal_id, "goal_state_digest": current.state_digest, "result_status": "terminal"}),
+                    "outcome_digest": terminal_outcome_digest,
+                    "evaluator_digest": current.evaluator_digest,
+                    "learning_state_digest": current.learning_state_digest,
+                    "progress_digest": current.progress_digest,
                     "retention": GOAL_RETENTION,
                     "secret_material": "never_returned",
                 }
@@ -6964,12 +6983,16 @@ class AutonomousTaskOrchestrator:
             result = self.run(task=task, domain=domain, **options)
         except Exception as error:
             try:
+                exception_status = f"exception:{type(error).__name__}"
                 goal_store.transition(
                     running.goal_id,
                     "failed",
                     expected_revision=running.revision,
                     blockers=(f"exception:{type(error).__name__}",),
                     next_action_digest=goal_task_digest("goal-retry"),
+                    outcome_digest=content_digest(
+                        {"goal_id": running.goal_id, "attempt": running.attempt, "result_status": exception_status}
+                    ),
                 )
             except AutonomousGoalError as transition_error:
                 raise BrainRunError("goal failure transition failed") from transition_error
@@ -6985,6 +7008,10 @@ class AutonomousTaskOrchestrator:
             result_status = "failed"
         else:
             result_status = result_status.strip()
+        outcome_digest = content_digest(
+            {"goal_id": running.goal_id, "attempt": running.attempt, "result_status": result_status}
+        )
+        evaluator_digest = metadata.get("evaluator_digest")
         settled = running
         try:
             if criterion_updates:
@@ -6993,16 +7020,31 @@ class AutonomousTaskOrchestrator:
                     criterion_updates,
                     expected_revision=running.revision,
                 )
+                if evaluator_digest is None:
+                    evaluator_digest = content_digest(
+                        {"criteria": [criterion.to_dict() for criterion in settled.criteria]}
+                    )
             target_status = goal_status_for_result(
                 result_status,
                 criteria_complete=settled.required_criteria_complete,
             )
+            transition_metadata = {
+                key: value
+                for key, value in (
+                    ("evaluator_digest", evaluator_digest),
+                    ("learning_state_digest", metadata.get("learning_state_digest")),
+                    ("progress_digest", metadata.get("progress_digest")),
+                )
+                if value is not None
+            }
             updated = goal_store.transition(
                 settled.goal_id,
                 target_status,
                 expected_revision=settled.revision,
                 blockers=(() if target_status == "completed" else (f"result:{result_status}",)),
                 next_action_digest=(None if target_status == "completed" else goal_task_digest(f"goal-next:{result_status}")),
+                outcome_digest=outcome_digest,
+                **transition_metadata,
             )
         except AutonomousGoalError as error:
             try:
@@ -7012,6 +7054,7 @@ class AutonomousTaskOrchestrator:
                     expected_revision=settled.revision,
                     blockers=(f"settlement:{type(error).__name__}",),
                     next_action_digest=goal_task_digest("goal-settlement-review"),
+                    outcome_digest=outcome_digest,
                 )
             except AutonomousGoalError as transition_error:
                 raise BrainRunError("goal lifecycle settlement failed and could not be checkpointed") from transition_error
@@ -7022,7 +7065,197 @@ class AutonomousTaskOrchestrator:
             "result": result,
             "result_status": result_status,
             "goal_status": updated.status,
-            "outcome_digest": content_digest({"goal_id": updated.goal_id, "goal_state_digest": updated.state_digest, "result_status": result_status}),
+            "outcome_digest": outcome_digest,
+            "evaluator_digest": updated.evaluator_digest,
+            "learning_state_digest": updated.learning_state_digest,
+            "progress_digest": updated.progress_digest,
+            "retention": GOAL_RETENTION,
+            "secret_material": "never_returned",
+        }
+
+    def run_cross_domain_goal_step(
+        self,
+        *,
+        goal_store: AutonomousGoalLedger,
+        goal_id: str,
+        task: str,
+        subtasks: Sequence[Mapping[str, Any]],
+        goal_criteria: Sequence[AutonomousGoalCriterion | Mapping[str, Any]] = (),
+        goal_max_attempts: int = 8,
+        criterion_updates: Sequence[Mapping[str, Any]] = (),
+        settlement_metadata: Mapping[str, Any] | None = None,
+        run_options: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Run one bounded cross-domain fan-out/fan-in attempt under a durable goal."""
+
+        if not isinstance(goal_store, AutonomousGoalLedger):
+            raise BrainRunError("goal_store must be an AutonomousGoalLedger")
+        if not isinstance(subtasks, Sequence) or isinstance(subtasks, (str, bytes, bytearray)):
+            raise BrainRunError("cross-domain goal subtasks must be a sequence")
+        if not isinstance(run_options, Mapping) and run_options is not None:
+            raise BrainRunError("run_options must be a mapping or None")
+        if not isinstance(settlement_metadata, Mapping) and settlement_metadata is not None:
+            raise BrainRunError("settlement_metadata must be a mapping or None")
+        metadata = {} if settlement_metadata is None else dict(settlement_metadata)
+        unknown_metadata = sorted(set(metadata).difference({"evaluator_digest", "learning_state_digest", "progress_digest"}))
+        if unknown_metadata:
+            raise BrainRunError("unsupported goal settlement metadata: " + ", ".join(unknown_metadata))
+        for metadata_name, metadata_value in metadata.items():
+            if metadata_value is not None:
+                _route_digest(metadata_value, f"goal settlement {metadata_name}")
+        options = {} if run_options is None else dict(run_options)
+        if any(name in options for name in ("task", "subtasks", "domain")):
+            raise BrainRunError("run_options cannot override cross-domain goal task, subtasks, or domain")
+        try:
+            task_digest = goal_task_digest(task)
+            current = goal_store.get(goal_id)
+            capability = options.get("capability")
+            risk_class = options.get("risk_class")
+            if current is None:
+                current = goal_store.create(
+                    goal_id=goal_id,
+                    task_digest=task_digest,
+                    domain="cross_domain",
+                    capability=capability,
+                    risk_class=risk_class,
+                    criteria=goal_criteria,
+                    max_attempts=goal_max_attempts,
+                )
+            else:
+                if current.task_digest != task_digest or current.domain != "cross_domain":
+                    raise BrainRunError("cross-domain goal identity does not match the requested task")
+                if capability is not None and current.capability != capability:
+                    raise BrainRunError("goal capability does not match the requested capability")
+                if risk_class is not None and current.risk_class != risk_class:
+                    raise BrainRunError("goal risk_class does not match the requested risk class")
+            if current.status in {"completed", "cancelled"}:
+                terminal_outcome_digest = content_digest(
+                    {"goal_id": current.goal_id, "attempt": current.attempt, "result_status": "terminal"}
+                )
+                return {
+                    "schema": GOAL_STEP_SCHEMA,
+                    "goal": current.to_dict(),
+                    "result": None,
+                    "result_status": "terminal",
+                    "goal_status": current.status,
+                    "outcome_digest": terminal_outcome_digest,
+                    "evaluator_digest": current.evaluator_digest,
+                    "learning_state_digest": current.learning_state_digest,
+                    "progress_digest": current.progress_digest,
+                    "retention": GOAL_RETENTION,
+                    "secret_material": "never_returned",
+                }
+            if current.status in {"blocked", "failed"}:
+                current = goal_store.transition(current.goal_id, "ready", expected_revision=current.revision)
+            running = goal_store.transition(current.goal_id, "running", expected_revision=current.revision)
+        except AutonomousGoalError as error:
+            raise BrainRunError("cross-domain goal lifecycle admission failed") from error
+
+        try:
+            result = self.run_cross_domain(task=task, subtasks=subtasks, **options)
+        except Exception as error:
+            try:
+                exception_status = f"exception:{type(error).__name__}"
+                goal_store.transition(
+                    running.goal_id,
+                    "failed",
+                    expected_revision=running.revision,
+                    blockers=(exception_status,),
+                    next_action_digest=goal_task_digest("goal-retry"),
+                    outcome_digest=content_digest(
+                        {"goal_id": running.goal_id, "attempt": running.attempt, "result_status": exception_status}
+                    ),
+                )
+            except AutonomousGoalError as transition_error:
+                raise BrainRunError("cross-domain goal failure transition failed") from transition_error
+            raise
+
+        result_status = getattr(result, "status", None)
+        if (
+            not isinstance(result_status, str)
+            or not result_status.strip()
+            or "\x00" in result_status
+            or len(result_status.encode("utf-8")) > 128
+        ):
+            result_status = "failed"
+        else:
+            result_status = result_status.strip()
+        outcome_digest = content_digest(
+            {"goal_id": running.goal_id, "attempt": running.attempt, "result_status": result_status}
+        )
+        settled = running
+        evaluator_digest = metadata.get("evaluator_digest")
+        progress_digest = metadata.get("progress_digest")
+        if progress_digest is None:
+            child_statuses = tuple(
+                status
+                for child in getattr(result, "child_results", ())
+                if isinstance(status := getattr(child, "status", None), str)
+            )
+            progress_digest = content_digest(
+                {
+                    "result_status": result_status,
+                    "child_statuses": child_statuses,
+                    "completed_children": getattr(result, "completed_children", None),
+                    "total_children": getattr(result, "total_children", None),
+                }
+            )
+        try:
+            if criterion_updates:
+                settled = goal_store.update_criteria(
+                    running.goal_id,
+                    criterion_updates,
+                    expected_revision=running.revision,
+                )
+                if evaluator_digest is None:
+                    evaluator_digest = content_digest(
+                        {"criteria": [criterion.to_dict() for criterion in settled.criteria]}
+                    )
+            target_status = goal_status_for_result(
+                result_status,
+                criteria_complete=settled.required_criteria_complete,
+            )
+            transition_metadata = {
+                key: value
+                for key, value in (
+                    ("evaluator_digest", evaluator_digest),
+                    ("learning_state_digest", metadata.get("learning_state_digest")),
+                    ("progress_digest", progress_digest),
+                )
+                if value is not None
+            }
+            updated = goal_store.transition(
+                settled.goal_id,
+                target_status,
+                expected_revision=settled.revision,
+                blockers=(() if target_status == "completed" else (f"result:{result_status}",)),
+                next_action_digest=(None if target_status == "completed" else goal_task_digest(f"goal-next:{result_status}")),
+                outcome_digest=outcome_digest,
+                **transition_metadata,
+            )
+        except AutonomousGoalError as error:
+            try:
+                goal_store.transition(
+                    settled.goal_id,
+                    "blocked",
+                    expected_revision=settled.revision,
+                    blockers=(f"settlement:{type(error).__name__}",),
+                    next_action_digest=goal_task_digest("goal-settlement-review"),
+                    outcome_digest=outcome_digest,
+                )
+            except AutonomousGoalError as transition_error:
+                raise BrainRunError("cross-domain goal settlement failed and could not be checkpointed") from transition_error
+            raise BrainRunError("cross-domain goal settlement failed") from error
+        return {
+            "schema": GOAL_STEP_SCHEMA,
+            "goal": updated.to_dict(),
+            "result": result,
+            "result_status": result_status,
+            "goal_status": updated.status,
+            "outcome_digest": outcome_digest,
+            "evaluator_digest": updated.evaluator_digest,
+            "learning_state_digest": updated.learning_state_digest,
+            "progress_digest": updated.progress_digest,
             "retention": GOAL_RETENTION,
             "secret_material": "never_returned",
         }

@@ -1514,6 +1514,12 @@ unresolved required criterion remains paused. The returned `AutonomousGoalStepRe
 transient runtime result for the current process, while the ledger stores only value-only state and
 an outcome digest.
 
+`AutonomousAgent.runCrossDomainGoalStep(...)` provides the matching fan-out/fan-in adapter and
+labels the durable objective as `cross_domain`. Its goal record retains separate outcome,
+evaluator, learning-state, and progress digests; child prompts, specialist responses, synthesis
+payloads, and credentials remain transient. This lets application-owned evaluator and bandit
+settlement resume by digest without allowing provider completion to bypass required criteria.
+
 ### Restart-safe model health and offline replay
 
 `InMemoryAutonomousModelHealthStore` is the TypeScript reference ledger for the selection feedback

@@ -25,9 +25,13 @@ test("goal execution wrapper advances approval, completion, terminal replay, and
   agent.run = async () => ({ status: "completed" });
   const completed = await agent.runGoalStep(ledger, "wrapper-goal", "review a release", "coding", {
     criterionUpdates: [{ criterion_id: "reviewed", status: "satisfied", evidence_digest: goalTaskDigest("local receipt") }],
+    settlementMetadata: { learning_state_digest: goalTaskDigest("bandit state"), progress_digest: goalTaskDigest("evaluation progress") },
   });
   assert.equal(completed.goal_status, "completed");
   assert.equal(completed.goal.attempt, 2);
+  assert.ok(completed.goal.evaluator_digest);
+  assert.equal(completed.goal.learning_state_digest, goalTaskDigest("bandit state"));
+  assert.equal(completed.goal.progress_digest, goalTaskDigest("evaluation progress"));
   const terminal = await agent.runGoalStep(ledger, "wrapper-goal", "review a release", "coding");
   assert.equal(terminal.result, null);
   assert.equal(terminal.result_status, "terminal");
@@ -124,6 +128,30 @@ test("goal execution wrapper uses the same approval lifecycle across every built
   assert.equal(ledger.verifyIntegrity().ok, true);
 });
 
+test("cross-domain goal execution wrapper persists fan-out progress without payloads", async () => {
+  const agent = new AutonomousAgent(new LLMRuntime({ fetch: async () => { throw new Error("provider must not be reached"); } }));
+  const ledger = new InMemoryAutonomousGoalLedger();
+  const subtasks = [{ domain: "coding", task: "inspect" }, { domain: "science", task: "compare" }];
+  agent.runCrossDomain = async () => ({ status: "approval_required", child_runs: [], completed_children: 0, total_children: 2 });
+  const paused = await agent.runCrossDomainGoalStep(ledger, "cross-domain-goal", "coordinate a bounded cross-domain review", {
+    runOptions: { subtasks },
+    goalCriteria: [{ criterion_id: "synthesis", criterion_digest: goalTaskDigest("synthesis") }],
+  });
+  assert.equal(paused.goal_status, "paused");
+  assert.equal(paused.goal.domain, "cross_domain");
+  assert.ok(paused.progress_digest);
+  assert.equal(JSON.stringify(ledger.snapshot()).includes("inspect"), false);
+  assert.equal(JSON.stringify(ledger.snapshot()).includes("compare"), false);
+
+  agent.runCrossDomain = async () => ({ status: "completed", child_runs: [{ result: { status: "completed" } }], completed_children: 2, total_children: 2 });
+  const completed = await agent.runCrossDomainGoalStep(ledger, "cross-domain-goal", "coordinate a bounded cross-domain review", {
+    runOptions: { subtasks },
+    criterionUpdates: [{ criterion_id: "synthesis", status: "satisfied", evidence_digest: goalTaskDigest("synthesis receipt") }],
+  });
+  assert.equal(completed.goal_status, "completed");
+  assert.equal(ledger.verifyIntegrity().ok, true);
+});
+
 test("goal digest and state identity match the Python reference contract", () => {
   const ledger = new InMemoryAutonomousGoalLedger({ clock: () => 100 });
   const record = ledger.create({
@@ -136,5 +164,5 @@ test("goal digest and state identity match the Python reference contract", () =>
     max_attempts: 2,
   });
   assert.equal(goalTaskDigest("parity task"), "75c9dd12cec986f5aa50dcab2416229220e8c2b3e28283c550fb7fad9c8d9841");
-  assert.equal(record.state_digest, "3d90744da6795394cde9323d93c03b22fccef0de32810a4fdc8fd39f81b8496b");
+  assert.equal(record.state_digest, "553312b08e201b99e81f39761bec11ed2127a9b7873f8e07859d867cdd1912cc");
 });

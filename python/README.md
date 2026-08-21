@@ -59,6 +59,8 @@ every built-in domain without retaining goal text or provider payloads.
 `AutonomousTaskOrchestrator.run_goal_step(...)` wires one bounded objective attempt into the normal
 route, planning, model-selection, provider, evaluator, and approval lifecycle, returning raw
 runtime output only transiently and persisting a value-only settlement.
+`run_cross_domain_goal_step(...)` applies the same contract to specialist fan-out and synthesis,
+retaining only outcome, evaluator, learning-state, and progress digests.
 `run_adaptive_mission_learning_cycle()` combines recall, evaluator reward, bandit state updates,
 and bounded pre-dispatch replanning without retaining provider text, tool arguments, or secrets.
 `BrainJobStore` adds resolver-backed leases and checkpoints for restart-safe learning jobs, while

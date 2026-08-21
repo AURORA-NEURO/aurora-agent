@@ -1925,6 +1925,12 @@ criterion updates at settlement; a runtime `completed` result remains `paused` u
 criteria are satisfied or waived. The returned provider result is transient, while the persisted
 projection contains only the goal record and an outcome digest.
 
+`AutonomousTaskOrchestrator.run_cross_domain_goal_step(...)` applies the same lifecycle to a
+bounded fan-out/fan-in execution. The durable record is labeled `cross_domain`, while child task
+text and specialist/synthesis outputs remain caller-owned and transient. The record can carry
+separate outcome, evaluator, learning-state, and progress digests, allowing an evaluator or bandit
+controller to be reconciled after restart without treating provider success as task quality.
+
 ## Resumable learning jobs
 
 For work that must survive a worker restart, `BrainJobStore` adds a separate orchestration journal.

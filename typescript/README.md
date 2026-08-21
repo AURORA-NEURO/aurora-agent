@@ -615,6 +615,8 @@ are never retained.
 `AutonomousAgent.runGoalStep(...)` connects one bounded objective attempt to the routed planning and
 provider runtime, turns approval/partial/failure/completion outcomes into resumable goal state, and
 keeps the runtime result transient while persisting only a value-only outcome digest.
+`runCrossDomainGoalStep(...)` applies the same lifecycle to specialist fan-out and synthesis and
+retains only outcome, evaluator, learning-state, and progress digests.
 
 `InMemoryAutonomousModelHealthStore` adds the restart-safe selection feedback plane. It records
 separate value-only invocation and evaluator-quality observations, aggregates success/failure,

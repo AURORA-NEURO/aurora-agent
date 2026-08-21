@@ -2,6 +2,8 @@ import { ArgumentError, isObject } from "./errors.js";
 import { canonicalJson, digestBytesSync, digestJsonSync } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
+/** Goal records retain only bounded lifecycle and settlement identities; execution payloads remain transient. */
+
 export const AUTONOMOUS_GOAL_SCHEMA = "bioprism-autonomous-goal/0.1" as const;
 export const AUTONOMOUS_GOAL_EVENT_SCHEMA = "bioprism-autonomous-goal-event/0.1" as const;
 export const AUTONOMOUS_GOAL_STEP_SCHEMA = "bioprism-autonomous-goal-step/0.1" as const;
@@ -61,11 +63,22 @@ export interface AutonomousGoalRecord extends JsonObject {
   criteria: AutonomousGoalCriterion[];
   blockers: string[];
   next_action_digest: string | null;
+  outcome_digest: string | null;
+  evaluator_digest: string | null;
+  learning_state_digest: string | null;
+  progress_digest: string | null;
   created_ns: number;
   updated_ns: number;
   state_digest: string;
   retention: typeof AUTONOMOUS_GOAL_RETENTION;
   secret_material: "never_returned";
+}
+
+/** Caller/evaluator-owned digest identities that may be attached to a goal settlement. */
+export interface AutonomousGoalSettlementMetadata extends JsonObject {
+  evaluator_digest?: string | null;
+  learning_state_digest?: string | null;
+  progress_digest?: string | null;
 }
 
 export interface AutonomousGoalEvent extends JsonObject {
@@ -177,6 +190,10 @@ type AutonomousGoalCore = {
   criteria: AutonomousGoalCriterion[];
   blockers: string[];
   next_action_digest: string | null;
+  outcome_digest: string | null;
+  evaluator_digest: string | null;
+  learning_state_digest: string | null;
+  progress_digest: string | null;
   created_ns: number;
   updated_ns: number;
 };
@@ -198,6 +215,10 @@ function buildRecord(fields: {
   criteria: unknown;
   blockers: unknown;
   next_action_digest?: string | null;
+  outcome_digest?: string | null;
+  evaluator_digest?: string | null;
+  learning_state_digest?: string | null;
+  progress_digest?: string | null;
   created_ns: number;
   updated_ns: number;
 }): AutonomousGoalRecord {
@@ -222,6 +243,10 @@ function buildRecord(fields: {
     criteria: normalizeCriteria(fields.criteria),
     blockers: normalizeBlockers(fields.blockers),
     next_action_digest: digest(fields.next_action_digest ?? null, "goal next_action_digest", true),
+    outcome_digest: digest(fields.outcome_digest ?? null, "goal outcome_digest", true),
+    evaluator_digest: digest(fields.evaluator_digest ?? null, "goal evaluator_digest", true),
+    learning_state_digest: digest(fields.learning_state_digest ?? null, "goal learning_state_digest", true),
+    progress_digest: digest(fields.progress_digest ?? null, "goal progress_digest", true),
     created_ns: created,
     updated_ns: updated,
   });
@@ -245,7 +270,12 @@ function verifyRecord(value: unknown): AutonomousGoalRecord {
   if (!isObject(value) || value.schema !== AUTONOMOUS_GOAL_SCHEMA) throw new ArgumentError("goal record has an invalid schema");
   if (value.retention !== AUTONOMOUS_GOAL_RETENTION || value.secret_material !== "never_returned") throw new ArgumentError("goal record retention contract is invalid");
   const record = buildRecord(value as unknown as Parameters<typeof buildRecord>[0]);
-  if (value.state_digest !== record.state_digest) throw new ArgumentError("goal state_digest does not match its content");
+  if (value.state_digest !== record.state_digest) {
+    const settlementFields = ["outcome_digest", "evaluator_digest", "learning_state_digest", "progress_digest"];
+    const { state_digest: _stateDigest, retention: _retention, secret_material: _secretMaterial, ...legacy } = record;
+    for (const field of settlementFields) delete legacy[field as keyof typeof legacy];
+    if (settlementFields.some((field) => field in value) || digestJsonSync(legacy) !== value.state_digest) throw new ArgumentError("goal state_digest does not match its content");
+  }
   return { ...record, retention: AUTONOMOUS_GOAL_RETENTION, secret_material: "never_returned" };
 }
 
@@ -290,7 +320,7 @@ export class InMemoryAutonomousGoalLedger {
     return [...this.goals.values()].filter((goal) => (domain === undefined || goal.domain === domain) && (!statuses.size || statuses.has(goal.status))).sort((left, right) => right.updated_ns - left.updated_ns || left.goal_id.localeCompare(right.goal_id)).slice(0, limit).map(clone);
   }
 
-  transition(goalId: string, status: AutonomousGoalStatus, options: { expected_revision?: number; criterion_updates?: readonly JsonObject[]; blockers?: readonly string[]; next_action_digest?: string | null; now_ns?: number } = {}): AutonomousGoalRecord {
+  transition(goalId: string, status: AutonomousGoalStatus, options: { expected_revision?: number; criterion_updates?: readonly JsonObject[]; blockers?: readonly string[]; next_action_digest?: string | null; outcome_digest?: string | null; evaluator_digest?: string | null; learning_state_digest?: string | null; progress_digest?: string | null; now_ns?: number } = {}): AutonomousGoalRecord {
     const id = identifier(goalId, "goal_id");
     const current = this.goals.get(id);
     if (!current) throw new ArgumentError(`goal ${id} was not found`);
@@ -317,7 +347,7 @@ export class InMemoryAutonomousGoalLedger {
       if (attempt >= current.max_attempts) throw new ArgumentError("goal attempt budget is exhausted");
       attempt += 1;
     }
-    const updated = buildRecord({ goal_id: current.goal_id, task_digest: current.task_digest, domain: current.domain, capability: current.capability, risk_class: current.risk_class, status, attempt, max_attempts: current.max_attempts, revision: current.revision + 1, criteria, blockers: options.blockers ?? current.blockers, next_action_digest: options.next_action_digest === undefined ? current.next_action_digest : options.next_action_digest, created_ns: current.created_ns, updated_ns: options.now_ns ?? this.clock() });
+    const updated = buildRecord({ goal_id: current.goal_id, task_digest: current.task_digest, domain: current.domain, capability: current.capability, risk_class: current.risk_class, status, attempt, max_attempts: current.max_attempts, revision: current.revision + 1, criteria, blockers: options.blockers ?? current.blockers, next_action_digest: options.next_action_digest === undefined ? current.next_action_digest : options.next_action_digest, outcome_digest: options.outcome_digest === undefined ? current.outcome_digest : options.outcome_digest, evaluator_digest: options.evaluator_digest === undefined ? current.evaluator_digest : options.evaluator_digest, learning_state_digest: options.learning_state_digest === undefined ? current.learning_state_digest : options.learning_state_digest, progress_digest: options.progress_digest === undefined ? current.progress_digest : options.progress_digest, created_ns: current.created_ns, updated_ns: options.now_ns ?? this.clock() });
     this.goals.set(id, updated);
     this.append("transition", updated, updated.updated_ns);
     return clone(updated);

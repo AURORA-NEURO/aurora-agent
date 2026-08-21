@@ -639,6 +639,7 @@ export type {
   AutonomousGoalEvent,
   AutonomousGoalPersistence,
   AutonomousGoalRecord,
+  AutonomousGoalSettlementMetadata,
   AutonomousGoalSnapshot,
   AutonomousGoalStatus,
 } from "./autonomous-goals.js";

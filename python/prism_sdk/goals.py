@@ -7,8 +7,9 @@ process restarts without writing the original task, prompt, provider response, t
 credentials to the goal store.
 
 Goal text is accepted only transiently by :func:`goal_task_digest`.  All durable fields are
-identifiers, SHA-256 digests, bounded criterion state, and explicit lifecycle metadata.  The ledger
-is deliberately domain-neutral; domain packs and evaluators remain authoritative for meaning,
+identifiers, SHA-256 digests, bounded criterion state, and explicit lifecycle metadata, including
+separate outcome, evaluator, learning-state, and cross-domain progress identities. The ledger is
+deliberately domain-neutral; domain packs and evaluators remain authoritative for meaning,
 authorization, and completion evidence.
 """
 
@@ -46,6 +47,7 @@ GoalStatus = Literal[
     "cancelled",
 ]
 CriterionStatus = Literal["pending", "satisfied", "failed", "waived"]
+_UNSET = object()
 
 _GOAL_COMPLETED_RESULTS = frozenset({"completed", "completed_without_replan", "children_completed"})
 _GOAL_PAUSED_RESULTS = frozenset(
@@ -260,6 +262,10 @@ class AutonomousGoalRecord:
     criteria: tuple[AutonomousGoalCriterion, ...] = field(default_factory=tuple)
     blockers: tuple[str, ...] = field(default_factory=tuple)
     next_action_digest: str | None = None
+    outcome_digest: str | None = None
+    evaluator_digest: str | None = None
+    learning_state_digest: str | None = None
+    progress_digest: str | None = None
     created_ns: int = 0
     updated_ns: int = 0
     state_digest: str = field(init=False)
@@ -289,6 +295,12 @@ class AutonomousGoalRecord:
             "next_action_digest",
             _digest_value(self.next_action_digest, name="goal.next_action_digest", allow_none=True),
         )
+        for name in ("outcome_digest", "evaluator_digest", "learning_state_digest", "progress_digest"):
+            object.__setattr__(
+                self,
+                name,
+                _digest_value(getattr(self, name), name=f"goal.{name}", allow_none=True),
+            )
         if self.updated_ns < self.created_ns:
             raise AutonomousGoalError("goal.updated_ns cannot precede created_ns")
         object.__setattr__(self, "state_digest", _digest(self._state_payload()))
@@ -308,9 +320,21 @@ class AutonomousGoalRecord:
             "criteria": [criterion.to_dict() for criterion in self.criteria],
             "blockers": list(self.blockers),
             "next_action_digest": self.next_action_digest,
+            "outcome_digest": self.outcome_digest,
+            "evaluator_digest": self.evaluator_digest,
+            "learning_state_digest": self.learning_state_digest,
+            "progress_digest": self.progress_digest,
             "created_ns": self.created_ns,
             "updated_ns": self.updated_ns,
         }
+
+    def _legacy_state_payload(self) -> dict[str, Any]:
+        """Reconstruct the pre-settlement state payload for SQLite restart migration."""
+
+        payload = self._state_payload()
+        for key in ("outcome_digest", "evaluator_digest", "learning_state_digest", "progress_digest"):
+            payload.pop(key, None)
+        return payload
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "AutonomousGoalRecord":
@@ -331,12 +355,18 @@ class AutonomousGoalRecord:
             criteria=value.get("criteria", ()),
             blockers=value.get("blockers", ()),
             next_action_digest=value.get("next_action_digest"),
+            outcome_digest=value.get("outcome_digest"),
+            evaluator_digest=value.get("evaluator_digest"),
+            learning_state_digest=value.get("learning_state_digest"),
+            progress_digest=value.get("progress_digest"),
             created_ns=value.get("created_ns"),
             updated_ns=value.get("updated_ns"),
         )
         supplied = value.get("state_digest")
         if supplied != record.state_digest:
-            raise AutonomousGoalError("goal state_digest does not match its content")
+            legacy_fields = ("outcome_digest", "evaluator_digest", "learning_state_digest", "progress_digest")
+            if any(field_name in value for field_name in legacy_fields) or supplied != _digest(record._legacy_state_payload()):
+                raise AutonomousGoalError("goal state_digest does not match its content")
         return record
 
     def to_dict(self) -> dict[str, Any]:
@@ -524,6 +554,10 @@ class AutonomousGoalLedger:
         criterion_updates: Sequence[Mapping[str, Any]] = (),
         blockers: Sequence[str] = (),
         next_action_digest: str | None = None,
+        outcome_digest: str | None | object = _UNSET,
+        evaluator_digest: str | None | object = _UNSET,
+        learning_state_digest: str | None | object = _UNSET,
+        progress_digest: str | None | object = _UNSET,
         now_ns: int | None = None,
     ) -> AutonomousGoalRecord:
         current = self.get(goal_id)
@@ -567,6 +601,10 @@ class AutonomousGoalLedger:
             criteria=criteria,
             blockers=tuple(blockers),
             next_action_digest=next_action_digest,
+            outcome_digest=current.outcome_digest if outcome_digest is _UNSET else outcome_digest,
+            evaluator_digest=current.evaluator_digest if evaluator_digest is _UNSET else evaluator_digest,
+            learning_state_digest=current.learning_state_digest if learning_state_digest is _UNSET else learning_state_digest,
+            progress_digest=current.progress_digest if progress_digest is _UNSET else progress_digest,
             created_ns=current.created_ns,
             updated_ns=now,
         )
