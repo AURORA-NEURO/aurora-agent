@@ -440,6 +440,7 @@ export type {
 } from "./mission-replan.js";
 export {
   AUTONOMOUS_EVALUATION_SCHEMA,
+  AUTONOMOUS_EVALUATOR_MESH_SCHEMA,
   AUTONOMOUS_LEARNING_EPISODE_SCHEMA,
   AUTONOMOUS_LEARNING_MAX_STAGES,
   AUTONOMOUS_LEARNING_MAX_TRAJECTORY_STEPS,
@@ -448,6 +449,7 @@ export {
   AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA,
   AutonomousLearningPersistenceCoordinator,
   AutonomousLearningController,
+  AutonomousEvaluatorMesh,
   AutonomousWorkflowEvaluator,
   InMemoryAutonomousLearningEpisodeStore,
   InMemoryAutonomousLearningSettlementReceiptStore,
@@ -540,6 +542,9 @@ export type {
 } from "./autonomous-cycle.js";
 export type {
   AutonomousDomainEvaluatorProfile,
+  AutonomousEvaluatorMeshMember,
+  AutonomousEvaluatorMeshMemberProjection,
+  AutonomousEvaluatorMeshResult,
   AutonomousCrossDomainLearningSettlement,
   AutonomousEvaluatorRewardInput,
   AutonomousLearningEpisode,

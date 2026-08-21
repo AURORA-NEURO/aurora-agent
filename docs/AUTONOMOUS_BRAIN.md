@@ -2697,6 +2697,24 @@ be kept in caller-controlled storage and explicitly rehydrated after restart. Du
 should atomically create a receipt for a key and keep the receipt store alongside the learning and
 cycle journals, while private execution material remains in a separately access-controlled store.
 
+### Evidence integrity and independent evaluator mesh
+
+The TypeScript workflow evaluator derives its evidence identity from a canonical packet: stage
+identifiers are sorted, signal keys are normalized, and the blueprint's contextual learning
+identity is included as value-only metadata. If a caller supplies `evidence_digest`, it must equal
+the digest of that normalized packet. This makes evidence order-independent while refusing a
+tampered or stale digest before any learner update. The packet deliberately excludes task text,
+prompts, provider responses, credentials, tool arguments, and raw evaluator evidence.
+
+`AutonomousEvaluatorMesh` provides an optional independent-evaluator gate for deployments that need
+more than one quality signal. It requires two to eight evaluator members, calls each member against
+the completed run, and projects only evaluator id/version, reward, pass/fail, failure class, and
+feedback/evidence digests. The mesh accepts learning credit only when members agree on pass/fail and
+failure class and the reward spread is within the configured bound. Member exceptions, malformed
+outputs, and disagreement produce a value-only refusal status; they never silently become bandit
+credit and never retain the underlying error or provider result. Because the mesh is defined over
+the shared run contract, the same policy applies to all twelve built-in domains.
+
 ## Structured decisions and multi-step work
 
 `AutonomousBrain.run_mission(...)` is the bridge from a model response to the existing mission

@@ -26,6 +26,7 @@ export const AUTONOMOUS_LEARNING_EPISODE_SCHEMA = "bioprism-typescript-autonomou
 export const AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA = "bioprism-typescript-autonomous-learning-trajectory/0.1" as const;
 export const AUTONOMOUS_LEARNING_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-learning-snapshot/0.1" as const;
 export const AUTONOMOUS_LEARNING_SETTLEMENT_RECEIPT_SCHEMA = "bioprism-typescript-autonomous-learning-settlement-receipt/0.1" as const;
+export const AUTONOMOUS_EVALUATOR_MESH_SCHEMA = "bioprism-typescript-autonomous-evaluator-mesh/0.1" as const;
 export const AUTONOMOUS_LEARNING_MAX_STAGES = 64;
 export const AUTONOMOUS_LEARNING_MAX_TRAJECTORY_STEPS = 32;
 
@@ -210,6 +211,42 @@ export interface AutonomousEvaluatorRewardInput extends JsonObject {
   evidence_digest?: Digest | null;
 }
 
+export interface AutonomousEvaluatorMeshMember {
+  evaluator_id: string;
+  evaluator_version: string;
+  evaluate: (result: AutonomousRunResult) => AutonomousEvaluatorRewardInput | Promise<AutonomousEvaluatorRewardInput>;
+}
+
+export interface AutonomousEvaluatorMeshMemberProjection extends JsonObject {
+  evaluator_id: string;
+  evaluator_version: string;
+  reward: number | null;
+  passed: boolean | null;
+  failed: boolean | null;
+  feedback_digest: Digest | null;
+  evidence_digest: Digest | null;
+  failure_class: string | null;
+}
+
+export interface AutonomousEvaluatorMeshResult extends JsonObject {
+  schema: typeof AUTONOMOUS_EVALUATOR_MESH_SCHEMA;
+  status: "accepted" | "disagreement" | "member_error";
+  evaluator_id: string;
+  evaluator_version: string;
+  reward: number | null;
+  passed: boolean | null;
+  failed: boolean;
+  feedback_digest: Digest | null;
+  evidence_digest: Digest | null;
+  failure_class: string | null;
+  reward_spread: number | null;
+  max_reward_spread: number;
+  member_results: AutonomousEvaluatorMeshMemberProjection[];
+  mesh_digest: Digest;
+  retention: typeof PRIVATE_RETENTION;
+  secret_material: "never_returned";
+}
+
 export interface AutonomousLearningSettlement extends JsonObject {
   schema: typeof AUTONOMOUS_LEARNING_EPISODE_SCHEMA;
   episode: AutonomousLearningEpisode;
@@ -365,6 +402,125 @@ export async function builtinAutonomousDomainEvaluatorProfiles(): Promise<Autono
   });
 }
 
+function meshMemberProjection(member: AutonomousEvaluatorMeshMember, value: AutonomousEvaluatorRewardInput): AutonomousEvaluatorMeshMemberProjection {
+  assertRewardInput(value);
+  return {
+    evaluator_id: member.evaluator_id,
+    evaluator_version: member.evaluator_version,
+    reward: value.reward,
+    passed: value.passed,
+    failed: value.failed ?? !value.passed,
+    feedback_digest: value.feedback_digest ?? null,
+    evidence_digest: value.evidence_digest ?? null,
+    failure_class: value.failure_class ?? null,
+  };
+}
+
+/**
+ * Optional independent evaluator quorum for high-impact or ambiguous work. Disagreement is
+ * retained and refuses learning credit; it is never averaged into a plausible-looking reward.
+ */
+export class AutonomousEvaluatorMesh {
+  readonly members: readonly AutonomousEvaluatorMeshMember[];
+  readonly evaluatorId: string;
+  readonly evaluatorVersion: string;
+  readonly maxRewardSpread: number;
+
+  constructor(options: { members: readonly AutonomousEvaluatorMeshMember[]; evaluatorId?: string; evaluatorVersion?: string; maxRewardSpread?: number }) {
+    if (!isObject(options) || !Array.isArray(options.members) || options.members.length < 2 || options.members.length > 8) throw new ArgumentError("evaluator mesh requires between 2 and 8 independent members");
+    this.evaluatorId = boundedIdentifier("evaluator mesh evaluatorId", options.evaluatorId ?? "typescript-evaluator-mesh");
+    this.evaluatorVersion = boundedIdentifier("evaluator mesh evaluatorVersion", options.evaluatorVersion ?? "0.1");
+    this.maxRewardSpread = boundedReward("evaluator mesh maxRewardSpread", options.maxRewardSpread ?? 0.1);
+    const seen = new Set<string>();
+    this.members = options.members.map((member) => {
+      if (!isObject(member) || typeof member.evaluate !== "function") throw new ArgumentError("evaluator mesh member must provide an evaluate function");
+      const evaluatorId = boundedIdentifier("evaluator mesh member evaluator_id", member.evaluator_id);
+      const evaluatorVersion = boundedIdentifier("evaluator mesh member evaluator_version", member.evaluator_version);
+      if (seen.has(evaluatorId)) throw new ArgumentError(`evaluator mesh member ${evaluatorId} is duplicated`);
+      seen.add(evaluatorId);
+      return { evaluator_id: evaluatorId, evaluator_version: evaluatorVersion, evaluate: member.evaluate as AutonomousEvaluatorMeshMember["evaluate"] };
+    });
+  }
+
+  async evaluateDetailed(result: AutonomousRunResult): Promise<AutonomousEvaluatorMeshResult> {
+    if (!isObject(result)) throw new ArgumentError("evaluator mesh requires an autonomous run result");
+    const outcomes = await Promise.allSettled(this.members.map((member) => member.evaluate(result)));
+    const memberResults: AutonomousEvaluatorMeshMemberProjection[] = outcomes.map((outcome, index) => {
+      const member = this.members[index]!;
+      if (outcome.status === "rejected") return { evaluator_id: member.evaluator_id, evaluator_version: member.evaluator_version, reward: null, passed: null, failed: true, feedback_digest: null, evidence_digest: null, failure_class: "evaluator_member_error" };
+      try {
+        return meshMemberProjection(member, outcome.value);
+      } catch {
+        return { evaluator_id: member.evaluator_id, evaluator_version: member.evaluator_version, reward: null, passed: null, failed: true, feedback_digest: null, evidence_digest: null, failure_class: "evaluator_member_invalid" };
+      }
+    });
+    const memberError = memberResults.some((member) => member.failure_class === "evaluator_member_error" || member.failure_class === "evaluator_member_invalid");
+    let status: AutonomousEvaluatorMeshResult["status"] = "accepted";
+    let reward: number | null = null;
+    let passed: boolean | null = null;
+    let failed = false;
+    let failureClass: string | null = null;
+    let rewardSpread: number | null = null;
+    let feedbackDigest: Digest | null = null;
+    let evidenceDigest: Digest | null = null;
+    if (memberError) {
+      status = "member_error";
+      failed = true;
+      failureClass = "evaluator_mesh_member_error";
+    } else {
+      const rewards = memberResults.map((member) => member.reward!);
+      rewardSpread = Number((Math.max(...rewards) - Math.min(...rewards)).toFixed(12));
+      const first = memberResults[0]!;
+      const agreement = memberResults.every((member) => member.passed === first.passed && member.failed === first.failed && member.failure_class === first.failure_class) && rewardSpread <= this.maxRewardSpread;
+      status = agreement ? "accepted" : "disagreement";
+      if (agreement) {
+        reward = Number((rewards.reduce((sum, value) => sum + value, 0) / rewards.length).toFixed(12));
+        passed = first.passed;
+        failed = first.failed ?? !first.passed;
+        failureClass = first.failure_class;
+      } else {
+        failed = true;
+        failureClass = "evaluator_disagreement";
+      }
+      feedbackDigest = await digestJson(memberResults.map((member) => ({ evaluator_id: member.evaluator_id, evaluator_version: member.evaluator_version, reward: member.reward, passed: member.passed, failed: member.failed, feedback_digest: member.feedback_digest, failure_class: member.failure_class })));
+      evidenceDigest = await digestJson(memberResults.map((member) => member.evidence_digest).sort());
+    }
+    const descriptor = {
+      schema: AUTONOMOUS_EVALUATOR_MESH_SCHEMA,
+      status,
+      evaluator_id: this.evaluatorId,
+      evaluator_version: this.evaluatorVersion,
+      reward,
+      passed,
+      failed,
+      feedback_digest: feedbackDigest,
+      evidence_digest: evidenceDigest,
+      failure_class: failureClass,
+      reward_spread: rewardSpread,
+      max_reward_spread: this.maxRewardSpread,
+      member_results: memberResults,
+      retention: PRIVATE_RETENTION,
+      secret_material: "never_returned" as const,
+    };
+    return { ...descriptor, mesh_digest: await digestJson(descriptor) };
+  }
+
+  async evaluate(result: AutonomousRunResult): Promise<AutonomousEvaluatorRewardInput> {
+    const mesh = await this.evaluateDetailed(result);
+    if (mesh.status !== "accepted" || mesh.reward === null || mesh.passed === null) throw new ArgumentError(`evaluator mesh refused learning credit: ${mesh.failure_class ?? mesh.status}`);
+    return {
+      evaluator_id: mesh.evaluator_id,
+      evaluator_version: mesh.evaluator_version,
+      reward: mesh.reward,
+      passed: mesh.passed,
+      failed: mesh.failed,
+      feedback_digest: mesh.feedback_digest,
+      evidence_digest: mesh.evidence_digest,
+      failure_class: mesh.failure_class,
+    };
+  }
+}
+
 /** Score only explicit evaluator signals; provider completion alone never creates reward. */
 export class AutonomousWorkflowEvaluator {
   readonly evaluatorVersion: string;
@@ -431,11 +587,15 @@ export class AutonomousWorkflowEvaluator {
     const evidenceDescriptor = {
       task_digest: blueprint.task_digest,
       workflow_digest: blueprint.workflow.workflow_digest,
+      context_digest: blueprint.learning_context_digest,
+      learning_context: { ...blueprint.selection_context },
       plan_digest: blueprint.plan.plan_digest,
-      stages: input.stages.map((stage) => ({ stage_id: stage.stage_id, signals: Object.fromEntries(Object.entries(stage.signals).sort(([left], [right]) => left.localeCompare(right))), evidence_digest: stage.evidence_digest ?? null })),
-      evidence_digest: input.evidence_digest ?? null,
+      stages: input.stages.map((stage) => ({ stage_id: stage.stage_id, signals: Object.fromEntries(Object.entries(stage.signals).sort(([left], [right]) => left.localeCompare(right))), evidence_digest: stage.evidence_digest ?? null })).sort((left, right) => left.stage_id.localeCompare(right.stage_id)),
+      evidence_digest: null,
     };
-    const evidenceDigest = input.evidence_digest ?? await digestJson(evidenceDescriptor);
+    const computedEvidenceDigest = await digestJson(evidenceDescriptor);
+    if (input.evidence_digest !== undefined && input.evidence_digest !== computedEvidenceDigest) throw new ArgumentError("workflow evaluator evidence_digest does not match the normalized evidence packet");
+    const evidenceDigest = computedEvidenceDigest;
     const descriptor = {
       schema: AUTONOMOUS_EVALUATION_SCHEMA,
       evaluator_id: this.evaluatorId ?? `typescript-${blueprint.domain_profile.domain}-workflow-evaluator`,
@@ -443,6 +603,8 @@ export class AutonomousWorkflowEvaluator {
       domain: blueprint.domain_profile.domain,
       task_digest: blueprint.task_digest,
       workflow_digest: blueprint.workflow.workflow_digest,
+      context_digest: blueprint.learning_context_digest,
+      learning_context: { ...blueprint.selection_context },
       plan_digest: blueprint.plan.plan_digest,
       execution_status: execution.status,
       stage_scores: stageScores,

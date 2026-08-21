@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   AutonomousAgent,
+  AutonomousEvaluatorMesh,
   AutonomousLearningController,
   AutonomousOnlineLearner,
   AutonomousWorkflowEvaluator,
@@ -118,6 +119,54 @@ test("the evaluator contract is executable for all twelve domain workflows", asy
     assert.equal(result.status, "passed", profile.domain);
     assert.equal(result.reward, 1, profile.domain);
   }
+});
+
+test("workflow evidence digests are canonical, order-independent, and tamper-bound", async () => {
+  const agent = await learningAgent();
+  const blueprint = (await agent.blueprint("Verify canonical evaluator evidence.", { domain: "coding" })).blueprint;
+  const evaluator = new AutonomousWorkflowEvaluator();
+  const execution = completeExecution(blueprint);
+  const stages = perfectEvidence(blueprint);
+  const first = await evaluator.evaluate(execution, { stages });
+  const reordered = await evaluator.evaluate(execution, { stages: [...stages].reverse(), evidence_digest: first.evidence_digest });
+  assert.equal(reordered.evidence_digest, first.evidence_digest);
+  assert.equal(reordered.context_digest, blueprint.learning_context_digest);
+  assert.ok(reordered.learning_context);
+  await assert.rejects(() => evaluator.evaluate(execution, { stages, evidence_digest: "a".repeat(64) }), /does not match the normalized evidence packet/);
+});
+
+test("independent evaluator mesh accepts agreement and refuses disagreement for every domain", async () => {
+  const agent = await learningAgent();
+  const members = [
+    { evaluator_id: "mesh-reviewer-a", evaluator_version: "1", evaluate: async () => ({ evaluator_id: "mesh-reviewer-a", evaluator_version: "1", reward: 0.9, passed: true, evidence_digest: "a".repeat(64) }) },
+    { evaluator_id: "mesh-reviewer-b", evaluator_version: "1", evaluate: async () => ({ evaluator_id: "mesh-reviewer-b", evaluator_version: "1", reward: 0.86, passed: true, evidence_digest: "b".repeat(64) }) },
+  ];
+  const mesh = new AutonomousEvaluatorMesh({ members, maxRewardSpread: 0.1 });
+  const profiles = await builtinAutonomousDomainProfiles();
+  for (const profile of profiles) {
+    const blueprint = (await agent.blueprint(`Evaluate ${profile.domain} with independent reviewers.`, { domain: profile.domain })).blueprint;
+    const detailed = await mesh.evaluateDetailed({ ...completeExecution(blueprint), response: { role: "assistant", content: "private output" } });
+    assert.equal(detailed.status, "accepted", profile.domain);
+    assert.equal(detailed.reward, 0.88, profile.domain);
+    assert.equal(detailed.member_results.length, 2, profile.domain);
+    assert.equal(JSON.stringify(detailed).includes("private output"), false);
+    const reward = await mesh.evaluate(completeExecution(blueprint));
+    assert.equal(reward.reward, 0.88, profile.domain);
+    assert.equal(reward.passed, true, profile.domain);
+  }
+  const disagreement = new AutonomousEvaluatorMesh({ members: [
+    members[0],
+    { evaluator_id: "mesh-reviewer-c", evaluator_version: "1", evaluate: async () => ({ evaluator_id: "mesh-reviewer-c", evaluator_version: "1", reward: 0.2, passed: false, failed: true, failure_class: "quality_gate", evidence_digest: "c".repeat(64) }) },
+  ] });
+  const blueprint = (await agent.blueprint("Test evaluator disagreement.", { domain: "coding" })).blueprint;
+  const refused = await disagreement.evaluateDetailed(completeExecution(blueprint));
+  assert.equal(refused.status, "disagreement");
+  assert.equal(refused.reward, null);
+  await assert.rejects(() => disagreement.evaluate(completeExecution(blueprint)), /refused learning credit/);
+  const memberError = new AutonomousEvaluatorMesh({ members: [members[0], { evaluator_id: "mesh-error", evaluator_version: "1", evaluate: async () => { throw new Error("private evaluator transport detail"); } }] });
+  const errored = await memberError.evaluateDetailed(completeExecution(blueprint));
+  assert.equal(errored.status, "member_error");
+  assert.equal(JSON.stringify(errored).includes("private evaluator transport detail"), false);
 });
 
 test("learning episodes rehydrate by digest and settle through the local bandit", async () => {

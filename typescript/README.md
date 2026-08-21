@@ -529,6 +529,20 @@ prompts, responses, credentials, tool arguments, raw results, and other private 
 the cross-domain result itself is never persisted in a trajectory receipt and must be rehydrated by
 the caller.
 
+Workflow evaluation also verifies evidence identity instead of trusting a caller-provided digest.
+Stage identifiers and signal keys are normalized into an order-independent evidence packet, hashed
+with SHA-256, and compared with any supplied `evidence_digest`; a mismatch refuses evaluation before
+learning credit can be produced. The packet includes the blueprint's contextual learning identity,
+but never includes task text, prompts, responses, credentials, or raw provider evidence.
+
+For higher-assurance deployments, `AutonomousEvaluatorMesh` runs two through eight independent
+evaluator members and returns only value-level member projections. Learning credit is accepted only
+when members agree on pass/fail and failure class and their rewards stay within the configured
+spread bound. A disagreement, invalid member result, or member exception returns a refusal status
+and cannot become bandit credit; evaluator errors are represented only by bounded error classes and
+digests. The same mesh can evaluate any of the twelve built-in domain workflows because it consumes
+the shared `AutonomousRunResult` contract rather than domain-specific private payloads.
+
 Ambiguous tasks now have a real fan-out/fan-in path. `blueprint()` returns a
 `cross_domain_blueprint` containing one child workflow per selected domain plus a cross-domain
 synthesis workflow. `runCrossDomain()` executes those children under the same provider approval,
