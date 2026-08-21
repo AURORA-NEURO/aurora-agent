@@ -264,6 +264,28 @@ the same redacted onboarding state, while `agent.start_credential_session()` cre
 request-scoped handle group. The application sends the entered value directly to
 `session.collect_user_credential()` over its protected input boundary; no generic brain or MCP endpoint
 accepts the raw key.
+
+The TypeScript façade exposes the same onboarding idea through a domain-wide readiness audit:
+
+```typescript
+const report = await agent.readiness();
+// twelve domain rows, model/provider gates, tool coverage, learning contexts, and next actions
+```
+
+`AutonomousAgent.readiness()` is provider-free and tool-free. It reads only caller-registered
+provider metadata, in-memory opaque credential status, registered model declarations, persisted
+health projections, and the optional live tool catalogue; it never calls a model-discovery
+endpoint, sends a prompt, executes a tool, or returns a key. The report uses the shared
+`bioprism-autonomous-agent-readiness/0.1` schema and emits one row for each of coding, browser,
+data, science, biomedical, neuroscience, operations, enterprise, multi-agent, multimodal,
+cross-domain, and evaluation. Each row includes required model capabilities, compatible and
+eligible counts, missing tool names, a digest of the normalized learning context, and next
+actions. `ready_for_caller_approval` means local gates pass; it does not authorize provider
+invocation or external effects. Passing `candidates: []` is supported so an onboarding screen can
+report `model_catalogue_required` before any model is configured. The report also distinguishes
+provider registration, credential collection, capacity/capability gaps, and mixed `partial`
+states instead of collapsing them into a misleading boolean.
+
 If `learn=True` is supplied, the same
 facade runs the explicit evaluator and caller-owned bandit state through the existing online
 learning path; it does not turn a provider response into a reward automatically. An application

@@ -7,6 +7,7 @@ import {
   AutonomousDomainToolRegistry,
   AutonomousDomainToolRuntime,
   AutonomousOnlineLearner,
+  AUTONOMOUS_READINESS_SCHEMA,
   CredentialStore,
   LLMRuntime,
   ToolCatalogue,
@@ -848,4 +849,101 @@ test("contextual selector abstains on an ambiguous model-only id without dispatc
   agent.registerModel(candidate("provider-b", "shared-model"));
   await assert.rejects(agent.run("Implement this code change", { domain: "coding", approveProviderCall: true }), /ambiguous model id/);
   assert.equal(calls, 0);
+});
+
+test("keyless readiness audits every built-in domain without contacting providers", async () => {
+  let fetchCalls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      fetchCalls += 1;
+      throw new Error("readiness must not contact providers");
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("local", "https://local.invalid", { requiresCredential: false }));
+  const profiles = await builtinAutonomousDomainProfiles();
+  const capabilities = [...new Set(profiles.flatMap((profile) => profile.required_model_capabilities))];
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel(candidate("local", "ready-model", capabilities));
+
+  const report = await agent.readiness();
+
+  assert.equal(report.schema, AUTONOMOUS_READINESS_SCHEMA);
+  assert.equal(report.domains.length, 12);
+  assert.equal(new Set(report.domains.map((row) => row.domain)).size, 12);
+  assert.ok(report.domains.every((row) => row.state === "ready_for_caller_approval"));
+  assert.equal(report.readiness_state, "ready_for_caller_approval");
+  assert.deepEqual(report.models[0].compatible_domains, profiles.map((profile) => profile.domain));
+  assert.deepEqual(report.models[0].eligible_domains, profiles.map((profile) => profile.domain));
+  assert.equal(report.learning.configured, false);
+  assert.equal(report.tooling.configured, false);
+  assert.equal(report.execution, "not_started; no_provider_or_tool_calls");
+  assert.equal(report.secret_material, "never_returned");
+  assert.match(report.readiness_digest, /^[0-9a-f]{64}$/);
+  assert.match(JSON.stringify(report), /attach AutonomousOnlineLearner/);
+  assert.doesNotMatch(JSON.stringify(report), /api_key|Bearer|sk-|test-secret/i);
+  assert.equal(fetchCalls, 0);
+});
+
+test("readiness exposes model, provider, and credential gates as actionable states", async () => {
+  let fetchCalls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      fetchCalls += 1;
+      throw new Error("readiness must not contact providers");
+    },
+  });
+  const profiles = await builtinAutonomousDomainProfiles();
+  const capabilities = [...new Set(profiles.flatMap((profile) => profile.required_model_capabilities))];
+
+  const empty = await new AutonomousAgent(llm).readiness({ candidates: [] });
+  assert.equal(empty.readiness_state, "model_catalogue_required");
+  assert.ok(empty.domains.every((row) => row.state === "model_catalogue_required"));
+  assert.equal(empty.models.length, 0);
+
+  const unregistered = new AutonomousAgent(llm);
+  unregistered.registerModel(candidate("unregistered", "model", capabilities));
+  const registrationReport = await unregistered.readiness();
+  assert.equal(registrationReport.readiness_state, "provider_registration_required");
+  assert.equal(registrationReport.models[0].provider_registered, false);
+  assert.equal(registrationReport.models[0].eligible_domains.length, 0);
+
+  llm.registerProvider(openaiCompatibleProvider("credentialed", "https://credentialed.invalid", { requiresCredential: true }));
+  const credentialed = new AutonomousAgent(llm);
+  credentialed.registerModel(candidate("credentialed", "model", capabilities));
+  const credentialReport = await credentialed.readiness();
+  assert.equal(credentialReport.readiness_state, "credential_required");
+  assert.equal(credentialReport.providers[0].credential_ready, false);
+  assert.match(JSON.stringify(credentialReport), /collect_user_credential/);
+  assert.equal(fetchCalls, 0);
+});
+
+test("readiness reports exact live tool metadata while keeping registration non-authorizing", async () => {
+  let fetchCalls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      fetchCalls += 1;
+      throw new Error("readiness must not contact providers");
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("local", "https://local.invalid", { requiresCredential: false }));
+  const profiles = await builtinAutonomousDomainProfiles();
+  const capabilities = [...new Set(profiles.flatMap((profile) => profile.required_model_capabilities))];
+  const binding = profiles.find((profile) => profile.domain === "coding").tool_profile.bindings[0];
+  const catalogue = await ToolCatalogue.fromDefinitions([{ name: binding.name, description: "metadata-only test tool", inputSchema: { type: "object", additionalProperties: true } }]);
+  const agent = new AutonomousAgent(llm, { toolCatalogue: catalogue });
+  agent.registerModel(candidate("local", "ready-model", capabilities));
+
+  const report = await agent.readiness();
+  const coding = report.domains.find((row) => row.domain === "coding");
+
+  assert.equal(report.tooling.configured, true);
+  assert.equal(report.tooling.available_tool_count, 1);
+  assert.equal(coding.available_tool_count, 1);
+  assert.equal(coding.missing_tools.includes(binding.name), false);
+  assert.ok(coding.missing_tools.length > 0);
+  assert.equal(report.execution, "not_started; no_provider_or_tool_calls");
+  assert.equal(fetchCalls, 0);
 });

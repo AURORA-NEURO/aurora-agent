@@ -64,6 +64,7 @@ export const AUTONOMOUS_LEARNING_SCHEMA = "bioprism-typescript-autonomous-online
 export const AUTONOMOUS_CROSS_DOMAIN_SCHEMA = "bioprism-typescript-autonomous-cross-domain/0.1" as const;
 export const AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA = "bioprism-typescript-autonomous-cross-domain-result/0.1" as const;
 export const AUTONOMOUS_MODEL_REFRESH_SCHEMA = "bioprism-typescript-autonomous-model-refresh/0.1" as const;
+export const AUTONOMOUS_READINESS_SCHEMA = "bioprism-autonomous-agent-readiness/0.1" as const;
 export const AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN = 8;
 export const AUTONOMOUS_CROSS_DOMAIN_MAX_CONCURRENCY = 4;
 const AUTONOMOUS_BANDIT_MAX_ARMS = 512;
@@ -320,6 +321,70 @@ export interface AutonomousDomainPack extends JsonObject {
   pack_digest: string;
   execution: "planning_only; dispatch_requires_caller_approval";
   credential_posture: "caller_supplied_opaque_handle_not_returned";
+}
+
+export type AutonomousReadinessState =
+  | "ready_for_caller_approval"
+  | "model_catalogue_required"
+  | "provider_registration_required"
+  | "credential_required"
+  | "model_capability_gap"
+  | "partial";
+
+export interface AutonomousReadinessModel extends JsonObject {
+  provider: string;
+  model: string;
+  enabled: boolean;
+  provider_registered: boolean;
+  credential_ready: boolean;
+  compatible_domains: AutonomousDomainName[];
+  eligible_domains: AutonomousDomainName[];
+}
+
+export interface AutonomousReadinessProvider extends JsonObject {
+  provider: string;
+  provider_registered: boolean;
+  requires_credential: boolean | null;
+  credential_ready: boolean;
+  circuit: string;
+  next_action: string;
+  credential: JsonObject;
+  health: JsonObject | null;
+  secret_material: "never_returned";
+}
+
+export interface AutonomousReadinessDomain extends JsonObject {
+  domain: AutonomousDomainName;
+  workflow_id: string;
+  workflow_digest: string;
+  required_model_capabilities: string[];
+  compatible_model_count: number;
+  eligible_model_count: number;
+  required_tool_count: number;
+  available_tool_count: number;
+  missing_tools: string[];
+  learning_context_digest: string;
+  state: AutonomousReadinessState;
+  next_actions: string[];
+}
+
+export interface AutonomousReadinessReport extends JsonObject {
+  schema: typeof AUTONOMOUS_READINESS_SCHEMA;
+  providers: AutonomousReadinessProvider[];
+  models: AutonomousReadinessModel[];
+  domains: AutonomousReadinessDomain[];
+  workflows: AutonomousWorkflow[];
+  domain_packs: AutonomousDomainPack[];
+  model_capability_coverage: JsonObject;
+  model_health: JsonObject;
+  learning: JsonObject;
+  tooling: JsonObject;
+  next_actions: string[];
+  readiness_state: AutonomousReadinessState;
+  execution: "not_started; no_provider_or_tool_calls";
+  credential_posture: "caller_supplied_opaque_handles";
+  secret_material: "never_returned";
+  readiness_digest: string;
 }
 
 export interface AutonomousTaskBlueprint extends JsonObject {
@@ -1927,6 +1992,115 @@ export class AutonomousAgent {
 
   async profiles(): Promise<AutonomousDomainProfile[]> {
     return builtinAutonomousDomainProfiles();
+  }
+
+  /**
+   * Project the complete keyless readiness posture for the autonomous brain.
+   *
+   * This is deliberately an application-local audit: it reads registered provider metadata,
+   * opaque credential status, model priors, persisted health, and the optional tool catalogue.
+   * It never discovers models, contacts a provider, executes a tool, or returns a credential.
+   * Every built-in domain receives an independent capability/tool/learning row so onboarding can
+   * tell a caller exactly what must happen before approval and dispatch.
+   */
+  async readiness(options: {
+    candidates?: readonly AutonomousModelCandidate[];
+    estimatedInputTokens?: number;
+    requestedOutputTokens?: number;
+  } = {}): Promise<AutonomousReadinessReport> {
+    const estimatedInputTokens = options.estimatedInputTokens ?? 4_096;
+    const requestedOutputTokens = options.requestedOutputTokens ?? 1_024;
+    for (const [name, value] of [["estimatedInputTokens", estimatedInputTokens], ["requestedOutputTokens", requestedOutputTokens]] as const) {
+      if (!Number.isSafeInteger(value) || value < 1 || value > 10_000_000) throw new ArgumentError(`autonomous readiness ${name} is outside its bounds`);
+    }
+    const candidates = (options.candidates === undefined ? this.models() : [...options.candidates].map(normalizeAutonomousModelCandidate));
+    if (candidates.length > 128) throw new ArgumentError("autonomous readiness candidates must contain at most 128 models");
+    const candidateIds = new Set<string>();
+    for (const candidate of candidates) {
+      const id = `${candidate.provider}/${candidate.model}`;
+      if (!candidateIds.add(id)) throw new ArgumentError(`autonomous readiness model ${id} is duplicated`);
+    }
+    const profiles = await builtinAutonomousDomainProfiles();
+    const metadataByProvider = new Map(this.llm.providerMetadata().map((row) => [String(row.provider), row]));
+    const providerNames = [...new Set([...metadataByProvider.keys(), ...candidates.map((candidate) => candidate.provider)])].sort();
+    const providerRows: AutonomousReadinessProvider[] = [];
+    const providerState = new Map<string, { registered: boolean; credentialReady: boolean; circuit: string; requiresCredential: boolean | null; nextAction: string }>();
+    for (const provider of providerNames) {
+      const metadata = metadataByProvider.get(provider);
+      const registered = metadata !== undefined;
+      const requiresCredential = typeof metadata?.requires_credential === "boolean" ? metadata.requires_credential : null;
+      const credential = this.llm.credentials.status(provider, registered);
+      const health = registered ? this.llm.providerStatus(provider) : null;
+      const credentialReady = requiresCredential === false || credential.ready === true;
+      const circuit = health?.circuit ?? "unconfigured";
+      const nextAction = !registered ? "register_provider" : credentialReady ? "ready" : "collect_user_credential";
+      providerState.set(provider, { registered, credentialReady, circuit, requiresCredential, nextAction });
+      providerRows.push({
+        provider,
+        provider_registered: registered,
+        requires_credential: requiresCredential,
+        credential_ready: credentialReady,
+        circuit,
+        next_action: nextAction,
+        credential: { ready: credentialReady, active_handles: credential.active_handles, expires_at: credential.expires_at, next_action: nextAction },
+        health: health ? { attempts: health.attempts, successes: health.successes, failures: health.failures, success_rate: health.success_rate, mean_latency_ms: health.mean_latency_ms, last_model: health.last_model, last_status_code: health.last_status_code } : null,
+        secret_material: "never_returned",
+      });
+    }
+    const toolNames = new Set(this.toolCatalogue?.definitions.map((definition) => definition.name) ?? []);
+    const modelRows: AutonomousReadinessModel[] = candidates.map((candidate) => ({ provider: candidate.provider, model: candidate.model, enabled: candidate.enabled !== false, provider_registered: providerState.get(candidate.provider)?.registered === true, credential_ready: providerState.get(candidate.provider)?.credentialReady === true, compatible_domains: [], eligible_domains: [] }));
+    const modelById = new Map(modelRows.map((row) => [`${row.provider}/${row.model}`, row]));
+    const domainRows: AutonomousReadinessDomain[] = [];
+    const capabilityRows: JsonObject[] = [];
+    for (const profile of profiles) {
+      const requiredCapabilities = [...profile.required_model_capabilities];
+      const compatible: AutonomousModelCandidate[] = [];
+      const incompatible: JsonObject[] = [];
+      for (const candidate of candidates) {
+        const missingCapabilities = requiredCapabilities.filter((required) => !(candidate.capabilities ?? []).includes(required));
+        const capacityMissing = candidate.context_window_tokens < estimatedInputTokens + requestedOutputTokens;
+        const outputMissing = candidate.max_output_tokens < requestedOutputTokens;
+        const enabled = candidate.enabled !== false;
+        if (enabled && !missingCapabilities.length && !capacityMissing && !outputMissing) compatible.push(candidate);
+        else incompatible.push({ arm_id: `${candidate.provider}/${candidate.model}`, missing_capabilities: missingCapabilities, context_capacity_ok: !capacityMissing, output_capacity_ok: !outputMissing, enabled });
+      }
+      const eligible = compatible.filter((candidate) => {
+        const state = providerState.get(candidate.provider);
+        return state?.registered === true && state.circuit !== "open" && state.credentialReady;
+      });
+      for (const candidate of compatible) modelById.get(`${candidate.provider}/${candidate.model}`)?.compatible_domains.push(profile.domain);
+      for (const candidate of eligible) modelById.get(`${candidate.provider}/${candidate.model}`)?.eligible_domains.push(profile.domain);
+      const uniqueBindings = [...new Map(profile.tool_profile.bindings.map((binding) => [binding.name, binding])).values()];
+      const missingTools = uniqueBindings.filter((binding) => !toolNames.has(binding.name)).map((binding) => binding.name).sort();
+      const context = { domain: profile.domain, capability: profile.default_capability, risk_class: profile.risk_class, task_family: profile.workflow.workflow_id };
+      const learningContextDigest = digestCanonicalJsonTextSync(JSON.stringify(context));
+      const providerMissing = compatible.some((candidate) => providerState.get(candidate.provider)?.registered !== true);
+      const credentialMissing = compatible.some((candidate) => {
+        const state = providerState.get(candidate.provider);
+        return state?.registered === true && state.credentialReady === false;
+      });
+      const state: AutonomousReadinessState = !candidates.length ? "model_catalogue_required" : !compatible.length ? "model_capability_gap" : eligible.length ? "ready_for_caller_approval" : credentialMissing ? "credential_required" : providerMissing ? "provider_registration_required" : "partial";
+      const nextActions = new Set<string>();
+      if (state === "model_catalogue_required") nextActions.add("register at least one model candidate with the reviewed domain capabilities");
+      if (state === "model_capability_gap") nextActions.add(`register a model declaring: ${requiredCapabilities.join(", ")}`);
+      if (state === "provider_registration_required") nextActions.add("register the provider transport before requesting a credential");
+      if (state === "credential_required") nextActions.add("collect a short-lived user credential through ProviderOnboarding");
+      if (missingTools.length) nextActions.add("attach and review the live tool catalogue; missing tools remain optional provider-only fallbacks until bound");
+      if (!this.learner) nextActions.add("attach AutonomousOnlineLearner and settle only explicit evaluator rewards");
+      const row: AutonomousReadinessDomain = { domain: profile.domain, workflow_id: profile.workflow.workflow_id, workflow_digest: profile.workflow.workflow_digest, required_model_capabilities: requiredCapabilities, compatible_model_count: compatible.length, eligible_model_count: eligible.length, required_tool_count: uniqueBindings.length, available_tool_count: uniqueBindings.length - missingTools.length, missing_tools: missingTools, learning_context_digest: learningContextDigest, state, next_actions: [...nextActions].sort() };
+      domainRows.push(row);
+      capabilityRows.push({ domain: profile.domain, required_model_capabilities: requiredCapabilities, compatible_model_ids: compatible.map((candidate) => `${candidate.provider}/${candidate.model}`), incompatible_models: incompatible });
+    }
+    const learning = { configured: this.learner !== undefined, domain_count: profiles.length, contexts: domainRows.map((row) => ({ domain: row.domain, context_digest: row.learning_context_digest })), feedback_contract: "explicit_evaluator_reward_only; transport_success_is_not_task_quality", retention: "value_only_learning_metadata" };
+    const domainPacks = await Promise.all(profiles.map((profile) => buildDomainPack(profile)));
+    const nextActions = new Set<string>(domainRows.flatMap((row) => row.next_actions));
+    for (const row of providerRows) if (row.next_action !== "ready") nextActions.add(`${row.next_action}: ${row.provider}`);
+    if (!this.toolCatalogue) nextActions.add("attach a live ToolCatalogue to compute exact domain-tool coverage");
+    if (!this.learner) nextActions.add("attach AutonomousOnlineLearner and settle only explicit evaluator rewards");
+    const distinctStates = new Set(domainRows.map((row) => row.state));
+    const readinessState: AutonomousReadinessState = distinctStates.size === 1 ? [...distinctStates][0]! : "partial";
+    const descriptor = { schema: AUTONOMOUS_READINESS_SCHEMA, providers: providerRows, models: [...modelRows].sort((left, right) => `${left.provider}/${left.model}`.localeCompare(`${right.provider}/${right.model}`)), domains: domainRows, workflows: profiles.map((profile) => profile.workflow), domain_packs: domainPacks, model_capability_coverage: { domain_count: capabilityRows.length, rows: capabilityRows, evidence_posture: "static_caller_declared_capabilities_only" }, model_health: this.llm.modelHealthSnapshot(), learning, tooling: { configured: this.toolCatalogue !== undefined, catalogue_digest: this.toolCatalogue?.digest ?? null, available_tool_count: toolNames.size, execution: "catalogue_metadata_only; registration_is_not_authorization" }, next_actions: [...nextActions].sort(), readiness_state: readinessState, execution: "not_started; no_provider_or_tool_calls" as const, credential_posture: "caller_supplied_opaque_handles" as const, secret_material: "never_returned" as const };
+    return { ...descriptor, readiness_digest: await digestJson(descriptor) };
   }
 
   async route(task: string, options: { domain?: AutonomousDomainName; hints?: readonly string[]; minConfidence?: number; minMargin?: number; maxDomains?: number; allowCrossDomain?: boolean } = {}): Promise<AutonomousRouteProposal> {

@@ -163,6 +163,40 @@ Python or Rust; all twelve built-in domain evaluator profiles use the same bound
 
 ## Autonomous orchestration across all domains
 
+### Keyless readiness audit
+
+`AutonomousAgent.readiness()` is the TypeScript-side preflight for the complete autonomous
+brain. It is intentionally safe to call before a user has entered a key and does not discover
+models, invoke a provider, execute a tool, or serialize credential material. It audits all twelve
+built-in domains in one report: provider registration and circuit state, opaque credential
+readiness, model capability/capacity compatibility, exact live-tool coverage, domain workflow
+digests, learning-context digests, and actionable next steps.
+
+```typescript
+const report = await agent.readiness();
+
+for (const domain of report.domains) {
+  console.log(domain.domain, domain.state, domain.next_actions);
+}
+// report.execution === "not_started; no_provider_or_tool_calls"
+// report.secret_material === "never_returned"
+```
+
+The readiness state is deliberately more precise than a boolean: `model_catalogue_required`,
+`provider_registration_required`, `credential_required`, `model_capability_gap`,
+`ready_for_caller_approval`, or `partial`. An empty local model catalogue is valid input for the
+audit (`agent.readiness({ candidates: [] })`) and produces the first state rather than an
+exception. A model is eligible only when its provider is registered, its declared capabilities
+and token limits satisfy the domain, its provider circuit is not open, and its credential gate is
+ready. `ready_for_caller_approval` still does not authorize a provider call or an effect.
+
+Tool names are compared against the caller-owned `ToolCatalogue` as metadata only. Missing tools
+are reported per domain, while catalogue registration remains separate from tool authorization and
+effect approval. Learning is likewise reported as configuration (`AutonomousOnlineLearner`) and
+context identity; provider transport success is never converted into evaluator reward. The report
+is digest-addressed under `bioprism-autonomous-agent-readiness/0.1`, contains no task text or
+provider payload, and can be rendered directly by a setup or operations screen.
+
 `AutonomousAgent` is the application-facing composition layer for the autonomous brain. It covers
 the twelve reviewed domains (`coding`, `browser`, `data`, `science`, `biomedical`,
 `neuroscience`, `operations`, `enterprise`, `multi_agent`, `multimodal`, `cross_domain`, and
