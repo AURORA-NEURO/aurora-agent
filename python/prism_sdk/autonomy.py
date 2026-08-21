@@ -55,6 +55,7 @@ from .domain_tools import (
     AutonomousDomainToolRegistry,
     AutonomousDomainToolRuntime,
     DOMAIN_TOOL_BINDING_PLAN_SCHEMA,
+    builtin_autonomous_domain_tool_profiles,
     plan_mcp_catalogue_bindings,
 )
 from .autonomy_onboarding import (
@@ -138,6 +139,7 @@ AUTONOMOUS_EXECUTION_PLAN_SCHEMA = "bioprism-python-autonomous-execution-plan/0.
 AUTONOMOUS_DOMAIN_LEARNING_STATE_SCHEMA = "bioprism-python-autonomous-domain-learning-state/0.1"
 AUTONOMOUS_CAPABILITY_CONTRACT_SCHEMA = "bioprism-python-autonomous-capability-contract/0.1"
 AUTONOMOUS_CAPABILITY_PLAN_SCHEMA = "bioprism-python-autonomous-capability-plan/0.1"
+AUTONOMOUS_CAPABILITY_PORTFOLIO_SCHEMA = "bioprism-python-autonomous-capability-portfolio/0.1"
 AUTONOMOUS_WORKFLOW_STAGE_PLAN_SCHEMA = "bioprism-python-autonomous-workflow-stage-plan/0.1"
 AUTONOMOUS_CAPABILITY_PLAN_STATUSES = (
     "ready",
@@ -176,6 +178,8 @@ MAX_AUTONOMOUS_DOMAIN_PACK_ITEMS = 64
 MAX_AUTONOMOUS_EXECUTION_PLAN_BYTES = 512_000
 MAX_AUTONOMOUS_CAPABILITY_CONTRACTS = 64
 MAX_AUTONOMOUS_CAPABILITY_PLAN_BYTES = 128_000
+MAX_AUTONOMOUS_CAPABILITY_PORTFOLIO_TOOLS = 128
+MAX_AUTONOMOUS_CAPABILITY_PORTFOLIO_TASK_BYTES = 32_000
 MAX_AUTONOMOUS_WORKFLOW_STAGE_PLAN_BYTES = 64_000
 AUTONOMOUS_SEMANTIC_ROUTE_SCHEMA = "bioprism-python-autonomous-semantic-route/0.1"
 AUTONOMOUS_PLAN_REFINEMENT_SCHEMA = "bioprism-python-autonomous-plan-refinement/0.1"
@@ -186,6 +190,7 @@ AUTONOMOUS_ROUTE_EVIDENCE = {
 _SAFE_IDENTIFIER_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-")
 _AUTONOMOUS_EXECUTION_PLAN_CONTEXT_KEY = "_aurora_execution_plan"
 _AUTONOMOUS_CAPABILITY_CONTRACT_CONTEXT_KEY = "_aurora_capability_contract"
+_AUTONOMOUS_CAPABILITY_PORTFOLIO_CONTEXT_KEY = "_aurora_capability_portfolio"
 _AUTONOMOUS_WORKFLOW_STAGE_PLAN_CONTEXT_KEY = "_aurora_workflow_stage_plan"
 _AUTONOMOUS_CROSS_DOMAIN_REPLAN_CONTEXT_KEY = "_aurora_cross_domain_replan"
 
@@ -275,6 +280,53 @@ _AUTONOMOUS_CAPABILITY_TOOL_ALIASES: dict[str, dict[str, tuple[str, ...]]] = {
         "reproducibility": ("reproduction_check", "research_ci", "adaptive_evaluation_panel", "benchmark_integrity_audit"),
     },
 }
+
+
+def _portfolio_task_tokens(task: str) -> tuple[str, ...]:
+    """Derive bounded local ranking tokens without retaining the task text."""
+
+    return tuple(dict.fromkeys(
+        token for token in _normalize_route_text(task).split()
+        if len(token) >= 3
+    ))[:128]
+
+
+def _portfolio_binding_supports_stage(
+    domain: str,
+    stage: "AutonomousWorkflowStage",
+    binding: AutonomousDomainToolBinding,
+) -> bool:
+    aliases = _AUTONOMOUS_CAPABILITY_TOOL_ALIASES.get(domain, {})
+    return any(
+        binding.capability == capability
+        or binding.capability in aliases.get(capability, ())
+        for capability in stage.required_capabilities
+    )
+
+
+def _portfolio_score(
+    tokens: Sequence[str],
+    requested_capabilities: Sequence[str],
+    stage: "AutonomousWorkflowStage",
+    binding: AutonomousDomainToolBinding,
+) -> tuple[int, int, int, int]:
+    corpus = _normalize_route_text(
+        f"{binding.name} {binding.capability} {stage.id} {stage.objective}"
+    )
+    relevance = sum(1 for token in tokens if token in corpus)
+    return (
+        int(binding.capability in requested_capabilities),
+        int(binding.capability in stage.required_capabilities),
+        relevance,
+        int(binding.read_only),
+    )
+
+
+def _portfolio_score_key(
+    score: tuple[int, int, int, int],
+    name: str,
+) -> tuple[int, int, int, int, str]:
+    return (-score[0], -score[1], -score[2], -score[3], name)
 
 
 # This is an intentionally small, reviewed routing vocabulary rather than a claim that a
@@ -10285,6 +10337,273 @@ class AutonomousAgent:
             "execution": "metadata_only; registration_is_not_authorization",
         }
 
+    def capability_portfolio(
+        self,
+        task: str,
+        *,
+        domains: Sequence[str] | None = None,
+        capability: str | None = None,
+        allowed_tools: Sequence[str] | None = None,
+        max_tools: int = 32,
+        read_only_only: bool = False,
+    ) -> dict[str, Any]:
+        """Select a bounded exact-name tool portfolio for a transient task.
+
+        Workflow stages and reviewed domain-tool bindings are the authority for candidate
+        selection.  Task text is used only for local deterministic ranking and is represented in
+        the returned packet by a digest.  This method never invokes a provider, executes a tool,
+        or turns a selected binding into authorization; activation and effect approval remain
+        independent runtime gates.
+        """
+
+        task_text = _text(
+            "capability portfolio task",
+            task,
+            maximum=MAX_AUTONOMOUS_CAPABILITY_PORTFOLIO_TASK_BYTES,
+        )
+        selected_domains = tuple(AUTONOMOUS_DOMAINS) if domains is None else _sequence(
+            "capability portfolio domains",
+            domains,
+            maximum=len(AUTONOMOUS_DOMAINS),
+        )
+        unknown_domains = sorted(set(selected_domains).difference(AUTONOMOUS_DOMAINS))
+        if unknown_domains:
+            raise BrainRunError(
+                "capability portfolio contains unknown domains: " + ", ".join(unknown_domains)
+            )
+        if isinstance(max_tools, bool) or not isinstance(max_tools, int) or not 1 <= max_tools <= MAX_AUTONOMOUS_CAPABILITY_PORTFOLIO_TOOLS:
+            raise BrainRunError(
+                f"capability portfolio max_tools must be between 1 and {MAX_AUTONOMOUS_CAPABILITY_PORTFOLIO_TOOLS}"
+            )
+        requested_capabilities = () if capability is None else (
+            _identifier("capability portfolio capability", capability),
+        )
+        caller_allowed: set[str] | None = None
+        if allowed_tools is not None:
+            if not isinstance(allowed_tools, Sequence) or isinstance(allowed_tools, (str, bytes)):
+                raise BrainRunError("capability portfolio allowed_tools must be a sequence")
+            if len(allowed_tools) > MAX_AUTONOMOUS_CAPABILITY_PORTFOLIO_TOOLS:
+                raise BrainRunError("capability portfolio allowed_tools exceed their bound")
+            caller_allowed = {_identifier("capability portfolio allowed tool", name) for name in allowed_tools}
+
+        activation_state = self.activation.state
+        if activation_state.status == "revoked":
+            effective_allowed: set[str] | None = set()
+        elif activation_state.plan_digest is not None:
+            effective_allowed = set(activation_state.approved_tools)
+        else:
+            effective_allowed = None
+        if caller_allowed is not None:
+            effective_allowed = caller_allowed if effective_allowed is None else effective_allowed.intersection(caller_allowed)
+
+        profile_map = {
+            profile.domain: profile
+            for profile in builtin_autonomous_domain_tool_profiles()
+        }
+        workflow_map = {
+            domain: self.orchestrator.workflow_registry.resolve(domain)
+            for domain in selected_domains
+        }
+        live_by_name: dict[str, AutonomousDomainTool] = {}
+        if self.tool_registry is not None:
+            for domain in selected_domains:
+                for tool in self.tool_registry.tools_for((domain,)):
+                    live_by_name.setdefault(tool.name, tool)
+
+        tokens = _portfolio_task_tokens(task_text)
+        stage_rows: list[dict[str, Any]] = []
+        for domain in selected_domains:
+            profile = profile_map.get(domain)
+            if profile is None:
+                raise BrainRunError(f"no reviewed domain tool profile is registered for {domain!r}")
+            binding_map = {binding.name: binding for binding in profile.bindings}
+            workflow = workflow_map[domain]
+            for stage in workflow.stages:
+                bindings = [
+                    binding
+                    for binding in binding_map.values()
+                    if _portfolio_binding_supports_stage(domain, stage, binding)
+                ]
+                live_bindings = [binding for binding in bindings if binding.name in live_by_name]
+                eligible = [
+                    binding
+                    for binding in live_bindings
+                    if (not read_only_only or binding.read_only)
+                    and (effective_allowed is None or binding.name in effective_allowed)
+                ]
+                ranked = sorted(
+                    eligible,
+                    key=lambda binding: _portfolio_score_key(
+                        _portfolio_score(tokens, requested_capabilities, stage, binding),
+                        binding.name,
+                    ),
+                )
+                stage_rows.append(
+                    {
+                        "domain": domain,
+                        "stage": stage,
+                        "bindings": bindings,
+                        "live_bindings": live_bindings,
+                        "eligible": eligible,
+                        "ranked": ranked,
+                    }
+                )
+
+        preferred: dict[str, tuple[AutonomousDomainToolBinding, tuple[int, int, int, int], str]] = {}
+        for row in stage_rows:
+            candidate = row["ranked"][0] if row["ranked"] else None
+            if candidate is None:
+                continue
+            score = _portfolio_score(tokens, requested_capabilities, row["stage"], candidate)
+            previous = preferred.get(candidate.name)
+            if previous is None or _portfolio_score_key(score, candidate.name) < _portfolio_score_key(previous[1], candidate.name) or (
+                score == previous[1] and row["domain"] < previous[2]
+            ):
+                preferred[candidate.name] = (candidate, score, row["domain"])
+
+        ranked_names = [
+            name
+            for name, _ in sorted(
+                preferred.items(),
+                key=lambda item: _portfolio_score_key(item[1][1], item[0]),
+            )
+        ]
+        selected_names: set[str] = set()
+        for row in stage_rows:
+            candidate = next(
+                (binding for binding in row["ranked"] if binding.name not in selected_names),
+                row["ranked"][0] if row["ranked"] else None,
+            )
+            if candidate is not None and len(selected_names) < max_tools:
+                selected_names.add(candidate.name)
+        for name in ranked_names:
+            if len(selected_names) >= max_tools:
+                break
+            selected_names.add(name)
+
+        selected_tool_names = sorted(selected_names)
+        def binding_projection(binding: AutonomousDomainToolBinding) -> dict[str, Any]:
+            return {
+                "name": binding.name,
+                "domains": list(binding.domains),
+                "capability": binding.capability,
+                "risk_class": binding.risk_class,
+                "read_only": binding.read_only,
+                "approval_required": binding.approval_required,
+                "secret_material": "never_returned",
+            }
+
+        selected_bindings = [
+            binding_projection(preferred[name][0])
+            for name in selected_tool_names
+            if name in preferred
+        ]
+        coverage: list[dict[str, Any]] = []
+        for row in stage_rows:
+            selected = next(
+                (binding for binding in row["ranked"] if binding.name in selected_names),
+                None,
+            )
+            if selected is not None:
+                status = "selected"
+            elif not row["bindings"]:
+                status = "provider_only"
+            elif not row["live_bindings"]:
+                status = "catalogue_missing"
+            elif effective_allowed is not None and not row["eligible"]:
+                status = "activation_required"
+            else:
+                status = "capacity_limited"
+            coverage.append(
+                {
+                    "domain": row["domain"],
+                    "stage_id": row["stage"].id,
+                    "required_capabilities": list(row["stage"].required_capabilities),
+                    "candidate_tool_names": sorted(binding.name for binding in row["live_bindings"]),
+                    "selected_tool": None if selected is None else selected.name,
+                    "selected_capability": None if selected is None else selected.capability,
+                    "approval_required": False if selected is None else selected.approval_required,
+                    "status": status,
+                }
+            )
+
+        all_live_bindings = [
+            binding
+            for domain in selected_domains
+            for binding in profile_map[domain].bindings
+            if binding.name in live_by_name
+        ]
+        binding_by_name: dict[str, AutonomousDomainToolBinding] = {}
+        binding_domains: dict[str, set[str]] = {}
+        for binding in all_live_bindings:
+            binding_by_name.setdefault(binding.name, binding)
+            binding_domains.setdefault(binding.name, set()).update(binding.domains)
+        omissions = []
+        for name in sorted(binding_by_name):
+            if name in selected_names:
+                continue
+            reason = (
+                "activation_required"
+                if effective_allowed is not None and name not in effective_allowed
+                else "capacity_limited"
+                if name in preferred
+                else "not_required_for_reviewed_workflow"
+            )
+            omissions.append(
+                {
+                    "name": name,
+                    "domains": sorted(binding_domains[name]),
+                    "capability": binding_by_name[name].capability,
+                    "reason": reason,
+                }
+            )
+        missing_tools = sorted({
+            binding.name
+            for domain in selected_domains
+            for binding in profile_map[domain].bindings
+            if binding.name not in live_by_name
+        })
+        descriptor = {
+            "schema": AUTONOMOUS_CAPABILITY_PORTFOLIO_SCHEMA,
+            "task_digest": content_digest({"task": task_text}),
+            "catalogue_digest": None if self.tool_registry is None else self.tool_registry.digest,
+            "profile_digest": content_digest([
+                profile_map[domain].to_dict() for domain in selected_domains
+            ]),
+            "domains": list(selected_domains),
+            "requested_capabilities": list(requested_capabilities),
+            "max_tools": max_tools,
+            "selected_tool_names": selected_tool_names,
+            "selected_bindings": selected_bindings,
+            "approval_required_tools": sorted(
+                binding["name"] for binding in selected_bindings if binding.get("approval_required") is True
+            ),
+            "missing_tools": missing_tools,
+            "omissions": omissions[:MAX_AUTONOMOUS_CAPABILITY_PORTFOLIO_TOOLS],
+            "coverage": coverage,
+            "selection_policy": "stage_coverage_then_task_relevance_then_read_only_then_name",
+            "execution": "metadata_only; no_provider_or_tool_calls",
+            "authorization": "selection_does_not_authorize_tools_or_effects",
+            "secret_material": "never_returned",
+        }
+        result = {
+            **descriptor,
+            "plan_digest": content_digest(descriptor),
+        }
+        try:
+            encoded = json.dumps(
+                result,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            )
+        except (TypeError, ValueError) as error:
+            raise BrainRunError("autonomous capability portfolio must be JSON-safe") from error
+        if len(encoded.encode("utf-8")) > MAX_AUTONOMOUS_CAPABILITY_PLAN_BYTES:
+            raise BrainRunError("autonomous capability portfolio exceeds its bounded size")
+        return json.loads(encoded)
+
     def domain_execution_plan(
         self,
         domain: str,
@@ -11351,6 +11670,7 @@ class AutonomousAgent:
         model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None,
         options: Mapping[str, Any],
         tool_domains: Sequence[str] = (),
+        task: str | None = None,
         resume_learning: bool = False,
         attach_execution_plan_context: bool = True,
         execution_id: str | None = None,
@@ -11359,6 +11679,11 @@ class AutonomousAgent:
         resolved_credentials = self._credential_mapping(credentials)
         resolved_candidates = self._resolve_candidates(model_candidates)
         resolved_options = dict(options)
+        task_text = None if task is None else _text(
+            "execution task",
+            task,
+            maximum=MAX_AUTONOMOUS_CAPABILITY_PORTFOLIO_TASK_BYTES,
+        )
         capability_focus = resolved_options.pop("_aurora_capability_focus", None)
         capability_contract = resolved_options.pop("_aurora_capability_contract", None)
         if capability_focus is not None:
@@ -11374,6 +11699,7 @@ class AutonomousAgent:
         for reserved_key in (
             _AUTONOMOUS_EXECUTION_PLAN_CONTEXT_KEY,
             _AUTONOMOUS_CAPABILITY_CONTRACT_CONTEXT_KEY,
+            _AUTONOMOUS_CAPABILITY_PORTFOLIO_CONTEXT_KEY,
             _AUTONOMOUS_WORKFLOW_STAGE_PLAN_CONTEXT_KEY,
         ):
             caller_context = resolved_options.get("context")
@@ -11396,6 +11722,16 @@ class AutonomousAgent:
             elif activation_state.plan_digest is not None:
                 approved = set(activation_state.approved_tools)
                 selected_tools = tuple(tool for tool in selected_tools if tool.name in approved)
+            portfolio_packet = None
+            if task_text is not None and tool_domains:
+                portfolio_packet = self.capability_portfolio(
+                    task_text,
+                    domains=tuple(dict.fromkeys(tool_domains)),
+                    capability=capability_focus,
+                )
+                selected_names = set(portfolio_packet["selected_tool_names"])
+                if selected_names:
+                    selected_tools = tuple(tool for tool in selected_tools if tool.name in selected_names)
             pack_capabilities: set[str] = set()
             for domain in tool_domains:
                 if domain in AUTONOMOUS_DOMAINS:
@@ -11435,6 +11771,25 @@ class AutonomousAgent:
             resolved_options["provider_tools"] = tuple(
                 tool.to_provider_tool() for tool in (pack_tools if capability_focus is not None else (pack_tools or selected_tools))
             )
+            if portfolio_packet is not None:
+                caller_context = resolved_options.get("context")
+                if caller_context is None:
+                    portfolio_context: dict[str, Any] = {}
+                elif isinstance(caller_context, Mapping):
+                    portfolio_context = dict(caller_context)
+                else:
+                    raise BrainRunError("context must be a mapping or None")
+                portfolio_context[_AUTONOMOUS_CAPABILITY_PORTFOLIO_CONTEXT_KEY] = {
+                    "schema": portfolio_packet["schema"],
+                    "plan_digest": portfolio_packet["plan_digest"],
+                    "catalogue_digest": portfolio_packet["catalogue_digest"],
+                    "profile_digest": portfolio_packet["profile_digest"],
+                    "domains": list(portfolio_packet["domains"]),
+                    "selected_tool_names": list(portfolio_packet["selected_tool_names"]),
+                    "execution": portfolio_packet["execution"],
+                    "authority_posture": portfolio_packet["authorization"],
+                }
+                resolved_options["context"] = portfolio_context
         plan_domains = tuple(
             dict.fromkeys(domain for domain in tool_domains if domain in AUTONOMOUS_DOMAINS)
         )
@@ -11625,6 +11980,7 @@ class AutonomousAgent:
             model_candidates=model_candidates,
             options=kwargs,
             tool_domains=(domain,),
+            task=task,
             resume_learning=bool(kwargs.get("learn")),
             execution_id=execution_id,
             resume_execution=resume_execution,
@@ -12216,6 +12572,7 @@ class AutonomousAgent:
                         if isinstance(value, Mapping) and isinstance(value.get("domain"), str)
                     ]
             )),
+            task=task,
             resume_learning=False,
             attach_execution_plan_context=False,
             execution_id=execution_id,
@@ -12265,6 +12622,7 @@ class AutonomousAgent:
                     ]
                 )
             ),
+            task=task,
             resume_learning=False,
             attach_execution_plan_context=False,
             execution_id=execution_id,
@@ -12314,6 +12672,7 @@ class AutonomousAgent:
                     ]
                 )
             ),
+            task=task,
             resume_learning=False,
             attach_execution_plan_context=False,
             execution_id=execution_id,
@@ -12350,6 +12709,7 @@ class AutonomousAgent:
             model_candidates=model_candidates,
             options=kwargs,
             tool_domains=(blueprint.spec.domain,),
+            task=blueprint.spec.task,
             resume_learning=True,
             attach_execution_plan_context=False,
             execution_id=execution_id,
@@ -12388,6 +12748,7 @@ class AutonomousAgent:
             model_candidates=model_candidates,
             options=options,
             tool_domains=(blueprint.spec.domain,),
+            task=blueprint.spec.task,
             resume_learning=False,
             attach_execution_plan_context=False,
             execution_id=execution_id,
@@ -12426,6 +12787,7 @@ class AutonomousAgent:
             model_candidates=model_candidates,
             options=options,
             tool_domains=(blueprint.spec.domain,),
+            task=blueprint.spec.task,
             resume_learning=False,
             attach_execution_plan_context=False,
             execution_id=execution_id,
@@ -12471,6 +12833,7 @@ class AutonomousAgent:
                     ]
                 )
             ),
+            task=task,
             resume_learning=True,
             attach_execution_plan_context=False,
             execution_id=execution_id,
@@ -12512,10 +12875,13 @@ __all__ = [
     "MAX_AUTONOMOUS_EXECUTION_PLAN_BYTES",
     "AUTONOMOUS_CAPABILITY_CONTRACT_SCHEMA",
     "AUTONOMOUS_CAPABILITY_PLAN_SCHEMA",
+    "AUTONOMOUS_CAPABILITY_PORTFOLIO_SCHEMA",
     "AUTONOMOUS_WORKFLOW_STAGE_PLAN_SCHEMA",
     "AUTONOMOUS_CAPABILITY_PLAN_STATUSES",
     "MAX_AUTONOMOUS_CAPABILITY_CONTRACTS",
     "MAX_AUTONOMOUS_CAPABILITY_PLAN_BYTES",
+    "MAX_AUTONOMOUS_CAPABILITY_PORTFOLIO_TOOLS",
+    "MAX_AUTONOMOUS_CAPABILITY_PORTFOLIO_TASK_BYTES",
     "MAX_AUTONOMOUS_WORKFLOW_STAGE_PLAN_BYTES",
     "AUTONOMOUS_ROUTE_REASONS",
     "MAX_AUTONOMOUS_ROUTE_CANDIDATES",

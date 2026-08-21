@@ -72,6 +72,15 @@ disagreement or member error. Its detailed result and value-only replay seam ret
 and digests only, so the same quorum gate applies to provider runs, tool loops, missions, workflows,
 and all twelve autonomous domain contexts.
 
+`AutonomousAgent.capability_portfolio(task)` is the task-aware tool admission proposal for the
+Python façade. It selects a bounded exact-name portfolio by reviewed workflow-stage coverage,
+capability, local relevance, read-only posture, activation state, and stable tie-breaks. Task text is
+used transiently and represented publicly by a digest; the portfolio never invokes a provider or
+tool and never grants authority. Automatic `run()`, workflow, and cross-domain paths use it when
+the caller has not supplied explicit provider tools, while custom tools remain a compatibility
+fallback when no reviewed candidate is available. Missing catalogue entries and activation-gated
+stages are explicit rather than optimistic.
+
 The shared caller-owned bandit state supports `ucb1`, `epsilon_greedy`, and deterministic
 `thompson_sampling` policies. Thompson selection forms a fractional Beta posterior from explicit
 evaluator rewards, emits posterior metadata for audit/replay, and still respects capability,

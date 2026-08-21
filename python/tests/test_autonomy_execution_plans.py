@@ -3,6 +3,7 @@ import json
 import pytest
 
 from prism_sdk import (
+    AUTONOMOUS_CAPABILITY_PORTFOLIO_SCHEMA,
     AUTONOMOUS_DOMAINS,
     AutonomousAgent,
     AutonomousCapabilityActivation,
@@ -16,6 +17,7 @@ from prism_sdk import (
     LLMRuntime,
     ModelCatalogue,
     plan_mcp_catalogue_bindings,
+    builtin_autonomous_domain_tool_profiles,
 )
 
 
@@ -134,6 +136,127 @@ def test_activation_plan_limits_runtime_tools_to_exact_approved_names():
     runtime_plan = options["context"]["_aurora_execution_plan"]
     assert runtime_plan["plans"][0]["domain"] == "coding"
     assert runtime_plan["plans"][0]["activation"]["approved_tool_count"] == 1
+
+    portfolio = agent.capability_portfolio(
+        "debug this repository and verify reproducible tests",
+        domains=("coding",),
+        max_tools=8,
+    )
+    assert portfolio["schema"] == AUTONOMOUS_CAPABILITY_PORTFOLIO_SCHEMA
+    assert portfolio["selected_tool_names"] == ["repository_catalog"]
+    assert portfolio["authorization"] == "selection_does_not_authorize_tools_or_effects"
+
+
+def test_task_capability_portfolio_is_deterministic_private_and_all_domain_bounded():
+    profile_rows = builtin_autonomous_domain_tool_profiles()
+    bindings_by_name: dict[str, AutonomousDomainToolBinding] = {}
+    for profile in profile_rows:
+        for binding in profile.bindings:
+            previous = bindings_by_name.get(binding.name)
+            if previous is None:
+                bindings_by_name[binding.name] = binding
+                continue
+            bindings_by_name[binding.name] = AutonomousDomainToolBinding(
+                name=binding.name,
+                domains=tuple(sorted(set(previous.domains).union(binding.domains))),
+                capability=binding.capability,
+                risk_class=binding.risk_class,
+                read_only=binding.read_only,
+                approval_required=binding.approval_required,
+            )
+    catalogue = [
+        {
+            "name": name,
+            "description": f"Test {name}",
+            "inputSchema": {"type": "object", "additionalProperties": True},
+        }
+        for name in sorted(bindings_by_name)
+    ]
+    registry = AutonomousDomainToolRegistry()
+    registry.register_mcp_catalogue(catalogue, bindings_by_name)
+    agent = AutonomousAgent(
+        _Workspace(),
+        LLMRuntime(),
+        model_catalogue=ModelCatalogue([_model()]),
+        tool_registry=registry,
+    )
+    task = "debug the repository, validate evidence, verify CI, and report reproducible findings"
+    portfolio = agent.capability_portfolio(task, domains=AUTONOMOUS_DOMAINS, max_tools=16)
+    repeated = agent.capability_portfolio(task, domains=AUTONOMOUS_DOMAINS, max_tools=16)
+
+    assert portfolio == repeated
+    assert portfolio["schema"] == AUTONOMOUS_CAPABILITY_PORTFOLIO_SCHEMA
+    assert portfolio["domains"] == list(AUTONOMOUS_DOMAINS)
+    assert {row["domain"] for row in portfolio["coverage"]} == set(AUTONOMOUS_DOMAINS)
+    assert len(portfolio["selected_tool_names"]) <= 16
+    assert portfolio["selected_tool_names"]
+    assert portfolio["omissions"]
+    assert len(portfolio["plan_digest"]) == 64
+    assert portfolio["execution"] == "metadata_only; no_provider_or_tool_calls"
+    public = json.dumps(portfolio)
+    assert task not in public
+    assert "api_key" not in public.lower()
+    assert "authorization:" not in public.lower()
+
+    _, _, options, _ = agent._execution_inputs(
+        credentials={},
+        model_candidates=None,
+        options={},
+        tool_domains=("coding",),
+        task=task,
+    )
+    assert set(tool.name for tool in options["provider_tools"]) <= set(portfolio["selected_tool_names"])
+    assert options["context"]["_aurora_capability_portfolio"]["plan_digest"]
+
+    for domain in AUTONOMOUS_DOMAINS:
+        _, _, domain_options, _ = agent._execution_inputs(
+            credentials={},
+            model_candidates=None,
+            options={},
+            tool_domains=(domain,),
+            task=f"review a bounded {domain} workflow",
+        )
+        packet = domain_options["context"]["_aurora_capability_portfolio"]
+        assert packet["domains"] == [domain]
+        assert len(packet["plan_digest"]) == 64
+        assert "review a bounded" not in json.dumps(packet)
+
+    blocked = agent.capability_portfolio(
+        "review this repository",
+        domains=("coding",),
+        allowed_tools=(),
+        max_tools=4,
+    )
+    assert blocked["selected_tool_names"] == []
+    assert any(row["status"] == "activation_required" for row in blocked["coverage"])
+
+
+def test_task_capability_portfolio_reports_sparse_catalogue_without_claiming_coverage():
+    registry = AutonomousDomainToolRegistry()
+    registry.register_mcp_catalogue(
+        _catalogue(),
+        {
+            "repository_catalog": AutonomousDomainToolBinding(
+                "repository_catalog", ("coding",), "repository_inspection"
+            ),
+            "repository_bundle": AutonomousDomainToolBinding(
+                "repository_bundle", ("coding",), "repository_inspection"
+            ),
+        },
+    )
+    agent = AutonomousAgent(
+        _Workspace(),
+        LLMRuntime(),
+        model_catalogue=ModelCatalogue([_model()]),
+        tool_registry=registry,
+    )
+    portfolio = agent.capability_portfolio(
+        "review this coding repository",
+        domains=("coding",),
+        max_tools=4,
+    )
+    assert any(row["status"] == "catalogue_missing" for row in portfolio["coverage"])
+    assert portfolio["missing_tools"]
 
 
 def test_runtime_plan_context_cannot_be_spoofed_by_caller_context():

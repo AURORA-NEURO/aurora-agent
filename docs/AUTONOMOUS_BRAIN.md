@@ -2521,6 +2521,32 @@ an immutable contract digest. Adapter resolution is exact and reviewed; there is
 from a tool name or description. This makes the same runtime decision legible to a UI, a planner,
 an evaluator, and the delayed-credit learning ledger.
 
+For automatic task intake, `agent.capability_portfolio(task)` adds the missing task-level decision
+without changing the underlying reviewed contracts. It walks the selected domains' workflow
+stages, ranks exact live bindings by stage coverage, requested capability, local task relevance,
+and read-only posture, and caps the result with `max_tools`. The task itself is never returned;
+the portfolio carries only a task digest, catalogue/profile digests, selected names, omissions, and
+coverage states. The method performs no provider or tool call:
+
+```python
+portfolio = agent.capability_portfolio(
+    "debug the repository, verify CI, and report reproducible findings",
+    domains=("coding", "evaluation"),
+    max_tools=12,
+)
+print(portfolio["selected_tool_names"])
+print(portfolio["coverage"])
+```
+
+Coverage explicitly distinguishes `selected`, `activation_required`, `catalogue_missing`,
+`provider_only`, and `capacity_limited`. `run()`, workflow execution, and cross-domain façade
+paths use this portfolio when the caller has not supplied explicit provider tools; a caller-owned
+custom tool remains visible as a compatibility fallback when no reviewed portfolio candidate is
+available. Activation can only narrow the result, and selection never authorizes provider access,
+tool execution, or effects. The portfolio is sealed under
+`bioprism-python-autonomous-capability-portfolio/0.1` and is separate from the older focused
+`domain_capability_plan()` contract.
+
 When the application already knows the capability, use focused dispatch to narrow provider-visible
 tools and bind the evidence contract into the developer prompt:
 
