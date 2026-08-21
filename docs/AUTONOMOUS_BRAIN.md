@@ -1025,6 +1025,24 @@ instruction digest, evaluator digest, request digest, attempt status, and trajec
 instruction, mission payload, evidence packet, or provider response. A hard three-replan ceiling
 and preflight revalidation prevent an evaluator from widening execution authority.
 
+For restart-safe orchestration, pass an `InMemoryAutonomousMissionReplanStateStore` in tests or a
+caller-owned implementation backed by SQLite, Postgres, IndexedDB, or object storage. It stores
+only the root identity, protected-contract digest, attempt/evaluation projections, learning
+settlement projections, checkpoint digests, and a generation-linked state digest. Its explicit
+phases are `execution_pending`, `evaluation_pending`, `replan_handoff`, and `terminal`. Saves are
+idempotent for the same digest and otherwise require a contiguous generation pointing to the
+previous state digest, so stale or forked workers fail closed.
+
+The state store never serializes a proposal, mission arguments, provider output, evaluator
+instruction, credentials, or raw evidence. After a restart on a non-root attempt,
+`rehydrateMission` reconstructs the private mission and the SDK rechecks its identity, protected
+contract, catalogue, policy, and preflight authorization. After a restart at `replan_handoff`,
+`rehydrateReplanInstruction` restores transient guidance by digest; evaluation and already-settled
+learning are not replayed. The executor checkpoint/result stores remain separate: the state table
+is the orchestration cursor, while the executor store and caller result cache own wave metadata
+and private values. `AutonomousMissionReplanPersistenceCoordinator` flushes/restores bounded,
+hash-bound multi-root snapshots through a caller-owned `read()`/`write()` adapter.
+
 The durable surface is intentionally metadata-only. Checkpoints and hash-chained events retain
 mission/step IDs, contract digests, statuses, attempt numbers, bounded failure classes, result
 digests, output byte counts, the next wave, and (for model-backed steps) a digest-only decision

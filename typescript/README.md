@@ -850,6 +850,24 @@ approval, recovery, reconciliation, and cancellation states return to the caller
 automatic retry. Replan instructions are transient and digest-bound; they cannot add tools,
 permissions, credentials, effects, or a new domain. The cycle has a hard three-replan ceiling.
 
+For restart-safe orchestration, pass an `InMemoryAutonomousMissionReplanStateStore` in tests or a
+caller-owned implementation backed by SQLite, Postgres, IndexedDB, or object storage. It stores
+only the root identity, protected-contract digest, attempt/evaluation projections, learning
+settlement projections, checkpoint digests, and a generation-linked state digest. Its explicit
+phases are `execution_pending`, `evaluation_pending`, `replan_handoff`, and `terminal`. Saves are
+idempotent for the same digest and otherwise require a contiguous generation pointing to the
+previous state digest, so stale or forked workers fail closed.
+
+The state store never serializes a proposal, mission arguments, provider output, evaluator
+instruction, credentials, or raw evidence. After a restart on a non-root attempt,
+`rehydrateMission` reconstructs the private mission and the SDK rechecks its identity, protected
+contract, catalogue, policy, and preflight authorization. After a restart at `replan_handoff`,
+`rehydrateReplanInstruction` restores transient guidance by digest; evaluation and already-settled
+learning are not replayed. The executor checkpoint/result stores remain separate: the state table
+is the orchestration cursor, while the executor store and caller result cache own wave metadata
+and private values. `AutonomousMissionReplanPersistenceCoordinator` flushes/restores bounded,
+hash-bound multi-root snapshots through a caller-owned `read()`/`write()` adapter.
+
 To connect provider-backed steps to delayed-credit learning, give the adapter the same
 `AutonomousLearningController` used by direct runs. Successful steps receive stable episode IDs;
 approval, refusal, failed, and uncertain-effect steps do not create episodes. The mission
