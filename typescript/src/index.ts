@@ -608,6 +608,22 @@ export type {
   AutonomousWorkflowLearningSettlement,
 } from "./autonomous-learning.js";
 export {
+  AUTONOMOUS_WORKFLOW_CYCLE_SCHEMA,
+  AUTONOMOUS_WORKFLOW_REPLAN_CONTEXT_SCHEMA,
+  AUTONOMOUS_WORKFLOW_CYCLE_MAX_REPLANS,
+  AUTONOMOUS_WORKFLOW_CYCLE_MAX_INSTRUCTION_BYTES,
+  runAutonomousWorkflowCycle,
+} from "./autonomous-workflow-cycle.js";
+export type {
+  AutonomousWorkflowCycleStatus,
+  AutonomousWorkflowCycleEvaluationInput,
+  AutonomousWorkflowCycleEvaluationProjection,
+  AutonomousWorkflowCycleAttempt,
+  AutonomousWorkflowCycleLearningOptions,
+  AutonomousWorkflowCycleOptions,
+  AutonomousWorkflowCycleResult,
+} from "./autonomous-workflow-cycle.js";
+export {
   AUTONOMOUS_MEMORY_EVENT_SCHEMA,
   AUTONOMOUS_MEMORY_MAX_EPISODES,
   AUTONOMOUS_MEMORY_MAX_EVENTS,

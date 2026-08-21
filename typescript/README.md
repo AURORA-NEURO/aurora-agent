@@ -848,6 +848,42 @@ provider refusals never create reward episodes. On restart, the caller rehydrate
 credential, reloads the checkpoint and episode store, and can continue the same value-only learning
 trajectory without replaying private payloads.
 
+For applications that want one high-level supervisor, `runAutonomousWorkflowCycle()` composes
+the durable executor, explicit evaluator, delayed-credit settlement, and bounded replanning
+boundary. The callback must return caller-owned evidence for the stages that ran; it may also
+request a retry with a short evaluator instruction. A retry gets a fresh child workflow job ID
+(`root`, then `root:attempt-2`, and so on), so the prior checkpoint and workflow contract remain
+immutable. The instruction is screened for credential-shaped material, placed only in transient
+prompt context, and included in the returned digest-only evaluation projection. The supervisor
+never treats a provider response, transport success, or model self-report as evidence or reward.
+
+```typescript
+const cycle = await runAutonomousWorkflowCycle(task, executor, {
+  domain: "coding",
+  candidates: agent.models(),
+  approveProviderCall: true,
+  jobId: "delivery-cycle-42",
+  maxReplans: 1,
+  learning: { controller: learning, trajectoryIdPrefix: "delivery-trajectory" },
+  evaluate: async (execution) => ({
+    evidence: {
+      stages: execution.stage_results.map((stage) => ({
+        stage_id: stage.stage.id,
+        signals: Object.fromEntries(stage.stage.evaluator_signals.map((signal) => [signal, 1])),
+      })),
+    },
+    replan_requested: false,
+  }),
+});
+```
+
+The cycle is domain-neutral and exercises the same reviewed stage contract for coding, browser,
+data, science, biomedical, neuroscience, operations, enterprise, multi-agent, multimodal,
+cross-domain, and evaluation workflows. Each attempt remains independently checkpointed by the
+executor store; the cycle result retains local provider results while exposing only bounded
+evaluation and learning projections for persistence. Approval, blocked-stage recovery, effect
+reconciliation, credential rehydration, and provider selection remain caller-controlled gates.
+
 When a deployment also needs a server-visible queue, `AutonomousDurableJobController` bridges that
 local worker to the value-only `brain_job_submit`, `brain_job_status`, `brain_job_events`, and
 `brain_job_approval` operations. Submission sends only an idempotency key, task/spec digest,

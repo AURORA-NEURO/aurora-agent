@@ -1872,6 +1872,41 @@ declared a completed workflow; the evaluator result remains `incomplete` until t
 finishes. Restart recovery reloads both caller-owned stores, verifies the original task/workflow
 digests through the executor, and does not silently recreate or overwrite a settled episode.
 
+`runAutonomousWorkflowCycle()` is the high-level supervisor for this boundary. It accepts an
+explicit evidence callback, invokes the built-in workflow evaluator, settles any pending stage
+trajectory through the supplied or executor-owned learning controller, and can perform up to
+three evaluator-requested replans. Every replan receives a fresh child checkpoint identity
+(`root:attempt-2`, `root:attempt-3`, and so on), preserving the previous attempt's workflow and
+execution-contract digests. The callback must provide evidence; transport success, a provider
+self-report, and a completed checkpoint are never inferred to be reward.
+
+```typescript
+const cycle = await runAutonomousWorkflowCycle(task, executor, {
+  domain: "science",
+  candidates: agent.models(),
+  approveProviderCall: true,
+  jobId: "science-review-42",
+  maxReplans: 1,
+  learning: { controller: learning, trajectoryIdPrefix: "science-review-trajectory" },
+  evaluate: async (execution) => ({
+    evidence: {
+      stages: execution.stage_results.map((stage) => ({
+        stage_id: stage.stage.id,
+        signals: Object.fromEntries(stage.stage.evaluator_signals.map((signal) => [signal, 1])),
+      })),
+    },
+    replan_requested: false,
+  }),
+});
+```
+
+Replan guidance is bounded, credential-screened, transient prompt context. It cannot add a
+domain, stage, dependency, tool, permission, budget, credential, or external effect. The returned
+cycle retains local attempt responses for the application while exposing only evaluation/learning
+projections and digests suitable for persistence. Each attempt is independently durable through
+the caller-owned workflow checkpoint store; approval, blocked-stage retry, effect reconciliation,
+and task/credential rehydration remain explicit worker decisions.
+
 ### Durable job-controller handoff
 
 `AutonomousDurableJobController` provides the concrete handoff between those two planes. Its
