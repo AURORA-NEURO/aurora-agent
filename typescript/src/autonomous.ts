@@ -622,6 +622,10 @@ export interface AutonomousRunResult {
   cross_domain?: AutonomousCrossDomainRunResult | null;
   /** Optional value-only episodic-memory projection; absent when memory is not configured. */
   memory?: AutonomousMemoryRunProjection | null;
+  /** Pending value-only learning episode prepared only after a completed provider run. */
+  learning_episode_id?: string | null;
+  learning_episode_status?: "prepared" | "not_eligible" | "failed";
+  learning_error_class?: string | null;
   learning: "provider_health_feedback_only" | "online_bandit_feedback_available";
   retention: "provider_response_local; value_only_learning_projection";
 }
@@ -819,6 +823,10 @@ export interface AutonomousRunOptions {
   retrieveMemory?: boolean;
   /** Optional caller-owned lesson; it is screened and retained only as bounded memory metadata. */
   memoryLesson?: string | null;
+  /** Optional controller that prepares a pending bandit-learning episode after a completed run. */
+  learning?: AutonomousLearningController;
+  /** Stable caller-owned identity for the pending learning episode. */
+  learningEpisodeId?: string;
   hints?: readonly string[];
   allowCrossDomain?: boolean;
   maxInputTokens?: number;
@@ -870,7 +878,6 @@ export interface AutonomousCrossDomainRunOptions extends AutonomousRunOptions {
   synthesize?: boolean;
   /** Maximum number of specialist provider calls in flight during bounded fan-out. */
   maxParallelChildren?: number;
-  learning?: AutonomousLearningController;
 }
 
 export interface DomainToolExecutor {
@@ -939,6 +946,7 @@ function resolvePlanAndRunBudget(options: AutonomousPlanAndRunOptions, planning:
 
 const AUTONOMOUS_MEMORY_RUN_RETENTION = "value_only_episode_metadata;transient_task_and_provider_payloads_not_retained" as const;
 let autonomousMemoryRunSequence = 0;
+let autonomousLearningEpisodeSequence = 0;
 
 interface AutonomousMemoryPreparation {
   readonly store: AutonomousEpisodicMemoryStore | undefined;
@@ -3837,8 +3845,11 @@ export class AutonomousAgent {
     if (route.abstained || !route.primary_domain) return { schema: "bioprism-typescript-autonomous-run/0.1", status: "route_review_required", route, blueprint: null, plan_refinement_digest: null, selection: null, response: null, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
     const memory = await this.prepareMemory(taskText, route, options, [route.primary_domain]);
     const finish = async (result: AutonomousRunResult): Promise<AutonomousRunResult> => {
-      if (!memory.store) return result;
-      return { ...result, memory: await this.recordMemory(taskText, route, result, options, memory) };
+      const withMemory = memory.store
+        ? { ...result, memory: await this.recordMemory(taskText, route, result, options, memory) }
+        : result;
+      if (!options.learning) return withMemory;
+      return { ...withMemory, ...(await this.prepareDirectLearning(withMemory, route, options)) };
     };
     const blueprintEnvelope = await this.blueprint(taskText, { domain: route.primary_domain, routeOverride: options.routeOverride, capability: options.capability, context: [...(options.context ?? []), ...memory.context], maxInputTokens: options.maxInputTokens, tools: options.tools?.map((tool) => tool.name), hints: options.hints });
     const blueprint = blueprintEnvelope.blueprint;
@@ -4082,6 +4093,31 @@ export class AutonomousAgent {
 
   private memoryStoreForRun(options: Pick<AutonomousRunOptions, "memoryStore">): AutonomousEpisodicMemoryStore | undefined {
     return options.memoryStore ?? this.memoryStore;
+  }
+
+  /** Prepare a pending evaluator settlement boundary for ordinary direct runs. */
+  private async prepareDirectLearning(
+    result: AutonomousRunResult,
+    route: AutonomousRouteProposal,
+    options: Pick<AutonomousRunOptions, "learning" | "learningEpisodeId" | "memoryRunId">,
+  ): Promise<Pick<AutonomousRunResult, "learning_episode_id" | "learning_episode_status" | "learning_error_class">> {
+    if (!options.learning) return {};
+    if (result.status !== "completed" || !result.blueprint || !result.selection?.selected_model) {
+      return { learning_episode_id: null, learning_episode_status: "not_eligible", learning_error_class: null };
+    }
+    try {
+      const derivedId = options.learningEpisodeId
+        ?? (options.memoryRunId
+          ? `learning:${memoryIdentity("memory run id", options.memoryRunId)}`
+          : `learning:${route.task_digest.slice(0, 24)}:${++autonomousLearningEpisodeSequence}`);
+      const episodeId = memoryIdentity("learning episode id", derivedId);
+      const episode = await options.learning.prepareRun(result, { episodeId, runId: episodeId });
+      return { learning_episode_id: episode.episode_id, learning_episode_status: "prepared", learning_error_class: null };
+    } catch (error) {
+      // A requested learning adapter must be observable as failed, but it must not turn a valid
+      // provider result into a fabricated provider failure or cause a provider replay.
+      return { learning_episode_id: null, learning_episode_status: "failed", learning_error_class: memoryErrorClass(error) };
+    }
   }
 
   /** Retrieve only bounded, value-only episode projections before prompt assembly. */

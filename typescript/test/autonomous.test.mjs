@@ -16,6 +16,7 @@ import {
   AutonomousCostBudgetError,
   AutonomousDomainToolRegistry,
   AutonomousDomainToolRuntime,
+  AutonomousLearningController,
   AutonomousOnlineLearner,
   InMemoryAutonomousEpisodicMemory,
   AUTONOMOUS_API_TOOL_ADAPTER_SCHEMA,
@@ -504,6 +505,99 @@ test("episodic-memory failures remain explicit without changing the provider exe
   assert.equal(recordResult.status, "approval_required");
   assert.equal(recordResult.memory.status, "record_failed");
   assert.equal(recordResult.memory.error_class, "Error");
+});
+
+test("ordinary direct runs prepare explicit online-learning episodes across every domain", async () => {
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => jsonResponse({ choices: [{ message: { role: "assistant", content: "direct-learning-response" }, finish_reason: "stop" }] }),
+  });
+  llm.registerProvider(openaiCompatibleProvider("direct-learning-provider", "https://direct-learning.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm, { learner: new AutonomousOnlineLearner() });
+  agent.registerModel(candidate("direct-learning-provider", "direct-learning-model", [
+    "reasoning", "code", "web", "data", "science", "biomedical", "operations", "enterprise", "coordination", "multimodal", "evaluation",
+  ]));
+  const controller = new AutonomousLearningController(agent);
+  const tasks = {
+    coding: "debug and test this repository",
+    browser: "compare current web sources",
+    data: "validate dataset schema and lineage",
+    science: "design a reproducible experiment",
+    biomedical: "review treatment evidence with safety boundaries",
+    neuroscience: "analyze EEG preprocessing limits",
+    operations: "plan a reversible outage rollback",
+    enterprise: "map governance ownership and approvals",
+    multi_agent: "delegate a bounded specialist task",
+    multimodal: "align an image with a transcript",
+    cross_domain: "synthesize interdisciplinary evidence",
+    evaluation: "replay a benchmark holdout",
+  };
+  for (const [domain, task] of Object.entries(tasks)) {
+    const result = await agent.run(task, {
+      domain,
+      approveProviderCall: true,
+      learning: controller,
+      learningEpisodeId: `direct-learning-${domain}`,
+    });
+    assert.equal(result.status, "completed", domain);
+    assert.equal(result.learning_episode_status, "prepared", domain);
+    assert.equal(result.learning_episode_id, `direct-learning-${domain}`, domain);
+    const episode = await controller.episodes.load(result.learning_episode_id);
+    assert.equal(episode.status, "pending", domain);
+    assert.equal(JSON.stringify(episode).includes("direct-learning-response"), false, domain);
+    const settlement = await controller.settleRun(result.learning_episode_id, {
+      evaluator_id: `${domain}-reviewer`,
+      evaluator_version: "1",
+      reward: 0.8,
+      passed: true,
+      evidence_digest: "a".repeat(64),
+    });
+    assert.equal(settlement.episode.status, "settled", domain);
+  }
+  assert.equal(agent.learner.snapshot().generation, 12);
+  const replay = await agent.run(tasks.coding, {
+    domain: "coding",
+    approveProviderCall: true,
+    learning: controller,
+    learningEpisodeId: "direct-learning-replay",
+  });
+  const replayed = await agent.run(tasks.coding, {
+    domain: "coding",
+    approveProviderCall: true,
+    learning: controller,
+    learningEpisodeId: "direct-learning-replay",
+  });
+  assert.equal(replay.learning_episode_status, "prepared");
+  assert.equal(replayed.learning_episode_status, "prepared");
+  assert.equal((await controller.episodes.pending()).filter((episode) => episode.episode_id === "direct-learning-replay").length, 1);
+});
+
+test("direct learning adapter failures are explicit and do not replay a valid provider result", async () => {
+  const llm = new LLMRuntime({ credentials: new CredentialStore() });
+  const agent = new AutonomousAgent(llm);
+  const result = await agent.run("prepare a bounded direct learning episode", {
+    domain: "coding",
+    approveProviderCall: false,
+    learning: { prepareRun: async () => { throw new Error("learning adapter unavailable"); } },
+    learningEpisodeId: "direct-learning-failure",
+  });
+  assert.equal(result.status, "approval_required");
+  assert.equal(result.learning_episode_status, "not_eligible");
+
+  const completedLlm = new LLMRuntime({ credentials: new CredentialStore(), fetch: async () => jsonResponse({ choices: [{ message: { role: "assistant", content: "ok" }, finish_reason: "stop" }] }) });
+  completedLlm.registerProvider(openaiCompatibleProvider("direct-learning-provider", "https://direct-learning.test", { requiresCredential: false }));
+  const completedAgent = new AutonomousAgent(completedLlm);
+  completedAgent.registerModel(candidate("direct-learning-provider", "direct-learning-model", ["reasoning", "code"]));
+  const completed = await completedAgent.run("prepare a bounded direct learning episode", {
+    domain: "coding",
+    approveProviderCall: true,
+    learning: { prepareRun: async () => { throw new Error("learning adapter unavailable"); } },
+    learningEpisodeId: "direct-learning-failure",
+  });
+  assert.equal(completed.status, "completed");
+  assert.equal(completed.learning_episode_status, "failed");
+  assert.equal(completed.learning_episode_id, null);
+  assert.equal(completed.learning_error_class, "Error");
 });
 
 test("provider planning refuses dependency-invalid proposals without retaining provider output", async () => {

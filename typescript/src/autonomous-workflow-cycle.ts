@@ -90,7 +90,7 @@ export interface AutonomousWorkflowCycleLearningOptions {
   remote?: boolean;
 }
 
-export interface AutonomousWorkflowCycleOptions extends Omit<AutonomousWorkflowExecuteOptions, "jobId" | "context"> {
+export interface AutonomousWorkflowCycleOptions extends Omit<AutonomousWorkflowExecuteOptions, "jobId" | "context" | "learning"> {
   /** Stable root identity. Each evaluator-guided retry receives a bounded child job id. */
   cycleId?: string;
   /** Root workflow checkpoint identity; defaults to cycleId or a task digest-derived id. */

@@ -131,7 +131,7 @@ export interface AutonomousDecisionCyclePersistenceOptions {
   rehydrateResult?: (context: AutonomousDecisionCycleRehydrationContext) => AutonomousDecisionCycleResult | AutonomousCrossDomainDecisionCycleResult | Promise<AutonomousDecisionCycleResult | AutonomousCrossDomainDecisionCycleResult>;
 }
 
-export interface AutonomousDecisionCycleOptions extends AutonomousRunOptions, AutonomousDecisionCyclePersistenceOptions {
+export interface AutonomousDecisionCycleOptions extends Omit<AutonomousRunOptions, "learning">, AutonomousDecisionCyclePersistenceOptions {
   semanticRouting?: AutonomousDecisionCycleSemanticOptions;
   /** Optional provider proposal phase; it never executes unless acceptPlan is true. */
   providerPlanning?: AutonomousProviderPlanningOptions;

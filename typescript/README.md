@@ -849,6 +849,15 @@ error class. Memory failures never turn an otherwise valid provider result into 
 success or silently widen authorization. Prior episodes remain advisory context: they cannot add
 tools, providers, permissions, effects, budgets, or factual authority.
 
+Direct runs can also hand their completed, selected-model identity to the online-learning
+controller in the same call. Supply `learning: controller` and a stable `learningEpisodeId`; the
+run returns `learning_episode_status: "prepared"` and a pending `learning_episode_id` only after
+provider completion. The controller then requires an independent evaluator packet through
+`settleRun()` before updating the bandit. Provider transport success, approval, or a model's own
+claim never becomes reward. Incomplete runs return `not_eligible`, and adapter preparation errors
+return `failed` with a redacted error class while preserving the valid provider result. Cross-domain
+runs continue to prepare specialist and synthesis episodes as one delayed-credit trajectory.
+
 For bounded automatic recall, `taskFacetDigests(task)` projects short identifier-like task terms into
 at most 32 namespaced SHA-256 digests. The original task vocabulary is never stored. Callers may put
 those digests in `AutonomousMemoryEpisodeInput.task_facets` and query them through

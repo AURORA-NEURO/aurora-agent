@@ -1566,6 +1566,18 @@ model candidate set, tool allow-list, budget, permission, or effect boundary. Re
 recording failures are reported in that projection without converting an otherwise valid provider
 outcome into a false success or replaying a provider call.
 
+### Direct-run learning bridge
+
+An ordinary single-domain `AutonomousAgent.run()` can now prepare a pending online-learning
+episode by receiving `learning: controller` and a stable `learningEpisodeId`. Preparation occurs
+only after a completed run has a selected provider/model and retains the same value-only run
+identity used by the controller. The result exposes `learning_episode_status` and
+`learning_episode_id`, allowing the caller to submit an independent evaluator packet to
+`controller.settleRun()`; no reward is inferred from transport success, approval, or provider
+self-report. An approval pause or incomplete result is `not_eligible`, while adapter failure is
+explicitly `failed` without replaying or relabeling the valid provider outcome. The cross-domain
+path retains its existing specialist/synthesis trajectory and delayed-credit semantics.
+
 ## Domain-aware autonomous task intake
 
 Applications that do not want to hand-assemble every prompt and plan can use the high-level
