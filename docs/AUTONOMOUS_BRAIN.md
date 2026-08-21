@@ -2824,6 +2824,44 @@ call requires an explicit new `attempt_id`. This protects against silent duplica
 claiming distributed exactly-once delivery; cross-process fencing and provider idempotency remain
 caller-owned.
 
+The TypeScript SDK now exposes the same connector seam with a browser-safe in-memory receipt
+journal and digest snapshot. Applications can persist `journal.snapshot()` through their own
+IndexedDB, SQLite, Postgres, or object-storage adapter and restore it only after snapshot and hash
+chain verification. The runtime remains dependency-free and never opens a network connection or
+accepts a raw key:
+
+```typescript
+const registry = new AutonomousConnectorRegistry([
+  new AutonomousConnectorRegistration(manifest, async (_manifest, request) => {
+    // The application may close over its short-lived provider session here.
+    return providerClient.read(request);
+  }),
+]);
+const journal = new InMemoryAutonomousConnectorReceiptJournal();
+const runtime = new AutonomousConnectorRuntime(registry, { receiptStore: journal });
+const plan = registry.selectForDomains(["science", "biomedical"], {
+  capability: "evidence_read",
+});
+const result = await runtime.dispatchFromPlan(plan, new AutonomousConnectorDispatchRequest({
+  dispatch_id: "evidence-dispatch-1",
+  execution_id: "research-run-1",
+  call_id: "source-call-1",
+  connector_id: plan.rows[0].connector_id,
+  domains: ["science", "biomedical"],
+  capability: "evidence_read",
+  request: { subject_digest },
+  selection_plan_digest: plan.plan_digest,
+  approved: true,
+}));
+```
+
+`AutonomousAgent` exposes `connectorCoverage()`, `selectConnectors()`, `dispatchConnector()`,
+and `dispatchConnectorFromPlan()` for the same routed path. TypeScript and Python now share
+explicit domain/capability scope, approval-before-executor, transient values, metadata-only
+receipts, replay barriers, and evaluator-driven adaptive selection across all twelve domains.
+Connector completion is still not task-quality proof; explicit evidence evaluation remains the
+only source of learning credit.
+
 For the gateway-backed source connector path, use
 `create_autonomous_api_source_connector_executor(api_client)`. It translates a transient
 `{"plan": ..., "execution": ...}` request into the typed source-plan and source-execute requests,

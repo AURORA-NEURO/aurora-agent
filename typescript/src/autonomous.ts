@@ -30,6 +30,13 @@ import type {
   AutonomousCapabilityExecutionResult,
 } from "./autonomous-capabilities.js";
 import type { AutonomousCapabilityJournalStore } from "./autonomous-capability-persistence.js";
+import {
+  AutonomousConnectorRegistry,
+  AutonomousConnectorRuntime,
+  type AutonomousConnectorDispatchRequest,
+  type AutonomousConnectorDispatchResult,
+  type AutonomousConnectorSelectionPlan,
+} from "./autonomous-connectors.js";
 import { AutonomousEffectBoundary, AutonomousEffectReconciliationRequiredError, type AutonomousEffectExecutionContext } from "./autonomous-effects.js";
 import type { AutonomousLearningController } from "./autonomous-learning.js";
 import { taskFacetDigests } from "./autonomous-memory.js";
@@ -476,6 +483,7 @@ export interface AutonomousReadinessReport extends JsonObject {
   model_health: JsonObject;
   learning: JsonObject;
   tooling: JsonObject;
+  connectors?: JsonObject;
   activation: AutonomousCapabilityActivationState;
   next_actions: string[];
   readiness_state: AutonomousReadinessState;
@@ -760,6 +768,10 @@ export interface AutonomousAgentOptions {
   memoryStore?: AutonomousEpisodicMemoryStore;
   /** Optional caller-owned activation state machine; keys and raw prompts never enter its state. */
   activation?: AutonomousCapabilityActivation;
+  /** Optional caller-owned external connector catalogue; registration never authorizes dispatch. */
+  connectorRegistry?: AutonomousConnectorRegistry;
+  /** Optional connector runtime with approval, replay, and receipt boundaries. */
+  connectorRuntime?: AutonomousConnectorRuntime;
 }
 
 /** Caller-owned controls for one provider-assisted planning proposal. */
@@ -2814,6 +2826,9 @@ export class AutonomousAgent {
   private readonly effectBoundary?: AutonomousEffectBoundary;
   private readonly capabilityJournal?: AutonomousCapabilityJournalStore;
   private readonly capabilityLearningSettlementStore: AutonomousCapabilityLearningSettlementStore;
+  /** Caller-owned connector catalogue and runtime for bounded external evidence/provider work. */
+  readonly connectorRegistry?: AutonomousConnectorRegistry;
+  readonly connectorRuntime?: AutonomousConnectorRuntime;
   /** Caller-owned episodic memory; exposed so the learning controller can close evaluation feedback. */
   readonly memoryStore?: AutonomousEpisodicMemoryStore;
   private domainToolRegistry?: AutonomousDomainToolRegistry;
@@ -2827,6 +2842,9 @@ export class AutonomousAgent {
     if (options.toolExecutor !== undefined && typeof options.toolExecutor !== "function") throw new ArgumentError("AutonomousAgent toolExecutor must be callable");
     if (options.effectBoundary !== undefined && !(options.effectBoundary instanceof AutonomousEffectBoundary)) throw new ArgumentError("AutonomousAgent effectBoundary must be an AutonomousEffectBoundary");
     if (options.activation !== undefined && !(options.activation instanceof AutonomousCapabilityActivation)) throw new ArgumentError("AutonomousAgent activation must be an AutonomousCapabilityActivation");
+    if (options.connectorRegistry !== undefined && !(options.connectorRegistry instanceof AutonomousConnectorRegistry)) throw new ArgumentError("AutonomousAgent connectorRegistry must be an AutonomousConnectorRegistry");
+    if (options.connectorRuntime !== undefined && !(options.connectorRuntime instanceof AutonomousConnectorRuntime)) throw new ArgumentError("AutonomousAgent connectorRuntime must be an AutonomousConnectorRuntime");
+    if (options.connectorRegistry !== undefined && options.connectorRuntime !== undefined && options.connectorRuntime.registry !== options.connectorRegistry) throw new ArgumentError("AutonomousAgent connectorRegistry and connectorRuntime must reference the same catalogue");
     this.llm = llm;
     this.apiClient = options.apiClient;
     this.learner = options.learner;
@@ -2850,6 +2868,8 @@ export class AutonomousAgent {
     this.capabilityJournal = options.capabilityJournal;
     if (options.capabilityLearningSettlementStore !== undefined && (typeof options.capabilityLearningSettlementStore.load !== "function" || typeof options.capabilityLearningSettlementStore.save !== "function")) throw new ArgumentError("AutonomousAgent capabilityLearningSettlementStore is malformed");
     this.capabilityLearningSettlementStore = options.capabilityLearningSettlementStore ?? new InMemoryAutonomousCapabilityLearningSettlementStore();
+    this.connectorRegistry = options.connectorRegistry ?? options.connectorRuntime?.registry;
+    this.connectorRuntime = options.connectorRuntime;
     const selector = options.selector ?? (this.modelHealthController ? this.modelHealthController.selector() : options.learner ? (request: AutonomousSelectionRequest) => options.learner!.select(request) : options.apiClient ? contextualSelector(options.apiClient) : this.modelHealthBridge ? this.modelHealthBridge.selector() : undefined);
     this.runtime = new AutonomousRuntime(llm, { selector });
   }
@@ -2968,6 +2988,33 @@ export class AutonomousAgent {
   /** Revoke the activation and immediately close all tool admission paths. */
   revokeActivation(reason?: string): AutonomousCapabilityActivationState {
     return this.activation.revoke(reason);
+  }
+
+  /** Return exact connector coverage for the requested routed domains without dispatching anything. */
+  connectorCoverage(domains: readonly AutonomousDomainName[], options: { capability?: string | null } = {}): JsonObject {
+    if (!this.connectorRegistry) return { status: "connector_registry_required", domains: [...domains], capability: options.capability ?? null, execution: "planning_only;no_dispatch;no_authorization", secret_material: "never_returned" };
+    return this.connectorRegistry.planForDomains(domains, options);
+  }
+
+  /** Select a digest-bound connector portfolio using deterministic or evaluator-backed evidence. */
+  selectConnectors(
+    domains: readonly AutonomousDomainName[],
+    options: { capability?: string | null; strategy?: "lexicographic_connector_id" | "weighted_evidence"; selectionSignals?: Readonly<Record<string, JsonObject>> } = {},
+  ): AutonomousConnectorSelectionPlan {
+    if (!this.connectorRegistry) throw new ArgumentError("AutonomousAgent has no connector registry");
+    return this.connectorRegistry.selectForDomains(domains, options);
+  }
+
+  /** Dispatch one already-reviewed connector request; external authority remains caller-owned. */
+  async dispatchConnector(request: AutonomousConnectorDispatchRequest): Promise<AutonomousConnectorDispatchResult> {
+    if (!this.connectorRuntime) throw new ArgumentError("AutonomousAgent has no connector runtime");
+    return this.connectorRuntime.dispatch(request);
+  }
+
+  /** Dispatch only when the digest-bound selection plan still matches the live connector catalogue. */
+  async dispatchConnectorFromPlan(plan: AutonomousConnectorSelectionPlan | unknown, request: AutonomousConnectorDispatchRequest): Promise<AutonomousConnectorDispatchResult> {
+    if (!this.connectorRuntime) throw new ArgumentError("AutonomousAgent has no connector runtime");
+    return this.connectorRuntime.dispatchFromPlan(plan, request);
   }
 
   /**
@@ -3339,7 +3386,10 @@ export class AutonomousAgent {
     if (activation.status === "revoked") nextActions.add("create a new activation after explicit caller review");
     const distinctStates = new Set(domainRows.map((row) => row.state));
     const readinessState: AutonomousReadinessState = distinctStates.size === 1 ? [...distinctStates][0]! : "partial";
-    const descriptor = { schema: AUTONOMOUS_READINESS_SCHEMA, providers: providerRows, models: [...modelRows].sort((left, right) => `${left.provider}/${left.model}`.localeCompare(`${right.provider}/${right.model}`)), domains: domainRows, workflows: profiles.map((profile) => profile.workflow), domain_packs: domainPacks, model_capability_coverage: { domain_count: capabilityRows.length, rows: capabilityRows, evidence_posture: "static_caller_declared_capabilities_only" }, model_health: this.llm.modelHealthSnapshot(), learning, tooling: { configured: this.toolCatalogue !== undefined, catalogue_digest: this.toolCatalogue?.digest ?? null, available_tool_count: toolNames.size, execution: "catalogue_metadata_only; registration_is_not_authorization", activation_status: activation.status }, activation, next_actions: [...nextActions].sort(), readiness_state: readinessState, execution: "not_started; no_provider_or_tool_calls" as const, credential_posture: "caller_supplied_opaque_handles" as const, secret_material: "never_returned" as const };
+    const connectorReadiness = this.connectorRegistry
+      ? { configured: true, registry_digest: this.connectorRegistry.digest, connector_count: this.connectorRegistry.registrations().length, execution: "selection_and_dispatch_require_explicit_plan_and_approval", secret_material: "never_returned" as const }
+      : { configured: false, registry_digest: null, connector_count: 0, execution: "caller_owned_connector_registry_not_configured", secret_material: "never_returned" as const };
+    const descriptor = { schema: AUTONOMOUS_READINESS_SCHEMA, providers: providerRows, models: [...modelRows].sort((left, right) => `${left.provider}/${left.model}`.localeCompare(`${right.provider}/${right.model}`)), domains: domainRows, workflows: profiles.map((profile) => profile.workflow), domain_packs: domainPacks, model_capability_coverage: { domain_count: capabilityRows.length, rows: capabilityRows, evidence_posture: "static_caller_declared_capabilities_only" }, model_health: this.llm.modelHealthSnapshot(), learning, tooling: { configured: this.toolCatalogue !== undefined, catalogue_digest: this.toolCatalogue?.digest ?? null, available_tool_count: toolNames.size, execution: "catalogue_metadata_only; registration_is_not_authorization", activation_status: activation.status }, connectors: connectorReadiness, activation, next_actions: [...nextActions].sort(), readiness_state: readinessState, execution: "not_started; no_provider_or_tool_calls" as const, credential_posture: "caller_supplied_opaque_handles" as const, secret_material: "never_returned" as const };
     return { ...descriptor, readiness_digest: await digestJson(descriptor) };
   }
 
