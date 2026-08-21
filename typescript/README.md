@@ -612,6 +612,9 @@ digest, optimistic revisions, and a hash-chained lifecycle across every built-in
 criteria must be satisfied or explicitly waived before completion; snapshots can be flushed through
 `AutonomousGoalPersistenceCoordinator`, and raw goal text, prompts, responses, tools, and credentials
 are never retained.
+`AutonomousAgent.runGoalStep(...)` connects one bounded objective attempt to the routed planning and
+provider runtime, turns approval/partial/failure/completion outcomes into resumable goal state, and
+keeps the runtime result transient while persisting only a value-only outcome digest.
 
 `InMemoryAutonomousModelHealthStore` adds the restart-safe selection feedback plane. It records
 separate value-only invocation and evaluator-quality observations, aggregates success/failure,

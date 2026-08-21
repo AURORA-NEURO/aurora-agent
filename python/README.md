@@ -56,6 +56,9 @@ persisting task text; explicit evaluator rewards remain the only learning author
 `AutonomousGoalLedger` adds the restart-safe objective layer above that memory: bounded attempts,
 criterion/evidence digests, blockers, optimistic revisions, and a hash-chained lifecycle work for
 every built-in domain without retaining goal text or provider payloads.
+`AutonomousTaskOrchestrator.run_goal_step(...)` wires one bounded objective attempt into the normal
+route, planning, model-selection, provider, evaluator, and approval lifecycle, returning raw
+runtime output only transiently and persisting a value-only settlement.
 `run_adaptive_mission_learning_cycle()` combines recall, evaluator reward, bandit state updates,
 and bounded pre-dispatch replanning without retaining provider text, tool arguments, or secrets.
 `BrainJobStore` adds resolver-backed leases and checkpoints for restart-safe learning jobs, while

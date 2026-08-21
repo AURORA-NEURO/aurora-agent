@@ -1,10 +1,11 @@
 import json
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from prism_sdk.autonomy import AUTONOMOUS_DOMAINS
+from prism_sdk.autonomy import AUTONOMOUS_DOMAINS, AutonomousTaskOrchestrator
 from prism_sdk.goals import (
     AutonomousGoalConflict,
     AutonomousGoalError,
@@ -118,6 +119,60 @@ def test_goal_ledger_is_domain_neutral_across_all_builtin_domains(tmp_path: Path
         assert len(ledger.list(limit=len(AUTONOMOUS_DOMAINS))) == len(AUTONOMOUS_DOMAINS)
         assert len(ledger.list(domain=AUTONOMOUS_DOMAINS[0])) == 1
         assert ledger.verify_integrity()["goals"] == len(AUTONOMOUS_DOMAINS)
+
+
+def test_goal_execution_wrapper_advances_all_domains_and_retains_only_value_state(tmp_path: Path) -> None:
+    orchestrator = object.__new__(AutonomousTaskOrchestrator)
+    orchestrator.run = lambda **_: SimpleNamespace(status="approval_required")
+    with AutonomousGoalLedger(str(tmp_path / "execution.sqlite3"), max_goals=len(AUTONOMOUS_DOMAINS)) as ledger:
+        for domain in AUTONOMOUS_DOMAINS:
+            step = orchestrator.run_goal_step(
+                goal_store=ledger,
+                goal_id=f"execution-{domain}",
+                task=f"perform a bounded task for {domain}",
+                domain=domain,
+            )
+            assert step["goal_status"] == "paused"
+            assert step["result_status"] == "approval_required"
+        assert len(ledger.list(statuses=("paused",), limit=len(AUTONOMOUS_DOMAINS))) == len(AUTONOMOUS_DOMAINS)
+        serialized = json.dumps([record.to_dict() for record in ledger.list(limit=len(AUTONOMOUS_DOMAINS))], sort_keys=True)
+        assert "perform a bounded task" not in serialized
+        assert ledger.verify_integrity()["ok"] is True
+
+
+def test_goal_execution_wrapper_completes_criteria_and_records_failures(tmp_path: Path) -> None:
+    orchestrator = object.__new__(AutonomousTaskOrchestrator)
+    with AutonomousGoalLedger(str(tmp_path / "settlement.sqlite3")) as ledger:
+        orchestrator.run = lambda **_: SimpleNamespace(status="approval_required")
+        paused = orchestrator.run_goal_step(
+            goal_store=ledger,
+            goal_id="settlement",
+            task="settle an evidence review",
+            domain="evaluation",
+            goal_criteria=[{"criterion_id": "evidence", "criterion_digest": _digest("evidence")}],
+        )
+        assert paused["goal_status"] == "paused"
+        orchestrator.run = lambda **_: SimpleNamespace(status="completed")
+        completed = orchestrator.run_goal_step(
+            goal_store=ledger,
+            goal_id="settlement",
+            task="settle an evidence review",
+            domain="evaluation",
+            criterion_updates=[{"criterion_id": "evidence", "status": "satisfied", "evidence_digest": _digest("receipt")}],
+        )
+        assert completed["goal_status"] == "completed"
+        assert completed["goal"]["attempt"] == 2
+
+        orchestrator.run = lambda **_: (_ for _ in ()).throw(RuntimeError("synthetic provider failure"))
+        with pytest.raises(RuntimeError, match="synthetic provider failure"):
+            orchestrator.run_goal_step(
+                goal_store=ledger,
+                goal_id="failed-goal",
+                task="retry an unavailable provider",
+                domain="operations",
+            )
+        assert ledger.get("failed-goal").status == "failed"
+        assert ledger.verify_integrity()["ok"] is True
 
 
 def test_goal_digest_contract_matches_the_typescript_reference() -> None:

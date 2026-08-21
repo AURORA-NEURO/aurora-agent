@@ -95,6 +95,15 @@ from .llm_runtime import (
     ProviderTool,
 )
 from .memory import BrainEpisodicMemory, BrainMemoryError, MemoryQuery, task_facet_digests
+from .goals import (
+    GOAL_RETENTION,
+    GOAL_STEP_SCHEMA,
+    AutonomousGoalCriterion,
+    AutonomousGoalError,
+    AutonomousGoalLedger,
+    goal_status_for_result,
+    goal_task_digest,
+)
 from .mission import MissionPolicy
 from .tooling import ToolCatalogue, ToolDefinition
 
@@ -6884,6 +6893,139 @@ class AutonomousTaskOrchestrator:
         kwargs.setdefault("execution_mode", blueprint.spec.execution_mode)
         kwargs.setdefault("tool_loop_options", None)
         return self._execute(replacement, **kwargs)
+
+    def run_goal_step(
+        self,
+        *,
+        goal_store: AutonomousGoalLedger,
+        goal_id: str,
+        task: str,
+        domain: str,
+        goal_criteria: Sequence[AutonomousGoalCriterion | Mapping[str, Any]] = (),
+        goal_max_attempts: int = 8,
+        criterion_updates: Sequence[Mapping[str, Any]] = (),
+        run_options: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Run one bounded attempt while advancing a durable objective lifecycle.
+
+        Provider responses remain transient in the returned ``result`` value.  Only the goal
+        transition, result status, and a value-only outcome digest enter the durable ledger.  A
+        provider approval pause, route review, evaluator-incomplete completion, or retryable
+        failure therefore becomes an explicit resumable goal state instead of an apparent success.
+        """
+
+        if not isinstance(goal_store, AutonomousGoalLedger):
+            raise BrainRunError("goal_store must be an AutonomousGoalLedger")
+        if not isinstance(run_options, Mapping) and run_options is not None:
+            raise BrainRunError("run_options must be a mapping or None")
+        options = {} if run_options is None else dict(run_options)
+        if "task" in options or "domain" in options:
+            raise BrainRunError("run_options cannot override goal task or domain")
+        try:
+            task_digest = goal_task_digest(task)
+            current = goal_store.get(goal_id)
+            capability = options.get("capability")
+            risk_class = options.get("risk_class")
+            if current is None:
+                current = goal_store.create(
+                    goal_id=goal_id,
+                    task_digest=task_digest,
+                    domain=domain,
+                    capability=capability,
+                    risk_class=risk_class,
+                    criteria=goal_criteria,
+                    max_attempts=goal_max_attempts,
+                )
+            else:
+                if current.task_digest != task_digest or current.domain != domain:
+                    raise BrainRunError("goal identity does not match the requested task or domain")
+                if capability is not None and current.capability != capability:
+                    raise BrainRunError("goal capability does not match the requested capability")
+                if risk_class is not None and current.risk_class != risk_class:
+                    raise BrainRunError("goal risk_class does not match the requested risk class")
+            if current.status in {"completed", "cancelled"}:
+                return {
+                    "schema": GOAL_STEP_SCHEMA,
+                    "goal": current.to_dict(),
+                    "result": None,
+                    "result_status": "terminal",
+                    "goal_status": current.status,
+                    "outcome_digest": content_digest({"goal_id": current.goal_id, "goal_state_digest": current.state_digest, "result_status": "terminal"}),
+                    "retention": GOAL_RETENTION,
+                    "secret_material": "never_returned",
+                }
+            if current.status in {"blocked", "failed"}:
+                current = goal_store.transition(current.goal_id, "ready", expected_revision=current.revision)
+            running = goal_store.transition(current.goal_id, "running", expected_revision=current.revision)
+        except AutonomousGoalError as error:
+            raise BrainRunError("goal lifecycle admission failed") from error
+
+        try:
+            result = self.run(task=task, domain=domain, **options)
+        except Exception as error:
+            try:
+                goal_store.transition(
+                    running.goal_id,
+                    "failed",
+                    expected_revision=running.revision,
+                    blockers=(f"exception:{type(error).__name__}",),
+                    next_action_digest=goal_task_digest("goal-retry"),
+                )
+            except AutonomousGoalError as transition_error:
+                raise BrainRunError("goal failure transition failed") from transition_error
+            raise
+
+        result_status = result.get("status") if isinstance(result, Mapping) else getattr(result, "status", None)
+        if (
+            not isinstance(result_status, str)
+            or not result_status.strip()
+            or "\x00" in result_status
+            or len(result_status.encode("utf-8")) > 128
+        ):
+            result_status = "failed"
+        else:
+            result_status = result_status.strip()
+        settled = running
+        try:
+            if criterion_updates:
+                settled = goal_store.update_criteria(
+                    running.goal_id,
+                    criterion_updates,
+                    expected_revision=running.revision,
+                )
+            target_status = goal_status_for_result(
+                result_status,
+                criteria_complete=settled.required_criteria_complete,
+            )
+            updated = goal_store.transition(
+                settled.goal_id,
+                target_status,
+                expected_revision=settled.revision,
+                blockers=(() if target_status == "completed" else (f"result:{result_status}",)),
+                next_action_digest=(None if target_status == "completed" else goal_task_digest(f"goal-next:{result_status}")),
+            )
+        except AutonomousGoalError as error:
+            try:
+                goal_store.transition(
+                    settled.goal_id,
+                    "blocked",
+                    expected_revision=settled.revision,
+                    blockers=(f"settlement:{type(error).__name__}",),
+                    next_action_digest=goal_task_digest("goal-settlement-review"),
+                )
+            except AutonomousGoalError as transition_error:
+                raise BrainRunError("goal lifecycle settlement failed and could not be checkpointed") from transition_error
+            raise BrainRunError("goal lifecycle settlement failed") from error
+        return {
+            "schema": GOAL_STEP_SCHEMA,
+            "goal": updated.to_dict(),
+            "result": result,
+            "result_status": result_status,
+            "goal_status": updated.status,
+            "outcome_digest": content_digest({"goal_id": updated.goal_id, "goal_state_digest": updated.state_digest, "result_status": result_status}),
+            "retention": GOAL_RETENTION,
+            "secret_material": "never_returned",
+        }
 
     def run(
         self,

@@ -1916,6 +1916,15 @@ represented only by a digest. The ledger is intentionally domain-neutral; instan
 same domain labels used by the built-in packs, then let the normal route, model selector, mission,
 workflow, evaluator, and bandit layers supply the domain-specific meaning and authorization.
 
+`AutonomousTaskOrchestrator.run_goal_step(...)` is the execution adapter for this boundary. It
+creates or identity-checks the goal, reopens retryable `failed`/`blocked` state, claims one bounded
+`running` attempt, calls the normal autonomous route/plan/model/provider path, and settles the
+result into `paused`, `blocked`, `failed`, or `completed`. Approval pauses and provider exceptions
+are therefore resumable states rather than implicit successes. Callers can pass evaluator-owned
+criterion updates at settlement; a runtime `completed` result remains `paused` until all required
+criteria are satisfied or waived. The returned provider result is transient, while the persisted
+projection contains only the goal record and an outcome digest.
+
 ## Resumable learning jobs
 
 For work that must survive a worker restart, `BrainJobStore` adds a separate orchestration journal.

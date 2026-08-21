@@ -4,6 +4,7 @@ import type { JsonObject } from "./types.js";
 
 export const AUTONOMOUS_GOAL_SCHEMA = "bioprism-autonomous-goal/0.1" as const;
 export const AUTONOMOUS_GOAL_EVENT_SCHEMA = "bioprism-autonomous-goal-event/0.1" as const;
+export const AUTONOMOUS_GOAL_STEP_SCHEMA = "bioprism-autonomous-goal-step/0.1" as const;
 export const AUTONOMOUS_GOAL_SNAPSHOT_SCHEMA = "bioprism-autonomous-goal-snapshot/0.1" as const;
 export const AUTONOMOUS_GOAL_RETENTION = "value_only_goal_state;task_prompt_response_tool_payloads_and_credentials_not_retained" as const;
 export const AUTONOMOUS_GOAL_MAX_GOALS = 4_096;
@@ -23,6 +24,19 @@ const ALLOWED_TRANSITIONS: Record<AutonomousGoalStatus, readonly AutonomousGoalS
   completed: [],
   cancelled: [],
 };
+
+const GOAL_COMPLETED_RESULTS = new Set(["completed", "completed_without_replan", "children_completed"]);
+const GOAL_PAUSED_RESULTS = new Set(["approval_required", "reconciliation_required", "turn_limit_reached", "paused", "stage_blocked", "children_partial", "child_incomplete"]);
+const GOAL_BLOCKED_RESULTS = new Set(["route_review_required", "planning_review_required", "provider_disagreement"]);
+
+/** Map a bounded runtime status to goal state without trusting provider text. */
+export function goalStatusForResult(resultStatus: string, criteriaComplete: boolean): AutonomousGoalStatus {
+  if (typeof resultStatus !== "string" || !resultStatus.trim()) return "failed";
+  if (GOAL_COMPLETED_RESULTS.has(resultStatus)) return criteriaComplete ? "completed" : "paused";
+  if (GOAL_PAUSED_RESULTS.has(resultStatus)) return "paused";
+  if (GOAL_BLOCKED_RESULTS.has(resultStatus)) return "blocked";
+  return "failed";
+}
 
 export interface AutonomousGoalCriterion extends JsonObject {
   criterion_id: string;

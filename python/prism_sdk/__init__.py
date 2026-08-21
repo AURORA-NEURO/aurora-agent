@@ -59,6 +59,7 @@ from .goals import (
     GOAL_EVENT_SCHEMA,
     GOAL_RETENTION,
     GOAL_SCHEMA,
+    GOAL_STEP_SCHEMA,
     MAX_GOAL_BLOCKERS,
     MAX_GOAL_CRITERIA,
     MAX_GOAL_EVENTS,
@@ -68,6 +69,7 @@ from .goals import (
     AutonomousGoalError,
     AutonomousGoalLedger,
     AutonomousGoalRecord,
+    goal_status_for_result,
     goal_task_digest,
 )
 from .jobs import (
@@ -2664,6 +2666,7 @@ __all__ = [
     "GOAL_EVENT_SCHEMA",
     "GOAL_RETENTION",
     "GOAL_SCHEMA",
+    "GOAL_STEP_SCHEMA",
     "MAX_GOAL_BLOCKERS",
     "MAX_GOAL_CRITERIA",
     "MAX_GOAL_EVENTS",
@@ -2673,6 +2676,7 @@ __all__ = [
     "AutonomousGoalError",
     "AutonomousGoalLedger",
     "AutonomousGoalRecord",
+    "goal_status_for_result",
     "goal_task_digest",
     "BRAIN_CONTROL_SCHEMA",
     "AsyncBrainControlClient",

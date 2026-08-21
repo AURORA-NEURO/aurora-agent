@@ -10,6 +10,16 @@ import type { AutonomousExecutionController } from "./autonomous-execution.js";
 import { AutonomousEffectBoundary, AutonomousEffectReconciliationRequiredError, type AutonomousEffectExecutionContext } from "./autonomous-effects.js";
 import type { AutonomousLearningController } from "./autonomous-learning.js";
 import {
+  AUTONOMOUS_GOAL_RETENTION,
+  AUTONOMOUS_GOAL_STEP_SCHEMA,
+  InMemoryAutonomousGoalLedger,
+  goalStatusForResult,
+  goalTaskDigest,
+  type AutonomousGoalCriterion,
+  type AutonomousGoalRecord,
+  type AutonomousGoalStatus,
+} from "./autonomous-goals.js";
+import {
   AutonomousRuntime,
   AutonomousCostBudget,
   type AutonomousModelCandidate,
@@ -530,6 +540,18 @@ export interface AutonomousRunResult {
   cross_domain?: AutonomousCrossDomainRunResult | null;
   learning: "provider_health_feedback_only" | "online_bandit_feedback_available";
   retention: "provider_response_local; value_only_learning_projection";
+}
+
+/** One bounded autonomous attempt plus its durable, value-only objective projection. */
+export interface AutonomousGoalStepResult {
+  schema: typeof AUTONOMOUS_GOAL_STEP_SCHEMA;
+  goal: AutonomousGoalRecord;
+  result: AutonomousRunResult | null;
+  result_status: string;
+  goal_status: AutonomousGoalStatus;
+  outcome_digest: string;
+  retention: typeof AUTONOMOUS_GOAL_RETENTION;
+  secret_material: "never_returned";
 }
 
 export interface AutonomousCrossDomainChildRun {
@@ -2604,6 +2626,115 @@ export class AutonomousAgent {
       plan_digest: await digestJson(descriptor),
       execution: "not_started",
       authorization: "caller_approval_per_provider_or_effect_boundary",
+    };
+  }
+
+  /**
+   * Run one bounded attempt while advancing a durable objective lifecycle.
+   *
+   * The provider result is returned to the caller but never copied into the goal ledger.
+   * The ledger receives only lifecycle state, criterion status, bounded blocker identifiers,
+   * and a digest of the value-only outcome projection. This makes approval pauses, partial
+   * progress, provider failures, and evaluator-incomplete results restartable across domains.
+   */
+  async runGoalStep(
+    goalStore: InMemoryAutonomousGoalLedger,
+    goalId: string,
+    task: string,
+    domain: AutonomousDomainName,
+    options: {
+      goalCriteria?: readonly AutonomousGoalCriterion[];
+      goalMaxAttempts?: number;
+      goalCapability?: string | null;
+      goalRiskClass?: string | null;
+      criterionUpdates?: readonly JsonObject[];
+      runOptions?: AutonomousRunOptions;
+    } = {},
+  ): Promise<AutonomousGoalStepResult> {
+    if (!(goalStore instanceof InMemoryAutonomousGoalLedger)) throw new ArgumentError("goalStore must be an InMemoryAutonomousGoalLedger");
+    if (!AUTONOMOUS_DOMAIN_NAMES.includes(domain)) throw new ArgumentError("goal domain is unsupported");
+    const taskText = boundedText("goal task", task, 32_000);
+    const runOptions = options.runOptions ?? {};
+    if (Object.prototype.hasOwnProperty.call(runOptions, "domain")) throw new ArgumentError("runOptions cannot override goal domain");
+    const taskDigest = goalTaskDigest(taskText);
+    const requestedCapability = options.goalCapability ?? runOptions.capability ?? null;
+    const requestedRiskClass = options.goalRiskClass ?? null;
+    let current = goalStore.get(goalId);
+    if (current === null) {
+      current = goalStore.create({
+        goal_id: goalId,
+        task_digest: taskDigest,
+        domain,
+        capability: requestedCapability,
+        risk_class: requestedRiskClass,
+        criteria: options.goalCriteria ?? [],
+        max_attempts: options.goalMaxAttempts ?? 8,
+      });
+    } else {
+      if (current.task_digest !== taskDigest || current.domain !== domain) throw new ArgumentError("goal identity does not match the requested task or domain");
+      if (requestedCapability !== null && current.capability !== requestedCapability) throw new ArgumentError("goal capability does not match the requested capability");
+      if (requestedRiskClass !== null && current.risk_class !== requestedRiskClass) throw new ArgumentError("goal risk class does not match the requested risk class");
+    }
+    if (current.status === "completed" || current.status === "cancelled") {
+      return {
+        schema: AUTONOMOUS_GOAL_STEP_SCHEMA,
+        goal: current,
+        result: null,
+        result_status: "terminal",
+        goal_status: current.status,
+        outcome_digest: await digestJson({ goal_id: current.goal_id, goal_state_digest: current.state_digest, result_status: "terminal" }),
+        retention: AUTONOMOUS_GOAL_RETENTION,
+        secret_material: "never_returned",
+      };
+    }
+    if (current.status === "blocked" || current.status === "failed") current = goalStore.transition(current.goal_id, "ready", { expected_revision: current.revision });
+    const running = goalStore.transition(current.goal_id, "running", { expected_revision: current.revision });
+    const effectiveCapability = runOptions.capability ?? current.capability ?? undefined;
+    const effectiveRunOptions: AutonomousRunOptions = {
+      ...runOptions,
+      domain,
+      ...(effectiveCapability === undefined ? {} : { capability: effectiveCapability }),
+    };
+    let result: AutonomousRunResult;
+    try {
+      result = await this.run(taskText, effectiveRunOptions);
+    } catch (error) {
+      goalStore.transition(running.goal_id, "failed", {
+        expected_revision: running.revision,
+        blockers: [`exception:${error instanceof Error ? error.constructor.name : "UnknownError"}`],
+        next_action_digest: goalTaskDigest("goal-retry"),
+      });
+      throw error;
+    }
+    const candidateResultStatus = typeof result.status === "string" ? result.status.trim() : "";
+    const resultStatus = candidateResultStatus && !candidateResultStatus.includes("\u0000") && new TextEncoder().encode(candidateResultStatus).byteLength <= 128 ? candidateResultStatus : "failed";
+    let settled = running;
+    let updated: AutonomousGoalRecord;
+    try {
+      if (options.criterionUpdates && options.criterionUpdates.length) settled = goalStore.updateCriteria(running.goal_id, options.criterionUpdates, { expected_revision: running.revision });
+      const goalStatus = goalStatusForResult(resultStatus, settled.criteria.every((criterion) => !criterion.required || criterion.status === "satisfied" || criterion.status === "waived"));
+      updated = goalStore.transition(settled.goal_id, goalStatus, {
+        expected_revision: settled.revision,
+        blockers: goalStatus === "completed" ? [] : [`result:${resultStatus}`],
+        next_action_digest: goalStatus === "completed" ? null : goalTaskDigest(`goal-next:${resultStatus}`),
+      });
+    } catch (error) {
+      goalStore.transition(settled.goal_id, "blocked", {
+        expected_revision: settled.revision,
+        blockers: [`settlement:${error instanceof Error ? error.constructor.name : "UnknownError"}`],
+        next_action_digest: goalTaskDigest("goal-settlement-review"),
+      });
+      throw error;
+    }
+    return {
+      schema: AUTONOMOUS_GOAL_STEP_SCHEMA,
+      goal: updated,
+      result,
+      result_status: resultStatus,
+      goal_status: updated.status,
+      outcome_digest: await digestJson({ goal_id: updated.goal_id, goal_state_digest: updated.state_digest, result_status: resultStatus }),
+      retention: AUTONOMOUS_GOAL_RETENTION,
+      secret_material: "never_returned",
     };
   }
 

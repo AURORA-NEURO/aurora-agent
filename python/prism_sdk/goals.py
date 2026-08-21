@@ -27,6 +27,7 @@ from typing import Any, Callable, Literal
 
 GOAL_SCHEMA = "bioprism-autonomous-goal/0.1"
 GOAL_EVENT_SCHEMA = "bioprism-autonomous-goal-event/0.1"
+GOAL_STEP_SCHEMA = "bioprism-autonomous-goal-step/0.1"
 GOAL_RETENTION = "value_only_goal_state;task_prompt_response_tool_payloads_and_credentials_not_retained"
 MAX_GOALS = 4_096
 MAX_GOAL_EVENTS = 16_384
@@ -46,6 +47,20 @@ GoalStatus = Literal[
 ]
 CriterionStatus = Literal["pending", "satisfied", "failed", "waived"]
 
+_GOAL_COMPLETED_RESULTS = frozenset({"completed", "completed_without_replan", "children_completed"})
+_GOAL_PAUSED_RESULTS = frozenset(
+    {
+        "approval_required",
+        "reconciliation_required",
+        "turn_limit_reached",
+        "paused",
+        "stage_blocked",
+        "children_partial",
+        "child_incomplete",
+    }
+)
+_GOAL_BLOCKED_RESULTS = frozenset({"route_review_required", "planning_review_required", "provider_disagreement"})
+
 _ALLOWED_TRANSITIONS: dict[GoalStatus, frozenset[GoalStatus]] = {
     "ready": frozenset({"running", "blocked", "cancelled"}),
     "running": frozenset({"paused", "blocked", "failed", "completed", "cancelled"}),
@@ -63,6 +78,20 @@ class AutonomousGoalError(RuntimeError):
 
 class AutonomousGoalConflict(AutonomousGoalError):
     """A goal changed after the caller's optimistic revision was read."""
+
+
+def goal_status_for_result(result_status: str, *, criteria_complete: bool) -> GoalStatus:
+    """Map a bounded runtime result into a goal lifecycle state without trusting provider text."""
+
+    if not isinstance(result_status, str) or not result_status.strip():
+        return "failed"
+    if result_status in _GOAL_COMPLETED_RESULTS:
+        return "completed" if criteria_complete else "paused"
+    if result_status in _GOAL_PAUSED_RESULTS:
+        return "paused"
+    if result_status in _GOAL_BLOCKED_RESULTS:
+        return "blocked"
+    return "failed"
 
 
 def goal_task_digest(task: str) -> str:
@@ -729,6 +758,7 @@ __all__ = [
     "GOAL_EVENT_SCHEMA",
     "GOAL_RETENTION",
     "GOAL_SCHEMA",
+    "GOAL_STEP_SCHEMA",
     "MAX_GOAL_BLOCKERS",
     "MAX_GOAL_CRITERIA",
     "MAX_GOAL_EVENTS",
@@ -738,5 +768,6 @@ __all__ = [
     "AutonomousGoalError",
     "AutonomousGoalLedger",
     "AutonomousGoalRecord",
+    "goal_status_for_result",
     "goal_task_digest",
 ]

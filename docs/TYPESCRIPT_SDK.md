@@ -1505,6 +1505,15 @@ Completion refuses unresolved required criteria, and `AutonomousGoalPersistenceC
 content-addressed snapshots to an application-owned durable adapter. The ledger never retains goal
 text, prompts, provider responses, tool arguments, or credentials.
 
+`AutonomousAgent.runGoalStep(...)` connects that ledger to the normal autonomous execution path. It
+identity-checks or creates the objective, advances one bounded attempt, invokes the routed
+planning/model/provider runtime, and maps `approval_required`, reconciliation, partial, blocked,
+failure, and completion statuses into the durable lifecycle. Caller-supplied evaluator criterion
+updates are applied before completion is considered; a provider result marked completed with an
+unresolved required criterion remains paused. The returned `AutonomousGoalStepResult` carries the
+transient runtime result for the current process, while the ledger stores only value-only state and
+an outcome digest.
+
 ### Restart-safe model health and offline replay
 
 `InMemoryAutonomousModelHealthStore` is the TypeScript reference ledger for the selection feedback

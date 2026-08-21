@@ -3,10 +3,41 @@ import { test } from "node:test";
 
 import {
   AutonomousGoalPersistenceCoordinator,
+  AutonomousAgent,
   InMemoryAutonomousGoalLedger,
+  LLMRuntime,
   builtinAutonomousDomainProfiles,
   goalTaskDigest,
 } from "../dist/index.js";
+
+test("goal execution wrapper advances approval, completion, terminal replay, and failure states", async () => {
+  const agent = new AutonomousAgent(new LLMRuntime({ fetch: async () => { throw new Error("provider must not be reached"); } }));
+  const ledger = new InMemoryAutonomousGoalLedger({ clock: () => 10 });
+  agent.run = async () => ({ status: "approval_required" });
+  const paused = await agent.runGoalStep(ledger, "wrapper-goal", "review a release", "coding", {
+    goalCriteria: [{ criterion_id: "reviewed", criterion_digest: goalTaskDigest("reviewed") }],
+  });
+  assert.equal(paused.goal_status, "paused");
+  assert.equal(paused.result_status, "approval_required");
+  assert.equal(paused.goal.attempt, 1);
+  assert.equal(JSON.stringify(ledger.snapshot()).includes("review a release"), false);
+
+  agent.run = async () => ({ status: "completed" });
+  const completed = await agent.runGoalStep(ledger, "wrapper-goal", "review a release", "coding", {
+    criterionUpdates: [{ criterion_id: "reviewed", status: "satisfied", evidence_digest: goalTaskDigest("local receipt") }],
+  });
+  assert.equal(completed.goal_status, "completed");
+  assert.equal(completed.goal.attempt, 2);
+  const terminal = await agent.runGoalStep(ledger, "wrapper-goal", "review a release", "coding");
+  assert.equal(terminal.result, null);
+  assert.equal(terminal.result_status, "terminal");
+
+  const failedLedger = new InMemoryAutonomousGoalLedger({ clock: () => 20 });
+  agent.run = async () => { throw new Error("synthetic provider failure"); };
+  await assert.rejects(() => agent.runGoalStep(failedLedger, "failed-goal", "retry a provider", "operations"), /synthetic provider failure/);
+  assert.equal(failedLedger.get("failed-goal").status, "failed");
+  assert.equal(failedLedger.verifyIntegrity().ok, true);
+});
 
 test("goal ledger carries value-only objective state across attempts and snapshots", async () => {
   let now = 100;
@@ -77,6 +108,20 @@ test("goal ledger accepts every built-in domain without domain-specific semantic
   assert.equal(ledger.list({ limit: profiles.length }).length, profiles.length);
   assert.equal(ledger.list({ domain: profiles[0].domain }).length, 1);
   assert.equal(ledger.verifyIntegrity().goals, profiles.length);
+});
+
+test("goal execution wrapper uses the same approval lifecycle across every built-in domain", async () => {
+  const profiles = await builtinAutonomousDomainProfiles();
+  const agent = new AutonomousAgent(new LLMRuntime({ fetch: async () => { throw new Error("provider must not be reached"); } }));
+  agent.run = async () => ({ status: "approval_required" });
+  const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: profiles.length });
+  for (const profile of profiles) {
+    const step = await agent.runGoalStep(ledger, `wrapper-${profile.domain}`, `bounded work for ${profile.domain}`, profile.domain);
+    assert.equal(step.goal_status, "paused");
+    assert.equal(step.result_status, "approval_required");
+  }
+  assert.equal(ledger.stats().statuses.paused, profiles.length);
+  assert.equal(ledger.verifyIntegrity().ok, true);
 });
 
 test("goal digest and state identity match the Python reference contract", () => {

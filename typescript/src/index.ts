@@ -202,6 +202,7 @@ export type {
   AutonomousRouteProposal,
   AutonomousRunOptions,
   AutonomousRunResult,
+  AutonomousGoalStepResult,
   AutonomousRunStatus,
   AutonomousTaskBlueprint,
   AutonomousToolLoopStatus,
@@ -626,8 +627,10 @@ export {
   AUTONOMOUS_GOAL_RETENTION,
   AUTONOMOUS_GOAL_SCHEMA,
   AUTONOMOUS_GOAL_SNAPSHOT_SCHEMA,
+  AUTONOMOUS_GOAL_STEP_SCHEMA,
   AutonomousGoalPersistenceCoordinator,
   InMemoryAutonomousGoalLedger,
+  goalStatusForResult,
   goalTaskDigest,
 } from "./autonomous-goals.js";
 export type {
