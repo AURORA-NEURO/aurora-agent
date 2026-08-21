@@ -166,6 +166,31 @@ remote providers continue to require the normal BYOK lifecycle. This makes it su
 CI, replay fixtures, local model bridges, and all-domain contract tests, but production deployments
 should register a real authenticated transport or a caller-owned adapter instead.
 
+The TypeScript SDK exposes the same boundary with `registerInMemoryProvider`. The callback sees
+the provider-neutral request, while the runtime owns bounded projection, health, retries, stream
+validation, and tool-loop continuation:
+
+```ts
+import { LLMRuntime } from "@aurora-neuro/prism-sdk";
+
+const runtime = new LLMRuntime();
+runtime.registerInMemoryProvider("offline", async (request) => ({
+  model: request.model,
+  output_text: "bounded local answer",
+  usage: { input_tokens: 8, output_tokens: 4 },
+}), {
+  discoverModels: async () => ({
+    data: [{ id: "offline-model", context_window_tokens: 32_000, max_output_tokens: 2_000 }],
+  }),
+});
+```
+
+The TypeScript and Python local transports intentionally require explicit registration. They do
+not turn a remote provider into a no-key provider, silently fall back when a credential is absent,
+or retain handler payloads in health, planning, learning, or receipts. This gives applications a
+cross-language offline path for deterministic evaluation and local model bridges while preserving
+the same approval and autonomous-selection gates used in production deployments.
+
 ### Non-interactive deployment bootstrap
 
 When no person enters a key, the deployment should register a source resolver during service

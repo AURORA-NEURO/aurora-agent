@@ -11,6 +11,7 @@ export const PROVIDER_OBSERVATION_SCHEMA = "bioprism-typescript-llm-provider-obs
 export const CREDENTIAL_ONBOARDING_SCHEMA = "bioprism-typescript-llm-credential-onboarding/0.1" as const;
 export const PROVIDER_MODEL_DISCOVERY_SCHEMA = "bioprism-typescript-llm-provider-model-discovery/0.1" as const;
 export const LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA = "bioprism-typescript-llm-runtime-health-snapshot/0.1" as const;
+export const IN_MEMORY_PROVIDER_SCHEMA = "bioprism-typescript-llm-in-memory-provider/0.1" as const;
 
 export const MAX_PROVIDER_MESSAGE_BYTES = 2_000_000;
 export const MAX_PROVIDER_REQUEST_BYTES = 8_000_000;
@@ -50,6 +51,8 @@ export interface ProviderConfig {
   maxResponseBytes?: number;
   structuredOutputMode?: "disabled" | "json_object" | "json_schema";
   allowInsecureHttp?: boolean;
+  /** Explicit caller-owned local transport. When present, no network or credential is used. */
+  transport?: InMemoryProviderTransport;
 }
 
 interface NormalizedProviderConfig {
@@ -67,6 +70,7 @@ interface NormalizedProviderConfig {
   readonly circuitBreakerResetMs: number;
   readonly maxResponseBytes: number;
   readonly structuredOutputMode: "disabled" | "json_object" | "json_schema";
+  readonly transport?: InMemoryProviderTransport;
 }
 
 export interface CredentialStatus extends JsonObject {
@@ -361,7 +365,38 @@ export interface ProviderResponse {
   structured: JsonValue | null;
   toolCalls: ProviderToolCall[];
   stopReason: string | null;
+  /** Present only on explicit local responses; identifies the bounded local transport posture. */
+  schema?: typeof IN_MEMORY_PROVIDER_SCHEMA;
+  transport?: "caller_owned";
 }
+
+/** Values accepted from an explicit local provider handler before normalization. */
+export type InMemoryProviderResponse = ProviderResponse | JsonObject | string;
+
+/** Provider-neutral local invocation callback used by deterministic and offline runtimes. */
+export type InMemoryProviderHandler = (request: ProviderRequest) => InMemoryProviderResponse | Promise<InMemoryProviderResponse>;
+
+/** Provider-neutral stream callback; events are validated before reaching callers. */
+export type InMemoryProviderStreamHandler = (
+  request: ProviderRequest,
+) => AsyncIterable<ProviderStreamEvent> | Iterable<ProviderStreamEvent> | Promise<AsyncIterable<ProviderStreamEvent> | Iterable<ProviderStreamEvent>>;
+
+/** Optional model inventory callback for a local provider. The payload follows `{ data: [...] }`. */
+export type InMemoryProviderDiscoveryHandler = () => JsonObject | Promise<JsonObject>;
+
+/** Explicit local transport implementation. It is never inferred for an HTTP provider. */
+export interface InMemoryProviderTransport {
+  invoke: InMemoryProviderHandler;
+  stream?: InMemoryProviderStreamHandler;
+  discoverModels?: InMemoryProviderDiscoveryHandler;
+}
+
+/** Configuration options for {@link LLMRuntime.registerInMemoryProvider}. */
+export type InMemoryProviderOptions = Omit<ProviderConfig, "provider" | "baseUrl" | "protocol" | "requiresCredential" | "transport"> & {
+  protocol?: ProviderProtocol;
+  stream?: InMemoryProviderStreamHandler;
+  discoverModels?: InMemoryProviderDiscoveryHandler;
+};
 
 /** Bounded provider model metadata; raw catalog rows and credential material are never returned. */
 export interface ProviderModelRecord extends JsonObject {
@@ -672,7 +707,7 @@ export interface ProviderHealth extends JsonObject {
   last_latency_ms: number | null;
   last_model: string | null;
   last_status_code: number | null;
-  credential_posture: "caller_supplied_opaque_handle";
+  credential_posture: "caller_supplied_opaque_handle" | "caller_supplied_in_memory_handle";
   credential_required: boolean;
   /** Provider transport capability used as a hard gate for explicit structured output. */
   structured_output_mode?: "disabled" | "json_object" | "json_schema";
@@ -793,6 +828,24 @@ function safeJson(value: unknown, label: string, maximum: number): JsonObject {
   }
   if (!isObject(parsed)) throw new ProviderRuntimeError(`${label} must be a JSON object`);
   return parsed as JsonObject;
+}
+
+function safeJsonValue(value: unknown, label: string, maximum: number): JsonValue {
+  let encoded: string;
+  try {
+    encoded = JSON.stringify(value);
+  } catch {
+    throw new ProviderRuntimeError(`${label} is not JSON-serializable`);
+  }
+  if (encoded === undefined || bytes(encoded) > maximum) throw new ProviderRuntimeError(`${label} exceeds its bounded JSON size`);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(encoded);
+  } catch {
+    throw new ProviderRuntimeError(`${label} is not valid JSON`);
+  }
+  validateJsonValue(parsed);
+  return parsed as JsonValue;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -976,7 +1029,13 @@ function normalizeConfig(config: ProviderConfig): NormalizedProviderConfig {
   if (!Number.isFinite(url.port ? Number(url.port) : 0)) throw new ProviderRuntimeError("provider baseUrl port is invalid");
   const path = boundedPath("provider path", config.path ?? DEFAULT_PATHS[config.protocol]);
   const modelsPath = boundedPath("provider modelsPath", config.modelsPath ?? "/models");
-  const requiresCredential = config.requiresCredential ?? true;
+  if (config.transport !== undefined && (!config.transport || typeof config.transport.invoke !== "function")) {
+    throw new ProviderRuntimeError("provider local transport must expose a callable invoke handler");
+  }
+  if (config.transport !== undefined && config.requiresCredential === true) {
+    throw new ProviderRuntimeError("an in-memory provider transport cannot require a credential");
+  }
+  const requiresCredential = config.transport !== undefined ? false : config.requiresCredential ?? true;
   const timeoutMs = config.timeoutMs ?? 60_000;
   const maxAttempts = config.maxAttempts ?? 1;
   const retryBackoffMs = config.retryBackoffMs ?? 0;
@@ -1007,6 +1066,7 @@ function normalizeConfig(config: ProviderConfig): NormalizedProviderConfig {
     circuitBreakerResetMs: resetMs,
     maxResponseBytes,
     structuredOutputMode,
+    ...(config.transport ? { transport: config.transport } : {}),
   };
 }
 
@@ -1233,6 +1293,171 @@ function parseResponse(config: NormalizedProviderConfig, payload: JsonObject, st
   return { provider: config.provider, model, text, statusCode, requestId, usage, structured, toolCalls, stopReason };
 }
 
+function normalizeLocalUsage(value: unknown): ProviderUsage {
+  if (value === undefined) return {};
+  const raw = safeJson(value, "in-memory provider usage", 256_000);
+  const usage: ProviderUsage = {};
+  const inputTokens = asNonNegativeInteger(raw.input_tokens ?? raw.prompt_tokens);
+  const outputTokens = asNonNegativeInteger(raw.output_tokens ?? raw.completion_tokens);
+  const totalTokens = asNonNegativeInteger(raw.total_tokens);
+  if (inputTokens !== null) usage.input_tokens = inputTokens;
+  if (outputTokens !== null) usage.output_tokens = outputTokens;
+  if (totalTokens !== null) usage.total_tokens = totalTokens;
+  return usage;
+}
+
+function normalizeLocalToolCall(value: unknown, request: ProviderRequest): ProviderToolCall {
+  if (!isObject(value)) throw new ProviderRuntimeError("in-memory provider tool_calls contain an invalid value", { code: "invalid_response" });
+  const id = boundedIdentifier("in-memory provider tool call id", value.id ?? value.call_id, 256);
+  const name = boundedIdentifier("in-memory provider tool name", value.name, 256);
+  if (!(request.tools ?? []).some((tool) => tool.name === name)) throw new ProviderRuntimeError("in-memory provider returned an unrequested tool call", { code: "invalid_response" });
+  return { id, name, arguments: parseArguments(value.arguments ?? {}) };
+}
+
+/** Project a caller-owned local result into the same safe response boundary as HTTP. */
+function normalizeLocalResponse(config: NormalizedProviderConfig, value: InMemoryProviderResponse, request: ProviderRequest): ProviderResponse {
+  let source: Record<string, unknown>;
+  if (typeof value === "string") {
+    source = { text: value };
+  } else if (isObject(value)) {
+    source = { ...value };
+  } else {
+    throw new ProviderRuntimeError("in-memory provider handler returned an unsupported response", { code: "invalid_response" });
+  }
+  const envelopeKeys = [
+    "provider", "model", "text", "output_text", "statusCode", "status_code", "requestId", "request_id",
+    "usage", "structured", "toolCalls", "tool_calls", "stopReason", "stop_reason",
+  ];
+  if (!envelopeKeys.some((key) => Object.prototype.hasOwnProperty.call(source, key))) {
+    const structured = safeJson(source, "in-memory provider response", config.maxResponseBytes);
+    source = { text: JSON.stringify(structured), structured };
+  }
+  const provider = source.provider === undefined ? config.provider : boundedIdentifier("in-memory provider response provider", source.provider, 128);
+  const model = source.model === undefined ? request.model : boundedIdentifier("in-memory provider response model", source.model, 512);
+  if (provider !== config.provider || model !== request.model) throw new ProviderRuntimeError("in-memory provider response identity does not match request", { code: "invalid_response" });
+  const statusCodeValue = source.statusCode ?? source.status_code ?? 200;
+  if (typeof statusCodeValue !== "number" || !Number.isSafeInteger(statusCodeValue) || statusCodeValue < 200 || statusCodeValue >= 300) throw new ProviderRuntimeError("in-memory provider response status is not successful", { code: "invalid_response" });
+  const statusCode = statusCodeValue;
+  const text = source.text ?? source.output_text ?? "";
+  if (typeof text !== "string" || bytes(text) > MAX_PROVIDER_MESSAGE_BYTES) throw new ProviderRuntimeError("in-memory provider response text is outside its bound", { code: "invalid_response" });
+  const requestIdValue = source.requestId ?? source.request_id ?? null;
+  const requestId = requestIdValue === null ? null : boundedIdentifier("in-memory provider request id", requestIdValue, 512);
+  const rawCalls = source.toolCalls ?? source.tool_calls ?? [];
+  if (!Array.isArray(rawCalls) || rawCalls.length > MAX_PROVIDER_TOOLS) throw new ProviderRuntimeError("in-memory provider tool_calls are outside their bounds", { code: "invalid_response" });
+  const toolCalls = rawCalls.map((call) => normalizeLocalToolCall(call, request));
+  const usage = normalizeLocalUsage(source.usage);
+  let structured: JsonValue | null = null;
+  if (!toolCalls.length && Object.prototype.hasOwnProperty.call(source, "structured") && source.structured !== undefined) {
+    structured = safeJsonValue(source.structured, "in-memory provider structured response", config.maxResponseBytes);
+  }
+  if (!toolCalls.length && request.requireJson) {
+    const candidate = structured ?? (() => {
+      try { return JSON.parse(text) as JsonValue; } catch { throw new ProviderRuntimeError("in-memory provider returned invalid JSON for the requested structured response", { code: "invalid_response" }); }
+    })();
+    validateStructuredResponseOrThrow(candidate, request.responseSchema);
+    structured = candidate;
+  }
+  const stopReasonValue = source.stopReason ?? source.stop_reason ?? null;
+  const stopReason = stopReasonValue === null ? null : boundedIdentifier("in-memory provider stop reason", stopReasonValue, 256);
+  return { provider: config.provider, model: request.model, text, statusCode, requestId, usage, structured, toolCalls, stopReason, schema: IN_MEMORY_PROVIDER_SCHEMA, transport: "caller_owned" };
+}
+
+function normalizeLocalStreamEvent(config: NormalizedProviderConfig, request: ProviderRequest, value: unknown): ProviderStreamEvent {
+  if (!isObject(value)) throw new ProviderRuntimeError("in-memory provider stream returned a malformed event", { code: "invalid_response" });
+  const provider = boundedIdentifier("in-memory stream provider", value.provider, 128);
+  const model = boundedIdentifier("in-memory stream model", value.model, 512);
+  if (provider !== config.provider || model !== request.model) throw new ProviderRuntimeError("in-memory provider stream event identity does not match request", { code: "invalid_response" });
+  const sequenceValue = value.sequence;
+  if (typeof sequenceValue !== "number" || !Number.isSafeInteger(sequenceValue) || sequenceValue < 0 || sequenceValue >= MAX_PROVIDER_STREAM_EVENTS) throw new ProviderRuntimeError("in-memory provider stream sequence is outside its bound", { code: "invalid_response" });
+  const sequence = sequenceValue;
+  const eventType = boundedIdentifier("in-memory provider stream event type", value.eventType ?? value.event_type, 128);
+  const textDelta = value.textDelta ?? value.text_delta ?? "";
+  if (typeof textDelta !== "string" || bytes(textDelta) > MAX_PROVIDER_STREAM_TEXT_BYTES) throw new ProviderRuntimeError("in-memory provider stream text is outside its bound", { code: "invalid_response" });
+  const requestIdValue = value.requestId ?? value.request_id ?? null;
+  const requestId = requestIdValue === null ? null : boundedIdentifier("in-memory stream request id", requestIdValue, 512);
+  if (typeof value.done !== "boolean") throw new ProviderRuntimeError("in-memory provider stream done flag is invalid", { code: "invalid_response" });
+  const toolCallValue = value.toolCall ?? value.tool_call;
+  const toolCall = toolCallValue === undefined || toolCallValue === null ? undefined : normalizeLocalToolCall(toolCallValue, request);
+  return { provider, model, sequence, eventType, textDelta, requestId, usage: normalizeLocalUsage(value.usage), done: value.done, ...(toolCall ? { toolCall } : {}) };
+}
+
+function inMemoryFailure(error: unknown, operation: string): ProviderRuntimeError {
+  const options = error instanceof ProviderRuntimeError
+    ? {
+        retryable: error.retryable,
+        statusCode: error.statusCode,
+        circuitOpen: error.circuitOpen,
+        code: error.code,
+        retryAfterMs: error.retryAfterMs,
+      }
+    : { code: "provider_error" as const };
+  return new ProviderRuntimeError(`in-memory provider ${operation} failed`, options);
+}
+
+function isProviderResponseValue(value: Response | ProviderResponse): value is ProviderResponse {
+  return isObject(value)
+    && typeof value.provider === "string"
+    && typeof value.model === "string"
+    && typeof value.text === "string"
+    && typeof value.statusCode === "number"
+    && Array.isArray(value.toolCalls)
+    && isObject(value.usage);
+}
+
+async function invokeLocalTransport(config: NormalizedProviderConfig, request: ProviderRequest): Promise<ProviderResponse> {
+  const transport = config.transport;
+  if (!transport) throw new ProviderRuntimeError("provider local transport is not configured");
+  let value: InMemoryProviderResponse;
+  try {
+    value = await transport.invoke(request);
+  } catch (error) {
+    throw inMemoryFailure(error, "handler");
+  }
+  return normalizeLocalResponse(config, value, request);
+}
+
+async function* streamLocalTransport(config: NormalizedProviderConfig, request: ProviderRequest): AsyncIterable<ProviderStreamEvent> {
+  const transport = config.transport;
+  if (!transport) throw new ProviderRuntimeError("provider local transport is not configured");
+  if (!transport.stream) {
+    const response = await invokeLocalTransport(config, request);
+    let sequence = 1;
+    if (response.text) {
+      yield streamEvent(config.provider, request.model, sequence, "in_memory.text", response.requestId, response.text, response.usage, false);
+      sequence += 1;
+    }
+    for (const call of response.toolCalls) {
+      yield streamEvent(config.provider, request.model, sequence, "in_memory.tool_call", response.requestId, "", response.usage, false, call);
+      sequence += 1;
+    }
+    yield streamEvent(config.provider, request.model, sequence, "in_memory.done", response.requestId, "", response.usage, true);
+    return;
+  }
+  let source: AsyncIterable<ProviderStreamEvent> | Iterable<ProviderStreamEvent>;
+  try {
+    source = await transport.stream(request);
+  } catch (error) {
+    throw inMemoryFailure(error, "stream handler");
+  }
+  if (!source || (typeof (source as AsyncIterable<ProviderStreamEvent>)[Symbol.asyncIterator] !== "function" && typeof (source as Iterable<ProviderStreamEvent>)[Symbol.iterator] !== "function")) {
+    throw new ProviderRuntimeError("in-memory provider stream handler must return an iterable", { code: "invalid_response" });
+  }
+  try {
+    let count = 0;
+    let textBytes = 0;
+    for await (const raw of source) {
+      count += 1;
+      if (count > MAX_PROVIDER_STREAM_EVENTS) throw new ProviderRuntimeError("in-memory provider stream exceeded its event bound", { code: "invalid_response" });
+      const event = normalizeLocalStreamEvent(config, request, raw);
+      textBytes += bytes(event.textDelta);
+      if (textBytes > MAX_PROVIDER_STREAM_TEXT_BYTES) throw new ProviderRuntimeError("in-memory provider stream text exceeded its bound", { code: "invalid_response" });
+      yield event;
+    }
+  } catch (error) {
+    throw inMemoryFailure(error, "stream handler");
+  }
+}
+
 function projectModelCatalog(config: NormalizedProviderConfig, payload: JsonObject, statusCode: number, requestId: string | null): ProviderModelDiscovery {
   if (!Array.isArray(payload.data) || payload.data.length > MAX_PROVIDER_MODELS) {
     throw new ProviderRuntimeError("provider model catalog data is outside its bounded contract", { statusCode });
@@ -1295,10 +1520,12 @@ function modelCapabilities(row: Record<string, unknown>): string[] {
   const parameters = Array.isArray(row.supported_parameters)
     ? row.supported_parameters.filter((value): value is string => typeof value === "string").map((value) => value.toLowerCase())
     : [];
-  const capabilities: string[] = [];
+  const capabilities = Array.isArray(row.capabilities)
+    ? row.capabilities.filter((value): value is string => typeof value === "string").map((value) => boundedIdentifier("provider model capability", value, 128))
+    : [];
   if (parameters.some((value) => ["tools", "tool_choice", "functions", "function_call"].includes(value))) capabilities.push("tool_use");
   if (parameters.some((value) => ["response_format", "json_object", "json_schema", "structured_outputs"].includes(value))) capabilities.push("structured_output");
-  return capabilities.sort();
+  return [...new Set(capabilities)].sort();
 }
 
 function boundedOptionalInteger(name: string, value: unknown, minimum: number, maximum: number, statusCode: number): number | null {
@@ -1670,10 +1897,37 @@ export class LLMRuntime {
     this.providerHealthState.set(normalized.provider, this.providerHealthState.get(normalized.provider) ?? emptyHealth());
   }
 
+  /**
+   * Register an explicit credentialless local provider without opening a network socket.
+   *
+   * The handler is still behind the normal request validation, circuit, retry, observation,
+   * health, tool-loop, and autonomous model-selection boundaries. It is never inferred for an
+   * HTTP provider and cannot be configured to accept a credential handle.
+   */
+  registerInMemoryProvider(provider: string, handler: InMemoryProviderHandler, options: InMemoryProviderOptions = {}): void {
+    if (typeof handler !== "function") throw new ProviderRuntimeError("in-memory provider handler must be callable");
+    if (options.stream !== undefined && typeof options.stream !== "function") throw new ProviderRuntimeError("in-memory provider stream handler must be callable");
+    if (options.discoverModels !== undefined && typeof options.discoverModels !== "function") throw new ProviderRuntimeError("in-memory provider model discovery handler must be callable");
+    const { protocol, stream, discoverModels, ...config } = options;
+    this.registerProvider({
+      ...config,
+      provider,
+      baseUrl: "https://in-memory.invalid",
+      protocol: protocol ?? "openai_responses",
+      requiresCredential: false,
+      transport: {
+        invoke: handler,
+        ...(stream ? { stream } : {}),
+        ...(discoverModels ? { discoverModels } : {}),
+      },
+    });
+  }
+
   providerMetadata(): JsonObject[] {
     return [...this.providers.values()].sort((a, b) => a.provider.localeCompare(b.provider)).map((config) => ({
       provider: config.provider,
       protocol: config.protocol,
+      transport: config.transport ? "in_memory" : "http",
       base_url: config.baseUrl,
       path: config.path,
       models_path: config.modelsPath,
@@ -1696,6 +1950,16 @@ export class LLMRuntime {
     options: { credential?: CredentialHandle; signal?: AbortSignal } = {},
   ): Promise<ProviderModelDiscovery> {
     const config = this.requireProvider(provider);
+    if (config.transport) {
+      if (options.credential !== undefined) throw new CredentialError(`provider ${provider} does not accept a credential handle`);
+      if (!config.transport.discoverModels) throw new ProviderRuntimeError(`provider ${provider} does not expose local model discovery`, { code: "invalid_request" });
+      try {
+        const payload = await config.transport.discoverModels();
+        return projectModelCatalog(config, safeJson(payload, "in-memory provider model catalog", config.maxResponseBytes), 200, null);
+      } catch (error) {
+        throw contextProviderFailure(errorFromUnknown(error), provider, "model_discovery");
+      }
+    }
     let response: Response;
     try {
       response = await this.fetchModelCatalog(config, options.credential, options.signal);
@@ -1720,7 +1984,7 @@ export class LLMRuntime {
     const health = this.providerHealthState.get(provider) ?? emptyHealth();
     const circuit = this.circuits.get(provider) ?? { consecutiveFailures: 0, openedUntil: null };
     const open = circuit.openedUntil !== null && circuit.openedUntil > this.clock();
-    return healthProjection(provider, health, open ? "open" : "closed", circuit.consecutiveFailures, config.requiresCredential);
+    return healthProjection(provider, health, open ? "open" : "closed", circuit.consecutiveFailures, config.requiresCredential, config.transport !== undefined);
   }
 
   modelHealthSnapshot(): Record<string, ProviderHealth> {
@@ -1729,7 +1993,8 @@ export class LLMRuntime {
       const { provider, model } = splitProviderModelArm(arm, this.providers.keys());
       const circuit = this.circuits.get(provider) ?? { consecutiveFailures: 0, openedUntil: null };
       const open = circuit.openedUntil !== null && circuit.openedUntil > this.clock();
-      result[arm] = { ...healthProjection(provider, health, open ? "open" : "closed", circuit.consecutiveFailures, true), model };
+      const config = this.providers.get(provider);
+      result[arm] = { ...healthProjection(provider, health, open ? "open" : "closed", circuit.consecutiveFailures, config?.requiresCredential ?? true, config?.transport !== undefined), model };
     }
     return result;
   }
@@ -1898,7 +2163,29 @@ export class LLMRuntime {
     const started = nowMs();
     let outcome: ProviderInvocationOutcome | null = null;
     try {
+      if (config.transport) {
+        const circuit = this.circuits.get(provider) ?? { consecutiveFailures: 0, openedUntil: null };
+        if (options.signal?.aborted) throw new ProviderRuntimeError("provider request was aborted before dispatch", { code: "aborted" });
+        if (circuit.openedUntil !== null && circuit.openedUntil > this.clock()) throw new ProviderRuntimeError("provider circuit is open; invocation is temporarily refused", { circuitOpen: true, code: "circuit_open" });
+        if (circuit.openedUntil !== null) { circuit.openedUntil = null; circuit.consecutiveFailures = 0; }
+        try {
+          for await (const event of streamLocalTransport(config, request)) yield event;
+          circuit.consecutiveFailures = 0;
+          circuit.openedUntil = null;
+          this.record(provider, request.model, true, Math.max(0, nowMs() - started), 200);
+          outcome = { success: true, status: "completed", latencyMs: Math.max(0, nowMs() - started), inputTokens: metadata.inputTokens, outputTokens: 0, statusCode: 200 };
+          return;
+        } catch (error) {
+          const normalized = errorFromUnknown(error);
+          if (normalized instanceof ProviderRuntimeError && normalized.retryable) {
+            circuit.consecutiveFailures += 1;
+            if (circuit.consecutiveFailures >= config.circuitBreakerFailureThreshold) circuit.openedUntil = this.clock() + config.circuitBreakerResetMs;
+          }
+          throw normalized;
+        }
+      }
       const response = await this.fetchWithRetries(config, request, options.credential, options.signal, true);
+      if (isProviderResponseValue(response)) throw new ProviderRuntimeError("provider stream returned a non-stream response");
       if (response.status >= 400) throw providerHttpError(response.status, response.headers);
       const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
       if (contentType && contentType !== "text/event-stream") throw new ProviderRuntimeError("provider stream did not return text/event-stream", { statusCode: response.status });
@@ -2078,6 +2365,7 @@ export class LLMRuntime {
 
   private async request(config: NormalizedProviderConfig, request: ProviderRequest, credential: CredentialHandle | undefined, signal: AbortSignal | undefined, stream: boolean): Promise<ProviderResponse> {
     const response = await this.fetchWithRetries(config, request, credential, signal, stream);
+    if (isProviderResponseValue(response)) return response;
     const body = await readBoundedBody(response, config.maxResponseBytes);
     if (response.status >= 400) throw providerHttpError(response.status, response.headers);
     let payload: unknown;
@@ -2087,7 +2375,7 @@ export class LLMRuntime {
     return parsed;
   }
 
-  private async fetchWithRetries(config: NormalizedProviderConfig, request: ProviderRequest, credential: CredentialHandle | undefined, signal: AbortSignal | undefined, stream: boolean): Promise<Response> {
+  private async fetchWithRetries(config: NormalizedProviderConfig, request: ProviderRequest, credential: CredentialHandle | undefined, signal: AbortSignal | undefined, stream: boolean): Promise<Response | ProviderResponse> {
     const circuit = this.circuits.get(config.provider) ?? { consecutiveFailures: 0, openedUntil: null };
     if (signal?.aborted) throw new ProviderRuntimeError("provider request was aborted before dispatch", { code: "aborted" });
     if (circuit.openedUntil !== null && circuit.openedUntil > this.clock()) throw new ProviderRuntimeError("provider circuit is open; invocation is temporarily refused", { circuitOpen: true, code: "circuit_open" });
@@ -2096,6 +2384,11 @@ export class LLMRuntime {
     for (let attempt = 0; attempt < config.maxAttempts; attempt += 1) {
       try {
         const response = await this.fetchOnce(config, request, credential, signal, stream);
+        if (isProviderResponseValue(response)) {
+          circuit.consecutiveFailures = 0;
+          circuit.openedUntil = null;
+          return response;
+        }
         if (response.status >= 400) throw providerHttpError(response.status, response.headers);
         circuit.consecutiveFailures = 0;
         circuit.openedUntil = null;
@@ -2120,10 +2413,14 @@ export class LLMRuntime {
     throw lastError ?? new ProviderRuntimeError("provider invocation failed", { code: "transport", retryable: true, provider: config.provider, operation: "provider_request" });
   }
 
-  private async fetchOnce(config: NormalizedProviderConfig, request: ProviderRequest, credential: CredentialHandle | undefined, callerSignal: AbortSignal | undefined, stream: boolean): Promise<Response> {
+  private async fetchOnce(config: NormalizedProviderConfig, request: ProviderRequest, credential: CredentialHandle | undefined, callerSignal: AbortSignal | undefined, stream: boolean): Promise<Response | ProviderResponse> {
     if (config.requiresCredential && credential === undefined) throw new CredentialError(`provider ${config.provider} requires a user credential handle`);
     if (!config.requiresCredential && credential !== undefined) throw new CredentialError(`provider ${config.provider} does not accept a credential handle`);
     if (callerSignal?.aborted) throw abortFailure(callerSignal, false);
+    if (config.transport) {
+      if (stream) throw new ProviderRuntimeError("in-memory streaming is handled by the stream transport boundary");
+      return invokeLocalTransport(config, request);
+    }
     const body = requestBody(config, request, stream);
     const encoded = JSON.stringify(body);
     if (encoded === undefined || bytes(encoded) > MAX_PROVIDER_REQUEST_BYTES) throw new ProviderRuntimeError("provider request exceeds its bounded size");
@@ -2668,7 +2965,7 @@ function splitProviderModelArm(arm: string, providerNames: Iterable<string>): { 
   return { provider: separator < 0 ? arm : arm.slice(0, separator), model: separator < 0 ? arm : arm.slice(separator + 1) };
 }
 
-function healthProjection(provider: string, state: HealthState, circuit: "closed" | "open", consecutiveFailures: number, requiresCredential: boolean): ProviderHealth {
+function healthProjection(provider: string, state: HealthState, circuit: "closed" | "open", consecutiveFailures: number, requiresCredential: boolean, inMemory = false): ProviderHealth {
   return {
     provider,
     circuit,
@@ -2681,7 +2978,7 @@ function healthProjection(provider: string, state: HealthState, circuit: "closed
     last_latency_ms: state.lastLatencyMs,
     last_model: state.lastModel,
     last_status_code: state.lastStatusCode,
-    credential_posture: "caller_supplied_opaque_handle",
+    credential_posture: inMemory ? "caller_supplied_in_memory_handle" : "caller_supplied_opaque_handle",
     credential_required: requiresCredential,
   };
 }
@@ -2696,7 +2993,7 @@ function providerHttpError(status: number, headers?: Headers): ProviderRuntimeEr
   });
 }
 
-export type ProviderFactoryOptions = Omit<ProviderConfig, "provider" | "protocol" | "baseUrl"> & { baseUrl?: string };
+export type ProviderFactoryOptions = Omit<ProviderConfig, "provider" | "protocol" | "baseUrl" | "transport"> & { baseUrl?: string };
 
 export function openaiProvider(options: ProviderFactoryOptions = {}): ProviderConfig {
   const { baseUrl, ...rest } = options;
@@ -2708,7 +3005,7 @@ export function anthropicProvider(options: ProviderFactoryOptions = {}): Provide
   return { ...rest, provider: "anthropic", protocol: "anthropic_messages", baseUrl: baseUrl ?? "https://api.anthropic.com", modelsPath: rest.modelsPath ?? "/v1/models", structuredOutputMode: rest.structuredOutputMode ?? "disabled" };
 }
 
-export function openaiCompatibleProvider(provider: string, baseUrl: string, options: Omit<ProviderConfig, "provider" | "protocol" | "baseUrl"> = {}): ProviderConfig {
+export function openaiCompatibleProvider(provider: string, baseUrl: string, options: Omit<ProviderConfig, "provider" | "protocol" | "baseUrl" | "transport"> = {}): ProviderConfig {
   return { provider, baseUrl, protocol: "openai_chat_completions", ...options };
 }
 

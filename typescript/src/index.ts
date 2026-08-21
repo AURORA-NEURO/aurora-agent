@@ -34,6 +34,7 @@ export {
   PROVIDER_OBSERVATION_SCHEMA,
   PROVIDER_MODEL_DISCOVERY_SCHEMA,
   LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA,
+  IN_MEMORY_PROVIDER_SCHEMA,
   MAX_LLM_RUNTIME_HEALTH_PROVIDERS,
   MAX_LLM_RUNTIME_HEALTH_MODELS,
   MAX_LLM_RUNTIME_HEALTH_SNAPSHOT_BYTES,
@@ -102,6 +103,12 @@ export type {
   ProviderToolResult,
   ProviderUsage,
   ProviderFactoryOptions,
+  InMemoryProviderResponse,
+  InMemoryProviderHandler,
+  InMemoryProviderStreamHandler,
+  InMemoryProviderDiscoveryHandler,
+  InMemoryProviderTransport,
+  InMemoryProviderOptions,
 } from "./llm.js";
 export { validateLLMRuntimeHealthSnapshot } from "./llm.js";
 export {
