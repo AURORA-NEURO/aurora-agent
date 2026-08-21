@@ -105,6 +105,7 @@ export const AUTONOMOUS_PROMPT_SCHEMA = "bioprism-python-autonomous-prompt/0.1" 
 export const AUTONOMOUS_PLAN_SCHEMA = "bioprism-python-autonomous-plan/0.1" as const;
 export const AUTONOMOUS_PLAN_REFINEMENT_SCHEMA = "bioprism-python-autonomous-plan-refinement/0.1" as const;
 export const AUTONOMOUS_CROSS_DOMAIN_PLAN_REFINEMENT_SCHEMA = "bioprism-python-autonomous-cross-domain-plan-refinement/0.1" as const;
+export const AUTONOMOUS_PLAN_AND_RUN_SCHEMA = "bioprism-typescript-autonomous-plan-and-run/0.1" as const;
 export const AUTONOMOUS_DOMAIN_TOOL_SCHEMA = "bioprism-typescript-autonomous-domain-tool/0.1" as const;
 export const AUTONOMOUS_DOMAIN_TOOL_REGISTRY_SCHEMA = "bioprism-typescript-autonomous-domain-tool-registry/0.1" as const;
 export const AUTONOMOUS_WORKFLOW_STAGE_CONTRACT_SCHEMA = "bioprism-typescript-autonomous-workflow-stage-contract/0.1" as const;
@@ -606,6 +607,8 @@ export interface AutonomousRunResult {
   status: AutonomousRunStatus;
   route: AutonomousRouteProposal;
   blueprint: AutonomousTaskBlueprint | null;
+  /** Digest of the explicitly accepted provider planning proposal that shaped invocation. */
+  plan_refinement_digest: string | null;
   selection: AutonomousSelectionDecision | null;
   response: ProviderResponse | null;
   tool_loop?: AutonomousToolLoopSummary | null;
@@ -804,6 +807,8 @@ export interface AutonomousRunOptions {
   effectBoundary?: AutonomousEffectBoundary;
   /** A completed, non-review provider proposal that may reorder existing cross-domain children. */
   acceptedCrossDomainPlanRefinement?: AutonomousCrossDomainPlanRefinementResult;
+  /** A completed, non-review provider proposal that may reorder existing workflow stages. */
+  acceptedSingleDomainPlanRefinement?: AutonomousPlanRefinementResult;
   /** Logical attempt number recorded in execution metadata; it never changes provider authority. */
   executionAttempt?: number;
   /** Maximum number of retryable provider failures that may trigger a new provider selection. */
@@ -831,6 +836,33 @@ export interface DomainToolApprover {
   (tool: AutonomousDomainToolBinding, call: ProviderToolCall): boolean | Promise<boolean>;
 }
 
+export type AutonomousPlanAndRunStatus =
+  | AutonomousRunStatus
+  | AutonomousCrossDomainRunStatus
+  | "plan_review_required"
+  | "provider_invalid"
+  | "provider_disagreement";
+
+/** Options for the explicit provider-planning -> human acceptance -> execution bridge. */
+export interface AutonomousPlanAndRunOptions extends AutonomousRunOptions {
+  /** Provider planning is disabled unless supplied; its own approval is separate from execution approval. */
+  planning?: AutonomousProviderPlanningOptions;
+  /** Only true allows a completed, non-review proposal to shape the subsequent invocation. */
+  acceptPlan?: boolean;
+}
+
+/** Value-only envelope for a provider-planned autonomous invocation. */
+export interface AutonomousPlanAndRunResult {
+  schema: typeof AUTONOMOUS_PLAN_AND_RUN_SCHEMA;
+  status: AutonomousPlanAndRunStatus;
+  route: AutonomousRouteProposal;
+  blueprint: AutonomousAutoBlueprint | null;
+  plan_refinement: AutonomousPlanRefinementResult | AutonomousCrossDomainPlanRefinementResult | null;
+  result: AutonomousRunResult | AutonomousCrossDomainRunResult | null;
+  retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned";
+  authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval";
+}
+
 function composeInvocationObservers(...observers: readonly (ProviderInvocationObserver | undefined)[]): ProviderInvocationObserver | undefined {
   const active = observers.filter((observer): observer is ProviderInvocationObserver => observer !== undefined);
   if (!active.length) return undefined;
@@ -848,6 +880,16 @@ function resolveAutonomousCostBudget(options: Pick<AutonomousRunOptions, "maxTot
   if (options.costBudget !== undefined && !(options.costBudget instanceof AutonomousCostBudget)) throw new ArgumentError("costBudget must be an AutonomousCostBudget");
   if (options.costBudget !== undefined && options.maxTotalCostUnits !== undefined) throw new ArgumentError("costBudget and maxTotalCostUnits cannot both be supplied");
   return options.costBudget ?? (options.maxTotalCostUnits === undefined ? undefined : new AutonomousCostBudget(options.maxTotalCostUnits));
+}
+
+function resolvePlanAndRunBudget(options: AutonomousPlanAndRunOptions, planning: AutonomousProviderPlanningOptions | undefined): AutonomousCostBudget | undefined {
+  const runConfigured = options.costBudget !== undefined || options.maxTotalCostUnits !== undefined;
+  const planningConfigured = planning?.costBudget !== undefined || planning?.maxTotalCostUnits !== undefined;
+  if (runConfigured && planningConfigured) {
+    if (options.costBudget !== undefined && planning?.costBudget === options.costBudget) return options.costBudget;
+    throw new ArgumentError("planAndRun accepts one shared cost budget configuration; provide the same AutonomousCostBudget object to both phases");
+  }
+  return runConfigured ? resolveAutonomousCostBudget(options) : planningConfigured ? resolveAutonomousCostBudget(planning!) : undefined;
 }
 
 interface ProfileSeed {
@@ -1589,6 +1631,33 @@ export interface AutonomousAcceptedCrossDomainPlan {
   priority_child_ids: string[];
   focus_child_ids: string[];
   refinement_digest: string;
+}
+
+export interface AutonomousAcceptedPlan {
+  priority_stage_ids: string[];
+  focus_stage_ids: string[];
+  refinement_digest: string;
+}
+
+/** Validate an accepted single-domain proposal before it can shape direct provider invocation. */
+export async function acceptedAutonomousPlan(
+  blueprint: AutonomousTaskBlueprint,
+  refinement: AutonomousPlanRefinementResult | undefined,
+): Promise<AutonomousAcceptedPlan | null> {
+  if (refinement === undefined) return null;
+  if (!isObject(refinement) || refinement.status !== "completed" || refinement.review_required !== false) throw new ProviderRuntimeError("only a completed, non-review plan refinement may be accepted");
+  if (refinement.task_digest !== blueprint.task_digest) throw new ProviderRuntimeError("accepted plan task does not match the blueprint");
+  if (refinement.base_plan_digest !== await digestJson(blueprint.plan)) throw new ProviderRuntimeError("accepted plan base does not match the blueprint");
+  if (refinement.workflow_digest !== blueprint.workflow.workflow_digest) throw new ProviderRuntimeError("accepted plan workflow does not match the blueprint");
+  const stages = blueprint.workflow.stages;
+  const stageIds = validatePlanningWorkflow(stages);
+  if (!Array.isArray(refinement.priority_stage_ids) || !Array.isArray(refinement.focus_stage_ids)) throw new ProviderRuntimeError("accepted plan stage identifiers are malformed");
+  const priority = refinement.priority_stage_ids.filter((stageId): stageId is string => typeof stageId === "string");
+  const focus = refinement.focus_stage_ids.filter((stageId): stageId is string => typeof stageId === "string");
+  if (priority.length !== refinement.priority_stage_ids.length || focus.length !== refinement.focus_stage_ids.length || priority.length !== stageIds.length || new Set(priority).size !== priority.length || new Set(focus).size !== focus.length || priority.some((stageId) => !stageIds.includes(stageId)) || focus.some((stageId) => !stageIds.includes(stageId))) throw new ProviderRuntimeError("accepted plan must contain an exact stage permutation and valid focus subset");
+  const positions = new Map(priority.map((stageId, index) => [stageId, index]));
+  if (stages.some((stage) => stage.depends_on.some((dependency) => (positions.get(dependency) ?? -1) > (positions.get(stage.id) ?? -1)))) throw new ProviderRuntimeError("accepted plan violates workflow dependencies");
+  return { priority_stage_ids: [...priority], focus_stage_ids: [...focus], refinement_digest: await digestJson(refinement) };
 }
 
 /** Validate an accepted cross-domain proposal before it can alter fan-out scheduling. */
@@ -3093,6 +3162,66 @@ export class AutonomousAgent {
     return { ...metadata, status: "completed", priority_child_ids: [...priorityIds], focus_child_ids: [...focusIds], review_required: reviewRequired, confidence };
   }
 
+  /**
+   * Run the complete plan-review-invoke path for either a single domain or a cross-domain route.
+   * Planning and execution retain separate approval gates; a provider proposal is never applied
+   * unless the caller sets acceptPlan and the returned proposal is dependency-closed.
+   */
+  async planAndRun(task: string, options: AutonomousPlanAndRunOptions = {}): Promise<AutonomousPlanAndRunResult> {
+    const taskText = boundedText("autonomous planAndRun task", task, 32_000);
+    validateAutonomousStructuredOutputOptions(options);
+    if (options.acceptedSingleDomainPlanRefinement !== undefined || options.acceptedCrossDomainPlanRefinement !== undefined) throw new ArgumentError("planAndRun creates its own accepted proposal; use run or runCrossDomain to apply an existing proposal");
+    const planning = options.planning;
+    const sharedBudget = resolvePlanAndRunBudget(options, planning);
+    const route = options.routeOverride ? await validateAutonomousRouteOverride(taskText, options.routeOverride) : await this.route(taskText, { domain: options.domain, hints: options.hints, allowCrossDomain: options.allowCrossDomain });
+    const envelope = await this.blueprint(taskText, {
+      domain: route.primary_domain ?? undefined,
+      routeOverride: route,
+      capability: options.capability,
+      context: options.context,
+      maxInputTokens: options.maxInputTokens,
+      tools: options.tools?.map((tool) => tool.name),
+      hints: options.hints,
+    });
+    if (route.abstained || !route.primary_domain || (!envelope.blueprint && !envelope.cross_domain_blueprint)) {
+      return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: "route_review_required", route, blueprint: envelope, plan_refinement: null, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
+    }
+    const planningOptions: AutonomousProviderPlanningOptions = {
+      ...(planning ?? {}),
+      ...(sharedBudget ? { costBudget: sharedBudget, maxTotalCostUnits: undefined } : {}),
+    };
+    const executionOptions: AutonomousRunOptions = {
+      ...options,
+      routeOverride: route,
+      costBudget: sharedBudget,
+      maxTotalCostUnits: undefined,
+      acceptedSingleDomainPlanRefinement: undefined,
+      acceptedCrossDomainPlanRefinement: undefined,
+    };
+    delete (executionOptions as AutonomousPlanAndRunOptions).planning;
+    delete (executionOptions as AutonomousPlanAndRunOptions).acceptPlan;
+    if (envelope.cross_domain_blueprint) {
+      const proposal = await this.planCrossDomainWithProvider(envelope.cross_domain_blueprint, planningOptions);
+      if (proposal.status !== "completed") {
+        const status: AutonomousPlanAndRunStatus = proposal.status === "approval_required" ? "approval_required" : proposal.status === "provider_invalid" ? "provider_invalid" : "provider_disagreement";
+        return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status, route, blueprint: envelope, plan_refinement: proposal, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
+      }
+      if (proposal.review_required || options.acceptPlan !== true) return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: "plan_review_required", route, blueprint: envelope, plan_refinement: proposal, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
+      const result = await this.runCrossDomain(taskText, { ...executionOptions, acceptedCrossDomainPlanRefinement: proposal });
+      return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: result.status, route, blueprint: envelope, plan_refinement: proposal, result, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
+    }
+    const blueprint = envelope.blueprint;
+    if (!blueprint) throw new ProviderRuntimeError("planAndRun single-domain blueprint is missing");
+    const proposal = await this.planWithProvider(blueprint, planningOptions);
+    if (proposal.status !== "completed") {
+      const status: AutonomousPlanAndRunStatus = proposal.status === "approval_required" ? "approval_required" : proposal.status === "provider_invalid" ? "provider_invalid" : "provider_disagreement";
+      return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status, route, blueprint: envelope, plan_refinement: proposal, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
+    }
+    if (proposal.review_required || options.acceptPlan !== true) return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: "plan_review_required", route, blueprint: envelope, plan_refinement: proposal, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
+    const result = await this.run(taskText, { ...executionOptions, acceptedSingleDomainPlanRefinement: proposal });
+    return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: result.status, route, blueprint: envelope, plan_refinement: proposal, result, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
+  }
+
   /** Build a bounded fan-out/fan-in plan without contacting a provider or executing a tool. */
   private async buildCrossDomainBlueprint(
     taskText: string,
@@ -3551,12 +3680,14 @@ export class AutonomousAgent {
     const costBudget = resolveAutonomousCostBudget(options);
     const route = options.routeOverride ? await validateAutonomousRouteOverride(taskText, options.routeOverride) : await this.route(taskText, { domain: options.domain, hints: options.hints, allowCrossDomain: options.allowCrossDomain });
     if (route.cross_domain && options.domain === undefined) {
+      if (options.acceptedSingleDomainPlanRefinement !== undefined) throw new ArgumentError("single-domain plan refinement cannot be applied to a cross-domain route");
       const cross = await this.runCrossDomain(taskText, { ...options, maxTotalCostUnits: undefined, costBudget });
       return {
         schema: "bioprism-typescript-autonomous-run/0.1",
         status: cross.status === "completed" ? "completed" : cross.status === "approval_required" ? "approval_required" : cross.status === "reconciliation_required" ? "reconciliation_required" : cross.status === "turn_limit_reached" ? "turn_limit_reached" : cross.status === "child_failed" ? "child_failed" : cross.status === "children_partial" ? "cross_domain_partial" : "route_review_required",
         route,
         blueprint: cross.blueprint?.synthesis_blueprint ?? null,
+        plan_refinement_digest: cross.plan_refinement_digest,
         selection: cross.synthesis?.selection ?? null,
         response: cross.synthesis?.response ?? null,
         tool_loop: cross.synthesis?.tool_loop ?? null,
@@ -3565,11 +3696,13 @@ export class AutonomousAgent {
         retention: "provider_response_local; value_only_learning_projection",
       };
     }
-    if (route.abstained || !route.primary_domain) return { schema: "bioprism-typescript-autonomous-run/0.1", status: "route_review_required", route, blueprint: null, selection: null, response: null, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
+    if (route.abstained || !route.primary_domain) return { schema: "bioprism-typescript-autonomous-run/0.1", status: "route_review_required", route, blueprint: null, plan_refinement_digest: null, selection: null, response: null, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
     const blueprintEnvelope = await this.blueprint(taskText, { domain: route.primary_domain, routeOverride: options.routeOverride, capability: options.capability, context: options.context, maxInputTokens: options.maxInputTokens, tools: options.tools?.map((tool) => tool.name), hints: options.hints });
     const blueprint = blueprintEnvelope.blueprint;
-    if (!blueprint) return { schema: "bioprism-typescript-autonomous-run/0.1", status: "route_review_required", route, blueprint: null, selection: null, response: null, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
-    if (options.approveProviderCall !== true) return { schema: "bioprism-typescript-autonomous-run/0.1", status: "approval_required", route, blueprint, selection: null, response: null, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
+    if (!blueprint) return { schema: "bioprism-typescript-autonomous-run/0.1", status: "route_review_required", route, blueprint: null, plan_refinement_digest: null, selection: null, response: null, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
+    const acceptedPlan = await acceptedAutonomousPlan(blueprint, options.acceptedSingleDomainPlanRefinement);
+    const planRefinementDigest = acceptedPlan?.refinement_digest ?? null;
+    if (options.approveProviderCall !== true) return { schema: "bioprism-typescript-autonomous-run/0.1", status: "approval_required", route, blueprint, plan_refinement_digest: planRefinementDigest, selection: null, response: null, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
     const candidates = options.candidates ? [...options.candidates] : this.models();
     if (!candidates.length) throw new ProviderRuntimeError("autonomous run requires at least one registered model candidate");
     const selectedDomains = route.selected_domains.length ? route.selected_domains : [route.primary_domain];
@@ -3577,6 +3710,7 @@ export class AutonomousAgent {
     const defaultToolNames = blueprint.plan.allowed_tools.filter((name) => name !== "provider.invoke");
     const tools = options.tools === undefined ? await this.liveToolsForNames(selectedDomains, defaultToolNames) : this.filterActivatedTools(options.tools);
     const messages: ProviderMessage[] = blueprint.prompt.messages.map((message) => ({ role: message.role, content: message.content }));
+    if (acceptedPlan) messages.push({ role: "user", content: `Accepted provider plan refinement (digest ${acceptedPlan.refinement_digest}). Follow this existing workflow order and focus only; do not add tools, effects, permissions, credentials, or claims. Priority stages: ${acceptedPlan.priority_stage_ids.join(", ")}. Focus stages: ${acceptedPlan.focus_stage_ids.join(", ")}.` });
     const requiredCapabilities = [...blueprint.required_capabilities];
     if (options.requireJson === true && !requiredCapabilities.includes("structured_output")) requiredCapabilities.push("structured_output");
     const request: ProviderRequest = {
@@ -3603,10 +3737,10 @@ export class AutonomousAgent {
       const toolReadOnly = options.toolReadOnly ?? (async (call: ProviderToolCall): Promise<boolean> => this.domainToolRegistry?.binding(call.name, selectedDomains)?.risk_class === "read_only");
       const loop = await this.runtime.invokeToolLoop(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, authorizeAndExecute, signal: options.signal, observer: feedbackObserver, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined, toolReadOnly });
       const status: AutonomousRunStatus = loop.loop.status === "completed" ? "completed" : loop.loop.status === "authorization_required" ? "approval_required" : loop.loop.status === "reconciliation_required" ? "reconciliation_required" : "turn_limit_reached";
-      return { schema: "bioprism-typescript-autonomous-run/0.1", status, route, blueprint, selection: loop.selection, response: loop.loop.finalResponse, tool_loop: { status: loop.loop.status, turns: loop.loop.turns, toolCalls: loop.loop.toolCalls }, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
+      return { schema: "bioprism-typescript-autonomous-run/0.1", status, route, blueprint, plan_refinement_digest: planRefinementDigest, selection: loop.selection, response: loop.loop.finalResponse, tool_loop: { status: loop.loop.status, turns: loop.loop.turns, toolCalls: loop.loop.toolCalls }, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
     }
     const result = await this.runtime.invoke(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: feedbackObserver, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined });
-    return { schema: "bioprism-typescript-autonomous-run/0.1", status: "completed", route, blueprint, selection: result.selection, response: result.response, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
+    return { schema: "bioprism-typescript-autonomous-run/0.1", status: "completed", route, blueprint, plan_refinement_digest: planRefinementDigest, selection: result.selection, response: result.response, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
   }
 
   /** Execute routed specialist children with bounded fan-out, then hand local outputs to synthesis. */

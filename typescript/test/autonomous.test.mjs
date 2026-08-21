@@ -175,6 +175,7 @@ test("provider planning is approval-gated, dependency-closed, and domain-neutral
       const body = JSON.parse(String(init.body));
       calls.push(body);
       const planningMessage = body.messages.find((message) => message.content.startsWith("Context planning-contract:\n"));
+      if (!planningMessage) return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify({ answer: "domain execution" }) }, finish_reason: "stop" }] });
       const contract = JSON.parse(planningMessage.content.slice("Context planning-contract:\n".length));
       const ids = (contract.stage_catalogue ?? contract.child_catalogue).map((row) => row.id);
       const focusField = contract.stage_catalogue ? "focus_stage_ids" : "focus_child_ids";
@@ -246,6 +247,123 @@ test("provider planning is approval-gated, dependency-closed, and domain-neutral
     assert.equal(result.cost_budget.max_cost_units, 1, domain);
     assert.ok(result.cost_budget.consumed_cost_units > 0, domain);
   }
+
+  for (const [domain, task] of Object.entries(domains)) {
+    const budget = new AutonomousCostBudget(2);
+    const twoPhase = await agent.planAndRun(task, {
+      domain,
+      planning: { approveProviderCall: true, costBudget: budget },
+      costBudget: budget,
+      acceptPlan: true,
+      approveProviderCall: true,
+    });
+    assert.equal(twoPhase.status, "completed", domain);
+    assert.equal(twoPhase.plan_refinement.status, "completed", domain);
+    assert.equal(twoPhase.result.status, "completed", domain);
+    assert.equal(twoPhase.result.plan_refinement_digest.length, 64, domain);
+  }
+});
+
+test("planAndRun requires explicit planning acceptance and binds the accepted proposal into direct execution", async () => {
+  const calls = [];
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      const body = JSON.parse(String(init.body));
+      calls.push(body);
+      const planningMessage = body.messages.find((message) => message.content.startsWith("Context planning-contract:\n"));
+      if (planningMessage) {
+        const contract = JSON.parse(planningMessage.content.slice("Context planning-contract:\n".length));
+        const ids = (contract.stage_catalogue ?? contract.child_catalogue).map((row) => row.id);
+        const focusField = contract.stage_catalogue ? "focus_stage_ids" : "focus_child_ids";
+        return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify({ priority_order: ids, [focusField]: ids.slice(0, 1), review_required: false, confidence: 0.97, abstain: false }) }, finish_reason: "stop" }] });
+      }
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify({ answer: "executed under accepted plan" }) }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("planner-runner", "https://planner-runner.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel(candidate("planner-runner", "planner-model", ["reasoning", "code", "structured_output"]));
+
+  const reviewBudget = new AutonomousCostBudget(2);
+  const review = await agent.planAndRun("Debug this coding repository and report verified tests.", {
+    domain: "coding",
+    planning: { approveProviderCall: true, costBudget: reviewBudget },
+    costBudget: reviewBudget,
+    approveProviderCall: true,
+  });
+  assert.equal(review.status, "plan_review_required");
+  assert.equal(review.plan_refinement.status, "completed");
+  assert.equal(review.result, null);
+  assert.equal(calls.length, 1, "planning acceptance pauses before execution dispatch");
+
+  const executeBudget = new AutonomousCostBudget(2);
+  const executed = await agent.planAndRun("Debug this coding repository and report verified tests.", {
+    domain: "coding",
+    planning: { approveProviderCall: true, costBudget: executeBudget },
+    costBudget: executeBudget,
+    acceptPlan: true,
+    approveProviderCall: true,
+  });
+  assert.equal(executed.status, "completed");
+  assert.equal(executed.plan_refinement.status, "completed");
+  assert.equal(executed.result.status, "completed");
+  assert.equal(executed.result.plan_refinement_digest.length, 64);
+  assert.ok(executed.result.response.text.includes("executed under accepted plan"));
+  assert.equal(calls.length, 3, "accepted planning performs exactly one planner and one execution dispatch");
+  assert.ok(executeBudget.snapshot().consumed_cost_units > 0);
+
+  const invalid = structuredClone(executed.plan_refinement);
+  invalid.priority_stage_ids.reverse();
+  await assert.rejects(
+    () => agent.run("Debug this coding repository and report verified tests.", {
+      domain: "coding",
+      acceptedSingleDomainPlanRefinement: invalid,
+      approveProviderCall: true,
+    }),
+    /accepted plan violates workflow dependencies/,
+  );
+  assert.equal(calls.length, 3, "dependency-invalid accepted plans fail before a second provider dispatch");
+});
+
+test("planAndRun applies the same accepted planning contract to cross-domain fan-out and synthesis", async () => {
+  const calls = [];
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      const body = JSON.parse(String(init.body));
+      calls.push(body);
+      const planningMessage = body.messages.find((message) => message.content.startsWith("Context planning-contract:\n"));
+      if (planningMessage) {
+        const contract = JSON.parse(planningMessage.content.slice("Context planning-contract:\n".length));
+        const ids = (contract.stage_catalogue ?? contract.child_catalogue).map((row) => row.id);
+        const focusField = contract.stage_catalogue ? "focus_stage_ids" : "focus_child_ids";
+        return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify({ priority_order: ids, [focusField]: ids.slice(0, 1), review_required: false, confidence: 0.94, abstain: false }) }, finish_reason: "stop" }] });
+      }
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify({ answer: "cross-domain execution" }) }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("cross-planner", "https://cross-planner.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel(candidate("cross-planner", "cross-model", ["reasoning", "structured_output", "biomedical", "science", "coordination"]));
+  const budget = new AutonomousCostBudget(8);
+  const result = await agent.planAndRun("Research a biomedical neuroscience experiment with EEG patient evidence.", {
+    allowCrossDomain: true,
+    planning: { approveProviderCall: true, costBudget: budget },
+    costBudget: budget,
+    acceptPlan: true,
+    approveProviderCall: true,
+    maxParallelChildren: 1,
+  });
+  assert.equal(result.route.cross_domain, true);
+  assert.equal(result.status, "completed");
+  assert.equal(result.plan_refinement.status, "completed");
+  assert.equal(result.result.status, "completed");
+  assert.equal(result.result.plan_refinement_digest.length, 64);
+  assert.equal(result.result.child_runs.length, 2);
+  assert.equal(result.result.child_runs.every((child) => child.result.status === "completed"), true);
+  assert.equal(calls.length, 4, "cross-domain planning dispatches one planner, two specialists, and one synthesis call");
+  assert.ok(budget.snapshot().consumed_cost_units > 0);
 });
 
 test("provider planning refuses dependency-invalid proposals without retaining provider output", async () => {

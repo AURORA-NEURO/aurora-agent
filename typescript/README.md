@@ -490,6 +490,28 @@ permutations, dependency safety, abstention, and confidence bounds. A malformed 
 response is converted into a typed `provider_invalid` result with a digest-only failure receipt;
 credential and transport failures remain typed runtime errors for the caller's retry policy.
 
+For applications that want the whole bounded sequence in one explicit call, use
+`agent.planAndRun()`. It routes and builds the blueprint, requests a provider proposal, pauses with
+`plan_review_required` until `acceptPlan: true`, then invokes the accepted plan. Planning approval
+and execution approval remain separate, and one caller-owned `AutonomousCostBudget` can be passed
+to both phases so the planner cannot consume budget that the executor does not see:
+
+```typescript
+const budget = new AutonomousCostBudget(4);
+const outcome = await agent.planAndRun(task, {
+  planning: { approveProviderCall: true, costBudget: budget },
+  costBudget: budget,
+  acceptPlan: true,
+  approveProviderCall: true,
+});
+```
+
+The same method applies to cross-domain routes: the proposal reorders only existing child ids,
+then the accepted digest is carried through every specialist and synthesis invocation. Omitting
+`acceptPlan` never dispatches the execution provider. Callers that already hold a reviewed proposal
+can instead pass `acceptedSingleDomainPlanRefinement` to `run()` or
+`acceptedCrossDomainPlanRefinement` to `runCrossDomain()`.
+
 These methods produce proposals, never authorization or execution. The returned records retain
 only existing ids, bounded confidence, selected-model metadata, numeric budget accounting, and SHA-256 digests. They do not
 retain the original task, prompt transcript, provider response, tool names, credentials, effects,

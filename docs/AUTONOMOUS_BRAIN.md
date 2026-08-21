@@ -786,6 +786,17 @@ effects, credentials, new domains, or synthesis. Malformed structured output bec
 digest-only `provider_invalid` result, while credential and transport failures remain typed runtime
 errors for application retry or review policy.
 
+For direct provider invocation, `agent.planAndRun()` composes the same bounded sequence: route,
+blueprint, provider planning proposal, explicit plan acceptance, and execution. Planning approval
+(`planning.approveProviderCall`) and execution approval (`approveProviderCall`) are separate. The
+method returns `plan_review_required` after a valid proposal unless `acceptPlan: true` is supplied;
+there is no execution dispatch during that pause. A single caller-owned `AutonomousCostBudget`
+may be supplied to both phases, and the accepted plan's digest is carried into the direct run
+result. Cross-domain calls use the same API and carry the accepted child-order digest through
+specialist fan-out and synthesis. Existing caller-held proposals can be applied directly with
+`acceptedSingleDomainPlanRefinement` on `agent.run()` or
+`acceptedCrossDomainPlanRefinement` on `agent.runCrossDomain()`.
+
 On the TypeScript path, single-domain acceptance is supplied as
 `acceptedPlanRefinement` to `AutonomousWorkflowExecutor.start()`/`resume()`, and cross-domain
 acceptance is supplied as `acceptedCrossDomainPlanRefinement` to `runCrossDomain()`. The accepted
