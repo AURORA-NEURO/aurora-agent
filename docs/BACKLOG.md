@@ -232,6 +232,13 @@ credential ingestion, approval, and domain interpretation outside the bridge, wh
 transport/refusal failures remain explicit. This is a composition seam over the existing gateway,
 not an external connector catalogue, durable queue, OTLP exporter, identity provider, or hosted
 worker; those broader runtime surfaces remain intentionally listed below.
+The next Python autonomous integration layer now adds a restart-safe hash-chained JSONL journal
+for direct domain-tool receipts and a caller-owned connector registry/dispatcher over the typed
+provider-manifest contract. These enforce exact twelve-domain scope, capability and approval
+gates, transient connector values, credential-shaped request rejection, idempotent receipt
+deduplication, and tamper/capacity failures. They still do not implement external provider
+clients, key storage, network retrieval, distributed workers, durable queues, or an OTLP exporter;
+those remain explicit integration work rather than hidden behind a local callback.
 The domain-workflow handoff now also has a retained verification boundary: callers can validate
 catalogue/contract/binding identity, rerun mission preflight, and optionally replay the original
 instantiation request before re-review. The verifier is intentionally structural and non-executing;

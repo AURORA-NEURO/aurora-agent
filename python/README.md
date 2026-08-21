@@ -84,6 +84,47 @@ are never sent to it. A sink failure fails closed instead of turning a completed
 unobserved success. The adapter and sink contract are exercised across all twelve built-in domain
 profiles, including refusal, malformed-response, transport, schema, and no-discovery paths.
 
+For provider-backed evidence, `AutonomousConnectorRegistry` and `AutonomousConnectorRuntime`
+provide the corresponding caller-owned connector process. Register a typed
+`DomainEvidenceProviderConnectorManifest` and an executor that may close over a short-lived
+credential session; the runtime enforces exact manifest domains/capabilities and approval before
+calling it. The request and returned value are transient, while the dispatch receipt retains only
+request/payload/manifest digests and bounded failure classes. `AutonomousDomainToolReceiptJournal`
+can persist direct tool receipts as hash-chained JSONL with identity-conflict detection and safe
+replay deduplication:
+
+```python
+from prism_sdk import (
+    AutonomousConnectorDispatchRequest,
+    AutonomousConnectorRegistry,
+    AutonomousConnectorRuntime,
+    AutonomousConnectorRegistration,
+    AutonomousDomainToolReceiptJournal,
+)
+
+connector_registry = AutonomousConnectorRegistry([registration])
+connector_runtime = AutonomousConnectorRuntime(connector_registry)
+result = connector_runtime.dispatch(
+    AutonomousConnectorDispatchRequest(
+        dispatch_id="evidence-dispatch-1",
+        execution_id="run-1",
+        call_id="evidence-call-1",
+        connector_id=registration.manifest.connector_id,
+        domains=("science",),
+        capability="literature_search",
+        request={"query": "caller-supplied transient query"},
+        approved=True,
+    )
+)
+```
+
+The registry never accepts a raw key and does not perform network I/O. A caller-owned executor
+can invoke the existing source-plan, provider-handoff, or external-payload APIs and return a
+typed transient observation. Credential handles, raw queries, provider responses, and headers are
+never serialized into the dispatch receipt. Both connector dispatch and journal reopening are
+tested across all twelve built-in domains, including approval, scope, capability, tamper,
+capacity, secret-field, and executor-failure paths.
+
 The provider runtime and [`AutonomousBrain`](../docs/AUTONOMOUS_BRAIN.md) add the caller-approved
 LLM boundary: BYOK credentials become short-lived opaque handles, model selection is health- and
 capability-gated, prompts and mission plans are bounded, and external effects require explicit

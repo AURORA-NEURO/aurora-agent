@@ -2725,6 +2725,25 @@ this seam to a durable journal or telemetry exporter without making durability a
 side effect. The Python adapter, exact catalogue gate, all twelve profiles, refusal paths, and
 receipt delivery behavior are covered by adversarial tests.
 
+Direct tool-loop receipts can be made restart-safe with
+`AutonomousDomainToolReceiptJournal(path)`. It is a bounded, append-only JSONL sink that verifies
+the complete hash chain on open, fsyncs each metadata-only entry, deduplicates an identical
+`execution_id`/`call_id`/tool identity, and rejects conflicting retries or tampering. It stores
+only status, identities, and schema/argument/output digests; reopening it never rehydrates a raw
+tool value and therefore cannot accidentally replay an external effect.
+
+External evidence connectors use the parallel `AutonomousConnectorRegistry`/
+`AutonomousConnectorRuntime` seam over `DomainEvidenceProviderConnectorManifest`. A registration
+is an exact manifest plus a caller-owned executor. Dispatch checks the requested built-in domains,
+capability, approval, request JSON bounds, and credential-shaped fields before invoking that
+executor. The caller may close over a short-lived credential session and call the existing
+source-plan/provider-handoff/external-payload APIs, but the runtime itself performs no discovery or
+network I/O and accepts no raw key. A transient value is returned to the caller while the
+`AutonomousConnectorDispatchReceipt` retains only request/payload/manifest digests, attempt
+identity, status, and bounded failure class. All twelve domains share the same registry, approval,
+and receipt contract; missing external services remain explicit rather than being simulated as
+successful evidence.
+
 For a UI or service that must survive a process restart, attach the redacted activation state to
 the agent. The activation snapshot tracks provider readiness, catalogue/profile/plan digests,
 approved exact tool names, pending review, and coverage for every built-in domain. It deliberately
