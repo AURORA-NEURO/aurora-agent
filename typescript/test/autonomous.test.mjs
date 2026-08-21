@@ -993,7 +993,11 @@ test("capability execution fails closed, replays completed work, and makes batch
     capabilities.execute(concurrentRequest),
   ]);
   assert.equal(concurrentFirst.record.status, "completed");
-  assert.equal(concurrentReplay.record.replay, "replayed");
+  assert.deepEqual(
+    [concurrentFirst.record.replay, concurrentReplay.record.replay].sort(),
+    ["fresh", "replayed"],
+    "identical concurrent requests must produce one fresh result and one replay",
+  );
   assert.equal(executions, 2, "identical concurrent requests must share one adapter dispatch");
 
   const wrongStage = await capabilities.execute({ ...base, call_id: "wrong-stage", replay_key: "wrong-stage", workflow_context: { ...context, stage_id: selected.stage_id === "implementation" ? "scope" : "implementation" } });
