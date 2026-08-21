@@ -516,9 +516,18 @@ Learning episodes can only be prepared from a completed autonomous run; approval
 refusals, child failures, and tool-loop limits cannot be converted into evaluator or bandit credit.
 Trajectory settlement is resumable after a later episode failure: matching already-settled reward
 projections are skipped, while changed reward evidence is refused.
-Remote settlement also uses an episode idempotency key and a bounded credited-outcome receipt. A
-retry after a crash is a no-op for the same arm/reward/failure contract; contradictory evidence is
-rejected, including after the caller rehydrates the persisted bandit state.
+Every settlement now also has a caller-owned, value-only receipt boundary. Pass
+`settlementReceipts` to `AutonomousLearningController` with a durable implementation of
+`AutonomousLearningSettlementReceiptStore` (the in-memory implementation is for tests and small
+workers). Single episodes default to `episode:<episode_id>` keys; trajectory steps use deterministic
+hashed keys, and callers may supply a stable trajectory-level `idempotencyKey`. Receipts bind the
+episode/trajectory digest, normalized evaluator request, and settlement projection. A retry after
+restart returns the exact prior projection, repairs a pending episode/trajectory commit when
+possible, and does not dispatch a provider or double-credit the local bandit. Contradictory
+reward, remote/local mode, identity, or receipt digest evidence is refused. Receipt payloads reject
+prompts, responses, credentials, tool arguments, raw results, and other private provider material;
+the cross-domain result itself is never persisted in a trajectory receipt and must be rehydrated by
+the caller.
 
 Ambiguous tasks now have a real fan-out/fan-in path. `blueprint()` returns a
 `cross_domain_blueprint` containing one child workflow per selected domain plus a cross-domain

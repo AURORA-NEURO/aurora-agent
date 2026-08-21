@@ -25,6 +25,7 @@ export const AUTONOMOUS_EVALUATION_SCHEMA = "bioprism-typescript-autonomous-work
 export const AUTONOMOUS_LEARNING_EPISODE_SCHEMA = "bioprism-typescript-autonomous-learning-episode/0.1" as const;
 export const AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA = "bioprism-typescript-autonomous-learning-trajectory/0.1" as const;
 export const AUTONOMOUS_LEARNING_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-learning-snapshot/0.1" as const;
+export const AUTONOMOUS_LEARNING_SETTLEMENT_RECEIPT_SCHEMA = "bioprism-typescript-autonomous-learning-settlement-receipt/0.1" as const;
 export const AUTONOMOUS_LEARNING_MAX_STAGES = 64;
 export const AUTONOMOUS_LEARNING_MAX_TRAJECTORY_STEPS = 32;
 
@@ -161,6 +162,31 @@ export interface AutonomousLearningSnapshotPersistence {
   write(snapshot: AutonomousLearningStateSnapshot): Promise<void> | void;
 }
 
+/**
+ * A replay receipt contains only value-level learning projections. It deliberately excludes
+ * prompts, provider responses, credentials, tool arguments, and raw evaluator evidence. A
+ * durable implementation should make `save` conditional on the idempotency key so concurrent
+ * workers cannot publish contradictory settlements.
+ */
+export interface AutonomousLearningSettlementReceipt extends JsonObject {
+  schema: typeof AUTONOMOUS_LEARNING_SETTLEMENT_RECEIPT_SCHEMA;
+  operation: "single_run" | "trajectory";
+  idempotency_key: string;
+  target_id: string;
+  target_digest: Digest;
+  request_digest: Digest;
+  settlement_digest: Digest;
+  settlement: AutonomousLearningSettlement | AutonomousTrajectorySettlement;
+  retention: typeof PRIVATE_RETENTION;
+  secret_material: "never_returned";
+}
+
+/** Adapter contract for a durable settlement journal (SQLite, Postgres, IndexedDB, etc.). */
+export interface AutonomousLearningSettlementReceiptStore {
+  load(idempotencyKey: string): Promise<AutonomousLearningSettlementReceipt | null> | AutonomousLearningSettlementReceipt | null;
+  save(receipt: AutonomousLearningSettlementReceipt): Promise<void> | void;
+}
+
 export interface AutonomousLearningStateStore {
   loadEpisode(episodeId: string): Promise<AutonomousLearningEpisode | null> | AutonomousLearningEpisode | null;
   saveEpisode(episode: AutonomousLearningEpisode): Promise<void> | void;
@@ -245,6 +271,48 @@ function boundedGeneration(value: unknown): number {
 
 function clone<T>(value: T): T {
   return structuredClone(value);
+}
+
+const SETTLEMENT_RECEIPT_FORBIDDEN_KEYS = new Set([
+  "prompt",
+  "response",
+  "credentials",
+  "credential",
+  "api_key",
+  "access_token",
+  "refresh_token",
+  "secret",
+  "tool_arguments",
+  "raw_response",
+  "result",
+]);
+
+function assertValueOnlySettlement(value: unknown, depth = 0): void {
+  if (depth > 12) throw new ArgumentError("learning settlement receipt is too deeply nested");
+  if (Array.isArray(value)) {
+    if (value.length > 4096) throw new ArgumentError("learning settlement receipt contains too many values");
+    for (const item of value) assertValueOnlySettlement(item, depth + 1);
+    return;
+  }
+  if (!isObject(value)) return;
+  for (const [key, child] of Object.entries(value)) {
+    if (SETTLEMENT_RECEIPT_FORBIDDEN_KEYS.has(key.toLowerCase())) throw new ArgumentError(`learning settlement receipt cannot retain ${key}`);
+    assertValueOnlySettlement(child, depth + 1);
+  }
+}
+
+function assertSettlementReceiptShape(value: unknown): asserts value is AutonomousLearningSettlementReceipt {
+  if (!isObject(value) || value.schema !== AUTONOMOUS_LEARNING_SETTLEMENT_RECEIPT_SCHEMA || !isObject(value.settlement)) throw new ArgumentError("learning settlement receipt is malformed");
+  if (value.operation !== "single_run" && value.operation !== "trajectory") throw new ArgumentError("learning settlement receipt operation is malformed");
+  boundedIdentifier("settlement receipt idempotency_key", value.idempotency_key);
+  boundedIdentifier("settlement receipt target_id", value.target_id);
+  boundedDigest("settlement receipt target_digest", value.target_digest);
+  boundedDigest("settlement receipt request_digest", value.request_digest);
+  boundedDigest("settlement receipt settlement_digest", value.settlement_digest);
+  if (value.retention !== PRIVATE_RETENTION || value.secret_material !== "never_returned") throw new ArgumentError("learning settlement receipt retention contract is malformed");
+  if (value.operation === "single_run" && !isObject(value.settlement.episode)) throw new ArgumentError("single-run settlement receipt is missing its episode projection");
+  if (value.operation === "trajectory" && (!isObject(value.settlement.trajectory) || !Array.isArray(value.settlement.settlements))) throw new ArgumentError("trajectory settlement receipt is missing its trajectory projection");
+  assertValueOnlySettlement(value.settlement);
 }
 
 function assertStageEvidence(value: unknown): asserts value is AutonomousStageSignalEvidence {
@@ -491,6 +559,31 @@ export class InMemoryAutonomousLearningTrajectoryStore implements AutonomousLear
   }
 }
 
+/** Bounded process-local receipt journal for tests and single-process deployments. */
+export class InMemoryAutonomousLearningSettlementReceiptStore implements AutonomousLearningSettlementReceiptStore {
+  private readonly receipts = new Map<string, AutonomousLearningSettlementReceipt>();
+
+  load(idempotencyKey: string): AutonomousLearningSettlementReceipt | null {
+    const key = boundedIdentifier("settlement receipt idempotency_key", idempotencyKey);
+    const receipt = this.receipts.get(key);
+    return receipt ? clone(receipt) : null;
+  }
+
+  save(receipt: AutonomousLearningSettlementReceipt): void {
+    assertSettlementReceiptShape(receipt);
+    const prior = this.receipts.get(receipt.idempotency_key);
+    if (prior && (prior.request_digest !== receipt.request_digest || prior.target_digest !== receipt.target_digest || prior.operation !== receipt.operation || prior.settlement_digest !== receipt.settlement_digest)) {
+      throw new ArgumentError(`settlement receipt ${receipt.idempotency_key} conflicts with an existing identity`);
+    }
+    if (this.receipts.size >= 8192 && !prior) throw new ArgumentError("learning settlement receipt store is full");
+    this.receipts.set(receipt.idempotency_key, clone(receipt));
+  }
+
+  rows(): AutonomousLearningSettlementReceipt[] {
+    return [...this.receipts.values()].map((receipt) => clone(receipt));
+  }
+}
+
 /** Unified caller-owned state store with integrity-checked restart snapshots. */
 export class InMemoryAutonomousLearningStateStore implements AutonomousLearningStateStore {
   private readonly episodeStore = new InMemoryAutonomousLearningEpisodeStore();
@@ -590,10 +683,11 @@ export class AutonomousLearningController {
   readonly agent: AutonomousAgent;
   readonly episodes: AutonomousLearningEpisodeStore;
   readonly trajectories: AutonomousLearningTrajectoryStore;
+  readonly settlementReceipts: AutonomousLearningSettlementReceiptStore;
   readonly evaluator: AutonomousWorkflowEvaluator;
   readonly apiClient?: ApiClient;
 
-  constructor(agent: AutonomousAgent, options: { store?: AutonomousLearningStateStore; episodes?: AutonomousLearningEpisodeStore; trajectories?: AutonomousLearningTrajectoryStore; evaluator?: AutonomousWorkflowEvaluator; apiClient?: ApiClient } = {}) {
+  constructor(agent: AutonomousAgent, options: { store?: AutonomousLearningStateStore; episodes?: AutonomousLearningEpisodeStore; trajectories?: AutonomousLearningTrajectoryStore; settlementReceipts?: AutonomousLearningSettlementReceiptStore; evaluator?: AutonomousWorkflowEvaluator; apiClient?: ApiClient } = {}) {
     if (!agent || typeof agent.recordEvaluatorReward !== "function") throw new ArgumentError("learning controller requires an AutonomousAgent");
     this.agent = agent;
     const stateStore = options.store;
@@ -608,8 +702,41 @@ export class AutonomousLearningController {
       save: (trajectory: AutonomousLearningTrajectory) => stateStore.saveTrajectory(trajectory),
       markSettled: (trajectoryId: string, settlementDigest: Digest) => stateStore.markTrajectorySettled(trajectoryId, settlementDigest),
     } : new InMemoryAutonomousLearningTrajectoryStore());
+    this.settlementReceipts = options.settlementReceipts ?? new InMemoryAutonomousLearningSettlementReceiptStore();
     this.evaluator = options.evaluator ?? new AutonomousWorkflowEvaluator();
     this.apiClient = options.apiClient;
+  }
+
+  private async loadReceipt(idempotencyKey: string, operation: AutonomousLearningSettlementReceipt["operation"], targetId: string, targetDigest: Digest, requestDigest: Digest): Promise<AutonomousLearningSettlementReceipt | null> {
+    const receipt = await this.settlementReceipts.load(idempotencyKey);
+    if (!receipt) return null;
+    assertSettlementReceiptShape(receipt);
+    const expectedSettlementDigest = await digestJson(receipt.settlement);
+    if (expectedSettlementDigest !== receipt.settlement_digest) throw new ArgumentError(`settlement receipt ${idempotencyKey} failed integrity verification`);
+    if (receipt.operation !== operation || receipt.target_id !== targetId || receipt.target_digest !== targetDigest || receipt.request_digest !== requestDigest) throw new ArgumentError(`settlement idempotency key ${idempotencyKey} conflicts with a different learning settlement`);
+    return clone(receipt);
+  }
+
+  private async saveReceipt(operation: AutonomousLearningSettlementReceipt["operation"], idempotencyKey: string, targetId: string, targetDigest: Digest, requestDigest: Digest, settlement: AutonomousLearningSettlement | AutonomousTrajectorySettlement): Promise<AutonomousLearningSettlementReceipt> {
+    assertValueOnlySettlement(settlement);
+    const receipt = {
+      schema: AUTONOMOUS_LEARNING_SETTLEMENT_RECEIPT_SCHEMA,
+      operation,
+      idempotency_key: idempotencyKey,
+      target_id: targetId,
+      target_digest: targetDigest,
+      request_digest: requestDigest,
+      settlement,
+      settlement_digest: await digestJson(settlement),
+      retention: PRIVATE_RETENTION,
+      secret_material: "never_returned" as const,
+    } satisfies AutonomousLearningSettlementReceipt;
+    await this.settlementReceipts.save(receipt);
+    return clone(receipt);
+  }
+
+  private async episodeSettlementKey(trajectoryId: string, episodeId: string): Promise<string> {
+    return `trajectory-episode:${await digestJson({ trajectory_id: trajectoryId, episode_id: episodeId })}`;
   }
 
   async evaluateWorkflow(execution: AutonomousWorkflowExecutionResult, input: AutonomousWorkflowEvaluationInput): Promise<AutonomousWorkflowEvaluation> {
@@ -665,17 +792,16 @@ export class AutonomousLearningController {
   /** Build a trajectory from the pending stage episodes emitted by AutonomousWorkflowExecutor. */
   async prepareWorkflowTrajectory(execution: AutonomousWorkflowExecutionResult, options: { trajectoryId: string; discount?: number }): Promise<AutonomousLearningTrajectory> {
     const ids = [...new Set((execution.learning_episode_ids ?? []))];
+    if (!ids.length) throw new ArgumentError("workflow execution has no learning episodes");
     const pending: string[] = [];
-    for (const id of ids) {
-      const episode = await this.episodes.load(id);
-      if (episode?.status === "pending") pending.push(id);
-    }
-    if (!pending.length) throw new ArgumentError("workflow execution has no pending learning episodes");
-    return this.prepareTrajectory(pending, options);
+    for (const id of ids) if ((await this.episodes.load(id))?.status === "pending") pending.push(id);
+    if (pending.length) return this.prepareTrajectory(pending, options);
+    if (await this.trajectories.load(options.trajectoryId)) return this.prepareTrajectory(ids, options);
+    throw new ArgumentError("workflow execution has no pending learning episodes");
   }
 
   /** Evaluate and settle the pending workflow stages with one explicit signal packet. */
-  async settleWorkflow(execution: AutonomousWorkflowExecutionResult, input: AutonomousWorkflowEvaluationInput, options: { trajectoryId: string; discount?: number; remote?: boolean }): Promise<AutonomousWorkflowLearningSettlement> {
+  async settleWorkflow(execution: AutonomousWorkflowExecutionResult, input: AutonomousWorkflowEvaluationInput, options: { trajectoryId: string; discount?: number; remote?: boolean; idempotencyKey?: string }): Promise<AutonomousWorkflowLearningSettlement> {
     const evaluation = await this.evaluateWorkflow(execution, input);
     const trajectory = await this.prepareWorkflowTrajectory(execution, options);
     const rewards: Record<string, AutonomousEvaluatorRewardInput> = {};
@@ -695,35 +821,52 @@ export class AutonomousLearningController {
         evidence_digest: evidence?.evidence_digest ?? evaluation.evidence_digest,
       };
     }
-    const settled = await this.settleTrajectory(trajectory.trajectory_id, rewards, { remote: options.remote });
+    const settled = await this.settleTrajectory(trajectory.trajectory_id, rewards, { remote: options.remote, idempotencyKey: options.idempotencyKey });
     return { schema: AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA, evaluation, trajectory: settled, retention: PRIVATE_RETENTION };
   }
 
   /** Build a trajectory from completed specialist and synthesis episodes emitted by runCrossDomain. */
   async prepareCrossDomainTrajectory(result: AutonomousCrossDomainRunResult, options: { trajectoryId: string; discount?: number }): Promise<AutonomousLearningTrajectory> {
     const ids = [...new Set(result.learning_episode_ids ?? [])];
+    if (!ids.length) throw new ArgumentError("cross-domain result has no learning episodes");
     const pending: string[] = [];
-    for (const id of ids) {
-      const episode = await this.episodes.load(id);
-      if (episode?.status === "pending") pending.push(id);
-    }
-    if (!pending.length) throw new ArgumentError("cross-domain result has no pending learning episodes");
-    return this.prepareTrajectory(pending, options);
+    for (const id of ids) if ((await this.episodes.load(id))?.status === "pending") pending.push(id);
+    if (pending.length) return this.prepareTrajectory(pending, options);
+    if (await this.trajectories.load(options.trajectoryId)) return this.prepareTrajectory(ids, options);
+    throw new ArgumentError("cross-domain result has no pending learning episodes");
   }
 
   /** Settle child and synthesis episodes with exact caller-provided evaluator rewards. */
-  async settleCrossDomain(result: AutonomousCrossDomainRunResult, rewards: Record<string, AutonomousEvaluatorRewardInput>, options: { trajectoryId: string; discount?: number; remote?: boolean }): Promise<AutonomousCrossDomainLearningSettlement> {
+  async settleCrossDomain(result: AutonomousCrossDomainRunResult, rewards: Record<string, AutonomousEvaluatorRewardInput>, options: { trajectoryId: string; discount?: number; remote?: boolean; idempotencyKey?: string }): Promise<AutonomousCrossDomainLearningSettlement> {
     const trajectory = await this.prepareCrossDomainTrajectory(result, options);
-    const settled = await this.settleTrajectory(trajectory.trajectory_id, rewards, { remote: options.remote });
+    const settled = await this.settleTrajectory(trajectory.trajectory_id, rewards, { remote: options.remote, idempotencyKey: options.idempotencyKey });
     return { schema: AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA, result, trajectory: settled, retention: PRIVATE_RETENTION };
   }
 
-  async settleRun(episodeId: string, input: AutonomousEvaluatorRewardInput, options: { creditedReward?: number; remote?: boolean } = {}): Promise<AutonomousLearningSettlement> {
-    const episode = await this.episodes.load(boundedIdentifier("episodeId", episodeId));
+  async settleRun(episodeId: string, input: AutonomousEvaluatorRewardInput, options: { creditedReward?: number; remote?: boolean; idempotencyKey?: string } = {}): Promise<AutonomousLearningSettlement> {
+    const id = boundedIdentifier("episodeId", episodeId);
+    const episode = await this.episodes.load(id);
     if (!episode) throw new ArgumentError(`learning episode ${episodeId} was not found`);
-    if (episode.status === "settled") throw new ArgumentError(`learning episode ${episodeId} has already been settled`);
     assertRewardInput(input);
     const creditedReward = boundedReward("credited reward", options.creditedReward ?? input.reward);
+    const idempotencyKey = boundedIdentifier("settlement idempotencyKey", options.idempotencyKey ?? `episode:${id}`);
+    const normalizedInput = { ...input, failed: input.failed ?? !input.passed, feedback_digest: input.feedback_digest ?? null, failure_class: input.failure_class ?? null, evidence_digest: input.evidence_digest ?? null };
+    const requestDigest = await digestJson({ episode_digest: episode.episode_digest, input: normalizedInput, credited_reward: creditedReward, remote: options.remote === true });
+    let priorReceipt: AutonomousLearningSettlementReceipt | null;
+    try {
+      priorReceipt = await this.loadReceipt(idempotencyKey, "single_run", id, episode.episode_digest, requestDigest);
+    } catch (error) {
+      if (episode.status === "settled") throw new ArgumentError(`learning episode ${id} has already been settled with conflicting reward evidence`);
+      throw error;
+    }
+    if (priorReceipt) {
+      const priorSettlement = priorReceipt.settlement as AutonomousLearningSettlement;
+      if (!priorSettlement.episode || priorSettlement.episode.episode_id !== id || priorSettlement.episode.status !== "settled" || !priorSettlement.episode.settlement) throw new ArgumentError(`settlement receipt ${idempotencyKey} does not contain a settled episode projection`);
+      if (episode.status === "pending") await this.episodes.markSettled(id, priorSettlement.episode.settlement);
+      else if (episode.settlement?.settlement_digest !== priorSettlement.episode.settlement.settlement_digest) throw new ArgumentError(`learning episode ${id} has a conflicting settled projection`);
+      return clone(priorSettlement);
+    }
+    if (episode.status === "settled") throw new ArgumentError(`learning episode ${episodeId} has already been settled; its settlement receipt is unavailable`);
     if (!this.agent.learner) throw new ArgumentError("learning settlement requires an AutonomousOnlineLearner on the agent");
     const creditedOutcomeDigest = await digestJson({ run_id: episode.run.run_id, outcome_digest: episode.run.outcome_digest });
     const assessment: BrainEvaluatorAssessment = {
@@ -748,7 +891,7 @@ export class AutonomousLearningController {
     }
     if (options.remote === true) {
       if (!this.apiClient || typeof this.apiClient.brainOutcomeRecord !== "function") throw new ArgumentError("remote learning settlement requires an ApiClient with brainOutcomeRecord");
-      const projected = projectOutcome(await this.apiClient.brainOutcomeRecord({ run: episode.run, assessment, bandit_state: this.agent.learner.snapshot(), arm_id: armId, ...(contextDigest === null ? {} : { context_digest: contextDigest, context: learningContext }), idempotency_key: `episode:${episode.episode_id}` }));
+      const projected = projectOutcome(await this.apiClient.brainOutcomeRecord({ run: episode.run, assessment, bandit_state: this.agent.learner.snapshot(), arm_id: armId, ...(contextDigest === null ? {} : { context_digest: contextDigest, context: learningContext }), idempotency_key: idempotencyKey }));
       if (!projected.next_state || !Array.isArray(projected.next_state.arms) || !projected.learning_evidence) throw new ProviderRuntimeError("brain outcome record returned an incomplete learning projection");
       nextState = this.agent.learner.restore(projected.next_state);
       learningEvidence = projected.learning_evidence;
@@ -758,8 +901,18 @@ export class AutonomousLearningController {
     }
     const settlementBase = { evaluation_digest: input.evidence_digest ?? null, reward: input.reward, credited_reward: creditedReward, next_generation: boundedGeneration(nextState.generation ?? 0), settled_at: Date.now() };
     const settlement: AutonomousLearningSettlementMetadata = { ...settlementBase, settlement_digest: await digestJson(settlementBase) };
-    const settledEpisode = await this.episodes.markSettled(episode.episode_id, settlement);
-    return { schema: AUTONOMOUS_LEARNING_EPISODE_SCHEMA, episode: settledEpisode, assessment, next_state: clone(nextState), learning_evidence: learningEvidence, remote, retention: PRIVATE_RETENTION };
+    const projectedEpisode = { ...episode, status: "settled" as const, settlement };
+    const result = { schema: AUTONOMOUS_LEARNING_EPISODE_SCHEMA, episode: projectedEpisode, assessment, next_state: clone(nextState), learning_evidence: learningEvidence, remote, retention: PRIVATE_RETENTION } satisfies AutonomousLearningSettlement;
+    await this.saveReceipt("single_run", idempotencyKey, id, episode.episode_digest, requestDigest, result);
+    let settledEpisode: AutonomousLearningEpisode;
+    try {
+      settledEpisode = await this.episodes.markSettled(episode.episode_id, settlement);
+    } catch (error) {
+      const observed = await this.episodes.load(episode.episode_id);
+      if (!observed || observed.status !== "settled" || observed.settlement?.settlement_digest !== settlement.settlement_digest) throw error;
+      settledEpisode = observed;
+    }
+    return clone({ ...result, episode: settledEpisode });
   }
 
   async prepareTrajectory(episodeIds: readonly string[], options: { trajectoryId: string; discount?: number }): Promise<AutonomousLearningTrajectory> {
@@ -771,23 +924,48 @@ export class AutonomousLearningController {
     if (new Set(ids).size !== ids.length) throw new ArgumentError("learning trajectory episode IDs must be unique");
     const episodes = await Promise.all(ids.map((id) => this.episodes.load(id)));
     if (episodes.some((episode) => !episode)) throw new ArgumentError("learning trajectory references a missing episode");
-    if (episodes.some((episode) => episode?.status !== "pending")) throw new ArgumentError("learning trajectory can only contain pending episodes");
     const steps = episodes.map((episode, index) => ({ index, episode_id: episode!.episode_id, arm_id: `${episode!.run.provider}/${episode!.run.model}`, context_digest: typeof episode!.context_digest === "string" ? episode!.context_digest : null, run_digest: episode!.run.outcome_digest, raw_reward: null, credited_reward: null }));
     const descriptor = { schema: AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA, trajectory_id: trajectoryId, discount, steps, status: "pending" as const, settlement_digest: null, retention: PRIVATE_RETENTION, secret_material: "never_returned" as const };
     const trajectory = { ...descriptor, trajectory_digest: await digestJson(descriptor) };
+    const prior = await this.trajectories.load(trajectoryId);
+    if (prior) {
+      if (prior.trajectory_digest !== trajectory.trajectory_digest) throw new ArgumentError(`learning trajectory ${trajectoryId} conflicts with an existing identity`);
+      return clone(prior);
+    }
+    if (episodes.some((episode) => episode?.status !== "pending")) throw new ArgumentError("learning trajectory can only contain pending episodes");
     this.trajectories.save(trajectory);
     return clone(trajectory);
   }
 
-  async settleTrajectory(trajectoryId: string, rewards: Record<string, AutonomousEvaluatorRewardInput>, options: { remote?: boolean } = {}): Promise<AutonomousTrajectorySettlement> {
-    const trajectory = await this.trajectories.load(boundedIdentifier("trajectoryId", trajectoryId));
+  async settleTrajectory(trajectoryId: string, rewards: Record<string, AutonomousEvaluatorRewardInput>, options: { remote?: boolean; idempotencyKey?: string } = {}): Promise<AutonomousTrajectorySettlement> {
+    const id = boundedIdentifier("trajectoryId", trajectoryId);
+    const trajectory = await this.trajectories.load(id);
     if (!trajectory) throw new ArgumentError(`learning trajectory ${trajectoryId} was not found`);
-    if (trajectory.status === "settled") throw new ArgumentError(`learning trajectory ${trajectoryId} has already been settled`);
     if (!isObject(rewards)) throw new ArgumentError("trajectory rewards must be an object keyed by episode ID");
     const expected = new Set(trajectory.steps.map((step) => step.episode_id));
     const supplied = Object.keys(rewards);
     if (supplied.length !== expected.size || supplied.some((id) => !expected.has(id))) throw new ArgumentError("trajectory rewards must cover exactly every episode");
     for (const step of trajectory.steps) assertRewardInput(rewards[step.episode_id]!);
+    const idempotencyKey = boundedIdentifier("trajectory settlement idempotencyKey", options.idempotencyKey ?? `trajectory:${id}`);
+    const normalizedRewards = Object.fromEntries(trajectory.steps.map((step) => {
+      const reward = rewards[step.episode_id]!;
+      return [step.episode_id, { ...reward, failed: reward.failed ?? !reward.passed, feedback_digest: reward.feedback_digest ?? null, failure_class: reward.failure_class ?? null, evidence_digest: reward.evidence_digest ?? null }];
+    }));
+    const requestDigest = await digestJson({ trajectory_digest: trajectory.trajectory_digest, rewards: normalizedRewards, remote: options.remote === true });
+    const priorReceipt = await this.loadReceipt(idempotencyKey, "trajectory", id, trajectory.trajectory_digest, requestDigest);
+    if (priorReceipt) {
+      const priorSettlement = priorReceipt.settlement as AutonomousTrajectorySettlement;
+      if (!priorSettlement.trajectory || priorSettlement.trajectory.trajectory_id !== id || priorSettlement.trajectory.status !== "settled") throw new ArgumentError(`settlement receipt ${idempotencyKey} does not contain a settled trajectory projection`);
+      if (trajectory.status === "pending") {
+        try {
+          await this.trajectories.markSettled(id, priorSettlement.trajectory.settlement_digest!);
+        } catch (error) {
+          const observed = await this.trajectories.load(id);
+          if (!observed || observed.status !== "settled" || observed.settlement_digest !== priorSettlement.trajectory.settlement_digest) throw error;
+        }
+      }
+      return clone(priorSettlement);
+    }
     const returnToGo: Record<string, number> = {};
     let next = 0;
     for (let index = trajectory.steps.length - 1; index >= 0; index -= 1) {
@@ -798,19 +976,27 @@ export class AutonomousLearningController {
       returnToGo[step.episode_id] = next;
     }
     const settlements: AutonomousLearningSettlement[] = [];
+    const replayingSettledTrajectory = trajectory.status === "settled";
     for (const step of trajectory.steps) {
       const reward = rewards[step.episode_id]!;
       const episode = await this.episodes.load(step.episode_id);
       if (!episode) throw new ArgumentError(`learning episode ${step.episode_id} disappeared during settlement`);
-      if (episode.status === "settled") {
-        const prior = episode.settlement;
-        if (!prior || prior.reward !== reward.reward || prior.credited_reward !== returnToGo[step.episode_id]) throw new ArgumentError(`learning episode ${step.episode_id} was already settled with different reward evidence`);
-        continue;
-      }
-      settlements.push(await this.settleRun(step.episode_id, reward, { creditedReward: returnToGo[step.episode_id], remote: options.remote }));
+      const settlement = await this.settleRun(step.episode_id, reward, { creditedReward: returnToGo[step.episode_id], remote: options.remote, idempotencyKey: await this.episodeSettlementKey(id, step.episode_id) });
+      if (replayingSettledTrajectory || episode.status === "pending") settlements.push(settlement);
     }
     const settlementDigest = await digestJson({ trajectory_digest: trajectory.trajectory_digest, return_to_go: returnToGo, settlement_digests: settlements.map((settlement) => settlement.episode.settlement?.settlement_digest ?? null) });
-    const settledTrajectory = await this.trajectories.markSettled(trajectory.trajectory_id, settlementDigest);
-    return { schema: AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA, trajectory: settledTrajectory, settlements, return_to_go: returnToGo, retention: PRIVATE_RETENTION };
+    const projectedTrajectory = { ...trajectory, status: "settled" as const, settlement_digest: settlementDigest };
+    const result = { schema: AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA, trajectory: projectedTrajectory, settlements, return_to_go: returnToGo, retention: PRIVATE_RETENTION } satisfies AutonomousTrajectorySettlement;
+    await this.saveReceipt("trajectory", idempotencyKey, id, trajectory.trajectory_digest, requestDigest, result);
+    if (replayingSettledTrajectory) return clone({ ...result, trajectory });
+    let settledTrajectory: AutonomousLearningTrajectory;
+    try {
+      settledTrajectory = await this.trajectories.markSettled(trajectory.trajectory_id, settlementDigest);
+    } catch (error) {
+      const observed = await this.trajectories.load(trajectory.trajectory_id);
+      if (!observed || observed.status !== "settled" || observed.settlement_digest !== settlementDigest) throw error;
+      settledTrajectory = observed;
+    }
+    return clone({ ...result, trajectory: settledTrajectory });
   }
 }

@@ -8,6 +8,7 @@ import {
   AutonomousWorkflowEvaluator,
   CredentialStore,
   InMemoryAutonomousLearningEpisodeStore,
+  InMemoryAutonomousLearningSettlementReceiptStore,
   InMemoryAutonomousLearningStateStore,
   InMemoryAutonomousLearningTrajectoryStore,
   AutonomousLearningPersistenceCoordinator,
@@ -145,6 +146,78 @@ test("learning episodes rehydrate by digest and settle through the local bandit"
   assert.equal(agent.learner.snapshot().generation, 1);
   assert.equal(episodes.pending().length, 0);
   await assert.rejects(() => controller.settleRun("episode-local-1", { evaluator_id: "coding-reviewer", evaluator_version: "1", reward: 0.8, passed: true }), /already been settled/);
+});
+
+test("settlement receipts make single-episode replay idempotent across controller restart", async () => {
+  const agent = await learningAgent();
+  const episodes = new InMemoryAutonomousLearningEpisodeStore();
+  const receipts = new InMemoryAutonomousLearningSettlementReceiptStore();
+  const firstController = new AutonomousLearningController(agent, { episodes, settlementReceipts: receipts });
+  const run = await agent.run("Implement this receipt replay test.", { domain: "coding", approveProviderCall: true });
+  await firstController.prepareRun(run, { episodeId: "receipt-episode-1" });
+  const reward = { evaluator_id: "receipt-reviewer", evaluator_version: "1", reward: 0.75, passed: true, evidence_digest: "d".repeat(64) };
+  const first = await firstController.settleRun("receipt-episode-1", reward);
+  const restartedController = new AutonomousLearningController(agent, { episodes, settlementReceipts: receipts });
+  const replayed = await restartedController.settleRun("receipt-episode-1", reward);
+  assert.deepEqual(replayed, first);
+  assert.equal(agent.learner.snapshot().generation, 1);
+  assert.equal(receipts.rows().length, 1);
+  assert.equal(JSON.stringify(receipts.rows()[0]).includes("Implement this receipt replay test"), false);
+  assert.equal(JSON.stringify(receipts.rows()[0]).includes("verified learning response"), false);
+  const contaminated = structuredClone(receipts.rows()[0]);
+  contaminated.settlement.response = "private provider response";
+  assert.throws(() => receipts.save(contaminated), /cannot retain response/);
+});
+
+test("receipt publication recovers a transient journal failure without double-crediting", async () => {
+  const agent = await learningAgent();
+  const episodes = new InMemoryAutonomousLearningEpisodeStore();
+  const durable = new InMemoryAutonomousLearningSettlementReceiptStore();
+  let failNextWrite = true;
+  const receipts = {
+    load: (key) => durable.load(key),
+    save: (receipt) => {
+      if (failNextWrite) {
+        failNextWrite = false;
+        throw new Error("temporary settlement journal failure");
+      }
+      return durable.save(receipt);
+    },
+  };
+  const controller = new AutonomousLearningController(agent, { episodes, settlementReceipts: receipts });
+  const run = await agent.run("Recover this interrupted settlement.", { domain: "coding", approveProviderCall: true });
+  await controller.prepareRun(run, { episodeId: "receipt-retry-1" });
+  const reward = { evaluator_id: "receipt-retry-reviewer", evaluator_version: "1", reward: 0.65, passed: true };
+  await assert.rejects(() => controller.settleRun("receipt-retry-1", reward), /temporary settlement journal failure/);
+  assert.equal(episodes.load("receipt-retry-1").status, "pending");
+  assert.equal(agent.learner.snapshot().generation, 1);
+  const recovered = await controller.settleRun("receipt-retry-1", reward);
+  assert.equal(recovered.episode.status, "settled");
+  assert.equal(agent.learner.snapshot().generation, 1);
+  assert.equal(durable.rows().length, 1);
+});
+
+test("trajectory receipts replay all delayed-credit settlements without provider or learner replay", async () => {
+  const agent = await learningAgent();
+  const episodes = new InMemoryAutonomousLearningEpisodeStore();
+  const trajectories = new InMemoryAutonomousLearningTrajectoryStore();
+  const receipts = new InMemoryAutonomousLearningSettlementReceiptStore();
+  const controller = new AutonomousLearningController(agent, { episodes, trajectories, settlementReceipts: receipts });
+  const run = await agent.run("Reconstruct this delayed-credit trajectory.", { domain: "coding", approveProviderCall: true });
+  await controller.prepareRun(run, { episodeId: "receipt-trajectory-episode-1" });
+  await controller.prepareRun(run, { episodeId: "receipt-trajectory-episode-2" });
+  const rewards = {
+    "receipt-trajectory-episode-1": { evaluator_id: "trajectory-receipt-reviewer", evaluator_version: "1", reward: 0.4, passed: false },
+    "receipt-trajectory-episode-2": { evaluator_id: "trajectory-receipt-reviewer", evaluator_version: "1", reward: 0.9, passed: true },
+  };
+  await controller.prepareTrajectory(Object.keys(rewards), { trajectoryId: "receipt-trajectory", discount: 0.9 });
+  const first = await controller.settleTrajectory("receipt-trajectory", rewards);
+  const restartedController = new AutonomousLearningController(agent, { episodes, trajectories, settlementReceipts: receipts });
+  const replayed = await restartedController.settleTrajectory("receipt-trajectory", rewards);
+  assert.deepEqual(replayed, first);
+  assert.equal(replayed.settlements.length, 2);
+  assert.equal(agent.learner.snapshot().generation, 2);
+  assert.equal(receipts.rows().filter((row) => row.operation === "trajectory").length, 1);
 });
 
 test("learning refuses incomplete autonomous runs before creating an episode", async () => {
@@ -312,7 +385,8 @@ test("trajectory settlement resumes after a transient later-episode failure", as
 test("cross-domain learning tracks specialists and synthesis as one delayed-credit trajectory", async () => {
   const agent = await learningAgent();
   const state = new InMemoryAutonomousLearningStateStore();
-  const controller = new AutonomousLearningController(agent, { store: state });
+  const receipts = new InMemoryAutonomousLearningSettlementReceiptStore();
+  const controller = new AutonomousLearningController(agent, { store: state, settlementReceipts: receipts });
   const result = await agent.runCrossDomain("Research a biomedical neuroscience experiment with EEG patient evidence", {
     candidates: agent.models(),
     approveProviderCall: true,
@@ -333,10 +407,16 @@ test("cross-domain learning tracks specialists and synthesis as one delayed-cred
     evidence_digest: String.fromCharCode(100 + index).repeat(64),
   }]));
   const settled = await controller.settleCrossDomain(result, rewards, { trajectoryId: "cross-domain-trajectory", discount: 0.9 });
+  const replayed = await controller.settleCrossDomain(result, rewards, { trajectoryId: "cross-domain-trajectory", discount: 0.9 });
   assert.equal(settled.trajectory.settlements.length, 3);
+  assert.deepEqual(replayed.trajectory, settled.trajectory);
   assert.equal(state.pendingEpisodes().length, 0);
   assert.ok(settled.trajectory.settlements.every((row) => JSON.stringify(row.episode).includes("biomedical evidence") === false));
   assert.equal(agent.learner.snapshot().generation, 3);
+  const trajectoryReceipt = receipts.rows().find((row) => row.operation === "trajectory");
+  assert.ok(trajectoryReceipt);
+  assert.equal(JSON.stringify(trajectoryReceipt).includes("verified learning response"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(trajectoryReceipt.settlement, "result"), false);
 });
 
 test("learning state snapshots restore pending/settled rows and refuse tampering", async () => {

@@ -2673,6 +2673,30 @@ reviewing the evaluator provenance. The ledger is append-only, bounded, fsynced 
 rejects secret-shaped fields. This is online bandit adaptation over explicit observations—not an
 unbounded self-modifying policy and not a claim of general intelligence.
 
+### TypeScript settlement recovery boundary
+
+The TypeScript façade adds a durable settlement receipt layer for workers that can lose process
+state between learner credit and cycle checkpointing. Construct
+`AutonomousLearningController` with a caller-owned `settlementReceipts` implementation of
+`AutonomousLearningSettlementReceiptStore`. The receipt key is stable by default for a single
+episode (`episode:<episode_id>`); trajectory steps receive deterministic hashed keys, and a caller
+can provide a stable trajectory-level `idempotencyKey`.
+
+Each receipt binds four identities: the single episode or trajectory digest, the normalized
+evaluator request, the settlement projection digest, and the operation kind. A matching replay
+returns the exact prior value-only projection. A conflicting reward, evaluator contract, remote /
+local mode, target identity, or digest fails closed. Receipt publication occurs before the
+episode/trajectory store commit, so a transient commit failure can be retried: the local learner's
+credited-outcome ledger recognizes the same outcome digest and does not add another pull, while a
+remote outcome call receives the same idempotency key.
+
+Receipts intentionally retain no task text, prompt, provider response, credentials, tool
+arguments, raw evidence, or cross-domain result. A cross-domain settlement receipt stores only the
+delayed-credit trajectory and per-episode value projections; the private cross-domain result must
+be kept in caller-controlled storage and explicitly rehydrated after restart. Durable adapters
+should atomically create a receipt for a key and keep the receipt store alongside the learning and
+cycle journals, while private execution material remains in a separately access-controlled store.
+
 ## Structured decisions and multi-step work
 
 `AutonomousBrain.run_mission(...)` is the bridge from a model response to the existing mission
