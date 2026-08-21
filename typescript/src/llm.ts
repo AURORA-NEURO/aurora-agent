@@ -2065,6 +2065,15 @@ function estimatedProviderCostUnits(candidate: AutonomousModelCandidate | undefi
 }
 
 /**
+ * A timeout can be isolated to one model's latency/capacity profile. Keep sibling models from
+ * being discarded in that case; transport, circuit, and provider HTTP failures remain
+ * provider-scoped so failover does not multiply an outage across every model arm.
+ */
+function modelFailoverAllowed(error: ProviderRuntimeError): boolean {
+  return error.code === "timeout" && error.circuitOpen !== true;
+}
+
+/**
  * Application-side composition for the autonomous brain boundary.
  *
  * The selector receives candidates plus value-only health and credential readiness. It never
@@ -2083,8 +2092,8 @@ export class AutonomousRuntime {
     this.selector = options.selector;
   }
 
-  async select(plan: AutonomousExecutionPlan, options: { excludedProviders?: readonly string[] } = {}): Promise<AutonomousSelectionDecision> {
-    const request = this.selectionRequest(plan, options.excludedProviders);
+  async select(plan: AutonomousExecutionPlan, options: { excludedProviders?: readonly string[]; excludedModels?: readonly string[] } = {}): Promise<AutonomousSelectionDecision> {
+    const request = this.selectionRequest(plan, options.excludedProviders, options.excludedModels);
     const ranking = this.rank(request);
     const selectionConfidence = autonomousSelectionConfidence(ranking);
     const minimumConfidence = request.min_selection_confidence ?? null;
@@ -2126,9 +2135,10 @@ export class AutonomousRuntime {
   ): Promise<AutonomousExecutionResult> {
     const maxProviderFailovers = autonomousProviderFailoverLimit(options);
     const excludedProviders = new Set<string>();
+    const excludedModels = new Set<string>();
     let failovers = 0;
     while (true) {
-      const selection = await this.select(plan, { excludedProviders: [...excludedProviders] });
+      const selection = await this.select(plan, { excludedProviders: [...excludedProviders], excludedModels: [...excludedModels] });
       if (!selection.selected_model) throw new ProviderRuntimeError(`autonomous selection abstained: ${selection.abstention_reason ?? "no model"}`);
       const provider = selection.selected_model.provider;
       const credential = options.credential ?? options.credentialFor?.(provider);
@@ -2147,9 +2157,11 @@ export class AutonomousRuntime {
         return { selection, response };
       } catch (error) {
         if (!(error instanceof ProviderRuntimeError) || !error.retryable || failovers >= maxProviderFailovers) throw error;
-        excludedProviders.add(provider);
-        const anotherProviderRemains = plan.candidates.some((candidate) => !excludedProviders.has(candidate.provider));
-        if (!anotherProviderRemains) throw error;
+        const modelId = `${provider}/${selection.selected_model.model}`;
+        if (modelFailoverAllowed(error)) excludedModels.add(modelId);
+        else excludedProviders.add(provider);
+        const anotherModelRemains = plan.candidates.some((candidate) => !excludedProviders.has(candidate.provider) && !excludedModels.has(`${candidate.provider}/${candidate.model}`));
+        if (!anotherModelRemains) throw error;
         failovers += 1;
       }
     }
@@ -2176,10 +2188,11 @@ export class AutonomousRuntime {
   ): Promise<{ selection: AutonomousSelectionDecision; loop: ProviderToolLoopResult }> {
     const maxProviderFailovers = autonomousProviderFailoverLimit(options);
     const excludedProviders = new Set<string>();
+    const excludedModels = new Set<string>();
     let failovers = 0;
     let toolActivity = false;
     while (true) {
-      const selection = await this.select(plan, { excludedProviders: [...excludedProviders] });
+      const selection = await this.select(plan, { excludedProviders: [...excludedProviders], excludedModels: [...excludedModels] });
       if (!selection.selected_model) throw new ProviderRuntimeError(`autonomous selection abstained: ${selection.abstention_reason ?? "no model"}`);
       const provider = selection.selected_model.provider;
       const credential = options.credential ?? options.credentialFor?.(provider);
@@ -2220,15 +2233,17 @@ export class AutonomousRuntime {
         // Replaying a loop after any provider-issued tool call could duplicate an effect. A
         // failover is therefore permitted only before the first tool request is observed.
         if (toolActivity || !(error instanceof ProviderRuntimeError) || !error.retryable || failovers >= maxProviderFailovers) throw error;
-        excludedProviders.add(provider);
-        const anotherProviderRemains = plan.candidates.some((candidate) => !excludedProviders.has(candidate.provider));
-        if (!anotherProviderRemains) throw error;
+        const modelId = `${provider}/${selection.selected_model.model}`;
+        if (modelFailoverAllowed(error)) excludedModels.add(modelId);
+        else excludedProviders.add(provider);
+        const anotherModelRemains = plan.candidates.some((candidate) => !excludedProviders.has(candidate.provider) && !excludedModels.has(`${candidate.provider}/${candidate.model}`));
+        if (!anotherModelRemains) throw error;
         failovers += 1;
       }
     }
   }
 
-  private selectionRequest(plan: AutonomousExecutionPlan, excludedProviders: readonly string[] = []): AutonomousSelectionRequest {
+  private selectionRequest(plan: AutonomousExecutionPlan, excludedProviders: readonly string[] = [], excludedModels: readonly string[] = []): AutonomousSelectionRequest {
     if (!isObject(plan) || typeof plan.task !== "string" || plan.task.trim().length === 0 || bytes(plan.task) > 16_000) throw new ProviderRuntimeError("autonomous task is outside its bounds");
     validateRequest(plan.request);
     if (!Array.isArray(plan.candidates) || plan.candidates.length === 0 || plan.candidates.length > MAX_PROVIDER_TOOLS) throw new ProviderRuntimeError("autonomous model candidates are outside their bounds");
@@ -2242,6 +2257,7 @@ export class AutonomousRuntime {
       min_selection_confidence: plan.minSelectionConfidence,
     });
     const excluded = new Set(excludedProviders.map((provider) => boundedIdentifier("excluded provider", provider, 128)));
+    const excludedModelIds = new Set(excludedModels.map((modelId) => boundedText("excluded model", modelId, 768)));
     const candidates = plan.candidates.map((candidate) => {
       if (!isObject(candidate)) throw new ProviderRuntimeError("autonomous model candidate must be an object");
       const normalized = candidate as unknown as AutonomousModelCandidate;
@@ -2252,7 +2268,7 @@ export class AutonomousRuntime {
       }
       if (normalized.quality > 1 || normalized.reliability > 1 || normalized.context_window_tokens < 1 || normalized.max_output_tokens < 1) throw new ProviderRuntimeError("candidate quality, reliability, or capacity is outside its bounds");
       return normalized;
-    }).filter((candidate) => !excluded.has(candidate.provider));
+    }).filter((candidate) => !excluded.has(candidate.provider) && !excludedModelIds.has(`${candidate.provider}/${candidate.model}`));
     const providers = new Set(candidates.map((candidate) => candidate.provider));
     const providerHealth: Record<string, ProviderHealth> = {};
     for (const provider of providers) {

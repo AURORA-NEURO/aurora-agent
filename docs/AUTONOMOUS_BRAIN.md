@@ -425,8 +425,10 @@ circuit can hard-disable all sibling models. This update is transport evidence o
 becomes evaluator reward and cannot override capability, credential, cost, approval, or circuit
 gates.
 
-Failover refreshes the same live gate after every provider refusal. A model-specific refusal
-disables only that arm. If the runtime circuit opens, or the error is explicitly marked
+Failover refreshes the same live gate after every provider refusal. A model-specific timeout
+disables only that arm for the bounded retry sequence, allowing a healthy sibling model on the
+same provider to be selected. Transport, provider HTTP, or circuit failures remain provider-scoped.
+If the runtime circuit opens, or the error is explicitly marked
 `circuit_open`, all remaining arms for that provider are disabled for the bounded retry sequence
 and the receipt records the post-failure circuit, consecutive failures, evidence count, success
 rate, and gate decision. This prevents a circuit outage from being retried once per model while
@@ -2444,6 +2446,12 @@ provider docs expose
 these inventory surfaces as OpenAI-compatible model-list operations for [DeepSeek](https://api-docs.deepseek.com/api/list-models),
 [Mistral](https://docs.mistral.ai/api/endpoint/models), and [OpenRouter](https://openrouter.ai/docs/api/api-reference/models/get-models);
 the runtime keeps the route configurable for proxies and compatible gateways.
+
+The TypeScript façade adds `agent.refreshModelCatalogue(specs, { credentialFor, maxParallel })` for
+bounded multi-provider reconciliation. Each provider is updated atomically, so an unavailable
+provider produces a redacted `partial` result without deleting healthy arms; the shared catalogue
+then feeds the same capability, credential, health, and learning gates for all twelve domains,
+workflow stages, cross-domain children, missions, and goals.
 
 All use the same `ProviderRequest` and `ProviderResponse` contract. The runtime does not follow
 redirects, does not allow plain HTTP unless explicitly enabled for local/test use, bounds response

@@ -809,8 +809,10 @@ Tool-loop results preserve that status rather than misreporting an uncertain wri
 approval pause or successful model turn.
 
 `AutonomousRuntime.invoke()` performs bounded provider failover when a selected provider returns a
-retryable `ProviderRuntimeError`: it removes that provider from the next ranking, selects again
-from the remaining eligible providers, and marks the retry as a failover admission. The default
+retryable `ProviderRuntimeError`: transport, circuit, and provider HTTP failures remove that
+provider from the next ranking, while an isolated timeout removes only the timed-out model so a
+healthy sibling model on the same provider can be selected. Every retry is re-ranked against the
+remaining eligible arms and marked as a failover admission. The default
 limit comes from `execution.policy.max_provider_failovers`; without an execution controller the
 default is zero, while callers can opt into a bounded standalone limit with
 `maxProviderFailovers`. Tool loops may fail over only before the first provider-issued tool call;
@@ -947,7 +949,12 @@ selection, and malformed restored generations, duplicate arms, or conflicting re
 are rejected before they can influence a later run.
 Live model refreshes are provider-scoped atomic reconciliations: `replaceExisting` removes stale
 discovered arms as well as registering new models and replacing changed metadata, with the removed
-IDs returned as value-only receipt metadata.
+IDs returned as value-only receipt metadata. `agent.refreshModelCatalogue()` composes bounded
+discovery for multiple registered providers, uses a caller-owned `credentialFor(provider)` resolver,
+supports bounded parallelism, and returns `completed`/`partial`/`failed` redacted status without
+erasing a healthy provider's catalogue when another provider is unavailable. The resulting shared
+catalogue feeds every built-in domain, workflow, cross-domain, mission, and goal invocation through
+the same capability and health gates.
 
 Learning episodes can only be prepared from a completed autonomous run; approval pauses, provider
 refusals, child failures, and tool-loop limits cannot be converted into evaluator or bandit credit.

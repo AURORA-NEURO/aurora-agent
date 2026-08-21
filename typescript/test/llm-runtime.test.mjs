@@ -671,6 +671,36 @@ test("AutonomousAgent refreshes live model metadata with atomic catalogue reconc
   assert.equal(discoveryCalls, 4);
 });
 
+test("AutonomousAgent refreshes multiple provider catalogues with bounded partial failure reporting", async () => {
+  const calls = [];
+  const runtime = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (url, init) => {
+      assert.equal(init.method, "GET");
+      calls.push(String(url));
+      if (String(url).startsWith("https://catalog-bad.test")) return jsonResponse({ error: "provider body must not escape" }, 503);
+      return jsonResponse({ data: [{ id: "good-model", context_window: 64_000, max_completion_tokens: 4_000, active: true }] });
+    },
+  });
+  runtime.registerProvider(openaiCompatibleProvider("catalog-good", "https://catalog-good.test", { requiresCredential: false }));
+  runtime.registerProvider(openaiCompatibleProvider("catalog-bad", "https://catalog-bad.test", { requiresCredential: false, maxAttempts: 1 }));
+  const agent = new AutonomousAgent(runtime);
+  const defaults = { context_window_tokens: 8_000, max_output_tokens: 512, quality: 0.8, latency_ms: 500, cost_per_million_tokens: 30, reliability: 0.9 };
+  const result = await agent.refreshModelCatalogue([
+    { provider: "catalog-good", defaults },
+    { provider: "catalog-bad", defaults },
+  ], { maxParallel: 2, replaceExisting: true });
+  assert.equal(result.status, "partial");
+  assert.equal(result.requested_provider_count, 2);
+  assert.equal(result.successful_provider_count, 1);
+  assert.equal(result.failed_provider_count, 1);
+  assert.equal(result.refreshes[0].provider, "catalog-good");
+  assert.deepEqual(result.failures, [{ provider: "catalog-bad", error_class: "ProviderRuntimeError", failure_code: "http_5xx", retryable: true }]);
+  assert.deepEqual(agent.models().map((model) => `${model.provider}/${model.model}`), ["catalog-good/good-model"]);
+  assert.doesNotMatch(JSON.stringify(result), /provider body must not escape/);
+  assert.equal(calls.length, 2);
+});
+
 test("autonomous runtime performs bounded provider failover and journals the admission", async () => {
   const calls = [];
   const runtime = new LLMRuntime({
@@ -712,6 +742,43 @@ test("autonomous runtime performs bounded provider failover and journals the adm
   assert.equal(execution.state.provider_failovers, 1);
   assert.equal((await journal.verifyIntegrity()).verified, true);
   await execution.complete();
+});
+
+test("autonomous runtime isolates a model timeout and retries a healthy sibling on the same provider", async () => {
+  const calls = [];
+  const runtime = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      const body = JSON.parse(String(init.body));
+      calls.push(body.model);
+      if (body.model === "slow-model") {
+        return await new Promise((_, reject) => init.signal.addEventListener("abort", () => reject(new DOMException("timed out", "AbortError")), { once: true }));
+      }
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: "sibling recovered" }, finish_reason: "stop" }] });
+    },
+  });
+  runtime.registerProvider(openaiCompatibleProvider("shared", "https://shared-models.test", {
+    requiresCredential: false,
+    timeoutMs: 5,
+    maxAttempts: 1,
+    circuitBreakerFailureThreshold: 4,
+  }));
+  const agent = new AutonomousRuntime(runtime);
+  const result = await agent.invoke({
+    task: "Choose a healthy model without discarding the provider after one model timeout.",
+    domain: "general",
+    capability: "reasoning",
+    candidates: [
+      { provider: "shared", model: "slow-model", context_window_tokens: 8_000, max_output_tokens: 512, quality: 0.99, latency_ms: 10, cost_per_million_tokens: 1, reliability: 0.99 },
+      { provider: "shared", model: "backup-model", context_window_tokens: 8_000, max_output_tokens: 512, quality: 0.75, latency_ms: 100, cost_per_million_tokens: 5, reliability: 0.8 },
+    ],
+    request: request("selection-placeholder"),
+  }, { maxProviderFailovers: 1 });
+  assert.deepEqual(calls, ["slow-model", "backup-model"]);
+  assert.equal(result.selection.selected_model.provider, "shared");
+  assert.equal(result.selection.selected_model.model, "backup-model");
+  assert.equal(result.response.text, "sibling recovered");
+  assert.equal(runtime.providerStatus("shared").circuit, "closed");
 });
 
 test("autonomous failover stays fail-closed for non-retryable failures and exhausted budgets", async () => {

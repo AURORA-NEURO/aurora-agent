@@ -123,9 +123,11 @@ export const AUTONOMOUS_GOAL_LEARNING_SCHEMA = "bioprism-typescript-autonomous-g
 export const AUTONOMOUS_CROSS_DOMAIN_SCHEMA = "bioprism-typescript-autonomous-cross-domain/0.1" as const;
 export const AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA = "bioprism-typescript-autonomous-cross-domain-result/0.1" as const;
 export const AUTONOMOUS_MODEL_REFRESH_SCHEMA = "bioprism-typescript-autonomous-model-refresh/0.1" as const;
+export const AUTONOMOUS_MODEL_CATALOGUE_REFRESH_SCHEMA = "bioprism-typescript-autonomous-model-catalogue-refresh/0.1" as const;
 export const AUTONOMOUS_READINESS_SCHEMA = "bioprism-autonomous-agent-readiness/0.1" as const;
 export const AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN = 8;
 export const AUTONOMOUS_CROSS_DOMAIN_MAX_CONCURRENCY = 4;
+export const AUTONOMOUS_MODEL_CATALOGUE_REFRESH_MAX_PROVIDERS = 32;
 const AUTONOMOUS_BANDIT_MAX_ARMS = 512;
 
 export const AUTONOMOUS_DOMAIN_NAMES = [
@@ -794,6 +796,34 @@ export interface AutonomousModelRefreshResult {
   removed_model_ids: string[];
   discovery: ProviderModelDiscovery;
   execution: "not_started;catalogue_registration_only";
+  retention: "model_metadata_only;credentials_and_raw_catalogue_not_retained";
+  secret_material: "never_returned";
+}
+
+/** One provider discovery request in an aggregate model-catalogue refresh. */
+export interface AutonomousModelRefreshSpec extends JsonObject {
+  provider: string;
+  defaults: AutonomousModelCandidateDefaults;
+}
+
+/** Redacted failure metadata from one provider discovery attempt. */
+export interface AutonomousModelRefreshFailure extends JsonObject {
+  provider: string;
+  error_class: string;
+  failure_code: string;
+  retryable: boolean;
+}
+
+/** Bounded multi-provider model discovery and atomic per-provider reconciliation result. */
+export interface AutonomousModelCatalogueRefreshResult {
+  schema: typeof AUTONOMOUS_MODEL_CATALOGUE_REFRESH_SCHEMA;
+  status: "completed" | "partial" | "failed";
+  requested_provider_count: number;
+  successful_provider_count: number;
+  failed_provider_count: number;
+  refreshes: AutonomousModelRefreshResult[];
+  failures: AutonomousModelRefreshFailure[];
+  execution: "catalogue_registration_only";
   retention: "model_metadata_only;credentials_and_raw_catalogue_not_retained";
   secret_material: "never_returned";
 }
@@ -2982,6 +3012,86 @@ export class AutonomousAgent {
       removed_model_ids: removed,
       discovery,
       execution: "not_started;catalogue_registration_only",
+      retention: "model_metadata_only;credentials_and_raw_catalogue_not_retained",
+      secret_material: "never_returned",
+    };
+  }
+
+  /**
+   * Discover and reconcile several provider catalogues through one bounded, redacted operation.
+   * Each provider is reconciled atomically by `refreshModels`; one unavailable provider therefore
+   * cannot erase a healthy provider's catalogue. Credentials stay in the caller's resolver and
+   * failures contain only stable classes/codes, never provider bodies or secret-bearing messages.
+   */
+  async refreshModelCatalogue(
+    specs: readonly AutonomousModelRefreshSpec[],
+    options: {
+      credentialFor?: (provider: string) => CredentialHandle | undefined;
+      signal?: AbortSignal;
+      replaceExisting?: boolean;
+      maxParallel?: number;
+      stopOnError?: boolean;
+    } = {},
+  ): Promise<AutonomousModelCatalogueRefreshResult> {
+    if (!Array.isArray(specs) || specs.length < 1 || specs.length > AUTONOMOUS_MODEL_CATALOGUE_REFRESH_MAX_PROVIDERS) throw new ArgumentError(`autonomous model catalogue refresh must contain 1..=${AUTONOMOUS_MODEL_CATALOGUE_REFRESH_MAX_PROVIDERS} providers`);
+    if (options.credentialFor !== undefined && typeof options.credentialFor !== "function") throw new ArgumentError("autonomous model catalogue credentialFor must be callable");
+    const maxParallel = options.maxParallel ?? Math.min(4, specs.length);
+    if (!Number.isSafeInteger(maxParallel) || maxParallel < 1 || maxParallel > 8) throw new ArgumentError("autonomous model catalogue maxParallel is outside its bounds");
+    const normalized = specs.map((spec) => {
+      if (!isObject(spec)) throw new ArgumentError("autonomous model catalogue refresh spec must be an object");
+      const provider = boundedText("autonomous model catalogue refresh provider", spec.provider, 128);
+      if (!/^[A-Za-z0-9_.-]+$/.test(provider)) throw new ArgumentError("autonomous model catalogue refresh provider must be a bounded identifier");
+      if (!isObject(spec.defaults)) throw new ArgumentError(`autonomous model catalogue defaults for ${provider} are malformed`);
+      return { provider, defaults: spec.defaults as unknown as AutonomousModelCandidateDefaults };
+    });
+    if (new Set(normalized.map((spec) => spec.provider)).size !== normalized.length) throw new ArgumentError("autonomous model catalogue refresh providers must be unique");
+    const refreshes: Array<AutonomousModelRefreshResult | null> = Array.from({ length: normalized.length }, () => null);
+    const failures: Array<AutonomousModelRefreshFailure | null> = Array.from({ length: normalized.length }, () => null);
+    const refreshOne = async (index: number): Promise<void> => {
+      const spec = normalized[index]!;
+      try {
+        refreshes[index] = await this.refreshModels(spec.provider, spec.defaults, {
+          credential: options.credentialFor?.(spec.provider),
+          signal: options.signal,
+          replaceExisting: options.replaceExisting,
+        });
+      } catch (error) {
+        const failureCode = error instanceof ProviderRuntimeError ? error.code : error instanceof Error && error.constructor.name.trim() ? error.constructor.name : "UnknownError";
+        const errorClass = error instanceof Error && /^[A-Za-z0-9_.:-]+$/.test(error.constructor.name) ? error.constructor.name : "ProviderRefreshError";
+        failures[index] = {
+          provider: spec.provider,
+          error_class: errorClass,
+          failure_code: failureCode,
+          retryable: error instanceof ProviderRuntimeError ? error.retryable : false,
+        };
+        if (options.stopOnError === true) throw error;
+      }
+    };
+    if (options.stopOnError === true || maxParallel === 1) {
+      for (let index = 0; index < normalized.length; index += 1) await refreshOne(index);
+    } else {
+      let next = 0;
+      const worker = async (): Promise<void> => {
+        while (true) {
+          const index = next;
+          next += 1;
+          if (index >= normalized.length) return;
+          await refreshOne(index);
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(maxParallel, normalized.length) }, () => worker()));
+    }
+    const completed = refreshes.filter((refresh): refresh is AutonomousModelRefreshResult => refresh !== null);
+    const failed = failures.filter((failure): failure is AutonomousModelRefreshFailure => failure !== null);
+    return {
+      schema: AUTONOMOUS_MODEL_CATALOGUE_REFRESH_SCHEMA,
+      status: failed.length === 0 ? "completed" : completed.length === 0 ? "failed" : "partial",
+      requested_provider_count: normalized.length,
+      successful_provider_count: completed.length,
+      failed_provider_count: failed.length,
+      refreshes: completed,
+      failures: failed,
+      execution: "catalogue_registration_only",
       retention: "model_metadata_only;credentials_and_raw_catalogue_not_retained",
       secret_material: "never_returned",
     };
