@@ -10,6 +10,7 @@ import {
   AutonomousDomainToolRegistry,
   AutonomousDomainToolRuntime,
   AutonomousOnlineLearner,
+  AUTONOMOUS_CAPABILITY_PLAN_SCHEMA,
   AUTONOMOUS_READINESS_SCHEMA,
   CredentialStore,
   LLMRuntime,
@@ -270,6 +271,56 @@ test("live catalogue binding covers every domain and effectful tools remain appr
   const approved = await runtime.authorizeAndExecute([{ id: "call-2", name: "agent_mission", arguments: {} }], { domains: ["coding"], approveEffects: true });
   assert.equal(approved[0].approved, true);
   assert.equal(executions, 1);
+});
+
+test("capability portfolio planning covers all domains without widening authority", async () => {
+  const profiles = await builtinAutonomousDomainProfiles();
+  const definitions = [...new Map(profiles.flatMap((profile) => profile.tool_profile.bindings.map((binding) => ({
+    name: binding.name,
+    description: `Test ${binding.name}`,
+    inputSchema: { type: "object", additionalProperties: true },
+  }))).map((definition) => [definition.name, definition])).values()];
+  const catalogue = await ToolCatalogue.fromDefinitions(definitions);
+  const registry = await AutonomousDomainToolRegistry.create(catalogue, profiles.map((profile) => profile.tool_profile));
+  const plan = await registry.planForTask("debug the repository, validate the evidence, verify CI, and report reproducible findings", {
+    domains: profiles.map((profile) => profile.domain),
+    maxTools: 16,
+  });
+
+  assert.equal(plan.schema, AUTONOMOUS_CAPABILITY_PLAN_SCHEMA);
+  assert.deepEqual(plan.domains, profiles.map((profile) => profile.domain));
+  assert.equal(new Set(plan.coverage.map((row) => row.domain)).size, 12);
+  assert.ok(plan.coverage.length >= 48);
+  assert.ok(plan.selected_tool_names.length > 0);
+  assert.ok(plan.selected_tool_names.length <= 16);
+  assert.ok(plan.omissions.length > 0);
+  assert.equal(plan.plan_digest.length, 64);
+  assert.equal(plan.execution, "metadata_only; no_provider_or_tool_calls");
+  assert.equal(plan.authorization, "selection_does_not_authorize_tools_or_effects");
+  assert.equal(plan.secret_material, "never_returned");
+  assert.doesNotMatch(JSON.stringify(plan), /debug the repository/);
+  assert.doesNotMatch(JSON.stringify(plan), /api[_ -]?key|authorization\s*:/i);
+
+  const repeated = await registry.planForTask("debug the repository, validate the evidence, verify CI, and report reproducible findings", {
+    domains: profiles.map((profile) => profile.domain),
+    maxTools: 16,
+  });
+  assert.deepEqual(repeated, plan);
+
+  const activationBlocked = await registry.planForTask("review the repository", {
+    domains: ["coding"],
+    allowedTools: [],
+    maxTools: 4,
+  });
+  assert.deepEqual(activationBlocked.selected_tool_names, []);
+  assert.ok(activationBlocked.coverage.some((row) => row.status === "activation_required"));
+  assert.ok(activationBlocked.omissions.some((row) => row.reason === "activation_required"));
+
+  const sparseCatalogue = await ToolCatalogue.fromDefinitions([{ name: "repository_catalog", description: "Inspect repository", inputSchema: { type: "object", additionalProperties: true } }]);
+  const sparseRegistry = await AutonomousDomainToolRegistry.create(sparseCatalogue, [profiles.find((profile) => profile.domain === "coding").tool_profile]);
+  const sparsePlan = await sparseRegistry.planForTask("review this coding repository", { domains: ["coding"], maxTools: 4 });
+  assert.ok(sparsePlan.coverage.some((row) => row.status === "catalogue_missing"));
+  assert.ok(sparsePlan.missing_tools.length > 0);
 });
 
 test("AutonomousAgent performs a real selected-provider tool loop with domain policy", async () => {

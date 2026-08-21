@@ -319,6 +319,29 @@ anything. Tool registration, provider approval, effect policy, and caller approv
 independent gates. `agent.readiness()` reports the pack catalogue, registry digest, and per-domain
 tool-capability coverage so a UI can show what is configured versus what is still missing.
 
+The TypeScript registry now makes the task-level portfolio decision explicit through
+`AutonomousDomainToolRegistry.planForTask()`. It walks the reviewed workflow stages for the
+selected domains, chooses a bounded set of exact live tool names by stage coverage and deterministic
+task relevance, and returns omissions when the catalogue, activation allow-list, or tool budget
+cannot cover a stage. The task is hashed for the public plan; raw task text is not returned, and
+the method performs no provider or tool call.
+
+```typescript
+const registry = await AutonomousDomainToolRegistry.create(liveCatalogue);
+const portfolio = await registry.planForTask(
+  "debug the repository, verify CI, and report reproducible findings",
+  { domains: ["coding", "evaluation"], maxTools: 12 },
+);
+// Inspect portfolio.coverage and portfolio.omissions before execution.
+// portfolio.authorization remains selection_does_not_authorize_tools_or_effects.
+```
+
+Each coverage row distinguishes `selected`, `activation_required`, `catalogue_missing`,
+`provider_only`, and `capacity_limited`. A blueprint uses this portfolio by default for single
+domain and cross-domain work; explicit caller tools remain compatibility input but are still
+subject to activation, catalogue, provider, and effect gates. This keeps model-visible tools
+small enough to be useful without converting discovery or selection into authority.
+
 Packs do not contain task text, prompts, keys, provider payloads, tool arguments, or outputs. They
 are reviewed planning and evidence metadata, not a source of truth. A production application can
 replace a pack registry, but the orchestrator refuses to run when a pack is missing or its workflow

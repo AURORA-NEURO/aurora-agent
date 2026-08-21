@@ -253,6 +253,36 @@ stale digests, and tampered persistence envelopes. Provider projection accepts o
 metadata such as registration, circuit, credential count, and next action; the key value itself is
 structurally unrepresentable in activation state.
 
+### Deterministic task-to-capability portfolios
+
+The registry also exposes `planForTask(task)`, which makes the default tool decision explicit. It
+reviews the workflow stages for every selected domain, binds only exact names present in the live
+catalogue, ranks candidates by stage coverage, requested capability, local task relevance, and
+read-only posture, and caps the result with `maxTools`. The planner is provider-free: task text is
+used only for local ranking and the public result retains a digest, never the task. `blueprint()`
+uses this portfolio automatically for single-domain, cross-domain child, and synthesis workflows;
+`run()` then exposes only the names that survived blueprint compilation and activation filtering.
+
+```typescript
+const registry = await AutonomousDomainToolRegistry.create(liveCatalogue);
+const portfolio = await registry.planForTask(
+  "debug the repository, verify CI, and report reproducible findings",
+  { domains: ["coding", "evaluation"], maxTools: 12 },
+);
+
+// Inspect before any provider or tool call.
+console.log(portfolio.selected_tool_names, portfolio.coverage, portfolio.plan_digest);
+// coverage.status explains selected, activation_required, catalogue_missing,
+// provider_only, and capacity_limited stages.
+```
+
+This is selection metadata, not authorization. `selected_bindings` still carry approval posture,
+the activation allow-list can only narrow the portfolio, and an effect boundary must approve every
+effectful call. A missing catalogue definition is reported as `catalogue_missing`/`missing_tools`
+instead of being silently treated as an available capability. The plan is sealed under
+`bioprism-typescript-autonomous-capability-plan/0.1` and explicitly states that it made no
+provider or tool calls.
+
 `AutonomousAgent` is the application-facing composition layer for the autonomous brain. It covers
 the twelve reviewed domains (`coding`, `browser`, `data`, `science`, `biomedical`,
 `neuroscience`, `operations`, `enterprise`, `multi_agent`, `multimodal`, `cross_domain`, and
