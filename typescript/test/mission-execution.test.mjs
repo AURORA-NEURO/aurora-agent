@@ -149,7 +149,9 @@ test("parallel mission waves merge deterministically and cap in-flight execution
     executeStep: async ({ step }) => {
       active += 1;
       maximum = Math.max(maximum, active);
-      await new Promise((resolve) => setTimeout(resolve, 2));
+      // Keep the first admitted step outstanding long enough for the second worker to
+      // reach the executor even on a loaded Node 20 hosted runner.
+      await new Promise((resolve) => setTimeout(resolve, 25));
       active -= 1;
       return { status: "succeeded", value: { id: step.id } };
     },
