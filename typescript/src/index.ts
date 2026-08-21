@@ -402,6 +402,28 @@ export type {
   AutonomousMissionStepStatus,
 } from "./mission-execution.js";
 export {
+  AUTONOMOUS_MISSION_REPLAN_CHECKPOINT_SCHEMA,
+  AUTONOMOUS_MISSION_REPLAN_MAX_INSTRUCTION_BYTES,
+  AUTONOMOUS_MISSION_REPLAN_MAX_REPLANS,
+  AUTONOMOUS_MISSION_REPLAN_SCHEMA,
+  AutonomousMissionReplanContractError,
+  AutonomousMissionReplanError,
+  runAutonomousMissionReplanCycle,
+  validateAutonomousMissionReplanCheckpoint,
+} from "./mission-replan.js";
+export type {
+  AutonomousMissionReplanAttempt,
+  AutonomousMissionReplanCheckpoint,
+  AutonomousMissionReplanContext,
+  AutonomousMissionReplanEvaluation,
+  AutonomousMissionReplanEvaluationProjection,
+  AutonomousMissionReplanEvaluator,
+  AutonomousMissionReplanner,
+  AutonomousMissionReplanOptions,
+  AutonomousMissionReplanResult,
+  AutonomousMissionReplanStatus,
+} from "./mission-replan.js";
+export {
   AUTONOMOUS_EVALUATION_SCHEMA,
   AUTONOMOUS_LEARNING_EPISODE_SCHEMA,
   AUTONOMOUS_LEARNING_MAX_STAGES,

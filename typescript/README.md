@@ -804,6 +804,14 @@ stores a provider secret, or assumes that a serialized snapshot is authorization
   resolved argument digest. Tool admission, caller approval, execution budgets, and the durable
   `AutonomousEffectBoundary` are reused at the final dispatch boundary. For deterministic local
   adapters, supply `executeStep` directly and keep model invocation outside the mission callback.
+- `runAutonomousMissionReplanCycle()` adds bounded evaluator-guided retries around the durable
+  executor. Each attempt receives a new mission ID, while a protected contract digest refuses
+  changes to tools, arguments, domains, dependencies, policy, claims, route review, credentials,
+  or effect authority. A replan may refine objectives or reorder independent steps; the default
+  replanner injects screened evaluator guidance transiently, and applications can supply their
+  own proposal callback. `checkpointSink` receives only attempt status, request/evaluation
+  digests, and learning trajectory IDs, so restart orchestration can persist metadata without
+  retaining the guidance or mission payload.
 
 ```typescript
 const missionExecutor = new AutonomousMissionExecutor({
@@ -824,6 +832,23 @@ const next = first.next_wave === null
   ? first
   : await missionExecutor.resume(mission, { approveProviderCall: true });
 ```
+
+An evaluator-guided mission loop can be layered over the same executor:
+
+```typescript
+const replanned = await runAutonomousMissionReplanCycle(missionExecutor, mission, {
+  maxReplans: 2,
+  evaluate: async (execution) => evaluateMissionWithCallerOwnedEvidence(execution),
+  learning: { adapter: learning, trajectoryIdPrefix: "mission-learning" },
+  checkpointSink: durableAttemptMetadata.write,
+});
+```
+
+The evaluator must explicitly return a bounded reward and exact rewards for any learning episode
+IDs emitted by successful steps. A failed or partial attempt can be evaluated and replanned, but
+approval, recovery, reconciliation, and cancellation states return to the caller without an
+automatic retry. Replan instructions are transient and digest-bound; they cannot add tools,
+permissions, credentials, effects, or a new domain. The cycle has a hard three-replan ceiling.
 
 To connect provider-backed steps to delayed-credit learning, give the adapter the same
 `AutonomousLearningController` used by direct runs. Successful steps receive stable episode IDs;

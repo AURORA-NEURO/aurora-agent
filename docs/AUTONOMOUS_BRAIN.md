@@ -1012,6 +1012,19 @@ episodes. The optional `onStepOutcome` callback remains useful for custom evalua
 but network success, latency, model confidence, or a completed HTTP request is never treated as an
 implicit reward.
 
+`runAutonomousMissionReplanCycle()` supplies the missing bounded feedback loop for durable
+missions. It evaluates a terminal or partial attempt, settles its exact successful-step episode
+rewards, and can schedule a new attempt when the evaluator explicitly requests a replan. Every
+attempt gets a new mission ID, but the protected contract digest must remain identical for the
+goal, policy, tools, arguments, domains, dependencies, bindings, claims, route review, workflow
+binding, and effect authority. Only step objectives and the order of dependency-independent
+declarations may change. The default replanner adds a credential-screened evaluator instruction
+to the transient step objective; applications can provide a custom proposal callback that receives
+the raw instruction only in memory. The returned cycle and optional `checkpointSink` retain the
+instruction digest, evaluator digest, request digest, attempt status, and trajectory ID—not the
+instruction, mission payload, evidence packet, or provider response. A hard three-replan ceiling
+and preflight revalidation prevent an evaluator from widening execution authority.
+
 The durable surface is intentionally metadata-only. Checkpoints and hash-chained events retain
 mission/step IDs, contract digests, statuses, attempt numbers, bounded failure classes, result
 digests, output byte counts, the next wave, and (for model-backed steps) a digest-only decision
