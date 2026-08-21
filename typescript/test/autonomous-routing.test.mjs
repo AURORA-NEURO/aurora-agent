@@ -51,7 +51,7 @@ function routerAgent(payloads) {
 test("semantic routing resolves an ambiguous task into a reviewed domain route", async () => {
   const { agent, bodies, calls } = routerAgent([{ selected_domains: [{ domain: "coding", score: 0.91, rationale: "implementation and verification" }], confidence: 0.92, abstain: false, abstain_reason: null }]);
   const task = "Please help me with an unfamiliar technical migration.";
-  const result = await semanticRouteAutonomousTask(agent, task, { approveProviderCall: true });
+  const result = await semanticRouteAutonomousTask(agent, task, { approveProviderCall: true, maxTotalCostUnits: 1 });
   assert.equal(result.status, "completed");
   assert.equal(result.route.primary_domain, "coding");
   assert.equal(result.route.source, "provider_semantic_hybrid");
@@ -59,9 +59,23 @@ test("semantic routing resolves an ambiguous task into a reviewed domain route",
   assert.equal(result.semantic_confidence, 0.92);
   assert.equal(result.route.route_digest.length, 64);
   assert.equal(result.outcome_digest.length, 64);
+  assert.equal(result.cost_budget.max_cost_units, 1);
+  assert.ok(result.cost_budget.consumed_cost_units > 0);
   assert.equal(calls(), 1);
   assert.equal(JSON.stringify(result).includes(task), false);
   assert.equal(Object.prototype.hasOwnProperty.call(bodies[0], "authorization"), false);
+});
+
+test("approved semantic route identity is carried into the executable blueprint", async () => {
+  const { agent, calls } = routerAgent([{ selected_domains: [{ domain: "coding", score: 0.91, rationale: "implementation and verification" }], confidence: 0.92, abstain: false, abstain_reason: null }]);
+  const task = "Debug this Rust repository and report the verified tests.";
+  const semantic = await semanticRouteAutonomousTask(agent, task, { approveProviderCall: true });
+  assert.equal(semantic.status, "completed");
+  const result = await agent.run(task, { routeOverride: semantic.route, approveProviderCall: true, candidates: [model()] });
+  assert.equal(result.status, "completed");
+  assert.equal(result.route.route_digest, semantic.route.route_digest);
+  assert.equal(result.blueprint.route_digest, semantic.route.route_digest);
+  assert.equal(calls(), 2);
 });
 
 test("semantic routing applies caller model-selection gates before classifier dispatch", async () => {

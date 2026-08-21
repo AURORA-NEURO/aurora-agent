@@ -481,18 +481,25 @@ if (proposal.status !== "completed" || proposal.review_required) {
 `planWithProvider()` can reorder only the exact reviewed stage identifiers and return a focus
 subset. `planCrossDomainWithProvider()` applies the same contract to the existing specialist
 child identifiers. Both methods require explicit approval, use the normal model-selection,
-credential, budget, health, retry, and abort gates, and return `approval_required` without network
-dispatch when approval is absent. Provider output is checked for strict JSON shape, exact
+credential, aggregate budget, health, retry, and abort gates, and return `approval_required` without
+network dispatch when approval is absent. Pass `maxTotalCostUnits` for a planning-local ceiling or
+one `AutonomousCostBudget` to charge planning and the eventual execution against the same caller-
+owned accounting boundary. The returned `cost_budget` is a numeric value-only snapshot; a zero or
+exhausted budget fails before provider dispatch. Provider output is checked for strict JSON shape, exact
 permutations, dependency safety, abstention, and confidence bounds. A malformed structured
 response is converted into a typed `provider_invalid` result with a digest-only failure receipt;
 credential and transport failures remain typed runtime errors for the caller's retry policy.
 
 These methods produce proposals, never authorization or execution. The returned records retain
-only existing ids, bounded confidence, selected-model metadata, and SHA-256 digests. They do not
+only existing ids, bounded confidence, selected-model metadata, numeric budget accounting, and SHA-256 digests. They do not
 retain the original task, prompt transcript, provider response, tool names, credentials, effects,
 or new domain authority. A caller that accepts a completed proposal must still apply it through
 its own workflow executor and re-check the task/blueprint digests at that boundary. The executor
 then binds the accepted proposal digest into every checkpoint and stage context:
+
+Every `AutonomousTaskBlueprint` also carries the `route_digest` that shaped it. A cross-domain
+blueprint carries the parent route digest and copies it into every specialist and synthesis
+blueprint, so a reviewed route cannot be silently replaced during planning or execution.
 
 ```typescript
 const executor = new AutonomousWorkflowExecutor(agent, checkpointStore);

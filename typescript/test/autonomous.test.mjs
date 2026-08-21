@@ -12,6 +12,7 @@ import {
   InMemoryAutonomousCapabilityLearningSettlementStore,
   AutonomousCapabilityLearningPersistenceCoordinator,
   validateAutonomousCapabilityLearningSnapshot,
+  AutonomousCostBudget,
   AutonomousCostBudgetError,
   AutonomousDomainToolRegistry,
   AutonomousDomainToolRuntime,
@@ -191,20 +192,30 @@ test("provider planning is approval-gated, dependency-closed, and domain-neutral
   assert.equal(calls.length, 0);
   assert.doesNotMatch(JSON.stringify(refused), /Debug this coding repository/);
 
-  const planned = await agent.planWithProvider(blueprint.blueprint, { approveProviderCall: true });
+  const planningBudget = new AutonomousCostBudget(1);
+  await assert.rejects(
+    () => agent.planWithProvider(blueprint.blueprint, { approveProviderCall: true, costBudget: new AutonomousCostBudget(0) }),
+    (error) => error instanceof AutonomousCostBudgetError,
+  );
+  assert.equal(calls.length, 0, "a zero planning budget refuses before provider dispatch");
+  const planned = await agent.planWithProvider(blueprint.blueprint, { approveProviderCall: true, costBudget: planningBudget });
   assert.equal(planned.status, "completed");
   assert.deepEqual(planned.priority_stage_ids, blueprint.blueprint.workflow.stages.map((stage) => stage.id));
   assert.equal(planned.focus_stage_ids.length, 1);
   assert.equal(planned.planner_prompt_digest.length, 64);
   assert.equal(planned.selection_digest.length, 64);
+  assert.equal(planned.cost_budget.max_cost_units, 1);
+  assert.ok(planned.cost_budget.consumed_cost_units > 0);
   assert.equal(calls[0].response_format.type, "json_schema");
 
   const crossBlueprint = await agent.blueprint("Write Python code for this dataset pipeline.");
   assert.ok(crossBlueprint.cross_domain_blueprint);
-  const cross = await agent.planCrossDomainWithProvider(crossBlueprint.cross_domain_blueprint, { approveProviderCall: true });
+  const cross = await agent.planCrossDomainWithProvider(crossBlueprint.cross_domain_blueprint, { approveProviderCall: true, costBudget: planningBudget });
   assert.equal(cross.status, "completed");
   assert.deepEqual(cross.priority_child_ids, crossBlueprint.cross_domain_blueprint.child_ids);
   assert.equal(cross.planner_prompt_digest.length, 64);
+  assert.equal(cross.cost_budget.max_cost_units, 1);
+  assert.ok(cross.cost_budget.consumed_cost_units > planned.cost_budget.consumed_cost_units, "planning and cross-domain planning share one aggregate budget");
   assert.doesNotMatch(JSON.stringify(cross), /Write Python code/);
 
   const domains = {
@@ -223,14 +234,17 @@ test("provider planning is approval-gated, dependency-closed, and domain-neutral
   };
   for (const [domain, task] of Object.entries(domains)) {
     const routed = await agent.blueprint(task, { domain });
+    const domainBudget = new AutonomousCostBudget(1);
+    let result;
     if (routed.cross_domain_blueprint) {
-      const result = await agent.planCrossDomainWithProvider(routed.cross_domain_blueprint, { approveProviderCall: true });
-      assert.equal(result.status, "completed", domain);
+      result = await agent.planCrossDomainWithProvider(routed.cross_domain_blueprint, { approveProviderCall: true, costBudget: domainBudget });
     } else {
       assert.ok(routed.blueprint, domain);
-      const result = await agent.planWithProvider(routed.blueprint, { approveProviderCall: true });
-      assert.equal(result.status, "completed", domain);
+      result = await agent.planWithProvider(routed.blueprint, { approveProviderCall: true, costBudget: domainBudget });
     }
+    assert.equal(result.status, "completed", domain);
+    assert.equal(result.cost_budget.max_cost_units, 1, domain);
+    assert.ok(result.cost_budget.consumed_cost_units > 0, domain);
   }
 });
 
@@ -853,6 +867,8 @@ test("cross-domain execution fans out to specialists, gates approval, and synthe
   const preview = await agent.blueprint(task);
   assert.equal(preview.route.cross_domain, true);
   assert.ok(preview.cross_domain_blueprint);
+  assert.equal(preview.cross_domain_blueprint.route_digest, preview.route.route_digest);
+  assert.ok(preview.cross_domain_blueprint.child_blueprints.every((child) => child.route_digest === preview.route.route_digest));
   assert.equal(preview.cross_domain_blueprint.child_blueprints.length, preview.route.selected_domains.length);
   assert.equal(preview.cross_domain_blueprint.execution, "not_started");
   const gated = await agent.run(task, { candidates: agent.models() });

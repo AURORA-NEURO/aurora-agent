@@ -54,6 +54,7 @@ import {
 import {
   AutonomousRuntime,
   AutonomousCostBudget,
+  type AutonomousCostBudgetSnapshot,
   type AutonomousModelCandidate,
   type AutonomousModelSelector,
   type AutonomousSelectionDecision,
@@ -474,6 +475,8 @@ export interface AutonomousReadinessReport extends JsonObject {
 export interface AutonomousTaskBlueprint extends JsonObject {
   schema: "bioprism-python-autonomous-task/0.1";
   task_digest: string;
+  /** Digest of the approved route that shaped this blueprint; route material remains caller-owned. */
+  route_digest: string;
   domain_profile: AutonomousDomainProfile;
   domain_pack: AutonomousDomainPack;
   workflow: AutonomousWorkflow;
@@ -497,6 +500,8 @@ export interface AutonomousCrossDomainSubtask {
 export interface AutonomousCrossDomainBlueprint {
   schema: typeof AUTONOMOUS_CROSS_DOMAIN_SCHEMA;
   task_digest: string;
+  /** Digest of the reviewed parent route shared by every child and synthesis blueprint. */
+  route_digest: string;
   child_ids: string[];
   child_blueprints: AutonomousTaskBlueprint[];
   synthesis_blueprint: AutonomousTaskBlueprint;
@@ -726,6 +731,10 @@ export interface AutonomousProviderPlanningOptions {
   maxLatencyMs?: number;
   minQuality?: number;
   minSelectionConfidence?: number;
+  /** Aggregate estimated spend ceiling for this planning call and any provider failover. */
+  maxTotalCostUnits?: number;
+  /** Share a caller-owned aggregate budget across planning and the eventual execution. */
+  costBudget?: AutonomousCostBudget;
   approveProviderCall?: boolean;
   runId?: string;
   temperature?: number;
@@ -1404,6 +1413,7 @@ async function buildTaskBlueprint(
   task: string,
   options: {
     taskDigest?: string;
+    routeDigest?: string;
     capability?: string;
     context?: readonly AutonomousPromptChunk[];
     maxInputTokens?: number;
@@ -1413,6 +1423,7 @@ async function buildTaskBlueprint(
 ): Promise<AutonomousTaskBlueprint> {
   const taskText = boundedText("autonomous task blueprint objective", task, 32_000);
   const taskDigest = options.taskDigest ?? await digestJson({ task: taskText });
+  if (typeof options.routeDigest !== "string" || !/^[0-9a-f]{64}$/.test(options.routeDigest)) throw new ArgumentError("autonomous task blueprint routeDigest must be a lowercase SHA-256 digest");
   const activeToolNames = [...new Set(options.activeToolNames ?? [])].sort();
   const selectedToolNames = [...new Set(options.selectedToolNames ?? activeToolNames)].sort();
   const pack = await buildDomainPack(profile);
@@ -1438,6 +1449,7 @@ async function buildTaskBlueprint(
   return {
     schema: "bioprism-python-autonomous-task/0.1",
     task_digest: taskDigest,
+    route_digest: options.routeDigest,
     domain_profile: profile,
     domain_pack: pack,
     workflow: profile.workflow,
@@ -2897,7 +2909,7 @@ export class AutonomousAgent {
     }
     const profile = await profileFor(route.primary_domain);
     const activeToolNames = options.tools ? this.filterActivatedToolNames([...options.tools]) : await this.liveToolNamesForTask(taskText, [route.primary_domain], options.capability);
-    const blueprint = await buildTaskBlueprint(profile, taskText, { taskDigest: route.task_digest, capability: options.capability, context: options.context, maxInputTokens: options.maxInputTokens, activeToolNames, selectedToolNames: activeToolNames });
+    const blueprint = await buildTaskBlueprint(profile, taskText, { taskDigest: route.task_digest, routeDigest: route.route_digest, capability: options.capability, context: options.context, maxInputTokens: options.maxInputTokens, activeToolNames, selectedToolNames: activeToolNames });
     return { schema: "bioprism-python-autonomous-auto-blueprint/0.1", route, blueprint, cross_domain_blueprint: null, execution: "not_started", authorization: "route_and_plan_only; no_provider_or_tool_effects_authorized" };
   }
 
@@ -2915,6 +2927,8 @@ export class AutonomousAgent {
   ): Promise<AutonomousPlanRefinementResult> {
     if (!isObject(blueprint) || blueprint.schema !== "bioprism-python-autonomous-task/0.1") throw new ArgumentError("provider planning requires an AutonomousTaskBlueprint");
     if (!isObject(blueprint.workflow) || !Array.isArray(blueprint.workflow.stages)) throw new ProviderRuntimeError("provider planning workflow is malformed");
+    const costBudget = resolveAutonomousCostBudget(options);
+    const budgetSnapshot = (): AutonomousCostBudgetSnapshot | null => costBudget?.snapshot() ?? null;
     const stages = blueprint.workflow.stages;
     const stageIds = validatePlanningWorkflow(stages);
     const basePlanDigest = await digestJson(blueprint.plan);
@@ -2943,10 +2957,11 @@ export class AutonomousAgent {
       planner_prompt_digest: prepared.prompt.prompt_digest,
       planner_plan_digest: null,
       outcome_digest: null,
+      cost_budget: null,
       retention: "stage_ids_and_digests_only; planner_transcript_not_retained",
       authorization: "plan_proposal_only; no_tools_or_effects_authorized",
     } satisfies AutonomousPlanRefinementResult;
-    if (options.approveProviderCall !== true) return { ...base, status: "approval_required" };
+    if (options.approveProviderCall !== true) return { ...base, status: "approval_required", cost_budget: budgetSnapshot() };
     const candidates = options.candidates ? [...options.candidates] : this.models();
     if (!candidates.length) throw new ProviderRuntimeError("provider planning requires at least one model candidate");
     let execution: Awaited<ReturnType<AutonomousRuntime["invoke"]>>;
@@ -2959,6 +2974,7 @@ export class AutonomousAgent {
         execution: options.execution,
         executionAttempt: options.executionAttempt,
         maxProviderFailovers: options.maxProviderFailovers,
+        reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined,
       });
     } catch (error) {
       if (!(error instanceof ProviderRuntimeError) || error.code !== "invalid_response") throw error;
@@ -2966,12 +2982,13 @@ export class AutonomousAgent {
         ...base,
         status: "provider_invalid",
         outcome_digest: await planningProviderFailureDigest(error),
+        cost_budget: budgetSnapshot(),
       };
     }
     const selectionDigest = await digestJson(execution.selection);
     const outcomeDigest = await planningOutcomeDigest(execution);
     const plannerPlanDigest = await digestJson({ planner_output: execution.response.structured });
-    const metadata = { ...base, selected_model: planningModelProjection(execution.selection), selection_digest: selectionDigest, planner_plan_digest: plannerPlanDigest, outcome_digest: outcomeDigest };
+    const metadata = { ...base, selected_model: planningModelProjection(execution.selection), selection_digest: selectionDigest, planner_plan_digest: plannerPlanDigest, outcome_digest: outcomeDigest, cost_budget: budgetSnapshot() };
     const raw = execution.response.structured;
     if (!isObject(raw)) return { ...metadata, status: "provider_invalid" };
     const priority = raw.priority_order;
@@ -2995,6 +3012,8 @@ export class AutonomousAgent {
   ): Promise<AutonomousCrossDomainPlanRefinementResult> {
     if (!isObject(blueprint) || blueprint.schema !== AUTONOMOUS_CROSS_DOMAIN_SCHEMA) throw new ArgumentError("cross-domain provider planning requires an AutonomousCrossDomainBlueprint");
     if (!Array.isArray(blueprint.child_ids) || !isObject(blueprint.dependency_graph) || !Array.isArray(blueprint.dependency_graph.fan_out)) throw new ProviderRuntimeError("cross-domain provider planning blueprint is malformed");
+    const costBudget = resolveAutonomousCostBudget(options);
+    const budgetSnapshot = (): AutonomousCostBudgetSnapshot | null => costBudget?.snapshot() ?? null;
     const childIds = [...blueprint.child_ids];
     if (childIds.length < 2 || childIds.length > AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN || childIds.some((id) => typeof id !== "string" || !id.trim()) || new Set(childIds).size !== childIds.length) throw new ProviderRuntimeError("cross-domain provider planning children are malformed");
     const fanOutIds = blueprint.dependency_graph.fan_out.map((child) => isObject(child) && typeof child.id === "string" ? child.id : null);
@@ -3023,10 +3042,11 @@ export class AutonomousAgent {
       planner_prompt_digest: prepared.prompt.prompt_digest,
       planner_plan_digest: null,
       outcome_digest: null,
+      cost_budget: null,
       retention: "child_ids_and_digests_only; planner_transcript_not_retained",
       authorization: "plan_proposal_only; no_tools_or_effects_authorized",
     } satisfies AutonomousCrossDomainPlanRefinementResult;
-    if (options.approveProviderCall !== true) return base;
+    if (options.approveProviderCall !== true) return { ...base, cost_budget: budgetSnapshot() };
     const candidates = options.candidates ? [...options.candidates] : this.models();
     if (!candidates.length) throw new ProviderRuntimeError("cross-domain provider planning requires at least one model candidate");
     let execution: Awaited<ReturnType<AutonomousRuntime["invoke"]>>;
@@ -3039,6 +3059,7 @@ export class AutonomousAgent {
         execution: options.execution,
         executionAttempt: options.executionAttempt,
         maxProviderFailovers: options.maxProviderFailovers,
+        reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined,
       });
     } catch (error) {
       if (!(error instanceof ProviderRuntimeError) || error.code !== "invalid_response") throw error;
@@ -3046,6 +3067,7 @@ export class AutonomousAgent {
         ...base,
         status: "provider_invalid",
         outcome_digest: await planningProviderFailureDigest(error),
+        cost_budget: budgetSnapshot(),
       };
     }
     const metadata = {
@@ -3055,6 +3077,7 @@ export class AutonomousAgent {
       selection_digest: await digestJson(execution.selection),
       planner_plan_digest: await digestJson({ planner_output: execution.response.structured }),
       outcome_digest: await planningOutcomeDigest(execution),
+      cost_budget: budgetSnapshot(),
     };
     const raw = execution.response.structured;
     if (!isObject(raw)) return metadata;
@@ -3106,6 +3129,7 @@ export class AutonomousAgent {
       const activeToolNames = options.tools ? this.filterActivatedToolNames([...options.tools]) : await this.liveToolNamesForTask(childTask, [subtask.domain], subtask.capability);
       const child = await buildTaskBlueprint(profile, childTask, {
         capability: subtask.capability,
+        routeDigest: route.route_digest,
         context: childContext,
         maxInputTokens: options.maxInputTokens,
         activeToolNames,
@@ -3128,6 +3152,7 @@ export class AutonomousAgent {
     const synthesisTools = options.tools ? this.filterActivatedToolNames([...options.tools]) : await this.liveToolNamesForTask(synthesisTask, [...selectedDomains, "cross_domain"], options.capability ?? synthesisProfile.default_capability);
     const synthesis = await buildTaskBlueprint(synthesisProfile, synthesisTask, {
       capability: options.capability ?? synthesisProfile.default_capability,
+      routeDigest: route.route_digest,
       context: synthesisContext,
       maxInputTokens: options.maxInputTokens,
       activeToolNames: synthesisTools,
@@ -3136,16 +3161,17 @@ export class AutonomousAgent {
     const descriptor = {
       schema: AUTONOMOUS_CROSS_DOMAIN_SCHEMA,
       task_digest: parentDigest,
+      route_digest: route.route_digest,
       child_ids: [...childIds],
       children: childMetadata,
       synthesis_task_digest: synthesis.task_digest,
-      route_digest: route.route_digest,
       execution: "not_started" as const,
       authorization: "caller_approval_per_provider_or_effect_boundary" as const,
     };
     return {
       schema: AUTONOMOUS_CROSS_DOMAIN_SCHEMA,
       task_digest: parentDigest,
+      route_digest: route.route_digest,
       child_ids: [...childIds],
       child_blueprints: children,
       synthesis_blueprint: synthesis,
@@ -3540,7 +3566,7 @@ export class AutonomousAgent {
       };
     }
     if (route.abstained || !route.primary_domain) return { schema: "bioprism-typescript-autonomous-run/0.1", status: "route_review_required", route, blueprint: null, selection: null, response: null, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
-    const blueprintEnvelope = await this.blueprint(taskText, { domain: route.primary_domain, capability: options.capability, context: options.context, maxInputTokens: options.maxInputTokens, tools: options.tools?.map((tool) => tool.name), hints: options.hints });
+    const blueprintEnvelope = await this.blueprint(taskText, { domain: route.primary_domain, routeOverride: options.routeOverride, capability: options.capability, context: options.context, maxInputTokens: options.maxInputTokens, tools: options.tools?.map((tool) => tool.name), hints: options.hints });
     const blueprint = blueprintEnvelope.blueprint;
     if (!blueprint) return { schema: "bioprism-typescript-autonomous-run/0.1", status: "route_review_required", route, blueprint: null, selection: null, response: null, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
     if (options.approveProviderCall !== true) return { schema: "bioprism-typescript-autonomous-run/0.1", status: "approval_required", route, blueprint, selection: null, response: null, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };

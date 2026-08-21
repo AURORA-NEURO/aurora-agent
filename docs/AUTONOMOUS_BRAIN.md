@@ -774,10 +774,14 @@ The TypeScript façade exposes the same provider-planning boundary as explicit p
 `agent.planWithProvider(blueprint, { approveProviderCall: true, credential })` for a single
 workflow and `agent.planCrossDomainWithProvider(crossBlueprint, { approveProviderCall: true,
 credential })` for an existing fan-out. Approval is checked before provider dispatch; model
-selection, credential readiness, health, retry, budget, abort, and structured-output gates remain
-active. The TypeScript result is intentionally proposal-only: it contains existing stage or child
-ids, bounded confidence, selected-model metadata, and digests, and must be accepted and applied by
-the caller's workflow executor after rechecking the blueprint digests. It never authorizes tools,
+selection, credential readiness, health, retry, aggregate-budget, abort, and structured-output gates
+remain active. `maxTotalCostUnits` creates a planning-local ceiling, while `costBudget` lets the
+caller charge planning and subsequent execution to one shared accounting boundary. The returned
+`cost_budget` contains only max/consumed/remaining numeric values, and zero or exhausted accounting
+fails closed before transport. The TypeScript result is intentionally proposal-only: it contains
+existing stage or child ids, bounded confidence, selected-model metadata, budget accounting, and
+digests, and must be accepted and applied by the caller's workflow executor after rechecking the
+blueprint digests. It never authorizes tools,
 effects, credentials, new domains, or synthesis. Malformed structured output becomes a typed,
 digest-only `provider_invalid` result, while credential and transport failures remain typed runtime
 errors for application retry or review policy.
@@ -792,6 +796,12 @@ stage, specialist, and synthesis calls, and copied into value-only learning epis
 requires the same identity; omitting it or substituting a different proposal fails before the next
 provider dispatch. Without explicit acceptance, TypeScript retains declaration order and no plan
 digest is persisted.
+
+TypeScript blueprints bind the reviewed route identity explicitly: a single-domain
+`AutonomousTaskBlueprint` carries `route_digest`, while a cross-domain blueprint carries the
+parent route digest and repeats it in each specialist and synthesis blueprint. Passing a semantic
+`routeOverride` into `agent.run()` therefore binds the same route identity into the executable
+blueprint instead of silently rebuilding a deterministic route for the selected domain.
 
 The durable single-domain executor can also compose the provider-assisted semantic router for
 ambiguous intake. Set `semanticRouting.enabled` with its own `approveProviderCall` and keep the

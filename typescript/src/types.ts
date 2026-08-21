@@ -360,6 +360,11 @@ export interface AutonomousSemanticRouteResult extends JsonObject {
   prompt_digest: string | null;
   plan_digest: string | null;
   outcome_digest: string | null;
+  cost_budget?: {
+    max_cost_units: number;
+    consumed_cost_units: number;
+    remaining_cost_units: number;
+  } | null;
   retention: string;
   authorization: string;
 }
@@ -379,6 +384,12 @@ export interface AutonomousPlanRefinementResult extends JsonObject {
   planner_prompt_digest: string | null;
   planner_plan_digest: string | null;
   outcome_digest: string | null;
+  /** Metadata-only aggregate accounting for the provider planning call, when budgeted. */
+  cost_budget?: {
+    max_cost_units: number;
+    consumed_cost_units: number;
+    remaining_cost_units: number;
+  } | null;
   retention: string;
   authorization: string;
 }
@@ -398,6 +409,12 @@ export interface AutonomousCrossDomainPlanRefinementResult extends JsonObject {
   planner_prompt_digest: string | null;
   planner_plan_digest: string | null;
   outcome_digest: string | null;
+  /** Metadata-only aggregate accounting for the provider planning call, when budgeted. */
+  cost_budget?: {
+    max_cost_units: number;
+    consumed_cost_units: number;
+    remaining_cost_units: number;
+  } | null;
   retention: string;
   authorization: string;
 }
@@ -594,6 +611,7 @@ export interface AutonomousCredentialSessionStatus extends JsonObject {
 export interface AutonomousTaskBlueprint extends JsonObject {
   schema: "bioprism-python-autonomous-task/0.1" | string;
   task: JsonObject;
+  route_digest?: string;
   domain_profile: JsonObject;
   domain_pack: AutonomousDomainPack;
   workflow: JsonObject;

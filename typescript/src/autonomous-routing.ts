@@ -34,6 +34,12 @@ export interface AutonomousSemanticRouteResult extends JsonObject {
   selection_digest: string | null;
   prompt_digest: string;
   outcome_digest: string | null;
+  /** Metadata-only aggregate accounting for the classifier call, when budgeted. */
+  cost_budget: {
+    max_cost_units: number;
+    consumed_cost_units: number;
+    remaining_cost_units: number;
+  } | null;
   retention: "route_digests_and_scores_only;task_prompt_and_provider_response_not_retained";
   authorization: "route_review_only;provider_call_requires_explicit_approval";
 }
@@ -84,8 +90,8 @@ function boundedProbability(name: string, value: unknown, allowZero = true): num
   return value;
 }
 
-function routeReviewResult(deterministic: AutonomousRouteProposal, status: AutonomousSemanticRouteResult["status"], promptDigest: string, selectionDigest: string | null, selectedModel: { provider: string; model: string } | null, semanticCandidates: AutonomousSemanticRouteCandidate[] = [], selectedDomains: AutonomousDomainName[] = [], confidence = 0, outcomeDigest: string | null = null): AutonomousSemanticRouteResult {
-  return { schema: AUTONOMOUS_SEMANTIC_ROUTE_SCHEMA, status, route: deterministic, deterministic_route: deterministic, semantic_candidates: semanticCandidates, semantic_selected_domains: selectedDomains, semantic_confidence: confidence, selected_model: selectedModel, selection_digest: selectionDigest, prompt_digest: promptDigest, outcome_digest: outcomeDigest, retention: RETENTION, authorization: AUTHORIZATION };
+function routeReviewResult(deterministic: AutonomousRouteProposal, status: AutonomousSemanticRouteResult["status"], promptDigest: string, selectionDigest: string | null, selectedModel: { provider: string; model: string } | null, semanticCandidates: AutonomousSemanticRouteCandidate[] = [], selectedDomains: AutonomousDomainName[] = [], confidence = 0, outcomeDigest: string | null = null, costBudget?: AutonomousCostBudget): AutonomousSemanticRouteResult {
+  return { schema: AUTONOMOUS_SEMANTIC_ROUTE_SCHEMA, status, route: deterministic, deterministic_route: deterministic, semantic_candidates: semanticCandidates, semantic_selected_domains: selectedDomains, semantic_confidence: confidence, selected_model: selectedModel, selection_digest: selectionDigest, prompt_digest: promptDigest, outcome_digest: outcomeDigest, cost_budget: costBudget?.snapshot() ?? null, retention: RETENTION, authorization: AUTHORIZATION };
 }
 
 function routeSchema(): JsonObject {
@@ -129,7 +135,7 @@ export async function semanticRouteAutonomousTask(agent: AutonomousAgent, task: 
   const profileByDomain = new Map(profiles.map((profile) => [profile.domain, profile]));
   const catalogue = profiles.map((profile) => ({ domain: profile.domain, capability: profile.default_capability, risk_class: profile.risk_class, capabilities: profile.capabilities, description: profile.tool_profile.description }));
   const promptDigest = await digestJson({ schema: AUTONOMOUS_SEMANTIC_ROUTE_SCHEMA, task_digest: taskDigest, catalogue: catalogue.map((entry) => ({ domain: entry.domain, capability: entry.capability, risk_class: entry.risk_class, capabilities: entry.capabilities })) });
-  if (options.approveProviderCall !== true) return routeReviewResult(deterministic, "approval_required", promptDigest, null, null);
+  if (options.approveProviderCall !== true) return routeReviewResult(deterministic, "approval_required", promptDigest, null, null, [], [], 0, null, costBudget);
   const candidates: AutonomousModelCandidate[] = options.candidates ? [...options.candidates] : agent.models();
   if (!candidates.length) throw new ProviderRuntimeError("semantic routing requires at least one model candidate");
   const catalogText = catalogue.map((entry) => `${entry.domain}: capability=${entry.capability}; risk=${entry.risk_class}; capabilities=${entry.capabilities.join(", ")}; ${entry.description}`).join("\n");
@@ -148,7 +154,7 @@ export async function semanticRouteAutonomousTask(agent: AutonomousAgent, task: 
   try {
     execution = await agent.runtime.invoke({ task: taskText, domain: "cross_domain", capability: "routing", riskClass: "route_review", requiredCapabilities: ["reasoning"], maxCostPerMillionTokens: options.maxCostPerMillionTokens, maxLatencyMs: options.maxLatencyMs, minQuality: options.minQuality, candidates, request }, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: options.observer, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined });
   } catch (error) {
-    if (error instanceof ProviderRuntimeError && error.code === "invalid_response") return routeReviewResult(deterministic, "provider_invalid", promptDigest, null, null);
+    if (error instanceof ProviderRuntimeError && error.code === "invalid_response") return routeReviewResult(deterministic, "provider_invalid", promptDigest, null, null, [], [], 0, null, costBudget);
     await failSemanticExecution(options);
     throw error;
   }
@@ -157,21 +163,21 @@ export async function semanticRouteAutonomousTask(agent: AutonomousAgent, task: 
   const selectedModel = execution.selection.selected_model;
   let payload: unknown = execution.response.structured;
   if (payload === null && execution.response.text.trim()) {
-    try { payload = JSON.parse(execution.response.text); } catch { return routeReviewResult(deterministic, "provider_invalid", promptDigest, selectionDigest, selectedModel, [], [], 0, outcomeDigest); }
+    try { payload = JSON.parse(execution.response.text); } catch { return routeReviewResult(deterministic, "provider_invalid", promptDigest, selectionDigest, selectedModel, [], [], 0, outcomeDigest, costBudget); }
   }
-  if (!isObject(payload) || !Array.isArray(payload.selected_domains)) return routeReviewResult(deterministic, "provider_invalid", promptDigest, selectionDigest, selectedModel, [], [], 0, outcomeDigest);
+  if (!isObject(payload) || !Array.isArray(payload.selected_domains)) return routeReviewResult(deterministic, "provider_invalid", promptDigest, selectionDigest, selectedModel, [], [], 0, outcomeDigest, costBudget);
   let confidence: number;
-  try { confidence = boundedProbability("semantic route confidence", payload.confidence); } catch { return routeReviewResult(deterministic, "provider_invalid", promptDigest, selectionDigest, selectedModel, [], [], 0, outcomeDigest); }
+  try { confidence = boundedProbability("semantic route confidence", payload.confidence); } catch { return routeReviewResult(deterministic, "provider_invalid", promptDigest, selectionDigest, selectedModel, [], [], 0, outcomeDigest, costBudget); }
   const semanticCandidates: AutonomousSemanticRouteCandidate[] = [];
   const seen = new Set<AutonomousDomainName>();
   for (const row of payload.selected_domains.slice(0, 8)) {
-    if (!isObject(row) || typeof row.domain !== "string" || !AUTONOMOUS_DOMAIN_NAMES.includes(row.domain as AutonomousDomainName) || seen.has(row.domain as AutonomousDomainName) || typeof row.rationale !== "string") return routeReviewResult(deterministic, "provider_invalid", promptDigest, selectionDigest, selectedModel, [], [], confidence, outcomeDigest);
+    if (!isObject(row) || typeof row.domain !== "string" || !AUTONOMOUS_DOMAIN_NAMES.includes(row.domain as AutonomousDomainName) || seen.has(row.domain as AutonomousDomainName) || typeof row.rationale !== "string") return routeReviewResult(deterministic, "provider_invalid", promptDigest, selectionDigest, selectedModel, [], [], confidence, outcomeDigest, costBudget);
     let score: number;
-    try { score = boundedProbability("semantic route score", row.score); } catch { return routeReviewResult(deterministic, "provider_invalid", promptDigest, selectionDigest, selectedModel, [], [], confidence, outcomeDigest); }
-    try { boundedText("semantic route rationale", row.rationale, 512); } catch { return routeReviewResult(deterministic, "provider_invalid", promptDigest, selectionDigest, selectedModel, [], [], confidence, outcomeDigest); }
+    try { score = boundedProbability("semantic route score", row.score); } catch { return routeReviewResult(deterministic, "provider_invalid", promptDigest, selectionDigest, selectedModel, [], [], confidence, outcomeDigest, costBudget); }
+    try { boundedText("semantic route rationale", row.rationale, 512); } catch { return routeReviewResult(deterministic, "provider_invalid", promptDigest, selectionDigest, selectedModel, [], [], confidence, outcomeDigest, costBudget); }
     const domain = row.domain as AutonomousDomainName;
     const profile = profileByDomain.get(domain);
-    if (!profile) return routeReviewResult(deterministic, "provider_invalid", promptDigest, selectionDigest, selectedModel, [], [], confidence, outcomeDigest);
+    if (!profile) return routeReviewResult(deterministic, "provider_invalid", promptDigest, selectionDigest, selectedModel, [], [], confidence, outcomeDigest, costBudget);
     seen.add(domain);
     semanticCandidates.push({ domain, score, capability: profile.default_capability, rationale: row.rationale });
   }
@@ -182,14 +188,14 @@ export async function semanticRouteAutonomousTask(agent: AutonomousAgent, task: 
   if (!Number.isSafeInteger(maxDomains) || maxDomains < 1 || maxDomains > 8) throw new ArgumentError("semantic route maxDomains must be between 1 and 8");
   const selectedDomains = semanticCandidates.filter((candidate) => candidate.score >= minConfidence).slice(0, maxDomains).map((candidate) => candidate.domain);
   const abstained = payload.abstain === true || selectedDomains.length === 0;
-  if (abstained) return routeReviewResult(deterministic, "provider_abstained", promptDigest, selectionDigest, selectedModel, semanticCandidates, [], confidence, outcomeDigest);
+  if (abstained) return routeReviewResult(deterministic, "provider_abstained", promptDigest, selectionDigest, selectedModel, semanticCandidates, [], confidence, outcomeDigest, costBudget);
   const deterministicDomains = new Set(deterministic.selected_domains);
   const agrees = deterministic.abstained
     ? true
     : deterministic.cross_domain
       ? selectedDomains.some((domain) => deterministicDomains.has(domain))
       : selectedDomains.length === 1 && selectedDomains[0] === deterministic.primary_domain;
-  if (!agrees) return routeReviewResult(deterministic, "provider_disagreement", promptDigest, selectionDigest, selectedModel, semanticCandidates, selectedDomains, confidence, outcomeDigest);
+  if (!agrees) return routeReviewResult(deterministic, "provider_disagreement", promptDigest, selectionDigest, selectedModel, semanticCandidates, selectedDomains, confidence, outcomeDigest, costBudget);
   const routeCandidates: AutonomousRouteCandidate[] = semanticCandidates.filter((candidate) => selectedDomains.includes(candidate.domain)).map((candidate) => {
     const profile = profileByDomain.get(candidate.domain)!;
     return { domain: candidate.domain, score: candidate.score, matched_terms: ["provider_semantic_candidate"], capability: profile.default_capability, risk_class: profile.risk_class, workflow_id: profile.workflow.workflow_id, evidence: "provider_semantic_candidate" as const };
@@ -209,5 +215,5 @@ export async function semanticRouteAutonomousTask(agent: AutonomousAgent, task: 
     does_not_claim: ["provider semantic output is a routing hypothesis, not evidence", "routing does not authorize tools, provider calls, or external effects"],
   };
   const route = { ...routeDescriptor, route_digest: await digestJson(routeDescriptor) };
-  return { schema: AUTONOMOUS_SEMANTIC_ROUTE_SCHEMA, status: "completed", route, deterministic_route: deterministic, semantic_candidates: routeCandidates.map((candidate) => semanticCandidates.find((row) => row.domain === candidate.domain)!), semantic_selected_domains: selectedDomains, semantic_confidence: confidence, selected_model: selectedModel, selection_digest: selectionDigest, prompt_digest: promptDigest, outcome_digest: outcomeDigest, retention: RETENTION, authorization: AUTHORIZATION };
+  return { schema: AUTONOMOUS_SEMANTIC_ROUTE_SCHEMA, status: "completed", route, deterministic_route: deterministic, semantic_candidates: routeCandidates.map((candidate) => semanticCandidates.find((row) => row.domain === candidate.domain)!), semantic_selected_domains: selectedDomains, semantic_confidence: confidence, selected_model: selectedModel, selection_digest: selectionDigest, prompt_digest: promptDigest, outcome_digest: outcomeDigest, cost_budget: costBudget?.snapshot() ?? null, retention: RETENTION, authorization: AUTHORIZATION };
 }
