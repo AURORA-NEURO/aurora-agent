@@ -287,6 +287,7 @@ from .autonomous_connectors import (
     AutonomousConnectorRegistration,
     AutonomousConnectorRegistry,
     AutonomousConnectorRuntime,
+    create_autonomous_api_source_connector_executor,
 )
 from .autonomous_capabilities import (
     AUTONOMOUS_CAPABILITY_BATCH_SCHEMA,
@@ -4887,6 +4888,7 @@ __all__ = [
     "AutonomousConnectorRegistration",
     "AutonomousConnectorRegistry",
     "AutonomousConnectorRuntime",
+    "create_autonomous_api_source_connector_executor",
     "builtin_autonomous_domain_tool_profiles",
     "plan_mcp_catalogue_bindings",
     "AUTONOMOUS_CAPABILITY_BATCH_SCHEMA",

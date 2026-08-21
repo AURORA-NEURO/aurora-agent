@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -13,9 +14,13 @@ from prism_sdk import (
     AutonomousConnectorRegistration,
     AutonomousConnectorRegistry,
     AutonomousConnectorRuntime,
+    ApiClient,
+    DomainEvidenceSourceExecutionRequest,
+    DomainEvidenceSourcePlanRequest,
     DomainEvidenceProviderConnectorManifest,
     builtin_autonomous_domain_tool_profiles,
     content_digest,
+    create_autonomous_api_source_connector_executor,
 )
 from prism_sdk.errors import ArgumentError
 
@@ -164,3 +169,105 @@ def test_connector_plan_is_review_only_and_does_not_dispatch() -> None:
     assert plan["execution"] == "planning_only;no_dispatch;no_authorization"
     assert called == []
     assert AUTONOMOUS_CONNECTOR_DISPATCH_SCHEMA in str(plan) or "dispatch" in str(plan)
+
+
+def test_api_source_connector_binds_execution_to_the_returned_plan_digest(monkeypatch) -> None:
+    client = ApiClient("https://prism.test")
+    plan_calls: list[DomainEvidenceSourcePlanRequest] = []
+    execution_calls: list[DomainEvidenceSourceExecutionRequest] = []
+    plan_digest = content_digest({"plan": "science"})
+
+    plan_payload = {
+        "group_id": "group-science",
+        "domains": ["science"],
+        "subject_id": "subject-1",
+        "connector_kind": "provider_api",
+        "locator_kind": "opaque",
+        "locator": "caller-source-reference",
+        "retrieval_mode": "metadata_only",
+        "source_tool": "caller-source",
+        "parent_digests": [],
+        "retrieval_policy": {
+            "network": "caller_managed",
+            "max_bytes": 4096,
+            "timeout_ms": 1000,
+            "cache": "content_addressed",
+            "allowed_hosts": [],
+        },
+        "does_not_claim": ["not a truth claim"],
+    }
+
+    def plan(request):
+        assert isinstance(request, DomainEvidenceSourcePlanRequest)
+        plan_calls.append(request)
+        return SimpleNamespace(plan_digest=plan_digest)
+
+    def execute(request):
+        assert isinstance(request, DomainEvidenceSourceExecutionRequest)
+        execution_calls.append(request)
+        return SimpleNamespace(
+            outcome="observed",
+            to_dict=lambda: {"workflow": "domain_evidence_source_execute", "response_digest": content_digest({"ok": True})},
+        )
+
+    monkeypatch.setattr(client, "domain_evidence_source_plan_tool", plan)
+    monkeypatch.setattr(client, "domain_evidence_source_execute_tool", execute)
+    monkeypatch.setattr(client, "tools", lambda: (_ for _ in ()).throw(AssertionError("discovery is forbidden")))
+
+    registration = _registration("science", lambda _manifest, _request: {})
+    executor = create_autonomous_api_source_connector_executor(client)
+    registry = AutonomousConnectorRegistry(
+        [AutonomousConnectorRegistration(registration.manifest, executor, approval_required=True)]
+    )
+    runtime = AutonomousConnectorRuntime(registry)
+    request = AutonomousConnectorDispatchRequest(
+        dispatch_id="source-dispatch",
+        execution_id="source-execution",
+        call_id="source-call",
+        connector_id=registration.manifest.connector_id,
+        domains=("science",),
+        capability="evidence_read",
+        request={
+            "plan": plan_payload,
+            "execution": {"source_tool": "caller-source", "request": {"query": "transient"}},
+        },
+        approved=True,
+    )
+
+    result = runtime.dispatch(request)
+
+    assert result.receipt.status == "observed"
+    assert result.value["workflow"] == "domain_evidence_source_execute"
+    assert plan_calls[0].source_tool == "caller-source"
+    assert execution_calls[0].source_plan_digest == plan_digest
+    assert execution_calls[0].request == {"query": "transient"}
+    assert request.request_digest in result.receipt.request_digest
+    assert "transient" not in json.dumps(result.receipt.to_dict())
+
+
+def test_api_source_connector_rejects_wrong_manifest_kind_without_network_discovery() -> None:
+    client = ApiClient("https://prism.test")
+    executor = create_autonomous_api_source_connector_executor(client)
+    request = {
+        "plan": {
+            "group_id": "group",
+            "domains": ["science"],
+            "subject_id": "subject",
+            "connector_kind": "literature",
+            "locator_kind": "opaque",
+            "locator": "reference",
+            "retrieval_mode": "reference_only",
+            "does_not_claim": ["not a truth claim"],
+        },
+        "execution": {},
+    }
+    manifest = DomainEvidenceProviderConnectorManifest(
+        connector_id="science-provider-api",
+        version="v1",
+        provider="caller-managed",
+        connector_kind="provider_api",
+        domains=("science",),
+        capabilities=("evidence_read",),
+    )
+    with pytest.raises(ArgumentError, match="kind"):
+        executor(manifest, request)

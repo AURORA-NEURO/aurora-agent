@@ -239,6 +239,11 @@ gates, transient connector values, credential-shaped request rejection, idempote
 deduplication, and tamper/capacity failures. They still do not implement external provider
 clients, key storage, network retrieval, distributed workers, durable queues, or an OTLP exporter;
 those remain explicit integration work rather than hidden behind a local callback.
+The connector layer now also has a typed API source-plan/source-execute bridge that binds the
+returned plan digest before retrieval and keeps connector scope separate from provider payloads.
+This makes the existing gateway usable from the autonomous runtime without turning it into a
+credential client or silently enabling discovery; concrete provider-specific adapters and external
+network/auth execution remain caller-owned.
 The domain-workflow handoff now also has a retained verification boundary: callers can validate
 catalogue/contract/binding identity, rerun mission preflight, and optionally replay the original
 instantiation request before re-review. The verifier is intentionally structural and non-executing;

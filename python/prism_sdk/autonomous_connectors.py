@@ -17,6 +17,10 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Sequence
 
 from .authoring import content_digest
+from .domain_evidence_source import (
+    DomainEvidenceSourceExecutionRequest,
+    DomainEvidenceSourcePlanRequest,
+)
 from .domain_evidence_provider_handoff import DomainEvidenceProviderConnectorManifest
 from .domain_tools import (
     AUTONOMOUS_DOMAIN_NAMES,
@@ -26,6 +30,7 @@ from .domain_tools import (
     _sequence,
 )
 from .errors import ArgumentError
+from .http_client import ApiClient
 
 
 AUTONOMOUS_CONNECTOR_REGISTRY_SCHEMA = "bioprism-python-autonomous-connector-registry/0.1"
@@ -498,6 +503,74 @@ class AutonomousConnectorRuntime:
         return AutonomousConnectorDispatchResult(receipt, value)
 
 
+def create_autonomous_api_source_connector_executor(
+    client: ApiClient,
+    *,
+    use_tool_route: bool = True,
+) -> Callable[[DomainEvidenceProviderConnectorManifest, Mapping[str, Any]], Any]:
+    """Build a key-agnostic source connector over the typed REST/MCP source routes.
+
+    The caller supplies the already-configured ``ApiClient`` and may close over an opaque
+    credential/session in the transport implementation. This helper performs no catalogue or
+    credential discovery. It requires a transient request shaped as ``{"plan": {...},
+    "execution": {...}}``, creates the typed source plan, then binds execution to the plan digest
+    returned by the gateway rather than trusting a caller-supplied digest.
+    """
+
+    if not isinstance(client, ApiClient):
+        raise ArgumentError("autonomous API source connector requires an ApiClient")
+    if not isinstance(use_tool_route, bool):
+        raise ArgumentError("autonomous API source connector use_tool_route must be a boolean")
+
+    def execute(
+        manifest: DomainEvidenceProviderConnectorManifest,
+        request: Mapping[str, Any],
+    ) -> AutonomousConnectorObservation:
+        if not isinstance(manifest, DomainEvidenceProviderConnectorManifest):
+            raise ArgumentError("autonomous API source connector received an invalid manifest")
+        if not isinstance(request, Mapping):
+            raise ArgumentError("autonomous API source connector request must be an object")
+        plan_raw = request.get("plan")
+        execution_raw = request.get("execution", {})
+        if not isinstance(plan_raw, Mapping) or not isinstance(execution_raw, Mapping):
+            raise ArgumentError("autonomous API source connector requires plan and execution objects")
+        plan_request = DomainEvidenceSourcePlanRequest(**dict(plan_raw))
+        if plan_request.connector_kind != manifest.connector_kind:
+            raise ArgumentError("autonomous API source connector kind does not match its manifest")
+        if any(domain not in manifest.domains for domain in plan_request.domains):
+            raise ArgumentError("autonomous API source connector plan exceeds manifest domain scope")
+        plan_report = (
+            client.domain_evidence_source_plan_tool(plan_request)
+            if use_tool_route
+            else client.domain_evidence_source_plan(plan_request)
+        )
+        plan_digest = getattr(plan_report, "plan_digest", None)
+        if not isinstance(plan_digest, str):
+            raise ArgumentError("autonomous API source connector plan response omitted its digest")
+        parent_digests = execution_raw.get("parent_digests", plan_request.parent_digests)
+        if not isinstance(parent_digests, Sequence) or isinstance(parent_digests, (str, bytes)):
+            raise ArgumentError("autonomous API source connector parent_digests must be a sequence")
+        execution_request = DomainEvidenceSourceExecutionRequest(
+            source_plan_digest=plan_digest,
+            source_tool=execution_raw.get("source_tool", plan_request.source_tool),
+            request=execution_raw.get("request"),
+            claim_posture=execution_raw.get("claim_posture"),
+            parent_digests=tuple(parent_digests),
+        )
+        execution_report = (
+            client.domain_evidence_source_execute_tool(execution_request)
+            if use_tool_route
+            else client.domain_evidence_source_execute(execution_request)
+        )
+        outcome = getattr(execution_report, "outcome", None)
+        report_value = execution_report.to_dict() if hasattr(execution_report, "to_dict") else None
+        if outcome not in AUTONOMOUS_CONNECTOR_DISPATCH_STATUSES or report_value is None:
+            raise ArgumentError("autonomous API source connector execution response is malformed")
+        return AutonomousConnectorObservation(value=report_value, status=outcome)
+
+    return execute
+
+
 __all__ = [
     "AUTONOMOUS_CONNECTOR_REGISTRY_SCHEMA",
     "AUTONOMOUS_CONNECTOR_DISPATCH_SCHEMA",
@@ -515,4 +588,5 @@ __all__ = [
     "AutonomousConnectorDispatchReceipt",
     "AutonomousConnectorDispatchResult",
     "AutonomousConnectorRuntime",
+    "create_autonomous_api_source_connector_executor",
 ]

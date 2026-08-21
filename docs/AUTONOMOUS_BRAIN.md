@@ -2744,6 +2744,13 @@ identity, status, and bounded failure class. All twelve domains share the same r
 and receipt contract; missing external services remain explicit rather than being simulated as
 successful evidence.
 
+For the gateway-backed source connector path, use
+`create_autonomous_api_source_connector_executor(api_client)`. It translates a transient
+`{"plan": ..., "execution": ...}` request into the typed source-plan and source-execute requests,
+checks connector-kind/domain scope, and binds execution to the plan digest returned by the
+gateway. It does not accept a key or perform discovery; the configured `ApiClient` and any
+caller-owned credential session remain outside the autonomous metadata boundary.
+
 For a UI or service that must survive a process restart, attach the redacted activation state to
 the agent. The activation snapshot tracks provider readiness, catalogue/profile/plan digests,
 approved exact tool names, pending review, and coverage for every built-in domain. It deliberately

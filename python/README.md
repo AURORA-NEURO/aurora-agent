@@ -125,6 +125,12 @@ never serialized into the dispatch receipt. Both connector dispatch and journal 
 tested across all twelve built-in domains, including approval, scope, capability, tamper,
 capacity, secret-field, and executor-failure paths.
 
+`create_autonomous_api_source_connector_executor(api, use_tool_route=True)` is the ready-made
+bridge for the existing source-plan/source-execute gateway routes. It validates the connector kind
+and manifest scope, snapshots the exact plan through the configured `ApiClient`, and uses the
+returned `plan_digest` when executing; a caller-provided digest cannot redirect the fetch. It is
+still key-agnostic and does not call `tools()` discovery.
+
 The provider runtime and [`AutonomousBrain`](../docs/AUTONOMOUS_BRAIN.md) add the caller-approved
 LLM boundary: BYOK credentials become short-lived opaque handles, model selection is health- and
 capability-gated, prompts and mission plans are bounded, and external effects require explicit
