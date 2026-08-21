@@ -85,6 +85,35 @@ test("all twelve built-in domains expose profiles, workflows, tools, and determi
   }
 });
 
+test("built-in workflows preserve domain-specific objectives, evidence, and safety gates", async () => {
+  const profiles = await builtinAutonomousDomainProfiles();
+  const expected = {
+    coding: { stages: ["scope", "inspect", "implement", "verify", "handoff"], signals: ["schema_valid", "tests_passed", "evidence_complete"], evidence: ["scope", "acceptance_criteria", "test_results", "residual_risks"] },
+    browser: { stages: ["scope", "retrieve", "compare", "synthesize"], signals: ["evidence_traceable", "uncertainty_reported", "claim_scope_respected"], evidence: ["sources", "retrieval_gaps", "citations"] },
+    data: { stages: ["schema", "lineage", "quality", "transform", "report"], signals: ["schema_valid", "lineage_complete", "quality_gate_passed"], evidence: ["schema_contract", "lineage", "quality_metrics"] },
+    science: { stages: ["question", "evidence", "hypothesis", "design", "reproduce"], signals: ["evidence_traceable", "uncertainty_reported", "claim_scope_respected"], evidence: ["question", "evidence_map", "reproduction_plan"] },
+    biomedical: { stages: ["scope", "provenance", "review", "escalate", "communicate"], signals: ["boundary_compliant", "provenance_complete", "human_review_ready"], evidence: ["boundary", "provenance", "review_questions"] },
+    neuroscience: { stages: ["measurement", "preprocess", "model", "biology", "reproduce"], signals: ["evidence_traceable", "uncertainty_reported", "claim_scope_respected"], evidence: ["measurement_contract", "confounds", "validation_plan"] },
+    operations: { stages: ["observe", "impact", "rollback", "approval", "handoff"], signals: ["safety_gate_passed", "approval_complete", "rollback_plan_present"], evidence: ["observations", "rollback", "approval_request"] },
+    enterprise: { stages: ["request", "policy", "options", "decision", "audit"], signals: ["schema_valid", "approval_complete", "evidence_complete"], evidence: ["stakeholders", "policy_map", "approver"] },
+    multi_agent: { stages: ["decompose", "delegate", "reconcile", "synthesize"], signals: ["schema_valid", "evidence_complete", "claim_scope_respected"], evidence: ["subtasks", "assignments", "conflicts"] },
+    multimodal: { stages: ["inventory", "extract", "align", "uncertainty", "synthesize"], signals: ["evidence_traceable", "uncertainty_reported", "claim_scope_respected"], evidence: ["modality_inventory", "mismatches", "blind_spots"] },
+    cross_domain: { stages: ["decompose", "route", "align", "synthesize", "gate"], signals: ["schema_valid", "evidence_traceable", "evidence_complete", "uncertainty_reported"], evidence: ["domain_questions", "disagreements", "decision_gate"] },
+    evaluation: { stages: ["rubric", "cases", "replay", "failure", "report"], signals: ["schema_valid", "evidence_complete", "tests_passed", "claim_scope_respected"], evidence: ["rubric", "coverage", "evaluation_report"] },
+  };
+  for (const profile of profiles) {
+    const contract = expected[profile.domain];
+    assert.deepEqual(profile.workflow.stages.map((stage) => stage.id), contract.stages, profile.domain);
+    assert.deepEqual(profile.workflow.evaluator_signals, contract.signals, profile.domain);
+    const outputs = new Set(profile.workflow.stages.flatMap((stage) => stage.evidence_outputs));
+    for (const output of contract.evidence) assert.ok(outputs.has(output), `${profile.domain} missing ${output}`);
+    assert.ok(profile.workflow.stages.every((stage) => stage.objective.length > 32), `${profile.domain} still has a generic stage objective`);
+  }
+  const operations = profiles.find((profile) => profile.domain === "operations");
+  assert.equal(operations.workflow.stages.find((stage) => stage.id === "approval").approval_required, true);
+  assert.equal(operations.workflow.stages.find((stage) => stage.id === "rollback").depends_on[0], "impact");
+});
+
 test("routing abstains on weak evidence and permits explicit cross-domain review", async () => {
   const unknown = await routeAutonomousTask("please help me with something");
   assert.equal(unknown.abstained, true);

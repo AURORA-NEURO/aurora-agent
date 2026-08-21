@@ -1276,6 +1276,17 @@ stable domain intent to model capabilities, risk class, guardrails, evaluator si
 names, and stage-level approval requirements. The profile is policy metadata; it is not a claim that
 the gateway currently has every listed tool.
 
+Each built-in workflow is a domain-specific contract mirrored by the Python SDK: coding has
+scope/inspect/implement/verify/handoff stages; browser research preserves retrieval, comparison,
+freshness, and citation evidence; data work gates schema, lineage, quality, and reversible
+transformation; science separates evidence, hypotheses, design, and reproduction; biomedical work
+enforces provenance, non-diagnostic boundaries, and human review; neuroscience keeps measurement,
+preprocessing, model, and biological claims distinct; operations requires rollback before approval;
+enterprise and multi-agent workflows preserve accountable ownership; multimodal and cross-domain
+work retain modality/domain attribution; and evaluation workflows keep rubrics, cases, replay,
+failure analysis, and reporting independent. Workflow digests are cross-language identical, so a
+checkpoint or learning trajectory cannot silently switch to a generic or different domain contract.
+
 `routeAutonomousTask()` is intentionally deterministic and provider-free. It scores only reviewed
 catalogue vocabulary, preserves matched terms and a route digest, abstains when evidence,
 confidence, or score margin is insufficient, and can return multiple domains for explicit

@@ -160,6 +160,10 @@ rows back into selection; local registration, credential readiness, capability, 
 approval gates still decide eligibility. Use
 `autonomousReplayEvidenceDigest()` when a replay artifact must be independently reproduced by
 Python or Rust; all twelve built-in domain evaluator profiles use the same bounded signal policy.
+The built-in workflow contracts are also mirrored across Python and TypeScript: each domain has
+its own stage objectives, evidence outputs, evaluator signals, dependencies, and approval posture.
+Workflow digests are identical across the two SDKs, which binds checkpoints and learning
+trajectories to the same reviewed domain contract.
 
 ## Autonomous orchestration across all domains
 

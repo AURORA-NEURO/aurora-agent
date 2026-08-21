@@ -788,11 +788,211 @@ interface ProfileSeed {
   systemInstructions: string;
   evaluatorDomain: AutonomousDomainProfile["evaluator_domain"];
   workflowId: string;
-  stageIds: string[];
-  stageCapabilities: string[][];
   toolRows: string;
   description: string;
 }
+
+interface WorkflowStageDefinition {
+  id: string;
+  objective: string;
+  required_capabilities: string[];
+  depends_on: string[];
+  evidence_outputs: string[];
+  evaluator_signals: string[];
+  read_only: boolean;
+  approval_required: boolean;
+}
+
+interface WorkflowDefinition {
+  workflowId: string;
+  stages: WorkflowStageDefinition[];
+  routeIntents: string[];
+  evaluatorSignals: string[];
+  completionContract: string;
+}
+
+function workflowStage(
+  id: string,
+  objective: string,
+  requiredCapabilities: string[],
+  dependsOn: string[],
+  evidenceOutputs: string[],
+  evaluatorSignals: string[],
+  approvalRequired = false,
+): WorkflowStageDefinition {
+  return {
+    id,
+    objective,
+    required_capabilities: requiredCapabilities,
+    depends_on: dependsOn,
+    evidence_outputs: evidenceOutputs,
+    evaluator_signals: evaluatorSignals,
+    read_only: true,
+    approval_required: approvalRequired,
+  };
+}
+
+/**
+ * Domain workflow contracts are deliberately explicit rather than synthesized from stage
+ * names. These contracts are mirrored by the Python SDK and are the source of the planning,
+ * evidence, evaluator, and learning boundaries for every built-in domain.
+ */
+const WORKFLOW_CONTRACTS: Record<AutonomousDomainName, WorkflowDefinition> = {
+  coding: {
+    workflowId: "coding_delivery",
+    stages: [
+      workflowStage("scope", "Bound the change, assumptions, and acceptance criteria", ["review"], [], ["scope", "acceptance_criteria"], ["schema_valid"]),
+      workflowStage("inspect", "Inspect relevant code, tests, dependencies, and failure evidence", ["review", "debugging"], ["scope"], ["observations", "evidence_gaps"], ["evidence_complete"]),
+      workflowStage("implement", "Propose the smallest verifiable implementation and migration path", ["implementation"], ["inspect"], ["change_plan", "rollback_plan"], ["schema_valid"]),
+      workflowStage("verify", "Run or request bounded tests and report exact verification results", ["testing"], ["implement"], ["test_results", "residual_risks"], ["tests_passed"]),
+      workflowStage("handoff", "Synthesize the change, evidence, limitations, and next review decision", ["review"], ["verify"], ["handoff"], ["evidence_complete"]),
+    ],
+    routeIntents: ["repository inspection", "code and test validation", "reversible implementation"],
+    evaluatorSignals: ["schema_valid", "tests_passed", "evidence_complete"],
+    completionContract: "Every recommendation has bounded scope, explicit evidence, and reported verification status.",
+  },
+  browser: {
+    workflowId: "browser_research",
+    stages: [
+      workflowStage("scope", "Define the information need, freshness requirement, and source constraints", ["web_research"], [], ["research_question", "freshness_requirement"], ["uncertainty_reported"]),
+      workflowStage("retrieve", "Retrieve bounded sources and preserve source identity and timestamps", ["web_research", "navigation"], ["scope"], ["sources", "retrieval_gaps"], ["evidence_traceable"]),
+      workflowStage("compare", "Compare independent sources and identify disagreement or stale claims", ["source_comparison"], ["retrieve"], ["comparison", "disagreements"], ["claim_scope_respected"]),
+      workflowStage("synthesize", "Answer with citations, freshness, uncertainty, and unresolved retrieval limits", ["web_research", "source_comparison"], ["compare"], ["answer", "citations", "uncertainty"], ["evidence_traceable", "uncertainty_reported"]),
+    ],
+    routeIntents: ["source retrieval", "source comparison", "freshness and provenance"],
+    evaluatorSignals: ["evidence_traceable", "uncertainty_reported", "claim_scope_respected"],
+    completionContract: "Every substantive claim is attached to traceable source evidence or marked unresolved.",
+  },
+  data: {
+    workflowId: "data_quality_analysis",
+    stages: [
+      workflowStage("schema", "Define fields, units, cohort, grain, and expected schema invariants", ["schema_validation"], [], ["schema_contract"], ["schema_valid"]),
+      workflowStage("lineage", "Trace sources, transformations, joins, and missingness provenance", ["lineage"], ["schema"], ["lineage", "missingness"], ["lineage_complete"]),
+      workflowStage("quality", "Measure quality gates, anomalies, distributions, and uncertainty", ["quality_control", "data_analysis"], ["lineage"], ["quality_metrics", "anomalies"], ["quality_gate_passed"]),
+      workflowStage("transform", "Propose reversible transformations and validation checks without silent mutation", ["data_analysis", "schema_validation"], ["quality"], ["transformation_plan", "validation_plan"], ["schema_valid"]),
+      workflowStage("report", "Synthesize data findings, limitations, lineage, and safe next actions", ["quality_control"], ["transform"], ["data_report"], ["lineage_complete", "quality_gate_passed"]),
+    ],
+    routeIntents: ["schema and units validation", "lineage and missingness", "quality gates", "reversible transformation"],
+    evaluatorSignals: ["schema_valid", "lineage_complete", "quality_gate_passed"],
+    completionContract: "No conclusion or transformation is accepted without schema, lineage, and quality evidence.",
+  },
+  science: {
+    workflowId: "scientific_inquiry",
+    stages: [
+      workflowStage("question", "Formalize the question, estimand, assumptions, and competing explanations", ["hypothesis"], [], ["question", "assumptions"], ["claim_scope_respected"]),
+      workflowStage("evidence", "Acquire and compare literature or supplied evidence with provenance", ["literature"], ["question"], ["evidence_map", "gaps"], ["evidence_traceable"]),
+      workflowStage("hypothesis", "Separate hypotheses, predictions, correlations, and causal claims", ["hypothesis", "statistics"], ["evidence"], ["hypotheses", "predictions"], ["claim_scope_respected"]),
+      workflowStage("design", "Design a discriminating, reproducible analysis or experiment with controls", ["experiment", "statistics"], ["hypothesis"], ["design", "controls"], ["evidence_complete"]),
+      workflowStage("reproduce", "Specify analysis, provenance, uncertainty, and reproducibility checks", ["reproducibility"], ["design"], ["reproduction_plan", "limitations"], ["uncertainty_reported", "evidence_traceable"]),
+    ],
+    routeIntents: ["literature evidence", "hypothesis and predictions", "experimental design", "reproducibility"],
+    evaluatorSignals: ["evidence_traceable", "uncertainty_reported", "claim_scope_respected"],
+    completionContract: "The result distinguishes evidence, hypothesis, prediction, design, and unresolved uncertainty.",
+  },
+  biomedical: {
+    workflowId: "biomedical_review",
+    stages: [
+      workflowStage("scope", "Classify the request and establish the non-diagnostic information boundary", ["biomedical_review", "safety_boundary"], [], ["scope", "boundary"], ["boundary_compliant"]),
+      workflowStage("provenance", "Trace biomedical evidence, population, date, and applicability limits", ["provenance"], ["scope"], ["provenance", "applicability"], ["provenance_complete"]),
+      workflowStage("review", "Analyze evidence while separating population findings from individual decisions", ["biomedical_review"], ["provenance"], ["review", "uncertainty"], ["boundary_compliant"]),
+      workflowStage("escalate", "Identify human-review, clinician, institutional, or safety escalation needs", ["human_review"], ["review"], ["escalation", "review_questions"], ["human_review_ready"]),
+      workflowStage("communicate", "Produce a provenance-aware summary without diagnosis or prescription", ["biomedical_review"], ["escalate"], ["summary", "limitations"], ["boundary_compliant", "provenance_complete"]),
+    ],
+    routeIntents: ["biomedical provenance", "safety boundary", "human review readiness"],
+    evaluatorSignals: ["boundary_compliant", "provenance_complete", "human_review_ready"],
+    completionContract: "The response stays within the information boundary and makes qualified human review explicit.",
+  },
+  neuroscience: {
+    workflowId: "neuroscience_analysis",
+    stages: [
+      workflowStage("measurement", "Inventory modalities, acquisition, cohort, and measurement limitations", ["neuroscience_analysis"], [], ["measurement_contract"], ["evidence_traceable"]),
+      workflowStage("preprocess", "Make preprocessing, exclusions, confounds, and signal assumptions explicit", ["signal_interpretation"], ["measurement"], ["preprocessing", "confounds"], ["evidence_complete"]),
+      workflowStage("model", "Compare analysis models and distinguish signal from proxy or artifact", ["neuroscience_analysis", "signal_interpretation"], ["preprocess"], ["model", "sensitivity"], ["claim_scope_respected"]),
+      workflowStage("biology", "Connect findings to biological interpretation without overclaiming individual outcomes", ["neuroscience_analysis"], ["model"], ["interpretation", "alternative_explanations"], ["uncertainty_reported"]),
+      workflowStage("reproduce", "Specify reproducibility, provenance, and follow-up validation", ["study_design", "reproducibility"], ["biology"], ["validation_plan"], ["evidence_complete"]),
+    ],
+    routeIntents: ["modality and measurement", "signal preprocessing", "model sensitivity", "reproducibility"],
+    evaluatorSignals: ["evidence_traceable", "uncertainty_reported", "claim_scope_respected"],
+    completionContract: "Measurement and preprocessing limitations remain attached to every biological interpretation.",
+  },
+  operations: {
+    workflowId: "operations_change",
+    stages: [
+      workflowStage("observe", "Establish current state, telemetry, incident scope, and evidence freshness", ["observability", "incident_response"], [], ["observations", "freshness"], ["safety_gate_passed"]),
+      workflowStage("impact", "Bound blast radius, dependencies, failure modes, and stop conditions", ["risk_review"], ["observe"], ["impact", "stop_conditions"], ["safety_gate_passed"]),
+      workflowStage("rollback", "Define reversible checkpoints, rollback, recovery, and verification", ["rollback"], ["impact"], ["rollback", "recovery"], ["rollback_plan_present"]),
+      workflowStage("approval", "Prepare the accountable approval request and required operational gates", ["approval"], ["rollback"], ["approval_request", "gates"], ["approval_complete"], true),
+      workflowStage("handoff", "Summarize the runbook and explicitly separate proposed from executed work", ["runbook"], ["approval"], ["runbook", "execution_boundary"], ["safety_gate_passed", "rollback_plan_present"]),
+    ],
+    routeIntents: ["observability and incident state", "blast radius", "rollback and recovery", "approval gate"],
+    evaluatorSignals: ["safety_gate_passed", "approval_complete", "rollback_plan_present"],
+    completionContract: "No operational effect is considered complete without safety, approval, rollback, and verification evidence.",
+  },
+  enterprise: {
+    workflowId: "enterprise_governance",
+    stages: [
+      workflowStage("request", "Clarify the business request, stakeholders, scope, and decision horizon", ["workflow", "coordination"], [], ["request", "stakeholders"], ["schema_valid"]),
+      workflowStage("policy", "Identify applicable policy, compliance, privacy, and authorization constraints", ["governance", "compliance"], ["request"], ["policy_map", "constraints"], ["approval_complete"]),
+      workflowStage("options", "Compare reversible options, costs, risks, and accountable owners", ["analytics", "governance"], ["policy"], ["options", "tradeoffs"], ["evidence_complete"]),
+      workflowStage("decision", "Prepare a traceable decision package and explicit approver handoff", ["coordination"], ["options"], ["decision_package", "approver"], ["approval_complete"]),
+      workflowStage("audit", "Define follow-up metrics, ownership, and review evidence", ["governance", "analytics"], ["decision"], ["audit_plan"], ["evidence_complete"]),
+    ],
+    routeIntents: ["policy and compliance", "owner and approver mapping", "reversible options", "audit evidence"],
+    evaluatorSignals: ["schema_valid", "approval_complete", "evidence_complete"],
+    completionContract: "The result identifies accountable ownership and does not infer authorization from context.",
+  },
+  multi_agent: {
+    workflowId: "multi_agent_coordination",
+    stages: [
+      workflowStage("decompose", "Split the task into bounded specialist contracts with explicit interfaces", ["delegation", "coordination"], [], ["subtasks", "interfaces"], ["schema_valid"]),
+      workflowStage("delegate", "Assign each subtask to an eligible specialist without widening authority", ["delegation"], ["decompose"], ["assignments", "budgets"], ["approval_complete"]),
+      workflowStage("reconcile", "Compare specialist outputs, conflicts, omissions, and provenance", ["consensus", "conflict_resolution"], ["delegate"], ["reconciliation", "conflicts"], ["evidence_complete"]),
+      workflowStage("synthesize", "Produce one accountable synthesis with dissent and uncertainty preserved", ["handoff", "coordination"], ["reconcile"], ["synthesis", "dissent"], ["claim_scope_respected"]),
+    ],
+    routeIntents: ["bounded subtask delegation", "specialist handoff", "conflict reconciliation", "synthesis"],
+    evaluatorSignals: ["schema_valid", "evidence_complete", "claim_scope_respected"],
+    completionContract: "Delegation remains bounded and one accountable effect authority owns any external action.",
+  },
+  multimodal: {
+    workflowId: "multimodal_alignment",
+    stages: [
+      workflowStage("inventory", "Inventory available modalities, resolution, timestamps, and missing inputs", ["document", "cross_modal_alignment"], [], ["modality_inventory", "missing_modalities"], ["evidence_traceable"]),
+      workflowStage("extract", "Extract modality-specific observations without implying unavailable inspection", ["image", "audio", "video", "document"], ["inventory"], ["observations"], ["evidence_complete"]),
+      workflowStage("align", "Align entities, time, scale, and provenance across modalities", ["cross_modal_alignment"], ["extract"], ["alignment", "mismatches"], ["schema_valid"]),
+      workflowStage("uncertainty", "Report blind spots, ambiguity, and modality-specific confidence", ["cross_modal_alignment"], ["align"], ["uncertainty", "blind_spots"], ["uncertainty_reported"]),
+      workflowStage("synthesize", "Synthesize only claims supported by the available aligned modalities", ["document", "cross_modal_alignment"], ["uncertainty"], ["multimodal_summary"], ["claim_scope_respected"]),
+    ],
+    routeIntents: ["modality inventory", "modality-specific extraction", "cross-modal alignment", "blind-spot analysis"],
+    evaluatorSignals: ["evidence_traceable", "uncertainty_reported", "claim_scope_respected"],
+    completionContract: "Every conclusion states which modalities support it and which unavailable inputs limit it.",
+  },
+  cross_domain: {
+    workflowId: "cross_domain_synthesis",
+    stages: [
+      workflowStage("decompose", "Identify the contributing disciplines, questions, and evidence standards", ["routing", "synthesis"], [], ["domain_questions", "standards"], ["schema_valid"]),
+      workflowStage("route", "Route each question to an appropriate capability and preserve route evidence", ["routing"], ["decompose"], ["route", "unresolved_needs"], ["evidence_traceable"]),
+      workflowStage("align", "Align terminology, units, provenance, and disagreement across domains", ["evidence_alignment"], ["route"], ["alignment", "disagreements"], ["claim_scope_respected"]),
+      workflowStage("synthesize", "Synthesize domain-scoped findings without flattening different evidence standards", ["synthesis"], ["align"], ["synthesis", "domain_attributions"], ["evidence_complete"]),
+      workflowStage("gate", "State unresolved conflicts, decision boundaries, and accountable next review", ["workflow_composition"], ["synthesize"], ["decision_gate", "open_questions"], ["uncertainty_reported"]),
+    ],
+    routeIntents: ["domain decomposition", "capability routing", "evidence alignment", "cross-domain synthesis"],
+    evaluatorSignals: ["schema_valid", "evidence_traceable", "evidence_complete", "uncertainty_reported"],
+    completionContract: "Domain-specific claims retain attribution, evidence standards, disagreement, and unresolved boundaries.",
+  },
+  evaluation: {
+    workflowId: "evaluation_reliability",
+    stages: [
+      workflowStage("rubric", "Define the evaluation question, rubric, pass criteria, and evaluator independence", ["rubric"], [], ["rubric", "pass_criteria"], ["schema_valid"]),
+      workflowStage("cases", "Select or construct bounded cases with coverage, controls, and replay identity", ["benchmarking"], ["rubric"], ["cases", "coverage"], ["evidence_complete"]),
+      workflowStage("replay", "Run or inspect reproducible evaluation evidence without letting the subject author its pass signal", ["replay"], ["cases"], ["replay", "outcomes"], ["tests_passed"]),
+      workflowStage("failure", "Analyze failures, regressions, uncertainty, and evaluator disagreement", ["failure_analysis"], ["replay"], ["failures", "regressions"], ["evidence_complete"]),
+      workflowStage("report", "Report bounded conclusions, limitations, and the next learning update", ["reproducibility"], ["failure"], ["evaluation_report", "learning_recommendation"], ["tests_passed", "claim_scope_respected"]),
+    ],
+    routeIntents: ["evaluation rubric", "benchmark coverage", "replay evidence", "failure analysis"],
+    evaluatorSignals: ["schema_valid", "evidence_complete", "tests_passed", "claim_scope_respected"],
+    completionContract: "Pass/fail conclusions are independent, replayable, and bounded by the declared rubric and cases.",
+  },
+};
 
 const COMMON_GUARDRAILS = [
   "separate observations from inferences and recommendations",
@@ -816,73 +1016,73 @@ const PROFILE_SEEDS: ProfileSeed[] = [
   {
     domain: "coding", riskClass: "engineering_change", defaultCapability: "implementation", requiredModelCapabilities: ["reasoning", "code"], capabilities: ["implementation", "debugging", "testing", "review"],
     terms: ["coding", "code", "bug", "debug", "repository", "repo", "pull request", "github", "python", "rust", "typescript", "compile", "build", "test", "tests", "refactor", "implement", "function", "api", "software"],
-    systemInstructions: "Act as a careful software engineering copilot. Produce explicit assumptions, implementation intent, and verification evidence.", evaluatorDomain: "engineering", workflowId: "coding_delivery", stageIds: ["scope", "inspect", "implement", "verify", "handoff"], stageCapabilities: [["review"], ["review", "debugging"], ["implementation"], ["testing"], ["review"]],
+    systemInstructions: "Act as a careful software engineering copilot. Produce explicit assumptions, implementation intent, and verification evidence.", evaluatorDomain: "engineering", workflowId: "coding_delivery",
     toolRows: "repository_catalog=repository_inspection,repository_bundle=repository_inspection,repository_impact=repository_impact_analysis,developer_platform_status=platform_observability,engineering_manifest_audit=engineering_contract_audit,engineering_execution_plan=engineering_planning,release_pipeline_audit=release_readiness,operational_readiness_audit=operational_readiness,developer_workbench=developer_workbench,developer_workbench_verify=developer_workbench_verification,ci_provider_normalize=ci_evidence_normalization,ci_provider_evidence_audit=ci_evidence_audit,ci_execution_evidence_audit=ci_execution_audit,execution_provenance_audit=execution_provenance,developer_delivery_audit=delivery_audit,developer_delivery_receipt=delivery_receipt,developer_delivery_receipt_verify=delivery_receipt_verification,release_audit=release_audit,sdk_registry_check=sdk_registry_audit,conformance_run=conformance_verification,provider_capability_gate=provider_capability_verification,stewardship_review_check=stewardship_review,agent_mission=mission_execution", description: "Repository inspection, engineering planning, delivery evidence, and release readiness.",
   },
   {
     domain: "browser", riskClass: "external_information", defaultCapability: "web_research", requiredModelCapabilities: ["reasoning", "web"], capabilities: ["web_research", "source_comparison", "navigation"],
     terms: ["browser", "web", "webpage", "website", "research online", "search", "source", "citation", "citations", "retrieve", "retrieval", "navigate", "freshness", "current", "url", "internet"],
-    systemInstructions: "Act as a source-aware browser and research assistant. Preserve provenance, freshness, and unresolved retrieval gaps.", evaluatorDomain: "research", workflowId: "browser_research", stageIds: ["scope", "retrieve", "compare", "synthesize"], stageCapabilities: [["web_research"], ["web_research", "navigation"], ["source_comparison"], ["web_research", "source_comparison"]],
+    systemInstructions: "Act as a source-aware browser and research assistant. Preserve provenance, freshness, and unresolved retrieval gaps.", evaluatorDomain: "research", workflowId: "browser_research",
     toolRows: "workspace_capabilities=workspace_capability_discovery,capability_discover=capability_discovery,capability_route=capability_routing,capability_route_review=route_review,capability_route_plan=route_planning,capability_route_plan_verify=route_plan_verification,hub_search=hub_discovery,hub_resolve=hub_resolution,lens_catalogue=lens_discovery,domain_acquisition_catalogue=evidence_acquisition_discovery,repository_catalog=repository_inspection,domain_evidence_source_plan=evidence_source_planning,domain_evidence_coverage=evidence_coverage", description: "Capability discovery, route inspection, hub lookup, and evidence-source planning.",
   },
   {
     domain: "data", riskClass: "data_integrity", defaultCapability: "data_analysis", requiredModelCapabilities: ["reasoning", "data"], capabilities: ["data_analysis", "schema_validation", "lineage", "quality_control"],
     terms: ["data", "dataset", "table", "csv", "parquet", "schema", "lineage", "pipeline", "missingness", "quality", "transform", "join", "cohort", "units", "analytics", "statistics", "query", "warehouse"],
-    systemInstructions: "Act as a data analyst and pipeline designer. Make schemas, transformations, quality gates, and lineage explicit.", evaluatorDomain: "data", workflowId: "data_quality_analysis", stageIds: ["schema", "lineage", "quality", "transform", "report"], stageCapabilities: [["schema_validation"], ["lineage"], ["quality_control", "data_analysis"], ["data_analysis", "schema_validation"], ["quality_control"]],
+    systemInstructions: "Act as a data analyst and pipeline designer. Make schemas, transformations, quality gates, and lineage explicit.", evaluatorDomain: "data", workflowId: "data_quality_analysis",
     toolRows: "world_validate=world_validation,adapter_plan=data_adapter_planning,world_claim_check=world_claim_validation,lineage_audit=lineage_audit,token_context_plan=context_budget_planning,fiber_compile=context_compilation,fiber_refine=context_refinement,fiber_explain=context_explanation,fiber_verify=context_verification,projection_bundle=projection_bundling,obligation_gate_check=obligation_gate,domain_evidence_coverage=evidence_coverage,context_compare=context_comparison,tabular_ingest=tabular_ingestion", description: "World validation, lineage, structured context compilation, and decision-gated data work.",
   },
   {
     domain: "science", riskClass: "scientific_inference", defaultCapability: "scientific_reasoning", requiredModelCapabilities: ["reasoning", "science"], capabilities: ["literature", "hypothesis", "experiment", "statistics", "reproducibility"],
     terms: ["science", "scientific", "research", "hypothesis", "experiment", "causal", "causality", "literature", "paper", "papers", "replicate", "reproducibility", "statistics", "estimand", "prediction", "mechanism", "study design"],
-    systemInstructions: "Act as a rigorous scientific reasoning assistant. Track claims, evidence, alternatives, limitations, and reproducibility requirements.", evaluatorDomain: "research", workflowId: "scientific_inquiry", stageIds: ["question", "evidence", "hypothesis", "design", "reproduce"], stageCapabilities: [["hypothesis"], ["literature"], ["hypothesis", "statistics"], ["experiment", "statistics"], ["reproducibility"]],
+    systemInstructions: "Act as a rigorous scientific reasoning assistant. Track claims, evidence, alternatives, limitations, and reproducibility requirements.", evaluatorDomain: "research", workflowId: "scientific_inquiry",
     toolRows: "literature_bind_check=literature_binding,measurement_compare=measurement_comparison,contradiction_review=contradiction_review,influence_analyze=influence_analysis,lab_plan=laboratory_planning,lab_space_audit=laboratory_space_audit,lab_pareto_audit=laboratory_pareto_audit,lab_branch_audit=laboratory_branch_audit,lab_holdout_audit=laboratory_holdout_audit,lab_evolution_audit=laboratory_evolution_audit,routing_decide=research_routing,routing_lab_run=research_routing_replay,foundation_contract_check=foundation_contract_validation,evaluation_reproduction_check=reproduction_check,epistemic_voi=value_of_information,epistemic_decision_quotient=decision_quotient,epistemic_context_audit=epistemic_context_audit,epistemic_selection_audit=epistemic_selection_audit,epistemic_adaptive_execute=adaptive_acquisition_execution", description: "Literature, measurement, hypothesis, experiment, and reproducibility planning.",
   },
   {
     domain: "biomedical", riskClass: "biomedical_safety", defaultCapability: "biomedical_review", requiredModelCapabilities: ["reasoning", "biomedical"], capabilities: ["biomedical_review", "provenance", "safety_boundary", "human_review"],
     terms: ["biomedical", "medicine", "medical", "clinical", "patient", "diagnosis", "diagnostic", "treatment", "therapy", "drug", "disease", "safety", "clinician", "healthcare", "fhir", "phenotype", "biomarker"],
-    systemInstructions: "Act as a biomedical information and workflow assistant within strict safety boundaries. Surface provenance, uncertainty, and escalation needs.", evaluatorDomain: "biomedical", workflowId: "biomedical_review", stageIds: ["scope", "safety", "provenance", "review", "escalate", "communicate"], stageCapabilities: [["biomedical_review", "safety_boundary"], ["safety_boundary"], ["provenance"], ["biomedical_review"], ["human_review"], ["biomedical_review"]],
+    systemInstructions: "Act as a biomedical information and workflow assistant within strict safety boundaries. Surface provenance, uncertainty, and escalation needs.", evaluatorDomain: "biomedical", workflowId: "biomedical_review",
     toolRows: "bioworlds_catalog=biological_world_catalogue,world_validate=world_validation,modality_catalog=modality_catalogue,modality_support_check=modality_support,modality_transport_check=modality_transport,modality_comparability_check=modality_comparability,literature_bind_check=literature_binding,measurement_compare=measurement_comparison,contradiction_review=contradiction_review,bioql_compile=biomedical_query_compilation,medical_boundary_check=medical_boundary,bioethics_action_review=bioethics_action_review,bioethics_human_subject_screen=human_subject_screening,bioethics_dual_use_review=dual_use_review,bioethics_validation_check=bioethics_validation,bioethics_representation_audit=representation_audit,bioeval_reference_audit=biomedical_reference_audit,bioeval_grounding_audit=biomedical_grounding_audit,bioeval_estimand_audit=biomedical_estimand_audit,onco_boundary_check=oncology_boundary,onco_response_assess=oncology_response_assessment,onco_worldline_view=oncology_worldline,onco_classification_check=oncology_classification,onco_outcome_analyze=oncology_outcome_analysis,world_generate=biological_world_generation", description: "Biomedical evidence, safety boundaries, modality checks, and human-review escalation.",
   },
   {
     domain: "neuroscience", riskClass: "neuroscience_inference", defaultCapability: "neuroscience_analysis", requiredModelCapabilities: ["reasoning", "science"], capabilities: ["neuroscience_analysis", "signal_interpretation", "study_design", "reproducibility"],
     terms: ["neuroscience", "neural", "brain", "neuron", "eeg", "fmri", "meg", "neuroimaging", "electrophysiology", "cognitive", "cognition", "signal", "preprocessing", "connectome", "neurobiology", "neural signal"],
-    systemInstructions: "Act as a neuroscience research assistant. Separate measurement, preprocessing, model interpretation, and biological claims.", evaluatorDomain: "biomedical", workflowId: "neuroscience_analysis", stageIds: ["measurement", "preprocess", "model", "biology", "reproduce"], stageCapabilities: [["neuroscience_analysis"], ["signal_interpretation"], ["neuroscience_analysis", "signal_interpretation"], ["neuroscience_analysis"], ["study_design", "reproducibility"]],
+    systemInstructions: "Act as a neuroscience research assistant. Separate measurement, preprocessing, model interpretation, and biological claims.", evaluatorDomain: "biomedical", workflowId: "neuroscience_analysis",
     toolRows: "modality_catalog=modality_catalogue,modality_support_check=modality_support,modality_transport_check=modality_transport,modality_comparability_check=modality_comparability,measurement_compare=measurement_comparison,trace_analyze=trajectory_trace_analysis,benchmark_trace_analyze=benchmark_trace_analysis,influence_analyze=influence_analysis,lab_holdout_audit=laboratory_holdout_audit,evaluation_trajectory_check=trajectory_evaluation,epistemic_voi=value_of_information", description: "Neural measurement, signal interpretation, study design, and reproducibility.",
   },
   {
     domain: "operations", riskClass: "operational_effect", defaultCapability: "operations_planning", requiredModelCapabilities: ["reasoning", "operations"], capabilities: ["runbook", "incident_response", "observability", "risk_review", "rollback", "approval"],
     terms: ["operations", "ops", "incident", "outage", "runbook", "deployment", "deploy", "rollback", "recovery", "reliability", "observability", "telemetry", "on call", "production", "blast radius", "change management", "sre"],
-    systemInstructions: "Act as a reliability and operations planner. Make blast radius, rollback, approvals, and observability concrete.", evaluatorDomain: "operations", workflowId: "operations_change", stageIds: ["observe", "impact", "approval", "change", "handoff"], stageCapabilities: [["observability", "incident_response"], ["risk_review", "rollback"], ["approval"], ["rollback", "runbook"], ["runbook"]],
+    systemInstructions: "Act as a reliability and operations planner. Make blast radius, rollback, approvals, and observability concrete.", evaluatorDomain: "operations", workflowId: "operations_change",
     toolRows: "operations_catalog=operations_catalogue,ops_acceptance=operations_acceptance,ops_capacity=capacity_assessment,quality_gate_run=quality_gate,telemetry_project=telemetry_projection,registry_gate=registry_gate,registry_lifecycle_simulate=registry_lifecycle_simulation,cache_invalidation_simulate=cache_invalidation_simulation,storage_lifecycle_simulate=storage_lifecycle_simulation,release_audit=release_audit,artifact_registry_audit=artifact_registry_audit,runtime_effect_check=runtime_effect_check,runtime_tape_verify=runtime_tape_verification,operational_readiness_audit=operational_readiness,factory_lifecycle_simulate=factory_lifecycle_simulation,factory_authority_verify=factory_authority_verification,ledger_ingest=ledger_ingestion", description: "Incident response, observability, reversible change planning, and operational readiness.",
   },
   {
     domain: "enterprise", riskClass: "enterprise_governance", defaultCapability: "enterprise_workflow", requiredModelCapabilities: ["reasoning", "enterprise"], capabilities: ["workflow", "governance", "compliance", "analytics", "coordination"],
     terms: ["enterprise", "business", "organization", "stakeholder", "governance", "compliance", "policy", "approval", "approver", "owner", "workflow", "decision", "procurement", "audit", "risk register", "roadmap"],
-    systemInstructions: "Act as an enterprise workflow assistant. Optimize for traceability, ownership, policy alignment, and reversible decisions.", evaluatorDomain: "operations", workflowId: "enterprise_governance", stageIds: ["request", "policy", "options", "decision", "audit"], stageCapabilities: [["workflow", "coordination"], ["governance", "compliance"], ["analytics", "governance"], ["coordination"], ["governance", "analytics"]],
+    systemInstructions: "Act as an enterprise workflow assistant. Optimize for traceability, ownership, policy alignment, and reversible decisions.", evaluatorDomain: "operations", workflowId: "enterprise_governance",
     toolRows: "policy_screen=policy_screening,safety_posture=safety_posture,security_redteam_simulate=security_redteam_simulation,safety_release_gate=safety_release_gate,medical_boundary_check=medical_boundary,bioethics_dual_use_review=dual_use_review,governance_schema_check=governance_schema,security_privacy_audit=security_privacy_audit,sandbox_admission_audit=sandbox_admission,sandbox_runtime_simulate=sandbox_runtime_simulation,security_program_audit=security_program_audit,provider_capability_gate=provider_capability_verification,stewardship_review_check=stewardship_review,release_audit=release_audit,hub_submission_review=hub_submission_review,hub_disclosure_review=hub_disclosure_review,hub_lock=hub_lock", description: "Governance, compliance, security, ownership, and accountable enterprise decisions.",
   },
   {
     domain: "multi_agent", riskClass: "coordination", defaultCapability: "agent_coordination", requiredModelCapabilities: ["reasoning", "coordination"], capabilities: ["delegation", "coordination", "consensus", "handoff", "conflict_resolution"],
     terms: ["multi agent", "multi-agent", "delegate", "delegation", "specialist", "team of agents", "consensus", "handoff", "coordination", "conflict resolution", "subtask", "parallel agents", "agent team"],
-    systemInstructions: "Act as a coordinator of bounded specialist agents. Define contracts, dependencies, conflict handling, and synthesis criteria.", evaluatorDomain: "engineering", workflowId: "multi_agent_coordination", stageIds: ["decompose", "delegate", "reconcile", "synthesize"], stageCapabilities: [["delegation", "coordination"], ["delegation"], ["consensus", "conflict_resolution"], ["handoff", "coordination"]],
+    systemInstructions: "Act as a coordinator of bounded specialist agents. Define contracts, dependencies, conflict handling, and synthesis criteria.", evaluatorDomain: "engineering", workflowId: "multi_agent_coordination",
     toolRows: "weave_protocol_catalog=protocol_catalogue,weavelang_compile=protocol_compilation,choreography_check=choreography_validation,fabric_synthesize=multi_agent_synthesis,interweave_workflow_catalogue=workflow_catalogue,mission_evaluator_discover=mission_evaluator_discovery,mission_evaluator_review=mission_evaluator_review,mission_evaluator_replay=mission_evaluator_replay,mission_evaluator_replay_compare=mission_evaluator_replay_comparison,mission_evidence_bundle_verify=mission_evidence_verification,mission_evidence_bundle_import=mission_evidence_import,mission_evidence_bundle_query=mission_evidence_query,mission_evidence_bundle_get=mission_evidence_lookup,interweave_workflow_execute=workflow_execution,agent_mission=mission_execution", description: "Bounded delegation, specialist coordination, evidence reconciliation, and accountable synthesis.",
   },
   {
     domain: "multimodal", riskClass: "multimodal_interpretation", defaultCapability: "multimodal_analysis", requiredModelCapabilities: ["reasoning", "multimodal"], capabilities: ["image", "audio", "video", "document", "cross_modal_alignment"],
     terms: ["multimodal", "multi-modal", "image", "images", "audio", "video", "document", "documents", "scan", "screenshot", "transcript", "vision", "cross-modal", "modality", "align modalities"],
-    systemInstructions: "Act as a multimodal analysis assistant. Track which modalities were available, what each supports, and where alignment is uncertain.", evaluatorDomain: "research", workflowId: "multimodal_alignment", stageIds: ["inventory", "extract", "align", "uncertainty", "synthesize"], stageCapabilities: [["document", "cross_modal_alignment"], ["image", "audio", "video", "document"], ["cross_modal_alignment"], ["cross_modal_alignment"], ["document", "cross_modal_alignment"]],
+    systemInstructions: "Act as a multimodal analysis assistant. Track which modalities were available, what each supports, and where alignment is uncertain.", evaluatorDomain: "research", workflowId: "multimodal_alignment",
     toolRows: "modality_catalog=modality_catalogue,modality_support_check=modality_support,modality_transport_check=modality_transport,modality_comparability_check=modality_comparability,literature_bind_check=literature_binding,measurement_compare=measurement_comparison,projection_bundle=projection_bundling,lens_catalogue=lens_discovery,hub_card_render=hub_card_rendering,context_compare=context_comparison", description: "Modality inventory, extraction, alignment, and explicit blind-spot reporting.",
   },
   {
     domain: "cross_domain", riskClass: "cross_domain_integration", defaultCapability: "cross_domain_synthesis", requiredModelCapabilities: ["reasoning", "coordination"], capabilities: ["routing", "synthesis", "evidence_alignment", "workflow_composition"],
     terms: ["cross domain", "cross-domain", "interdisciplinary", "integrate domains", "synthesize domains", "multiple disciplines", "combined analysis", "domain synthesis", "route domains", "compare disciplines"],
-    systemInstructions: "Act as a cross-domain synthesis planner. Route work to the right capability, preserve each domain's evidence standard, and expose conflicts.", evaluatorDomain: "research", workflowId: "cross_domain_synthesis", stageIds: ["decompose", "route", "align", "synthesize", "gate"], stageCapabilities: [["routing", "synthesis"], ["routing"], ["evidence_alignment"], ["synthesis"], ["workflow_composition"]],
+    systemInstructions: "Act as a cross-domain synthesis planner. Route work to the right capability, preserve each domain's evidence standard, and expose conflicts.", evaluatorDomain: "research", workflowId: "cross_domain_synthesis",
     toolRows: "workspace_capabilities=workspace_capability_discovery,capability_discover=capability_discovery,capability_route=capability_routing,capability_route_review=route_review,capability_route_plan=route_planning,capability_route_plan_verify=route_plan_verification,domain_workflow_catalogue=workflow_catalogue,domain_workflow_scaffold=workflow_scaffolding,domain_workflow_instantiate=workflow_instantiation,domain_workflow_portfolio=workflow_portfolio,domain_workflow_portfolio_verify=workflow_portfolio_verification,domain_workflow_verify=workflow_verification,domain_evidence_intake=evidence_intake,domain_evidence_coverage=evidence_coverage,domain_evidence_source_plan=evidence_source_planning,control_plane_readiness_audit=control_plane_readiness,provider_normalize=provider_normalization,provider_replay=provider_replay,domain_evidence_source_execute=evidence_source_execution", description: "Routing, workflow composition, evidence alignment, and cross-domain control-plane readiness.",
   },
   {
     domain: "evaluation", riskClass: "evaluation_integrity", defaultCapability: "agent_evaluation", requiredModelCapabilities: ["reasoning", "evaluation"], capabilities: ["benchmarking", "rubric", "replay", "failure_analysis", "reproducibility"],
     terms: ["evaluation", "evaluate", "benchmark", "benchmarking", "rubric", "grader", "held out", "holdout", "replay", "regression", "failure analysis", "test harness", "score", "quality assessment", "red team"],
-    systemInstructions: "Act as an evaluation and reliability analyst. Keep test inputs, evaluator policy, outcomes, and conclusions separate.", evaluatorDomain: "engineering", workflowId: "evaluation_reliability", stageIds: ["rubric", "cases", "replay", "failure", "report"], stageCapabilities: [["rubric"], ["benchmarking"], ["replay"], ["failure_analysis"], ["reproducibility"]],
+    systemInstructions: "Act as an evaluation and reliability analyst. Keep test inputs, evaluator policy, outcomes, and conclusions separate.", evaluatorDomain: "engineering", workflowId: "evaluation_reliability",
     toolRows: "context_compare=context_comparison,prism_minimize=evaluation_minimization,adaptive_panel=adaptive_evaluation_panel,posterior_gate=posterior_gate,evaluation_worldline_audit=worldline_evaluation,evaluation_reproduction_check=reproduction_check,evaluation_trajectory_check=trajectory_evaluation,benchmark_trace_analyze=benchmark_trace_analysis,benchmark_decision_audit=benchmark_decision_audit,benchmark_integrity_audit=benchmark_integrity_audit,benchmark_counterfactual_check=benchmark_counterfactual,benchmark_oracle_review=benchmark_oracle_review,benchmark_compile=benchmark_compilation,benchmark_compile_review=benchmark_compilation_review,oracle_combine=oracle_combination,oracle_reference_panel=oracle_reference_panel,oracle_missingness=oracle_missingness,research_ci_check=research_ci,metrics_profile_audit=metrics_profile_audit,metrics_analytics_audit=metrics_analytics_audit,bioeval_reference_audit=biomedical_reference_audit,bioeval_grounding_audit=biomedical_grounding_audit,epistemic_adaptive_execute=adaptive_acquisition_execution", description: "Rubrics, benchmarks, replay, failure analysis, and reproducibility evidence.",
   },
 ];
@@ -967,28 +1167,17 @@ function parseToolRows(seed: ProfileSeed): AutonomousDomainToolBinding[] {
   });
 }
 
-function makeStages(seed: ProfileSeed): AutonomousWorkflowStage[] {
-  return seed.stageIds.map((id, index) => ({
-    id,
-    objective: `${id[0]?.toUpperCase() ?? id} ${seed.domain} work with explicit evidence, uncertainty, and review boundaries`,
-    required_capabilities: [...(seed.stageCapabilities[index] ?? [seed.defaultCapability])],
-    depends_on: index === 0 ? [] : [seed.stageIds[index - 1] as string],
-    evidence_outputs: [`${id}_evidence`, `${id}_uncertainty`],
-    evaluator_signals: [id === "verify" || id === "replay" || id === "reproduce" ? "tests_passed" : "evidence_complete"],
-    read_only: true,
-    approval_required: false,
-  }));
-}
-
 async function makeWorkflow(seed: ProfileSeed): Promise<AutonomousWorkflow> {
+  const contract = WORKFLOW_CONTRACTS[seed.domain];
+  if (!contract || contract.workflowId !== seed.workflowId) throw new ArgumentError(`missing workflow contract for ${seed.domain}`);
   const descriptor = {
     schema: AUTONOMOUS_WORKFLOW_SCHEMA,
-    workflow_id: seed.workflowId,
+    workflow_id: contract.workflowId,
     domain: seed.domain,
-    stages: makeStages(seed),
-    route_intents: seed.stageIds.map((stage) => `${seed.domain}:${stage}`),
-    evaluator_signals: ["schema_valid", "evidence_complete", "tests_passed"],
-    completion_contract: "Every recommendation has bounded scope, explicit evidence, and reported verification status.",
+    stages: contract.stages.map((stage) => ({ ...stage, required_capabilities: [...stage.required_capabilities], depends_on: [...stage.depends_on], evidence_outputs: [...stage.evidence_outputs], evaluator_signals: [...stage.evaluator_signals] })),
+    route_intents: [...contract.routeIntents],
+    evaluator_signals: [...contract.evaluatorSignals],
+    completion_contract: contract.completionContract,
   };
   return { ...descriptor, workflow_digest: await digestJson(descriptor), execution: "strategy_metadata_only" };
 }
