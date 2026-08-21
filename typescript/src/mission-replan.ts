@@ -9,6 +9,8 @@ import {
   type AutonomousMissionLearningSettlement,
   type AutonomousMissionStatus,
 } from "./mission-execution.js";
+import { AutonomousCostBudget, type AutonomousCostBudgetSnapshot } from "./llm.js";
+import type { AutonomousRouteProposal } from "./autonomous.js";
 import { digestJson } from "./tooling.js";
 import type { AutonomousEvaluatorRewardInput } from "./autonomous-learning.js";
 import type { AgentMissionArgs, AgentMissionStep, JsonObject } from "./types.js";
@@ -81,6 +83,7 @@ export interface AutonomousMissionReplanAttempt extends JsonObject {
   evaluation_digest: string | null;
   learning_trajectory_id: string | null;
   replan_instruction_digest: string | null;
+  route_digest?: string | null;
 }
 
 export interface AutonomousMissionReplanCheckpoint extends JsonObject {
@@ -95,6 +98,8 @@ export interface AutonomousMissionReplanCheckpoint extends JsonObject {
   evaluation_digest: string | null;
   replan_instruction_digest: string | null;
   learning_trajectory_id: string | null;
+  route_digest?: string | null;
+  cost_budget?: AutonomousCostBudgetSnapshot | null;
   checkpoint_digest: string;
   retention: "metadata_only_no_arguments_outputs_credentials_or_provider_material";
   secret_material: "never_returned";
@@ -114,6 +119,10 @@ export interface AutonomousMissionReplanState {
   attempts: AutonomousMissionReplanAttempt[];
   evaluations: AutonomousMissionReplanEvaluationProjection[];
   learning_settlements: AutonomousMissionLearningSettlement[];
+  /** Digest of the approved route shared across all attempts; route material is caller-owned. */
+  route_digest?: string | null;
+  /** Metadata-only aggregate accounting; provider payloads and credentials are excluded. */
+  cost_budget?: AutonomousCostBudgetSnapshot | null;
   last_mission_checkpoint_digest: string | null;
   generation: number;
   previous_state_digest: string | null;
@@ -201,6 +210,8 @@ export interface AutonomousMissionReplanResult {
   attempts: AutonomousMissionReplanAttempt[];
   evaluations: AutonomousMissionReplanEvaluationProjection[];
   learning_settlements: AutonomousMissionLearningSettlement[];
+  route_digest: string | null;
+  cost_budget: AutonomousCostBudgetSnapshot | null;
   replan_count: number;
   final_execution: AutonomousMissionExecutionResult;
   retention: "provider_responses_local;replan_instructions_transient;value_only_evaluation_and_learning_projection";
@@ -225,6 +236,20 @@ function boundedDigest(name: string, value: unknown, allowNull = false): string 
   if (allowNull && (value === null || value === undefined)) return null;
   if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new AutonomousMissionReplanError(`${name} must be a lowercase SHA-256 digest`);
   return value;
+}
+
+function boundedCostBudgetSnapshot(name: string, value: unknown, allowNull = true): AutonomousCostBudgetSnapshot | null {
+  if (allowNull && (value === null || value === undefined)) return null;
+  if (!isObject(value)) throw new AutonomousMissionReplanError(`${name} must be a cost budget snapshot`);
+  assertKnownKeys(name, value, ["max_cost_units", "consumed_cost_units", "remaining_cost_units"]);
+  try {
+    const budget = AutonomousCostBudget.fromSnapshot(value as unknown as AutonomousCostBudgetSnapshot);
+    const normalized = budget.snapshot();
+    if (JSON.stringify(normalized) !== JSON.stringify(value)) throw new Error("snapshot normalization mismatch");
+    return normalized;
+  } catch {
+    throw new AutonomousMissionReplanError(`${name} is malformed`);
+  }
 }
 
 function boundedReward(name: string, value: unknown): number {
@@ -368,6 +393,8 @@ async function checkpoint(
   evaluationDigest: string | null,
   instructionDigest: string | null,
   learningTrajectoryId: string | null,
+  routeDigest: string | null,
+  costBudget: AutonomousCostBudgetSnapshot | null,
 ): Promise<AutonomousMissionReplanCheckpoint> {
   const descriptor = {
     schema: AUTONOMOUS_MISSION_REPLAN_CHECKPOINT_SCHEMA,
@@ -381,6 +408,8 @@ async function checkpoint(
     evaluation_digest: evaluationDigest,
     replan_instruction_digest: instructionDigest,
     learning_trajectory_id: learningTrajectoryId,
+    route_digest: routeDigest,
+    cost_budget: costBudget,
     retention: CHECKPOINT_RETENTION,
     secret_material: "never_returned" as const,
   };
@@ -430,6 +459,8 @@ function result(
   evaluations: AutonomousMissionReplanEvaluationProjection[],
   settlements: AutonomousMissionLearningSettlement[],
   finalExecution: AutonomousMissionExecutionResult,
+  routeDigest: string | null,
+  costBudget: AutonomousCostBudgetSnapshot | null,
 ): AutonomousMissionReplanResult {
   return {
     schema: AUTONOMOUS_MISSION_REPLAN_SCHEMA,
@@ -439,6 +470,8 @@ function result(
     attempts,
     evaluations,
     learning_settlements: settlements,
+    route_digest: routeDigest,
+    cost_budget: costBudget,
     replan_count: Math.max(0, attempts.length - 1),
     final_execution: finalExecution,
     retention: RETENTION,
@@ -462,6 +495,8 @@ export async function validateAutonomousMissionReplanCheckpoint(value: unknown):
   boundedDigest("replan checkpoint evaluation_digest", checkpoint.evaluation_digest, true);
   boundedDigest("replan checkpoint replan_instruction_digest", checkpoint.replan_instruction_digest, true);
   if (checkpoint.learning_trajectory_id !== null) boundedIdentifier("replan checkpoint learning_trajectory_id", checkpoint.learning_trajectory_id);
+  if (checkpoint.route_digest !== undefined) boundedDigest("replan checkpoint route_digest", checkpoint.route_digest, true);
+  if (checkpoint.cost_budget !== undefined) boundedCostBudgetSnapshot("replan checkpoint cost_budget", checkpoint.cost_budget, true);
   boundedDigest("replan checkpoint checkpoint_digest", checkpoint.checkpoint_digest);
   const descriptor = {
     schema: checkpoint.schema,
@@ -475,6 +510,8 @@ export async function validateAutonomousMissionReplanCheckpoint(value: unknown):
     evaluation_digest: checkpoint.evaluation_digest,
     replan_instruction_digest: checkpoint.replan_instruction_digest,
     learning_trajectory_id: checkpoint.learning_trajectory_id,
+    ...(checkpoint.route_digest === undefined ? {} : { route_digest: checkpoint.route_digest }),
+    ...(checkpoint.cost_budget === undefined ? {} : { cost_budget: checkpoint.cost_budget }),
     retention: checkpoint.retention,
     secret_material: checkpoint.secret_material,
   };
@@ -569,7 +606,7 @@ async function validateEvaluationProjection(value: unknown, index: number): Prom
 function validateAttempt(value: unknown, index: number): AutonomousMissionReplanAttempt {
   if (!isObject(value)) throw new AutonomousMissionReplanError(`mission replan attempt ${index} must be an object`);
   const attempt = value as unknown as AutonomousMissionReplanAttempt;
-  assertKnownKeys(`mission replan attempt ${index}`, attempt, ["attempt", "mission_id", "status", "next_wave", "completed_steps", "succeeded_steps", "failed_steps", "evaluation_digest", "learning_trajectory_id", "replan_instruction_digest"]);
+  assertKnownKeys(`mission replan attempt ${index}`, attempt, ["attempt", "mission_id", "status", "next_wave", "completed_steps", "succeeded_steps", "failed_steps", "evaluation_digest", "learning_trajectory_id", "replan_instruction_digest", "route_digest"]);
   boundedCount(`mission replan attempt ${index}.attempt`, attempt.attempt, AUTONOMOUS_MISSION_REPLAN_MAX_ATTEMPTS);
   boundedIdentifier(`mission replan attempt ${index}.mission_id`, attempt.mission_id);
   if (!AUTONOMOUS_MISSION_STATUSES.includes(attempt.status)) throw new AutonomousMissionReplanError(`mission replan attempt ${index}.status is invalid`);
@@ -581,6 +618,7 @@ function validateAttempt(value: unknown, index: number): AutonomousMissionReplan
   boundedDigest(`mission replan attempt ${index}.evaluation_digest`, attempt.evaluation_digest, true);
   if (attempt.learning_trajectory_id !== null) boundedIdentifier(`mission replan attempt ${index}.learning_trajectory_id`, attempt.learning_trajectory_id);
   boundedDigest(`mission replan attempt ${index}.replan_instruction_digest`, attempt.replan_instruction_digest, true);
+  if (attempt.route_digest !== undefined) boundedDigest(`mission replan attempt ${index}.route_digest`, attempt.route_digest, true);
   if (attempt.succeeded_steps + attempt.failed_steps > attempt.completed_steps) throw new AutonomousMissionReplanError(`mission replan attempt ${index} step counts are inconsistent`);
   return structuredClone(attempt);
 }
@@ -594,7 +632,7 @@ function stateDescriptor(state: AutonomousMissionReplanState): JsonObject {
 export async function validateAutonomousMissionReplanState(value: unknown): Promise<AutonomousMissionReplanState> {
   if (!isObject(value)) throw new AutonomousMissionReplanError("mission replan state must be an object");
   const state = value as unknown as AutonomousMissionReplanState;
-  assertKnownKeys("mission replan state", state as unknown as Record<string, unknown>, ["schema", "root_mission_id", "protected_contract_digest", "max_replans", "attempt", "current_mission_id", "mission_request_digest", "phase", "replan_instruction_digest", "terminal_status", "attempts", "evaluations", "learning_settlements", "last_mission_checkpoint_digest", "generation", "previous_state_digest", "state_digest", "retention", "secret_material"]);
+  assertKnownKeys("mission replan state", state as unknown as Record<string, unknown>, ["schema", "root_mission_id", "protected_contract_digest", "max_replans", "attempt", "current_mission_id", "mission_request_digest", "phase", "replan_instruction_digest", "terminal_status", "attempts", "evaluations", "learning_settlements", "route_digest", "cost_budget", "last_mission_checkpoint_digest", "generation", "previous_state_digest", "state_digest", "retention", "secret_material"]);
   if (state.schema !== AUTONOMOUS_MISSION_REPLAN_STATE_SCHEMA || state.retention !== "metadata_only_no_arguments_outputs_credentials_provider_material_or_raw_instructions" || state.secret_material !== "never_returned") throw new AutonomousMissionReplanError("mission replan state retention markers are invalid");
   boundedIdentifier("mission replan state root_mission_id", state.root_mission_id);
   boundedDigest("mission replan state protected_contract_digest", state.protected_contract_digest);
@@ -606,6 +644,8 @@ export async function validateAutonomousMissionReplanState(value: unknown): Prom
   boundedDigest("mission replan state mission_request_digest", state.mission_request_digest, true);
   if (!["execution_pending", "evaluation_pending", "replan_handoff", "terminal"].includes(state.phase)) throw new AutonomousMissionReplanError("mission replan state phase is invalid");
   boundedDigest("mission replan state replan_instruction_digest", state.replan_instruction_digest, true);
+  if (state.route_digest !== undefined) boundedDigest("mission replan state route_digest", state.route_digest, true);
+  if (state.cost_budget !== undefined) boundedCostBudgetSnapshot("mission replan state cost_budget", state.cost_budget, true);
   if (state.terminal_status !== null && !["completed", "completed_without_replan", "replan_limit_reached", ...AUTONOMOUS_MISSION_STATUSES].includes(state.terminal_status)) throw new AutonomousMissionReplanError("mission replan state terminal status is invalid");
   boundedDigest("mission replan state last_mission_checkpoint_digest", state.last_mission_checkpoint_digest, true);
   boundedCount("mission replan state generation", state.generation, Number.MAX_SAFE_INTEGER);
@@ -621,6 +661,8 @@ export async function validateAutonomousMissionReplanState(value: unknown): Prom
     if (!attemptIds.add(attempt.attempt) || attempt.attempt > state.attempt) throw new AutonomousMissionReplanError("mission replan state contains duplicate or future attempts");
     if (attempt.mission_id !== expectedMissionId(state.root_mission_id, attempt.attempt)) throw new AutonomousMissionReplanError("mission replan state attempt identity is inconsistent with its root");
   }
+  const attemptRouteDigests = [...new Set(attempts.map((attempt) => attempt.route_digest ?? null).filter((digest): digest is string => digest !== null))];
+  if (attemptRouteDigests.length > 1 || (state.route_digest !== undefined && state.route_digest !== null && attemptRouteDigests.some((digest) => digest !== state.route_digest))) throw new AutonomousMissionReplanError("mission replan state attempts do not share one route identity");
   if (attempts.some((attempt, index) => attempt.attempt !== index + 1)) throw new AutonomousMissionReplanError("mission replan state attempts are not contiguous");
   const evaluations: AutonomousMissionReplanEvaluationProjection[] = [];
   for (let index = 0; index < state.evaluations.length; index += 1) evaluations.push(await validateEvaluationProjection(state.evaluations[index], index));
@@ -751,6 +793,42 @@ export async function runAutonomousMissionReplanCycle(
   let terminalStatus = persisted?.terminal_status ?? null;
   let finalExecution: AutonomousMissionExecutionResult | null = null;
   let persistedState: AutonomousMissionReplanState | null = persisted;
+  let routeDigest = persisted?.route_digest ?? null;
+  let routeOverride: AutonomousRouteProposal | null = options.execute?.routeOverride ?? null;
+  if (routeDigest !== null && routeOverride !== null && routeOverride.route_digest !== routeDigest) throw new AutonomousMissionReplanContractError("supplied mission route override does not match the persisted route digest");
+  if (routeDigest !== null && routeOverride === null) throw new AutonomousMissionReplanError("stored mission replan state requires caller-owned routeOverride for route recovery; semantic routing is never replayed implicitly");
+
+  const executeTemplate = options.execute ?? {};
+  if (executeTemplate.costBudget !== undefined && executeTemplate.maxTotalCostUnits !== undefined) throw new AutonomousMissionReplanError("mission replan execute options cannot combine costBudget and maxTotalCostUnits");
+  let sharedCostBudget = executeTemplate.costBudget;
+  if (persisted?.cost_budget !== undefined && persisted.cost_budget !== null) {
+    const persistedBudget = AutonomousCostBudget.fromSnapshot(boundedCostBudgetSnapshot("persisted mission replan cost_budget", persisted.cost_budget, false)!);
+    if (sharedCostBudget !== undefined) {
+      if (JSON.stringify(sharedCostBudget.snapshot()) !== JSON.stringify(persistedBudget.snapshot())) throw new AutonomousMissionReplanContractError("supplied mission cost budget does not match the persisted accounting");
+    } else if (executeTemplate.maxTotalCostUnits !== undefined && executeTemplate.maxTotalCostUnits !== persistedBudget.maxCostUnits) {
+      throw new AutonomousMissionReplanContractError("supplied mission maxTotalCostUnits does not match the persisted accounting");
+    } else {
+      sharedCostBudget = persistedBudget;
+    }
+  } else if (sharedCostBudget === undefined && executeTemplate.maxTotalCostUnits !== undefined) {
+    sharedCostBudget = new AutonomousCostBudget(executeTemplate.maxTotalCostUnits);
+  }
+  const executeBase: Omit<AutonomousMissionExecuteOptions, "signal" | "execution_attempt"> = sharedCostBudget === undefined
+    ? executeTemplate
+    : { ...executeTemplate, costBudget: sharedCostBudget, maxTotalCostUnits: undefined };
+  const executeOptions = (attemptNumber: number): AutonomousMissionExecuteOptions => ({
+    ...executeBase,
+    ...(routeOverride === null ? {} : { routeOverride, semanticRouting: undefined }),
+    execution_attempt: attemptNumber,
+    signal: options.signal,
+  });
+  const observeExecutionRoute = (execution: AutonomousMissionExecutionResult): void => {
+    const observed = execution.route?.route_digest ?? null;
+    if (observed === null) return;
+    if (routeDigest !== null && routeDigest !== observed) throw new AutonomousMissionReplanContractError("mission execution changed the persisted route identity");
+    routeDigest = observed;
+    if (routeOverride === null && execution.semantic_route_status === "completed" && execution.route !== null) routeOverride = execution.route;
+  };
 
   if (persisted && persisted.current_mission_id !== rootMissionId) {
     if (!options.rehydrateMission) throw new AutonomousMissionReplanError("resume requires caller-owned mission rehydration for the current non-root attempt");
@@ -774,8 +852,12 @@ export async function runAutonomousMissionReplanCycle(
     missionRequestDigest: string | null;
     replanInstructionDigest: string | null;
     lastMissionCheckpointDigest: string | null;
+    routeDigest?: string | null;
+    costBudget?: AutonomousCostBudgetSnapshot | null;
   }): Promise<void> => {
     if (!stateStore) return;
+    const nextRouteDigest = Object.prototype.hasOwnProperty.call(next, "routeDigest") ? next.routeDigest ?? null : routeDigest;
+    const nextCostBudget = Object.prototype.hasOwnProperty.call(next, "costBudget") ? next.costBudget ?? null : sharedCostBudget?.snapshot() ?? null;
     const descriptor = {
       schema: AUTONOMOUS_MISSION_REPLAN_STATE_SCHEMA,
       root_mission_id: rootMissionId,
@@ -790,6 +872,8 @@ export async function runAutonomousMissionReplanCycle(
       attempts: structuredClone(attempts),
       evaluations: structuredClone(evaluations),
       learning_settlements: structuredClone(settlements),
+      route_digest: nextRouteDigest,
+      cost_budget: nextCostBudget,
       last_mission_checkpoint_digest: next.lastMissionCheckpointDigest,
       generation: (persistedState?.generation ?? 0) + 1,
       previous_state_digest: persistedState?.state_digest ?? null,
@@ -803,6 +887,7 @@ export async function runAutonomousMissionReplanCycle(
     terminalStatus = next.terminalStatus;
     missionRequestDigest = next.missionRequestDigest;
     replanInstructionDigest = next.replanInstructionDigest;
+    routeDigest = nextRouteDigest;
     lastMissionCheckpointDigest = next.lastMissionCheckpointDigest;
   };
 
@@ -813,7 +898,7 @@ export async function runAutonomousMissionReplanCycle(
     instructionDigest: string | null,
     trajectoryId: string | null,
   ): Promise<AutonomousMissionReplanCheckpoint> => {
-    const row = await checkpoint(rootMissionId, protectedContractDigest, attempt, current, execution, checkpointPhase, evaluationDigest, instructionDigest, trajectoryId);
+    const row = await checkpoint(rootMissionId, protectedContractDigest, attempt, current, execution, checkpointPhase, evaluationDigest, instructionDigest, trajectoryId, routeDigest, sharedCostBudget?.snapshot() ?? null);
     if (options.checkpointSink) await options.checkpointSink(row);
     return row;
   };
@@ -821,8 +906,9 @@ export async function runAutonomousMissionReplanCycle(
   while (true) {
     if (phase === "terminal") {
       if (!terminalStatus) throw new AutonomousMissionReplanError("terminal mission replan state is missing its result status");
-      finalExecution ??= await executor.start(current, { ...(options.execute ?? {}), execution_attempt: attempt, signal: options.signal });
-      return result(terminalStatus, rootMissionId, protectedContractDigest, attempts, evaluations, settlements, finalExecution);
+      finalExecution ??= await executor.start(current, executeOptions(attempt));
+      observeExecutionRoute(finalExecution);
+      return result(terminalStatus, rootMissionId, protectedContractDigest, attempts, evaluations, settlements, finalExecution, routeDigest, sharedCostBudget?.snapshot() ?? null);
     }
 
     if (phase === "replan_handoff") {
@@ -831,7 +917,8 @@ export async function runAutonomousMissionReplanCycle(
       if (!options.rehydrateReplanInstruction) throw new AutonomousMissionReplanError("resume requires caller-owned replan instruction rehydration; raw evaluator guidance is never persisted");
       const instruction = screenInstruction(await options.rehydrateReplanInstruction({ root_mission_id: rootMissionId, mission_id: current.mission_id, attempt, instruction_digest: replanInstructionDigest, evaluation: structuredClone(projection) }));
       if (!instruction || await digestJson(instruction) !== replanInstructionDigest) throw new AutonomousMissionReplanContractError("rehydrated replan instruction does not match its stored digest");
-      finalExecution = await executor.start(current, { ...(options.execute ?? {}), execution_attempt: attempt, signal: options.signal });
+      finalExecution = await executor.start(current, executeOptions(attempt));
+      observeExecutionRoute(finalExecution);
       if (!isTerminalMission(finalExecution.status)) throw new AutonomousMissionReplanError("stored replan handoff does not point to a terminal mission attempt");
       if (current.policy?.allow_side_effects === true && !options.replan) throw new AutonomousMissionReplanError("default mission replanning refuses side-effect-enabled missions; supply an explicit idempotency-aware replanner");
       const proposal = options.replan
@@ -844,15 +931,16 @@ export async function runAutonomousMissionReplanCycle(
     }
 
     if (phase === "execution_pending") await persistState({ phase: "execution_pending", terminalStatus: null, missionRequestDigest, replanInstructionDigest, lastMissionCheckpointDigest });
-    const execution = await executor.start(current, { ...(options.execute ?? {}), execution_attempt: attempt, signal: options.signal });
+    const execution = await executor.start(current, executeOptions(attempt));
     finalExecution = execution;
+    observeExecutionRoute(execution);
     missionRequestDigest = execution.preflight.request_digest ?? null;
     if (!isTerminalMission(execution.status)) {
-      const pendingAttempt = { attempt, mission_id: current.mission_id, status: execution.status, next_wave: execution.next_wave, completed_steps: execution.completed_steps, succeeded_steps: execution.succeeded_steps, failed_steps: execution.failed_steps, evaluation_digest: null, learning_trajectory_id: null, replan_instruction_digest: null } satisfies AutonomousMissionReplanAttempt;
+      const pendingAttempt = { attempt, mission_id: current.mission_id, status: execution.status, next_wave: execution.next_wave, completed_steps: execution.completed_steps, succeeded_steps: execution.succeeded_steps, failed_steps: execution.failed_steps, evaluation_digest: null, learning_trajectory_id: null, replan_instruction_digest: null, route_digest: routeDigest } satisfies AutonomousMissionReplanAttempt;
       upsertAttempt(pendingAttempt);
       const row = await writeCheckpoint(execution, "execution_pending", null, null, null);
       await persistState({ phase: "execution_pending", terminalStatus: null, missionRequestDigest, replanInstructionDigest: null, lastMissionCheckpointDigest: row.checkpoint_digest });
-      return result(execution.status, rootMissionId, protectedContractDigest, attempts, evaluations, settlements, execution);
+      return result(execution.status, rootMissionId, protectedContractDigest, attempts, evaluations, settlements, execution, routeDigest, sharedCostBudget?.snapshot() ?? null);
     }
     if (phase === "execution_pending") {
       const pendingIndex = attempts.findIndex((existing) => existing.attempt === attempt && existing.evaluation_digest === null);
@@ -880,18 +968,18 @@ export async function runAutonomousMissionReplanCycle(
       throw new AutonomousMissionReplanError("mission evaluator returned learning rewards without a learning adapter");
     }
 
-    upsertAttempt({ attempt, mission_id: current.mission_id, status: execution.status, next_wave: execution.next_wave, completed_steps: execution.completed_steps, succeeded_steps: execution.succeeded_steps, failed_steps: execution.failed_steps, evaluation_digest: projection.evaluation_digest, learning_trajectory_id: trajectoryId, replan_instruction_digest: projection.replan_instruction_digest });
+    upsertAttempt({ attempt, mission_id: current.mission_id, status: execution.status, next_wave: execution.next_wave, completed_steps: execution.completed_steps, succeeded_steps: execution.succeeded_steps, failed_steps: execution.failed_steps, evaluation_digest: projection.evaluation_digest, learning_trajectory_id: trajectoryId, replan_instruction_digest: projection.replan_instruction_digest, route_digest: routeDigest });
     evaluations.push(projection);
     replanInstructionDigest = projection.replan_instruction_digest;
     if (!evaluation.replan_requested) {
       const row = await writeCheckpoint(execution, "terminal", projection.evaluation_digest, projection.replan_instruction_digest, trajectoryId);
       await persistState({ phase: "terminal", terminalStatus: evaluation.passed ? "completed" : "completed_without_replan", missionRequestDigest, replanInstructionDigest, lastMissionCheckpointDigest: row.checkpoint_digest });
-      return result(evaluation.passed ? "completed" : "completed_without_replan", rootMissionId, protectedContractDigest, attempts, evaluations, settlements, execution);
+      return result(evaluation.passed ? "completed" : "completed_without_replan", rootMissionId, protectedContractDigest, attempts, evaluations, settlements, execution, routeDigest, sharedCostBudget?.snapshot() ?? null);
     }
     if (attempt > maxReplans) {
       const row = await writeCheckpoint(execution, "terminal", projection.evaluation_digest, projection.replan_instruction_digest, trajectoryId);
       await persistState({ phase: "terminal", terminalStatus: "replan_limit_reached", missionRequestDigest, replanInstructionDigest, lastMissionCheckpointDigest: row.checkpoint_digest });
-      return result("replan_limit_reached", rootMissionId, protectedContractDigest, attempts, evaluations, settlements, execution);
+      return result("replan_limit_reached", rootMissionId, protectedContractDigest, attempts, evaluations, settlements, execution, routeDigest, sharedCostBudget?.snapshot() ?? null);
     }
     const row = await writeCheckpoint(execution, "replan_scheduled", projection.evaluation_digest, projection.replan_instruction_digest, trajectoryId);
     await persistState({ phase: "replan_handoff", terminalStatus: null, missionRequestDigest, replanInstructionDigest: projection.replan_instruction_digest, lastMissionCheckpointDigest: row.checkpoint_digest });

@@ -59,6 +59,7 @@ export type {
   AutonomousExecutionResult,
   AutonomousCostReservation,
   AutonomousCostReservationCallback,
+  AutonomousCostBudgetSnapshot,
   AutonomousProviderCostEstimator,
   ProviderInvocationOptions,
   AutonomousModelCandidate,

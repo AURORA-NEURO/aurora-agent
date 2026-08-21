@@ -443,6 +443,12 @@ export type AutonomousCostReservation = () => void;
 /** Internal/provider-boundary hook used to compose one budget across nested autonomous calls. */
 export type AutonomousCostReservationCallback = (costUnits: number) => AutonomousCostReservation | void;
 
+export interface AutonomousCostBudgetSnapshot extends JsonObject {
+  max_cost_units: number;
+  consumed_cost_units: number;
+  remaining_cost_units: number;
+}
+
 /** Estimate the cost of one provider request from caller-owned candidate metadata. */
 export type AutonomousProviderCostEstimator = (request: ProviderRequest) => number;
 
@@ -478,6 +484,16 @@ export class AutonomousCostBudget {
     this.maxCostUnits = maxCostUnits;
   }
 
+  /** Rehydrate a caller-owned budget without permitting its consumed accounting to reset. */
+  static fromSnapshot(snapshot: AutonomousCostBudgetSnapshot): AutonomousCostBudget {
+    if (!snapshot || typeof snapshot !== "object" || !Number.isFinite(snapshot.max_cost_units) || !Number.isFinite(snapshot.consumed_cost_units) || !Number.isFinite(snapshot.remaining_cost_units) || snapshot.max_cost_units < 0 || snapshot.consumed_cost_units < 0 || snapshot.consumed_cost_units > snapshot.max_cost_units || snapshot.remaining_cost_units !== Math.max(0, snapshot.max_cost_units - snapshot.consumed_cost_units)) {
+      throw new ArgumentError("cost budget snapshot is malformed");
+    }
+    const budget = new AutonomousCostBudget(snapshot.max_cost_units);
+    budget.consumedCostUnitsValue = snapshot.consumed_cost_units;
+    return budget;
+  }
+
   get consumedCostUnits(): number {
     return this.consumedCostUnitsValue;
   }
@@ -486,7 +502,7 @@ export class AutonomousCostBudget {
     return Math.max(0, this.maxCostUnits - this.consumedCostUnitsValue);
   }
 
-  snapshot(): { max_cost_units: number; consumed_cost_units: number; remaining_cost_units: number } {
+  snapshot(): AutonomousCostBudgetSnapshot {
     return {
       max_cost_units: this.maxCostUnits,
       consumed_cost_units: this.consumedCostUnits,

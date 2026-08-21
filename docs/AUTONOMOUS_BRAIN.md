@@ -1151,6 +1151,15 @@ instruction digest, evaluator digest, request digest, attempt status, and trajec
 instruction, mission payload, evidence packet, or provider response. A hard three-replan ceiling
 and preflight revalidation prevent an evaluator from widening execution authority.
 
+Route and budget identity continue through that evaluator loop as well. Once a mission has an
+approved semantic route, every replan attempt receives the same `routeOverride` and the orchestration
+state records only its `route_digest`; semantic classification is never repeated implicitly. A
+restart with a stored route digest requires caller-owned route rehydration before any attempt can
+resume. `AutonomousCostBudget` exposes a digest-safe numeric snapshot so a cycle created from
+`maxTotalCostUnits` cannot reset its aggregate spend ceiling when it advances to a new mission ID or
+restarts in another process. Mismatched route or budget snapshots fail closed before provider
+dispatch, while provider responses, instructions, arguments, and credentials remain transient.
+
 For restart-safe orchestration, pass an `InMemoryAutonomousMissionReplanStateStore` in tests or a
 caller-owned implementation backed by SQLite, Postgres, IndexedDB, or object storage. It stores
 only the root identity, protected-contract digest, attempt/evaluation projections, learning

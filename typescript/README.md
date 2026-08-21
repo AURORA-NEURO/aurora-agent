@@ -1336,6 +1336,12 @@ stores a provider secret, or assumes that a serialized snapshot is authorization
   own proposal callback. `checkpointSink` receives only attempt status, request/evaluation
   digests, and learning trajectory IDs, so restart orchestration can persist metadata without
   retaining the guidance or mission payload.
+- Replanning now carries the approved mission `route_digest` across attempts instead of invoking
+  semantic classification again. If the orchestration state is restored, the caller must provide
+  the original `execute.routeOverride`; a stored digest alone cannot authorize a reconstructed
+  route. A `maxTotalCostUnits` or `costBudget` supplied to the cycle becomes one shared budget for
+  routing and every attempt, and the state/checkpoint projections retain only its numeric
+  max/consumed/remaining snapshot. A changed route or budget fails before provider dispatch.
 
 ```typescript
 const missionExecutor = new AutonomousMissionExecutor({

@@ -3,17 +3,50 @@ import assert from "node:assert/strict";
 
 import {
   AUTONOMOUS_DOMAIN_NAMES,
+  AutonomousAgent,
   AutonomousMissionExecutor,
   AutonomousMissionReplanPersistenceCoordinator,
   AutonomousMissionReplanContractError,
   InMemoryAutonomousMissionReplanStateStore,
   InMemoryAutonomousMissionCheckpointStore,
   InMemoryAutonomousMissionResultStore,
+  CredentialStore,
+  LLMRuntime,
   ToolCatalogue,
+  openaiCompatibleProvider,
   runAutonomousMissionReplanCycle,
   validateAutonomousMissionReplanCheckpoint,
   validateAutonomousMissionReplanSnapshot,
 } from "../dist/index.js";
+
+function jsonResponse(payload) {
+  return new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
+}
+
+function semanticAgent(payload) {
+  let calls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      calls += 1;
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify(payload) }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("mission-replan-router", "https://mission-replan-router.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel({
+    provider: "mission-replan-router",
+    model: "mission-replan-router-model",
+    capabilities: ["reasoning", "structured_output", "code", "data", "coordination"],
+    context_window_tokens: 32_000,
+    max_output_tokens: 2_000,
+    quality: 0.9,
+    latency_ms: 50,
+    cost_per_million_tokens: 5,
+    reliability: 0.99,
+  });
+  return { agent, calls: () => calls };
+}
 
 async function catalogue() {
   return ToolCatalogue.fromDefinitions([
@@ -292,4 +325,78 @@ test("mission replan state resumes evaluator handoffs without replaying settled 
   const restored = await new AutonomousMissionReplanPersistenceCoordinator(restoredStore, persistence).restore();
   assert.equal(restored.states, 1);
   assert.equal((await restoredStore.load(root.mission_id)).state_digest, (await stateStore.load(root.mission_id)).state_digest);
+});
+
+test("mission replanning reuses one approved semantic route and one aggregate budget across attempts", async () => {
+  const { agent, calls } = semanticAgent({
+    selected_domains: [
+      { domain: "coding", score: 0.94, rationale: "implementation" },
+      { domain: "data", score: 0.91, rationale: "data validation" },
+    ],
+    confidence: 0.93,
+    abstain: false,
+    abstain_reason: null,
+  });
+  const root = mission([
+    { id: "code", domain: "coding", capability: "verification", objective: "verify code", tool: "mission_probe", arguments: {} },
+    { id: "data", domain: "data", capability: "verification", objective: "verify data", tool: "mission_probe", arguments: {} },
+  ], "mission-route-replan-root");
+  root.goal = "Help with an unfamiliar task.";
+  const stateStore = new InMemoryAutonomousMissionReplanStateStore();
+  const executor = new AutonomousMissionExecutor({
+    agent,
+    catalogue: await catalogue(),
+    checkpointStore: new InMemoryAutonomousMissionCheckpointStore(),
+    resultStore: new InMemoryAutonomousMissionResultStore(),
+    executeStep: async ({ step }) => ({ status: "succeeded", value: { step: step.id } }),
+  });
+  let evaluations = 0;
+  const result = await runAutonomousMissionReplanCycle(executor, root, {
+    maxReplans: 1,
+    stateStore,
+    execute: {
+      maxTotalCostUnits: 100,
+      semanticRouting: { enabled: true, approveProviderCall: true, maxDomains: 2, allowCrossDomain: true },
+    },
+    evaluate: () => {
+      evaluations += 1;
+      return evaluations === 1
+        ? { evaluator_id: "reviewer", evaluator_version: "1", reward: 0.2, passed: false, replan_requested: true, replan_instruction: "add review" }
+        : { evaluator_id: "reviewer", evaluator_version: "1", reward: 0.95, passed: true, replan_requested: false };
+    },
+  });
+  assert.equal(result.status, "completed");
+  assert.equal(calls(), 1, "semantic routing is classified once and route-bound on the replan attempt");
+  assert.equal(result.route_digest, result.final_execution.route.route_digest);
+  assert.equal(result.cost_budget.max_cost_units, 100);
+  assert.ok(result.cost_budget.consumed_cost_units > 0);
+  assert.equal(result.attempts[0].route_digest, result.attempts[1].route_digest);
+  const persisted = await stateStore.load(root.mission_id);
+  assert.equal(persisted.route_digest, result.route_digest);
+  assert.deepEqual(persisted.cost_budget, result.cost_budget);
+
+  const restarted = new AutonomousMissionExecutor({
+    agent,
+    catalogue: await catalogue(),
+    checkpointStore: executor.store,
+    resultStore: executor.resultStore,
+    executeStep: async () => ({ status: "succeeded", value: { should_not_dispatch: true } }),
+  });
+  await assert.rejects(
+    () => runAutonomousMissionReplanCycle(restarted, root, { stateStore, execute: { semanticRouting: { enabled: true, approveProviderCall: true } }, evaluate: () => ({ evaluator_id: "reviewer", evaluator_version: "1", reward: 1, passed: true, replan_requested: false }) }),
+    /routeOverride/,
+  );
+  const resumed = await runAutonomousMissionReplanCycle(restarted, root, {
+    stateStore,
+    execute: { routeOverride: result.final_execution.route, maxTotalCostUnits: 100, semanticRouting: { enabled: true, approveProviderCall: true } },
+    rehydrateMission: () => ({
+      ...root,
+      mission_id: "mission-route-replan-root:attempt-2",
+      steps: root.steps.map((step) => ({ ...step, objective: result.final_execution.results.find((row) => row.step.id === step.id).step.objective })),
+    }),
+    evaluate: () => ({ evaluator_id: "reviewer", evaluator_version: "1", reward: 1, passed: true, replan_requested: false }),
+  });
+  assert.equal(resumed.status, "completed");
+  assert.equal(calls(), 1, "route and budget snapshots recover without provider replay");
+  assert.deepEqual(resumed.cost_budget, result.cost_budget);
 });
