@@ -11,6 +11,7 @@ import {
   AutonomousEvidenceAdapterSelectionPlan,
   AutonomousEvidenceAdapterSelector,
   AutonomousEvidenceAcquisitionError,
+  AutonomousEvidenceFailoverPolicy,
   AutonomousEvidenceRetryPolicy,
   AutonomousEvidenceRuntime,
   AutonomousHttpConnectorPolicy,
@@ -39,6 +40,7 @@ import {
   registerAutonomousHttpEvidenceAdapter,
   createAutonomousEvidenceRetryingAcquirer,
   classifyAutonomousEvidenceAcquisitionError,
+  createAutonomousEvidenceAdapterFailoverAcquirer,
   validateAutonomousWorkflowPortfolioEvidenceCheckpoint,
   validateAutonomousWorkflowPortfolioEvidenceWorkQueueSnapshot,
 } from "../dist/index.js";
@@ -940,4 +942,55 @@ test("bounded evidence retry classifies transient failures and retries every aut
   await assert.rejects(() => exhausted.acquire({ plan_digest: evidencePlan.plan_digest, requirement: codingRequirement, request: { requirement_id: codingRequirement.requirement_id, source_id: "exhausted-source" }, attempt: 1, parent_evidence_digests: [], execution: "caller_owned_adapter;raw_value_transient" }), AutonomousEvidenceAcquisitionError);
   assert.equal(exhaustedAttempts, 2);
   assert.equal(exhaustedObservations.at(-1).status, "exhausted");
+});
+
+test("reviewed evidence adapter failover uses the next eligible candidate only within an explicit budget", async () => {
+  const evidencePlan = await agentFor().evidencePlan(AUTONOMOUS_DOMAIN_NAMES);
+  const registry = new AutonomousEvidenceAdapterRegistry();
+  for (const tier of ["fast", "backup"]) {
+    registerAutonomousEvidenceAdaptersForAllDomains(registry, (domain) => ({
+      adapterId: `failover.${tier}.${domain}`,
+      version: "1.0.0",
+      capabilities: ["bounded_evidence"],
+      sourceKinds: ["caller_fixture"],
+      acquire: async () => tier === "fast"
+        ? (() => { throw new AutonomousEvidenceAcquisitionError("transport_error", true); })()
+        : { transient_failover_value: `${tier}-${domain}` },
+      project: (_value, context) => [{ label: context.requirement.label, kind: "fact", status: "observed", value_digest: null }],
+    }));
+  }
+  const signals = Object.fromEntries(registry.manifests().map((manifest) => [manifest.adapter_id, manifest.adapter_id.startsWith("failover.fast.")
+    ? { eligible: true, health: 0.99, success_rate: 0.99, evaluator_reward: 0.9, latency_ms: 5, cost_units: 1 }
+    : { eligible: true, health: 0.8, success_rate: 0.8, evaluator_reward: 0.6, latency_ms: 20, cost_units: 5 }]));
+  const selection = new AutonomousEvidenceAdapterSelector(registry).selectAdaptiveForDomains(AUTONOMOUS_DOMAIN_NAMES, signals, { capability: "bounded_evidence", minScore: 0.1, minMargin: 0 });
+  assert.ok(selection.rows.every((row) => row.adapter_id?.startsWith("failover.fast.")));
+  assert.equal(new AutonomousEvidenceFailoverPolicy({ maxFailovers: 1, retryPolicy: new AutonomousEvidenceRetryPolicy({ maxAttempts: 1, baseDelayMs: 0 }) }).toJSON().max_failovers, 1);
+  const failoverEvents = [];
+  const failover = createAutonomousEvidenceAdapterFailoverAcquirer(registry, selection, {
+    maxFailovers: 1,
+    retryPolicy: new AutonomousEvidenceRetryPolicy({ maxAttempts: 1, baseDelayMs: 0 }),
+    observeFailover: (event) => failoverEvents.push(event),
+  });
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const requirement = evidencePlan.requirements.find((candidate) => candidate.domain === domain);
+    const value = await failover.acquire({ plan_digest: evidencePlan.plan_digest, requirement, request: { requirement_id: requirement.requirement_id, source_id: `failover-source-${domain}` }, attempt: 1, parent_evidence_digests: [], execution: "caller_owned_adapter;raw_value_transient" });
+    assert.equal(value.transient_failover_value, `backup-${domain}`);
+  }
+  assert.equal(failoverEvents.filter((event) => event.status === "fallback_started").length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(failoverEvents.filter((event) => event.status === "candidate_succeeded").length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.doesNotMatch(JSON.stringify(failoverEvents), /transient_failover_value|api_key|access_token/);
+
+  let noBudgetAttempts = 0;
+  const noBudgetRegistry = new AutonomousEvidenceAdapterRegistry();
+  noBudgetRegistry.register({ adapterId: "no-budget.fast", version: "1.0.0", domains: ["coding"], capabilities: ["bounded_evidence"], sourceKinds: ["caller_fixture"], acquire: async () => { noBudgetAttempts += 1; throw new AutonomousEvidenceAcquisitionError("transport_error", true); } });
+  noBudgetRegistry.register({ adapterId: "no-budget.backup", version: "1.0.0", domains: ["coding"], capabilities: ["bounded_evidence"], sourceKinds: ["caller_fixture"], acquire: async () => ({ backup: true }) });
+  const noBudgetSignals = { "no-budget.fast": { eligible: true, health: 1, success_rate: 1, evaluator_reward: 1, latency_ms: 1, cost_units: 1 }, "no-budget.backup": { eligible: true, health: 0.5, success_rate: 0.5, evaluator_reward: 0, latency_ms: 10, cost_units: 10 } };
+  const noBudgetPlan = new AutonomousEvidenceAdapterSelector(noBudgetRegistry).selectAdaptiveForDomains(["coding"], noBudgetSignals, { capability: "bounded_evidence" });
+  await assert.rejects(() => createAutonomousEvidenceAdapterFailoverAcquirer(noBudgetRegistry, noBudgetPlan, { maxFailovers: 0, retryPolicy: new AutonomousEvidenceRetryPolicy({ maxAttempts: 1, baseDelayMs: 0 }) }).acquire({ plan_digest: evidencePlan.plan_digest, requirement: evidencePlan.requirements.find((candidate) => candidate.domain === "coding"), request: { requirement_id: evidencePlan.requirements.find((candidate) => candidate.domain === "coding").requirement_id, source_id: "no-budget-source" }, attempt: 1, parent_evidence_digests: [], execution: "caller_owned_adapter;raw_value_transient" }), AutonomousEvidenceAcquisitionError);
+  assert.equal(noBudgetAttempts, 1);
+
+  const refusedEvents = [];
+  await assert.rejects(() => createAutonomousEvidenceAdapterFailoverAcquirer(registry, selection, { maxFailovers: 1, retryPolicy: new AutonomousEvidenceRetryPolicy({ maxAttempts: 1, baseDelayMs: 0 }), classify: () => ({ failure_class: "auth_refused", retryable: false }), observeFailover: (event) => refusedEvents.push(event) }).acquire({ plan_digest: evidencePlan.plan_digest, requirement: evidencePlan.requirements.find((candidate) => candidate.domain === "coding"), request: { requirement_id: evidencePlan.requirements.find((candidate) => candidate.domain === "coding").requirement_id, source_id: "refused-source" }, attempt: 1, parent_evidence_digests: [], execution: "caller_owned_adapter;raw_value_transient" }), AutonomousEvidenceAcquisitionError);
+  assert.equal(refusedEvents.length, 1);
+  assert.equal(refusedEvents[0].status, "candidate_failed");
 });

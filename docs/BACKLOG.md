@@ -59,6 +59,12 @@ domain, attempt, stable failure class, latency, and delay; no original errors, r
 or values are persisted. Caller approval, global rate policy, and source-specific retry semantics
 remain authoritative.
 
+Reviewed adapter failover now composes the retry boundary. A caller can explicitly budget bounded
+same-run fallback across score-ordered, digest-verified candidates for every domain; no-budget,
+non-transient, and authorization failures remain terminal. Failover projections retain only candidate
+identity, manifest digest, rank, stable failure class, and counters, so fallback cannot silently
+widen source scope or persist source payloads.
+
 The portfolio now also has a bounded evidence supervisor. It verifies successful provider items,
 rejects cross-domain requests, scopes each evidence runtime to its item's domain, preserves direct
 predecessor evidence digests, and executes acquisition/projection/evaluation in the portfolio's

@@ -4284,6 +4284,15 @@ The HTTP evidence bridge emits `AutonomousEvidenceAcquisitionError` with a stabl
 rate limits, timeouts, transport failures, and server errors. The retry wrapper remains caller-owned
 and does not grant source authorization or bypass the existing approval/evaluator boundaries.
 
+When a reviewed plan contains multiple eligible candidates, use
+`createAutonomousEvidenceAdapterFailoverAcquirer(registry, plan, { maxFailovers })` to enable
+bounded same-run fallback. Candidates are verified against the plan's registry digest and tried in
+the plan's score order; `maxFailovers` defaults to zero, so fallback can never appear implicitly.
+Only retry-policy-approved transient classes can trigger the next candidate. Authentication,
+permission, validation, and unknown failures stop on the current candidate. Failover events retain
+only candidate identity, manifest digest, rank, stable failure class, and budget counters, and the
+caller still owns the overarching evidence approval.
+
 When multiple adapters cover a domain, `AutonomousEvidenceAdapterSelector` provides a separate,
 metadata-only decision boundary. Lexicographic selection is deterministic for static deployments;
 `selectAdaptiveForDomains()` accepts caller-produced health, success-rate, evaluator-reward, latency,

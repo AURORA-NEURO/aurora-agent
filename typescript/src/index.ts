@@ -615,6 +615,19 @@ export type {
   AutonomousEvidenceRetryAcquirerOptions,
 } from "./autonomous-evidence-retry.js";
 export {
+  AUTONOMOUS_EVIDENCE_FAILOVER_POLICY_SCHEMA,
+  AUTONOMOUS_EVIDENCE_FAILOVER_EVENT_SCHEMA,
+  MAX_AUTONOMOUS_EVIDENCE_FAILOVERS,
+  AutonomousEvidenceFailoverPolicy,
+  createAutonomousEvidenceAdapterFailoverAcquirer,
+} from "./autonomous-evidence-failover.js";
+export type {
+  AutonomousEvidenceFailoverPolicyJSON,
+  AutonomousEvidenceFailoverEvent,
+  AutonomousEvidenceFailoverPolicyOptions,
+  AutonomousEvidenceFailoverAcquirerOptions,
+} from "./autonomous-evidence-failover.js";
+export {
   AUTONOMOUS_EVIDENCE_ADAPTER_SELECTION_SCHEMA,
   AUTONOMOUS_EVIDENCE_ADAPTER_SELECTION_ROW_SCHEMA,
   AUTONOMOUS_EVIDENCE_ADAPTER_SELECTION_STRATEGIES,
