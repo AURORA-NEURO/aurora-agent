@@ -21,6 +21,8 @@ the same explicit provider contract.
 
 from __future__ import annotations
 
+import base64
+import binascii
 from dataclasses import dataclass, field, replace
 import getpass
 import hashlib
@@ -43,6 +45,8 @@ MAX_RESPONSE_BYTES = 20_000_000
 MAX_PROVIDER_TOOLS = 128
 MAX_TOOL_NAME_BYTES = 256
 MAX_TOOL_ARGUMENT_BYTES = 1_000_000
+MAX_PROVIDER_CONTENT_PARTS = 64
+MAX_PROVIDER_CONTENT_PART_BYTES = MAX_MESSAGE_CHARS
 MAX_STREAM_EVENTS = 100_000
 MAX_STREAM_EVENT_BYTES = 2_000_000
 MAX_STREAM_TEXT_BYTES = MAX_MESSAGE_CHARS
@@ -98,6 +102,7 @@ _MODEL_SECRET_METADATA_KEYS = frozenset(
         "refresh_token",
     }
 )
+_PROVIDER_IMAGE_MEDIA_TYPES = frozenset({"image/png", "image/jpeg", "image/webp", "image/gif"})
 
 
 def _normalize_provider_path(value: str, field_name: str) -> str:
@@ -1662,6 +1667,116 @@ class ProviderHealthLedger:
 
 
 @dataclass(frozen=True, slots=True)
+class ProviderContentPart:
+    """Provider-neutral text/image content translated at the final wire boundary.
+
+    Content is transient request material. It may contain an HTTPS image URL or bounded inline
+    base64 bytes, but it is never copied into provider health, model selection, learning, or
+    public response projections. Unknown fields are rejected so a caller cannot smuggle a
+    provider credential or an unreviewed payload through this typed surface.
+    """
+
+    type: str
+    text: str | None = None
+    url: str | None = None
+    media_type: str | None = None
+    data: str | None = None
+    detail: str | None = None
+
+    def __post_init__(self) -> None:
+        _canonical_provider_content_part(self)
+
+    @classmethod
+    def text_part(cls, text: str) -> "ProviderContentPart":
+        return cls(type="text", text=text)
+
+    @classmethod
+    def image_url_part(
+        cls,
+        url: str,
+        *,
+        detail: str = "auto",
+    ) -> "ProviderContentPart":
+        return cls(type="image_url", url=url, detail=detail)
+
+    @classmethod
+    def image_base64_part(
+        cls,
+        data: str,
+        media_type: str,
+        *,
+        detail: str = "auto",
+    ) -> "ProviderContentPart":
+        return cls(type="image_base64", data=data, media_type=media_type, detail=detail)
+
+    def to_dict(self) -> dict[str, Any]:
+        return _canonical_provider_content_part(self)
+
+
+def _canonical_provider_content_part(value: ProviderContentPart | Mapping[str, Any]) -> dict[str, Any]:
+    if isinstance(value, ProviderContentPart):
+        part_type = value.type
+        if part_type == "text":
+            raw = {"type": value.type, "text": value.text}
+        elif part_type == "image_url":
+            raw = {"type": value.type, "url": value.url, "detail": value.detail}
+        else:
+            raw = {"type": value.type, "media_type": value.media_type, "data": value.data, "detail": value.detail}
+    elif isinstance(value, Mapping):
+        part_type = value.get("type")
+        raw = value
+    else:
+        raise ProviderError("provider content part must be an object")
+    if part_type == "text":
+        allowed = {"type", "text"}
+        if set(raw) - allowed:
+            raise ProviderError("provider text content part contains unsupported fields")
+        text = raw.get("text")
+        if not isinstance(text, str) or not text or len(text.encode("utf-8")) > MAX_PROVIDER_CONTENT_PART_BYTES or "\x00" in text:
+            raise ProviderError("provider text content part is outside its bounds")
+        return {"type": "text", "text": text}
+    detail = raw.get("detail")
+    if detail not in {"auto", "low", "high"}:
+        raise ProviderError("provider image detail is invalid")
+    if part_type == "image_url":
+        allowed = {"type", "url", "detail"}
+        if set(raw) - allowed:
+            raise ProviderError("provider image URL content part contains unsupported fields")
+        url = raw.get("url")
+        if not isinstance(url, str) or not url or len(url.encode("utf-8")) > 8_192 or not url.lower().startswith("https://") or any(character.isspace() or ord(character) < 32 for character in url):
+            raise ProviderError("provider image URL content part must be an HTTPS URL")
+        return {"type": "image_url", "url": url, "detail": detail}
+    if part_type == "image_base64":
+        allowed = {"type", "media_type", "data", "detail"}
+        if set(raw) - allowed:
+            raise ProviderError("provider image base64 content part contains unsupported fields")
+        media_type = raw.get("media_type")
+        data = raw.get("data")
+        if media_type not in _PROVIDER_IMAGE_MEDIA_TYPES:
+            raise ProviderError("provider image media type is unsupported")
+        if not isinstance(data, str) or not data or len(data.encode("utf-8")) > MAX_PROVIDER_CONTENT_PART_BYTES:
+            raise ProviderError("provider image base64 content part is outside its bounds")
+        try:
+            base64.b64decode(data, validate=True)
+        except (binascii.Error, ValueError) as error:
+            raise ProviderError("provider image base64 content part is malformed") from error
+        return {"type": "image_base64", "media_type": media_type, "data": data, "detail": detail}
+    raise ProviderError("provider content part type is unsupported")
+
+
+def provider_text_part(text: str) -> ProviderContentPart:
+    return ProviderContentPart.text_part(text)
+
+
+def provider_image_url_part(url: str, *, detail: str = "auto") -> ProviderContentPart:
+    return ProviderContentPart.image_url_part(url, detail=detail)
+
+
+def provider_image_base64_part(data: str, media_type: str, *, detail: str = "auto") -> ProviderContentPart:
+    return ProviderContentPart.image_base64_part(data, media_type, detail=detail)
+
+
+@dataclass(frozen=True, slots=True)
 class ProviderTool:
     """Provider-neutral function schema; it describes a tool but never grants execution."""
 
@@ -2725,11 +2840,7 @@ class LLMRuntime:
         # useful for policy without giving telemetry access to prompt data.
         input_bytes = 0
         for message in request.messages:
-            content = message.get("content")
-            if isinstance(content, str):
-                input_bytes += len(content.encode("utf-8"))
-            else:
-                input_bytes += len(json.dumps(content, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+            input_bytes += _provider_content_bytes(message.get("content"), str(message.get("role")))
         input_tokens = max(1, (input_bytes + 3) // 4)
         return ProviderInvocationMetadata(
             provider=provider,
@@ -3194,14 +3305,14 @@ class LLMRuntime:
             }
         elif config.protocol == "anthropic_messages":
             system = "\n\n".join(
-                str(message["content"])
-                for message in messages
-                if message.get("role") == "system" and isinstance(message.get("content"), str)
+                _provider_content_text(message["content"], str(message["role"]))
+                for message in request.messages
+                if message.get("role") in {"system", "developer"}
             )
             body = {
                 "model": request.model,
                 "messages": [
-                    message for message in messages if message.get("role") != "system"
+                    message for message in messages if message.get("role") not in {"system", "developer"}
                 ],
                 "max_tokens": request.max_output_tokens,
             }
@@ -4528,13 +4639,83 @@ def _bounded_json_bytes(value: Any, limit: int, label: str) -> int:
     return size
 
 
+def _normalize_provider_content(value: Any, role: str) -> str | list[dict[str, Any]]:
+    if isinstance(value, str):
+        if len(value.encode("utf-8")) > MAX_MESSAGE_CHARS:
+            raise ProviderError("provider message content is outside its bounded text contract")
+        return value
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)) or not value or len(value) > MAX_PROVIDER_CONTENT_PARTS:
+        raise ProviderError("provider message content parts are outside their bounds")
+    parts = [_canonical_provider_content_part(item) for item in value]
+    if role == "tool":
+        raise ProviderError("provider tool message content must remain text")
+    if role in {"system", "developer"} and any(part["type"] != "text" for part in parts):
+        raise ProviderError("provider system and developer messages support text content only")
+    _bounded_json_bytes(parts, MAX_MESSAGE_CHARS, "provider message content parts")
+    return parts
+
+
+def _provider_content_text(value: Any, role: str) -> str:
+    normalized = _normalize_provider_content(value, role)
+    if isinstance(normalized, str):
+        return normalized
+    return "\n".join(part["text"] for part in normalized if part["type"] == "text")
+
+
+def _provider_content_bytes(value: Any, role: str) -> int:
+    normalized = _normalize_provider_content(value, role)
+    return len((normalized if isinstance(normalized, str) else json.dumps(normalized, ensure_ascii=False, separators=(",", ":"))).encode("utf-8"))
+
+
+def _image_data_url(part: Mapping[str, Any]) -> str:
+    return f"data:{part['media_type']};base64,{part['data']}"
+
+
+def _wire_provider_content(protocol: str, value: Any, role: str) -> str | list[dict[str, Any]]:
+    normalized = _normalize_provider_content(value, role)
+    if isinstance(normalized, str):
+        return normalized
+    if protocol == "openai_responses":
+        return [
+            {"type": "input_text", "text": part["text"]}
+            if part["type"] == "text"
+            else {
+                "type": "input_image",
+                "image_url": part["url"] if part["type"] == "image_url" else _image_data_url(part),
+                **({} if "detail" not in part else {"detail": part["detail"]}),
+            }
+            for part in normalized
+        ]
+    if protocol == "anthropic_messages":
+        return [
+            {"type": "text", "text": part["text"]}
+            if part["type"] == "text"
+            else (
+                {"type": "image", "source": {"type": "url", "url": part["url"]}}
+                if part["type"] == "image_url"
+                else {"type": "image", "source": {"type": "base64", "media_type": part["media_type"], "data": part["data"]}}
+            )
+            for part in normalized
+        ]
+    return [
+        {"type": "text", "text": part["text"]}
+        if part["type"] == "text"
+        else {
+            "type": "image_url",
+            "image_url": {
+                "url": part["url"] if part["type"] == "image_url" else _image_data_url(part),
+                **({} if "detail" not in part else {"detail": part["detail"]}),
+            },
+        }
+        for part in normalized
+    ]
+
+
 def _validate_provider_message(message: Mapping[str, Any]) -> None:
     if not isinstance(message, Mapping) or not isinstance(message.get("role"), str):
         raise ProviderError("each message must contain a string role")
     content = message.get("content")
-    if not isinstance(content, (str, Mapping, list, tuple)):
-        raise ProviderError("each message content must be a bounded JSON value")
-    _bounded_json_bytes(content, MAX_MESSAGE_CHARS, "provider message content")
+    _normalize_provider_content(content, str(message.get("role")))
     tool_call_id = message.get("tool_call_id")
     if tool_call_id is not None and (
         not isinstance(tool_call_id, str) or not tool_call_id.strip() or len(tool_call_id) > 256
@@ -4595,8 +4776,8 @@ def _wire_messages(
                 messages.extend(dict(item) for item in provider_output_items if isinstance(item, Mapping))
                 continue
             if role == "assistant" and tool_calls:
-                content = message.get("content")
-                if isinstance(content, str) and content:
+                content = _wire_provider_content(protocol, message.get("content"), str(role))
+                if content:
                     messages.append({"role": "assistant", "content": content})
                 for call in tool_calls:
                     messages.append(
@@ -4617,13 +4798,16 @@ def _wire_messages(
                     }
                 )
                 continue
+            message["content"] = _wire_provider_content(protocol, message.get("content"), str(role))
             messages.append(message)
             continue
         if protocol == "anthropic_messages":
             if role == "assistant" and tool_calls:
                 blocks: list[dict[str, Any]] = []
-                content = message.get("content")
-                if isinstance(content, str) and content:
+                content = _wire_provider_content(protocol, message.get("content"), str(role))
+                if isinstance(content, list):
+                    blocks.extend(content)
+                elif content:
                     blocks.append({"type": "text", "text": content})
                 for call in tool_calls:
                     try:
@@ -4658,6 +4842,7 @@ def _wire_messages(
                 )
                 continue
             message.pop("provider_output_items", None)
+            message["content"] = _wire_provider_content(protocol, message.get("content"), str(role))
             messages.append(message)
             continue
         message.pop("provider_output_items", None)
@@ -4674,6 +4859,7 @@ def _wire_messages(
                 for call in tool_calls
             ]
             message["tool_calls"] = wire_calls
+        message["content"] = _wire_provider_content(protocol, message.get("content"), str(role))
         messages.append(message)
     return messages
 

@@ -357,6 +357,41 @@ metadata-bounded `partial` observation containing those items and the failure cl
 autonomous domains use the same pagination, cycle, cap, and partial-progress contract, while the
 caller still owns provider-specific record interpretation and claim validation.
 
+### Bounded multimodal provider input
+
+The LLM runtime now has one provider-neutral content contract for transient text and image
+evidence. TypeScript callers use `providerTextPart()`, `providerImageUrlPart()`, or
+`providerImageBase64Part()`; Python callers use `provider_text_part()`,
+`provider_image_url_part()`, or `provider_image_base64_part()` (or the equivalent
+`ProviderContentPart` constructors). A `ProviderMessage.content` may remain an ordinary string
+or contain up to 64 typed parts.
+
+The adapters translate the same input into OpenAI Responses `input_text`/`input_image`,
+OpenAI-compatible Chat `text`/`image_url`, and Anthropic Messages `text`/`image` blocks. Remote
+image references must be HTTPS, inline bytes must be valid bounded base64 with an allow-listed
+image media type, and system/developer messages remain text-only. Unknown fields and unsupported
+part types are refused before dispatch; the runtime never silently drops an image or sends an
+unreviewed provider-native shape. Content remains request-local and is excluded from health,
+selection, memory, learning, and public response projections.
+
+```python
+request = ProviderRequest(
+    model="vision-model",
+    messages=(
+        {"role": "system", "content": "Follow the evidence contract."},
+        {"role": "user", "content": (
+            provider_text_part("Inspect this image."),
+            provider_image_url_part("https://evidence.example/image.png", detail="high"),
+        )},
+    ),
+)
+runtime.invoke("openai", request, credential=session.handle("openai"))
+```
+
+This is a transport/input capability, not an image classifier or clinical truth oracle. Domain
+workflows still own modality inventory, provenance, uncertainty, human review, and evaluator
+evidence before any model output becomes a claim.
+
 ### Non-interactive deployment bootstrap
 
 When no person enters a key, the deployment should register a source resolver during service

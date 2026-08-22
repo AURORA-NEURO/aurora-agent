@@ -18,6 +18,9 @@ import {
   openaiCompatibleProvider,
   openaiProvider,
   providerModelsToCandidates,
+  providerTextPart,
+  providerImageUrlPart,
+  providerImageBase64Part,
   validateLLMRuntimeHealthSnapshot,
 } from "../dist/index.js";
 
@@ -40,6 +43,84 @@ function request(model = "test-model", overrides = {}) {
     ...overrides,
   };
 }
+
+test("bounded multimodal content translates across provider protocols without leaking into metadata", async () => {
+  const messages = [
+    { role: "system", content: "Use the evidence contract." },
+    {
+      role: "user",
+      content: [
+        providerTextPart("Inspect this image."),
+        providerImageUrlPart("https://evidence.example/image.png", "high"),
+        providerImageBase64Part("iVBORw0KGgo=", "image/png"),
+      ],
+    },
+  ];
+
+  const openaiCalls = [];
+  const openaiRuntime = new LLMRuntime({
+    fetch: async (_url, init) => {
+      openaiCalls.push(requestRecord(_url, init));
+      return jsonResponse({ output_text: "openai" });
+    },
+  });
+  openaiRuntime.registerProvider(openaiProvider({ baseUrl: "https://vision.test", requiresCredential: false }));
+  await openaiRuntime.invoke("openai", request("vision-model", { messages }));
+  assert.equal(openaiCalls[0].body.input[1].content[0].type, "input_text");
+  assert.equal(openaiCalls[0].body.input[1].content[1].type, "input_image");
+  assert.equal(openaiCalls[0].body.input[1].content[1].detail, "high");
+  assert.match(openaiCalls[0].body.input[1].content[2].image_url, /^data:image\/png;base64,/);
+  await openaiRuntime.invoke("openai", request("vision-model", {
+    messages: [{
+      role: "assistant",
+      content: [providerImageUrlPart("https://evidence.example/follow-up.png")],
+      toolCalls: [{ id: "call-vision", name: "inspect", arguments: { image: true } }],
+    }],
+  }));
+  assert.equal(openaiCalls[1].body.input[0].content[0].type, "input_image");
+
+  const chatCalls = [];
+  const chatRuntime = new LLMRuntime({
+    fetch: async (_url, init) => {
+      chatCalls.push(requestRecord(_url, init));
+      return jsonResponse({ choices: [{ message: { content: "chat" }, finish_reason: "stop" }] });
+    },
+  });
+  chatRuntime.registerProvider(openaiCompatibleProvider("gateway", "https://vision.test", { requiresCredential: false }));
+  await chatRuntime.invoke("gateway", request("vision-model", { messages }));
+  assert.equal(chatCalls[0].body.messages[1].content[1].type, "image_url");
+  assert.equal(chatCalls[0].body.messages[1].content[1].image_url.detail, "high");
+
+  const anthropicCalls = [];
+  const anthropicRuntime = new LLMRuntime({
+    fetch: async (_url, init) => {
+      anthropicCalls.push(requestRecord(_url, init));
+      return jsonResponse({ content: [{ type: "text", text: "anthropic" }], stop_reason: "end_turn" });
+    },
+  });
+  anthropicRuntime.registerProvider(anthropicProvider({ baseUrl: "https://vision.test", requiresCredential: false }));
+  await anthropicRuntime.invoke("anthropic", request("vision-model", { messages }));
+  assert.equal(anthropicCalls[0].body.system, "Use the evidence contract.");
+  assert.equal(anthropicCalls[0].body.messages[0].content[1].type, "image");
+  assert.equal(anthropicCalls[0].body.messages[0].content[2].source.type, "base64");
+
+  assert.equal(JSON.stringify(openaiRuntime.providerStatus("openai")).includes("evidence.example"), false);
+});
+
+test("multimodal content refuses insecure URLs, malformed base64, secret-shaped fields, and non-text policy messages", async () => {
+  assert.throws(() => providerImageUrlPart("http://insecure.example/image.png"), ProviderRuntimeError);
+  assert.throws(() => providerImageBase64Part("not-base64", "image/png"), ProviderRuntimeError);
+  const runtime = new LLMRuntime({ fetch: async () => jsonResponse({ output_text: "must not dispatch" }) });
+  runtime.registerProvider(openaiProvider({ baseUrl: "https://vision.test", requiresCredential: false }));
+  await assert.rejects(
+    runtime.invoke("openai", request("vision-model", { messages: [{ role: "system", content: [providerImageUrlPart("https://evidence.example/image.png")] }] })),
+    ProviderRuntimeError,
+  );
+  await assert.rejects(
+    runtime.invoke("openai", request("vision-model", { messages: [{ role: "user", content: [{ type: "image_url", url: "https://evidence.example/image.png", apiKey: "must-refuse" }] }] })),
+    ProviderRuntimeError,
+  );
+});
 
 test("BYOK credentials are opaque, provider-scoped, and revocable", async () => {
   const calls = [];

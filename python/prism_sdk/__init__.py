@@ -554,6 +554,8 @@ from .llm_runtime import (
     MAX_CREDENTIAL_SOURCE_LABEL_BYTES,
     MAX_PROVIDER_DISCOVERED_MODELS,
     MAX_PROVIDER_MODEL_DISCOVERY_BYTES,
+    MAX_PROVIDER_CONTENT_PARTS,
+    MAX_PROVIDER_CONTENT_PART_BYTES,
     ModelCandidate,
     ModelCatalogue,
     MODEL_CATALOGUE_SCHEMA,
@@ -564,6 +566,7 @@ from .llm_runtime import (
     ProviderTool,
     ProviderToolCall,
     ProviderConfig,
+    ProviderContentPart,
     ProviderError,
     ProviderInvocationMetadata,
     ProviderInvocationObserver,
@@ -584,6 +587,9 @@ from .llm_runtime import (
     openai_provider,
     openrouter_provider,
     xai_provider,
+    provider_text_part,
+    provider_image_url_part,
+    provider_image_base64_part,
 )
 from .anndata import AnnDataAdapter, AnnDataAuditResult, AnnDataFinding, audit_anndata
 from .alignment import AlignmentAdapter, AlignmentAuditResult, AlignmentFinding, audit_alignments
@@ -5286,6 +5292,8 @@ __all__ = [
     "MAX_CREDENTIAL_SOURCE_LABEL_BYTES",
     "MAX_PROVIDER_DISCOVERED_MODELS",
     "MAX_PROVIDER_MODEL_DISCOVERY_BYTES",
+    "MAX_PROVIDER_CONTENT_PARTS",
+    "MAX_PROVIDER_CONTENT_PART_BYTES",
     "ModelCandidate",
     "ModelCatalogue",
     "MODEL_CATALOGUE_SCHEMA",
@@ -5296,6 +5304,7 @@ __all__ = [
     "ProviderTool",
     "ProviderToolCall",
     "ProviderConfig",
+    "ProviderContentPart",
     "ProviderError",
     "ProviderRequest",
     "ProviderResponse",
@@ -5314,4 +5323,7 @@ __all__ = [
     "openai_provider",
     "openrouter_provider",
     "xai_provider",
+    "provider_text_part",
+    "provider_image_url_part",
+    "provider_image_base64_part",
 ]

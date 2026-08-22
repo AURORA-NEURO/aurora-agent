@@ -23,6 +23,8 @@ export const MAX_PROVIDER_STREAM_TEXT_BYTES = 20_000_000;
 export const MAX_PROVIDER_TURNS = 32;
 export const MAX_PROVIDER_CREDENTIAL_BYTES = 16_384;
 export const MAX_PROVIDER_MODELS = 512;
+export const MAX_PROVIDER_CONTENT_PARTS = 64;
+export const MAX_PROVIDER_CONTENT_PART_BYTES = 2_000_000;
 export const MAX_CREDENTIAL_PROVISIONING_SOURCES = 128;
 export const MAX_CREDENTIAL_PROVISIONING_PROVIDERS = 128;
 export const MAX_CREDENTIAL_SOURCE_LABEL_BYTES = 256;
@@ -311,11 +313,66 @@ export class CredentialStore {
 
 export interface ProviderMessage {
   role: "system" | "developer" | "user" | "assistant" | "tool";
-  content: string;
+  content: string | readonly ProviderContentPart[];
   name?: string;
   toolCallId?: string;
   toolCalls?: readonly ProviderToolCall[];
   isError?: boolean;
+}
+
+/**
+ * Provider-neutral multimodal input. The runtime translates this small contract into each
+ * provider's native image shape and refuses unsupported parts rather than silently dropping
+ * evidence. URLs and base64 payloads are transient request material; they are never included in
+ * health, learning, planning, or public response projections.
+ */
+export type ProviderContentPart = ProviderTextContentPart | ProviderImageUrlContentPart | ProviderImageBase64ContentPart;
+
+export interface ProviderTextContentPart {
+  type: "text";
+  text: string;
+}
+
+export interface ProviderImageUrlContentPart {
+  type: "image_url";
+  url: string;
+  detail?: "auto" | "low" | "high";
+}
+
+export interface ProviderImageBase64ContentPart {
+  type: "image_base64";
+  mediaType: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
+  data: string;
+  detail?: "auto" | "low" | "high";
+}
+
+/** Build a provider-neutral text part without exposing provider wire details to callers. */
+export function providerTextPart(text: string): ProviderTextContentPart {
+  boundedText("provider text content part", text, MAX_PROVIDER_CONTENT_PART_BYTES);
+  return { type: "text", text };
+}
+
+/** Build a provider-neutral HTTPS image reference for a transient model request. */
+export function providerImageUrlPart(url: string, detail: ProviderImageUrlContentPart["detail"] = "auto"): ProviderImageUrlContentPart {
+  const normalized = boundedText("provider image URL content part", url, 8_192);
+  if (!/^https:\/\/[^\s\u0000-\u001f]+$/i.test(normalized)) throw new ProviderRuntimeError("provider image URL content part must be an HTTPS URL");
+  return { type: "image_url", url: normalized, detail };
+}
+
+/** Build a bounded inline image part; callers own the transient bytes and lifecycle. */
+export function providerImageBase64Part(
+  data: string,
+  mediaType: ProviderImageBase64ContentPart["mediaType"],
+  detail: ProviderImageBase64ContentPart["detail"] = "auto",
+): ProviderImageBase64ContentPart {
+  const normalized = boundedText("provider image base64 content part", data, MAX_PROVIDER_CONTENT_PART_BYTES);
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(normalized) || normalized.length % 4 !== 0) {
+    throw new ProviderRuntimeError("provider image base64 content part is malformed");
+  }
+  if (!("image/png" === mediaType || "image/jpeg" === mediaType || "image/webp" === mediaType || "image/gif" === mediaType)) {
+    throw new ProviderRuntimeError("provider image media type is unsupported");
+  }
+  return { type: "image_base64", mediaType, data: normalized, detail };
 }
 
 export interface ProviderTool {
@@ -1072,7 +1129,7 @@ function normalizeConfig(config: ProviderConfig): NormalizedProviderConfig {
 
 function requestMetadata(provider: string, request: ProviderRequest, kind: string): ProviderInvocationMetadata {
   boundedIdentifier("invocation kind", kind, 128);
-  const inputTokens = Math.max(1, Math.ceil(request.messages.reduce((sum, message) => sum + bytes(message.content), 0) / 4));
+  const inputTokens = Math.max(1, Math.ceil(request.messages.reduce((sum, message) => sum + providerContentBytes(message.content, message.role), 0) / 4));
   return {
     provider,
     model: request.model,
@@ -1083,6 +1140,81 @@ function requestMetadata(provider: string, request: ProviderRequest, kind: strin
   };
 }
 
+function normalizedContentPart(value: unknown): ProviderContentPart {
+  if (!isObject(value)) throw new ProviderRuntimeError("provider content part must be an object");
+  const type = value.type;
+  const detail = value.detail;
+  if (detail !== undefined && detail !== "auto" && detail !== "low" && detail !== "high") throw new ProviderRuntimeError("provider image detail is invalid");
+  if (type === "text") {
+    const text = boundedText("provider text content part", value.text, MAX_PROVIDER_CONTENT_PART_BYTES);
+    if (Object.keys(value).some((key) => !["type", "text"].includes(key))) throw new ProviderRuntimeError("provider text content part contains unsupported fields");
+    return { type, text };
+  }
+  if (type === "image_url") {
+    const url = boundedText("provider image URL content part", value.url, 8_192);
+    if (!/^https:\/\/[^\s\u0000-\u001f]+$/i.test(url)) throw new ProviderRuntimeError("provider image URL content part must be an HTTPS URL");
+    if (Object.keys(value).some((key) => !["type", "url", "detail"].includes(key))) throw new ProviderRuntimeError("provider image URL content part contains unsupported fields");
+    return { type, url, ...(detail === undefined ? {} : { detail }) };
+  }
+  if (type === "image_base64") {
+    const data = boundedText("provider image base64 content part", value.data, MAX_PROVIDER_CONTENT_PART_BYTES);
+    if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(data) || data.length % 4 !== 0) throw new ProviderRuntimeError("provider image base64 content part is malformed");
+    const mediaType = value.mediaType;
+    if (mediaType !== "image/png" && mediaType !== "image/jpeg" && mediaType !== "image/webp" && mediaType !== "image/gif") throw new ProviderRuntimeError("provider image media type is unsupported");
+    if (Object.keys(value).some((key) => !["type", "mediaType", "data", "detail"].includes(key))) throw new ProviderRuntimeError("provider image base64 content part contains unsupported fields");
+    return { type, mediaType, data, ...(detail === undefined ? {} : { detail }) };
+  }
+  throw new ProviderRuntimeError("provider content part type is unsupported");
+}
+
+function normalizedProviderContent(value: unknown, role: ProviderMessage["role"]): string | ProviderContentPart[] {
+  if (typeof value === "string") {
+    if (bytes(value) > MAX_PROVIDER_MESSAGE_BYTES) throw new ProviderRuntimeError("provider message content is outside its bounded text contract");
+    return value;
+  }
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_PROVIDER_CONTENT_PARTS) throw new ProviderRuntimeError("provider message content parts are outside their bounds");
+  const parts = value.map(normalizedContentPart);
+  if (role === "tool") throw new ProviderRuntimeError("provider tool message content must remain text");
+  if ((role === "system" || role === "developer") && parts.some((part) => part.type !== "text")) throw new ProviderRuntimeError("provider system and developer messages support text content only");
+  if (bytes(jsonText(parts)) > MAX_PROVIDER_MESSAGE_BYTES) throw new ProviderRuntimeError("provider message content parts exceed their bounded size");
+  return parts;
+}
+
+function providerContentBytes(value: ProviderMessage["content"], role: ProviderMessage["role"]): number {
+  const normalized = normalizedProviderContent(value, role);
+  return bytes(typeof normalized === "string" ? normalized : jsonText(normalized));
+}
+
+function imageDataUrl(part: ProviderImageBase64ContentPart): string {
+  return `data:${part.mediaType};base64,${part.data}`;
+}
+
+function wireContent(protocol: ProviderProtocol, value: ProviderMessage["content"], role: ProviderMessage["role"]): JsonValue {
+  const normalized = normalizedProviderContent(value, role);
+  if (typeof normalized === "string") return normalized;
+  if (protocol === "openai_responses") {
+    return normalized.map((part) => part.type === "text"
+      ? { type: "input_text", text: part.text }
+      : { type: "input_image", image_url: part.type === "image_url" ? part.url : imageDataUrl(part), ...(part.detail === undefined ? {} : { detail: part.detail }) });
+  }
+  if (protocol === "anthropic_messages") {
+    return normalized.map((part) => part.type === "text"
+      ? { type: "text", text: part.text }
+      : part.type === "image_url"
+        ? { type: "image", source: { type: "url", url: part.url } }
+        : { type: "image", source: { type: "base64", media_type: part.mediaType, data: part.data } });
+  }
+  return normalized.map((part) => part.type === "text"
+    ? { type: "text", text: part.text }
+    : { type: "image_url", image_url: { url: part.type === "image_url" ? part.url : imageDataUrl(part), ...(part.detail === undefined ? {} : { detail: part.detail }) } });
+}
+
+function textContentForSystem(value: ProviderMessage["content"], role: ProviderMessage["role"]): string {
+  const normalized = normalizedProviderContent(value, role);
+  if (typeof normalized === "string") return normalized;
+  return normalized.filter((part): part is ProviderTextContentPart => part.type === "text").map((part) => part.text).join("\n");
+}
+
 function validateRequest(request: ProviderRequest): void {
   if (!isObject(request)) throw new ProviderRuntimeError("provider request must be an object");
   boundedIdentifier("model", request.model, 512);
@@ -1090,11 +1222,7 @@ function validateRequest(request: ProviderRequest): void {
   for (const message of request.messages) {
     const role = isObject(message) && typeof message.role === "string" ? message.role : "";
     if (!isObject(message) || !["system", "developer", "user", "assistant", "tool"].includes(role)) throw new ProviderRuntimeError("provider request contains an invalid message");
-    if (message.role === "assistant" && Array.isArray(message.toolCalls) && message.toolCalls.length && message.content === "") {
-      if (bytes(message.content) > MAX_PROVIDER_MESSAGE_BYTES) throw new ProviderRuntimeError("provider message content is outside its bounded text contract");
-    } else {
-      boundedText("provider message content", message.content, MAX_PROVIDER_MESSAGE_BYTES);
-    }
+    normalizedProviderContent(message.content, role as ProviderMessage["role"]);
     if (message.name !== undefined) boundedIdentifier("provider message name", message.name, 256);
     if (message.toolCallId !== undefined) boundedIdentifier("provider tool call id", message.toolCallId, 256);
     if (message.toolCalls !== undefined) {
@@ -1141,27 +1269,31 @@ function wireMessages(protocol: ProviderProtocol, messages: readonly ProviderMes
   for (const message of messages) {
     if (protocol === "openai_responses") {
       if (message.role === "tool") {
-        output.push({ type: "function_call_output", call_id: message.toolCallId ?? "unknown", output: message.content });
+        output.push({ type: "function_call_output", call_id: message.toolCallId ?? "unknown", output: textContentForSystem(message.content, message.role) });
       } else if (message.role === "assistant" && message.toolCalls?.length) {
-        if (message.content) output.push({ role: "assistant", content: message.content });
+        const assistantContent = wireContent(protocol, message.content, message.role);
+        if (Array.isArray(assistantContent)) output.push({ role: "assistant", content: assistantContent });
+        else if (assistantContent) output.push({ role: "assistant", content: assistantContent });
         for (const call of message.toolCalls) output.push({ type: "function_call", call_id: call.id, name: call.name, arguments: JSON.stringify(call.arguments) });
       } else {
-        output.push({ role: message.role, content: message.content });
+        output.push({ role: message.role, content: wireContent(protocol, message.content, message.role) });
       }
     } else if (protocol === "anthropic_messages") {
       if (message.role === "system" || message.role === "developer") continue;
       if (message.role === "tool") {
-        output.push({ role: "user", content: [{ type: "tool_result", tool_use_id: message.toolCallId ?? "unknown", content: message.content, is_error: message.isError ?? false }] });
+        output.push({ role: "user", content: [{ type: "tool_result", tool_use_id: message.toolCallId ?? "unknown", content: textContentForSystem(message.content, message.role), is_error: message.isError ?? false }] });
       } else if (message.role === "assistant" && message.toolCalls?.length) {
         const content: JsonValue[] = [];
-        if (message.content) content.push({ type: "text", text: message.content });
+        const assistantContent = wireContent(protocol, message.content, message.role);
+        if (Array.isArray(assistantContent)) content.push(...assistantContent);
+        else if (assistantContent) content.push({ type: "text", text: assistantContent });
         for (const call of message.toolCalls) content.push({ type: "tool_use", id: call.id, name: call.name, input: call.arguments });
         output.push({ role: "assistant", content });
       } else {
-        output.push({ role: message.role === "assistant" ? "assistant" : "user", content: message.content });
+        output.push({ role: message.role === "assistant" ? "assistant" : "user", content: wireContent(protocol, message.content, message.role) });
       }
     } else {
-      const row: Record<string, JsonValue> = { role: message.role, content: message.content };
+      const row: Record<string, JsonValue> = { role: message.role, content: wireContent(protocol, message.content, message.role) };
       if (message.name) row.name = message.name;
       if (message.toolCallId) row.tool_call_id = message.toolCallId;
       if (message.toolCalls?.length) row.tool_calls = message.toolCalls.map((call) => ({ id: call.id, type: "function", function: { name: call.name, arguments: JSON.stringify(call.arguments) } }));
@@ -1186,7 +1318,7 @@ function requestBody(config: NormalizedProviderConfig, request: ProviderRequest,
         : { format: { type: "json_object" } };
     }
   } else if (config.protocol === "anthropic_messages") {
-    const system = request.messages.filter((message) => message.role === "system" || message.role === "developer").map((message) => message.content).join("\n\n");
+    const system = request.messages.filter((message) => message.role === "system" || message.role === "developer").map((message) => textContentForSystem(message.content, message.role)).join("\n\n");
     body = { model: request.model, messages, max_tokens: request.maxOutputTokens };
     if (system) body.system = system;
     if (request.temperature !== undefined) body.temperature = request.temperature;
@@ -2612,7 +2744,7 @@ export class LLMRuntimeHealthPersistenceCoordinator {
 
 function estimatedProviderCostUnits(candidate: AutonomousModelCandidate | undefined, request: ProviderRequest): number {
   if (!candidate) return 0;
-  const estimatedInputTokens = Math.max(1, Math.ceil(request.messages.reduce((sum, message) => sum + bytes(message.content), 0) / 4));
+  const estimatedInputTokens = Math.max(1, Math.ceil(request.messages.reduce((sum, message) => sum + providerContentBytes(message.content, message.role), 0) / 4));
   return ((estimatedInputTokens + request.maxOutputTokens) / 1_000_000) * candidate.cost_per_million_tokens;
 }
 
@@ -2847,7 +2979,7 @@ export class AutonomousRuntime {
       ...(plan.taskFamily !== undefined ? { task_family: plan.taskFamily } : {}),
       ...(plan.learningContextDigest !== undefined ? { context_digest: plan.learningContextDigest } : {}),
       required_capabilities: [...(plan.requiredCapabilities ?? [])],
-      estimated_input_tokens: Math.max(1, Math.ceil(plan.request.messages.reduce((sum, message) => sum + bytes(message.content), 0) / 4)),
+      estimated_input_tokens: Math.max(1, Math.ceil(plan.request.messages.reduce((sum, message) => sum + providerContentBytes(message.content, message.role), 0) / 4)),
       requested_output_tokens: plan.request.maxOutputTokens,
       max_cost_per_million_tokens: plan.maxCostPerMillionTokens ?? null,
       max_latency_ms: plan.maxLatencyMs ?? null,

@@ -19,6 +19,7 @@ from prism_sdk.llm_runtime import (
     ProviderError,
     ProviderOnboarding,
     ProviderConfig,
+    ProviderContentPart,
     ProviderRequest,
     ProviderResponse,
     ProviderStreamEvent,
@@ -33,6 +34,9 @@ from prism_sdk.llm_runtime import (
     openai_provider,
     openrouter_provider,
     xai_provider,
+    provider_image_base64_part,
+    provider_image_url_part,
+    provider_text_part,
 )
 from prism_sdk.brain import (
     AutonomousBrain,
@@ -291,6 +295,69 @@ class LlmRuntimeTests(unittest.TestCase):
         self.assertNotIn("super-secret", repr(handle))
         self.assertNotIn("super-secret", json.dumps(metadata))
         self.assertEqual(metadata["secret_persistence"], "in_memory_only")
+
+    def test_multimodal_content_is_translated_per_provider_protocol(self) -> None:
+        request = ProviderRequest(
+            model="vision-model",
+            messages=(
+                {"role": "system", "content": "Use the evidence contract."},
+                {
+                    "role": "user",
+                    "content": (
+                        provider_text_part("Inspect this image."),
+                        provider_image_url_part("https://evidence.example/image.png", detail="high"),
+                        provider_image_base64_part("iVBORw0KGgo=", "image/png"),
+                    ),
+                },
+            ),
+            max_output_tokens=64,
+        )
+
+        responses = LLMRuntime._body(openai_provider(base_url="https://provider.example"), request)
+        self.assertEqual(responses["input"][1]["content"][0]["type"], "input_text")
+        self.assertEqual(responses["input"][1]["content"][1]["type"], "input_image")
+        self.assertEqual(responses["input"][1]["content"][1]["detail"], "high")
+        self.assertTrue(responses["input"][1]["content"][2]["image_url"].startswith("data:image/png;base64,"))
+
+        chat = LLMRuntime._body(openai_compatible_provider("gateway", "https://provider.example"), request)
+        self.assertEqual(chat["messages"][1]["content"][1]["type"], "image_url")
+        self.assertEqual(chat["messages"][1]["content"][1]["image_url"]["detail"], "high")
+
+        anthropic = LLMRuntime._body(anthropic_provider(base_url="https://provider.example"), request)
+        self.assertEqual(anthropic["system"], "Use the evidence contract.")
+        self.assertEqual(anthropic["messages"][0]["content"][1]["type"], "image")
+        self.assertEqual(anthropic["messages"][0]["content"][2]["source"]["type"], "base64")
+
+        tool_continuation = ProviderRequest(
+            model="vision-model",
+            messages=(
+                {
+                    "role": "assistant",
+                    "content": (provider_image_url_part("https://evidence.example/follow-up.png"),),
+                    "tool_calls": ({"id": "call-vision", "name": "inspect", "arguments": '{"image":true}'},),
+                },
+            ),
+        )
+        continuation_body = LLMRuntime._body(openai_provider(base_url="https://provider.example"), tool_continuation)
+        self.assertEqual(continuation_body["input"][0]["content"][0]["type"], "input_image")
+
+        self.assertEqual(ProviderContentPart.text_part("typed").to_dict(), {"type": "text", "text": "typed"})
+
+    def test_multimodal_content_fails_closed_on_unsafe_or_unsupported_shapes(self) -> None:
+        with self.assertRaises(ProviderError):
+            provider_image_url_part("http://insecure.example/image.png")
+        with self.assertRaises(ProviderError):
+            provider_image_base64_part("not-base64", "image/png")
+        with self.assertRaises(ProviderError):
+            ProviderRequest(
+                model="vision-model",
+                messages=({"role": "system", "content": (provider_image_url_part("https://evidence.example/image.png"),)},),
+            )
+        with self.assertRaises(ProviderError):
+            ProviderRequest(
+                model="vision-model",
+                messages=({"role": "user", "content": ({"type": "image_url", "url": "https://evidence.example/image.png", "api_key": "must-refuse"},)},),
+            )
 
     def test_credential_value_is_bounded_before_storage(self) -> None:
         store = CredentialStore()
