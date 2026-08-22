@@ -599,10 +599,13 @@ export type {
   AutonomousWorkflowStageResult,
 } from "./workflow-execution.js";
 export {
+  autonomousConnectorMissionExecutor,
   autonomousConnectorMissionStepExecutor,
   autonomousConnectorWorkflowStageExecutor,
+  settleAutonomousConnectorEvaluatorFeedback,
 } from "./autonomous-connector-adapters.js";
 export type {
+  AutonomousConnectorMissionExecutorOptions,
   AutonomousConnectorPayloadRehydrator,
   AutonomousMissionConnectorAdapterOptions,
   AutonomousWorkflowConnectorAdapterOptions,

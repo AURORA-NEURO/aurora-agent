@@ -3142,6 +3142,50 @@ const executeStep = autonomousConnectorMissionStepExecutor({
 const mission = new AutonomousMissionExecutor({ catalogue, executeStep });
 ```
 
+For the common durable path, `autonomousConnectorMissionExecutor()` composes that adapter and
+the checkpointed mission scheduler in one typed boundary. Passing the default
+`AutonomousConnectorOperationRegistry` makes the twelve domain operations explicit: the adapter
+selects exactly one operation for the step's domain/capability, injects its `operation_id`, binds
+the operation digest into the dispatch parents, and rejects a caller-supplied operation from a
+different domain. `InMemoryAutonomousConnectorFeedbackLedger` is optional and accepts only
+explicit evaluator packets; when it has rows, their reward/health projection drives weighted
+connector selection for the next dispatch.
+
+```typescript
+const feedback = new InMemoryAutonomousConnectorFeedbackLedger();
+const receipts = [];
+const missionExecutor = autonomousConnectorMissionExecutor({
+  catalogue,
+  checkpointStore,
+  connector: {
+    runtime,
+    operationRegistry: new AutonomousConnectorOperationRegistry(),
+    feedbackLedger: feedback,
+    approved: true,
+    onDispatch: (dispatch) => receipts.push(dispatch.receipt),
+    rehydratePayload: (receipt) => valueStore.get(receipt.payload_digest ?? "") ?? null,
+  },
+});
+const execution = await missionExecutor.start(missionRequest, { approveProviderCall: true });
+
+// Transport success is not reward. A caller-owned evaluator settles it explicitly later.
+settleAutonomousConnectorEvaluatorFeedback(feedback, receipts[0], {
+  feedback_id: "review-001-step-0",
+  evaluator_id: "caller-reviewer",
+  evaluator_version: "2026.08",
+  reward: 0.8,
+  passed: true,
+  source: "caller_evaluator",
+});
+```
+
+The helper still returns the existing `AutonomousMissionExecutionResult`, so all of the normal
+wave limits, result-store rehydration, output budgets, approval states, route binding, and
+metadata-only checkpoint rules remain in force. `onDispatch` exposes a receipt to the caller's
+feedback/evidence store without adding that receipt or its payload to the mission checkpoint.
+`settleAutonomousConnectorEvaluatorFeedback()` is idempotent through the feedback ledger's
+feedback identity and refuses credential-shaped request fields before connector dispatch.
+
 Each adapter derives bounded dispatch, execution, and call identities from the durable job or
 mission step, attempt number, argument digest, and execution-contract digest. The parent digest
 set includes the reviewed route/workflow or step contract plus the selection-plan digest. A plan

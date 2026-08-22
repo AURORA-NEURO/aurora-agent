@@ -5,6 +5,7 @@ import {
   AUTONOMOUS_DOMAIN_NAMES,
   AutonomousAgent,
   AutonomousConnectorObservation,
+  AutonomousConnectorOperationRegistry,
   AutonomousConnectorRegistration,
   AutonomousConnectorRegistry,
   AutonomousConnectorRuntime,
@@ -12,13 +13,16 @@ import {
   AutonomousWorkflowExecutor,
   CredentialStore,
   InMemoryAutonomousConnectorReceiptJournal,
+  InMemoryAutonomousConnectorFeedbackLedger,
   InMemoryAutonomousMissionCheckpointStore,
   InMemoryAutonomousWorkflowCheckpointStore,
   LLMRuntime,
   ToolCatalogue,
+  autonomousConnectorMissionExecutor,
   autonomousConnectorMissionStepExecutor,
   autonomousConnectorWorkflowStageExecutor,
   builtinAutonomousDomainProfiles,
+  settleAutonomousConnectorEvaluatorFeedback,
 } from "../dist/index.js";
 
 function connectorManifest(capabilities) {
@@ -167,4 +171,103 @@ test("connector-backed missions execute all domains and leave raw observations o
   assert.equal(result.results.length, AUTONOMOUS_DOMAIN_NAMES.length);
   assert.ok(result.results.every((row) => row.status === "succeeded"));
   assert.equal(JSON.stringify(result.checkpoint).includes("local-deterministic-connector"), false);
+});
+
+test("connector mission operation contracts and explicit feedback drive durable adaptive execution", async () => {
+  const fixture = await connectorFixture();
+  const operationRegistry = new AutonomousConnectorOperationRegistry();
+  const feedbackLedger = new InMemoryAutonomousConnectorFeedbackLedger();
+  const receipts = [];
+  const catalogue = await ToolCatalogue.fromDefinitions([{
+    name: "connector_probe",
+    description: "bounded connector probe",
+    inputSchema: { type: "object", additionalProperties: true },
+  }]);
+  const executor = autonomousConnectorMissionExecutor({
+    catalogue,
+    checkpointStore: new InMemoryAutonomousMissionCheckpointStore(),
+    connector: {
+      runtime: fixture.runtime,
+      operationRegistry,
+      feedbackLedger,
+      approved: true,
+      onDispatch: (dispatch) => receipts.push(dispatch.receipt),
+    },
+  });
+  const result = await executor.start({
+    mission_id: "connector-operation-bound-mission",
+    goal: "execute one operation-bound scientific observation",
+    steps: [{
+      id: "science-evidence",
+      domain: "science",
+      capability: "literature",
+      objective: "acquire bounded evidence",
+      tool: "connector_probe",
+      arguments: { subject_digest: "d".repeat(64) },
+    }],
+    policy: {
+      execute: true,
+      stop_on_error: true,
+      allow_side_effects: false,
+      max_steps: 4,
+      max_step_output_bytes: 100_000,
+      max_total_output_bytes: 200_000,
+      execution_mode: "serial",
+      max_parallelism: 1,
+      allowed_tools: ["connector_probe"],
+    },
+  }, { approveProviderCall: true });
+  assert.equal(result.status, "succeeded");
+  assert.equal(receipts.length, 1);
+  const settlement = settleAutonomousConnectorEvaluatorFeedback(feedbackLedger, receipts[0], {
+    feedback_id: "science-evidence-review-1",
+    evaluator_id: "local-evaluator",
+    evaluator_version: "1",
+    reward: 0.9,
+    passed: true,
+    source: "caller_evaluator",
+  });
+  assert.equal(settlement.reward, 0.9);
+  assert.equal(feedbackLedger.signals({ domain: "science", capability: "literature" })[receipts[0].connector_id].evaluator_reward, 0.9);
+  assert.equal(JSON.stringify(result.checkpoint).includes("local-deterministic-connector"), false);
+});
+
+test("operation identity and credential-shaped request fields fail closed", async () => {
+  const fixture = await connectorFixture();
+  const operationRegistry = new AutonomousConnectorOperationRegistry();
+  const context = {
+    mission_id: "connector-contract-boundary",
+    goal: "validate connector request boundaries",
+    wave: 0,
+    step: {
+      id: "science-boundary",
+      domain: "science",
+      capability: "literature",
+      objective: "read bounded evidence",
+      tool: "connector_probe",
+      arguments: { subject_digest: "e".repeat(64) },
+    },
+    arguments: { subject_digest: "e".repeat(64) },
+    dependency_outputs: {},
+    execution_attempt: 1,
+    resumed: false,
+  };
+  await assert.rejects(
+    autonomousConnectorMissionStepExecutor({
+      runtime: fixture.runtime,
+      operationRegistry,
+      approved: true,
+      requestForStep: () => ({ operation_id: "coding.repository_change_analysis" }),
+    })(context),
+    /operation_id does not match/,
+  );
+  await assert.rejects(
+    autonomousConnectorMissionStepExecutor({
+      runtime: fixture.runtime,
+      operationRegistry,
+      approved: true,
+      requestForStep: () => ({ api_key: "caller-secret-must-never-enter-dispatch" }),
+    })(context),
+    /credential-shaped fields/,
+  );
 });

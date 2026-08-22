@@ -1,11 +1,18 @@
 import { ArgumentError } from "./errors.js";
 import {
+  AutonomousConnectorDispatchReceipt,
   AutonomousConnectorDispatchRequest,
   AutonomousConnectorRegistry,
   AutonomousConnectorRuntime,
   AutonomousConnectorSelectionPlan,
   type AutonomousConnectorDispatchResult,
 } from "./autonomous-connectors.js";
+import {
+  AutonomousConnectorOperationRegistry,
+  InMemoryAutonomousConnectorFeedbackLedger,
+  type AutonomousConnectorFeedbackEntry,
+  type AutonomousConnectorFeedbackInput,
+} from "./autonomous-connector-worker.js";
 import { IN_MEMORY_PROVIDER_SCHEMA, type AutonomousSelectionDecision, type ProviderResponse } from "./llm.js";
 import type {
   AutonomousDomainName,
@@ -18,9 +25,11 @@ import type {
 import type {
   AutonomousMissionStepExecutionContext,
   AutonomousMissionStepExecutionResult,
+  AutonomousMissionExecutorOptions,
   AutonomousMissionStepExecutor,
 } from "./mission-execution.js";
-import { digestJson, digestJsonSync } from "./tooling.js";
+import { AutonomousMissionExecutor } from "./mission-execution.js";
+import { ToolCatalogue, digestJson, digestJsonSync } from "./tooling.js";
 import type { JsonObject, JsonValue } from "./types.js";
 
 const CONNECTOR_ADAPTER_ID_BYTES = 96;
@@ -32,23 +41,33 @@ export interface AutonomousConnectorPayloadRehydrator {
 export interface AutonomousWorkflowConnectorAdapterOptions {
   runtime: AutonomousConnectorRuntime;
   registry?: AutonomousConnectorRegistry;
+  /** Optional exact operation vocabulary. When present, every stage is operation-bound. */
+  operationRegistry?: AutonomousConnectorOperationRegistry;
   approved?: boolean;
   selectionStrategy?: "lexicographic_connector_id" | "weighted_evidence";
   selectionSignals?: Readonly<Record<string, JsonObject>>;
+  /** Explicit evaluator outcomes only; transport success is never treated as reward. */
+  feedbackLedger?: InMemoryAutonomousConnectorFeedbackLedger;
   planForStage?: (context: AutonomousWorkflowStageExecutionContext) => AutonomousConnectorSelectionPlan | Promise<AutonomousConnectorSelectionPlan>;
   requestForStage?: (context: AutonomousWorkflowStageExecutionContext) => JsonObject | Promise<JsonObject>;
   rehydratePayload?: AutonomousConnectorPayloadRehydrator;
+  onDispatch?: (result: AutonomousConnectorDispatchResult, context: AutonomousWorkflowStageExecutionContext) => void | Promise<void>;
 }
 
 export interface AutonomousMissionConnectorAdapterOptions {
   runtime: AutonomousConnectorRuntime;
   registry?: AutonomousConnectorRegistry;
+  /** Optional exact operation vocabulary. When present, every mission step is operation-bound. */
+  operationRegistry?: AutonomousConnectorOperationRegistry;
   approved?: boolean;
   selectionStrategy?: "lexicographic_connector_id" | "weighted_evidence";
   selectionSignals?: Readonly<Record<string, JsonObject>>;
+  /** Explicit evaluator outcomes only; transport success is never treated as reward. */
+  feedbackLedger?: InMemoryAutonomousConnectorFeedbackLedger;
   planForStep?: (context: AutonomousMissionStepExecutionContext) => AutonomousConnectorSelectionPlan | Promise<AutonomousConnectorSelectionPlan>;
   requestForStep?: (context: AutonomousMissionStepExecutionContext) => JsonObject | Promise<JsonObject>;
   rehydratePayload?: AutonomousConnectorPayloadRehydrator;
+  onDispatch?: (result: AutonomousConnectorDispatchResult, context: AutonomousMissionStepExecutionContext) => void | Promise<void>;
 }
 
 function boundedAdapterId(value: string, label: string): string {
@@ -72,6 +91,40 @@ function connectorPlan(
   const row = plan.rows.find((candidate) => candidate.domain === domain);
   if (!row || row.status !== "selected" || !row.connector_id) throw new ArgumentError(`no connector is selected for ${domain}/${capability}`);
   return { plan, connectorId: row.connector_id };
+}
+
+function operationFor(
+  registry: AutonomousConnectorOperationRegistry | undefined,
+  domain: AutonomousDomainName,
+  capability: string,
+  label: string,
+) {
+  if (registry === undefined) return null;
+  const matches = registry.forDomain(domain).filter((operation) => operation.supports(capability));
+  if (matches.length !== 1) throw new ArgumentError(`${label} requires exactly one operation for ${domain}/${capability}`);
+  return matches[0] ?? null;
+}
+
+function selectionInputs(
+  domain: AutonomousDomainName,
+  capability: string,
+  selectionSignals: Readonly<Record<string, JsonObject>> | undefined,
+  feedbackLedger: InMemoryAutonomousConnectorFeedbackLedger | undefined,
+  strategy: "lexicographic_connector_id" | "weighted_evidence" | undefined,
+): { selectionSignals?: Readonly<Record<string, JsonObject>>; strategy?: "lexicographic_connector_id" | "weighted_evidence" } {
+  const feedback = feedbackLedger?.signals({ domain, capability }) ?? {};
+  const merged = { ...(selectionSignals ?? {}), ...feedback };
+  const hasSignals = Object.keys(merged).length > 0;
+  return {
+    ...(hasSignals ? { selectionSignals: merged } : {}),
+    ...(strategy === undefined && hasSignals ? { strategy: "weighted_evidence" as const } : strategy === undefined ? {} : { strategy }),
+  };
+}
+
+function attachOperation(request: JsonObject, operation: ReturnType<typeof operationFor>, label: string): JsonObject {
+  if (!operation) return request;
+  if (request.operation_id !== undefined && request.operation_id !== operation.operation_id) throw new ArgumentError(`${label} request operation_id does not match its domain operation`);
+  return { ...request, operation_id: operation.operation_id };
 }
 
 async function connectorValue(
@@ -175,29 +228,34 @@ async function workflowPlan(
   const domain = connectorDomain(context.workflow.domain, "workflow connector domain");
   const capability = context.stage.required_capabilities[0];
   if (!capability) throw new ArgumentError(`workflow stage ${context.stage.id} has no connector capability`);
-  return registry.selectForDomains([domain], { capability, strategy: options.selectionStrategy, selectionSignals: options.selectionSignals });
+  return registry.selectForDomains([domain], { capability, ...selectionInputs(domain, capability, options.selectionSignals, options.feedbackLedger, options.selectionStrategy) });
 }
 
-function defaultWorkflowRequest(context: AutonomousWorkflowStageExecutionContext): JsonObject {
+function defaultWorkflowRequest(context: AutonomousWorkflowStageExecutionContext, operation: ReturnType<typeof operationFor>): JsonObject {
   return {
     stage_id: context.stage.id,
     workflow_id: context.workflow.workflow_id,
     workflow_digest: context.workflow.workflow_digest,
     task_digest: context.task_digest,
     objective: context.stage.objective,
+    ...(operation ? { operation_id: operation.operation_id } : {}),
   };
 }
 
 /** Bind a connector portfolio to the durable workflow stage executor contract. */
 export function autonomousConnectorWorkflowStageExecutor(options: AutonomousWorkflowConnectorAdapterOptions): AutonomousWorkflowStageExecutor {
   if (!options || !(options.runtime instanceof AutonomousConnectorRuntime)) throw new ArgumentError("workflow connector adapter requires an AutonomousConnectorRuntime");
+  if (options.operationRegistry !== undefined && !(options.operationRegistry instanceof AutonomousConnectorOperationRegistry)) throw new ArgumentError("workflow connector operationRegistry is invalid");
+  if (options.feedbackLedger !== undefined && !(options.feedbackLedger instanceof InMemoryAutonomousConnectorFeedbackLedger)) throw new ArgumentError("workflow connector feedbackLedger is invalid");
   const registry = options.registry ?? options.runtime.registry;
   if (registry !== options.runtime.registry) throw new ArgumentError("workflow connector adapter registry must match its runtime");
   if (options.requestForStage !== undefined && typeof options.requestForStage !== "function") throw new ArgumentError("workflow connector requestForStage must be callable");
+  if (options.onDispatch !== undefined && typeof options.onDispatch !== "function") throw new ArgumentError("workflow connector onDispatch must be callable");
   return async (context) => {
     const domain = connectorDomain(context.workflow.domain, "workflow connector domain");
     const capability = context.stage.required_capabilities[0];
     if (!capability) throw new ArgumentError(`workflow stage ${context.stage.id} has no connector capability`);
+    const operation = operationFor(options.operationRegistry, domain, capability, "workflow connector");
     const plan = connectorPlan(await workflowPlan(context, options, registry), domain, capability);
     const stageDigest = await digestJson(context.stage);
     const identityDigest = await digestJson({ job_id: context.job_id, stage_id: context.stage.id, stage_attempt: context.stage_attempt, execution_contract_digest: context.execution_contract_digest });
@@ -208,13 +266,15 @@ export function autonomousConnectorWorkflowStageExecutor(options: AutonomousWork
       connector_id: plan.connectorId,
       domains: [domain],
       capability,
-      request: await (options.requestForStage?.(context) ?? defaultWorkflowRequest(context)),
+      request: attachOperation(await (options.requestForStage?.(context) ?? defaultWorkflowRequest(context, operation)), operation, "workflow connector"),
       parent_digests: [context.route.route_digest, context.workflow.workflow_digest, context.execution_contract_digest, stageDigest],
       attempt_id: boundedAdapterId(`a${context.stage_attempt}`, "workflow connector attempt_id"),
       selection_plan_digest: plan.plan.plan_digest,
       approved: options.approved === true,
     });
+    if (operation) operation.assertRequest(request);
     const result = await options.runtime.dispatchFromPlan(plan.plan, request);
+    await options.onDispatch?.(result, context);
     const resolved = await connectorValue(result, options.rehydratePayload);
     return connectorRun(context, result, resolved.value, resolved.replayRecoveryRequired);
   };
@@ -227,11 +287,15 @@ async function missionPlan(
 ): Promise<AutonomousConnectorSelectionPlan> {
   if (options.planForStep) return options.planForStep(context);
   const domain = connectorDomain(context.step.domain, "mission connector domain");
-  return registry.selectForDomains([domain], { capability: context.step.capability, strategy: options.selectionStrategy, selectionSignals: options.selectionSignals });
+  return registry.selectForDomains([domain], { capability: context.step.capability, ...selectionInputs(domain, context.step.capability, options.selectionSignals, options.feedbackLedger, options.selectionStrategy) });
 }
 
-function defaultMissionRequest(context: AutonomousMissionStepExecutionContext, goalDigest: string): JsonObject {
+function defaultMissionRequest(context: AutonomousMissionStepExecutionContext, goalDigest: string, operation: ReturnType<typeof operationFor>): JsonObject {
+  // Keep both the structured argument envelope and the flattened recommended fields.
+  // Connector contracts can consume stable fields without needing to understand the
+  // mission transport, while the envelope remains available for custom adapters.
   return {
+    ...context.arguments,
     mission_id: context.mission_id,
     step_id: context.step.id,
     domain: context.step.domain,
@@ -239,22 +303,28 @@ function defaultMissionRequest(context: AutonomousMissionStepExecutionContext, g
     objective: context.step.objective,
     goal_digest: goalDigest,
     arguments: context.arguments,
+    ...(operation ? { operation_id: operation.operation_id } : {}),
   };
 }
 
 /** Bind a connector portfolio to the mission executor's strict step contract. */
 export function autonomousConnectorMissionStepExecutor(options: AutonomousMissionConnectorAdapterOptions): AutonomousMissionStepExecutor {
   if (!options || !(options.runtime instanceof AutonomousConnectorRuntime)) throw new ArgumentError("mission connector adapter requires an AutonomousConnectorRuntime");
+  if (options.operationRegistry !== undefined && !(options.operationRegistry instanceof AutonomousConnectorOperationRegistry)) throw new ArgumentError("mission connector operationRegistry is invalid");
+  if (options.feedbackLedger !== undefined && !(options.feedbackLedger instanceof InMemoryAutonomousConnectorFeedbackLedger)) throw new ArgumentError("mission connector feedbackLedger is invalid");
   const registry = options.registry ?? options.runtime.registry;
   if (registry !== options.runtime.registry) throw new ArgumentError("mission connector adapter registry must match its runtime");
   if (options.requestForStep !== undefined && typeof options.requestForStep !== "function") throw new ArgumentError("mission connector requestForStep must be callable");
+  if (options.onDispatch !== undefined && typeof options.onDispatch !== "function") throw new ArgumentError("mission connector onDispatch must be callable");
   return async (context): Promise<AutonomousMissionStepExecutionResult> => {
     const domain = connectorDomain(context.step.domain, "mission connector domain");
     const argumentDigest = await digestJson(context.arguments);
     const goalDigest = await digestJson({ goal: context.goal });
+    const operation = operationFor(options.operationRegistry, domain, context.step.capability, "mission connector");
     const plan = connectorPlan(await missionPlan(context, options, registry), domain, context.step.capability);
     const stepDigest = await digestJson({ id: context.step.id, domain, capability: context.step.capability, objective: context.step.objective, tool: context.step.tool });
     const identityDigest = await digestJson({ mission_id: context.mission_id, step_id: context.step.id, attempt: context.execution_attempt, argument_digest: argumentDigest });
+    const requestPayload = attachOperation(await (options.requestForStep?.(context) ?? defaultMissionRequest(context, goalDigest, operation)), operation, "mission connector");
     const request = new AutonomousConnectorDispatchRequest({
       dispatch_id: boundedAdapterId(`mission-dispatch-${identityDigest.slice(0, 48)}`, "mission connector dispatch_id"),
       execution_id: boundedAdapterId(`mission-execution-${identityDigest.slice(0, 48)}`, "mission connector execution_id"),
@@ -262,13 +332,15 @@ export function autonomousConnectorMissionStepExecutor(options: AutonomousMissio
       connector_id: plan.connectorId,
       domains: [domain],
       capability: context.step.capability,
-      request: await (options.requestForStep?.(context) ?? defaultMissionRequest(context, goalDigest)),
-      parent_digests: [stepDigest, argumentDigest, goalDigest, ...(Object.keys(context.dependency_outputs).length ? [await digestJson(context.dependency_outputs)] : [])],
+      request: requestPayload,
+      parent_digests: [stepDigest, argumentDigest, goalDigest, ...(operation ? [operation.operation_digest] : []), ...(Object.keys(context.dependency_outputs).length ? [await digestJson(context.dependency_outputs)] : [])],
       attempt_id: boundedAdapterId(`a${context.execution_attempt}`, "mission connector attempt_id"),
       selection_plan_digest: plan.plan.plan_digest,
       approved: options.approved === true,
     });
+    if (operation) operation.assertRequest(request);
     const result = await options.runtime.dispatchFromPlan(plan.plan, request);
+    await options.onDispatch?.(result, context);
     const resolved = await connectorValue(result, options.rehydratePayload);
     const decision = {
       selection_digest: plan.plan.plan_digest,
@@ -284,4 +356,37 @@ export function autonomousConnectorMissionStepExecutor(options: AutonomousMissio
     if (result.receipt.status === "error" || result.receipt.status === "unknown") return { status: "failed", error_class: result.receipt.failure_class ?? "ConnectorExecutionFailed", detail: "connector dispatch did not produce an observation", run_status: result.receipt.status, decision };
     return { status: "succeeded", value: resolved.value, run_status: result.receipt.status === "partial" ? "connector_partial" : "connector_observed", decision };
   };
+}
+
+/**
+ * Compose the connector adapter with the SDK's durable mission executor in one call.
+ * The returned executor owns only checkpoint metadata; connector values remain in the
+ * caller's result store and replay payloads still require explicit rehydration.
+ */
+export interface AutonomousConnectorMissionExecutorOptions extends Omit<AutonomousMissionExecutorOptions, "catalogue" | "executeStep"> {
+  catalogue: ToolCatalogue;
+  connector: AutonomousMissionConnectorAdapterOptions;
+}
+
+export function autonomousConnectorMissionExecutor(options: AutonomousConnectorMissionExecutorOptions): AutonomousMissionExecutor {
+  if (!options || !(options.catalogue instanceof ToolCatalogue)) throw new ArgumentError("connector mission executor requires a ToolCatalogue");
+  if (!options.connector || typeof options.connector !== "object") throw new ArgumentError("connector mission executor options are malformed");
+  const { connector, ...executorOptions } = options;
+  return new AutonomousMissionExecutor({
+    ...executorOptions,
+    catalogue: options.catalogue,
+    executeStep: autonomousConnectorMissionStepExecutor(connector),
+  });
+}
+
+/** Record evaluator-owned reward after a connector receipt has been reviewed. */
+export function settleAutonomousConnectorEvaluatorFeedback(
+  ledger: InMemoryAutonomousConnectorFeedbackLedger,
+  receipt: AutonomousConnectorDispatchReceipt,
+  feedback: AutonomousConnectorFeedbackInput,
+  now?: number,
+): AutonomousConnectorFeedbackEntry {
+  if (!(ledger instanceof InMemoryAutonomousConnectorFeedbackLedger)) throw new ArgumentError("connector feedback ledger is invalid");
+  if (!(receipt instanceof AutonomousConnectorDispatchReceipt)) throw new ArgumentError("connector feedback requires a typed receipt");
+  return ledger.record({ feedback, receipt, ...(now === undefined ? {} : { now }) });
 }
