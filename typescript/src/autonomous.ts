@@ -63,6 +63,9 @@ import type {
   AutonomousWorkflowPortfolioEvidenceExecutionResult,
   AutonomousWorkflowPortfolioEvidenceSupervisorOptions,
 } from "./autonomous-workflow-portfolio-evidence.js";
+import type {
+  AutonomousWorkflowPortfolioEvidenceResumableExecutionOptions,
+} from "./autonomous-workflow-portfolio-evidence-resumable.js";
 import { taskFacetDigests } from "./autonomous-memory.js";
 import { buildAutonomousEvidencePlan, type AutonomousEvidencePlan, type AutonomousEvidencePlanJSON } from "./autonomous-evidence.js";
 import {
@@ -3827,6 +3830,15 @@ export class AutonomousAgent {
   ): Promise<AutonomousWorkflowPortfolioEvidenceExecutionResult> {
     const { executeAutonomousWorkflowPortfolioEvidence } = await import("./autonomous-workflow-portfolio-evidence.js");
     return executeAutonomousWorkflowPortfolioEvidence(this, execution, options);
+  }
+
+  /** Resume portfolio evidence through digest-bound checkpoints and caller-owned journals. */
+  async executeWorkflowPortfolioEvidenceResumable(
+    execution: AutonomousWorkflowPortfolioExecutionResult,
+    options: AutonomousWorkflowPortfolioEvidenceResumableExecutionOptions,
+  ): Promise<AutonomousWorkflowPortfolioEvidenceExecutionResult> {
+    const { executeAutonomousWorkflowPortfolioEvidenceResumable } = await import("./autonomous-workflow-portfolio-evidence-resumable.js");
+    return executeAutonomousWorkflowPortfolioEvidenceResumable(this, execution, options);
   }
 
   /** Resume a metadata-only portfolio checkpoint after caller-owned item rehydration. */

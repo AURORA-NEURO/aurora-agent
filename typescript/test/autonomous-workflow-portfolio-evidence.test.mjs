@@ -4,8 +4,11 @@ import test from "node:test";
 import {
   AUTONOMOUS_DOMAIN_NAMES,
   AutonomousAgent,
+  AutonomousWorkflowPortfolioEvidenceController,
   InMemoryAutonomousEvidenceRuntimeJournal,
+  InMemoryAutonomousWorkflowPortfolioEvidenceCheckpointStore,
   LLMRuntime,
+  validateAutonomousWorkflowPortfolioEvidenceCheckpoint,
 } from "../dist/index.js";
 
 const model = {
@@ -219,4 +222,106 @@ test("portfolio evidence supervisor stops later dependency waves after a failed 
   assert.equal(byId.get("coding")?.status, "failed");
   assert.equal(byId.get("data")?.status, "omitted");
   assert.equal(byId.get("data")?.errorClass, "portfolio_evidence_stopped_after_failure");
+});
+
+test("portfolio evidence controller checkpoints every wave and replays completed evidence after restart", async () => {
+  const agent = agentFor();
+  const providerExecution = await agent.executeWorkflowPortfolio(portfolioRequests(), {
+    planOptions: { requireAllDomains: true },
+    approveProviderCall: true,
+    maxParallelism: 4,
+  });
+  const evidencePlan = await agent.evidencePlan(AUTONOMOUS_DOMAIN_NAMES);
+  const items = evidenceRequests(evidencePlan);
+  const journals = new Map();
+  const checkpointStore = new InMemoryAutonomousWorkflowPortfolioEvidenceCheckpointStore();
+  const firstCalls = [];
+  const progressSnapshots = [];
+  const firstController = new AutonomousWorkflowPortfolioEvidenceController(agent, "portfolio-evidence-restart", checkpointStore);
+  const first = await firstController.run(providerExecution, {
+    evidencePlan,
+    items,
+    runtimePolicyDigest: "5".repeat(64),
+    progressSink: (progress) => progressSnapshots.push(progress),
+    journalFor: ({ itemId }) => {
+      const journal = journals.get(itemId) ?? new InMemoryAutonomousEvidenceRuntimeJournal();
+      journals.set(itemId, journal);
+      return journal;
+    },
+    runtime: evidenceRuntime({ acquire: (context) => firstCalls.push(context.request.request_id) }),
+  });
+  const valuesByRequest = new Map();
+  for (const item of first.evidence.items) for (const [requestDigest, value] of Object.entries(item.runtime?.values ?? {})) valuesByRequest.set(requestDigest, value);
+  const checkpoint = await checkpointStore.read();
+  assert.ok(checkpoint);
+  assert.equal(checkpoint.status, "completed");
+  assert.equal(checkpoint.settled_item_ids.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.ok(progressSnapshots.length >= AUTONOMOUS_DOMAIN_NAMES.length, "checkpoint progress is flushed after dependency waves");
+  assert.equal(checkpoint.retention, "request_and_result_digests_only;raw_evidence_values_and_sources_never_persisted");
+
+  const secondCalls = [];
+  const secondController = new AutonomousWorkflowPortfolioEvidenceController(agent, "portfolio-evidence-restart", checkpointStore);
+  assert.equal((await secondController.restore()).status, "restored");
+  const resumed = await secondController.run(providerExecution, {
+    evidencePlan,
+    items,
+    runtimePolicyDigest: "5".repeat(64),
+    journalFor: ({ itemId }) => journals.get(itemId),
+    runtime: {
+      ...evidenceRuntime({ acquire: (context) => secondCalls.push(context.request.request_id) }),
+      rehydrateValue: (receipt) => valuesByRequest.get(receipt.request_digest) ?? null,
+    },
+  });
+
+  assert.equal(first.evidence.status, "completed");
+  assert.equal(resumed.evidence.status, "completed");
+  assert.equal(firstCalls.length, valuesByRequest.size);
+  assert.equal(secondCalls.length, 0);
+  assert.equal(resumed.controller.status, "completed");
+  assert.equal(resumed.controller.settled_items, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.doesNotMatch(JSON.stringify(resumed.evidence), /private_raw_evidence|offline result/);
+});
+
+test("portfolio evidence checkpoints reject tampering, request drift, and evaluator-policy drift before replay", async () => {
+  const agent = agentFor();
+  const providerExecution = await agent.executeWorkflowPortfolio([{ id: "coding", task: "checkpoint task", domain: "coding" }], { approveProviderCall: true });
+  const evidencePlan = await agent.evidencePlan(["coding"]);
+  const items = evidenceRequests(evidencePlan, ["coding"]).map((entry) => ({ ...entry, item_id: "coding" }));
+  const journals = new Map([["coding", new InMemoryAutonomousEvidenceRuntimeJournal()]]);
+  const store = new InMemoryAutonomousWorkflowPortfolioEvidenceCheckpointStore();
+  const controller = new AutonomousWorkflowPortfolioEvidenceController(agent, "checkpoint-drift", store);
+  await controller.run(providerExecution, {
+    evidencePlan,
+    items,
+    runtimePolicyDigest: "6".repeat(64),
+    journalFor: ({ itemId }) => journals.get(itemId),
+    runtime: evidenceRuntime(),
+  });
+  const checkpoint = await store.read();
+  await assert.rejects(
+    () => validateAutonomousWorkflowPortfolioEvidenceCheckpoint({ ...checkpoint, status: "partial" }),
+    /checkpoint digest is invalid/,
+  );
+  const restarted = new AutonomousWorkflowPortfolioEvidenceController(agent, "checkpoint-drift", store);
+  const changedItems = items.map((entry) => ({ ...entry, requests: entry.requests.map((request) => ({ ...request, source_id: "changed-source" })) }));
+  await assert.rejects(
+    () => restarted.run(providerExecution, {
+      evidencePlan,
+      items: changedItems,
+      runtimePolicyDigest: "6".repeat(64),
+      journalFor: ({ itemId }) => journals.get(itemId),
+      runtime: evidenceRuntime(),
+    }),
+    /does not match the current reviewed execution or evidence input/,
+  );
+  await assert.rejects(
+    () => restarted.run(providerExecution, {
+      evidencePlan,
+      items,
+      runtimePolicyDigest: "7".repeat(64),
+      journalFor: ({ itemId }) => journals.get(itemId),
+      runtime: evidenceRuntime(),
+    }),
+    /checkpoint controls do not match/,
+  );
 });

@@ -41,6 +41,13 @@ approval refusals, acquisition failures, pending evaluation, and downstream omis
 explicit. JSON is metadata-only; source acquisition, evaluator authority, and durable journal
 storage remain application-owned.
 
+Portfolio evidence now also has a digest-bound restart controller. It flushes metadata-only wave
+checkpoints bound to the exact provider execution, evidence plan, request set, evaluator identity,
+runtime policy, and item result digests; resumed completed items require their caller-owned journals
+and value rehydration, so a restart cannot silently reacquire evidence. Tampered checkpoint/input or
+policy drift fails before adapter dispatch. The checkpoint store remains an application-owned
+atomic adapter, and multi-host consensus/lease coordination is still deployment work.
+
 The autonomous façade now compiles every built-in workflow into a digest-bound evidence plan.
 Python `AutonomousTaskOrchestrator.evidence_plan()` and TypeScript `AutonomousAgent.evidencePlan()`
 report qualified requirements, ambiguous-label handling, coverage, and dependency-safe next

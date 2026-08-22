@@ -55,6 +55,8 @@ export interface AutonomousWorkflowPortfolioEvidenceSupervisorOptions {
   journalFor?: (context: { itemId: string; domain: AutonomousDomainName; evidencePlanDigest: string }) => AutonomousEvidenceRuntimeJournal | undefined;
   maxParallelism?: number;
   stopOnFailure?: boolean;
+  /** Metadata-only wave progress for a restart checkpoint or operator projection. */
+  progressSink?: AutonomousWorkflowPortfolioEvidenceProgressSink;
 }
 
 export interface AutonomousWorkflowPortfolioEvidenceItemJSON extends JsonObject {
@@ -92,14 +94,28 @@ export interface AutonomousWorkflowPortfolioEvidenceJSON extends JsonObject {
   secret_material: "never_returned";
 }
 
-type EvidenceItemTransient = {
+export interface AutonomousWorkflowPortfolioEvidenceItemTransient {
   itemId: string;
   domain: AutonomousDomainName;
   providerStatus: AutonomousWorkflowPortfolioExecutionItemStatus;
   status: AutonomousWorkflowPortfolioEvidenceItemStatus;
   runtime: AutonomousEvidenceRuntimeResult | null;
   errorClass: string | null;
-};
+}
+
+export interface AutonomousWorkflowPortfolioEvidenceProgress {
+  plan: AutonomousWorkflowPortfolioPlan;
+  evidencePlan: AutonomousEvidencePlan;
+  items: readonly AutonomousWorkflowPortfolioEvidenceItemJSON[];
+  status: AutonomousWorkflowPortfolioEvidenceStatus;
+  resultDigest: string;
+}
+
+export type AutonomousWorkflowPortfolioEvidenceProgressSink = (
+  progress: AutonomousWorkflowPortfolioEvidenceProgress,
+) => Promise<void> | void;
+
+type EvidenceItemTransient = AutonomousWorkflowPortfolioEvidenceItemTransient;
 
 async function scopedEvidencePlan(
   agent: AutonomousAgent,
@@ -167,6 +183,23 @@ function itemJSON(item: EvidenceItemTransient): AutonomousWorkflowPortfolioEvide
   };
 }
 
+async function metadataDigest(
+  plan: AutonomousWorkflowPortfolioPlan,
+  evidencePlan: AutonomousEvidencePlan,
+  items: readonly EvidenceItemTransient[],
+  status: AutonomousWorkflowPortfolioEvidenceStatus,
+): Promise<string> {
+  return digestJson({
+    schema: AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_SCHEMA,
+    status,
+    portfolio_plan_digest: plan.portfolio_digest,
+    evidence_plan_digest: evidencePlan.plan_digest,
+    items: items.map(itemJSON),
+    retention: "metadata_only;raw_evidence_values_caller_owned" as const,
+    secret_material: "never_returned" as const,
+  });
+}
+
 function injectItemMetadata(request: AutonomousEvidenceAcquisitionRequest, item: AutonomousWorkflowPortfolioItemExecutionResult): AutonomousEvidenceAcquisitionRequest {
   const metadata = { ...(request.metadata ?? {}) } as Record<string, unknown>;
   const reserved = {
@@ -205,7 +238,7 @@ export class AutonomousWorkflowPortfolioEvidenceExecutionResult {
   constructor(
     readonly plan: AutonomousWorkflowPortfolioPlan,
     readonly evidencePlan: AutonomousEvidencePlan,
-    readonly items: readonly EvidenceItemTransient[],
+    readonly items: readonly AutonomousWorkflowPortfolioEvidenceItemTransient[],
     readonly status: AutonomousWorkflowPortfolioEvidenceStatus,
     readonly resultDigest: string,
   ) {}
@@ -283,6 +316,21 @@ export async function executeAutonomousWorkflowPortfolioEvidence(
     return null;
   });
   for (const item of initial) if (item) transient.set(item.itemId, item);
+  const snapshotItems = (): EvidenceItemTransient[] => plan.items.map((item) => transient.get(item.item_id) ?? {
+    itemId: item.item_id,
+    domain: item.domain,
+    providerStatus: executionItems.get(item.item_id)?.status ?? "omitted",
+    status: "omitted" as const,
+    runtime: null,
+    errorClass: "portfolio_evidence_not_scheduled",
+  });
+  const reportProgress = async (): Promise<void> => {
+    if (!options.progressSink) return;
+    const items = snapshotItems();
+    const status = overallStatus(items);
+    const resultDigest = await metadataDigest(plan, evidencePlan, items, status);
+    await options.progressSink({ plan, evidencePlan, items: items.map(itemJSON), status, resultDigest });
+  };
   let stopped = false;
   for (const wave of plan.dependency_graph.waves) {
     const waveIds = wave.filter((itemId) => !transient.has(itemId));
@@ -292,6 +340,7 @@ export async function executeAutonomousWorkflowPortfolioEvidence(
         const provider = executionItems.get(itemId)!;
         transient.set(itemId, { itemId, domain: item.domain, providerStatus: provider.status, status: "omitted", runtime: null, errorClass: "portfolio_evidence_stopped_after_failure" });
       }
+      await reportProgress();
       continue;
     }
     const runnable = waveIds.filter((itemId) => planItems.get(itemId)!.depends_on.every((dependency) => transient.get(dependency)?.status === "completed" || transient.get(dependency)?.status === "not_requested"));
@@ -317,19 +366,11 @@ export async function executeAutonomousWorkflowPortfolioEvidence(
       }
     });
     for (const result of results) transient.set(result.itemId, result);
+    await reportProgress();
     if (options.stopOnFailure === true && results.some((item) => item.status === "failed" || item.status === "reconciliation_required")) stopped = true;
   }
-  const items = plan.items.map((item) => transient.get(item.item_id) ?? { itemId: item.item_id, domain: item.domain, providerStatus: executionItems.get(item.item_id)?.status ?? "omitted", status: "omitted" as const, runtime: null, errorClass: "portfolio_evidence_not_scheduled" });
+  const items = snapshotItems();
   const status = overallStatus(items);
-  const metadata = {
-    schema: AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_SCHEMA,
-    status,
-    portfolio_plan_digest: plan.portfolio_digest,
-    evidence_plan_digest: evidencePlan.plan_digest,
-    items: items.map(itemJSON),
-    retention: "metadata_only;raw_evidence_values_caller_owned" as const,
-    secret_material: "never_returned" as const,
-  };
-  const resultDigest = await digestJson(metadata);
+  const resultDigest = await metadataDigest(plan, evidencePlan, items, status);
   return new AutonomousWorkflowPortfolioEvidenceExecutionResult(plan, evidencePlan, items, status, resultDigest);
 }

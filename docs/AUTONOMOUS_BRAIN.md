@@ -1852,6 +1852,39 @@ stop later dependency waves without inventing downstream evidence. This composes
 evaluation, provider execution, learning, and restart boundaries while leaving source authority,
 credentials, and production persistence with the application.
 
+For process restarts, `executeWorkflowPortfolioEvidenceResumable()` and
+`AutonomousWorkflowPortfolioEvidenceController` add a second, portfolio-level checkpoint around
+the per-item evidence journals. Each checkpoint binds the job, provider execution digest,
+portfolio/evidence-plan digests, ordered request digests, evaluator identity, runtime policy,
+controls, and settled metadata-only result digests. Wave progress is flushed through the caller's
+checkpoint store; raw source values, request metadata, evaluator payloads, and journals remain
+outside the checkpoint:
+
+```typescript
+const store = new InMemoryAutonomousWorkflowPortfolioEvidenceCheckpointStore();
+const controller = new AutonomousWorkflowPortfolioEvidenceController(
+  agent,
+  "portfolio-evidence-job-1",
+  store,
+);
+const run = await controller.run(providerExecution, {
+  evidencePlan,
+  items: requestsByPortfolioItem,
+  journalFor,
+  runtimePolicyDigest,
+  runtime: { acquirer, projector, evaluator },
+});
+```
+
+After restart, the same job and reviewed provider execution must be supplied with the matching
+request/evaluator policy identities, `journalFor`, and `rehydrateValue`. A completed evidence
+item is replayed from its journal and value digest; a missing or mismatched value becomes
+`reconciliation_required` instead of silently acquiring the source again. Tampered checkpoints,
+changed request metadata, changed evaluator policy, changed execution identity, and wrong journals
+are rejected before the evidence adapter can run. The in-memory store is a reference adapter for
+tests and desktop processes; a deployment can implement the same atomic read/write interface with
+SQLite, Postgres, IndexedDB, or object storage.
+
 Approval is fail-closed: with `approveProviderCall` absent or false, the first ready item returns
 `approval_required`, descendants become `blocked`, and no provider call starts. Hard failures,
 route review, uncertain effects, turn limits, and child failures are never converted into success;

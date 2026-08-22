@@ -373,7 +373,27 @@ export type {
   AutonomousWorkflowPortfolioEvidenceSupervisorOptions,
   AutonomousWorkflowPortfolioEvidenceItemJSON,
   AutonomousWorkflowPortfolioEvidenceJSON,
+  AutonomousWorkflowPortfolioEvidenceItemTransient,
+  AutonomousWorkflowPortfolioEvidenceProgress,
+  AutonomousWorkflowPortfolioEvidenceProgressSink,
 } from "./autonomous-workflow-portfolio-evidence.js";
+export {
+  AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_CHECKPOINT_SCHEMA,
+  MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_CHECKPOINT_BYTES,
+  validateAutonomousWorkflowPortfolioEvidenceCheckpoint,
+  executeAutonomousWorkflowPortfolioEvidenceResumable,
+  InMemoryAutonomousWorkflowPortfolioEvidenceCheckpointStore,
+  AutonomousWorkflowPortfolioEvidenceController,
+} from "./autonomous-workflow-portfolio-evidence-resumable.js";
+export type {
+  AutonomousWorkflowPortfolioEvidenceCheckpointStatus,
+  AutonomousWorkflowPortfolioEvidenceCheckpointJSON,
+  AutonomousWorkflowPortfolioEvidenceCheckpointStore,
+  AutonomousWorkflowPortfolioEvidenceResumableExecutionOptions,
+  AutonomousWorkflowPortfolioEvidenceControllerProjection,
+  AutonomousWorkflowPortfolioEvidenceControllerRun,
+  AutonomousWorkflowPortfolioEvidenceControllerRunOptions,
+} from "./autonomous-workflow-portfolio-evidence-resumable.js";
 export type {
   AutonomousAcceptedCrossDomainPlan,
   AutonomousAcceptedPlan,
