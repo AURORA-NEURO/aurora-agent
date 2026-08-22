@@ -298,6 +298,23 @@ export type {
   AutonomousWorkflowPortfolioMismatch,
   AutonomousWorkflowPortfolioVerification,
 } from "./autonomous-workflow-portfolio.js";
+export {
+  AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_SCHEMA,
+  MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_PARALLELISM,
+  DEFAULT_AUTONOMOUS_WORKFLOW_PORTFOLIO_HANDOFF_BYTES,
+  MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_HANDOFF_BYTES,
+  AutonomousWorkflowPortfolioItemExecutionResult,
+  AutonomousWorkflowPortfolioExecutionResult,
+  executeAutonomousWorkflowPortfolio,
+} from "./autonomous-workflow-portfolio-execution.js";
+export type {
+  AutonomousWorkflowPortfolioExecutionItemStatus,
+  AutonomousWorkflowPortfolioExecutionStatus,
+  AutonomousWorkflowPortfolioRunOptions,
+  AutonomousWorkflowPortfolioExecutionOptions,
+  AutonomousWorkflowPortfolioExecutionItemJSON,
+  AutonomousWorkflowPortfolioExecutionJSON,
+} from "./autonomous-workflow-portfolio-execution.js";
 export type {
   AutonomousAcceptedCrossDomainPlan,
   AutonomousAcceptedPlan,

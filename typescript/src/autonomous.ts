@@ -52,6 +52,10 @@ import type {
   AutonomousWorkflowPortfolioPlanOptions,
   AutonomousWorkflowPortfolioVerification,
 } from "./autonomous-workflow-portfolio.js";
+import type {
+  AutonomousWorkflowPortfolioExecutionOptions,
+  AutonomousWorkflowPortfolioExecutionResult,
+} from "./autonomous-workflow-portfolio-execution.js";
 import { taskFacetDigests } from "./autonomous-memory.js";
 import { buildAutonomousEvidencePlan, type AutonomousEvidencePlan, type AutonomousEvidencePlanJSON } from "./autonomous-evidence.js";
 import {
@@ -3798,6 +3802,15 @@ export class AutonomousAgent {
   ): Promise<AutonomousWorkflowPortfolioVerification> {
     const { verifyAutonomousWorkflowPortfolio } = await import("./autonomous-workflow-portfolio.js");
     return verifyAutonomousWorkflowPortfolio(this, plan, requests, options);
+  }
+
+  /** Execute a reviewed portfolio in dependency waves; provider/tool effects remain caller-approved per item. */
+  async executeWorkflowPortfolio(
+    requests: readonly AutonomousWorkflowPortfolioItemRequest[],
+    options: AutonomousWorkflowPortfolioExecutionOptions = {},
+  ): Promise<AutonomousWorkflowPortfolioExecutionResult> {
+    const { executeAutonomousWorkflowPortfolio } = await import("./autonomous-workflow-portfolio-execution.js");
+    return executeAutonomousWorkflowPortfolio(this, requests, options);
   }
 
   /** Compile evidence requirements and dependency-safe next stages without dispatching work. */

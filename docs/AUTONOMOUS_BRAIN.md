@@ -1710,6 +1710,41 @@ content digest, coverage projection, dependency graph, and retention markers bef
 can shape execution. The plan is a review artifact, not authorization for providers, tools,
 connectors, or effects.
 
+Execution is an explicit second operation rather than an implicit side effect of planning. Once
+the caller has reviewed the plan, `executeWorkflowPortfolio()` verifies it again by default and
+dispatches ready items in deterministic dependency waves. Same-wave work is capped by
+`maxParallelism`; a child receives only bounded, transient summaries of direct successful
+predecessors. Each child re-enters the ordinary `run()` path, so model selection, provider
+credentials, prompt assembly, memory, online learning, tool authorization, cost budgets, and
+effect controls apply independently to every domain item:
+
+```typescript
+const execution = await agent.executeWorkflowPortfolio(requests, {
+  plan: portfolio,
+  verifyPlan: true,
+  approveProviderCall: true,
+  maxParallelism: 4,
+  stopOnError: true,
+  run: {
+    candidates,
+    credentialFor, // returns an opaque caller-owned handle; raw keys never enter the SDK result
+    learning,
+    memoryStore,
+  },
+});
+
+// execution.items retains transient run objects for the current caller only.
+// JSON serialization contains digests, statuses, counts, and failure classes—not task text,
+// prompts, credentials, provider responses, tool payloads, or predecessor output.
+```
+
+Approval is fail-closed: with `approveProviderCall` absent or false, the first ready item returns
+`approval_required`, descendants become `blocked`, and no provider call starts. Hard failures,
+route review, uncertain effects, turn limits, and child failures are never converted into success;
+they produce explicit item states and can stop later waves. A blocked all-domain plan dispatches
+nothing. This makes the portfolio useful as both a twelve-domain execution surface and a
+restart-safe preflight/review boundary.
+
 Packs do not contain task text, prompts, keys, provider payloads, tool arguments, or outputs. They
 are reviewed planning and evidence metadata, not a source of truth. A production application can
 replace a pack registry, but the orchestrator refuses to run when a pack is missing or its workflow
