@@ -1191,6 +1191,74 @@ def test_reviewed_domain_packs_cover_every_domain_and_bind_workflow_evaluator_an
     assert readiness["domain_pack_registry_digest"] == packs.digest
 
 
+def test_model_selection_preview_is_keyless_provider_free_and_covers_every_domain():
+    runtime, _store, server, thread = _runtime()
+    workspace = _Workspace()
+    agent = AutonomousAgent(
+        workspace,
+        runtime,
+        model_catalogue=ModelCatalogue(_model()),
+    )
+    task = "preview the next bounded domain decision without invoking a provider"
+    try:
+        for domain in AUTONOMOUS_DOMAINS:
+            preview = agent.model_selection_preview(
+                task=task,
+                domain=domain,
+                credentials={},
+            )
+            assert preview["schema"] == "bioprism-python-autonomous-model-selection-preview/0.1"
+            assert preview["status"] == "refused_no_eligible_model"
+            assert preview["domain"] == domain
+            assert preview["candidate_count"] == 1
+            assert preview["eligible_candidate_count"] == 0
+            assert preview["review"]["provider_call"] == "not_started"
+            assert preview["execution"].startswith("preview_only")
+            assert len(preview["selection_context_digest"]) == 64
+            assert len(preview["execution_plan_digest"]) == 64
+            assert task not in json.dumps(preview)
+
+        focused = agent.model_selection_preview(
+            task="preview focused debugging model selection",
+            domain="coding",
+            capability="debugging",
+            credentials={},
+        )
+        assert focused["capability"] == "debugging"
+        assert len(focused["capability_contract_digest"]) == 64
+        assert focused["selection_audit"]["retention"] == "metadata_only_no_task_or_provider_payloads"
+        assert "brain_prompt_assemble" not in [name for name, _ in workspace.calls]
+        assert "brain_plan" not in [name for name, _ in workspace.calls]
+        assert not hasattr(server, "request_count")
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_model_selection_preview_rejects_raw_credentials_and_secret_context():
+    runtime, _store, server, thread = _runtime()
+    agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+    try:
+        with pytest.raises(BrainRunError, match="opaque handles"):
+            agent.model_selection_preview(
+                task="preview a coding route",
+                domain="coding",
+                credentials={"openai": "raw-secret"},  # type: ignore[dict-item]
+            )
+        with pytest.raises(BrainRunError, match="without secret-shaped fields"):
+            agent.model_selection_preview(
+                task="preview a coding route",
+                domain="coding",
+                credentials={},
+                context={"api_key": "must-not-enter-selection"},
+            )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
 def test_provider_free_router_covers_every_domain_and_abstains_without_evidence():
     registry = AutonomousDomainRegistry.with_builtin_profiles()
     router = AutonomousTaskRouter(registry)

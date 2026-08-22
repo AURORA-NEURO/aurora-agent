@@ -57,6 +57,7 @@ from .brain import (
     BrainRunResult,
     BrainToolLoopResult,
     _context_identity_digest,
+    build_model_selection_audit,
 )
 from .domain_tools import (
     AUTONOMOUS_DOMAIN_NAMES,
@@ -169,6 +170,8 @@ MAX_AUTONOMOUS_AGENT_PARALLELISM = 8
 MAX_AUTONOMOUS_BATCH_CHECKPOINT_BYTES = 128_000
 AUTONOMOUS_BATCH_MODES = ("domain", "auto", "cross_domain")
 AUTONOMOUS_BATCH_CHECKPOINT_STATUSES = ("running", "partial", "completed")
+AUTONOMOUS_MODEL_SELECTION_PREVIEW_SCHEMA = "bioprism-python-autonomous-model-selection-preview/0.1"
+MAX_AUTONOMOUS_MODEL_SELECTION_PREVIEW_BYTES = 250_000
 MAX_AUTONOMOUS_WORKFLOW_STAGE_EVIDENCE = 32
 MAX_AUTONOMOUS_WORKFLOW_CHECKPOINT_BYTES = 1_000_000
 MAX_AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_BYTES = 1_000_000
@@ -12580,6 +12583,180 @@ class AutonomousAgent:
             "secret_material": "never_returned",
         }
 
+    def model_selection_preview(
+        self,
+        *,
+        task: str,
+        domain: str,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession | None = None,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        capability: str | None = None,
+        risk_class: str | None = None,
+        context: Mapping[str, Any] | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        contextual_observations: Sequence[Mapping[str, Any]] = (),
+        required_model_capabilities: Sequence[str] = (),
+        input_tokens: int = 4_096,
+        requested_output_tokens: int = 2_048,
+        max_cost_per_million_tokens: int | None = None,
+        max_latency_ms: int | None = None,
+        min_quality: float | None = None,
+        min_selection_confidence: float | None = None,
+        selection_overrides: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Preview the live domain-scoped selector without contacting a provider.
+
+        This is the operator/UI boundary for the same decision that an execution call will use.
+        It compiles the reviewed domain blueprint and execution-plan identity, joins caller-owned
+        health and evaluator state, and asks only the local brain kernel for its bounded ranking.
+        Missing credentials therefore appear as eligibility evidence instead of triggering key
+        collection or a speculative provider request. The returned projection contains model-arm
+        metadata and digests, never task text, prompts, handles, or provider payloads.
+        """
+
+        if not isinstance(task, str) or not task.strip():
+            raise BrainRunError("model selection preview task must be a non-empty string")
+        _identifier("model selection preview domain", domain)
+        if domain not in AUTONOMOUS_DOMAINS:
+            raise BrainRunError(f"model selection preview domain is unsupported: {domain!r}")
+        resolved_candidates = self._resolve_candidates(model_candidates)
+        resolved_credentials = (
+            {}
+            if credentials is None
+            else self._credential_mapping(credentials)
+        )
+        blueprint = self.prepare(
+            task=task,
+            domain=domain,
+            capability=capability,
+            risk_class=risk_class,
+            context=context,
+            max_input_tokens=input_tokens,
+            required_model_capabilities=required_model_capabilities,
+        )
+        execution_plan = self.execution_plans(
+            (domain,),
+            model_candidates=resolved_candidates,
+        )
+        selection_context = dict(blueprint.selection_context)
+        selection_context[_AUTONOMOUS_EXECUTION_PLAN_CONTEXT_KEY] = execution_plan
+        capability_contract_digest: str | None = None
+        if capability is not None:
+            capability_plan = self.domain_capability_plan(
+                domain,
+                blueprint.spec.capability,
+                model_candidates=resolved_candidates,
+            )
+            contract = capability_plan.get("contract")
+            if not isinstance(contract, Mapping):
+                raise BrainRunError("model selection preview capability contract is malformed")
+            capability_contract_digest = contract.get("contract_digest")
+            if not isinstance(capability_contract_digest, str):
+                raise BrainRunError("model selection preview capability contract has no digest")
+            selection_context[_AUTONOMOUS_CAPABILITY_CONTRACT_CONTEXT_KEY] = dict(contract)
+
+        effective_state = bandit_state
+        if effective_state is None:
+            effective_state = self.domain_learning_state(
+                domain,
+                capability=blueprint.spec.capability,
+                risk_class=blueprint.spec.risk_class,
+            )["bandit_state"]
+        if not isinstance(effective_state, Mapping):
+            raise BrainRunError("model selection preview bandit state is malformed")
+
+        effective_overrides = (
+            None if selection_overrides is None else dict(selection_overrides)
+        )
+        if self.health_ledger is not None:
+            effective_overrides = self._merge_selection_overrides(
+                self.health_ledger.selection_overrides(),
+                effective_overrides,
+            )
+        merged_overrides = {} if effective_overrides is None else dict(effective_overrides)
+        merged_overrides.update(
+            {
+                "autonomy_execution_plan_digest": content_digest(execution_plan["plans"]),
+                "autonomy_execution_plan_statuses": {
+                    row["domain"]: row["status"]
+                    for row in execution_plan["plans"]
+                    if isinstance(row, Mapping)
+                    and isinstance(row.get("domain"), str)
+                    and isinstance(row.get("status"), str)
+                },
+            }
+        )
+        if capability is not None:
+            merged_overrides.update(
+                {
+                    "autonomy_capability_focus": blueprint.spec.capability,
+                    "autonomy_capability_contract_digest": capability_contract_digest,
+                }
+            )
+        selection_request = self.brain.build_adaptive_model_selection(
+            task=task,
+            model_candidates=resolved_candidates,
+            credentials=resolved_credentials,
+            ledger=self.ledger,
+            bandit_state=effective_state,
+            context=selection_context,
+            contextual_observations=contextual_observations,
+            required_capabilities=blueprint.required_capabilities,
+            input_tokens=input_tokens,
+            requested_output_tokens=requested_output_tokens,
+            max_cost_per_million_tokens=max_cost_per_million_tokens,
+            max_latency_ms=max_latency_ms,
+            min_quality=min_quality,
+            min_selection_confidence=min_selection_confidence,
+            selection_overrides=merged_overrides,
+        )
+        report = self.brain._preview_adaptive_selection(
+            task=task,
+            selection=selection_request,
+            context=selection_context,
+        )
+        audit = build_model_selection_audit(report)
+        eligibility = audit.get("eligibility", {})
+        if not isinstance(eligibility, Mapping):
+            raise BrainRunError("model selection preview audit eligibility is malformed")
+        preview = {
+            "schema": AUTONOMOUS_MODEL_SELECTION_PREVIEW_SCHEMA,
+            "status": audit["selection_status"],
+            "domain": blueprint.spec.domain,
+            "capability": blueprint.spec.capability,
+            "risk_class": blueprint.spec.risk_class,
+            "workflow_id": blueprint.workflow.workflow_id,
+            "workflow_digest": blueprint.workflow.workflow_digest,
+            "domain_pack_digest": blueprint.domain_pack.pack_digest,
+            "selection_context_digest": _context_identity_digest(selection_context),
+            "execution_plan_digest": content_digest(execution_plan["plans"]),
+            "capability_contract_digest": capability_contract_digest,
+            "required_model_capabilities": list(blueprint.required_capabilities),
+            "candidate_count": len(resolved_candidates),
+            "eligible_candidate_count": eligibility.get("eligible_count", 0),
+            "selection_audit": audit,
+            "review": {
+                "provider_call": "not_started",
+                "domain_tools": "not_started",
+                "caller_approval_required": True,
+                "next_action": (
+                    "review_selection_and_approve_provider_call"
+                    if audit["selection_status"] == "selected"
+                    else "resolve_model_provider_or_credential_gates"
+                ),
+            },
+            "execution": "preview_only; no_provider_or_domain_tool_invocation",
+            "authority_posture": "selection_review_only; preview_does_not_authorize_provider_or_effects",
+            "credential_posture": "caller_opaque_handles_only; no_handles_returned",
+            "retention": "metadata_only_model_ranking_and_digests",
+            "secret_material": "never_returned",
+        }
+        return _safe_json(
+            "autonomous model selection preview",
+            preview,
+            maximum=MAX_AUTONOMOUS_MODEL_SELECTION_PREVIEW_BYTES,
+        )
+
     def run_capability(
         self,
         *,
@@ -15667,6 +15844,8 @@ __all__ = [
     "AUTONOMOUS_DOMAINS",
     "AUTONOMOUS_EXECUTION_MODES",
     "AUTONOMOUS_LEARNING_MODES",
+    "AUTONOMOUS_MODEL_SELECTION_PREVIEW_SCHEMA",
+    "MAX_AUTONOMOUS_MODEL_SELECTION_PREVIEW_BYTES",
     "AUTONOMOUS_CROSS_DOMAIN_LEARNING_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_TRAJECTORY_LEARNING_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_REPLAN_SCHEMA",

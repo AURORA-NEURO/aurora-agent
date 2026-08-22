@@ -1411,6 +1411,33 @@ learning path; it does not turn a provider response into a reward automatically.
 can still call `AutonomousTaskOrchestrator` directly when it needs to provide every candidate
 mapping or policy field itself.
 
+### Provider-free model-selection preview
+
+Applications that need to show an operator what the brain would choose before requesting approval
+can use `agent.model_selection_preview(...)`. It compiles the same reviewed domain blueprint,
+workflow identity, execution-plan digest, capability contract, health overlay, credential gates,
+and contextual bandit state used by execution, then asks only the local brain kernel for its
+bounded ranking:
+
+```python
+preview = agent.model_selection_preview(
+    task="compare the reproducibility evidence for this experiment",
+    domain="science",
+    credentials={},  # empty is valid for a provider-free readiness preview
+)
+print(preview["selection_audit"]["ranking"])
+```
+
+The preview is available for all twelve built-in domains and accepts a focused `capability` when
+the caller wants the exact capability contract rather than the domain default. It reports eligible
+and rejected arms, rejection reasons, exploration observations, score margin, contextual identity,
+workflow/domain-pack digests, and the next operator action. Missing credentials or unregistered
+providers remain selection evidence; they do not trigger key collection, discovery, or a provider
+call. The projection retains only model-arm metadata and digests, marks `provider_call` as
+`not_started`, and never returns task text, prompt content, credential handles, or provider values.
+The preview is therefore suitable for an onboarding screen and can be compared with the later
+execution selection audit without treating routing confidence as answer correctness.
+
 ### Reviewed capability packs for every domain
 
 The domain profile and workflow are joined by an `AutonomousDomainPack` for every built-in domain:
