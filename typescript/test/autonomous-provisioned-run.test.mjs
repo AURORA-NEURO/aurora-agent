@@ -5,6 +5,7 @@ import {
   AUTONOMOUS_DOMAIN_NAMES,
   AUTONOMOUS_PROVISIONED_RUN_SCHEMA,
   AutonomousAgent,
+  AutonomousBrainFacade,
   CredentialError,
   LLMRuntime,
   ProviderSetup,
@@ -107,9 +108,22 @@ test("strict provisioned inventory refuses partial discovery before provider exe
   }));
   const setup = new ProviderSetup(runtime);
   const agent = new AutonomousAgent(runtime);
+  const brain = new AutonomousBrainFacade({ agent });
   await assert.rejects(
     () => setup.runWithProvisionedCredentials(agent, "this must not execute", {
       domain: "coding",
+      credentialProviders: ["offline"],
+      refreshInventory: true,
+      inventorySpecs: [
+        { provider: "offline", defaults: { context_window_tokens: 16_000, max_output_tokens: 1_000, quality: 0.8, latency_ms: 20, cost_per_million_tokens: 0, reliability: 0.95 } },
+        { provider: "missing-provider", defaults: { context_window_tokens: 16_000, max_output_tokens: 1_000, quality: 0.8, latency_ms: 20, cost_per_million_tokens: 0, reliability: 0.95 } },
+      ],
+      approveProviderCall: true,
+    }),
+    (error) => error instanceof CredentialError && /inventory refresh did not complete/.test(error.message),
+  );
+  await assert.rejects(
+    () => setup.runBrainWithProvisionedCredentials(brain, { task: "this must also not execute", domain: "coding" }, {
       credentialProviders: ["offline"],
       refreshInventory: true,
       inventorySpecs: [
@@ -139,4 +153,67 @@ test("the request-scoped facade executes every configured domain with one creden
     assert.equal(run.status, "completed", domain);
     assert.equal(run.result.response.provider, "offline", domain);
   }
+});
+
+test("provisioned brain facade executes direct, closed-loop, and adaptive paths across every domain", async () => {
+  const capabilities = await broadCapabilities();
+  const runtime = localRuntime("offline");
+  const setup = new ProviderSetup(runtime);
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(candidate("offline", capabilities));
+  const brain = new AutonomousBrainFacade({ agent });
+
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const run = await setup.runBrainWithProvisionedCredentials(brain, { task: `produce a bounded ${domain} review`, domain }, {
+      credentialProviders: ["offline"],
+      approveProviderCall: true,
+    });
+    assert.equal(run.status, "completed", domain);
+    assert.equal(run.result.run?.status, "completed", domain);
+    assert.equal(run.result.run?.response.provider, "offline", domain);
+  }
+
+  const cycle = await setup.runBrainCycleWithProvisionedCredentials(brain, { task: "close a bounded science review", domain: "science" }, {
+    credentialProviders: ["offline"],
+    approveProviderCall: true,
+  });
+  assert.ok(["completed", "children_completed"].includes(cycle.status));
+  assert.ok(cycle.result.cycle);
+
+  const adaptive = await setup.runBrainAdaptiveCycleWithProvisionedCredentials(brain, { task: "close a bounded evaluation review", domain: "evaluation" }, {
+    credentialProviders: ["offline"],
+    approveProviderCall: true,
+    adaptive: {
+      maxReplans: 0,
+      evaluate: () => ({ evaluator_id: "provisioned-facade-evaluator", evaluator_version: "1", reward: 0.8, passed: true, replan_requested: false }),
+    },
+  });
+  assert.equal(adaptive.status, "completed");
+  assert.equal(adaptive.result.adaptive.attempts.length, 1);
+  assert.equal(runtime.credentials.status("offline").active_handles, 0);
+});
+
+test("provisioned brain facade rejects nested credential injection before opening a session", async () => {
+  const runtime = localRuntime("offline");
+  const setup = new ProviderSetup(runtime);
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(candidate("offline", ["reasoning", "code"]));
+  const brain = new AutonomousBrainFacade({ agent });
+
+  await assert.rejects(
+    () => setup.runBrainWithProvisionedCredentials(brain, { task: "must not dispatch", domain: "coding" }, {
+      credentialProviders: ["offline"],
+      run: { credentialFor: () => undefined },
+    }),
+    (error) => error instanceof CredentialError && /owns credentials/.test(error.message),
+  );
+  await assert.rejects(
+    () => setup.runBrainCycleWithProvisionedCredentials(brain, { task: "must not dispatch either", domain: "coding" }, {
+      credentialProviders: ["offline"],
+      cycle: { providerPlanning: { credential: { provider: "offline" } } },
+    }),
+    (error) => error instanceof CredentialError && /owns credentials/.test(error.message),
+  );
+  assert.equal(runtime.credentials.status("offline").active_handles, 0);
+  assert.equal(runtime.providerStatus("offline").attempts, 0);
 });

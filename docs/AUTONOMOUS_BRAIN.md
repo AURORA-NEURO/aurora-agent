@@ -1256,6 +1256,15 @@ rejects partial/failed requested discovery before dispatch, and returns an
 `AutonomousProvisionedRun` whose `toJSON()` is metadata-only. This keeps the Python and
 TypeScript embedding surfaces aligned without making either runtime persist or serialize a key.
 
+The same setup boundary now wraps the application-facing TypeScript brain facade through
+`setup.runBrainWithProvisionedCredentials(brain, request, options)`,
+`runBrainCycleWithProvisionedCredentials()`, and
+`runBrainAdaptiveCycleWithProvisionedCredentials()`. These methods cover route/plan compilation,
+connector observation, direct provider execution, evaluator settlement, online learning, and
+bounded replan paths with one request-scoped session. Handles are injected only into the nested
+provider policy; nested caller-supplied credential fields are rejected before a session opens, and
+the result projection remains transient-result-free for durable job events.
+
 ## Application composition and model inventory
 
 The lower-level APIs intentionally make every decision input visible. An embedding application can

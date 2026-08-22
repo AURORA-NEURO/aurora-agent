@@ -98,6 +98,33 @@ partial or failed discovery throws before the task executes, so stale inventory 
 treated as current. The wrapper preserves the normal routing, approval, workflow, cross-domain,
 learning, evaluator, budget, and checkpoint options of `AutonomousAgent.run()`.
 
+Applications using the higher-level `AutonomousBrainFacade` can keep the same credential
+boundary across planning, connector observation, direct invocation, closed-loop evaluation, and
+bounded adaptive replanning:
+
+```typescript
+const brain = new AutonomousBrainFacade({ agent });
+const execution = await setup.runBrainWithProvisionedCredentials(brain, {
+  task: "review a bounded implementation plan",
+}, {
+  credentialProviders: ["openai"],
+  environment: process.env,
+  approveProviderCall: true,
+});
+const cycle = await setup.runBrainCycleWithProvisionedCredentials(brain, {
+  task: "evaluate the implementation plan and settle explicit feedback",
+}, {
+  credentialProviders: ["openai"],
+  approveProviderCall: true,
+});
+```
+
+`runBrainAdaptiveCycleWithProvisionedCredentials()` applies the same scope to evaluator-guided
+replanning. The facade methods inject the opaque resolver only into the nested provider policy,
+reject caller-supplied `credential` or `credentialFor` fields before opening a session, and close
+the session after connector, provider, evaluator, learning, or refusal paths. Their returned
+`AutonomousProvisionedRun.toJSON()` projection remains safe for job events and durable logs.
+
 `providerPresets()` and `setup.plan()` are safe to send to a setup screen or readiness endpoint:
 they contain provider metadata and the next action, never key values, handles, prompt text, or
 resolver references. The protected UI should use a password input, disable echo/history and

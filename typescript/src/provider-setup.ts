@@ -30,6 +30,16 @@ import type {
   AutonomousModelRefreshSpec,
 } from "./autonomous.js";
 import type {
+  AutonomousBrainAdaptiveCycleExecution,
+  AutonomousBrainAdaptiveCycleOptions,
+  AutonomousBrainCycleExecution,
+  AutonomousBrainCycleOptions,
+  AutonomousBrainExecuteOptions,
+  AutonomousBrainExecution,
+  AutonomousBrainFacade,
+  AutonomousBrainRequest,
+} from "./autonomous-brain-facade.js";
+import type {
   AutonomousModelInventoryRefreshOptions,
   AutonomousModelInventorySnapshot,
 } from "./autonomous-model-inventory.js";
@@ -113,7 +123,7 @@ export interface AutonomousProvisionedRun<T> {
 }
 
 /** Request-scoped deployment provisioning controls; raw credentials are intentionally absent. */
-export type AutonomousProvisionedExecutionOptions = Omit<AutonomousRunOptions, "credential" | "credentialFor"> & {
+export interface AutonomousProvisioningControls {
   credentialProviders?: readonly string[];
   credentialTtlMs?: number;
   environment?: Record<string, string | undefined>;
@@ -121,13 +131,40 @@ export type AutonomousProvisionedExecutionOptions = Omit<AutonomousRunOptions, "
   refreshInventory?: boolean;
   inventorySpecs?: readonly AutonomousModelRefreshSpec[];
   inventoryOptions?: Omit<AutonomousModelInventoryRefreshOptions, "credentialFor" | "credentialSession">;
-};
+}
+
+export type AutonomousProvisionedExecutionOptions = Omit<AutonomousRunOptions, "credential" | "credentialFor"> & AutonomousProvisioningControls;
 
 export type AutonomousExplicitProvisionedExecutionOptions = Omit<AutonomousProvisionedExecutionOptions, "domain"> & {
   domain: AutonomousDomainName;
 };
 
 export type AutonomousAutomaticProvisionedExecutionOptions = Omit<AutonomousProvisionedExecutionOptions, "domain">;
+
+type WithoutCredentialFields<T> = T extends unknown
+  ? Omit<T, "credential" | "credentialFor" | "providerPlanning">
+    & (T extends { providerPlanning?: infer P }
+      ? { providerPlanning?: WithoutCredentialFields<NonNullable<P>> }
+      : {})
+  : never;
+type AutonomousBrainRunOptions = NonNullable<AutonomousBrainExecuteOptions["run"]>;
+type AutonomousBrainCyclePolicy = NonNullable<AutonomousBrainCycleOptions["cycle"]>;
+type AutonomousBrainAdaptivePolicy = NonNullable<AutonomousBrainAdaptiveCycleOptions["adaptive"]>;
+
+/** Brain-facade execution controls with credential handles owned by this setup boundary. */
+export type AutonomousProvisionedBrainExecuteOptions = Omit<AutonomousBrainExecuteOptions, "run"> & {
+  run?: WithoutCredentialFields<AutonomousBrainRunOptions>;
+} & AutonomousProvisioningControls;
+
+/** Brain-facade closed-loop controls with credential handles owned by this setup boundary. */
+export type AutonomousProvisionedBrainCycleOptions = Omit<AutonomousBrainCycleOptions, "cycle"> & {
+  cycle?: WithoutCredentialFields<AutonomousBrainCyclePolicy>;
+} & AutonomousProvisioningControls;
+
+/** Brain-facade evaluator-guided controls with credential handles owned by this setup boundary. */
+export type AutonomousProvisionedBrainAdaptiveCycleOptions = Omit<AutonomousBrainAdaptiveCycleOptions, "adaptive"> & {
+  adaptive: WithoutCredentialFields<AutonomousBrainAdaptivePolicy>;
+} & AutonomousProvisioningControls;
 
 interface ProviderPresetRecord {
   readonly provider: SupportedProviderName;
@@ -368,11 +405,11 @@ export class ProviderSetup {
    * finally block. The callback receives no credential object; the runtime resolves the selected
    * provider through a transient opaque-handle lookup at invocation time.
    */
-  private async runProvisioned<T>(
+  private async runProvisioned<T, TOptions extends AutonomousProvisioningControls>(
     agent: AutonomousAgent,
     task: string,
-    options: AutonomousProvisionedExecutionOptions,
-    execute: (runOptions: Omit<AutonomousProvisionedExecutionOptions, "credentialProviders" | "credentialTtlMs" | "environment" | "requireReady" | "refreshInventory" | "inventorySpecs" | "inventoryOptions">, session: CredentialSession) => Promise<T>,
+    options: TOptions,
+    execute: (runOptions: Omit<TOptions, keyof AutonomousProvisioningControls>, session: CredentialSession) => Promise<T>,
   ): Promise<AutonomousProvisionedRun<T>> {
     if (!agent || typeof agent.run !== "function" || typeof agent.refreshModelInventory !== "function") throw new CredentialError("provisioned autonomous execution requires an AutonomousAgent");
     if (!options || typeof options !== "object") throw new CredentialError("provisioned autonomous execution options are malformed");
@@ -484,6 +521,57 @@ export class ProviderSetup {
     }));
   }
 
+  /** Execute the application-facing route/plan/connector/provider boundary with one fresh session. */
+  async runBrainWithProvisionedCredentials(
+    brain: AutonomousBrainFacade,
+    input: AutonomousBrainRequest,
+    options: AutonomousProvisionedBrainExecuteOptions = {},
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainExecution>> {
+    this.assertBrainFacade(brain, "execute");
+    this.assertBrainInput(input);
+    this.rejectNestedCredentialFields(options, ["run"]);
+    return this.runProvisioned(brain.agent, input.task, options, async (runOptions, session) => {
+      const brainOptions = runOptions as Omit<AutonomousProvisionedBrainExecuteOptions, keyof AutonomousProvisioningControls>;
+      const credentialFor = this.credentialResolver(brain.agent, session);
+      const run = brainOptions.run === undefined ? { credentialFor } : { ...brainOptions.run, credentialFor };
+      return brain.execute(input, { ...brainOptions, run } as AutonomousBrainExecuteOptions);
+    });
+  }
+
+  /** Execute the application-facing evaluator/learning cycle with one fresh session. */
+  async runBrainCycleWithProvisionedCredentials(
+    brain: AutonomousBrainFacade,
+    input: AutonomousBrainRequest,
+    options: AutonomousProvisionedBrainCycleOptions = {},
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainCycleExecution>> {
+    this.assertBrainFacade(brain, "executeCycle");
+    this.assertBrainInput(input);
+    this.rejectNestedCredentialFields(options, ["cycle"]);
+    return this.runProvisioned(brain.agent, input.task, options, async (runOptions, session) => {
+      const brainOptions = runOptions as Omit<AutonomousProvisionedBrainCycleOptions, keyof AutonomousProvisioningControls>;
+      const credentialFor = this.credentialResolver(brain.agent, session);
+      const cycle = brainOptions.cycle === undefined ? { credentialFor } : { ...brainOptions.cycle, credentialFor };
+      return brain.executeCycle(input, { ...brainOptions, cycle } as AutonomousBrainCycleOptions);
+    });
+  }
+
+  /** Execute the bounded evaluator-guided replan loop with one fresh session. */
+  async runBrainAdaptiveCycleWithProvisionedCredentials(
+    brain: AutonomousBrainFacade,
+    input: AutonomousBrainRequest,
+    options: AutonomousProvisionedBrainAdaptiveCycleOptions,
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainAdaptiveCycleExecution>> {
+    this.assertBrainFacade(brain, "executeAdaptiveCycle");
+    this.assertBrainInput(input);
+    this.rejectNestedCredentialFields(options, ["adaptive"]);
+    return this.runProvisioned(brain.agent, input.task, options, async (runOptions, session) => {
+      const brainOptions = runOptions as Omit<AutonomousProvisionedBrainAdaptiveCycleOptions, keyof AutonomousProvisioningControls>;
+      const credentialFor = this.credentialResolver(brain.agent, session);
+      const adaptive = { ...brainOptions.adaptive, credentialFor };
+      return brain.executeAdaptiveCycle(input, { ...brainOptions, adaptive } as AutonomousBrainAdaptiveCycleOptions);
+    });
+  }
+
   /**
    * Bridge the protected onboarding session into the agent's model inventory lifecycle.
    * Provider-specific credentials are resolved only at invocation time from the opaque session;
@@ -533,6 +621,33 @@ export class ProviderSetup {
       ],
       credential_posture: "caller_input_only; opaque_handles_at_runtime",
       secret_material: "never_returned",
+    };
+  }
+
+  private assertBrainFacade(brain: AutonomousBrainFacade, operation: "execute" | "executeCycle" | "executeAdaptiveCycle"): void {
+    if (!brain || !brain.agent || typeof brain[operation] !== "function") throw new CredentialError(`provisioned brain ${operation} requires an AutonomousBrainFacade`);
+  }
+
+  private assertBrainInput(input: AutonomousBrainRequest): void {
+    if (!input || typeof input !== "object" || typeof input.task !== "string" || !input.task.trim()) throw new CredentialError("provisioned brain execution requires a non-empty task");
+  }
+
+  private rejectNestedCredentialFields(options: unknown, sections: readonly string[]): void {
+    if (!options || typeof options !== "object" || Array.isArray(options)) throw new CredentialError("provisioned brain options are malformed");
+    const raw = options as Record<string, unknown>;
+    const containsForbidden = (value: unknown, depth = 0): boolean => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+      const candidate = value as Record<string, unknown>;
+      if (Object.prototype.hasOwnProperty.call(candidate, "credential") || Object.prototype.hasOwnProperty.call(candidate, "credentialFor")) return true;
+      return depth < 4 && containsForbidden(candidate.providerPlanning, depth + 1);
+    };
+    if (containsForbidden(raw) || sections.some((section) => containsForbidden(raw[section]))) throw new CredentialError("provisioned brain execution owns credentials; pass deployment sources instead");
+  }
+
+  private credentialResolver(agent: AutonomousAgent, session: CredentialSession): (provider: string) => CredentialHandle | undefined {
+    return (provider) => {
+      const metadata = agent.llm.providerMetadata().find((row) => row.provider === provider);
+      return metadata?.requires_credential === false ? undefined : session.handle(provider);
     };
   }
 

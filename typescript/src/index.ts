@@ -137,9 +137,13 @@ export type {
   ProviderSetupPlan,
   ProviderSetupStatus,
   AutonomousProvisionedRun,
+  AutonomousProvisioningControls,
   AutonomousProvisionedExecutionOptions,
   AutonomousExplicitProvisionedExecutionOptions,
   AutonomousAutomaticProvisionedExecutionOptions,
+  AutonomousProvisionedBrainExecuteOptions,
+  AutonomousProvisionedBrainCycleOptions,
+  AutonomousProvisionedBrainAdaptiveCycleOptions,
   SupportedProviderName,
 } from "./provider-setup.js";
 export {
