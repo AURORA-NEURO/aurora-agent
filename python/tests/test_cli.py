@@ -6,6 +6,10 @@ from unittest.mock import patch
 
 from prism_sdk import (
     AUTONOMOUS_DOMAINS,
+    AutonomousBatchCheckpoint,
+    AutonomousBatchItem,
+    AutonomousBatchResult,
+    AutonomousBatchRehydrationContext,
     AutonomousExecutionJournal,
     AutonomousExecutionPolicy,
     AutonomousWorkflowCheckpoint,
@@ -15,6 +19,8 @@ from prism_sdk import (
     ProviderModelDescriptor,
     SQLiteBrainLearningLedger,
 )
+from prism_sdk.authoring import content_digest
+from prism_sdk.autonomy import _batch_digest
 from prism_sdk.cli import main
 
 
@@ -454,6 +460,251 @@ def test_run_automatic_workflow_persists_and_explicitly_rehydrates_checkpoint(tm
     assert captured["run_auto"]["workflow_checkpoint"].checkpoint_digest == checkpoint.checkpoint_digest
     assert captured["run_auto"]["workflow_execution"] is True
     assert json.loads(output.getvalue())["workflow"]["checkpoint_loaded"] is True
+
+
+def _cli_batch_checkpoint(*, result_digest: str, status: str = "completed") -> AutonomousBatchCheckpoint:
+    return AutonomousBatchCheckpoint(
+        job_id="cli-batch-job-1",
+        mode="domain",
+        batch_input_digest="a" * 64,
+        request_digests=("b" * 64,),
+        completed_indices=(0,),
+        completed_result_digests=(result_digest,),
+        max_parallelism=1,
+        stop_on_error=False,
+        status=status,
+    )
+
+
+def test_batch_status_is_provider_free_and_projects_only_checkpoint_metadata(tmp_path) -> None:
+    from prism_sdk.cli import _BatchCheckpointFileStore
+
+    class Result:
+        status = "completed"
+
+    task_digest = content_digest({"task": "batch task"})
+    item = AutonomousBatchItem(index=0, status="succeeded", task_digest=task_digest, result=Result())
+    checkpoint = _cli_batch_checkpoint(result_digest=content_digest(item.to_dict()))
+    path = tmp_path / "batch-checkpoint.json"
+    _BatchCheckpointFileStore(str(path)).write(checkpoint)
+    code, payload, errors = _invoke("batch-status", "--batch-checkpoint-store", str(path))
+    assert code == 0
+    assert errors == ""
+    assert payload["available"] is True
+    assert payload["checkpoint"]["job_id"] == "cli-batch-job-1"
+    assert payload["checkpoint"]["completed_indices"] == [0]
+    assert payload["checkpoint"]["checkpoint_digest"] == checkpoint.checkpoint_digest
+    assert "batch task" not in json.dumps(payload)
+    assert "options" not in json.dumps(payload)
+
+
+def test_batch_status_missing_store_does_not_create_it(tmp_path) -> None:
+    path = tmp_path / "missing-batch-checkpoint.json"
+    code, payload, errors = _invoke("batch-status", "--batch-checkpoint-store", str(path))
+    assert code == 0
+    assert errors == ""
+    assert payload["available"] is False
+    assert not path.exists()
+
+
+def test_batch_request_file_rejects_credential_shaped_fields_before_provider_access(tmp_path) -> None:
+    requests = tmp_path / "requests.json"
+    requests.write_text(
+        json.dumps(
+            {
+                "schema": "aurora-autonomous-batch-requests/0.1",
+                "mode": "domain",
+                "job_id": "cli-batch-job-1",
+                "requests": [
+                    {
+                        "task": "inspect all domains",
+                        "domain": "coding",
+                        "options": {"authorization": "must-never-enter-the-request"},
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    code, payload, errors = _invoke(
+        "batch-run",
+        "--mcp-command", "python server.py",
+        "--requests-file", str(requests),
+        "--job-id", "cli-batch-job-1",
+        "--provider", "local",
+        "--model", "local-model",
+    )
+    assert code == 2
+    assert payload is None
+    assert "command failed" in errors
+    assert "must-never-enter-the-request" not in errors
+
+
+def test_batch_run_wires_all_domain_request_file_controls_and_writes_status_manifest(tmp_path) -> None:
+    captured: dict[str, object] = {}
+    requests = tmp_path / "requests.json"
+    requests.write_text(
+        json.dumps(
+            {
+                "schema": "aurora-autonomous-batch-requests/0.1",
+                "mode": "domain",
+                "job_id": "cli-batch-job-1",
+                "requests": [
+                    {
+                        "task": f"inspect {domain} evidence",
+                        "domain": domain,
+                        "options": {"max_steps": 3} if domain == "coding" else {},
+                    }
+                    for domain in AUTONOMOUS_DOMAINS
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    checkpoint_path = tmp_path / "batch-checkpoint.json"
+    manifest_path = tmp_path / "batch-results.json"
+
+    class Result:
+        status = "completed"
+
+    items = tuple(
+        AutonomousBatchItem(
+            index=index,
+            status="succeeded",
+            task_digest=content_digest({"task": f"inspect {domain} evidence"}),
+            result=Result(),
+        )
+        for index, domain in enumerate(AUTONOMOUS_DOMAINS)
+    )
+    batch = AutonomousBatchResult(
+        status="completed",
+        items=items,
+        completed_count=len(items),
+        failed_count=0,
+        omitted_count=0,
+        max_parallelism=1,
+        stop_on_error=False,
+        batch_digest=_batch_digest(items),
+    )
+    checkpoint = AutonomousBatchCheckpoint(
+        job_id="cli-batch-job-1",
+        mode="domain",
+        batch_input_digest="a" * 64,
+        request_digests=tuple(f"{index:064x}" for index in range(len(items))),
+        completed_indices=tuple(range(len(items))),
+        completed_result_digests=tuple(content_digest(item.to_dict()) for item in items),
+        max_parallelism=1,
+        stop_on_error=False,
+        status="completed",
+    )
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    class FakeAgent:
+        def __init__(self, _workspace: object, _runtime: object, **kwargs: object) -> None:
+            captured["agent_kwargs"] = kwargs
+
+    class FakeController:
+        def __init__(self, _agent: object, persistence: object) -> None:
+            captured["persistence"] = persistence
+
+        def restore(self):
+            captured["restored"] = True
+            return {"status": "empty"}
+
+        def run(self, requests_value, **kwargs: object):
+            captured["requests"] = requests_value
+            captured["options"] = kwargs["options_factory"](requests_value[0], 0)
+            captured["rehydrate_result"] = kwargs.get("rehydrate_result")
+            persistence = captured["persistence"]
+            persistence.write(checkpoint)
+            return {"controller": {"status": "completed"}, "batch": batch}
+
+    with (
+        patch("prism_sdk.cli.AutonomousAgent", FakeAgent),
+        patch("prism_sdk.cli.AutonomousBrainBatchJobController", FakeController),
+    ):
+        output = io.StringIO()
+        errors = io.StringIO()
+        code = main(
+            (
+                "batch-run",
+                "--mcp-command", "python server.py",
+                "--requests-file", str(requests),
+                "--job-id", "cli-batch-job-1",
+                "--provider", "local",
+                "--model", "local-model",
+                "--approve-provider-call",
+                "--batch-checkpoint-store", str(checkpoint_path),
+                "--batch-result-manifest", str(manifest_path),
+                "--max-parallelism", "1",
+            ),
+            environ={},
+            writer=output,
+            error_writer=errors,
+            client_factory=lambda *_args, **_kwargs: FakeClient(),
+        )
+    payload = json.loads(output.getvalue())
+    assert code == 0
+    assert errors.getvalue() == ""
+    assert captured["restored"] is True
+    assert {request["domain"] for request in captured["requests"]} == set(AUTONOMOUS_DOMAINS)
+    assert captured["options"]["approve_provider_call"] is True
+    assert captured["options"]["approve_mission_dispatch"] is False
+    assert captured["options"]["max_steps"] == 3
+    assert payload["batch"]["status"] == "completed"
+    assert payload["batch_persistence"]["checkpoint_digest"] == checkpoint.checkpoint_digest
+    assert manifest_path.exists()
+    assert "inspect coding evidence" not in output.getvalue()
+
+
+def test_batch_resume_requires_and_validates_status_only_manifest(tmp_path) -> None:
+    from prism_sdk.cli import _BatchCheckpointFileStore, _load_batch_rehydrator, _write_batch_result_manifest
+
+    class Result:
+        status = "completed"
+
+    task_digest = content_digest({"task": "batch task"})
+    item = AutonomousBatchItem(index=0, status="succeeded", task_digest=task_digest, result=Result())
+    batch = AutonomousBatchResult(
+        status="completed",
+        items=(item,),
+        completed_count=1,
+        failed_count=0,
+        omitted_count=0,
+        max_parallelism=1,
+        stop_on_error=False,
+        batch_digest=_batch_digest((item,)),
+    )
+    checkpoint = _cli_batch_checkpoint(result_digest=content_digest(item.to_dict()))
+    checkpoint_path = tmp_path / "checkpoint.json"
+    manifest_path = tmp_path / "manifest.json"
+    _BatchCheckpointFileStore(str(checkpoint_path)).write(checkpoint)
+    _write_batch_result_manifest(str(manifest_path), checkpoint, batch)
+    rehydrate = _load_batch_rehydrator(str(manifest_path), checkpoint)
+    restored = rehydrate(
+        AutonomousBatchRehydrationContext(
+            job_id=checkpoint.job_id,
+            index=0,
+            mode="domain",
+            request_digest=checkpoint.request_digests[0],
+            task_digest=task_digest,
+            expected_result_digest=checkpoint.completed_result_digests[0],
+        )
+    )
+    assert restored.status == "completed"
+    manifest_path.write_text(manifest_path.read_text(encoding="utf-8").replace("completed", "tampered"), encoding="utf-8")
+    try:
+        _load_batch_rehydrator(str(manifest_path), checkpoint)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("tampered batch manifest must be rejected")
 
 
 def _write_cli_learning_episode(path, *, episode_id: str = "cli-episode-1", evidence_digest=None) -> None:

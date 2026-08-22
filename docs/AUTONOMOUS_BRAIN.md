@@ -362,6 +362,51 @@ operators should protect that file according to their data policy. A missing sta
 reported as unavailable without creating it, and a tampered or oversized store fails closed before
 credential collection or provider access.
 
+### Bounded multi-task execution across the domain catalogue
+
+The library's batch executor is available at the process boundary through `batch-run`. A request
+file is validated before onboarding or MCP startup, and one shared opaque credential session and
+model catalogue are used for every item. The file can contain explicit-domain, automatic-routing,
+or cross-domain requests; each item still passes through the same provider, model-selection,
+execution-mode, approval, health, learning, and journal gates as a single run:
+
+```json
+{
+  "schema": "aurora-autonomous-batch-requests/0.1",
+  "mode": "domain",
+  "job_id": "all-domain-review-001",
+  "requests": [
+    {"task": "review the coding handoff", "domain": "coding"},
+    {"task": "compare the evidence sources", "domain": "science"},
+    {"task": "check the safety boundary", "domain": "bioethics"}
+  ]
+}
+```
+
+```bash
+python -m prism_sdk batch-run \
+  --mcp-command "python path/to/mcp_server.py" \
+  --provider local \
+  --model local-model \
+  --requests-file .aurora/review-batch.json \
+  --job-id all-domain-review-001 \
+  --max-parallelism 3 \
+  --batch-checkpoint-store .aurora/review-batch.checkpoint.json \
+  --approve-provider-call
+
+python -m prism_sdk batch-status \
+  --batch-checkpoint-store .aurora/review-batch.checkpoint.json
+```
+
+The request boundary accepts at most 64 items, rejects credential-shaped fields before provider
+access, and never echoes task text, request options, or provider values in its batch projection.
+`--stop-on-error` turns the remaining items into explicit omissions after the first failure. A
+status-only result manifest records only successful result statuses and item digests, allowing
+independent domain/automatic items to be rehydrated on an explicit `--resume-batch`; it cannot
+reconstruct provider payloads. Cross-domain resume remains a caller-library concern because its
+fan-out and synthesis values require an application-owned rehydrator rather than a CLI-generated
+placeholder.
+
 The command accepts no API-key or token argument. By default it uses a no-echo prompt; deployment
 automation can select `--credential-source environment --credential-env OPENAI_API_KEY`. The value
 is converted immediately into a short-lived in-memory session, is passed to the runtime only as an

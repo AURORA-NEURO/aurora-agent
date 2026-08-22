@@ -12,7 +12,9 @@ the brain or into MCP:
   persisted health, learning, execution, and staged workflow metadata, while
   ``settle-learning`` accepts only a bounded evaluator decision for a restart-safe settlement; and
 * ``run`` connects to a caller-owned MCP workspace, collects one short-lived credential, lets the
-  existing autonomous planner select a model, and requires explicit provider/mission approval.
+  existing autonomous planner select a model, and requires explicit provider/mission approval; and
+* ``batch-run`` applies the same model, provider, approval, learning, and execution boundaries to
+  a bounded request file spanning explicit-domain, automatic, or cross-domain work.
 
 The command line parser deliberately has no API-key, token, header, or secret argument.  Keys
 are accepted only through the existing no-echo prompt or an explicitly named environment
@@ -36,7 +38,12 @@ from .authoring import content_digest
 from .autonomy import (
     AUTONOMOUS_DOMAINS,
     AutonomousAgent,
+    AutonomousBatchItem,
+    AutonomousBatchCheckpoint,
+    AutonomousBatchResult,
+    AutonomousBrainBatchJobController,
     AutonomousWorkflowCheckpoint,
+    InMemoryAutonomousBatchCheckpointStore,
 )
 from .autonomous_model_inventory import AutonomousModelInventoryStore
 from .autonomy_persistence import AutonomousExecutionJournal
@@ -60,11 +67,16 @@ from .llm_runtime import (
 
 CLI_SCHEMA = "aurora-autonomous-cli/0.1"
 WORKFLOW_CHECKPOINT_STORE_SCHEMA = "aurora-autonomous-workflow-checkpoint-store/0.1"
+BATCH_CHECKPOINT_STORE_SCHEMA = "aurora-autonomous-batch-checkpoint-store/0.1"
+BATCH_RESULT_MANIFEST_SCHEMA = "aurora-autonomous-batch-result-manifest/0.1"
+AUTONOMOUS_BATCH_REQUESTS_SCHEMA = "aurora-autonomous-batch-requests/0.1"
 _DEFAULT_CONTEXT_WINDOW = 128_000
 _DEFAULT_MAX_OUTPUT = 4_096
 _DEFAULT_TIMEOUT = 30.0
 _LOCAL_PROVIDER_NAMES = frozenset({"local", "in_memory"})
 _MAX_WORKFLOW_CHECKPOINT_STORE_BYTES = 1_000_000
+_MAX_BATCH_REQUEST_FILE_BYTES = 4_000_000
+_MAX_BATCH_RESULT_MANIFEST_BYTES = 1_000_000
 
 
 class _CliArgumentError(ValueError):
@@ -935,6 +947,543 @@ def _workflow_status(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+class _BatchCheckpointFileStore:
+    """Atomic, digest-bound file adapter for the metadata-only batch checkpoint."""
+
+    def __init__(self, path_value: str) -> None:
+        self.path = Path(path_value)
+
+    def read(self) -> dict[str, Any] | None:
+        if not self.path.exists():
+            return None
+        if not self.path.is_file() or self.path.stat().st_size > _MAX_BATCH_RESULT_MANIFEST_BYTES:
+            raise ValueError("batch checkpoint store is outside its bounded file contract")
+        try:
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            raise ValueError("batch checkpoint store is unreadable") from error
+        if not isinstance(raw, Mapping) or raw.get("schema") != BATCH_CHECKPOINT_STORE_SCHEMA:
+            raise ValueError("batch checkpoint store has an invalid schema")
+        supplied_digest = raw.get("store_digest")
+        unsigned = dict(raw)
+        unsigned.pop("store_digest", None)
+        if supplied_digest != content_digest(unsigned):
+            raise ValueError("batch checkpoint store digest does not match its contents")
+        checkpoint_payload = raw.get("checkpoint")
+        if not isinstance(checkpoint_payload, Mapping):
+            raise ValueError("batch checkpoint store is missing its checkpoint")
+        checkpoint = AutonomousBatchCheckpoint.from_dict(checkpoint_payload)
+        if raw.get("checkpoint_digest") != checkpoint.checkpoint_digest:
+            raise ValueError("batch checkpoint store checkpoint digest does not match")
+        return checkpoint.to_dict()
+
+    def write(self, checkpoint: AutonomousBatchCheckpoint | Mapping[str, Any]) -> None:
+        verified = (
+            AutonomousBatchCheckpoint.from_dict(checkpoint.to_dict())
+            if isinstance(checkpoint, AutonomousBatchCheckpoint)
+            else AutonomousBatchCheckpoint.from_dict(checkpoint)
+        )
+        unsigned: dict[str, Any] = {
+            "schema": BATCH_CHECKPOINT_STORE_SCHEMA,
+            "checkpoint": verified.to_dict(),
+            "checkpoint_digest": verified.checkpoint_digest,
+            "retention": "request_and_result_digests_only; task_text_and_provider_values_not_persisted",
+        }
+        payload = {**unsigned, "store_digest": content_digest(unsigned)}
+        encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + "\n"
+        if len(encoded.encode("utf-8")) > _MAX_BATCH_RESULT_MANIFEST_BYTES:
+            raise ValueError("batch checkpoint store exceeds its bounded size")
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_name: str | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=str(self.path.parent),
+                prefix=f".{self.path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as temporary:
+                temporary_name = temporary.name
+                temporary.write(encoded)
+                temporary.flush()
+                os.fsync(temporary.fileno())
+            os.replace(temporary_name, self.path)
+            temporary_name = None
+        finally:
+            if temporary_name is not None:
+                try:
+                    os.unlink(temporary_name)
+                except FileNotFoundError:
+                    pass
+
+
+def _batch_checkpoint_projection(checkpoint: AutonomousBatchCheckpoint) -> dict[str, Any]:
+    """Project batch progress without returning tasks, options, or result payloads."""
+
+    return {
+        "schema": checkpoint.to_dict()["schema"],
+        "job_id": checkpoint.job_id,
+        "mode": checkpoint.mode,
+        "batch_input_digest": checkpoint.batch_input_digest,
+        "request_count": len(checkpoint.request_digests),
+        "completed_indices": list(checkpoint.completed_indices),
+        "completed_count": len(checkpoint.completed_indices),
+        "remaining_count": len(checkpoint.request_digests) - len(checkpoint.completed_indices),
+        "completed_result_digests": list(checkpoint.completed_result_digests),
+        "max_parallelism": checkpoint.max_parallelism,
+        "stop_on_error": checkpoint.stop_on_error,
+        "status": checkpoint.status,
+        "checkpoint_digest": checkpoint.checkpoint_digest,
+        "retention": "request_and_result_digests_only; tasks_and_provider_values_not_returned",
+    }
+
+
+def _batch_status(args: argparse.Namespace) -> dict[str, Any]:
+    """Inspect a batch checkpoint without opening credentials, MCP, or a provider."""
+
+    if not os.path.exists(args.batch_checkpoint_store):
+        return {
+            "schema": CLI_SCHEMA,
+            "command": "batch-status",
+            "available": False,
+            "batch_checkpoint_store": args.batch_checkpoint_store,
+            "checkpoint": None,
+            "authorization": "metadata_read_only; no_provider_or_credential_access",
+            "retention": "request_and_result_digests_only",
+            "secret_material": "never_returned",
+        }
+    store = _BatchCheckpointFileStore(args.batch_checkpoint_store)
+    raw = store.read()
+    if raw is None:
+        raise ValueError("batch checkpoint store unexpectedly returned no checkpoint")
+    checkpoint = AutonomousBatchCheckpoint.from_dict(raw)
+    return {
+        "schema": CLI_SCHEMA,
+        "command": "batch-status",
+        "available": True,
+        "batch_checkpoint_store": args.batch_checkpoint_store,
+        "checkpoint": _batch_checkpoint_projection(checkpoint),
+        "authorization": "metadata_read_only; no_provider_or_credential_access",
+        "retention": "request_and_result_digests_only",
+        "secret_material": "never_returned",
+    }
+
+
+class _CliRehydratedBatchResult:
+    """Metadata-only successful result used to rehydrate independent batch items."""
+
+    def __init__(self, status: str) -> None:
+        self.status = status
+
+
+def _batch_manifest_payload(
+    checkpoint: AutonomousBatchCheckpoint,
+    result: AutonomousBatchResult,
+) -> dict[str, Any]:
+    expected_digests = dict(zip(checkpoint.completed_indices, checkpoint.completed_result_digests))
+    items = []
+    for item in result.items:
+        if item.status != "succeeded":
+            continue
+        result_status = item.result_status
+        if (
+            not isinstance(result_status, str)
+            or not result_status
+            or len(result_status) > 128
+            or any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:-" for character in result_status)
+        ):
+            raise ValueError("successful batch result is missing a bounded result status")
+        item_projection = item.to_dict()
+        item_digest = content_digest(item_projection)
+        if item.index not in expected_digests or expected_digests[item.index] != item_digest:
+            raise ValueError("batch result does not match the persisted checkpoint")
+        items.append(
+            {
+                "index": item.index,
+                "result_status": result_status,
+                "result_digest": item_digest,
+            }
+        )
+    if set(item["index"] for item in items) != set(checkpoint.completed_indices):
+        raise ValueError("batch result does not cover every checkpointed successful item")
+    unsigned: dict[str, Any] = {
+        "schema": BATCH_RESULT_MANIFEST_SCHEMA,
+        "job_id": checkpoint.job_id,
+        "checkpoint_digest": checkpoint.checkpoint_digest,
+        "batch_input_digest": checkpoint.batch_input_digest,
+        "items": items,
+        "retention": "successful_result_status_and_item_digests_only; result_values_not_persisted",
+    }
+    return {**unsigned, "manifest_digest": content_digest(unsigned)}
+
+
+def _write_batch_result_manifest(
+    path_value: str,
+    checkpoint: AutonomousBatchCheckpoint,
+    result: AutonomousBatchResult,
+) -> None:
+    payload = _batch_manifest_payload(checkpoint, result)
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + "\n"
+    if len(encoded.encode("utf-8")) > _MAX_BATCH_RESULT_MANIFEST_BYTES:
+        raise ValueError("batch result manifest exceeds its bounded size")
+    path = Path(path_value)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_name: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=str(path.parent),
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary_name = temporary.name
+            temporary.write(encoded)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.replace(temporary_name, path)
+        temporary_name = None
+    finally:
+        if temporary_name is not None:
+            try:
+                os.unlink(temporary_name)
+            except FileNotFoundError:
+                pass
+
+
+def _load_batch_rehydrator(
+    path_value: str,
+    checkpoint: AutonomousBatchCheckpoint,
+) -> Callable[[Any], Any]:
+    path = Path(path_value)
+    if not path.exists() or not path.is_file() or path.stat().st_size > _MAX_BATCH_RESULT_MANIFEST_BYTES:
+        raise ValueError("batch resume requires an existing bounded result manifest")
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError("batch result manifest is unreadable") from error
+    if not isinstance(raw, Mapping) or raw.get("schema") != BATCH_RESULT_MANIFEST_SCHEMA:
+        raise ValueError("batch result manifest has an invalid schema")
+    unsigned = dict(raw)
+    supplied_digest = unsigned.pop("manifest_digest", None)
+    if supplied_digest != content_digest(unsigned):
+        raise ValueError("batch result manifest digest does not match its contents")
+    if raw.get("job_id") != checkpoint.job_id or raw.get("checkpoint_digest") != checkpoint.checkpoint_digest or raw.get("batch_input_digest") != checkpoint.batch_input_digest:
+        raise ValueError("batch result manifest does not match the checkpoint")
+    raw_items = raw.get("items")
+    if not isinstance(raw_items, Sequence) or isinstance(raw_items, (str, bytes)):
+        raise ValueError("batch result manifest items are malformed")
+    entries: dict[int, Mapping[str, Any]] = {}
+    for raw_item in raw_items:
+        if not isinstance(raw_item, Mapping):
+            raise ValueError("batch result manifest item is malformed")
+        index = raw_item.get("index")
+        result_status = raw_item.get("result_status")
+        result_digest = raw_item.get("result_digest")
+        if (
+            not isinstance(index, int)
+            or isinstance(index, bool)
+            or not isinstance(result_status, str)
+            or not result_status
+            or len(result_status) > 128
+            or any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:-" for character in result_status)
+            or not isinstance(result_digest, str)
+            or len(result_digest) != 64
+            or any(character not in "0123456789abcdef" for character in result_digest)
+        ):
+            raise ValueError("batch result manifest item is outside its contract")
+        if index in entries or index not in checkpoint.completed_indices:
+            raise ValueError("batch result manifest item index is not checkpointed")
+        entries[index] = raw_item
+    if set(entries) != set(checkpoint.completed_indices):
+        raise ValueError("batch result manifest does not cover every completed item")
+
+    def rehydrate(context: Any) -> Any:
+        entry = entries.get(context.index)
+        if entry is None:
+            raise ValueError("batch result manifest is missing the requested item")
+        result = _CliRehydratedBatchResult(entry["result_status"])
+        item = AutonomousBatchItem(
+            index=context.index,
+            status="succeeded",
+            task_digest=context.task_digest,
+            result=result,
+        )
+        item_digest = content_digest(item.to_dict())
+        if item_digest != entry["result_digest"] or item_digest != context.expected_result_digest:
+            raise ValueError("batch result manifest item digest does not match the checkpoint")
+        return result
+
+    return rehydrate
+
+
+def _batch_request_json_safe(value: Any, *, depth: int = 0) -> None:
+    """Reject credential-shaped request-file fields before they reach the batch engine."""
+
+    if depth > 32:
+        raise ValueError("batch request file is too deeply nested")
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            if not isinstance(key, str) or not key.strip() or "\x00" in key:
+                raise ValueError("batch request file contains an invalid field")
+            normalized = "".join(character for character in key.lower() if character.isalnum())
+            if normalized in {
+                "apikey",
+                "authorization",
+                "bearer",
+                "credential",
+                "credentials",
+                "password",
+                "privatekey",
+                "secret",
+                "secretkey",
+                "token",
+                "accesstoken",
+                "refreshtoken",
+            } or normalized.startswith("gsk") or normalized.startswith("skproj"):
+                raise ValueError("batch request file contains credential-shaped fields")
+            _batch_request_json_safe(child, depth=depth + 1)
+    elif isinstance(value, (list, tuple)):
+        for child in value:
+            _batch_request_json_safe(child, depth=depth + 1)
+    elif isinstance(value, (str, bool, int, float)) or value is None:
+        if isinstance(value, float) and (value != value or value in {float("inf"), float("-inf")}):
+            raise ValueError("batch request file contains a non-finite number")
+    else:
+        raise ValueError("batch request file contains a non-JSON value")
+
+
+def _load_batch_requests(args: argparse.Namespace) -> tuple[str, str, list[dict[str, Any]]]:
+    path = Path(args.requests_file)
+    if not path.exists() or not path.is_file() or path.stat().st_size > _MAX_BATCH_REQUEST_FILE_BYTES:
+        raise ValueError("batch requests file is missing or outside its bounded size")
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError("batch requests file is unreadable") from error
+    _batch_request_json_safe(raw)
+    if not isinstance(raw, Mapping) or raw.get("schema") != AUTONOMOUS_BATCH_REQUESTS_SCHEMA:
+        raise ValueError("batch requests file has an invalid schema")
+    mode = raw.get("mode")
+    if args.batch_mode is not None and mode != args.batch_mode:
+        raise ValueError("--batch-mode does not match the request file")
+    if mode not in {"domain", "auto", "cross_domain"}:
+        raise ValueError("batch requests mode must be domain, auto, or cross_domain")
+    job_id = raw.get("job_id", args.job_id)
+    if job_id != args.job_id:
+        raise ValueError("--job-id does not match the request file")
+    if not isinstance(job_id, str) or not job_id.strip() or len(job_id.encode("utf-8")) > 256:
+        raise ValueError("batch job_id is outside its bounded contract")
+    requests = raw.get("requests")
+    if not isinstance(requests, list) or not 1 <= len(requests) <= 64:
+        raise ValueError("batch requests must contain between 1 and 64 entries")
+    allowed_fields = {"task", "domain", "subtasks", "options", "model_candidates", "execution_id"}
+    normalized_requests: list[dict[str, Any]] = []
+    for index, request in enumerate(requests):
+        if not isinstance(request, Mapping):
+            raise ValueError(f"batch request {index} must be an object")
+        unknown = sorted(set(request).difference(allowed_fields))
+        if unknown:
+            raise ValueError(f"batch request {index} contains unsupported fields")
+        task = request.get("task")
+        if not isinstance(task, str) or not task.strip() or len(task.encode("utf-8")) > 16_000:
+            raise ValueError(f"batch request {index} task is outside its bounded contract")
+        if mode == "domain":
+            domain = request.get("domain")
+            if domain not in AUTONOMOUS_DOMAINS:
+                raise ValueError(f"batch request {index} has an unsupported domain")
+            if "subtasks" in request:
+                raise ValueError(f"batch request {index} cannot contain subtasks in domain mode")
+        elif mode == "cross_domain":
+            subtasks = request.get("subtasks")
+            if not isinstance(subtasks, list) or not subtasks:
+                raise ValueError(f"cross-domain batch request {index} requires subtasks")
+            if "domain" in request:
+                raise ValueError(f"cross-domain batch request {index} cannot contain domain")
+        else:
+            if "domain" in request or "subtasks" in request:
+                raise ValueError(f"automatic batch request {index} cannot preselect a domain or subtasks")
+        options = request.get("options", {})
+        if options is None:
+            options = {}
+        if not isinstance(options, Mapping):
+            raise ValueError(f"batch request {index} options must be an object")
+        if "credentials" in options:
+            raise ValueError("batch request options cannot carry credentials")
+        normalized = dict(request)
+        normalized["options"] = dict(options)
+        normalized_requests.append(normalized)
+    return mode, job_id, normalized_requests
+
+
+def _batch_run(
+    args: argparse.Namespace,
+    *,
+    environ: Mapping[str, str],
+    reader: Callable[[str], str] | None,
+    client_factory: Callable[..., Client] = Client,
+) -> dict[str, Any]:
+    mode, job_id, requests = _load_batch_requests(args)
+    if args.resume_batch and args.batch_checkpoint_store is None:
+        raise ValueError("--resume-batch requires --batch-checkpoint-store")
+    if args.batch_result_manifest is not None and args.batch_checkpoint_store is None:
+        raise ValueError("--batch-result-manifest requires --batch-checkpoint-store")
+    if args.batch_checkpoint_store is not None:
+        checkpoint_store: Any = _BatchCheckpointFileStore(args.batch_checkpoint_store)
+        existing_checkpoint = checkpoint_store.read()
+        if existing_checkpoint is not None and not args.resume_batch:
+            raise ValueError("existing batch checkpoint requires --resume-batch")
+        if args.resume_batch and existing_checkpoint is None:
+            raise ValueError("--resume-batch requires an existing batch checkpoint")
+    else:
+        checkpoint_store = InMemoryAutonomousBatchCheckpointStore()
+        existing_checkpoint = None
+    if args.resume_batch and mode == "cross_domain":
+        raise ValueError("CLI batch result rehydration currently supports domain and automatic batches only")
+    command = _parse_mcp_command(args.mcp_command)
+    if args.discover_models and not args.approve_provider_call:
+        raise ValueError("model discovery requires --approve-provider-call")
+    if args.use_inventory and args.discover_models:
+        raise ValueError("--use-inventory and --discover-models cannot be combined")
+    if args.use_inventory and args.inventory_store is None:
+        raise ValueError("--inventory-store is required with --use-inventory")
+    if args.batch_mode is not None and args.batch_mode not in {"domain", "auto", "cross_domain"}:
+        raise ValueError("--batch-mode is unsupported")
+    if args.learning_mode == "trajectory" and mode == "domain":
+        raise ValueError("trajectory learning requires automatic or cross-domain batch mode")
+    if args.workflow_execution and mode != "auto":
+        raise ValueError("--workflow-execution requires automatic batch mode")
+    if args.workflow_execution and not args.single_domain:
+        raise ValueError("batch workflow execution requires --single-domain")
+    if (args.workflow_max_stage_calls is not None or args.workflow_retry_blocked) and not args.workflow_execution:
+        raise ValueError("batch workflow controls require --workflow-execution")
+    if args.learning_mode is not None and mode == "cross_domain":
+        raise ValueError("cross-domain batch learning must be declared per request in options")
+    persisted_candidates = _persisted_candidate_args(args) if args.use_inventory else ()
+    runtime, onboarding = _runtime_with_provider(args)
+    session = onboarding.start_session(ttl_seconds=args.ttl_seconds)
+    health_ledger = None
+    learning_ledger = None
+    execution_journal = None
+    try:
+        if args.health_store is not None:
+            health_ledger = ProviderHealthLedger(args.health_store)
+        if args.learning_store is not None:
+            learning_ledger = SQLiteBrainLearningLedger(args.learning_store)
+        if args.execution_store is not None:
+            execution_journal = AutonomousExecutionJournal(args.execution_store)
+        _collect_credentials(args, session, environ=environ, reader=reader)
+        descriptors = _discover_descriptors(runtime, args, session) if args.discover_models else ()
+        candidates = (
+            _candidate_args(args, descriptors)
+            if args.discover_models
+            else persisted_candidates
+            if args.use_inventory
+            else _candidate_args(args)
+        )
+        catalogue = ModelCatalogue(candidates)
+        client = client_factory(command, cwd=args.mcp_cwd, timeout=args.mcp_timeout)
+        with client:
+            agent_kwargs: dict[str, Any] = {"model_catalogue": catalogue}
+            if learning_ledger is not None:
+                agent_kwargs["ledger"] = learning_ledger
+            if health_ledger is not None:
+                agent_kwargs["health_ledger"] = health_ledger
+            if execution_journal is not None:
+                agent_kwargs["execution_journal"] = execution_journal
+            agent = AutonomousAgent(_McpWorkspace(client), runtime, **agent_kwargs)
+            controller = AutonomousBrainBatchJobController(agent, checkpoint_store)
+            controller.restore()
+            rehydrate_result = None
+            if args.resume_batch and existing_checkpoint is not None:
+                checkpoint = AutonomousBatchCheckpoint.from_dict(existing_checkpoint)
+                if checkpoint.completed_indices:
+                    manifest_path = args.batch_result_manifest or f"{args.batch_checkpoint_store}.results.json"
+                    rehydrate_result = _load_batch_rehydrator(manifest_path, checkpoint)
+
+            def options_factory(raw: Mapping[str, Any], _index: int) -> Mapping[str, Any]:
+                options = dict(raw.get("options", {}))
+                # Approval is an operator-level gate and cannot be smuggled in through the file.
+                options["approve_provider_call"] = args.approve_provider_call
+                options["approve_mission_dispatch"] = args.approve_mission_dispatch
+                if args.execution_mode is not None:
+                    options["execution_mode"] = args.execution_mode
+                if args.max_steps is not None:
+                    options["max_steps"] = args.max_steps
+                if args.requested_output_tokens is not None:
+                    options["requested_output_tokens"] = args.requested_output_tokens
+                    options["max_output_tokens"] = args.requested_output_tokens
+                if args.learning_mode is not None:
+                    if mode == "auto":
+                        options["learning_mode"] = args.learning_mode
+                    elif args.learning_mode == "online":
+                        options["learn"] = True
+                if args.workflow_execution:
+                    options["workflow_execution"] = True
+                    options["allow_cross_domain"] = False
+                    if args.workflow_max_stage_calls is not None:
+                        options["workflow_max_stage_calls"] = args.workflow_max_stage_calls
+                    if args.workflow_retry_blocked:
+                        options["workflow_retry_blocked"] = True
+                return options
+
+            run_payload = controller.run(
+                requests,
+                job_id=job_id,
+                mode=mode,
+                credentials=session,
+                model_candidates=candidates,
+                options_factory=options_factory,
+                max_parallelism=args.max_parallelism,
+                stop_on_error=args.stop_on_error,
+                rehydrate_result=rehydrate_result,
+            )
+        batch = run_payload.get("batch") if isinstance(run_payload, Mapping) else None
+        if not isinstance(batch, AutonomousBatchResult):
+            raise ValueError("batch engine returned an invalid result")
+        checkpoint_raw = checkpoint_store.read()
+        checkpoint = None if checkpoint_raw is None else AutonomousBatchCheckpoint.from_dict(checkpoint_raw)
+        manifest_path = None
+        if args.batch_checkpoint_store is not None and checkpoint is not None:
+            manifest_path = args.batch_result_manifest or f"{args.batch_checkpoint_store}.results.json"
+            _write_batch_result_manifest(manifest_path, checkpoint, batch)
+        return {
+            "schema": CLI_SCHEMA,
+            "command": "batch-run",
+            "mode": mode,
+            "job_id": job_id,
+            "model_inventory": {
+                "mode": "provider_discovery" if args.discover_models else "persisted_catalogue" if args.use_inventory else "caller_declared",
+                "models": [descriptor.to_dict() for descriptor in descriptors],
+                "model_count": len(descriptors),
+                "candidates": [candidate.to_dict() for candidate in candidates] if args.use_inventory else [],
+            },
+            "batch": batch,
+            "controller": run_payload.get("controller") if isinstance(run_payload, Mapping) else None,
+            "batch_persistence": {
+                "checkpoint_store": args.batch_checkpoint_store,
+                "checkpoint_available": checkpoint is not None,
+                "checkpoint_digest": None if checkpoint is None else checkpoint.checkpoint_digest,
+                "resume_requested": args.resume_batch,
+                "result_manifest": manifest_path,
+                "retention": "checkpoint_digests_and_success_statuses_only; task_text_and_provider_values_not_persisted",
+            },
+            "provider_status": runtime.provider_status(args.provider),
+            "credential_session": session.status().to_dict(),
+            "authorization": {
+                "provider_call_approved": args.approve_provider_call,
+                "mission_dispatch_approved": args.approve_mission_dispatch,
+            },
+            "secret_material": "never_returned",
+        }
+    finally:
+        session.close()
+        if learning_ledger is not None:
+            learning_ledger.close()
+
+
 def _settle_learning(
     args: argparse.Namespace,
     *,
@@ -1358,6 +1907,16 @@ def _parser() -> argparse.ArgumentParser:
         help="caller-owned workflow checkpoint store",
     )
 
+    batch_status = subparsers.add_parser(
+        "batch-status",
+        help="inspect a digest-verified batch checkpoint without contacting a provider",
+    )
+    batch_status.add_argument(
+        "--batch-checkpoint-store",
+        required=True,
+        help="caller-owned metadata-only batch checkpoint store",
+    )
+
     settle_learning = subparsers.add_parser(
         "settle-learning",
         help="settle one prevalidated value-only evaluator decision without a provider call",
@@ -1442,6 +2001,49 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--approve-provider-call", action="store_true", help="authorize provider invocation")
     run.add_argument("--approve-mission-dispatch", action="store_true", help="authorize mission effects")
     _add_credential_arguments(run)
+
+    batch_run = subparsers.add_parser(
+        "batch-run",
+        parents=[provider_parent],
+        help="execute a bounded request file across explicit, automatic, or cross-domain routes",
+    )
+    batch_run.add_argument("--mcp-command", required=True, help="MCP executable and arguments; no shell is invoked")
+    batch_run.add_argument("--mcp-cwd", default=None, help="working directory for the MCP process")
+    batch_run.add_argument("--mcp-timeout", type=float, default=_DEFAULT_TIMEOUT)
+    batch_run.add_argument("--requests-file", required=True, help="JSON request file validated before provider access")
+    batch_run.add_argument("--job-id", required=True, help="stable batch identity for checkpoint/resume")
+    batch_run.add_argument("--batch-mode", choices=("domain", "auto", "cross_domain"), default=None, help="optional mode assertion; the request file remains authoritative")
+    batch_run.add_argument("--max-parallelism", type=int, default=4, help="bounded concurrent request count")
+    batch_run.add_argument("--stop-on-error", action="store_true", help="omit remaining requests after the first failed/refused item")
+    batch_run.add_argument("--single-domain", action="store_true", help="keep automatic requests on one reviewed domain")
+    batch_run.add_argument("--batch-checkpoint-store", default=None, help="atomic metadata-only batch checkpoint path")
+    batch_run.add_argument("--batch-result-manifest", default=None, help="status-only manifest used to rehydrate completed independent items")
+    batch_run.add_argument("--resume-batch", action="store_true", help="explicitly resume the existing batch checkpoint")
+    batch_run.add_argument("--model", action="append", default=[], help="shared candidate model; repeatable")
+    batch_run.add_argument("--discover-models", action="store_true", help="discover selectable models through the approved provider inventory endpoint")
+    batch_run.add_argument("--use-inventory", action="store_true", help="rehydrate selectable candidates from --inventory-store")
+    batch_run.add_argument("--inventory-store", default=None, help="digest-bound metadata-only inventory store")
+    batch_run.add_argument("--health-store", default=None, help="persist provider/model health observations")
+    batch_run.add_argument("--learning-store", default=None, help="persist value-only online-learning state")
+    batch_run.add_argument("--execution-store", default=None, help="persist hash-chained metadata-only execution checkpoints")
+    batch_run.add_argument("--execution-mode", choices=("provider", "tool_loop", "mission"), default=None)
+    batch_run.add_argument("--max-steps", type=int, default=None)
+    batch_run.add_argument("--requested-output-tokens", type=int, default=None)
+    batch_run.add_argument("--learning-mode", choices=("off", "online", "trajectory"), default=None, help="automatic route learning mode")
+    batch_run.add_argument("--workflow-execution", action="store_true", help="enable checkpointable workflow execution for automatic requests")
+    batch_run.add_argument("--workflow-max-stage-calls", type=int, default=None)
+    batch_run.add_argument("--workflow-retry-blocked", action="store_true")
+    batch_run.add_argument("--model-limit", type=int, default=64)
+    batch_run.add_argument("--model-capability", action="append", default=[])
+    batch_run.add_argument("--context-window-tokens", type=int, default=_DEFAULT_CONTEXT_WINDOW)
+    batch_run.add_argument("--model-max-output-tokens", type=int, default=_DEFAULT_MAX_OUTPUT)
+    batch_run.add_argument("--quality", type=float, default=0.5)
+    batch_run.add_argument("--reliability", type=float, default=0.5)
+    batch_run.add_argument("--latency-ms", type=int, default=1_000)
+    batch_run.add_argument("--cost-per-million-tokens", type=int, default=0)
+    batch_run.add_argument("--approve-provider-call", action="store_true", help="authorize provider invocation")
+    batch_run.add_argument("--approve-mission-dispatch", action="store_true", help="authorize mission effects")
+    _add_credential_arguments(batch_run)
     return parser
 
 
@@ -1501,10 +2103,14 @@ def main(
             payload = _execution_status(args)
         elif args.command == "workflow-status":
             payload = _workflow_status(args)
+        elif args.command == "batch-status":
+            payload = _batch_status(args)
         elif args.command == "settle-learning":
             payload = _settle_learning(args, client_factory=client_factory)
         elif args.command == "run":
             payload = _run(args, environ=env, reader=reader, client_factory=client_factory)
+        elif args.command == "batch-run":
+            payload = _batch_run(args, environ=env, reader=reader, client_factory=client_factory)
         else:  # pragma: no cover - argparse enforces the command set
             raise ValueError("unknown command")
         _write_json(out, payload)
