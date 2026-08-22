@@ -12722,6 +12722,7 @@ class AutonomousAgent:
         preview = {
             "schema": AUTONOMOUS_MODEL_SELECTION_PREVIEW_SCHEMA,
             "status": audit["selection_status"],
+            "task_digest": blueprint.spec.task_digest,
             "domain": blueprint.spec.domain,
             "capability": blueprint.spec.capability,
             "risk_class": blueprint.spec.risk_class,
@@ -12734,6 +12735,23 @@ class AutonomousAgent:
             "required_model_capabilities": list(blueprint.required_capabilities),
             "candidate_count": len(resolved_candidates),
             "eligible_candidate_count": eligibility.get("eligible_count", 0),
+            "selection_contract": {
+                "task_digest": blueprint.spec.task_digest,
+                "domain": blueprint.spec.domain,
+                "capability": blueprint.spec.capability,
+                "risk_class": blueprint.spec.risk_class,
+                "required_model_capabilities": list(blueprint.required_capabilities),
+                "candidate_ids": [
+                    f"{candidate['provider']}/{candidate['model']}"
+                    for candidate in resolved_candidates
+                ],
+                "input_tokens": input_tokens,
+                "requested_output_tokens": requested_output_tokens,
+                "max_cost_per_million_tokens": max_cost_per_million_tokens,
+                "max_latency_ms": max_latency_ms,
+                "min_quality": min_quality,
+                "min_selection_confidence": min_selection_confidence,
+            },
             "selection_audit": audit,
             "review": {
                 "provider_call": "not_started",
@@ -12755,6 +12773,150 @@ class AutonomousAgent:
             "autonomous model selection preview",
             preview,
             maximum=MAX_AUTONOMOUS_MODEL_SELECTION_PREVIEW_BYTES,
+        )
+
+    def run_approved_model_selection(
+        self,
+        *,
+        task: str,
+        domain: str,
+        selection_preview: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        capability: str | None = None,
+        risk_class: str | None = None,
+        context: Mapping[str, Any] | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        contextual_observations: Sequence[Mapping[str, Any]] = (),
+        required_model_capabilities: Sequence[str] = (),
+        input_tokens: int = 4_096,
+        requested_output_tokens: int = 2_048,
+        max_cost_per_million_tokens: int | None = None,
+        max_latency_ms: int | None = None,
+        min_quality: float | None = None,
+        min_selection_confidence: float | None = None,
+        selection_overrides: Mapping[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Revalidate a provider-free preview, then invoke only its reviewed model arm."""
+
+        if not isinstance(selection_preview, Mapping):
+            raise BrainRunError("approved model selection preview must be a mapping")
+        if selection_preview.get("schema") != AUTONOMOUS_MODEL_SELECTION_PREVIEW_SCHEMA:
+            raise BrainRunError("approved model selection preview schema is invalid")
+        if selection_preview.get("status") != "selected":
+            raise BrainRunError("approved model selection preview is not selected")
+        contract = selection_preview.get("selection_contract")
+        audit = selection_preview.get("selection_audit")
+        if not isinstance(contract, Mapping) or not isinstance(audit, Mapping):
+            raise BrainRunError("approved model selection preview is missing its selection contract")
+        selected = audit.get("selected_model")
+        selected_id = selected.get("model_id") if isinstance(selected, Mapping) else None
+        if not isinstance(selected_id, str) or not selected_id.strip() or "/" not in selected_id:
+            raise BrainRunError("approved model selection preview has no exact selected model")
+        candidate_ids = contract.get("candidate_ids")
+        if (
+            not isinstance(candidate_ids, Sequence)
+            or isinstance(candidate_ids, (str, bytes))
+            or any(not isinstance(candidate_id, str) or not candidate_id.strip() for candidate_id in candidate_ids)
+        ):
+            raise BrainRunError("approved model selection preview candidate ids are malformed")
+        resolved_candidates = self._resolve_candidates(model_candidates)
+        resolved_ids = [
+            f"{candidate['provider']}/{candidate['model']}"
+            for candidate in resolved_candidates
+        ]
+        if list(candidate_ids) != resolved_ids:
+            raise BrainRunError("approved model selection candidate catalogue changed; re-review required")
+        selected_candidates = [
+            candidate for candidate in resolved_candidates
+            if f"{candidate['provider']}/{candidate['model']}" == selected_id
+        ]
+        if len(selected_candidates) != 1:
+            raise BrainRunError("approved model selection selected model is absent or duplicated")
+        if contract.get("domain") != domain:
+            raise BrainRunError("approved model selection domain does not match the request")
+        if capability is not None and capability != contract.get("capability"):
+            raise BrainRunError("approved model selection capability does not match the request")
+        if risk_class is not None and risk_class != contract.get("risk_class"):
+            raise BrainRunError("approved model selection risk class does not match the request")
+        expected_contract = {
+            "task_digest": selection_preview.get("task_digest"),
+            "domain": domain,
+            "capability": contract.get("capability"),
+            "risk_class": contract.get("risk_class"),
+            "required_model_capabilities": list(contract.get("required_model_capabilities", ())),
+            "candidate_ids": resolved_ids,
+            "input_tokens": input_tokens,
+            "requested_output_tokens": requested_output_tokens,
+            "max_cost_per_million_tokens": max_cost_per_million_tokens,
+            "max_latency_ms": max_latency_ms,
+            "min_quality": min_quality,
+            "min_selection_confidence": min_selection_confidence,
+        }
+        if contract != expected_contract:
+            raise BrainRunError("approved model selection inputs changed; re-review required")
+        fresh = self.model_selection_preview(
+            task=task,
+            domain=domain,
+            credentials=credentials,
+            model_candidates=resolved_candidates,
+            capability=capability,
+            risk_class=risk_class,
+            context=context,
+            bandit_state=bandit_state,
+            contextual_observations=contextual_observations,
+            required_model_capabilities=required_model_capabilities,
+            input_tokens=input_tokens,
+            requested_output_tokens=requested_output_tokens,
+            max_cost_per_million_tokens=max_cost_per_million_tokens,
+            max_latency_ms=max_latency_ms,
+            min_quality=min_quality,
+            min_selection_confidence=min_selection_confidence,
+            selection_overrides=selection_overrides,
+        )
+        for field in (
+            "task_digest", "domain", "capability", "risk_class", "workflow_id",
+            "workflow_digest", "domain_pack_digest", "selection_context_digest",
+            "execution_plan_digest", "required_model_capabilities", "selection_contract",
+            "selection_audit",
+        ):
+            if fresh.get(field) != selection_preview.get(field):
+                raise BrainRunError("approved model selection is stale; re-review required")
+        fresh_selected = fresh["selection_audit"].get("selected_model")
+        if not isinstance(fresh_selected, Mapping) or fresh_selected.get("model_id") != selected_id:
+            raise BrainRunError("approved model selection changed; re-review required")
+        run_options = dict(kwargs)
+        supplied_approval = run_options.pop("approve_provider_call", None)
+        if supplied_approval is not None and supplied_approval is not True:
+            raise BrainRunError("approved model selection cannot disable provider approval")
+        supplied_failovers = run_options.pop("max_provider_failovers", None)
+        if supplied_failovers not in (None, 0):
+            raise BrainRunError("approved model selection forbids provider failover")
+        run_options.update(
+            {
+                "capability": capability,
+                "risk_class": risk_class,
+                "context": context,
+                "bandit_state": bandit_state,
+                "contextual_observations": contextual_observations,
+                "required_model_capabilities": required_model_capabilities,
+                "input_tokens": input_tokens,
+                "requested_output_tokens": requested_output_tokens,
+                "max_cost_per_million_tokens": max_cost_per_million_tokens,
+                "max_latency_ms": max_latency_ms,
+                "min_quality": min_quality,
+                "selection_overrides": selection_overrides,
+                "approve_provider_call": True,
+                "max_provider_failovers": 0,
+            }
+        )
+        return self.run(
+            task=task,
+            domain=domain,
+            credentials=credentials,
+            model_candidates=selected_candidates,
+            **run_options,
         )
 
     def run_capability(

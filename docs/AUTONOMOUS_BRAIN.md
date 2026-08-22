@@ -1445,6 +1445,35 @@ and health/credential posture; a configured `in_memory` provider is eligible wit
 an unregistered or credential-gated provider returns the same reviewable refusal metadata without
 attempting transport.
 
+### Digest-bound approval handoff
+
+Preview output is intentionally not an authorization token. After an operator reviews a selected
+arm, the caller can submit that exact projection to the approval handoff:
+
+```python
+result = agent.run_approved_model_selection(
+    task="compare the reproducibility evidence for this experiment",
+    domain="science",
+    selection_preview=preview,
+    credentials={},
+)
+```
+
+The handoff recomputes the transient task blueprint and local selection against the current
+candidate catalogue, provider readiness, health overlay, bandit state, constraints, workflow
+identity, and selection audit. A changed digest, ranking, selected arm, or candidate list refuses
+before provider dispatch and requires a new preview. Once revalidated, the runtime receives one
+candidate only and provider failover is disabled, preventing an approved model from silently
+becoming a different model. The TypeScript equivalents are
+`agent.runApprovedModelSelection(...)` and
+`brain.executeApprovedSelection({ task, domain }, preview)`.
+
+This boundary preserves the two approvals separately: preview review approves the model decision,
+while the execution call still requires the normal provider/effect gates and caller-owned opaque
+credentials. The approval projection contains only task/candidate digests, bounded constraints,
+model-arm metadata, and the value-only selection audit; it never contains a key, handle, prompt,
+provider response, or raw task text.
+
 ### Reviewed capability packs for every domain
 
 The domain profile and workflow are joined by an `AutonomousDomainPack` for every built-in domain:

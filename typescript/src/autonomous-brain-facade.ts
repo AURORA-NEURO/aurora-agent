@@ -2,6 +2,7 @@ import { ArgumentError, ProviderRuntimeError, isObject } from "./errors.js";
 import {
   AUTONOMOUS_DOMAIN_NAMES,
   type AutonomousAgent,
+  type AutonomousApprovedModelSelectionOptions,
   type AutonomousAutoBlueprint,
   type AutonomousDomainToolPlan,
   type AutonomousCrossDomainBlueprint,
@@ -158,6 +159,11 @@ export interface AutonomousBrainExecuteOptions {
   includeConnectorObservation?: boolean;
   /** Lower-level provider, tool, memory, learning, and effect controls. */
   run?: Omit<AutonomousRunOptions, "domain" | "routeOverride" | "capability" | "context" | "hints" | "allowCrossDomain">;
+}
+
+/** Options for executing one caller-approved, digest-bound model-selection preview. */
+export interface AutonomousBrainApprovedSelectionOptions {
+  run?: Omit<AutonomousApprovedModelSelectionOptions, "domain">;
 }
 
 type AutonomousBrainCycleBoundKeys = "domain" | "routeOverride" | "capability" | "context" | "hints" | "allowCrossDomain" | "semanticRouting";
@@ -788,6 +794,42 @@ export class AutonomousBrainFacade {
       capability: options.capability ?? request.capability,
       context: options.context ?? request.context,
     });
+  }
+
+  /**
+   * Revalidate and execute one previously reviewed model-selection preview.
+   *
+   * The agent recomputes the selection against current health and catalogue state. A stale
+   * ranking refuses before provider dispatch, and the final invocation is narrowed to the exact
+   * approved candidate with failover disabled.
+   */
+  async executeApprovedSelection(
+    input: AutonomousBrainRequest,
+    preview: AutonomousModelSelectionPreview,
+    options: AutonomousBrainApprovedSelectionOptions = {},
+  ): Promise<AutonomousBrainExecution> {
+    const request = validateRequest(input);
+    if (request.domain === undefined) throw new ArgumentError("approved model selection requires an explicit domain");
+    if (request.connector !== undefined) throw new ArgumentError("approved model selection does not accept connector dispatch inputs");
+    const prepared = await this.prepare(request);
+    if (prepared.plan.status !== "ready" || prepared.route.cross_domain) throw new ProviderRuntimeError("approved model selection requires a ready single-domain plan");
+    const runOptions = {
+      ...(options.run ?? {}),
+      domain: request.domain,
+      capability: options.run?.capability ?? request.capability,
+      context: options.run?.context ?? request.context,
+    } as AutonomousApprovedModelSelectionOptions;
+    const run = await this.agent.runApprovedModelSelection(request.task, preview, runOptions);
+    return {
+      schema: AUTONOMOUS_BRAIN_FACADE_SCHEMA,
+      status: run.status,
+      plan: prepared.plan.toJSON(),
+      run,
+      connector: null,
+      error: null,
+      retention: "plan_metadata_only;run_and_connector_values_transient_to_caller",
+      secret_material: "never_returned",
+    };
   }
 
   /** Recompute keyless readiness and activation metadata without dispatching a provider or tool. */

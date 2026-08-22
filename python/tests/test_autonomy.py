@@ -1259,6 +1259,72 @@ def test_model_selection_preview_rejects_raw_credentials_and_secret_context():
         server.server_close()
 
 
+def test_approved_model_selection_revalidates_and_invokes_one_credentialless_arm_for_every_domain():
+    class OfflineWorkspace(_Workspace):
+        def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+            report = super().tool(name, arguments)
+            if name == "brain_model_select_contextual":
+                selection = dict(report["selection"])
+                selection["selected_model"] = {"provider": "offline", "model": "offline-model"}
+                selection["ranking"] = [
+                    {
+                        "model_id": "offline/offline-model",
+                        "eligible": True,
+                        "reasons": [],
+                        "base_score": 1.0,
+                        "exploration_bonus": 0.0,
+                        "score": 1.0,
+                        "observed_pulls": 0,
+                    }
+                ]
+                report["selection"] = selection
+            return report
+
+    calls: list[str] = []
+    runtime = LLMRuntime()
+    runtime.register_in_memory_provider(
+        "offline",
+        lambda request: calls.append(request.model) or {"output_text": "offline approval result"},
+    )
+    candidate = dict(_model()[0])
+    candidate.update({"provider": "offline", "model": "offline-model", "requires_credential": False})
+    agent = AutonomousAgent(
+        OfflineWorkspace(),
+        runtime,
+        model_catalogue=ModelCatalogue([candidate]),
+    )
+    task = "execute one reviewed local model decision"
+    previews: dict[str, dict[str, object]] = {}
+    for domain in AUTONOMOUS_DOMAINS:
+        preview = agent.model_selection_preview(task=task, domain=domain, credentials={})
+        previews[domain] = preview
+        assert preview["status"] == "selected"
+        assert preview["selection_contract"]["candidate_ids"] == ["offline/offline-model"]
+        result = agent.run_approved_model_selection(
+            task=task,
+            domain=domain,
+            selection_preview=preview,
+            credentials={},
+        )
+        assert result.status.startswith("completed")
+        assert result.response is not None
+        assert result.response.provider == "offline"
+
+    assert calls == ["offline-model"] * len(AUTONOMOUS_DOMAINS)
+    stale = dict(previews["coding"])
+    stale_contract = dict(stale["selection_contract"])
+    stale_contract["requested_output_tokens"] = int(stale_contract["requested_output_tokens"]) + 1
+    stale["selection_contract"] = stale_contract
+    with pytest.raises(BrainRunError, match="budget changed|stale|changed"):
+        agent.run_approved_model_selection(
+            task=task,
+            domain="coding",
+            selection_preview=stale,
+            credentials={},
+        )
+    assert calls == ["offline-model"] * len(AUTONOMOUS_DOMAINS)
+
+
 def test_provider_free_router_covers_every_domain_and_abstains_without_evidence():
     registry = AutonomousDomainRegistry.with_builtin_profiles()
     router = AutonomousTaskRouter(registry)

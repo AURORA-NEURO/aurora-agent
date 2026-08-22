@@ -126,6 +126,36 @@ test("brain facade previews provider-free model selection for every built-in dom
   assert.equal(refused.review.next_action, "resolve_model_provider_or_credential_gates");
 });
 
+test("brain facade revalidates approved model previews and invokes one exact local arm across every domain", async () => {
+  const runtime = localRuntime();
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+  const previews = new Map();
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const task = tasks[domain];
+    const preview = await brain.modelSelectionPreview({ task, domain });
+    previews.set(domain, preview);
+    assert.deepEqual(preview.selection_contract.candidate_ids, ["offline/offline-model"]);
+    const execution = await brain.executeApprovedSelection({ task, domain }, preview);
+    assert.equal(execution.status, "completed", domain);
+    assert.equal(execution.run?.status, "completed", domain);
+    assert.equal(execution.run?.selection.selected_model?.provider, "offline", domain);
+    assert.equal(execution.run?.selection.selected_model?.model, "offline-model", domain);
+    assert.equal(execution.plan.task_digest, preview.task_digest, domain);
+    assert.ok(!JSON.stringify(execution.plan).includes(task), domain);
+  }
+  assert.equal(runtime.providerStatus("offline").attempts, AUTONOMOUS_DOMAIN_NAMES.length);
+
+  const stale = structuredClone(previews.get("coding"));
+  stale.selection_contract.requested_output_tokens += 1;
+  await assert.rejects(
+    () => brain.executeApprovedSelection({ task: tasks.coding, domain: "coding" }, stale),
+    /output budget changed|stale|changed/,
+  );
+  assert.equal(runtime.providerStatus("offline").attempts, AUTONOMOUS_DOMAIN_NAMES.length);
+});
+
 test("brain facade closed-loop execution accepts every built-in domain through one provider-neutral entry point", async () => {
   const runtime = localRuntime();
   const agent = new AutonomousAgent(runtime);

@@ -521,10 +521,31 @@ export interface AutonomousModelSelectionPreviewOptions {
   minSelectionConfidence?: number;
 }
 
+export interface AutonomousModelSelectionContract extends JsonObject {
+  task_digest: string;
+  domain: AutonomousDomainName;
+  capability: string;
+  risk_class: string;
+  required_model_capabilities: string[];
+  candidate_ids: string[];
+  input_tokens: number;
+  requested_output_tokens: number;
+  max_cost_per_million_tokens: number | null;
+  max_latency_ms: number | null;
+  min_quality: number | null;
+  min_selection_confidence: number | null;
+}
+
+/** Options for approving one previously reviewed model-selection preview. */
+export type AutonomousApprovedModelSelectionOptions = Omit<AutonomousRunOptions, "approveProviderCall" | "domain"> & {
+  domain: AutonomousDomainName;
+};
+
 /** Provider-free projection of the exact selection request that execution would use. */
 export interface AutonomousModelSelectionPreview extends JsonObject {
   schema: typeof AUTONOMOUS_MODEL_SELECTION_PREVIEW_SCHEMA;
   status: AutonomousModelSelectionPreviewStatus;
+  task_digest: string;
   domain: AutonomousDomainName;
   capability: string;
   risk_class: string;
@@ -536,6 +557,7 @@ export interface AutonomousModelSelectionPreview extends JsonObject {
   required_model_capabilities: string[];
   candidate_count: number;
   eligible_candidate_count: number;
+  selection_contract: AutonomousModelSelectionContract;
   selection_audit: AutonomousSelectionDecision;
   review: {
     provider_call: "not_started";
@@ -3553,6 +3575,7 @@ export class AutonomousAgent {
     const preview: AutonomousModelSelectionPreview = {
       schema: AUTONOMOUS_MODEL_SELECTION_PREVIEW_SCHEMA,
       status: selected ? "selected" : "refused_no_eligible_model",
+      task_digest: blueprint.task_digest,
       domain: blueprint.domain_profile.domain,
       capability: blueprint.selection_context.capability,
       risk_class: blueprint.domain_profile.risk_class,
@@ -3564,6 +3587,20 @@ export class AutonomousAgent {
       required_model_capabilities: [...blueprint.required_capabilities],
       candidate_count: candidates.length,
       eligible_candidate_count: eligibleCandidateCount,
+      selection_contract: {
+        task_digest: blueprint.task_digest,
+        domain: blueprint.domain_profile.domain,
+        capability: blueprint.selection_context.capability,
+        risk_class: blueprint.domain_profile.risk_class,
+        required_model_capabilities: [...blueprint.required_capabilities],
+        candidate_ids: candidates.map((candidate) => `${candidate.provider}/${candidate.model}`),
+        input_tokens: estimatedInputTokens,
+        requested_output_tokens: requestedOutputTokens,
+        max_cost_per_million_tokens: options.maxCostPerMillionTokens ?? null,
+        max_latency_ms: options.maxLatencyMs ?? null,
+        min_quality: options.minQuality ?? null,
+        min_selection_confidence: options.minSelectionConfidence ?? null,
+      },
       selection_audit: structuredClone(selection),
       review: {
         provider_call: "not_started",
@@ -3582,6 +3619,108 @@ export class AutonomousAgent {
       throw new ProviderRuntimeError("autonomous model selection preview exceeds its bounded size");
     }
     return structuredClone(preview);
+  }
+
+  /**
+   * Revalidate a metadata-only selection preview, then invoke only its exact reviewed model arm.
+   *
+   * The caller must supply the transient task and any context again. The local selector is
+   * rerun against the current provider readiness, health, candidate catalogue, and constraints.
+   * Drift refuses before dispatch; the final run uses one candidate and zero failovers so an
+   * approved model cannot be silently replaced by a different arm.
+   */
+  async runApprovedModelSelection(
+    task: string,
+    preview: AutonomousModelSelectionPreview,
+    options: AutonomousApprovedModelSelectionOptions,
+  ): Promise<AutonomousRunResult> {
+    const taskText = boundedText("approved autonomous task", task, 32_000);
+    if (!isObject(preview) || preview.schema !== AUTONOMOUS_MODEL_SELECTION_PREVIEW_SCHEMA || preview.status !== "selected") {
+      throw new ProviderRuntimeError("approved model selection preview is invalid or not selected");
+    }
+    if (!options || !AUTONOMOUS_DOMAIN_NAMES.includes(options.domain)) throw new ArgumentError("approved model selection requires a built-in domain");
+    const contract = preview.selection_contract;
+    if (!isObject(contract) || !Array.isArray(contract.candidate_ids) || contract.candidate_ids.some((candidateId) => typeof candidateId !== "string" || !candidateId.trim())) {
+      throw new ProviderRuntimeError("approved model selection preview contract is malformed");
+    }
+    const audit = preview.selection_audit;
+    if (!isObject(audit) || !isObject(audit.selected_model) || typeof audit.selected_model.provider !== "string" || typeof audit.selected_model.model !== "string") {
+      throw new ProviderRuntimeError("approved model selection preview has no exact selected model");
+    }
+    const selectedId = `${audit.selected_model.provider}/${audit.selected_model.model}`;
+    const candidates = (options.candidates === undefined
+      ? this.models()
+      : [...options.candidates].map((candidate) => normalizeAutonomousModelCandidate(candidate)));
+    if (!candidates.length) throw new ProviderRuntimeError("approved model selection requires model candidates");
+    const candidateIds = candidates.map((candidate) => `${candidate.provider}/${candidate.model}`);
+    if (canonicalJson(contract.candidate_ids) !== canonicalJson(candidateIds)) throw new ProviderRuntimeError("approved model selection candidate catalogue changed; re-review required");
+    const selectedCandidates = candidates.filter((candidate) => `${candidate.provider}/${candidate.model}` === selectedId);
+    if (selectedCandidates.length !== 1) throw new ProviderRuntimeError("approved model selection selected model is absent or duplicated");
+
+    const inputTokens = options.maxInputTokens ?? contract.input_tokens;
+    const requestedOutputTokens = options.maxOutputTokens ?? contract.requested_output_tokens;
+    const capability = options.capability ?? contract.capability;
+    const maxCostPerMillionTokens = options.maxCostPerMillionTokens ?? (contract.max_cost_per_million_tokens ?? undefined);
+    const maxLatencyMs = options.maxLatencyMs ?? (contract.max_latency_ms ?? undefined);
+    const minQuality = options.minQuality ?? (contract.min_quality ?? undefined);
+    const minSelectionConfidence = options.minSelectionConfidence ?? (contract.min_selection_confidence ?? undefined);
+    if (options.maxInputTokens !== undefined && options.maxInputTokens !== contract.input_tokens) throw new ProviderRuntimeError("approved model selection input budget changed; re-review required");
+    if (options.maxOutputTokens !== undefined && options.maxOutputTokens !== contract.requested_output_tokens) throw new ProviderRuntimeError("approved model selection output budget changed; re-review required");
+    for (const [label, supplied, reviewed] of [
+      ["cost", options.maxCostPerMillionTokens, contract.max_cost_per_million_tokens],
+      ["latency", options.maxLatencyMs, contract.max_latency_ms],
+      ["quality", options.minQuality, contract.min_quality],
+      ["confidence", options.minSelectionConfidence, contract.min_selection_confidence],
+    ] as const) {
+      if (supplied !== undefined && supplied !== reviewed) throw new ProviderRuntimeError(`approved model selection ${label} constraint changed; re-review required`);
+    }
+
+    const fresh = await this.modelSelectionPreview(taskText, {
+      domain: options.domain,
+      capability,
+      context: options.context,
+      candidates,
+      estimatedInputTokens: inputTokens,
+      requestedOutputTokens,
+      ...(maxCostPerMillionTokens === undefined ? {} : { maxCostPerMillionTokens }),
+      ...(maxLatencyMs === undefined ? {} : { maxLatencyMs }),
+      ...(minQuality === undefined ? {} : { minQuality }),
+      ...(minSelectionConfidence === undefined ? {} : { minSelectionConfidence }),
+    });
+    for (const field of [
+      "task_digest",
+      "domain",
+      "capability",
+      "risk_class",
+      "workflow_id",
+      "workflow_digest",
+      "domain_pack_digest",
+      "selection_context_digest",
+      "execution_plan_digest",
+      "required_model_capabilities",
+      "selection_contract",
+      "selection_audit",
+    ] as const) {
+      if (canonicalJson(fresh[field]) !== canonicalJson(preview[field])) throw new ProviderRuntimeError("approved model selection is stale; re-review required");
+    }
+    const freshSelected = fresh.selection_audit.selected_model;
+    if (!freshSelected || `${freshSelected.provider}/${freshSelected.model}` !== selectedId) throw new ProviderRuntimeError("approved model selection changed; re-review required");
+
+    const executionOptions: AutonomousRunOptions = {
+      ...options,
+      domain: options.domain,
+      capability,
+      candidates: [selectedCandidates[0]!],
+      maxInputTokens: inputTokens,
+      maxOutputTokens: requestedOutputTokens,
+      ...(maxCostPerMillionTokens === undefined ? {} : { maxCostPerMillionTokens }),
+      ...(maxLatencyMs === undefined ? {} : { maxLatencyMs }),
+      ...(minQuality === undefined ? {} : { minQuality }),
+      ...(minSelectionConfidence === undefined ? {} : { minSelectionConfidence }),
+      approveProviderCall: true,
+      maxProviderFailovers: 0,
+    };
+    return this.run(taskText, executionOptions);
   }
 
   async route(task: string, options: { domain?: AutonomousDomainName; hints?: readonly string[]; minConfidence?: number; minMargin?: number; maxDomains?: number; allowCrossDomain?: boolean } = {}): Promise<AutonomousRouteProposal> {
