@@ -8,6 +8,7 @@ from prism_sdk import (
     AUTONOMOUS_DOMAINS,
     AutonomousExecutionJournal,
     AutonomousExecutionPolicy,
+    AutonomousWorkflowCheckpoint,
     BRAIN_LEARNING_EPISODE_SCHEMA,
     ModelCandidate,
     ModelCatalogue,
@@ -282,6 +283,177 @@ def test_execution_status_missing_store_does_not_create_it(tmp_path) -> None:
     assert errors == ""
     assert payload["available"] is False
     assert not path.exists()
+
+
+def _cli_workflow_checkpoint() -> AutonomousWorkflowCheckpoint:
+    return AutonomousWorkflowCheckpoint(
+        run_id="workflow-cli-run-1",
+        task_digest="a" * 64,
+        workflow_id="coding-workflow",
+        workflow_digest="b" * 64,
+        stages=(
+            {
+                "stage_id": "scope",
+                "status": "completed",
+                "execution_status": "completed",
+                "structured": {"summary": "caller-owned structured stage value"},
+                "evidence": ["evidence-digest-or-label"],
+                "uncertainty": [],
+                "attempt": 1,
+                "response_digest": "c" * 64,
+                "stage_execution_plan_digest": "d" * 64,
+                "stage_selected_tool_names": ["read_repository"],
+                "stage_capability_contract_digests": ["e" * 64],
+            },
+            {
+                "stage_id": "inspect",
+                "status": "not_attempted",
+                "execution_status": "paused",
+                "structured": {},
+                "evidence": [],
+                "uncertainty": ["awaiting_scope"],
+                "attempt": 1,
+                "response_digest": "f" * 64,
+                "stage_execution_plan_digest": None,
+                "stage_selected_tool_names": [],
+                "stage_capability_contract_digests": [],
+            },
+        ),
+    )
+
+
+def test_workflow_status_projects_digest_verified_stage_lifecycle_without_structured_values(tmp_path) -> None:
+    from prism_sdk.cli import _persist_workflow_checkpoint
+
+    path = tmp_path / "workflow-checkpoint.json"
+    checkpoint = _cli_workflow_checkpoint()
+    _persist_workflow_checkpoint(str(path), checkpoint)
+    code, payload, errors = _invoke(
+        "workflow-status",
+        "--workflow-checkpoint-store", str(path),
+    )
+    assert code == 0
+    assert errors == ""
+    assert payload["available"] is True
+    assert payload["checkpoint"]["checkpoint_digest"] == checkpoint.checkpoint_digest
+    assert payload["checkpoint"]["completed_stage_ids"] == ["scope"]
+    assert payload["checkpoint"]["remaining_stage_ids"] == ["inspect"]
+    assert payload["checkpoint"]["stages"][0]["evidence_count"] == 1
+    assert "caller-owned structured stage value" not in json.dumps(payload)
+    assert all("structured" not in stage for stage in payload["checkpoint"]["stages"])
+
+
+def test_workflow_status_missing_store_does_not_create_it(tmp_path) -> None:
+    path = tmp_path / "missing-workflow-checkpoint.json"
+    code, payload, errors = _invoke(
+        "workflow-status",
+        "--workflow-checkpoint-store", str(path),
+    )
+    assert code == 0
+    assert errors == ""
+    assert payload["available"] is False
+    assert not path.exists()
+
+
+def test_workflow_status_rejects_tampered_checkpoint_store(tmp_path) -> None:
+    from prism_sdk.cli import _persist_workflow_checkpoint
+
+    path = tmp_path / "tampered-workflow-checkpoint.json"
+    _persist_workflow_checkpoint(str(path), _cli_workflow_checkpoint())
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw["checkpoint"]["stages"][0]["status"] = "blocked"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    code, payload, errors = _invoke(
+        "workflow-status",
+        "--workflow-checkpoint-store", str(path),
+    )
+    assert code == 2
+    assert payload is None
+    assert "command failed" in errors
+
+
+def test_run_automatic_workflow_persists_and_explicitly_rehydrates_checkpoint(tmp_path) -> None:
+    captured: dict[str, object] = {}
+    checkpoint = _cli_workflow_checkpoint()
+    store = tmp_path / "run-workflow-checkpoint.json"
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    class FakeResult:
+        def __init__(self, value: AutonomousWorkflowCheckpoint) -> None:
+            self.checkpoint = value
+
+        def to_dict(self):
+            return {"status": "paused"}
+
+    class FakeAgent:
+        def __init__(self, _workspace: object, _runtime: object, *, model_catalogue: object) -> None:
+            captured["catalogue"] = model_catalogue
+
+        def run_auto(self, **kwargs: object) -> FakeResult:
+            captured["run_auto"] = kwargs
+            return FakeResult(checkpoint)
+
+    with patch("prism_sdk.cli.AutonomousAgent", FakeAgent):
+        output = io.StringIO()
+        errors = io.StringIO()
+        code = main(
+            (
+                "run",
+                "--mcp-command", "python server.py",
+                "--automatic",
+                "--single-domain",
+                "--task", "resume a staged coding review",
+                "--provider", "local",
+                "--model", "local-model",
+                "--workflow-execution",
+                "--workflow-max-stage-calls", "2",
+                "--workflow-checkpoint-store", str(store),
+            ),
+            environ={},
+            writer=output,
+            error_writer=errors,
+            client_factory=lambda *_args, **_kwargs: FakeClient(),
+        )
+    payload = json.loads(output.getvalue())
+    assert code == 0
+    assert errors.getvalue() == ""
+    assert payload["workflow"]["checkpoint_persisted"] is True
+    assert payload["workflow"]["checkpoint_digest"] == checkpoint.checkpoint_digest
+    assert "caller-owned structured stage value" not in output.getvalue()
+
+    captured.clear()
+    with patch("prism_sdk.cli.AutonomousAgent", FakeAgent):
+        output = io.StringIO()
+        errors = io.StringIO()
+        code = main(
+            (
+                "run",
+                "--mcp-command", "python server.py",
+                "--automatic",
+                "--single-domain",
+                "--task", "resume a staged coding review",
+                "--provider", "local",
+                "--model", "local-model",
+                "--workflow-execution",
+                "--workflow-checkpoint-store", str(store),
+                "--resume-workflow",
+            ),
+            environ={},
+            writer=output,
+            error_writer=errors,
+            client_factory=lambda *_args, **_kwargs: FakeClient(),
+        )
+    assert code == 0
+    assert errors.getvalue() == ""
+    assert captured["run_auto"]["workflow_checkpoint"].checkpoint_digest == checkpoint.checkpoint_digest
+    assert captured["run_auto"]["workflow_execution"] is True
+    assert json.loads(output.getvalue())["workflow"]["checkpoint_loaded"] is True
 
 
 def _write_cli_learning_episode(path, *, episode_id: str = "cli-episode-1", evidence_digest=None) -> None:

@@ -8,7 +8,8 @@ the brain or into MCP:
 * ``route`` exposes deterministic routing evidence without invoking a model;
 * ``provider-status``, ``onboard``, and the inventory commands implement the redacted BYOK and
   model-lifecycle boundaries; and
-* ``state-status`` and ``learning-status`` inspect persisted health/learning metadata, while
+* ``state-status``, ``learning-status``, ``execution-status``, and ``workflow-status`` inspect
+  persisted health, learning, execution, and staged workflow metadata, while
   ``settle-learning`` accepts only a bounded evaluator decision for a restart-safe settlement; and
 * ``run`` connects to a caller-owned MCP workspace, collects one short-lived credential, lets the
   existing autonomous planner select a model, and requires explicit provider/mission approval.
@@ -27,9 +28,16 @@ import json
 import os
 import shlex
 import sys
+import tempfile
+from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence, TextIO
 
-from .autonomy import AUTONOMOUS_DOMAINS, AutonomousAgent
+from .authoring import content_digest
+from .autonomy import (
+    AUTONOMOUS_DOMAINS,
+    AutonomousAgent,
+    AutonomousWorkflowCheckpoint,
+)
 from .autonomous_model_inventory import AutonomousModelInventoryStore
 from .autonomy_persistence import AutonomousExecutionJournal
 from .brain import BrainEvaluatorDecision, BrainLearningEpisode, BrainOutcomeEvaluator
@@ -51,10 +59,12 @@ from .llm_runtime import (
 
 
 CLI_SCHEMA = "aurora-autonomous-cli/0.1"
+WORKFLOW_CHECKPOINT_STORE_SCHEMA = "aurora-autonomous-workflow-checkpoint-store/0.1"
 _DEFAULT_CONTEXT_WINDOW = 128_000
 _DEFAULT_MAX_OUTPUT = 4_096
 _DEFAULT_TIMEOUT = 30.0
 _LOCAL_PROVIDER_NAMES = frozenset({"local", "in_memory"})
+_MAX_WORKFLOW_CHECKPOINT_STORE_BYTES = 1_000_000
 
 
 class _CliArgumentError(ValueError):
@@ -750,6 +760,181 @@ def _execution_status(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def _workflow_checkpoint_projection(
+    checkpoint: AutonomousWorkflowCheckpoint,
+) -> dict[str, Any]:
+    """Project a workflow checkpoint without returning structured stage values."""
+
+    stages = [
+        {
+            "stage_id": stage["stage_id"],
+            "status": stage["status"],
+            "execution_status": stage["execution_status"],
+            "attempt": stage["attempt"],
+            "response_digest": stage["response_digest"],
+            "stage_execution_plan_digest": stage.get("stage_execution_plan_digest"),
+            "evidence_count": len(stage.get("evidence", ())),
+            "uncertainty_count": len(stage.get("uncertainty", ())),
+            "selected_tool_count": len(stage.get("stage_selected_tool_names", ())),
+            "capability_contract_count": len(stage.get("stage_capability_contract_digests", ())),
+        }
+        for stage in checkpoint.stages
+    ]
+    completed = set(checkpoint.completed_stage_ids)
+    return {
+        "schema": checkpoint.to_dict()["schema"],
+        "run_id": checkpoint.run_id,
+        "task_digest": checkpoint.task_digest,
+        "workflow_id": checkpoint.workflow_id,
+        "workflow_digest": checkpoint.workflow_digest,
+        "plan_refinement_digest": checkpoint.plan_refinement_digest,
+        "stage_count": len(stages),
+        "completed_stage_ids": list(checkpoint.completed_stage_ids),
+        "remaining_stage_ids": [stage["stage_id"] for stage in stages if stage["stage_id"] not in completed],
+        "stages": stages,
+        "checkpoint_digest": checkpoint.checkpoint_digest,
+        "retention": "stage_status_counts_and_digests_only; structured_values_not_returned",
+    }
+
+
+def _workflow_checkpoint_store_payload(
+    checkpoint: AutonomousWorkflowCheckpoint,
+) -> dict[str, Any]:
+    checkpoint_payload = checkpoint.to_dict()
+    payload: dict[str, Any] = {
+        "schema": WORKFLOW_CHECKPOINT_STORE_SCHEMA,
+        "checkpoint": checkpoint_payload,
+        "checkpoint_digest": checkpoint.checkpoint_digest,
+        "retention": "caller_owned_structured_stage_metadata; no_task_or_provider_transcript",
+    }
+    payload["store_digest"] = content_digest(payload)
+    return payload
+
+
+def _load_workflow_checkpoint(path_value: str) -> AutonomousWorkflowCheckpoint:
+    """Load and verify one caller-owned workflow checkpoint before any provider access."""
+
+    path = Path(path_value)
+    if not path.exists():
+        raise ValueError("workflow resume requires an existing checkpoint store")
+    if not path.is_file():
+        raise ValueError("workflow checkpoint store must be a regular file")
+    if path.stat().st_size > _MAX_WORKFLOW_CHECKPOINT_STORE_BYTES:
+        raise ValueError("workflow checkpoint store exceeds its bounded size")
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError("workflow checkpoint store is unreadable") from error
+    if not isinstance(raw, Mapping) or raw.get("schema") != WORKFLOW_CHECKPOINT_STORE_SCHEMA:
+        raise ValueError("workflow checkpoint store has an invalid schema")
+    supplied_store_digest = raw.get("store_digest")
+    unsigned = dict(raw)
+    unsigned.pop("store_digest", None)
+    if supplied_store_digest != content_digest(unsigned):
+        raise ValueError("workflow checkpoint store digest does not match its contents")
+    checkpoint_payload = raw.get("checkpoint")
+    if not isinstance(checkpoint_payload, Mapping):
+        raise ValueError("workflow checkpoint store is missing its checkpoint")
+    checkpoint = AutonomousWorkflowCheckpoint.from_dict(checkpoint_payload)
+    if raw.get("checkpoint_digest") != checkpoint.checkpoint_digest:
+        raise ValueError("workflow checkpoint store checkpoint digest does not match")
+    return checkpoint
+
+
+def _persist_workflow_checkpoint(
+    path_value: str,
+    checkpoint: AutonomousWorkflowCheckpoint,
+) -> None:
+    """Atomically replace a caller-owned checkpoint store after validating the checkpoint."""
+
+    payload = _workflow_checkpoint_store_payload(
+        AutonomousWorkflowCheckpoint.from_dict(checkpoint.to_dict())
+    )
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        indent=2,
+        allow_nan=False,
+    ) + "\n"
+    if len(encoded.encode("utf-8")) > _MAX_WORKFLOW_CHECKPOINT_STORE_BYTES:
+        raise ValueError("workflow checkpoint store exceeds its bounded size")
+    destination = Path(path_value)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary_name: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=str(destination.parent),
+            prefix=f".{destination.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary_name = temporary.name
+            temporary.write(encoded)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.replace(temporary_name, destination)
+        temporary_name = None
+    finally:
+        if temporary_name is not None:
+            try:
+                os.unlink(temporary_name)
+            except FileNotFoundError:
+                pass
+
+
+def _workflow_checkpoint_from_result(result: Any) -> AutonomousWorkflowCheckpoint | None:
+    """Find the typed checkpoint nested in automatic workflow and learning results."""
+
+    pending: list[Any] = [result]
+    visited: set[int] = set()
+    while pending and len(visited) < 16:
+        current = pending.pop(0)
+        identity = id(current)
+        if identity in visited:
+            continue
+        visited.add(identity)
+        if isinstance(current, AutonomousWorkflowCheckpoint):
+            return current
+        checkpoint = getattr(current, "checkpoint", None)
+        if isinstance(checkpoint, AutonomousWorkflowCheckpoint):
+            return checkpoint
+        for attribute in ("result", "workflow"):
+            nested = getattr(current, attribute, None)
+            if nested is not None and not isinstance(nested, (str, bytes, Mapping)):
+                pending.append(nested)
+    return None
+
+
+def _workflow_status(args: argparse.Namespace) -> dict[str, Any]:
+    """Inspect a digest-verified workflow checkpoint without opening a provider session."""
+
+    if not os.path.exists(args.workflow_checkpoint_store):
+        return {
+            "schema": CLI_SCHEMA,
+            "command": "workflow-status",
+            "available": False,
+            "workflow_checkpoint_store": args.workflow_checkpoint_store,
+            "checkpoint": None,
+            "authorization": "metadata_read_only; no_provider_or_credential_access",
+            "retention": "stage_status_counts_and_digests_only",
+            "secret_material": "never_returned",
+        }
+    checkpoint = _load_workflow_checkpoint(args.workflow_checkpoint_store)
+    return {
+        "schema": CLI_SCHEMA,
+        "command": "workflow-status",
+        "available": True,
+        "workflow_checkpoint_store": args.workflow_checkpoint_store,
+        "checkpoint": _workflow_checkpoint_projection(checkpoint),
+        "authorization": "metadata_read_only; no_provider_or_credential_access",
+        "retention": "stage_status_counts_and_digests_only",
+        "secret_material": "never_returned",
+    }
+
+
 def _settle_learning(
     args: argparse.Namespace,
     *,
@@ -864,6 +1049,30 @@ def _run(
         raise ValueError("--inventory-store is required with --use-inventory")
     if not args.automatic and args.learning_mode == "trajectory":
         raise ValueError("trajectory learning requires --automatic or a workflow execution API")
+    workflow_controls_requested = any(
+        (
+            args.workflow_execution,
+            args.workflow_retry_blocked,
+            args.workflow_max_stage_calls is not None,
+            args.workflow_checkpoint_store is not None,
+            args.resume_workflow,
+        )
+    )
+    if workflow_controls_requested and not args.automatic:
+        raise ValueError("workflow controls require --automatic")
+    if args.workflow_execution and not args.single_domain:
+        raise ValueError("workflow execution requires --single-domain because staged workflows are single-domain")
+    if args.workflow_checkpoint_store is not None and not args.workflow_execution:
+        raise ValueError("--workflow-checkpoint-store requires --workflow-execution")
+    if args.resume_workflow and args.workflow_checkpoint_store is None:
+        raise ValueError("--resume-workflow requires --workflow-checkpoint-store")
+    if args.workflow_max_stage_calls is not None and not 1 <= args.workflow_max_stage_calls <= 16:
+        raise ValueError("--workflow-max-stage-calls must be between 1 and 16")
+    workflow_checkpoint = (
+        _load_workflow_checkpoint(args.workflow_checkpoint_store)
+        if args.resume_workflow and args.workflow_checkpoint_store is not None
+        else None
+    )
     persisted_candidates = _persisted_candidate_args(args) if args.use_inventory else ()
     runtime, onboarding = _runtime_with_provider(args)
     session = onboarding.start_session(ttl_seconds=args.ttl_seconds)
@@ -935,11 +1144,39 @@ def _run(
                     planning_mode=args.planning_mode,
                     planning_run_id=args.planning_run_id,
                     planning_max_output_tokens=args.planning_max_output_tokens,
+                    workflow_execution=args.workflow_execution,
+                    workflow_checkpoint=workflow_checkpoint,
+                    workflow_retry_blocked=args.workflow_retry_blocked,
+                    workflow_max_stage_calls=args.workflow_max_stage_calls,
                 )
             else:
                 if args.learning_mode == "online":
                     common["learn"] = True
                 result = agent.run(**common, domain=args.domain)
+        workflow_result_checkpoint = _workflow_checkpoint_from_result(result)
+        workflow_persistence = {
+            "configured": args.workflow_checkpoint_store is not None,
+            "workflow_execution_requested": args.workflow_execution,
+            "store": args.workflow_checkpoint_store,
+            "resume_requested": args.resume_workflow,
+            "checkpoint_loaded": workflow_checkpoint is not None,
+            "checkpoint_persisted": False,
+            "checkpoint_available": workflow_result_checkpoint is not None,
+            "checkpoint_digest": None,
+            "completed_stage_ids": [],
+            "retention": "caller_owned_structured_stage_metadata; status_projection_excludes_structured_values",
+        }
+        if workflow_result_checkpoint is not None:
+            workflow_persistence.update(
+                {
+                    "checkpoint_digest": workflow_result_checkpoint.checkpoint_digest,
+                    "completed_stage_ids": list(workflow_result_checkpoint.completed_stage_ids),
+                }
+            )
+            if args.workflow_checkpoint_store is not None:
+                _persist_workflow_checkpoint(args.workflow_checkpoint_store, workflow_result_checkpoint)
+                workflow_persistence["checkpoint_persisted"] = True
+
         execution_id = args.execution_id
         execution_state = None
         if execution_journal is not None:
@@ -995,6 +1232,7 @@ def _run(
                 if execution_journal is not None
                 else None
             ),
+            "workflow": workflow_persistence,
             "secret_material": "never_returned",
         }
     finally:
@@ -1110,6 +1348,16 @@ def _parser() -> argparse.ArgumentParser:
     execution_status.add_argument("--execution-id", default=None, help="optionally filter one execution identity")
     execution_status.add_argument("--limit", type=int, default=256, help="maximum execution transitions to return")
 
+    workflow_status = subparsers.add_parser(
+        "workflow-status",
+        help="inspect a digest-verified staged workflow checkpoint without contacting a provider",
+    )
+    workflow_status.add_argument(
+        "--workflow-checkpoint-store",
+        required=True,
+        help="caller-owned workflow checkpoint store",
+    )
+
     settle_learning = subparsers.add_parser(
         "settle-learning",
         help="settle one prevalidated value-only evaluator decision without a provider call",
@@ -1150,6 +1398,32 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--execution-store", default=None, help="persist hash-chained metadata-only execution checkpoints")
     run.add_argument("--execution-id", default=None, help="stable execution identity for persistence/resume")
     run.add_argument("--resume-execution", action="store_true", help="explicitly resume the named non-terminal execution")
+    run.add_argument(
+        "--workflow-execution",
+        action="store_true",
+        help="execute the selected automatic single-domain route as a checkpointable stage DAG",
+    )
+    run.add_argument(
+        "--workflow-max-stage-calls",
+        type=int,
+        default=None,
+        help="bound staged provider calls in this request; the checkpoint can continue later",
+    )
+    run.add_argument(
+        "--workflow-retry-blocked",
+        action="store_true",
+        help="explicitly retry a blocked/proposed workflow stage from a resumed checkpoint",
+    )
+    run.add_argument(
+        "--workflow-checkpoint-store",
+        default=None,
+        help="atomically persist the validated caller-owned workflow checkpoint",
+    )
+    run.add_argument(
+        "--resume-workflow",
+        action="store_true",
+        help="load and explicitly resume the checkpoint at --workflow-checkpoint-store",
+    )
     run.add_argument("--learning-mode", choices=("off", "online", "trajectory"), default="off", help="automatic route learning mode; rewards remain evaluator-gated")
     run.add_argument("--model-limit", type=int, default=64, help="maximum provider inventory rows to inspect when discovering")
     run.add_argument("--model-capability", action="append", default=[], help="declared capability for every model candidate")
@@ -1225,6 +1499,8 @@ def main(
             payload = _learning_status(args)
         elif args.command == "execution-status":
             payload = _execution_status(args)
+        elif args.command == "workflow-status":
+            payload = _workflow_status(args)
         elif args.command == "settle-learning":
             payload = _settle_learning(args, client_factory=client_factory)
         elif args.command == "run":

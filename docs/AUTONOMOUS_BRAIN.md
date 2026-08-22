@@ -317,6 +317,51 @@ policy-bound: the journal refuses changed policy, terminal executions, and unkno
 journal is a checkpoint/accounting boundary, not a provider-conversation archive; callers must
 rehydrate transient task/result material and decide whether a resumed operation is safe.
 
+The CLI also exposes the staged workflow checkpoint itself. This is a separate, explicitly
+configured caller-owned store: the execution journal accounts for policy transitions, while the
+workflow store lets the runner skip already-completed stages after a process restart. Staged
+automatic execution is intentionally single-domain, so use `--single-domain` and let the reviewed
+all-domain router choose which domain owns the workflow:
+
+```bash
+python -m prism_sdk run \
+  --mcp-command "python path/to/mcp_server.py" \
+  --provider local \
+  --model local-model \
+  --task "review the bounded implementation plan" \
+  --automatic \
+  --single-domain \
+  --workflow-execution \
+  --workflow-max-stage-calls 2 \
+  --workflow-checkpoint-store .aurora/coding-workflow.json \
+  --approve-provider-call
+
+# Resume is never implicit. The task and reviewed workflow digests must still match.
+python -m prism_sdk run \
+  --mcp-command "python path/to/mcp_server.py" \
+  --provider local \
+  --model local-model \
+  --task "review the bounded implementation plan" \
+  --automatic \
+  --single-domain \
+  --workflow-execution \
+  --workflow-checkpoint-store .aurora/coding-workflow.json \
+  --resume-workflow \
+  --approve-provider-call
+
+python -m prism_sdk workflow-status \
+  --workflow-checkpoint-store .aurora/coding-workflow.json
+```
+
+The checkpoint store is atomically replaced only after the SDK validates the typed checkpoint and
+the store digest. `workflow-status` verifies that digest and returns stage ids, statuses, attempt
+counts, evidence/uncertainty counts, tool/contract counts, and identity digests; it never returns
+structured stage values. The configured checkpoint file is caller-owned and may contain bounded
+structured stage outputs because the workflow runner requires them to resume dependency inputs;
+operators should protect that file according to their data policy. A missing status store is
+reported as unavailable without creating it, and a tampered or oversized store fails closed before
+credential collection or provider access.
+
 The command accepts no API-key or token argument. By default it uses a no-echo prompt; deployment
 automation can select `--credential-source environment --credential-env OPENAI_API_KEY`. The value
 is converted immediately into a short-lived in-memory session, is passed to the runtime only as an
