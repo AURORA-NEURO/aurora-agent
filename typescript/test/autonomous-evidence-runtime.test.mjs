@@ -114,3 +114,51 @@ test("evidence runtime replay requires value reconciliation after journal rehydr
   assert.notEqual(replayed.json.receipts[0].status, "reconciliation_required");
   assert.equal(calls.length, 1);
 });
+
+test("evidence runtime persists a pending evaluator revision and accepts it after restart", async () => {
+  const profile = (await builtinAutonomousDomainProfiles()).find((item) => item.domain === "science");
+  const baseline = await buildAutonomousEvidencePlan([profile.workflow]);
+  const plan = await buildAutonomousEvidencePlan([profile.workflow], { availableEvidence: baseline.requirements.slice(1).map((item) => item.requirement_id) });
+  const request = requestFor(plan.requirements[0]);
+  const journal = new InMemoryAutonomousEvidenceRuntimeJournal();
+  const calls = [];
+  const value = { fixture: "reconcile-me", requirement: plan.requirements[0].requirement_id };
+  const projector = { project: (_value, context) => [{ label: context.requirement.label, status: "observed" }] };
+  const pendingEvaluator = {
+    evaluator_id: "reconciliation-evaluator",
+    evaluator_version: "1",
+    evaluate: () => ({ evaluator_id: "reconciliation-evaluator", evaluator_version: "1", verdict: "indeterminate", score: 0.5 }),
+  };
+  const first = await new AutonomousEvidenceRuntime({ plan, journal }).execute([request], {
+    acquirer: { acquire: () => { calls.push("acquire"); return value; } },
+    projector,
+    evaluator: pendingEvaluator,
+  });
+  assert.equal(first.json.status, "awaiting_evaluation");
+  assert.equal(journal.records().length, 1);
+  const snapshot = await journal.snapshot(plan.plan_digest);
+  const restoredJournal = new InMemoryAutonomousEvidenceRuntimeJournal();
+  await restoredJournal.restore(snapshot, plan.plan_digest);
+  const restored = new AutonomousEvidenceRuntime({ plan, journal: restoredJournal });
+  await restored.rehydrate();
+  const accepted = await restored.execute([request], {
+    acquirer: { acquire: () => { throw new Error("pending reconciliation must not reacquire"); } },
+    projector,
+    evaluator: {
+      evaluator_id: "reconciliation-evaluator",
+      evaluator_version: "2",
+      evaluate: () => ({ evaluator_id: "reconciliation-evaluator", evaluator_version: "2", verdict: "accepted", score: 1 }),
+    },
+    rehydrateValue: () => value,
+    reevaluatePending: true,
+  });
+  assert.equal(accepted.json.status, "awaiting_evaluation", "the revised requirement is accepted while the remaining plan requirements still need evaluator decisions");
+  assert.equal(accepted.json.receipts[0].replay, "replayed");
+  assert.equal(accepted.json.receipts[0].evaluator_status, "accepted");
+  assert.equal(accepted.json.assessments.length, 1);
+  assert.ok(accepted.json.completed_requirement_ids.includes(plan.requirements[0].requirement_id));
+  assert.ok(!accepted.json.pending_evaluation_requirement_ids.includes(plan.requirements[0].requirement_id));
+  assert.equal(accepted.json.missing_requirement_ids.length, 0);
+  assert.equal(restoredJournal.records().length, 2, "assessment reconciliation is an append-only revision");
+  assert.deepEqual(calls, ["acquire"]);
+});

@@ -255,6 +255,7 @@ async function executeStageEvidence(
     ],
     acquirer: { acquire: () => value },
     rehydrateValue: () => value,
+    reevaluatePending: true,
   });
   return { result: evidenceResult, accepted: evidenceAccepted(evidenceResult) };
 }

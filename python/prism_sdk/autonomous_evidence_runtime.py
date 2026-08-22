@@ -346,6 +346,7 @@ class AutonomousEvidenceEvaluator(Protocol):
 
 
 class AutonomousEvidenceRuntimeJournal(Protocol):
+    """Append-only journal; later assessment revisions may reuse a request digest."""
     def append(self, entry: AutonomousEvidenceRuntimeJournalEntry) -> AutonomousEvidenceRuntimeJournalEntry: ...
     def records(self) -> Sequence[AutonomousEvidenceRuntimeJournalEntry]: ...
 
@@ -427,9 +428,7 @@ class InMemoryAutonomousEvidenceRuntimeJournal:
     def append(self, entry: AutonomousEvidenceRuntimeJournalEntry) -> AutonomousEvidenceRuntimeJournalEntry:
         with self._lock:
             existing = next((item for item in self._entries if item.receipt.request_digest == entry.receipt.request_digest), None)
-            if existing is not None:
-                if content_digest(existing.to_dict()) != content_digest(entry.to_dict()):
-                    raise ArgumentError("evidence runtime journal request identity conflicts with an existing receipt")
+            if existing is not None and content_digest(existing.to_dict()) == content_digest(entry.to_dict()):
                 return existing
             if entry.sequence != len(self._entries) + 1 or entry.previous_entry_digest != (self._entries[-1].entry_digest if self._entries else None):
                 raise ArgumentError("evidence runtime journal chain position is invalid")
@@ -609,7 +608,57 @@ class AutonomousEvidenceRuntime:
             raise ArgumentError("evidence runtime evaluator must return a mapping")
         return result
 
-    def execute(self, requests: Sequence[Mapping[str, Any]], *, acquirer: Any, projector: Any | None = None, evaluator: Any | None = None, rehydrate_value: Callable[[Mapping[str, Any]], Any] | None = None, parent_evidence_digests: Sequence[str] = (), stop_on_failure: bool = False) -> AutonomousEvidenceRuntimeResult:
+    def _reconcile_prior(
+        self,
+        entry: AutonomousEvidenceRuntimeJournalEntry,
+        requirement: AutonomousEvidenceRequirement,
+        value: Any,
+        evaluator: Any,
+        evaluator_id: str,
+        evaluator_version: str,
+    ) -> tuple[AutonomousEvidenceReceipt, AutonomousEvidenceAssessment | None] | None:
+        prior = entry.receipt
+        if prior.status not in {"observed", "partial"} or requirement.requirement_id not in prior.observed_requirement_ids or prior.evaluator_status not in {"not_evaluated", "indeterminate", "failed"}:
+            return None
+        replay_base = self._make_receipt(**{**prior.to_dict(), "receipt_digest": None, "replay": "replayed", "evaluator_status": "not_evaluated", "assessment_digest": None})
+        try:
+            decision = self._call_evaluator(
+                evaluator,
+                {
+                    "requirement": requirement,
+                    "receipt": replay_base.to_dict(),
+                    "observations": [item.to_dict() for item in replay_base.observations],
+                    "value": value,
+                },
+            )
+            decision_id = _identifier("evidence runtime evaluator_id", decision.get("evaluator_id"))
+            decision_version = _identifier("evidence runtime evaluator_version", decision.get("evaluator_version"))
+            if decision_id != evaluator_id or decision_version != evaluator_version:
+                raise ArgumentError("evidence runtime evaluator identity does not match configured evaluator")
+            verdict = _text("evidence runtime evaluator verdict", decision.get("verdict"), 32)
+            score = decision.get("score")
+            if verdict not in _VERDICTS or isinstance(score, bool) or not isinstance(score, (int, float)) or not 0 <= float(score) <= 1:
+                raise ArgumentError("evidence runtime evaluator verdict is malformed")
+            assessment = self._make_assessment(
+                receipt_digest=replay_base.receipt_digest,
+                requirement_id=requirement.requirement_id,
+                evaluator_id=decision_id,
+                evaluator_version=decision_version,
+                verdict=verdict,
+                score=float(score),
+                feedback_digest=_digest("evidence runtime feedback_digest", decision.get("feedback_digest"), allow_none=True),
+                evidence_digest=_digest("evidence runtime evidence_digest", decision.get("evidence_digest"), allow_none=True),
+                failure_class=None if decision.get("failure_class") is None else _identifier("evidence runtime failure_class", decision.get("failure_class")),
+            )
+            receipt = self._make_receipt(**{**replay_base.to_dict(), "receipt_digest": None, "evaluator_status": verdict, "assessment_digest": assessment.assessment_digest})
+            self._append(receipt, assessment)
+            return receipt, assessment
+        except Exception as error:
+            receipt = self._make_receipt(**{**replay_base.to_dict(), "receipt_digest": None, "evaluator_status": "failed", "limitations": list(replay_base.limitations) + ["caller-owned evaluator failed", error.__class__.__name__]})
+            self._append(receipt, None)
+            return receipt, None
+
+    def execute(self, requests: Sequence[Mapping[str, Any]], *, acquirer: Any, projector: Any | None = None, evaluator: Any | None = None, rehydrate_value: Callable[[Mapping[str, Any]], Any] | None = None, parent_evidence_digests: Sequence[str] = (), stop_on_failure: bool = False, reevaluate_pending: bool = False) -> AutonomousEvidenceRuntimeResult:
         if not isinstance(requests, Sequence) or isinstance(requests, (str, bytes, bytearray)) or not 1 <= len(requests) <= MAX_AUTONOMOUS_EVIDENCE_RUNTIME_REQUESTS:
             raise ArgumentError(f"evidence runtime requests must contain 1..{MAX_AUTONOMOUS_EVIDENCE_RUNTIME_REQUESTS} entries")
         parents = _list("evidence runtime parent_evidence_digests", parent_evidence_digests, 64)
@@ -646,15 +695,22 @@ class AutonomousEvidenceRuntime:
                     saw_reconciliation = True
                 else:
                     replayed = self._make_receipt(**{**replayed.to_dict(), "receipt_digest": None, "replay": "replayed"})
+                reconciled = None
+                if reevaluate_pending and evaluator is not None and value is not None:
+                    reconciled = self._reconcile_prior(prior, requirement, value, evaluator, evaluator_id, evaluator_version)
+                if reconciled is not None:
+                    replayed, replay_assessment = reconciled
+                else:
+                    replay_assessment = prior.assessment
                 receipts.append(replayed)
-                if prior.assessment is not None:
-                    assessments.append(prior.assessment)
+                if replay_assessment is not None:
+                    assessments.append(replay_assessment)
                 if value is not None:
                     values[request_digest] = value
                     self._values[request_digest] = value
                 for evidence_id in replayed.observed_requirement_ids:
                     available.add(evidence_id)
-                if prior.assessment is not None and prior.assessment.verdict == "accepted":
+                if replay_assessment is not None and replay_assessment.verdict == "accepted":
                     completed.add(replayed.requirement_id)
                 elif replayed.evaluator_status in {"not_evaluated", "indeterminate", "failed"}:
                     pending.add(replayed.requirement_id)

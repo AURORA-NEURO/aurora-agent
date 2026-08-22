@@ -425,6 +425,7 @@ class AutonomousConnectorWorkflowAdapter:
                 + (result.receipt.request_digest,)
                 + ((result.receipt.payload_digest,) if result.receipt.payload_digest else ())
             ),
+            reevaluate_pending=True,
         )
         accepted = bool(evidence.receipts) and all(
             receipt.status == "observed"

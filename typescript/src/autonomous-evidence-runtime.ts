@@ -220,6 +220,7 @@ export interface AutonomousEvidenceRuntimeSnapshot extends JsonObject {
 }
 
 export interface AutonomousEvidenceRuntimeJournal {
+  /** Append-only journals may contain later assessment revisions for one request digest. */
   append(entry: AutonomousEvidenceRuntimeJournalEntry): Promise<AutonomousEvidenceRuntimeJournalEntry> | AutonomousEvidenceRuntimeJournalEntry;
   records(): Promise<readonly AutonomousEvidenceRuntimeJournalEntry[]> | readonly AutonomousEvidenceRuntimeJournalEntry[];
 }
@@ -231,6 +232,8 @@ export interface AutonomousEvidenceRuntimeExecuteOptions {
   rehydrateValue?: (receipt: AutonomousEvidenceReceiptJSON) => JsonValue | null | Promise<JsonValue | null>;
   parentEvidenceDigests?: readonly string[];
   stopOnFailure?: boolean;
+  /** Re-run an evaluator for a journaled observed receipt whose prior verdict is unresolved. */
+  reevaluatePending?: boolean;
 }
 
 export interface AutonomousEvidenceRuntimeResultJSON extends JsonObject {
@@ -344,10 +347,7 @@ export class InMemoryAutonomousEvidenceRuntimeJournal implements AutonomousEvide
     const validatedAssessment = entry.assessment === null ? null : await validateAssessment(entry.assessment);
     const normalized = structuredClone({ ...entry, receipt: validatedReceipt, assessment: validatedAssessment });
     const prior = this.entries.find((candidate) => candidate.receipt.request_digest === validatedReceipt.request_digest);
-    if (prior) {
-      if (await digestJson(prior) !== await digestJson(normalized)) throw new ArgumentError("evidence runtime journal request identity conflicts with an existing receipt");
-      return structuredClone(prior);
-    }
+    if (prior && await digestJson(prior) === await digestJson(normalized)) return structuredClone(prior);
     if (normalized.sequence !== this.entries.length + 1 || normalized.previous_entry_digest !== (this.entries.at(-1)?.entry_digest ?? null)) throw new ArgumentError("evidence runtime journal chain position is invalid");
     if (await digestJson(journalDescriptor(normalized)) !== normalized.entry_digest) throw new ArgumentError("evidence runtime journal entry digest is invalid");
     if (this.entries.length >= MAX_AUTONOMOUS_EVIDENCE_RUNTIME_RECEIPTS) throw new ArgumentError("evidence runtime journal capacity is exhausted");
@@ -469,6 +469,58 @@ export class AutonomousEvidenceRuntime {
     return { receipt: { ...prior, replay: "replayed" }, assessment: entry.assessment, value };
   }
 
+  private async reconcilePrior(
+    entry: AutonomousEvidenceRuntimeJournalEntry,
+    requirement: AutonomousEvidenceRequirement,
+    value: JsonValue,
+    options: AutonomousEvidenceRuntimeExecuteOptions,
+  ): Promise<{ receipt: AutonomousEvidenceReceiptJSON; assessment: AutonomousEvidenceAssessmentJSON | null } | null> {
+    if (!options.evaluator || !["observed", "partial"].includes(entry.receipt.status) || !entry.receipt.observed_requirement_ids.includes(requirement.requirement_id) || !["not_evaluated", "indeterminate", "failed"].includes(entry.receipt.evaluator_status)) return null;
+    const replayBase = await this.receipt({
+      ...entry.receipt,
+      replay: "replayed",
+      evaluator_status: "not_evaluated",
+      assessment_digest: null,
+    });
+    try {
+      const decision = await options.evaluator.evaluate({
+        requirement,
+        receipt: replayBase,
+        observations: replayBase.observations,
+        value,
+      });
+      const evaluatorId = boundedIdentifier("evidence runtime evaluator_id", decision.evaluator_id);
+      const evaluatorVersion = boundedIdentifier("evidence runtime evaluator_version", decision.evaluator_version);
+      if (evaluatorId !== boundedIdentifier("configured evidence runtime evaluator_id", options.evaluator.evaluator_id) || evaluatorVersion !== boundedIdentifier("configured evidence runtime evaluator_version", options.evaluator.evaluator_version)) throw new ArgumentError("evidence runtime evaluator identity does not match configured evaluator");
+      if (!["accepted", "rejected", "indeterminate"].includes(decision.verdict) || typeof decision.score !== "number" || !Number.isFinite(decision.score) || decision.score < 0 || decision.score > 1) throw new ArgumentError("evidence runtime evaluator verdict is malformed");
+      const assessment = await this.assessment({
+        schema: AUTONOMOUS_EVIDENCE_ASSESSMENT_SCHEMA,
+        receipt_digest: replayBase.receipt_digest,
+        requirement_id: requirement.requirement_id,
+        evaluator_id: evaluatorId,
+        evaluator_version: evaluatorVersion,
+        verdict: decision.verdict,
+        score: decision.score,
+        feedback_digest: digestOrNull("evidence runtime feedback_digest", decision.feedback_digest),
+        evidence_digest: digestOrNull("evidence runtime evidence_digest", decision.evidence_digest),
+        failure_class: decision.failure_class === undefined || decision.failure_class === null ? null : boundedIdentifier("evidence runtime failure_class", decision.failure_class),
+        retention: "value_only;evaluator_payloads_caller_owned",
+        secret_material: "never_returned",
+      });
+      const receipt = await this.receipt({ ...replayBase, evaluator_status: assessment.verdict, assessment_digest: assessment.assessment_digest });
+      await this.append(receipt, assessment);
+      return { receipt, assessment };
+    } catch (error) {
+      const receipt = await this.receipt({
+        ...replayBase,
+        evaluator_status: "failed",
+        limitations: [...replayBase.limitations, "caller-owned evaluator failed", error instanceof Error ? error.constructor.name : "evaluator_failed"],
+      });
+      await this.append(receipt, null);
+      return { receipt, assessment: null };
+    }
+  }
+
   async execute(requests: readonly AutonomousEvidenceAcquisitionRequest[], options: AutonomousEvidenceRuntimeExecuteOptions): Promise<AutonomousEvidenceRuntimeResult> {
     if (!Array.isArray(requests) || requests.length < 1 || requests.length > MAX_AUTONOMOUS_EVIDENCE_RUNTIME_REQUESTS) throw new ArgumentError(`evidence runtime requests must contain 1..${MAX_AUTONOMOUS_EVIDENCE_RUNTIME_REQUESTS} entries`);
     if (!options || !options.acquirer || typeof options.acquirer.acquire !== "function") throw new ArgumentError("evidence runtime requires a caller-owned acquirer");
@@ -492,7 +544,11 @@ export class AutonomousEvidenceRuntime {
       const requestDigest = await this.requestDigest(request);
       const prior = this.recordsByRequest.get(requestDigest);
       if (prior) {
-        const replay = await this.replayPrior(prior, request, options);
+        let replay = await this.replayPrior(prior, request, options);
+        if (options.reevaluatePending === true && replay.value !== null) {
+          const reconciled = await this.reconcilePrior(prior, requirement, replay.value, options);
+          if (reconciled) replay = { ...reconciled, value: replay.value };
+        }
         receipts.push(replay.receipt);
         if (replay.assessment) assessments.push(replay.assessment);
         values[requestDigest] = replay.value;
@@ -500,7 +556,7 @@ export class AutonomousEvidenceRuntime {
         for (const id of replay.receipt.observed_requirement_ids) available.add(id);
         if (replay.receipt.status === "reconciliation_required") sawReconciliation = true;
         if (replay.assessment?.verdict === "accepted") completed.add(replay.receipt.requirement_id);
-        else if (replay.receipt.evaluator_status === "not_evaluated" || replay.receipt.evaluator_status === "indeterminate") pendingEvaluation.add(replay.receipt.requirement_id);
+        else if (replay.receipt.evaluator_status === "not_evaluated" || replay.receipt.evaluator_status === "indeterminate" || replay.receipt.evaluator_status === "failed") pendingEvaluation.add(replay.receipt.requirement_id);
         continue;
       }
       if (sawFailure && options.stopOnFailure === true) {

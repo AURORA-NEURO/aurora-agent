@@ -561,11 +561,14 @@ and the Python connector runner preserves the same status contract.
 Reconciliation is idempotent at the connector boundary. Evidence-bound stage identities use a
 stable attempt identity, so a resumed stage replays its digest-bound connector receipt and does
 not issue a second external call. The caller must rehydrate the connector payload by its exact
-receipt digest. If the evaluator decision is being replaced after a pause, the caller can create
-a fresh evidence runtime with the same reviewed plan and journal the new evaluator attempt while
-reusing the connector receipt; this keeps evaluation changes explicit and prevents a stale
-indeterminate verdict from being mistaken for acceptance. A restarted runtime should call its
-`rehydrate()` method before executing against an existing evidence journal.
+receipt digest. If an evaluator previously returned `not_evaluated`, `indeterminate`, or `failed`,
+the caller may re-run the same reviewed request with `reevaluatePending: true` (TypeScript) or
+`reevaluate_pending=True` (Python) after rehydrating the transient value. The runtime validates the
+new evaluator identity and verdict, appends a new hash-chained receipt/assessment revision without
+retaining the payload, and keeps the original request digest as the replay barrier. Connector
+adapters enable this mode for resumed evidence-bound stages, so evaluator recovery never reacquires
+or redispatches the external connector operation. A restarted runtime should call its `rehydrate()`
+method before executing against an existing evidence journal.
 
 ### Non-interactive deployment bootstrap
 
