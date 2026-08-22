@@ -21,6 +21,8 @@ import { AutonomousCostBudget } from "./llm.js";
 import { digestJson } from "./tooling.js";
 import type {
   BrainJobApprovalResult,
+  BrainJobCancelResult,
+  BrainJobClaimNextResult,
   BrainJobEventsResult,
   BrainJobLifecycleResult,
   BrainJobRecord,
@@ -1143,6 +1145,20 @@ export class AutonomousDurableJobController {
 
   async events(jobId?: string, after = 0, limit = AUTONOMOUS_WORKFLOW_MAX_EVENTS): Promise<BrainJobEventsResult> {
     return projectControlPlane(await this.apiClient.brainJobEvents({ job_id: jobId === undefined ? undefined : boundedJobId(jobId), after, limit }), "brain job events");
+  }
+
+  /** Lease the next durable queued job for this worker; empty queues remain explicit. */
+  async claimNext(): Promise<BrainJobClaimNextResult> {
+    const client = this.apiClient as unknown as Record<string, unknown>;
+    if (typeof client.brainJobClaimNext !== "function") throw new ProviderRuntimeError("brain job claim-next is not available on this control-plane client");
+    return projectControlPlane(await this.apiClient.brainJobClaimNext({ worker_id: this.workerId, lease_ms: 300_000 }), "brain job claim next");
+  }
+
+  /** Cancel before dispatch, or inspect the reconciliation quarantine after dispatch. */
+  async cancel(jobId: string, reason = "cancelled by caller"): Promise<BrainJobCancelResult> {
+    const client = this.apiClient as unknown as Record<string, unknown>;
+    if (typeof client.brainJobCancel !== "function") throw new ProviderRuntimeError("brain job cancellation is not available on this control-plane client");
+    return projectControlPlane(await this.apiClient.brainJobCancel({ job_id: boundedJobId(jobId), reason }), "brain job cancel");
   }
 
   async approval(jobId: string, action: "request" | "approve" | "deny", options: { reason?: string; authorizationDigest?: string } = {}): Promise<BrainJobApprovalResult> {

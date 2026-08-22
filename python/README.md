@@ -256,10 +256,12 @@ through LLMRuntime, and report only value-only outcome metadata back to the cont
 
 For a restart-safe application-owned host, `DurableBrainControlPlaneAdapter` exposes the same
 `brain_job_*` tool names over `BrainJobStore` rather than duplicating the state machine in an HTTP
-handler. Mutations fail closed until the host supplies an authorization callback; the callback
-receives only operation metadata and digests. `AsyncDurableBrainControlPlaneAdapter` runs the
-SQLite transaction in a worker thread for async hosts. Both adapters project idempotency keys,
-checkpoint bodies, failure text, result metadata, and reconciliation notes as digests only:
+handler. It supports deterministic priority-ordered `claim_next` dequeue and cancellation that
+quarantines jobs after a dispatched/unknown side-effect boundary. Mutations fail closed until the
+host supplies an authorization callback; the callback receives only operation metadata and
+digests. `AsyncDurableBrainControlPlaneAdapter` runs the SQLite transaction in a worker thread
+for async hosts. Both adapters project idempotency keys, checkpoint bodies, failure text, result
+metadata, cancellation reasons, and reconciliation notes as digests only:
 
 ```python
 from prism_sdk import (

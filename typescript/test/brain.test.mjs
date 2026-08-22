@@ -54,6 +54,12 @@ test("client exposes the autonomous brain value-only kernel", async () => {
       if (path.endsWith("brain_job_approval")) {
         return new Response(JSON.stringify({ ok: true, tool: "brain_job_approval", mcp: { result: { structuredContent: { ok: true, job: { job_id: "job-1", state: "waiting_approval" } } } } }), { status: 200, headers: { "content-type": "application/json" } });
       }
+      if (path.endsWith("brain_job_claim_next")) {
+        return new Response(JSON.stringify({ ok: true, tool: "brain_job_claim_next", mcp: { result: { structuredContent: { ok: true, operation: "claim_next", claimed: true, idempotent: false, job: { job_id: "job-1", state: "leased" }, event: null } } } }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (path.endsWith("brain_job_cancel")) {
+        return new Response(JSON.stringify({ ok: true, tool: "brain_job_cancel", mcp: { result: { structuredContent: { ok: true, operation: "cancel", cancelled: true, reconciliation_required: false, idempotent: false, job: { job_id: "job-1", state: "cancelled" }, event: null } } } }), { status: 200, headers: { "content-type": "application/json" } });
+      }
       if (path.endsWith("brain_job_claim") || path.endsWith("brain_job_renew") || path.endsWith("brain_job_checkpoint") || path.endsWith("brain_job_complete") || path.endsWith("brain_job_fail") || path.endsWith("brain_job_reconcile")) {
         return new Response(JSON.stringify({ ok: true, tool: path.split("/").at(-1), mcp: { result: { structuredContent: { ok: true, operation: path.split("/").at(-1).replace("brain_job_", ""), idempotent: false, job: { job_id: "job-1", state: path.endsWith("reconcile") ? "queued" : "running" }, event: null } } } }), { status: 200, headers: { "content-type": "application/json" } });
       }
@@ -112,11 +118,13 @@ test("client exposes the autonomous brain value-only kernel", async () => {
   const events = await client.brainJobEvents({ after: 0, limit: 10 });
   const approval = await client.brainJobApproval({ job_id: "job-1", action: "request", reason: "review" });
   const claimed = await client.brainJobClaim({ job_id: "job-1", worker_id: "worker-a", lease_ms: 1000 });
+  const claimedNext = await client.brainJobClaimNext({ worker_id: "worker-a", lease_ms: 1000 });
   const renewed = await client.brainJobRenew({ job_id: "job-1", worker_id: "worker-a", lease_ms: 1000 });
   const checkpointed = await client.brainJobCheckpoint({ job_id: "job-1", worker_id: "worker-a", phase: "preflight", checkpoint_digest: "c".repeat(64), side_effect_boundary: "preflight" });
   const completed = await client.brainJobComplete({ job_id: "job-1", worker_id: "worker-a", result_digest: "d".repeat(64) });
   const failed = await client.brainJobFail({ job_id: "job-1", worker_id: "worker-a", reason: "timeout", retryable: true });
   const reconciled = await client.brainJobReconcile({ job_id: "job-1", outcome: "not_executed", evidence_digest: "e".repeat(64), effect_absent: true });
+  const cancelled = await client.brainJobCancel({ job_id: "job-1", reason: "operator stop" });
   const health = await client.brainModelHealth({ operation: "snapshot", provider: "openai" });
   const replay = await client.brainReplayEvaluate({
     case_id: "case-1",
@@ -140,11 +148,13 @@ test("client exposes the autonomous brain value-only kernel", async () => {
   assert.deepEqual(events.mcp.result.structuredContent.events, []);
   assert.equal(approval.mcp.result.structuredContent.job.state, "waiting_approval");
   assert.equal(claimed.mcp.result.structuredContent.operation, "claim");
+  assert.equal(claimedNext.mcp.result.structuredContent.operation, "claim_next");
   assert.equal(renewed.mcp.result.structuredContent.operation, "renew");
   assert.equal(checkpointed.mcp.result.structuredContent.operation, "checkpoint");
   assert.equal(completed.mcp.result.structuredContent.operation, "complete");
   assert.equal(failed.mcp.result.structuredContent.operation, "fail");
   assert.equal(reconciled.mcp.result.structuredContent.operation, "reconcile");
+  assert.equal(cancelled.mcp.result.structuredContent.operation, "cancel");
   assert.equal(health.mcp.result.structuredContent.operation, "snapshot");
   assert.equal(replay.mcp.result.structuredContent.passed, true);
   assert.deepEqual(seen.find(({ path }) => path.endsWith("brain_model_select")).body.provider_health, {
@@ -153,7 +163,7 @@ test("client exposes the autonomous brain value-only kernel", async () => {
   assert.deepEqual(seen.find(({ path }) => path.endsWith("brain_model_select")).body.model_health, {
     "openai/test-model": { attempts: 12, successes: 11, failures: 1, success_rate: 11 / 12, last_latency_ms: 42 },
   });
-  assert.equal(seen.length, 20);
+  assert.equal(seen.length, 22);
   assert.ok(seen.every(({ body }) => !Object.prototype.hasOwnProperty.call(body, "api_key")));
   assert.ok(seen.every(({ body }) => !Object.prototype.hasOwnProperty.call(body, "prompt")));
 });
@@ -194,6 +204,8 @@ test("brain client methods fail before transport on malformed input", async () =
   }), ArgumentError);
   await assert.rejects(() => client.brainJobApproval({ job_id: "job-1", action: "approve" }), ArgumentError);
   await assert.rejects(() => client.brainJobClaim({ job_id: "job-1", worker_id: "worker-a", lease_ms: 99 }), ArgumentError);
+  await assert.rejects(() => client.brainJobClaimNext({ worker_id: "worker-a", lease_ms: 99 }), ArgumentError);
+  await assert.rejects(() => client.brainJobCancel({ job_id: "job-1", reason: "" }), ArgumentError);
   await assert.rejects(() => client.brainJobCheckpoint({ job_id: "job-1", worker_id: "worker-a", phase: "x", checkpoint_digest: "not-a-digest" }), ArgumentError);
   await assert.rejects(() => client.brainJobReconcile({ job_id: "job-1", outcome: "not_executed", evidence_digest: "a".repeat(64) }), ArgumentError);
   await assert.rejects(() => client.brainReplayEvaluate({

@@ -120,12 +120,14 @@ class DurableBrainControlPlaneAdapter:
             "brain_job_status",
             "brain_job_events",
             "brain_job_approval",
+            "brain_job_claim_next",
             "brain_job_claim",
             "brain_job_renew",
             "brain_job_checkpoint",
             "brain_job_complete",
             "brain_job_fail",
             "brain_job_reconcile",
+            "brain_job_cancel",
         )
     )
 
@@ -145,12 +147,14 @@ class DurableBrainControlPlaneAdapter:
             ("brain_job_status", "Read one durable metadata-only job projection.", {"job_id": identifier}, ("job_id",)),
             ("brain_job_events", "Read a bounded cursor page of hash-chained metadata-only events.", {"job_id": identifier, "after": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": MAX_DURABLE_TRANSPORT_PAGE}}, ()),
             ("brain_job_approval", "Request or decide a caller-owned approval boundary.", {"job_id": identifier, "action": {"type": "string", "enum": ["request", "approve", "deny"]}, "reason": {"type": "string", "maxLength": 2048}, "authorization_digest": digest}, ("job_id", "action")),
+            ("brain_job_claim_next", "Atomically lease the highest-priority queued job.", {"worker_id": identifier, "lease_ms": {"type": "integer", "minimum": MIN_LEASE_MS, "maximum": MAX_LEASE_MS}}, ("worker_id",)),
             ("brain_job_claim", "Acquire a bounded worker lease.", {"job_id": identifier, "worker_id": identifier, "lease_ms": {"type": "integer", "minimum": MIN_LEASE_MS, "maximum": MAX_LEASE_MS}}, ("job_id", "worker_id")),
             ("brain_job_renew", "Extend an owned worker lease.", {"job_id": identifier, "worker_id": identifier, "lease_ms": {"type": "integer", "minimum": MIN_LEASE_MS, "maximum": MAX_LEASE_MS}}, ("job_id", "worker_id")),
             ("brain_job_checkpoint", "Persist a phase and monotonic external-effect boundary digest.", {"job_id": identifier, "worker_id": identifier, "phase": {"type": "string", "maxLength": 128}, "checkpoint_digest": digest, "side_effect_boundary": {"type": "string", "enum": ["not_started", "preflight", "dispatched", "unknown"]}, "waiting_for_approval": {"type": "boolean"}}, ("job_id", "worker_id", "phase", "checkpoint_digest")),
             ("brain_job_complete", "Settle an owned lease with a caller-owned result digest.", {"job_id": identifier, "worker_id": identifier, "result_digest": digest}, ("job_id", "worker_id", "result_digest")),
             ("brain_job_fail", "Record a bounded failure without retaining the failure text.", {"job_id": identifier, "worker_id": identifier, "reason": {"type": "string", "maxLength": 2048}, "retryable": {"type": "boolean"}}, ("job_id", "worker_id", "reason")),
             ("brain_job_reconcile", "Resolve an uncertain external effect with explicit caller evidence.", {"job_id": identifier, "outcome": {"type": "string", "enum": ["succeeded", "failed", "not_executed", "unknown"]}, "evidence_digest": digest, "evidence_kind": {"type": "string", "maxLength": 128}, "operator": identifier, "reason": {"type": "string", "maxLength": 2048}, "effect_absent": {"type": "boolean"}}, ("job_id", "outcome", "evidence_digest")),
+            ("brain_job_cancel", "Cancel before external dispatch or quarantine after dispatch.", {"job_id": identifier, "reason": {"type": "string", "maxLength": 2048}}, ("job_id",)),
         )
         return tuple(
             deepcopy(
@@ -328,6 +332,27 @@ class DurableBrainControlPlaneAdapter:
         )
         return result
 
+    def _brain_job_claim_next(self, arguments: Mapping[str, Any] | None) -> dict[str, Any]:
+        args = _arguments("brain_job_claim_next", arguments, {"worker_id", "lease_ms"})
+        self._authorize("brain_job_claim_next", args)
+        worker_id = _text("worker_id", args.get("worker_id"))
+        lease_ms = _uint("lease_ms", args.get("lease_ms"), MIN_LEASE_MS, MAX_LEASE_MS, 60_000)
+        record = self.store.claim_next(worker_id, lease_seconds=lease_ms / 1_000.0)
+        result = self._base()
+        if record is None:
+            result.update({"operation": "claim_next", "claimed": False, "idempotent": False, "job": None, "event": None})
+            return result
+        result.update(
+            {
+                "operation": "claim_next",
+                "claimed": True,
+                "idempotent": False,
+                "job": self._job_projection(record),
+                "event": self._event_for_record(record),
+            }
+        )
+        return result
+
     def _brain_job_approval(self, arguments: Mapping[str, Any] | None) -> dict[str, Any]:
         args = _arguments(
             "brain_job_approval", arguments, {"job_id", "action", "reason", "authorization_digest"}
@@ -499,6 +524,31 @@ class DurableBrainControlPlaneAdapter:
         }
         if before is None:
             raise BrainJobError("unknown brain job")
+        return result
+
+    def _brain_job_cancel(self, arguments: Mapping[str, Any] | None) -> dict[str, Any]:
+        args = _arguments("brain_job_cancel", arguments, {"job_id", "reason"})
+        self._authorize("brain_job_cancel", args)
+        job_id = _text("job_id", args.get("job_id"))
+        before = self.store.get(job_id)
+        if before is None:
+            raise BrainJobError("unknown brain job")
+        reason = _text("reason", args.get("reason", "cancelled by caller"), 2_048)
+        record = self.store.cancel(
+            job_id,
+            reason="caller requested cancellation",
+            reason_digest=_sha256_text(reason),
+        )
+        operation = "cancel" if record.state == "cancelled" else "cancel_quarantine"
+        idempotent = before.terminal
+        result = self._transition_response(
+            operation,
+            record,
+            idempotent=idempotent,
+            include_event=not idempotent,
+        )
+        result["cancelled"] = record.state == "cancelled"
+        result["reconciliation_required"] = record.state == "reconciliation_required"
         return result
 
     def _transition_response(

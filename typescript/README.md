@@ -1292,8 +1292,11 @@ for a caller-owned durable adapter.
 
 When a deployment also needs a server-visible queue, `AutonomousDurableJobController` bridges that
 local worker to the value-only `brain_job_submit`, `brain_job_status`, `brain_job_events`,
-`brain_job_approval`, `brain_job_claim`, `brain_job_renew`, `brain_job_checkpoint`,
-`brain_job_complete`, `brain_job_fail`, and `brain_job_reconcile` operations. Submission sends only an idempotency key, task/spec digest,
+`brain_job_approval`, `brain_job_claim_next`, `brain_job_claim`, `brain_job_renew`,
+`brain_job_checkpoint`, `brain_job_complete`, `brain_job_fail`, `brain_job_reconcile`, and
+`brain_job_cancel` operations. `brain_job_claim_next` performs deterministic priority-ordered
+dequeue; cancellation quarantines a job after a dispatched or unknown side-effect boundary.
+Submission sends only an idempotency key, task/spec digest,
 domain, capability, risk class, retry budget, priority, and optional checkpoint digest. The server
 record is a control-plane projection: it never receives the task, prompt, model transcript, tool
 payload, credential, or provider response. A worker reads the projection, honors a server-side

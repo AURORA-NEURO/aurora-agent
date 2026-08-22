@@ -188,6 +188,21 @@ class BrainJobClaimCommand:
 
 
 @dataclass(frozen=True, slots=True)
+class BrainJobClaimNextCommand:
+    """Atomically claim the next priority-ordered queued metadata-only job."""
+
+    worker_id: str
+    lease_ms: int = 60_000
+
+    def __post_init__(self) -> None:
+        _text("worker_id", self.worker_id)
+        _bounded_uint("lease_ms", self.lease_ms, 100, 86_400_000, 60_000)
+
+    def to_arguments(self) -> dict[str, Any]:
+        return {"worker_id": self.worker_id, "lease_ms": self.lease_ms}
+
+
+@dataclass(frozen=True, slots=True)
 class BrainJobRenewCommand(BrainJobClaimCommand):
     """Renew an active metadata-only job lease for its current worker."""
 
@@ -296,6 +311,21 @@ class BrainJobReconcileCommand:
             "reason": self.reason,
             "effect_absent": self.effect_absent,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class BrainJobCancelCommand:
+    """Cancel before dispatch or retain an explicit reconciliation quarantine after dispatch."""
+
+    job_id: str
+    reason: str = "cancelled by caller"
+
+    def __post_init__(self) -> None:
+        _text("job_id", self.job_id)
+        _text("reason", self.reason, _MAX_REASON_BYTES)
+
+    def to_arguments(self) -> dict[str, Any]:
+        return {"job_id": self.job_id, "reason": self.reason}
 
 
 @dataclass(frozen=True, slots=True)
@@ -488,6 +518,10 @@ def _as_claim(value: BrainJobClaimCommand | Mapping[str, Any]) -> BrainJobClaimC
     return value if isinstance(value, BrainJobClaimCommand) else BrainJobClaimCommand(**dict(value))
 
 
+def _as_claim_next(value: BrainJobClaimNextCommand | Mapping[str, Any]) -> BrainJobClaimNextCommand:
+    return value if isinstance(value, BrainJobClaimNextCommand) else BrainJobClaimNextCommand(**dict(value))
+
+
 def _as_renew(value: BrainJobRenewCommand | Mapping[str, Any]) -> BrainJobRenewCommand:
     return value if isinstance(value, BrainJobRenewCommand) else BrainJobRenewCommand(**dict(value))
 
@@ -506,6 +540,10 @@ def _as_fail(value: BrainJobFailCommand | Mapping[str, Any]) -> BrainJobFailComm
 
 def _as_reconcile(value: BrainJobReconcileCommand | Mapping[str, Any]) -> BrainJobReconcileCommand:
     return value if isinstance(value, BrainJobReconcileCommand) else BrainJobReconcileCommand(**dict(value))
+
+
+def _as_cancel(value: BrainJobCancelCommand | Mapping[str, Any]) -> BrainJobCancelCommand:
+    return value if isinstance(value, BrainJobCancelCommand) else BrainJobCancelCommand(**dict(value))
 
 
 def _as_health(value: BrainHealthObservation | Mapping[str, Any]) -> BrainHealthObservation:
@@ -584,6 +622,9 @@ class BrainControlClient:
     def claim_job(self, request: BrainJobClaimCommand | Mapping[str, Any]) -> dict[str, Any]:
         return self._invoke("brain_job_claim", _as_claim(request).to_arguments())
 
+    def claim_next_job(self, request: BrainJobClaimNextCommand | Mapping[str, Any]) -> dict[str, Any]:
+        return self._invoke("brain_job_claim_next", _as_claim_next(request).to_arguments())
+
     def renew_job(self, request: BrainJobRenewCommand | Mapping[str, Any]) -> dict[str, Any]:
         return self._invoke("brain_job_renew", _as_renew(request).to_arguments())
 
@@ -598,6 +639,9 @@ class BrainControlClient:
 
     def reconcile_job(self, request: BrainJobReconcileCommand | Mapping[str, Any]) -> dict[str, Any]:
         return self._invoke("brain_job_reconcile", _as_reconcile(request).to_arguments())
+
+    def cancel_job(self, request: BrainJobCancelCommand | Mapping[str, Any]) -> dict[str, Any]:
+        return self._invoke("brain_job_cancel", _as_cancel(request).to_arguments())
 
     def record_health(
         self,
@@ -680,6 +724,9 @@ class AsyncBrainControlClient:
     async def claim_job(self, request: BrainJobClaimCommand | Mapping[str, Any]) -> dict[str, Any]:
         return await self._invoke("brain_job_claim", _as_claim(request).to_arguments())
 
+    async def claim_next_job(self, request: BrainJobClaimNextCommand | Mapping[str, Any]) -> dict[str, Any]:
+        return await self._invoke("brain_job_claim_next", _as_claim_next(request).to_arguments())
+
     async def renew_job(self, request: BrainJobRenewCommand | Mapping[str, Any]) -> dict[str, Any]:
         return await self._invoke("brain_job_renew", _as_renew(request).to_arguments())
 
@@ -694,6 +741,9 @@ class AsyncBrainControlClient:
 
     async def reconcile_job(self, request: BrainJobReconcileCommand | Mapping[str, Any]) -> dict[str, Any]:
         return await self._invoke("brain_job_reconcile", _as_reconcile(request).to_arguments())
+
+    async def cancel_job(self, request: BrainJobCancelCommand | Mapping[str, Any]) -> dict[str, Any]:
+        return await self._invoke("brain_job_cancel", _as_cancel(request).to_arguments())
 
     async def record_health(
         self,
@@ -715,10 +765,12 @@ __all__ = [
     "CONTROL_SCHEMA",
     "AsyncBrainControlClient",
     "BrainApprovalCommand",
+    "BrainJobCancelCommand",
     "BrainControlClient",
     "BrainControlError",
     "BrainControlRefusal",
     "BrainJobClaimCommand",
+    "BrainJobClaimNextCommand",
     "BrainJobCheckpointCommand",
     "BrainJobCompleteCommand",
     "BrainJobFailCommand",

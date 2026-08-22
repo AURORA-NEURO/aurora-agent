@@ -188,3 +188,45 @@ def test_async_typed_client_uses_the_same_durable_store(tmp_path) -> None:
             assert status["durability"]["scope"] == "python_sqlite"
 
     asyncio.run(run())
+
+
+def test_claim_next_is_priority_ordered_and_cancel_respects_effect_boundary(tmp_path) -> None:
+    with BrainJobStore(tmp_path / "scheduler-transport.sqlite3") as store:
+        adapter = DurableBrainControlPlaneAdapter(store, authorizer=lambda _operation, _metadata: True)
+        adapter.call_tool("brain_job_submit", {**_submit_arguments("job-low", "data"), "priority": 1})
+        adapter.call_tool("brain_job_submit", {**_submit_arguments("job-high", "science"), "priority": 50})
+        client = BrainControlClient.from_durable(adapter)
+
+        first = client.claim_next_job({"worker_id": "worker-next"})
+        assert first["claimed"] is True
+        assert first["job"]["job_id"] == "job-high"
+        second = client.claim_next_job({"worker_id": "worker-next"})
+        assert second["job"]["job_id"] == "job-low"
+        empty = client.claim_next_job({"worker_id": "worker-next"})
+        assert empty["claimed"] is False
+        assert empty["job"] is None
+
+        cancelled = client.cancel_job({"job_id": "job-low", "reason": "operator stop"})
+        assert cancelled["job"]["state"] == "cancelled"
+        repeated = client.cancel_job({"job_id": "job-low"})
+        assert repeated["idempotent"] is True
+        assert repeated["event"] is None
+
+        adapter.call_tool("brain_job_submit", _submit_arguments("job-dispatched", "operations"))
+        claimed = client.claim_next_job({"worker_id": "worker-next"})
+        assert claimed["job"]["job_id"] == "job-dispatched"
+
+        adapter.call_tool(
+            "brain_job_checkpoint",
+            {
+                "job_id": "job-dispatched",
+                "worker_id": "worker-next",
+                "phase": "dispatch",
+                "checkpoint_digest": _digest("dispatch-cancel"),
+                "side_effect_boundary": "dispatched",
+            },
+        )
+        quarantined = client.cancel_job({"job_id": "job-dispatched", "reason": "provider-secret cancellation"})
+        assert quarantined["job"]["state"] == "reconciliation_required"
+        assert quarantined["reconciliation_required"] is True
+        assert "provider-secret" not in json.dumps(quarantined)

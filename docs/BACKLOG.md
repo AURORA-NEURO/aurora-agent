@@ -27,6 +27,12 @@ replay/reconciliation metadata. It does not retrieve sources, interpret raw medi
 connectors, or establish truth on its own; external source adapters, domain evaluators, UI, and
 durable production persistence remain application-specific deployment work.
 
+The shared brain lifecycle now includes atomic priority-ordered dequeue and side-effect-safe
+cancellation across the Rust MCP projection, the durable Python SQLite adapter, and the typed
+TypeScript controller. This closes the worker handoff gap while preserving the remaining boundary:
+multi-host consensus, external-effect verification, protected task rehydration, and provider
+invocation are still caller-owned deployment responsibilities.
+
 The MCP transport now executes additional in-tree contracts for tabular ingestion and conformance,
 observed-world declaration, provenance-bounded claim checking, federated resolution, dependency
 locking, trajectory ingestion and divergence review, specimen-lineage auditing, pre-analytic
@@ -331,10 +337,12 @@ admission, restart-safe lifecycle calls, and digest-only projections aligned wit
 multi-host consensus, tenant fairness, external delivery guarantees, and provider-specific
 execution remain deployment-owned.
 The MCP control-plane projection now also exposes the matching remote lifecycle vocabulary:
-`brain_job_claim`, `brain_job_renew`, `brain_job_checkpoint`, `brain_job_complete`,
-`brain_job_fail`, and `brain_job_reconcile`. The TypeScript `AutonomousDurableJobController`
-claims and renews its worker lease, records a digest-only execution admission before entering the
-local provider boundary, and settles completion or failure without sending payloads. The Rust
+`brain_job_claim_next`, `brain_job_claim`, `brain_job_renew`, `brain_job_checkpoint`,
+`brain_job_complete`, `brain_job_fail`, `brain_job_reconcile`, and `brain_job_cancel`. The
+TypeScript `AutonomousDurableJobController` can atomically dequeue by priority, claims and renews
+its worker lease, records a digest-only execution admission before entering the local provider
+boundary, and settles completion, failure, or cancellation without sending payloads. Cancellation
+preserves a `reconciliation_required` quarantine after a dispatched or unknown boundary. The Rust
 projection remains process-scoped; Python `BrainJobStore` is still the restart-safe authority and
 multi-host persistence, authentication, and external effect verification remain deployment-owned.
 Python now also includes a credentialless `local-offline` built-in connector adapter covering all

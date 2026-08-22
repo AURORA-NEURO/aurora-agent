@@ -875,7 +875,7 @@ export interface BrainJobEventsResult extends JsonObject {
 export interface BrainJobLifecycleResult extends JsonObject {
   schema: string;
   ok: boolean;
-  operation: "claim" | "renew" | "checkpoint" | "complete" | "fail" | "reconcile" | string;
+  operation: "claim" | "claim_next" | "renew" | "checkpoint" | "complete" | "fail" | "reconcile" | "cancel" | "cancel_quarantine" | string;
   idempotent: boolean;
   job: BrainJobRecord;
   event: BrainControlEvent | null;
@@ -887,6 +887,23 @@ export interface BrainJobClaimArgs extends JsonObject {
   job_id: string;
   worker_id: string;
   lease_ms?: number;
+}
+
+export interface BrainJobClaimNextArgs extends JsonObject {
+  worker_id: string;
+  lease_ms?: number;
+}
+
+export interface BrainJobClaimNextResult extends JsonObject {
+  schema: string;
+  ok: boolean;
+  operation: "claim_next" | string;
+  claimed: boolean;
+  idempotent: boolean;
+  job: BrainJobRecord | null;
+  event: BrainControlEvent | null;
+  retention: string;
+  durability: BrainControlDurability;
 }
 
 export interface BrainJobRenewArgs extends JsonObject {
@@ -929,6 +946,17 @@ export interface BrainJobReconcileArgs extends JsonObject {
   operator?: string;
   reason?: string;
   effect_absent?: boolean;
+}
+
+export interface BrainJobCancelArgs extends JsonObject {
+  job_id: string;
+  reason?: string;
+}
+
+export interface BrainJobCancelResult extends BrainJobLifecycleResult {
+  operation: "cancel" | "cancel_quarantine" | string;
+  cancelled: boolean;
+  reconciliation_required: boolean;
 }
 
 export type BrainJobApprovalAction = "request" | "approve" | "deny";

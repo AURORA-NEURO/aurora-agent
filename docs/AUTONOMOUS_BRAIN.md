@@ -2684,10 +2684,11 @@ control-plane contract. The MCP server exposes:
 - brain_job_approval: moves a queued job into waiting_approval, or returns it to queued
   after a caller-authenticated authorization proof digest. The transport records that the proof
   was supplied but does not verify identity and never dispatches work.
-- brain_job_claim and brain_job_renew: atomically acquire and extend bounded worker leases. The
-  server checks owner identity, expiry, and terminal state; competing workers are refused. Lease
-  expiry before dispatch requeues work, while expiry at or after dispatch enters
-  reconciliation_required.
+- brain_job_claim_next, brain_job_claim, and brain_job_renew: atomically select the highest-priority
+  queued job and acquire or extend bounded worker leases. `claim_next` orders priority descending,
+  then creation sequence and job ID, and returns `claimed=false` for an empty queue. The server
+  checks owner identity, expiry, and terminal state; competing workers are refused. Lease expiry
+  before dispatch requeues work, while expiry at or after dispatch enters reconciliation_required.
 - brain_job_checkpoint: stores only a phase and checkpoint digest, enforces the monotonic
   not_started -> preflight -> dispatched -> unknown boundary, and can release the lease into
   waiting_approval. The checkpoint body remains caller-owned.
@@ -2697,6 +2698,10 @@ control-plane contract. The MCP server exposes:
 - brain_job_reconcile: records an evidence digest and bounded operator decision for an uncertain
   external effect. Only explicit effect_absent=true can return a quarantined job to queued; the
   transport never infers that an external effect did not happen.
+- brain_job_cancel: cancels queued or pre-dispatch work idempotently. A leased/running job whose
+  boundary is `dispatched` or `unknown` is moved to `reconciliation_required` instead of being
+  reported as cancelled. The reason is retained only as a digest, so cancellation cannot erase an
+  uncertain external effect or leak operator text into the control-plane projection.
 - brain_model_health: records and projects provider/model status, latency, bounded quality,
   usage counts, registration posture, and credential readiness. A runtime can feed the resulting
   provider_health map into brain_model_select to hard-gate open circuits or unready providers,
@@ -2711,9 +2716,10 @@ tools/call. The typed Python bridge keeps the wire shape consistent. The Rust li
 remain an in-memory MCP projection (`scope: mcp_process`), while Python now ships a concrete
 `DurableBrainControlPlaneAdapter` over the restart-safe `BrainJobStore`. That adapter exposes the
 same `brain_job_*` tool names, applies SQLite transactions through the existing state machine,
-supports queued approval admission, and projects Python-only checkpoint/reason/result fields as
-digests. Its async counterpart delegates the same transactions to a worker thread instead of
-creating a second state machine.
+supports queued approval admission, priority-ordered atomic dequeue, and side-effect-safe
+cancellation, and projects Python-only checkpoint/reason/result fields as digests. Its async
+counterpart delegates the same transactions to a worker thread instead of creating a second state
+machine.
 
 The durable adapter fails closed unless the host supplies an application-owned authorization
 callback. The callback receives only operation metadata, worker digests, job IDs, and any caller

@@ -776,6 +776,10 @@ test("durable job controller sends only metadata, preserves server approval, and
       job.attempts += 1;
       return projection({ operation: "claim", idempotent: false, job: { ...job, state: serverState, attempts: job.attempts, lease_owner: args.worker_id, lease_expires_ns: 1 } });
     },
+    async brainJobClaimNext(args) {
+      seen.push({ operation: "claim_next", args });
+      return projection({ operation: "claim_next", claimed: true, idempotent: false, job: { ...job, state: "leased", lease_owner: args.worker_id, lease_expires_ns: 1 }, event: null });
+    },
     async brainJobRenew(args) {
       seen.push({ operation: "renew", args });
       return projection({ operation: "renew", idempotent: false, job: { ...job, state: serverState, lease_owner: args.worker_id, lease_expires_ns: 2 } });
@@ -796,6 +800,10 @@ test("durable job controller sends only metadata, preserves server approval, and
       serverState = "reconciliation_required";
       return projection({ operation: "fail", idempotent: false, job: { ...job, state: serverState, lease_owner: null, lease_expires_ns: null } });
     },
+    async brainJobCancel(args) {
+      seen.push({ operation: "cancel", args });
+      return projection({ operation: "cancel", cancelled: true, reconciliation_required: false, idempotent: false, job: { ...job, state: "cancelled", lease_owner: null, lease_expires_ns: null }, event: null });
+    },
   };
   const llm = new LLMRuntime({
     credentials: new CredentialStore(),
@@ -812,6 +820,10 @@ test("durable job controller sends only metadata, preserves server approval, and
   const submitted = await controller.submit(task, { idempotencyKey: "durable-request-1", domain: "coding", candidates: agent.models() });
   assert.equal(submitted.status, "submitted");
   assert.equal(submitted.job.job_id, "server-job-1");
+  const claimedNext = await controller.claimNext();
+  assert.equal(claimedNext.operation, "claim_next");
+  const cancelled = await controller.cancel("server-job-1", "operator stop");
+  assert.equal(cancelled.cancelled, true);
   assert.equal(seen[0].args.spec_digest, submitted.spec_digest);
   assert.equal(Object.prototype.hasOwnProperty.call(seen[0].args, "task"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(seen[0].args, "prompt"), false);

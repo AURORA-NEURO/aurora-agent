@@ -545,6 +545,71 @@ impl BrainControlState {
         Ok(job_transition_result(job, "claim", event, false))
     }
 
+    /// Atomically select and claim the next queued job using deterministic priority ordering.
+    ///
+    /// The durable Python store owns the restart-safe queue in production; this process-scoped
+    /// projection mirrors the same worker contract so a caller can use one scheduler vocabulary
+    /// across MCP, HTTP, and the durable host adapter.
+    pub(crate) fn job_claim_next(&mut self, arguments: &Value) -> Result<Value, String> {
+        let object = object(arguments, "brain_job_claim_next")?;
+        reject_unknown(object, &["worker_id", "lease_ms"])?;
+        let worker_id = text(object, "worker_id", MAX_ID_BYTES)?;
+        let lease_ms = bounded_u64(object, "lease_ms", MIN_LEASE_MS, MAX_LEASE_MS, 60_000)?;
+        let now = control_now_ns();
+        let expired = self
+            .jobs
+            .values()
+            .filter(|job| {
+                matches!(job.state.as_str(), "leased" | "running")
+                    && job.lease_expires_ns.is_some_and(|expires| expires <= now)
+            })
+            .map(|job| job.job_id.clone())
+            .collect::<Vec<_>>();
+        for job_id in expired {
+            self.recover_expired_lease(&job_id, now)?;
+        }
+
+        let mut candidates = self
+            .jobs
+            .values()
+            .filter(|job| job.state == "queued")
+            .cloned()
+            .collect::<Vec<_>>();
+        candidates.sort_by(|left, right| {
+            right
+                .priority
+                .cmp(&left.priority)
+                .then_with(|| left.created_sequence.cmp(&right.created_sequence))
+                .then_with(|| left.job_id.cmp(&right.job_id))
+        });
+        let Some(candidate) = candidates.into_iter().next() else {
+            return Ok(json!({
+                "schema": CONTROL_SCHEMA,
+                "ok": true,
+                "operation": "claim_next",
+                "claimed": false,
+                "idempotent": false,
+                "job": Value::Null,
+                "event": Value::Null,
+                "retention": "metadata_only_hash_chained",
+                "durability": durability_posture(),
+            }));
+        };
+        let mut result = self.job_claim(&json!({
+            "job_id": candidate.job_id,
+            "worker_id": worker_id,
+            "lease_ms": lease_ms,
+        }))?;
+        if result["job"]["state"] == json!("dead_lettered") {
+            // A queued record can already have exhausted its attempt budget. Keep selecting until
+            // the worker receives a real lease or the queue is empty.
+            return self.job_claim_next(arguments);
+        }
+        result["operation"] = json!("claim_next");
+        result["claimed"] = json!(true);
+        Ok(result)
+    }
+
     /// Extend an active lease only when the same worker still owns it.
     pub(crate) fn job_renew(&mut self, arguments: &Value) -> Result<Value, String> {
         let object = object(arguments, "brain_job_renew")?;
@@ -844,6 +909,81 @@ impl BrainControlState {
         job.reconciliation_digest = Some(decision_digest);
         update_record_event(job, &event);
         Ok(job_transition_result(job, "reconcile", event, false))
+    }
+
+    /// Cancel before external dispatch; after dispatch, quarantine for explicit reconciliation.
+    pub(crate) fn job_cancel(&mut self, arguments: &Value) -> Result<Value, String> {
+        let object = object(arguments, "brain_job_cancel")?;
+        reject_unknown(object, &["job_id", "reason"])?;
+        let job_id = text(object, "job_id", MAX_ID_BYTES)?;
+        let reason = text_with_default(object, "reason", "cancelled by caller", MAX_REASON_BYTES)?;
+        let current = self
+            .jobs
+            .get(&job_id)
+            .cloned()
+            .ok_or_else(|| format!("unknown brain job_id {job_id:?}"))?;
+        if matches!(
+            current.state.as_str(),
+            "succeeded" | "failed" | "dead_lettered" | "cancelled" | "reconciliation_required"
+        ) {
+            let operation = if current.state == "reconciliation_required" {
+                "cancel_quarantine"
+            } else {
+                "cancel"
+            };
+            let mut result = job_transition_result(&current, operation, Value::Null, true);
+            result["cancelled"] = json!(current.state == "cancelled");
+            result["reconciliation_required"] = json!(current.state == "reconciliation_required");
+            return Ok(result);
+        }
+        let quarantine = matches!(current.state.as_str(), "leased" | "running")
+            && matches!(
+                current.side_effect_boundary.as_str(),
+                "dispatched" | "unknown"
+            );
+        let next_state = if quarantine {
+            "reconciliation_required"
+        } else {
+            "cancelled"
+        };
+        let event_type = if quarantine {
+            "job_cancellation_quarantined"
+        } else {
+            "job_cancelled"
+        };
+        let reason_digest = digest_value(&json!(reason))?;
+        let event = self.append_event(
+            &job_id,
+            event_type,
+            json!({
+                "previous_state": current.state,
+                "reason_digest": reason_digest,
+                "side_effect_boundary": current.side_effect_boundary,
+                "reconciliation_required": quarantine,
+            }),
+        )?;
+        let job = self
+            .jobs
+            .get_mut(&job_id)
+            .ok_or_else(|| "brain job disappeared during cancellation".to_string())?;
+        job.state = next_state.into();
+        job.lease_owner = None;
+        job.lease_expires_ns = None;
+        job.reason_digest = Some(reason_digest);
+        update_record_event(job, &event);
+        let mut result = job_transition_result(
+            job,
+            if quarantine {
+                "cancel_quarantine"
+            } else {
+                "cancel"
+            },
+            event,
+            false,
+        );
+        result["cancelled"] = json!(!quarantine);
+        result["reconciliation_required"] = json!(quarantine);
+        Ok(result)
     }
 
     fn recover_expired_lease(&mut self, job_id: &str, now: u64) -> Result<(), String> {
@@ -1849,6 +1989,11 @@ pub(crate) fn tool_definitions() -> Vec<Value> {
             "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"job_id": {"type": "string", "maxLength": 256}, "worker_id": {"type": "string", "maxLength": 256}, "lease_ms": {"type": "integer", "minimum": 100, "maximum": 86400000}}, "required": ["job_id", "worker_id"]}
         }),
         json!({
+            "name": "brain_job_claim_next",
+            "description": "Atomically claim the highest-priority queued metadata-only brain job for a bounded worker lease. Selection is priority-descending, then creation-sequence ascending, then job-id ascending; an empty queue returns claimed=false without inventing work.",
+            "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"worker_id": {"type": "string", "maxLength": 256}, "lease_ms": {"type": "integer", "minimum": 100, "maximum": 86400000}}, "required": ["worker_id"]}
+        }),
+        json!({
             "name": "brain_job_renew",
             "description": "Renew an active brain job lease only for its current worker owner. Renewal never changes the side-effect boundary and refuses expired or mismatched leases.",
             "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"job_id": {"type": "string", "maxLength": 256}, "worker_id": {"type": "string", "maxLength": 256}, "lease_ms": {"type": "integer", "minimum": 100, "maximum": 86400000}}, "required": ["job_id", "worker_id"]}
@@ -1872,6 +2017,11 @@ pub(crate) fn tool_definitions() -> Vec<Value> {
             "name": "brain_job_reconcile",
             "description": "Resolve an uncertain external effect with caller-supplied evidence digest and bounded operator metadata. succeeded/failed close the job; not_executed can requeue only with effect_absent=true; unknown records a deferred decision and remains quarantined.",
             "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"job_id": {"type": "string", "maxLength": 256}, "outcome": {"type": "string", "enum": ["succeeded", "failed", "not_executed", "unknown"]}, "evidence_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "evidence_kind": {"type": "string", "maxLength": 128}, "operator": {"type": "string", "maxLength": 256}, "reason": {"type": "string", "maxLength": 2048}, "effect_absent": {"type": "boolean"}}, "required": ["job_id", "outcome", "evidence_digest"]}
+        }),
+        json!({
+            "name": "brain_job_cancel",
+            "description": "Cancel a job before external dispatch. A cancellation request at or after dispatched/unknown is quarantined in reconciliation_required instead of pretending the external effect was absent.",
+            "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"job_id": {"type": "string", "maxLength": 256}, "reason": {"type": "string", "maxLength": 2048}}, "required": ["job_id"]}
         }),
         json!({
             "name": "brain_model_health",
@@ -2033,6 +2183,90 @@ mod tests {
         assert_eq!(completed["job"]["state"], json!("succeeded"));
         assert_eq!(completed["job"]["result_digest"], json!("e".repeat(64)));
         assert_eq!(completed["job"]["lease_owner"], Value::Null);
+    }
+
+    #[test]
+    fn claim_next_is_priority_ordered_and_cancel_preserves_effect_boundaries() {
+        let mut state = BrainControlState::default();
+        let submit = |state: &mut BrainControlState, key: &str, priority: u64| {
+            state
+                .submit_job(&json!({
+                    "idempotency_key": key,
+                    "spec_digest": format!("{:0<64}", key),
+                    "domain": "engineering",
+                    "capability": "code_change",
+                    "risk_class": "reversible",
+                    "priority": priority,
+                }))
+                .unwrap()
+        };
+        let low = submit(&mut state, "claim-low", 10);
+        let high = submit(&mut state, "claim-high", 200);
+
+        let first = state
+            .job_claim_next(&json!({"worker_id": "scheduler-a", "lease_ms": 100}))
+            .unwrap();
+        assert_eq!(first["operation"], json!("claim_next"));
+        assert_eq!(first["claimed"], json!(true));
+        assert_eq!(first["job"]["job_id"], high["job"]["job_id"]);
+
+        let second = state
+            .job_claim_next(&json!({"worker_id": "scheduler-a", "lease_ms": 100}))
+            .unwrap();
+        assert_eq!(second["job"]["job_id"], low["job"]["job_id"]);
+        let empty = state
+            .job_claim_next(&json!({"worker_id": "scheduler-a", "lease_ms": 100}))
+            .unwrap();
+        assert_eq!(empty["claimed"], json!(false));
+        assert_eq!(empty["job"], Value::Null);
+
+        let cancelled = state
+            .job_cancel(&json!({
+                "job_id": low["job"]["job_id"],
+                "reason": "operator stopped before dispatch",
+            }))
+            .unwrap();
+        assert_eq!(cancelled["operation"], json!("cancel"));
+        assert_eq!(cancelled["cancelled"], json!(true));
+        assert_eq!(cancelled["job"]["state"], json!("cancelled"));
+        assert!(cancelled.to_string().contains("reason_digest"));
+        assert!(!cancelled.to_string().contains("operator stopped"));
+        let repeated = state
+            .job_cancel(&json!({"job_id": low["job"]["job_id"]}))
+            .unwrap();
+        assert_eq!(repeated["idempotent"], json!(true));
+        assert_eq!(repeated["event"], Value::Null);
+
+        let dispatched = submit(&mut state, "cancel-dispatched", 100);
+        let leased = state
+            .job_claim_next(&json!({"worker_id": "scheduler-b", "lease_ms": 100}))
+            .unwrap();
+        assert_eq!(leased["job"]["job_id"], dispatched["job"]["job_id"]);
+        state
+            .job_checkpoint(&json!({
+                "job_id": dispatched["job"]["job_id"],
+                "worker_id": "scheduler-b",
+                "phase": "provider_dispatch",
+                "checkpoint_digest": "c".repeat(64),
+                "side_effect_boundary": "dispatched",
+            }))
+            .unwrap();
+        let quarantined = state
+            .job_cancel(&json!({
+                "job_id": dispatched["job"]["job_id"],
+                "reason": "provider cancellation requested",
+            }))
+            .unwrap();
+        assert_eq!(quarantined["operation"], json!("cancel_quarantine"));
+        assert_eq!(quarantined["cancelled"], json!(false));
+        assert_eq!(quarantined["reconciliation_required"], json!(true));
+        assert_eq!(
+            quarantined["job"]["state"],
+            json!("reconciliation_required")
+        );
+        assert!(!quarantined
+            .to_string()
+            .contains("provider cancellation requested"));
     }
 
     #[test]

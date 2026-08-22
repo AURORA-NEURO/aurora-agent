@@ -481,7 +481,11 @@ import type {
   BrainBanditUpdate,
   BrainJobApprovalArgs,
   BrainJobApprovalResult,
+  BrainJobCancelArgs,
+  BrainJobCancelResult,
   BrainJobClaimArgs,
+  BrainJobClaimNextArgs,
+  BrainJobClaimNextResult,
   BrainJobCheckpointArgs,
   BrainJobCompleteArgs,
   BrainJobEventsArgs,
@@ -1888,6 +1892,17 @@ export class ApiClient {
     return this.callTool<BrainJobLifecycleResult>("brain_job_claim", args, options);
   }
 
+  /** Atomically claim the next priority-ordered queued job for a bounded worker lease. */
+  async brainJobClaimNext(
+    args: BrainJobClaimNextArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainJobClaimNextResult>> {
+    if (!isObject(args) || typeof args.worker_id !== "string" || !args.worker_id.trim() || args.worker_id.length > 256) throw new ArgumentError("brain job claim-next worker_id must be a bounded non-empty string");
+    rejectBrainSecretFields(args, "brain job claim-next");
+    validateOptionalBoundedInteger(args.lease_ms, 100, 86_400_000, "lease_ms");
+    return this.callTool<BrainJobClaimNextResult>("brain_job_claim_next", args, options);
+  }
+
   /** Renew an active lease only for its current worker owner. */
   async brainJobRenew(
     args: BrainJobRenewArgs,
@@ -1955,6 +1970,17 @@ export class ApiClient {
     if (args.outcome === "not_executed" && args.effect_absent !== true) throw new ArgumentError("not_executed reconciliation requires effect_absent=true");
     rejectBrainSecretFields(args, "brain job reconcile");
     return this.callTool<BrainJobLifecycleResult>("brain_job_reconcile", args, options);
+  }
+
+  /** Cancel before external dispatch, or retain a reconciliation quarantine after dispatch. */
+  async brainJobCancel(
+    args: BrainJobCancelArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainJobCancelResult>> {
+    if (!isObject(args) || typeof args.job_id !== "string" || !args.job_id.trim()) throw new ArgumentError("brain job cancel job_id must be a non-empty string");
+    if (args.reason !== undefined && (typeof args.reason !== "string" || !args.reason.trim() || args.reason.length > 2048)) throw new ArgumentError("reason must be a bounded non-empty string");
+    rejectBrainSecretFields(args, "brain job cancel");
+    return this.callTool<BrainJobCancelResult>("brain_job_cancel", args, options);
   }
 
   /** Record or inspect provider/model posture without accepting credential material or payloads. */

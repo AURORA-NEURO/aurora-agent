@@ -863,9 +863,17 @@ class BrainJobStore:
                 self._connection.execute("ROLLBACK")
                 raise
 
-    def cancel(self, job_id: str, *, reason: str = "cancelled by caller") -> BrainJobRecord:
+    def cancel(
+        self,
+        job_id: str,
+        *,
+        reason: str = "cancelled by caller",
+        reason_digest: str | None = None,
+    ) -> BrainJobRecord:
         job_id = _job_text("job_id", job_id, MAX_JOB_ID_BYTES)
         reason = _job_text("cancellation reason", reason, MAX_JOB_REASON_BYTES)
+        if reason_digest is not None and not _valid_digest(reason_digest):
+            raise BrainJobError("reason_digest must be a lowercase SHA-256 digest")
         with self._lock:
             self._begin_locked()
             try:
@@ -876,6 +884,34 @@ class BrainJobStore:
                 if record.terminal:
                     self._connection.execute("COMMIT")
                     return record
+                if record.state in {"leased", "running"} and record.side_effect_boundary in {"dispatched", "unknown"}:
+                    checkpoint = {
+                        **dict(record.checkpoint),
+                        "phase": "cancellation_quarantined",
+                        "reason": reason,
+                    }
+                    if reason_digest is not None:
+                        checkpoint["reason_digest"] = reason_digest
+                    self._transition_locked(
+                        record,
+                        event_type="job_cancellation_quarantined",
+                        state="reconciliation_required",
+                        reason=reason,
+                        lease_owner=None,
+                        lease_expires_ns=None,
+                        checkpoint=checkpoint,
+                    )
+                    self._connection.execute("COMMIT")
+                    return self._row_to_record(
+                        self._connection.execute("SELECT * FROM brain_jobs WHERE job_id = ?", (job_id,)).fetchone()
+                    )
+                checkpoint = {
+                    **dict(record.checkpoint),
+                    "phase": "cancelled",
+                    "reason": reason,
+                }
+                if reason_digest is not None:
+                    checkpoint["reason_digest"] = reason_digest
                 self._transition_locked(
                     record,
                     event_type="job_cancelled",
@@ -883,11 +919,7 @@ class BrainJobStore:
                     reason=reason,
                     lease_owner=None,
                     lease_expires_ns=None,
-                    checkpoint={
-                        **dict(record.checkpoint),
-                        "phase": "cancelled",
-                        "reason": reason,
-                    },
+                    checkpoint=checkpoint,
                 )
                 self._connection.execute("COMMIT")
                 return self._row_to_record(
