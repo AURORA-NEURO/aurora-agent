@@ -7,8 +7,10 @@ import {
   AutonomousBrainFacade,
   AutonomousBrainJobWorker,
   InMemoryAutonomousBrainJobScheduler,
+  InMemoryAutonomousModelHealthStore,
   InMemoryAutonomousRunTraceStore,
   LLMRuntime,
+  ProviderRuntimeError,
   autonomousBrainJobSpecDigest,
 } from "../dist/index.js";
 
@@ -42,15 +44,15 @@ const model = {
   reliability: 0.99,
 };
 
-function makeBrain(onRequest = () => {}) {
+function makeBrain(onRequest = () => {}, modelHealthStore = undefined) {
   const runtime = new LLMRuntime({ fetch: async () => { throw new Error("network must not be reached"); } });
   runtime.registerInMemoryProvider("worker-offline", (request) => {
     onRequest(request);
     return { output_text: "worker bounded result" };
   });
-  const agent = new AutonomousAgent(runtime);
+  const agent = new AutonomousAgent(runtime, modelHealthStore ? { modelHealthStore } : undefined);
   agent.registerModel(model);
-  return { runtime, brain: new AutonomousBrainFacade({ agent }) };
+  return { runtime, agent, brain: new AutonomousBrainFacade({ agent }) };
 }
 
 function policyDigest(letter = "p") {
@@ -75,7 +77,8 @@ function jobFor(index, request, mode = "execute", policy = policyDigest()) {
 
 test("durable brain worker preserves approval gates and completes every domain through one traced provider boundary", async () => {
   let providerCalls = 0;
-  const { runtime, brain } = makeBrain(() => { providerCalls += 1; });
+  const healthStore = new InMemoryAutonomousModelHealthStore({ clock: () => 1_000 });
+  const { runtime, brain } = makeBrain(() => { providerCalls += 1; }, healthStore);
   const scheduler = new InMemoryAutonomousBrainJobScheduler({ maxJobs: 32, clock: () => 1_000 });
   const traces = new InMemoryAutonomousRunTraceStore();
   const policies = new Map();
@@ -126,6 +129,12 @@ test("durable brain worker preserves approval gates and completes every domain t
   }
   assert.equal(providerCalls, AUTONOMOUS_DOMAIN_NAMES.length);
   assert.equal(runtime.providerStatus("worker-offline").attempts, AUTONOMOUS_DOMAIN_NAMES.length);
+  const health = await healthStore.health({ limit: 32 });
+  assert.equal(health.length, 1);
+  assert.equal(health[0].attempts, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(health[0].successes, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(health[0].failures, 0);
+  assert.equal((await healthStore.verifyIntegrity()).events, AUTONOMOUS_DOMAIN_NAMES.length);
   assert.equal(traces.verifyIntegrity().verified, true);
   assert.equal(JSON.stringify(scheduler.snapshot()).includes("private-task-never-retained"), false);
   assert.equal(scheduler.inventory({ limit: 32 }).every((job) => job.state === "succeeded"), true);
@@ -241,4 +250,99 @@ test("worker rejects spec drift before dispatch and quarantines uncertain provid
   const uncertain = await worker.runOnce("worker-job-failure", 9_003);
   assert.equal(uncertain.status, "reconciliation_required");
   assert.equal(scheduler.get("worker-job-failure").state, "reconciliation_required");
+});
+
+test("worker retries only typed preflight failures and dead-letters after bounded exhaustion", async () => {
+  const { brain } = makeBrain();
+  const scheduler = new InMemoryAutonomousBrainJobScheduler({ maxJobs: 8, clock: () => 12_000 });
+  const recoverRequest = requestFor("coding");
+  const recoverPolicy = policyDigest("a");
+  const exhaustedRequest = requestFor("evaluation");
+  const exhaustedPolicy = policyDigest("b");
+  scheduler.submit(jobFor(40, recoverRequest, "execute", recoverPolicy), 12_000);
+  scheduler.submit({
+    ...jobFor(41, exhaustedRequest, "execute", exhaustedPolicy),
+    maxAttempts: 2,
+  }, 12_000);
+  const attempts = new Map();
+  const worker = new AutonomousBrainJobWorker({
+    brain,
+    scheduler,
+    workerId: "worker-retry",
+    resolve: ({ job }) => {
+      const attempt = (attempts.get(job.job_id) ?? 0) + 1;
+      attempts.set(job.job_id, attempt);
+      if (job.job_id === "worker-job-40" && attempt === 1) throw new ProviderRuntimeError("temporary local preflight refusal", { code: "timeout", retryable: true });
+      if (job.job_id === "worker-job-41") throw new ProviderRuntimeError("persistent local preflight refusal", { code: "transport", retryable: true });
+      const request = recoverRequest;
+      return {
+        specDigest: job.spec_digest,
+        policyDigest: recoverPolicy,
+        request,
+        mode: "execute",
+        execute: { approveProviderCall: true, run: { candidates: [model] } },
+      };
+    },
+  });
+
+  const scheduled = await worker.runOnce("worker-job-40", 12_000);
+  assert.equal(scheduled.status, "retry_scheduled");
+  assert.equal(scheduled.error_retryable, true);
+  assert.equal(scheduler.get("worker-job-40").state, "queued");
+  assert.equal(scheduler.get("worker-job-40").attempts, 1);
+  const waiting = await worker.runOnce("worker-job-40", 12_002);
+  assert.equal(waiting.status, "waiting_approval");
+  scheduler.resumeApproval("worker-job-40", "operator-retry", "approved after plan review", 12_003);
+  const recovered = await worker.runOnce("worker-job-40", 12_004);
+  assert.equal(recovered.status, "succeeded");
+  assert.equal(scheduler.get("worker-job-40").state, "succeeded");
+
+  const exhaustedFirst = await worker.runOnce("worker-job-41", 12_005);
+  assert.equal(exhaustedFirst.status, "retry_scheduled");
+  assert.equal(scheduler.get("worker-job-41").state, "queued");
+  const exhaustedSecond = await worker.runOnce("worker-job-41", 12_006);
+  assert.equal(exhaustedSecond.status, "failed");
+  assert.equal(exhaustedSecond.error_retryable, true);
+  assert.equal(scheduler.get("worker-job-41").state, "dead_lettered");
+  assert.equal((await worker.run({ limit: 4 })).status, "empty");
+
+  const immediateRequest = requestFor("operations");
+  const immediatePolicy = policyDigest("d");
+  scheduler.submit(jobFor(42, immediateRequest, "execute", immediatePolicy), 12_007);
+  const immediateWorker = new AutonomousBrainJobWorker({
+    brain,
+    scheduler,
+    workerId: "worker-no-retry",
+    retryPreflightFailures: false,
+    resolve: () => { throw new ProviderRuntimeError("retryable but explicitly non-retried", { code: "timeout", retryable: true }); },
+  });
+  const immediate = await immediateWorker.runOnce("worker-job-42", 12_008);
+  assert.equal(immediate.status, "failed");
+  assert.equal(immediate.error_retryable, true);
+  assert.equal(scheduler.get("worker-job-42").state, "failed");
+});
+
+test("worker batch reports retry backpressure without hot-looping a queued job", async () => {
+  const { brain } = makeBrain();
+  const scheduler = new InMemoryAutonomousBrainJobScheduler({ maxJobs: 4, clock: () => 13_000 });
+  const request = requestFor("operations");
+  const policy = policyDigest("c");
+  scheduler.submit(jobFor(50, request, "execute", policy), 13_000);
+  let calls = 0;
+  const worker = new AutonomousBrainJobWorker({
+    brain,
+    scheduler,
+    workerId: "worker-batch-retry",
+    resolve: () => {
+      calls += 1;
+      throw new ProviderRuntimeError("retryable local planning transport", { code: "transport", retryable: true });
+    },
+  });
+  const batch = await worker.run({ limit: 4 });
+  assert.equal(batch.status, "partial");
+  assert.equal(batch.claimed_count, 1);
+  assert.equal(batch.retry_scheduled_count, 1);
+  assert.equal(batch.failed_count, 0);
+  assert.equal(calls, 1);
+  assert.equal(scheduler.get("worker-job-50").state, "queued");
 });

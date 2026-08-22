@@ -20,13 +20,13 @@ import { digestJsonSync } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
 /** Metadata-only worker lifecycle for one rehydrated autonomous brain job. */
-export const AUTONOMOUS_BRAIN_JOB_WORKER_SCHEMA = "bioprism-typescript-autonomous-brain-job-worker/0.1" as const;
+export const AUTONOMOUS_BRAIN_JOB_WORKER_SCHEMA = "bioprism-typescript-autonomous-brain-job-worker/0.2" as const;
 export const AUTONOMOUS_BRAIN_JOB_SPEC_SCHEMA = "bioprism-typescript-autonomous-brain-job-spec/0.1" as const;
 export const MAX_AUTONOMOUS_BRAIN_WORKER_HEARTBEAT_MS = 300_000;
 export const MAX_AUTONOMOUS_BRAIN_WORKER_BATCH = 64;
 
 export type AutonomousBrainJobExecutionMode = "execute" | "cycle" | "adaptive";
-export type AutonomousBrainJobWorkerStatus = "succeeded" | "waiting_approval" | "reconciliation_required" | "failed" | "already_terminal";
+export type AutonomousBrainJobWorkerStatus = "succeeded" | "waiting_approval" | "retry_scheduled" | "reconciliation_required" | "failed" | "already_terminal";
 
 export interface AutonomousBrainJobSpecDigestInput {
   request: AutonomousBrainRequest;
@@ -63,6 +63,8 @@ export interface AutonomousBrainJobWorkerOptions {
   traceStore?: AutonomousRunTraceStore;
   leaseMs?: number;
   heartbeatMs?: number;
+  /** Retry only typed, retryable failures that occurred before the facade was invoked. */
+  retryPreflightFailures?: boolean;
 }
 
 export interface AutonomousBrainJobWorkerRun {
@@ -78,6 +80,7 @@ export interface AutonomousBrainJobWorkerRun {
   trace: AutonomousRunTraceSummary | null;
   error_class: string | null;
   failure_code: string | null;
+  error_retryable: boolean | null;
   retention: "metadata_only_job_and_trace;private_task_policy_provider_and_evaluator_values_transient";
   secret_material: "never_returned";
 }
@@ -91,6 +94,7 @@ export interface AutonomousBrainJobWorkerBatch {
   succeeded_count: number;
   waiting_count: number;
   reconciliation_count: number;
+  retry_scheduled_count: number;
   failed_count: number;
   batch_digest: string;
   retention: "metadata_only_job_and_trace;private_task_policy_provider_and_evaluator_values_transient";
@@ -122,10 +126,10 @@ function mode(value: unknown): AutonomousBrainJobExecutionMode {
   return value;
 }
 
-function errorProjection(error: unknown): { errorClass: string; failureCode: string } {
-  if (error instanceof ProviderRuntimeError) return { errorClass: error.constructor.name, failureCode: error.code };
-  if (error instanceof Error && /^[A-Za-z0-9_.:-]+$/.test(error.constructor.name)) return { errorClass: error.constructor.name, failureCode: "error" };
-  return { errorClass: "AutonomousBrainJobWorkerError", failureCode: "unknown" };
+function errorProjection(error: unknown): { errorClass: string; failureCode: string; retryable: boolean | null } {
+  if (error instanceof ProviderRuntimeError) return { errorClass: error.constructor.name, failureCode: error.code, retryable: error.retryable };
+  if (error instanceof Error && /^[A-Za-z0-9_.:-]+$/.test(error.constructor.name)) return { errorClass: error.constructor.name, failureCode: "error", retryable: null };
+  return { errorClass: "AutonomousBrainJobWorkerError", failureCode: "unknown", retryable: null };
 }
 
 function statusOf(result: AutonomousBrainExecution | AutonomousBrainCycleExecution | AutonomousBrainAdaptiveCycleExecution): string {
@@ -191,6 +195,7 @@ export class AutonomousBrainJobWorker {
   readonly traceStore?: AutonomousRunTraceStore;
   readonly leaseMs: number;
   readonly heartbeatMs: number;
+  readonly retryPreflightFailures: boolean;
 
   constructor(options: AutonomousBrainJobWorkerOptions) {
     if (!options || !(options.brain instanceof AutonomousBrainFacade)) throw new ArgumentError("autonomous brain job worker requires an AutonomousBrainFacade");
@@ -205,6 +210,8 @@ export class AutonomousBrainJobWorker {
     this.leaseMs = boundedInteger("autonomous brain worker leaseMs", options.leaseMs ?? 60_000, 1, 600_000);
     this.heartbeatMs = boundedInteger("autonomous brain worker heartbeatMs", options.heartbeatMs ?? Math.min(30_000, Math.floor(this.leaseMs / 3)), 1, MAX_AUTONOMOUS_BRAIN_WORKER_HEARTBEAT_MS);
     if (this.heartbeatMs >= this.leaseMs) throw new ArgumentError("autonomous brain worker heartbeatMs must be less than leaseMs");
+    if (options.retryPreflightFailures !== undefined && typeof options.retryPreflightFailures !== "boolean") throw new ArgumentError("autonomous brain worker retryPreflightFailures must be boolean");
+    this.retryPreflightFailures = options.retryPreflightFailures ?? true;
   }
 
   async runOnce(jobId?: string, now?: number): Promise<AutonomousBrainJobWorkerRun | null> {
@@ -313,8 +320,21 @@ export class AutonomousBrainJobWorker {
       try {
         const boundary = executionStarted ? "unknown" : planCompiled ? "preflight" : "not_started";
         this.scheduler.checkpoint(claimed.job_id, this.workerId, { phase: "worker_execution_error", checkpointDigest: digestJsonSync({ error_class: projection.errorClass, failure_code: projection.failureCode }), sideEffectBoundary: boundary });
-        const failed = this.scheduler.fail(claimed.job_id, this.workerId, { reason: executionStarted ? "worker execution outcome is uncertain; reconciliation required" : "worker execution failed before provider dispatch", retryable: false });
-        return this.envelope(failed, failed.state === "reconciliation_required" ? "reconciliation_required" : "failed", resolution?.mode ?? null, null, null, null, trace, projection);
+        const retryablePreflight = !executionStarted && this.retryPreflightFailures && error instanceof ProviderRuntimeError && error.retryable;
+        const failed = this.scheduler.fail(claimed.job_id, this.workerId, {
+          reason: executionStarted
+            ? "worker execution outcome is uncertain; reconciliation required"
+            : retryablePreflight
+              ? "retryable worker preflight failure; scheduler retry policy applied"
+              : "worker execution failed before provider dispatch",
+          retryable: retryablePreflight,
+        });
+        const workerStatus = failed.state === "reconciliation_required"
+          ? "reconciliation_required"
+          : failed.state === "queued"
+            ? "retry_scheduled"
+            : "failed";
+        return this.envelope(failed, workerStatus, resolution?.mode ?? null, null, null, null, trace, projection);
       } catch (persistenceError) {
         const wrapped = new ProviderRuntimeError("autonomous brain worker failure could not be durably recorded", { code: "configuration" });
         (wrapped as Error & { cause?: unknown }).cause = persistenceError;
@@ -332,21 +352,23 @@ export class AutonomousBrainJobWorker {
       const result = await this.runOnce();
       if (result === null) break;
       runs.push(result);
-      if (result.status === "waiting_approval" || result.status === "reconciliation_required") break;
+      if (result.status === "waiting_approval" || result.status === "retry_scheduled" || result.status === "reconciliation_required") break;
     }
     const succeeded = runs.filter((run) => run.status === "succeeded").length;
     const waiting = runs.filter((run) => run.status === "waiting_approval").length;
     const reconciliation = runs.filter((run) => run.status === "reconciliation_required").length;
+    const retryScheduled = runs.filter((run) => run.status === "retry_scheduled").length;
     const failed = runs.filter((run) => run.status === "failed").length;
     return {
       schema: AUTONOMOUS_BRAIN_JOB_WORKER_SCHEMA,
       worker_id: this.workerId,
-      status: runs.length === 0 ? "empty" : failed > 0 && succeeded === 0 ? "failed" : waiting > 0 || reconciliation > 0 || failed > 0 ? "partial" : "completed",
+      status: runs.length === 0 ? "empty" : failed > 0 && succeeded === 0 && waiting === 0 && reconciliation === 0 && retryScheduled === 0 ? "failed" : waiting > 0 || reconciliation > 0 || retryScheduled > 0 || failed > 0 ? "partial" : "completed",
       runs,
       claimed_count: runs.filter((run) => run.status !== "already_terminal").length,
       succeeded_count: succeeded,
       waiting_count: waiting,
       reconciliation_count: reconciliation,
+      retry_scheduled_count: retryScheduled,
       failed_count: failed,
       batch_digest: digestJsonSync(runs.map((run) => ({ job_id: run.job_id, status: run.status, job_digest: run.job.job_digest, trace_digest: run.trace?.trace_digest ?? null }))),
       retention: RETENTION,
@@ -383,11 +405,11 @@ export class AutonomousBrainJobWorker {
     execution: AutonomousBrainExecution | null,
     cycle: AutonomousBrainCycleExecution | null,
     trace: AutonomousRunTraceSummary | null,
-    error: { errorClass: string; failureCode: string } | null,
+    error: { errorClass: string; failureCode: string; retryable: boolean | null } | null,
   ): AutonomousBrainJobWorkerRun {
     const resolvedExecution = execution ?? (result && "run" in result ? result as AutonomousBrainExecution : null);
     const resolvedCycle = cycle ?? (result && "cycle" in result ? result as AutonomousBrainCycleExecution : null);
     const resolvedAdaptive = result && "adaptive" in result ? result as AutonomousBrainAdaptiveCycleExecution : null;
-    return { schema: AUTONOMOUS_BRAIN_JOB_WORKER_SCHEMA, worker_id: this.workerId, job_id: job.job_id, status, job, mode: selectedMode, execution: resolvedExecution, cycle: resolvedCycle, adaptive: resolvedAdaptive, trace, error_class: error?.errorClass ?? null, failure_code: error?.failureCode ?? null, retention: RETENTION, secret_material: SECRET_MATERIAL };
+    return { schema: AUTONOMOUS_BRAIN_JOB_WORKER_SCHEMA, worker_id: this.workerId, job_id: job.job_id, status, job, mode: selectedMode, execution: resolvedExecution, cycle: resolvedCycle, adaptive: resolvedAdaptive, trace, error_class: error?.errorClass ?? null, failure_code: error?.failureCode ?? null, error_retryable: error?.retryable ?? null, retention: RETENTION, secret_material: SECRET_MATERIAL };
   }
 }

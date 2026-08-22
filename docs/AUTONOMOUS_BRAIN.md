@@ -4009,11 +4009,24 @@ scheduler.resumeApproval("science-job-1", "operator-42", "reviewed scope");
 const result = await worker.runOnce("science-job-1");
 ```
 
-The worker never writes the resolver's task or policy values to the scheduler. A provider error
-after dispatch is conservatively quarantined for reconciliation; a spec mismatch, missing
-evaluator, or route/domain mismatch fails before the external boundary. The worker is still a
-single-process scheduler adapter: multi-host transactions, provider-side idempotency, and secret
-manager/session ownership remain deployment responsibilities.
+The worker never writes the resolver's task or policy values to the scheduler. By default, a typed
+`ProviderRuntimeError` with `retryable: true` is retried only when it occurs before the facade is
+invoked. The scheduler's `maxAttempts` ceiling owns the bound: a queued retry is returned as
+`retry_scheduled`, the batch loop stops so it cannot hot-loop the same job, and exhaustion becomes
+`failed`/dead-lettered. Set `retryPreflightFailures: false` when the deployment wants every
+preflight error to fail immediately. A provider error after dispatch is conservatively quarantined
+for reconciliation and is never automatically retried; a spec mismatch, missing evaluator, or
+route/domain mismatch fails before the external boundary. `error_retryable` is a boolean-or-null
+metadata projection only, never a raw error message.
+
+The worker deliberately does not duplicate model-health observers. Construct the underlying
+`AutonomousAgent` with the caller-owned `InMemoryAutonomousModelHealthStore` or durable store, for
+example `new AutonomousAgent(runtime, { modelHealthStore: healthStore })`. The agent then records
+bounded invocation outcomes at the provider boundary and folds persisted health into subsequent
+model selection. This keeps direct, cycle, adaptive, and all-domain worker jobs on the same health
+and bandit-selection path without retaining prompts, responses, credentials, or evaluator values.
+The worker is still a single-process scheduler adapter: multi-host transactions, provider-side
+idempotency, and secret manager/session ownership remain deployment responsibilities.
 
 ## Provider-neutral boundary
 
