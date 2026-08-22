@@ -409,6 +409,51 @@ request-scoped handle group. The application sends the entered value directly to
 `session.collect_user_credential()` over its protected input boundary; no generic brain or MCP endpoint
 accepts the raw key.
 
+### Bounded Python task batches
+
+The Python application façade also provides deterministic task batching without weakening any
+single-run boundary. `agent.run_batch()` accepts one shared opaque credential mapping/session and
+an ordered sequence of request descriptors. Each descriptor contains a `task`, `domain`, and
+optional `options`, `model_candidates`, and `execution_id`; options can select ordinary online
+learning, tool-loop authorization, workflow execution, or bounded replanning just as they can on
+`agent.run()`. A caller-owned `options_factory(request, index)` is evaluated for every item before
+the first provider call, which makes malformed per-item policy fail closed rather than producing a
+partially dispatched batch.
+
+```python
+batch = agent.run_batch(
+    [
+        {"task": "review the migration checks", "domain": "data"},
+        {"task": "inspect the delivery plan", "domain": "coding"},
+    ],
+    credentials=session,  # opaque handles only; never a raw key
+    max_parallelism=2,
+    options_factory=lambda _request, _index: {
+        "approve_provider_call": True,
+        "learn": True,
+    },
+)
+
+for item in batch.items:
+    print(item.index, item.status, item.result_status, item.task_digest)
+public_batch = batch.to_dict()  # metadata-only; provider values remain in batch.results
+```
+
+The worker pool claims work under a bounded lock, preserves declaration order, and records
+`succeeded`, `refused`, `failed`, and `omitted` items independently. `stop_on_error=True` prevents
+new work from being claimed after a refusal/failure; already claimed calls may finish, so the
+result always reports exact omission accounting. The aggregate status is `completed`, `partial`,
+or `failed`, and `batch_digest` binds only item indexes, task digests, statuses, result statuses,
+and bounded error codes. `to_dict()` never serializes task text, prompts, provider responses,
+credential handles, tool arguments, or exception messages. `run_cross_domain_batch()` exposes the
+same contract for descriptors with `subtasks`, preserving specialist child order and the separate
+fan-out/synthesis approval boundary. Both APIs cover the twelve built-in domains and are also
+usable with the explicit credentialless `in_memory` transport for local CI and replay tests.
+When the caller wants the brain to own intake as well as model selection, `run_auto_batch()` accepts
+only `task` descriptors and delegates deterministic routing, abstention, optional provider
+planning, learning-mode selection, and the existing approval gates per item. Route abstentions and
+planning reviews become visible `refused` items rather than silently selecting a domain.
+
 The TypeScript façade exposes the same onboarding idea through a domain-wide readiness audit:
 
 ```typescript

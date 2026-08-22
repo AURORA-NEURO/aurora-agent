@@ -8,7 +8,9 @@ import pytest
 
 from prism_sdk import (
     AUTONOMOUS_DOMAINS,
+    AUTONOMOUS_AGENT_BATCH_SCHEMA,
     AutonomousAgent,
+    AutonomousBatchResult,
     AutonomousDomainRegistry,
     InMemoryProvider,
     LLMRuntime,
@@ -321,3 +323,219 @@ def test_credentialless_runtime_executes_every_builtin_domain_through_agent_faca
     assert all(result.status == "completed_provider_call" for result in results)
     assert len(requests) == len(AUTONOMOUS_DOMAINS)
     assert {request.model for request in requests} == {"offline-model"}
+
+
+def test_agent_run_batch_covers_every_domain_with_stable_metadata_and_opaque_credentials() -> None:
+    runtime = LLMRuntime()
+
+    def handler(request: ProviderRequest) -> Mapping[str, Any]:
+        return {"output_text": f"offline result for {request.model}"}
+
+    runtime.register_in_memory_provider("offline", handler)
+    required = {
+        capability
+        for profile in AutonomousDomainRegistry.with_builtin_profiles().catalogue()
+        for capability in profile["required_model_capabilities"]
+    }
+    required.update({"tool_calling", "structured_output"})
+    catalogue = ModelCatalogue(
+        [
+            {
+                "provider": "offline",
+                "model": "offline-model",
+                "capabilities": sorted(required),
+                "context_window_tokens": 32_000,
+                "max_output_tokens": 2_048,
+                "quality": 0.9,
+                "latency_ms": 1,
+                "cost_per_million_tokens": 0,
+                "reliability": 0.99,
+            }
+        ]
+    )
+    agent = AutonomousAgent(_OfflineWorkspace(), runtime, model_catalogue=catalogue)
+    requests = tuple(
+        {"task": f"perform a bounded {domain} review", "domain": domain}
+        for domain in AUTONOMOUS_DOMAINS
+    )
+
+    first = agent.run_batch(
+        requests,
+        credentials={},
+        max_parallelism=3,
+        options_factory=lambda _request, _index: {"approve_provider_call": True},
+    )
+    second = agent.run_batch(
+        requests,
+        credentials={},
+        max_parallelism=3,
+        options_factory=lambda _request, _index: {"approve_provider_call": True},
+    )
+
+    assert isinstance(first, AutonomousBatchResult)
+    assert first.status == "completed"
+    assert first.completed_count == len(AUTONOMOUS_DOMAINS)
+    assert first.failed_count == 0
+    assert first.omitted_count == 0
+    assert [item.index for item in first.items] == list(range(len(AUTONOMOUS_DOMAINS)))
+    assert all(item.status == "succeeded" for item in first.items)
+    assert all(result is not None and result.status == "completed_provider_call" for result in first.results)
+    assert first.batch_digest == second.batch_digest
+    public = json.dumps(first.to_dict())
+    assert AUTONOMOUS_AGENT_BATCH_SCHEMA in public
+    assert "perform a bounded" not in public
+    assert "offline result" not in public
+
+
+def test_agent_run_batch_preflights_shape_and_accounts_for_stop_on_error_omissions() -> None:
+    runtime = LLMRuntime()
+
+    def handler(request: ProviderRequest) -> Mapping[str, Any]:
+        return {"output_text": "offline answer"}
+
+    runtime.register_in_memory_provider("offline", handler)
+    required = {
+        capability
+        for profile in AutonomousDomainRegistry.with_builtin_profiles().catalogue()
+        for capability in profile["required_model_capabilities"]
+    }
+    required.update({"tool_calling", "structured_output"})
+    catalogue = ModelCatalogue(
+        [
+            {
+                "provider": "offline",
+                "model": "offline-model",
+                "capabilities": sorted(required),
+                "context_window_tokens": 32_000,
+                "max_output_tokens": 2_048,
+                "quality": 0.9,
+                "latency_ms": 1,
+                "cost_per_million_tokens": 0,
+                "reliability": 0.99,
+            }
+        ]
+    )
+    agent = AutonomousAgent(_OfflineWorkspace(), runtime, model_catalogue=catalogue)
+    requests = (
+        {"task": "complete a bounded coding review", "domain": "coding"},
+        {"task": "reject this bounded data review", "domain": "data", "options": {"max_steps": 0}},
+        {"task": "omit this later operations review", "domain": "operations"},
+    )
+    result = agent.run_batch(
+        requests,
+        credentials={},
+        max_parallelism=1,
+        stop_on_error=True,
+        options_factory=lambda _request, _index: {"approve_provider_call": True},
+    )
+    assert result.status == "partial"
+    assert result.completed_count == 1
+    assert result.failed_count == 1
+    assert result.omitted_count == 1
+    assert [item.status for item in result.items] == ["succeeded", "failed", "omitted"]
+    assert result.items[1].error_class == "BrainRunError"
+    assert result.items[1].failure_code == "error"
+    assert result.items[2].task_digest is None
+
+
+def test_agent_run_auto_batch_routes_without_preselecting_domains_and_preserves_abstention() -> None:
+    runtime = LLMRuntime()
+    runtime.register_in_memory_provider(
+        "offline",
+        lambda _request: {"output_text": "offline routed answer"},
+    )
+    required = {
+        capability
+        for profile in AutonomousDomainRegistry.with_builtin_profiles().catalogue()
+        for capability in profile["required_model_capabilities"]
+    }
+    required.update({"tool_calling", "structured_output"})
+    agent = AutonomousAgent(
+        _OfflineWorkspace(),
+        runtime,
+        model_catalogue=ModelCatalogue(
+            [
+                {
+                    "provider": "offline",
+                    "model": "offline-model",
+                    "capabilities": sorted(required),
+                    "context_window_tokens": 32_000,
+                    "max_output_tokens": 2_048,
+                    "quality": 0.9,
+                    "latency_ms": 1,
+                    "cost_per_million_tokens": 0,
+                    "reliability": 0.99,
+                }
+            ]
+        ),
+    )
+    result = agent.run_auto_batch(
+        (
+            {"task": "perform a bounded coding review"},
+            {"task": "ask an entirely unclassified household question"},
+        ),
+        credentials={},
+        max_parallelism=1,
+        options_factory=lambda _request, _index: {"approve_provider_call": True},
+    )
+    assert result.status == "partial"
+    assert result.completed_count == 1
+    assert result.failed_count == 1
+    assert result.items[0].result is not None
+    assert result.items[0].result.status == "completed"
+    assert result.items[0].result.route.primary_domain == "coding"
+    assert result.items[1].status == "refused"
+    assert result.items[1].result is not None
+    assert result.items[1].result.status == "route_review_required"
+
+
+def test_agent_run_cross_domain_batch_preserves_child_order_and_shared_approval_boundary() -> None:
+    runtime = LLMRuntime()
+
+    def handler(request: ProviderRequest) -> Mapping[str, Any]:
+        return {"output_text": "offline cross-domain answer"}
+
+    runtime.register_in_memory_provider("offline", handler)
+    required = {
+        capability
+        for profile in AutonomousDomainRegistry.with_builtin_profiles().catalogue()
+        for capability in profile["required_model_capabilities"]
+    }
+    required.update({"tool_calling", "structured_output"})
+    catalogue = ModelCatalogue(
+        [
+            {
+                "provider": "offline",
+                "model": "offline-model",
+                "capabilities": sorted(required),
+                "context_window_tokens": 32_000,
+                "max_output_tokens": 2_048,
+                "quality": 0.9,
+                "latency_ms": 1,
+                "cost_per_million_tokens": 0,
+                "reliability": 0.99,
+            }
+        ]
+    )
+    agent = AutonomousAgent(_OfflineWorkspace(), runtime, model_catalogue=catalogue)
+    result = agent.run_cross_domain_batch(
+        (
+            {
+                "task": "inspect coding and data readiness",
+                "subtasks": (
+                    {"id": "coding", "domain": "coding", "task": "inspect coding readiness"},
+                    {"id": "data", "domain": "data", "task": "inspect data readiness"},
+                ),
+            },
+        ),
+        credentials={},
+        max_parallelism=1,
+        options_factory=lambda _request, _index: {
+            "approve_provider_call": True,
+            "synthesize": False,
+        },
+    )
+    assert result.status == "completed"
+    assert result.items[0].result is not None
+    assert result.items[0].result.status == "children_completed"
+    assert result.items[0].result.execution_child_ids == ("coding", "data")

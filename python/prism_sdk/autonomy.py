@@ -22,9 +22,11 @@ establish scientific, operational, or biomedical truth by itself.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 import json
 import math
+from threading import Lock
 import uuid
 from typing import Any, Callable, Mapping, Sequence
 
@@ -136,6 +138,7 @@ from .tooling import ToolCatalogue, ToolDefinition
 
 
 AUTONOMY_SCHEMA = "bioprism-python-autonomous-task/0.1"
+AUTONOMOUS_AGENT_BATCH_SCHEMA = "bioprism-python-autonomous-agent-batch/0.1"
 AUTONOMOUS_EXECUTION_MODES = ("provider", "tool_loop", "mission")
 AUTONOMOUS_LEARNING_MODES = ("off", "online", "trajectory")
 AUTONOMOUS_PLANNING_MODES = ("deterministic", "provider")
@@ -144,6 +147,8 @@ MAX_AUTONOMY_TEXT_BYTES = 16_000
 MAX_AUTONOMY_CONTEXT_BYTES = 2_000_000
 MAX_AUTONOMY_LIST_ITEMS = 64
 MAX_AUTONOMY_MEMORY_ITEMS = 32
+MAX_AUTONOMOUS_AGENT_BATCH = 64
+MAX_AUTONOMOUS_AGENT_PARALLELISM = 8
 MAX_AUTONOMOUS_WORKFLOW_STAGE_EVIDENCE = 32
 MAX_AUTONOMOUS_WORKFLOW_CHECKPOINT_BYTES = 1_000_000
 MAX_AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_BYTES = 1_000_000
@@ -3006,6 +3011,188 @@ class AutonomousAutoResult:
             "planning_mode": self.planning_mode,
             "planning": None if self.planning is None else self.planning.to_dict(),
             "retention": "route_metadata_only; provider_result_caller_owned",
+        }
+
+
+def _batch_error_projection(error: BaseException) -> tuple[str, str]:
+    """Project an exception into bounded metadata without retaining its message or payload."""
+
+    error_class = type(error).__name__
+    if not error_class or len(error_class) > 128 or any(
+        character not in _SAFE_IDENTIFIER_CHARS for character in error_class
+    ):
+        error_class = "AutonomousBatchError"
+    raw_code = getattr(error, "code", None)
+    if not isinstance(raw_code, str) or not raw_code or len(raw_code) > 128 or any(
+        character not in _SAFE_IDENTIFIER_CHARS for character in raw_code
+    ):
+        raw_code = "error"
+    return error_class, raw_code
+
+
+def _batch_result_classification(result: Any) -> tuple[str, str | None]:
+    """Classify a caller-owned execution result using only its public status."""
+
+    status = getattr(result, "status", None)
+    if not isinstance(status, str):
+        return "failed", None
+    if status.startswith("completed") or status in {"children_completed", "succeeded"}:
+        return "succeeded", status
+    if status in {
+        "approval_required",
+        "route_review_required",
+        "plan_review_required",
+        "planning_review_required",
+        "connector_blocked",
+        "provider_abstained",
+        "provider_invalid",
+        "provider_disagreement",
+        "plan_refused",
+        "stage_proposed",
+        "stage_blocked",
+        "stage_not_attempted",
+    } or status.endswith("review_required"):
+        return "refused", status
+    return "failed", status
+
+
+def _batch_digest(items: Sequence["AutonomousBatchItem"]) -> str:
+    """Bind only ordered result metadata; tasks, prompts, credentials, and provider values stay out."""
+
+    return content_digest(
+        [
+            {
+                "index": item.index,
+                "status": item.status,
+                "task_digest": item.task_digest,
+                "result_status": item.result_status,
+                "error_class": item.error_class,
+                "failure_code": item.failure_code,
+            }
+            for item in items
+        ]
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousBatchItem:
+    """One ordered, transient task-batch outcome with a metadata-only public projection."""
+
+    index: int
+    status: str
+    task_digest: str | None
+    result: Any | None = field(default=None, repr=False, compare=False)
+    error_class: str | None = None
+    failure_code: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.index, int) or isinstance(self.index, bool) or self.index < 0:
+            raise BrainRunError("autonomous batch item index must be a non-negative integer")
+        if self.status not in {"succeeded", "refused", "failed", "omitted"}:
+            raise BrainRunError("autonomous batch item status is invalid")
+        if self.task_digest is not None:
+            _route_digest(self.task_digest, "autonomous batch item task_digest")
+        if self.status == "omitted" and self.result is not None:
+            raise BrainRunError("omitted autonomous batch items cannot contain results")
+        for name, value in (("error_class", self.error_class), ("failure_code", self.failure_code)):
+            if value is not None and (
+                not isinstance(value, str)
+                or not value
+                or len(value) > 128
+                or any(character not in _SAFE_IDENTIFIER_CHARS for character in value)
+            ):
+                raise BrainRunError(f"autonomous batch item {name} is not a bounded identifier")
+
+    @property
+    def result_status(self) -> str | None:
+        status = getattr(self.result, "status", None)
+        return status if isinstance(status, str) else None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "index": self.index,
+            "status": self.status,
+            "task_digest": self.task_digest,
+            "result_status": self.result_status,
+            "error_class": self.error_class,
+            "failure_code": self.failure_code,
+            "retention": "task_digest_and_status_only;result_caller_owned_and_transient",
+            "secret_material": "never_returned",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousBatchResult:
+    """Ordered aggregate for bounded single- or cross-domain task execution."""
+
+    status: str
+    items: tuple[AutonomousBatchItem, ...]
+    completed_count: int
+    failed_count: int
+    omitted_count: int
+    max_parallelism: int
+    stop_on_error: bool
+    batch_digest: str
+
+    def __post_init__(self) -> None:
+        if self.status not in {"completed", "partial", "failed"}:
+            raise BrainRunError("autonomous batch status is invalid")
+        if not isinstance(self.items, Sequence) or isinstance(self.items, (str, bytes)):
+            raise BrainRunError("autonomous batch items must be a sequence")
+        items = tuple(self.items)
+        if not 1 <= len(items) <= MAX_AUTONOMOUS_AGENT_BATCH:
+            raise BrainRunError("autonomous batch must contain between 1 and 64 items")
+        if any(not isinstance(item, AutonomousBatchItem) for item in items):
+            raise BrainRunError("autonomous batch items must contain AutonomousBatchItem values")
+        if tuple(item.index for item in items) != tuple(range(len(items))):
+            raise BrainRunError("autonomous batch items must preserve contiguous input order")
+        for name, value in (
+            ("completed_count", self.completed_count),
+            ("failed_count", self.failed_count),
+            ("omitted_count", self.omitted_count),
+        ):
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise BrainRunError(f"autonomous batch {name} must be a non-negative integer")
+        completed = sum(item.status == "succeeded" for item in items)
+        failed = sum(item.status in {"failed", "refused"} for item in items)
+        omitted = sum(item.status == "omitted" for item in items)
+        if (self.completed_count, self.failed_count, self.omitted_count) != (completed, failed, omitted):
+            raise BrainRunError("autonomous batch counts do not match item outcomes")
+        expected_status = "completed" if failed == 0 and omitted == 0 else "partial" if completed else "failed"
+        if self.status != expected_status:
+            raise BrainRunError("autonomous batch status does not match item outcomes")
+        if (
+            not isinstance(self.max_parallelism, int)
+            or isinstance(self.max_parallelism, bool)
+            or not 1 <= self.max_parallelism <= MAX_AUTONOMOUS_AGENT_PARALLELISM
+        ):
+            raise BrainRunError("autonomous batch max_parallelism is outside its bound")
+        if not isinstance(self.stop_on_error, bool):
+            raise BrainRunError("autonomous batch stop_on_error must be a boolean")
+        _route_digest(self.batch_digest, "autonomous batch batch_digest")
+        if self.batch_digest != _batch_digest(items):
+            raise BrainRunError("autonomous batch batch_digest does not match its items")
+        object.__setattr__(self, "items", items)
+
+    @property
+    def results(self) -> tuple[Any | None, ...]:
+        """Return caller-owned transient result values in the same order as ``items``."""
+
+        return tuple(item.result for item in self.items)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_AGENT_BATCH_SCHEMA,
+            "status": self.status,
+            "items": [item.to_dict() for item in self.items],
+            "completed_count": self.completed_count,
+            "failed_count": self.failed_count,
+            "omitted_count": self.omitted_count,
+            "max_parallelism": self.max_parallelism,
+            "stop_on_error": self.stop_on_error,
+            "batch_digest": self.batch_digest,
+            "retention": "metadata_only_tasks_and_outcomes;provider_values_caller_owned_and_transient",
+            "secret_material": "never_returned",
         }
 
 
@@ -13266,6 +13453,397 @@ class AutonomousAgent:
         self._finish_execution(execution_controller, result=result)
         return result
 
+    @staticmethod
+    def _batch_controls(max_parallelism: int, stop_on_error: bool) -> tuple[int, bool]:
+        if (
+            not isinstance(max_parallelism, int)
+            or isinstance(max_parallelism, bool)
+            or not 1 <= max_parallelism <= MAX_AUTONOMOUS_AGENT_PARALLELISM
+        ):
+            raise BrainRunError(
+                "autonomous batch max_parallelism must be between 1 and "
+                f"{MAX_AUTONOMOUS_AGENT_PARALLELISM}"
+            )
+        if not isinstance(stop_on_error, bool):
+            raise BrainRunError("autonomous batch stop_on_error must be a boolean")
+        return max_parallelism, stop_on_error
+
+    def _prepare_batch_invocations(
+        self,
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None,
+        options_factory: Callable[[Mapping[str, Any], int], Mapping[str, Any]] | None,
+        cross_domain: bool,
+    ) -> tuple[tuple[dict[str, Any], ...], dict[str, CredentialHandle]]:
+        if not isinstance(requests, Sequence) or isinstance(requests, (str, bytes)):
+            raise BrainRunError("autonomous batch requests must be a sequence")
+        if not 1 <= len(requests) <= MAX_AUTONOMOUS_AGENT_BATCH:
+            raise BrainRunError(
+                "autonomous batch requests must contain between 1 and "
+                f"{MAX_AUTONOMOUS_AGENT_BATCH} entries"
+            )
+        if options_factory is not None and not callable(options_factory):
+            raise BrainRunError("autonomous batch options_factory must be callable or None")
+        resolved_credentials = self._credential_mapping(credentials)
+        common_candidates = self._resolve_candidates(model_candidates)
+        prepared: list[dict[str, Any]] = []
+        reserved_options = {
+            "credentials",
+            "task",
+            "domain",
+            "subtasks",
+            "model_candidates",
+            "execution_id",
+        }
+        for index, raw in enumerate(requests):
+            if not isinstance(raw, Mapping):
+                raise BrainRunError(f"autonomous batch request {index} must be a mapping")
+            if "credentials" in raw:
+                raise BrainRunError(
+                    "autonomous batch requests cannot carry credentials; pass one shared opaque "
+                    "credential mapping or session"
+                )
+            task = _text(
+                f"autonomous batch request {index} task",
+                raw.get("task"),
+                maximum=MAX_AUTONOMY_TEXT_BYTES,
+            )
+            if cross_domain:
+                subtasks = raw.get("subtasks")
+                if not isinstance(subtasks, Sequence) or isinstance(subtasks, (str, bytes)):
+                    raise BrainRunError(
+                        f"autonomous cross-domain batch request {index} subtasks must be a sequence"
+                    )
+                if not 1 <= len(subtasks) <= MAX_AUTONOMOUS_CROSS_DOMAIN_CHILDREN:
+                    raise BrainRunError(
+                        f"autonomous cross-domain batch request {index} subtasks are outside their bound"
+                    )
+            else:
+                domain = raw.get("domain")
+                _identifier(f"autonomous batch request {index} domain", domain)
+                if domain not in AUTONOMOUS_DOMAINS:
+                    raise BrainRunError(
+                        f"autonomous batch request {index} domain is unsupported: {domain!r}"
+                    )
+            raw_options = raw.get("options", {})
+            if raw_options is None:
+                raw_options = {}
+            if not isinstance(raw_options, Mapping):
+                raise BrainRunError(f"autonomous batch request {index} options must be a mapping")
+            options = dict(raw_options)
+            if options_factory is not None:
+                try:
+                    generated = options_factory(raw, index)
+                except Exception as error:
+                    raise BrainRunError(
+                        f"autonomous batch options_factory failed for request {index}"
+                    ) from error
+                if not isinstance(generated, Mapping):
+                    raise BrainRunError(
+                        f"autonomous batch options_factory result {index} must be a mapping"
+                    )
+                options.update(generated)
+            reserved = sorted(reserved_options.intersection(options))
+            if reserved:
+                raise BrainRunError(
+                    f"autonomous batch request {index} options cannot override: {', '.join(reserved)}"
+                )
+            item_candidates = raw.get("model_candidates", common_candidates)
+            if item_candidates is None:
+                item_candidates = common_candidates
+            normalized_candidates = self._resolve_candidates(item_candidates)
+            execution_id = raw.get("execution_id")
+            prepared.append(
+                {
+                    "index": index,
+                    "task": task,
+                    "task_digest": content_digest({"task": task}),
+                    "domain": raw.get("domain"),
+                    "subtasks": tuple(subtasks) if cross_domain else None,
+                    "model_candidates": normalized_candidates,
+                    "execution_id": execution_id,
+                    "options": options,
+                }
+            )
+        return tuple(prepared), resolved_credentials
+
+    @staticmethod
+    def _execute_prepared_batch(
+        prepared: Sequence[Mapping[str, Any]],
+        *,
+        invoke: Callable[[Mapping[str, Any]], Any],
+        max_parallelism: int,
+        stop_on_error: bool,
+    ) -> AutonomousBatchResult:
+        workers = min(max_parallelism, len(prepared))
+        items: list[AutonomousBatchItem | None] = [None] * len(prepared)
+        lock = Lock()
+        next_index = 0
+        halted = False
+
+        def worker() -> None:
+            nonlocal next_index, halted
+            while True:
+                with lock:
+                    if next_index >= len(prepared):
+                        return
+                    index = next_index
+                    next_index += 1
+                    if halted:
+                        items[index] = AutonomousBatchItem(
+                            index=index,
+                            status="omitted",
+                            task_digest=None,
+                        )
+                        continue
+                descriptor = prepared[index]
+                try:
+                    result = invoke(descriptor)
+                    status, _result_status = _batch_result_classification(result)
+                    item = AutonomousBatchItem(
+                        index=index,
+                        status=status,
+                        task_digest=descriptor["task_digest"],
+                        result=result,
+                    )
+                except Exception as error:
+                    error_class, failure_code = _batch_error_projection(error)
+                    item = AutonomousBatchItem(
+                        index=index,
+                        status="failed",
+                        task_digest=descriptor["task_digest"],
+                        error_class=error_class,
+                        failure_code=failure_code,
+                    )
+                with lock:
+                    items[index] = item
+                    if stop_on_error and item.status != "succeeded":
+                        halted = True
+
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="aurora-autonomous-batch") as pool:
+            futures = [pool.submit(worker) for _ in range(workers)]
+            for future in futures:
+                future.result()
+        normalized = tuple(
+            item
+            if item is not None
+            else AutonomousBatchItem(
+                index=index,
+                status="failed",
+                task_digest=None,
+                error_class="AutonomousBatchError",
+                failure_code="missing_batch_result",
+            )
+            for index, item in enumerate(items)
+        )
+        completed = sum(item.status == "succeeded" for item in normalized)
+        failed = sum(item.status in {"failed", "refused"} for item in normalized)
+        omitted = sum(item.status == "omitted" for item in normalized)
+        status = "completed" if failed == 0 and omitted == 0 else "partial" if completed else "failed"
+        return AutonomousBatchResult(
+            status=status,
+            items=normalized,
+            completed_count=completed,
+            failed_count=failed,
+            omitted_count=omitted,
+            max_parallelism=max_parallelism,
+            stop_on_error=stop_on_error,
+            batch_digest=_batch_digest(normalized),
+        )
+
+    def _prepare_auto_batch_invocations(
+        self,
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None,
+        options_factory: Callable[[Mapping[str, Any], int], Mapping[str, Any]] | None,
+    ) -> tuple[tuple[dict[str, Any], ...], dict[str, CredentialHandle]]:
+        if not isinstance(requests, Sequence) or isinstance(requests, (str, bytes)):
+            raise BrainRunError("autonomous auto batch requests must be a sequence")
+        if not 1 <= len(requests) <= MAX_AUTONOMOUS_AGENT_BATCH:
+            raise BrainRunError(
+                "autonomous auto batch requests must contain between 1 and "
+                f"{MAX_AUTONOMOUS_AGENT_BATCH} entries"
+            )
+        if options_factory is not None and not callable(options_factory):
+            raise BrainRunError("autonomous auto batch options_factory must be callable or None")
+        resolved_credentials = self._credential_mapping(credentials)
+        common_candidates = self._resolve_candidates(model_candidates)
+        prepared: list[dict[str, Any]] = []
+        reserved_options = {"credentials", "task", "model_candidates", "execution_id"}
+        for index, raw in enumerate(requests):
+            if not isinstance(raw, Mapping):
+                raise BrainRunError(f"autonomous auto batch request {index} must be a mapping")
+            if "credentials" in raw:
+                raise BrainRunError(
+                    "autonomous auto batch requests cannot carry credentials; pass one shared "
+                    "opaque credential mapping or session"
+                )
+            task = _text(
+                f"autonomous auto batch request {index} task",
+                raw.get("task"),
+                maximum=MAX_AUTONOMY_TEXT_BYTES,
+            )
+            raw_options = raw.get("options", {})
+            if raw_options is None:
+                raw_options = {}
+            if not isinstance(raw_options, Mapping):
+                raise BrainRunError(f"autonomous auto batch request {index} options must be a mapping")
+            options = dict(raw_options)
+            if options_factory is not None:
+                try:
+                    generated = options_factory(raw, index)
+                except Exception as error:
+                    raise BrainRunError(
+                        f"autonomous auto batch options_factory failed for request {index}"
+                    ) from error
+                if not isinstance(generated, Mapping):
+                    raise BrainRunError(
+                        f"autonomous auto batch options_factory result {index} must be a mapping"
+                    )
+                options.update(generated)
+            reserved = sorted(reserved_options.intersection(options))
+            if reserved:
+                raise BrainRunError(
+                    f"autonomous auto batch request {index} options cannot override: {', '.join(reserved)}"
+                )
+            item_candidates = raw.get("model_candidates", common_candidates)
+            if item_candidates is None:
+                item_candidates = common_candidates
+            prepared.append(
+                {
+                    "index": index,
+                    "task": task,
+                    "task_digest": content_digest({"task": task}),
+                    "model_candidates": self._resolve_candidates(item_candidates),
+                    "execution_id": raw.get("execution_id"),
+                    "options": options,
+                }
+            )
+        return tuple(prepared), resolved_credentials
+
+    def run_batch(
+        self,
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        options_factory: Callable[[Mapping[str, Any], int], Mapping[str, Any]] | None = None,
+        max_parallelism: int = 4,
+        stop_on_error: bool = False,
+    ) -> AutonomousBatchResult:
+        """Run bounded single-domain tasks across the shared provider/learning envelope.
+
+        Each request contains ``task``, ``domain``, and optional ``options``,
+        ``model_candidates``, and ``execution_id``. Credentials are deliberately shared at the
+        method boundary and must be opaque handles or a live session; a request cannot smuggle a
+        raw key or replace the credential mapping. All request shape and model-catalogue checks
+        finish before the first provider call, while results remain caller-owned and transient.
+        """
+
+        max_parallelism, stop_on_error = self._batch_controls(max_parallelism, stop_on_error)
+        prepared, resolved_credentials = self._prepare_batch_invocations(
+            requests,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            options_factory=options_factory,
+            cross_domain=False,
+        )
+
+        def invoke(descriptor: Mapping[str, Any]) -> Any:
+            return self.run(
+                task=descriptor["task"],
+                domain=descriptor["domain"],
+                credentials=resolved_credentials,
+                model_candidates=descriptor["model_candidates"],
+                execution_id=descriptor["execution_id"],
+                **descriptor["options"],
+            )
+
+        return self._execute_prepared_batch(
+            prepared,
+            invoke=invoke,
+            max_parallelism=max_parallelism,
+            stop_on_error=stop_on_error,
+        )
+
+    def run_auto_batch(
+        self,
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        options_factory: Callable[[Mapping[str, Any], int], Mapping[str, Any]] | None = None,
+        max_parallelism: int = 4,
+        stop_on_error: bool = False,
+    ) -> AutonomousBatchResult:
+        """Route and execute bounded tasks without requiring callers to preselect a domain."""
+
+        max_parallelism, stop_on_error = self._batch_controls(max_parallelism, stop_on_error)
+        prepared, resolved_credentials = self._prepare_auto_batch_invocations(
+            requests,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            options_factory=options_factory,
+        )
+
+        def invoke(descriptor: Mapping[str, Any]) -> Any:
+            return self.run_auto(
+                task=descriptor["task"],
+                credentials=resolved_credentials,
+                model_candidates=descriptor["model_candidates"],
+                execution_id=descriptor["execution_id"],
+                **descriptor["options"],
+            )
+
+        return self._execute_prepared_batch(
+            prepared,
+            invoke=invoke,
+            max_parallelism=max_parallelism,
+            stop_on_error=stop_on_error,
+        )
+
+    def run_cross_domain_batch(
+        self,
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        options_factory: Callable[[Mapping[str, Any], int], Mapping[str, Any]] | None = None,
+        max_parallelism: int = 4,
+        stop_on_error: bool = False,
+    ) -> AutonomousBatchResult:
+        """Run bounded fan-out/fan-in tasks with the same deterministic batch accounting."""
+
+        max_parallelism, stop_on_error = self._batch_controls(max_parallelism, stop_on_error)
+        prepared, resolved_credentials = self._prepare_batch_invocations(
+            requests,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            options_factory=options_factory,
+            cross_domain=True,
+        )
+
+        def invoke(descriptor: Mapping[str, Any]) -> Any:
+            return self.run_cross_domain(
+                task=descriptor["task"],
+                subtasks=descriptor["subtasks"],
+                credentials=resolved_credentials,
+                model_candidates=descriptor["model_candidates"],
+                execution_id=descriptor["execution_id"],
+                **descriptor["options"],
+            )
+
+        return self._execute_prepared_batch(
+            prepared,
+            invoke=invoke,
+            max_parallelism=max_parallelism,
+            stop_on_error=stop_on_error,
+        )
+
     def settle_cross_domain_trajectory_learning(
         self,
         *,
@@ -14233,6 +14811,9 @@ class AutonomousAgent:
 
 __all__ = [
     "AUTONOMY_SCHEMA",
+    "AUTONOMOUS_AGENT_BATCH_SCHEMA",
+    "MAX_AUTONOMOUS_AGENT_BATCH",
+    "MAX_AUTONOMOUS_AGENT_PARALLELISM",
     "AUTONOMOUS_DOMAINS",
     "AUTONOMOUS_EXECUTION_MODES",
     "AUTONOMOUS_LEARNING_MODES",
@@ -14302,6 +14883,8 @@ __all__ = [
     "AutonomousCrossDomainReplanCheckpoint",
     "AutonomousAutoBlueprint",
     "AutonomousAutoResult",
+    "AutonomousBatchItem",
+    "AutonomousBatchResult",
     "AutonomousLearningResult",
     "AutonomousAgent",
     "AutonomousWorkflowCheckpoint",
