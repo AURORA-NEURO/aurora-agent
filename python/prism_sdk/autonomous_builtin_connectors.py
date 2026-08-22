@@ -161,14 +161,25 @@ class AutonomousBuiltinConnectorAdapter:
         *,
         connector_id: str = AUTONOMOUS_BUILTIN_CONNECTOR_ID,
         version: str = AUTONOMOUS_BUILTIN_CONNECTOR_VERSION,
+        domain: str | None = None,
     ) -> None:
         self.operation_registry = operation_registry or AutonomousConnectorOperationRegistry()
         if not isinstance(self.operation_registry, AutonomousConnectorOperationRegistry):
             raise ArgumentError("built-in connector operation_registry is invalid")
         self.connector_id = _identifier("built-in connector connector_id", connector_id)
         self.version = _identifier("built-in connector version", version)
+        if domain is not None and domain not in AUTONOMOUS_DOMAIN_NAMES:
+            raise ArgumentError("built-in connector domain is unsupported")
+        self.domain = domain
+        scoped_contracts = (
+            self.operation_registry.for_domain(domain)
+            if domain is not None
+            else self.operation_registry.operations()
+        )
+        if not scoped_contracts:
+            raise ArgumentError("built-in connector domain has no operation contract")
         missing = sorted(
-            set(contract.operation_id for contract in self.operation_registry.operations())
+            set(contract.operation_id for contract in scoped_contracts)
             .difference(_RECOMMENDED_FIELDS)
         )
         if missing:
@@ -176,7 +187,7 @@ class AutonomousBuiltinConnectorAdapter:
 
     @property
     def domains(self) -> tuple[str, ...]:
-        return tuple(AUTONOMOUS_DOMAIN_NAMES)
+        return (self.domain,) if self.domain is not None else tuple(AUTONOMOUS_DOMAIN_NAMES)
 
     @property
     def capabilities(self) -> tuple[str, ...]:
@@ -184,7 +195,11 @@ class AutonomousBuiltinConnectorAdapter:
         # (primary) capability of every operation, then fill the remaining budget
         # deterministically with secondary aliases. The operation registry remains the
         # authority for the complete vocabulary; this is only the wire-level projection.
-        operations = self.operation_registry.operations()
+        operations = (
+            self.operation_registry.for_domain(self.domain)
+            if self.domain is not None
+            else self.operation_registry.operations()
+        )
         primary = tuple(dict.fromkeys(operation.capabilities[0] for operation in operations))
         secondary = tuple(
             capability
@@ -231,6 +246,8 @@ class AutonomousBuiltinConnectorAdapter:
         _reject_secret_fields(safe_request)
         operation_id = _identifier("built-in connector operation_id", safe_request.get("operation_id"))
         contract = self.operation_registry.resolve(operation_id)
+        if self.domain is not None and contract.domain != self.domain:
+            raise ArgumentError("built-in connector operation exceeds its domain scope")
         subject_digest = _digest("built-in connector subject_digest", safe_request.get("subject_digest"))
         fields = _field_projection(safe_request)
         # Presence is based on an explicit field, not truthiness. Empty conflict lists,
@@ -285,6 +302,7 @@ def builtin_autonomous_connector_registration(
     connector_id: str = AUTONOMOUS_BUILTIN_CONNECTOR_ID,
     version: str = AUTONOMOUS_BUILTIN_CONNECTOR_VERSION,
     approval_required: bool = True,
+    domain: str | None = None,
 ) -> AutonomousConnectorRegistration:
     """Create the reviewed all-domain registration without mutating a registry."""
 
@@ -294,6 +312,7 @@ def builtin_autonomous_connector_registration(
         operation_registry,
         connector_id=connector_id,
         version=version,
+        domain=domain,
     )
     return AutonomousConnectorRegistration(adapter.manifest(), adapter, approval_required=approval_required)
 
@@ -321,6 +340,63 @@ def register_builtin_autonomous_connectors(
     return registration
 
 
+def builtin_autonomous_domain_connector_registrations(
+    operation_registry: AutonomousConnectorOperationRegistry | None = None,
+    *,
+    connector_id: str = AUTONOMOUS_BUILTIN_CONNECTOR_ID,
+    version: str = AUTONOMOUS_BUILTIN_CONNECTOR_VERSION,
+    approval_required: bool = True,
+) -> tuple[AutonomousConnectorRegistration, ...]:
+    """Create one exact-capability registration per domain.
+
+    The provider-manifest wire contract bounds one capability array. Domain-scoped manifests
+    avoid compressing the vocabulary: every stage capability for a domain remains selectable,
+    while each registration still has one explicit domain and one operation contract.
+    """
+
+    operations = operation_registry or AutonomousConnectorOperationRegistry()
+    return tuple(
+        builtin_autonomous_connector_registration(
+            operations,
+            connector_id=f"{connector_id}.{domain}",
+            version=version,
+            approval_required=approval_required,
+            domain=domain,
+        )
+        for domain in AUTONOMOUS_DOMAIN_NAMES
+    )
+
+
+def register_builtin_autonomous_domain_connectors(
+    registry: AutonomousConnectorRegistry,
+    operation_registry: AutonomousConnectorOperationRegistry | None = None,
+    *,
+    connector_id: str = AUTONOMOUS_BUILTIN_CONNECTOR_ID,
+    version: str = AUTONOMOUS_BUILTIN_CONNECTOR_VERSION,
+    approval_required: bool = True,
+    replace: bool = False,
+) -> tuple[AutonomousConnectorRegistration, ...]:
+    """Atomically validate and register the domain-scoped offline connector portfolio."""
+
+    if not isinstance(registry, AutonomousConnectorRegistry):
+        raise ArgumentError("built-in domain connector registration requires an AutonomousConnectorRegistry")
+    registrations = builtin_autonomous_domain_connector_registrations(
+        operation_registry,
+        connector_id=connector_id,
+        version=version,
+        approval_required=approval_required,
+    )
+    existing = {registration.connector_id for registration in registry.registrations()}
+    incoming = {registration.connector_id for registration in registrations}
+    if not replace and existing.intersection(incoming):
+        raise ArgumentError("a built-in domain connector is already registered")
+    if len(existing.union(incoming)) > 256:
+        raise ArgumentError("built-in domain connector registration exceeds registry capacity")
+    for registration in registrations:
+        registry.register(registration, replace=replace)
+    return registrations
+
+
 __all__ = [
     "AUTONOMOUS_BUILTIN_CONNECTOR_SCHEMA",
     "AUTONOMOUS_BUILTIN_CONNECTOR_ID",
@@ -334,4 +410,6 @@ __all__ = [
     "AutonomousBuiltinConnectorAdapter",
     "builtin_autonomous_connector_registration",
     "register_builtin_autonomous_connectors",
+    "builtin_autonomous_domain_connector_registrations",
+    "register_builtin_autonomous_domain_connectors",
 ]

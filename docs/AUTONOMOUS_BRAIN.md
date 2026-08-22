@@ -2961,6 +2961,42 @@ remains authoritative for the complete vocabulary. Applications that need a comp
 not present in that bounded projection should register a narrower caller-owned adapter with the
 exact manifest they reviewed, rather than widening the built-in manifest implicitly.
 
+For complete staged coverage, Python also exposes
+`AutonomousAgent.register_builtin_domain_connectors()` and
+`AutonomousAgent.run_connector_workflow()`. The former registers twelve domain-scoped manifests,
+so every stage capability remains selectable without compressing unrelated domain vocabularies
+into one manifest. The latter consumes an already prepared `AutonomousTaskBlueprint`, walks its
+dependency DAG, and writes the same structured `AutonomousWorkflowCheckpoint` used by provider
+workflows. It requires no model candidates or credential handles:
+
+```python
+agent = AutonomousAgent(workspace, LLMRuntime())
+agent.register_builtin_domain_connectors(receipt_store=receipt_journal)
+blueprint = agent.prepare(task="profile a supplied dataset", domain="data")
+run = agent.run_connector_workflow(
+    blueprint=blueprint,
+    approved=True,
+    request_for_stage=lambda stage: {
+        "subject_digest": caller_subject_digest,
+        # Caller-owned bounded evidence metadata for this exact stage.
+        "schema": caller_schema_metadata,
+        "row_count": caller_row_count,
+        "column_count": caller_column_count,
+        "lineage": caller_lineage_metadata,
+    },
+)
+```
+
+The callback is transient and caller-owned; its values are projected by the adapter and are not
+copied into the workflow checkpoint. `observed` connector outcomes become completed stages,
+`partial` outcomes become proposed stages requiring review, and approval/scope/provider failures
+stop the DAG without unlocking dependents. On a journal replay the workflow pauses unless the
+caller supplies `rehydrate_payload(receipt)` whose returned value matches the receipt's payload
+digest. A matching value resumes the stage without a second connector invocation; a missing or
+mismatched value remains `paused` for reconciliation. This makes the offline path useful for
+fixture-driven evaluation and the live path useful for authenticated caller-owned adapters,
+without conflating either with independently verified domain truth.
+
 The TypeScript SDK now exposes the same connector seam with a browser-safe in-memory receipt
 journal and digest snapshot. Applications can persist `journal.snapshot()` through their own
 IndexedDB, SQLite, Postgres, or object-storage adapter and restore it only after snapshot and hash

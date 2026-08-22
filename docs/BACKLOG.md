@@ -263,6 +263,13 @@ counts, and explicit `observed`/`partial` outcomes so routing, approval, worker 
 and evaluator tests are executable without a provider key or network. It does not replace the
 remaining external provider-specific adapters, source retrieval, authentication, or domain-truth
 validation, which remain caller-owned by design.
+Python now also has a credentialless staged connector execution path: domain-scoped built-in
+manifests preserve every workflow capability, `AutonomousAgent.run_connector_workflow()` walks
+the prepared dependency DAG, and connector outcomes use the existing structured workflow
+checkpoint/status contract. Replay without caller payload rehydration pauses for reconciliation;
+digest-verified rehydration resumes without reinvocation. Provider-backed workflow execution,
+external source retrieval, and independently verified domain truth remain separate caller-owned
+surfaces.
 The domain-workflow handoff now also has a retained verification boundary: callers can validate
 catalogue/contract/binding identity, rerun mission preflight, and optionally replay the original
 instantiation request before re-review. The verifier is intentionally structural and non-executing;

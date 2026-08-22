@@ -219,6 +219,15 @@ from .autonomy import (
     builtin_autonomous_workflow_strategies,
     builtin_autonomous_domain_profiles,
 )
+from .autonomous_connector_workflow import (
+    AUTONOMOUS_CONNECTOR_WORKFLOW_ADAPTER_SCHEMA,
+    MAX_AUTONOMOUS_CONNECTOR_WORKFLOW_STAGE_REQUEST_BYTES,
+    MAX_AUTONOMOUS_CONNECTOR_WORKFLOW_STAGE_CALLS,
+    AutonomousConnectorWorkflowStageContext,
+    AutonomousConnectorWorkflowStageExecution,
+    AutonomousConnectorWorkflowAdapter,
+    run_autonomous_connector_workflow,
+)
 from .workflow_cycle import (
     AUTONOMOUS_WORKFLOW_CYCLE_SCHEMA,
     AUTONOMOUS_WORKFLOW_CYCLE_CHECKPOINT_SCHEMA,
@@ -341,6 +350,8 @@ from .autonomous_builtin_connectors import (
     AutonomousBuiltinConnectorAdapter,
     builtin_autonomous_connector_registration,
     register_builtin_autonomous_connectors,
+    builtin_autonomous_domain_connector_registrations,
+    register_builtin_autonomous_domain_connectors,
 )
 from .autonomous_capabilities import (
     AUTONOMOUS_CAPABILITY_BATCH_SCHEMA,
@@ -4926,6 +4937,13 @@ __all__ = [
     "AutonomousWorkflowStageResult",
     "builtin_autonomous_workflow_strategies",
     "builtin_autonomous_domain_profiles",
+    "AUTONOMOUS_CONNECTOR_WORKFLOW_ADAPTER_SCHEMA",
+    "MAX_AUTONOMOUS_CONNECTOR_WORKFLOW_STAGE_REQUEST_BYTES",
+    "MAX_AUTONOMOUS_CONNECTOR_WORKFLOW_STAGE_CALLS",
+    "AutonomousConnectorWorkflowStageContext",
+    "AutonomousConnectorWorkflowStageExecution",
+    "AutonomousConnectorWorkflowAdapter",
+    "run_autonomous_connector_workflow",
     "AUTONOMOUS_WORKFLOW_CYCLE_SCHEMA",
     "AUTONOMOUS_WORKFLOW_CYCLE_CHECKPOINT_SCHEMA",
     "AUTONOMOUS_WORKFLOW_CYCLE_CONTEXT_SCHEMA",
@@ -5033,6 +5051,8 @@ __all__ = [
     "AutonomousBuiltinConnectorAdapter",
     "builtin_autonomous_connector_registration",
     "register_builtin_autonomous_connectors",
+    "builtin_autonomous_domain_connector_registrations",
+    "register_builtin_autonomous_domain_connectors",
     "builtin_autonomous_domain_tool_profiles",
     "plan_mcp_catalogue_bindings",
     "AUTONOMOUS_CAPABILITY_BATCH_SCHEMA",

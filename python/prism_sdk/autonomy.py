@@ -93,6 +93,7 @@ from .autonomous_model_inventory import (
     AutonomousModelInventoryStore,
 )
 from .autonomous_builtin_connectors import (
+    register_builtin_autonomous_domain_connectors,
     register_builtin_autonomous_connectors,
 )
 from .evaluators import (
@@ -11293,6 +11294,96 @@ class AutonomousAgent:
             raise
         except Exception as error:
             raise BrainRunError("built-in connector registration failed") from error
+
+    def register_builtin_domain_connectors(
+        self,
+        *,
+        operation_registry: Any | None = None,
+        connector_id: str = "builtin.offline-evidence",
+        version: str = "1.0.0",
+        approval_required: bool = True,
+        replace: bool = False,
+        receipt_sink: Callable[[Any], Any] | None = None,
+        receipt_store: Any | None = None,
+    ) -> tuple[Any, ...]:
+        """Install one exact-capability credentialless connector for every domain.
+
+        Domain-scoped manifests preserve the complete reviewed operation vocabulary within the
+        provider-manifest capability bound. This portfolio is the recommended registration for
+        :meth:`run_connector_workflow`; the single all-domain registration remains useful for
+        compact probes and broad routing tests.
+        """
+
+        if self.connector_registry is None:
+            self.connector_registry = AutonomousConnectorRegistry()
+        if self.connector_runtime is None:
+            self.connector_runtime = AutonomousConnectorRuntime(
+                self.connector_registry,
+                receipt_sink=receipt_sink,
+                receipt_store=receipt_store,
+            )
+        elif receipt_sink is not None or receipt_store is not None:
+            raise BrainRunError(
+                "receipt_sink and receipt_store must be supplied when creating the connector runtime"
+            )
+        try:
+            return register_builtin_autonomous_domain_connectors(
+                self.connector_registry,
+                operation_registry,
+                connector_id=connector_id,
+                version=version,
+                approval_required=approval_required,
+                replace=replace,
+            )
+        except (ArgumentError, BrainRunError):
+            raise
+        except Exception as error:
+            raise BrainRunError("built-in domain connector registration failed") from error
+
+    def run_connector_workflow(
+        self,
+        *,
+        blueprint: AutonomousTaskBlueprint,
+        checkpoint: Any | None = None,
+        run_id: str | None = None,
+        approved: bool = False,
+        retry_blocked: bool = False,
+        max_stage_calls: int | None = None,
+        request_for_stage: Callable[[Any], Mapping[str, Any]] | None = None,
+        rehydrate_payload: Callable[[Any], Any] | None = None,
+        operation_registry: Any | None = None,
+        selection_signals: Mapping[str, Mapping[str, Any]] | None = None,
+    ) -> Any:
+        """Run a blueprint's workflow DAG through reviewed connectors without provider credentials.
+
+        This is a separate execution mode from :meth:`run_workflow`: it preserves the same
+        workflow checkpoint/status model, but each stage is dispatched through the configured
+        connector registry. Provider invocation is never implicit, and replayed payloads require
+        caller-owned rehydration by digest.
+        """
+
+        from .autonomous_connector_workflow import run_autonomous_connector_workflow
+
+        if self.connector_runtime is None:
+            raise BrainRunError("connector runtime is not configured")
+        try:
+            return run_autonomous_connector_workflow(
+                self.connector_runtime,
+                blueprint=blueprint,
+                checkpoint=checkpoint,
+                run_id=run_id,
+                approved=approved,
+                retry_blocked=retry_blocked,
+                max_stage_calls=max_stage_calls,
+                request_for_stage=request_for_stage,
+                rehydrate_payload=rehydrate_payload,
+                operation_registry=operation_registry,
+                selection_signals=selection_signals,
+            )
+        except (ArgumentError, BrainRunError):
+            raise
+        except Exception as error:
+            raise BrainRunError("connector workflow execution failed") from error
 
     def connector_selection_plan(
         self,
