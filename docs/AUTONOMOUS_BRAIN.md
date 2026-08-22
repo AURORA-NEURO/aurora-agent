@@ -783,6 +783,31 @@ fields, and never performs network access. Production connector executors can cl
 lived browser session, repository workspace, data client, or provider handle, but those values
 remain transient and outside the mission checkpoint.
 
+For source-backed connectors, TypeScript now provides
+`createAutonomousApiSourceConnectorExecutor(client)`, matching the Python source bridge. The
+executor accepts a transient `{ plan, execution }` envelope, sends the typed source plan through
+the caller's `ApiClient`, takes the returned `plan_digest` as authoritative, and uses that exact
+digest for source execution. It supports either REST or MCP tool routing and refuses manifest
+kind/domain mismatches, missing plan digests, malformed parent digests, and unknown source
+outcomes. The `ApiClient` remains responsible for its configured transport and opaque credential
+session; the autonomous connector never accepts or persists a raw key:
+
+```typescript
+const executeSource = createAutonomousApiSourceConnectorExecutor(apiClient, {
+  useToolRoute: true,
+});
+const registration = new AutonomousConnectorRegistration(
+  sourceManifest,
+  executeSource,
+  true, // retain the normal explicit connector approval gate
+);
+```
+
+The returned source report is transient connector value. Durable connector receipts retain only
+the dispatch, request, manifest, source-plan, payload, parent, and failure digests. This closes
+the typed source-plan-to-execute handoff without claiming that retrieval, parsing, source
+interpretation, or domain truth has been independently validated.
+
 ### Bounded provider-neutral HTTP connector transport
 
 The connector registry remains provider-neutral, but applications that need a real external

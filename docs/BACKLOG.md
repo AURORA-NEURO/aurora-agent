@@ -278,9 +278,11 @@ closes typed multimodal invocation without claiming image understanding, file ac
 interpretation, or domain-truth validation; callers must resupply transient parts after restart.
 The connector layer now also has a typed API source-plan/source-execute bridge that binds the
 returned plan digest before retrieval and keeps connector scope separate from provider payloads.
-This makes the existing gateway usable from the autonomous runtime without turning it into a
-credential client or silently enabling discovery; concrete provider-specific adapters and external
-authentication/session resolution, source interpretation, and domain validation remain caller-owned.
+Both SDKs now expose that bridge (`createAutonomousApiSourceConnectorExecutor` on TypeScript and
+`create_autonomous_api_source_connector_executor` on Python). This makes the existing gateway
+usable from the autonomous runtime without turning it into a credential client or silently
+enabling discovery; concrete provider-specific adapters and external authentication/session
+resolution, source interpretation, and domain validation remain caller-owned.
 Connector dispatch now also accepts a caller-owned restart-safe receipt store. The bounded,
 fsynced connector JSONL journal verifies a hash chain, deduplicates exact identities, rejects
 conflicting outcomes, and returns a metadata-only replay barrier after restart; a new attempt

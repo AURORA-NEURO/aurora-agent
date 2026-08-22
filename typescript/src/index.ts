@@ -443,6 +443,7 @@ export {
   InMemoryAutonomousConnectorReceiptJournal,
   AutonomousConnectorReceiptJournalPersistenceCoordinator,
   AutonomousConnectorRuntime,
+  createAutonomousApiSourceConnectorExecutor,
 } from "./autonomous-connectors.js";
 export type {
   AutonomousConnectorSelectionStrategy,

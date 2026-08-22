@@ -1,6 +1,11 @@
 import { ArgumentError, isObject } from "./errors.js";
+import type { ApiClient } from "./client.js";
 import { canonicalJson, digestJsonSync } from "./tooling.js";
 import type {
+  DomainEvidenceSourceExecutionArgs,
+  DomainEvidenceSourceExecutionResult,
+  DomainEvidenceSourcePlanArgs,
+  DomainEvidenceSourcePlanResult,
   DomainEvidenceProviderConnectorKind,
   DomainEvidenceProviderConnectorManifest,
   JsonObject,
@@ -45,6 +50,78 @@ export type AutonomousConnectorExecutor = (
   manifest: DomainEvidenceProviderConnectorManifest,
   request: JsonObject,
 ) => unknown | Promise<unknown>;
+
+const SOURCE_CONNECTOR_STATUSES = ["observed", "partial", "refused", "error", "unknown"] as const;
+
+function sourceConnectorStructured<T extends JsonObject>(response: unknown, label: string): T {
+  if (!isObject(response) || response.ok !== true || !isObject(response.mcp) || !isObject(response.mcp.result) || !isObject(response.mcp.result.structuredContent)) throw new ArgumentError(`${label} returned no structured source report`);
+  return response.mcp.result.structuredContent as T;
+}
+
+function sourceConnectorManifest(value: unknown): DomainEvidenceProviderConnectorManifest {
+  if (!isObject(value)) throw new ArgumentError("autonomous API source connector manifest is malformed");
+  return normalizeManifest(value as unknown as DomainEvidenceProviderConnectorManifest);
+}
+
+/**
+ * Bridge a caller-configured ApiClient into the reviewed source connector runtime.
+ *
+ * The bridge performs source planning and source execution as two distinct calls. The execution
+ * request always uses the plan digest returned by the planning response; a caller cannot smuggle
+ * a different digest through the transient connector envelope. ApiClient owns transport, auth,
+ * and session resolution. This helper never accepts, discovers, logs, or persists credentials.
+ */
+export function createAutonomousApiSourceConnectorExecutor(
+  client: ApiClient,
+  options: { useToolRoute?: boolean } = {},
+): AutonomousConnectorExecutor {
+  if (!client || typeof client.domainEvidenceSourcePlan !== "function" || typeof client.domainEvidenceSourceExecute !== "function") throw new ArgumentError("autonomous API source connector requires a configured ApiClient");
+  if (!isObject(options)) throw new ArgumentError("autonomous API source connector options must be an object");
+  if (options.useToolRoute !== undefined && typeof options.useToolRoute !== "boolean") throw new ArgumentError("autonomous API source connector useToolRoute must be boolean");
+  const useToolRoute = options.useToolRoute === true;
+  if (useToolRoute && (typeof client.domainEvidenceSourcePlanTool !== "function" || typeof client.domainEvidenceSourceExecuteTool !== "function")) throw new ArgumentError("autonomous API source connector tool route is unavailable on the ApiClient");
+
+  return async (rawManifest, rawRequest): Promise<AutonomousConnectorObservation> => {
+    const manifest = sourceConnectorManifest(rawManifest);
+    if (!isObject(rawRequest)) throw new ArgumentError("autonomous API source connector request must be an object");
+    const planRaw = rawRequest.plan;
+    const executionRaw = rawRequest.execution ?? {};
+    if (!isObject(planRaw) || !isObject(executionRaw)) throw new ArgumentError("autonomous API source connector requires plan and execution objects");
+    const safePlan = safeJson("autonomous API source connector plan", planRaw, MAX_AUTONOMOUS_CONNECTOR_REQUEST_BYTES);
+    const safeExecution = safeJson("autonomous API source connector execution", executionRaw, MAX_AUTONOMOUS_CONNECTOR_REQUEST_BYTES);
+    if (!isObject(safePlan) || !isObject(safeExecution)) throw new ArgumentError("autonomous API source connector plan and execution must be objects");
+    const planRequest = safePlan as unknown as DomainEvidenceSourcePlanArgs;
+    const execution = safeExecution;
+    if (planRequest.connector_kind !== manifest.connector_kind) throw new ArgumentError("autonomous API source connector kind does not match its manifest");
+    if (!Array.isArray(planRequest.domains) || planRequest.domains.some((domain) => !manifest.domains.includes(domain))) throw new ArgumentError("autonomous API source connector plan exceeds manifest domain scope");
+
+    const planResponse = useToolRoute
+      ? sourceConnectorStructured<DomainEvidenceSourcePlanResult>(await client.domainEvidenceSourcePlanTool!(planRequest), "autonomous API source connector planning")
+      : await client.domainEvidenceSourcePlan(planRequest);
+    if (!isObject(planResponse) || planResponse.ok !== true) throw new ArgumentError("autonomous API source connector plan response was not successful");
+    if (typeof planResponse.plan_digest !== "string" || !/^[0-9a-f]{64}$/.test(planResponse.plan_digest)) throw new ArgumentError("autonomous API source connector plan response omitted its digest");
+
+    const sourceTool = execution.source_tool;
+    if (sourceTool !== undefined && sourceTool !== null && typeof sourceTool !== "string") throw new ArgumentError("autonomous API source connector execution source_tool must be a string or null");
+    const claimPosture = execution.claim_posture;
+    if (claimPosture !== undefined && !isObject(claimPosture)) throw new ArgumentError("autonomous API source connector execution claim_posture must be an object");
+    const parentDigestsRaw = execution.parent_digests ?? planRequest.parent_digests ?? [];
+    if (!Array.isArray(parentDigestsRaw) || parentDigestsRaw.length > 128 || parentDigestsRaw.some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest))) throw new ArgumentError("autonomous API source connector parent_digests must contain at most 128 lowercase SHA-256 digests");
+    const parentDigests = parentDigestsRaw as string[];
+    const executionRequest: DomainEvidenceSourceExecutionArgs = {
+      source_plan_digest: planResponse.plan_digest,
+      source_tool: sourceTool === undefined ? planRequest.source_tool ?? null : sourceTool,
+      request: execution.request,
+      claim_posture: claimPosture as JsonObject | undefined,
+      parent_digests: [...parentDigests],
+    };
+    const executionResponse = useToolRoute
+      ? sourceConnectorStructured<DomainEvidenceSourceExecutionResult>(await client.domainEvidenceSourceExecuteTool!(executionRequest), "autonomous API source connector execution")
+      : await client.domainEvidenceSourceExecute(executionRequest);
+    if (!isObject(executionResponse) || executionResponse.ok !== true || typeof executionResponse.outcome !== "string" || !SOURCE_CONNECTOR_STATUSES.includes(executionResponse.outcome as typeof SOURCE_CONNECTOR_STATUSES[number])) throw new ArgumentError("autonomous API source connector execution response is malformed");
+    return new AutonomousConnectorObservation(executionResponse, executionResponse.outcome as typeof SOURCE_CONNECTOR_STATUSES[number]);
+  };
+}
 
 export interface AutonomousConnectorSelectionSignal {
   connector_id: string;
