@@ -960,6 +960,23 @@ export {
   autonomousWorkflowEvaluatorForDomain,
 } from "./autonomous-learning.js";
 export {
+  AUTONOMOUS_VALUE_EVALUATOR_MAX_LIMITATIONS,
+  AUTONOMOUS_VALUE_EVALUATOR_MAX_REFERENCES,
+  AUTONOMOUS_VALUE_EVALUATOR_MAX_SIGNALS,
+  AUTONOMOUS_VALUE_EVALUATOR_MAX_TEXT_BYTES,
+  AUTONOMOUS_VALUE_EVALUATOR_SCHEMA,
+  AutonomousCompositeValueEvaluator,
+  AutonomousValueEvaluatorAdapter,
+  AutonomousValueEvaluatorRegistry,
+  builtinAutonomousValueEvaluatorProfiles,
+} from "./autonomous-domain-evaluators.js";
+export type {
+  AutonomousValueEvaluation,
+  AutonomousValueEvaluationEvidence,
+  AutonomousValueEvaluationInput,
+  AutonomousValueEvaluatorProfile,
+} from "./autonomous-domain-evaluators.js";
+export {
   AUTONOMOUS_SEMANTIC_ROUTE_SCHEMA,
   semanticRouteAutonomousTask,
 } from "./autonomous-routing.js";

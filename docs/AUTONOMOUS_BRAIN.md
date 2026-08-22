@@ -2947,6 +2947,50 @@ The adapter is a `BrainOutcomeEvaluator`, so it plugs directly into
 `run_adaptive_mission_learning_cycle(...)` and retains the same secret-safe replay and explicit
 bandit-update boundary across all five domains.
 
+The TypeScript SDK exposes the same contract through
+`AutonomousValueEvaluatorRegistry.withBuiltinProfiles()`. Its twelve profiles correspond exactly
+to the built-in autonomous domains (`coding`, `browser`, `data`, `science`, `biomedical`,
+`neuroscience`, `operations`, `enterprise`, `multi_agent`, `multimodal`, `cross_domain`, and
+`evaluation`). The registry is useful when a workflow, connector, or cross-domain cycle needs a
+stable value-only reward packet without coupling the caller to the generic stage-signal evaluator.
+It accepts only bounded normalized signals and SHA-256 references; prompt text, provider output,
+credentials, raw tool payloads, and arbitrary fields are rejected before scoring.
+
+```typescript
+import {
+  AutonomousCompositeValueEvaluator,
+  AutonomousValueEvaluatorRegistry,
+} from "@aurora-neuro/prism-sdk";
+
+const registry = AutonomousValueEvaluatorRegistry.withBuiltinProfiles();
+const evaluator = registry.resolve("science");
+const evidence = {
+  domain: "science",
+  capability: "reproducible_analysis",
+  risk_class: "high_review",
+  signals: {
+    evidence_traceable: 1,
+    uncertainty_reported: 1,
+    claim_scope_respected: 1,
+    reproducible: 1,
+  },
+  references: ["a".repeat(64)],
+};
+const assessment = evaluator.assess({ evidence });
+const reward = evaluator.toRewardInput({ evidence });
+
+// Cross-domain jobs keep one outer identity while routing each child to its own rubric.
+const composite = AutonomousCompositeValueEvaluator.fromRegistry(registry);
+const routed = composite.assess({ context: { domain: "science" }, evidence });
+```
+
+`assess()` fails closed when evidence is absent, incomplete, below threshold, unmapped, or
+outside the adapter's accepted domain set. `toRewardInput()` returns the evaluator identity,
+bounded reward, pass/fail state, failure class, and digests needed by the online learner; it never
+returns the evidence values as part of the settlement packet. These adapters are scoring policy
+scaffolds, not truth or clinical authorities. Applications remain responsible for producing the
+signals, validating sources, and deciding whether a reward is eligible for learning credit.
+
 ## Cross-process control plane and offline adaptation
 
 `BrainControlPlane` exposes the durable job journal as a bounded cursor stream for worker
