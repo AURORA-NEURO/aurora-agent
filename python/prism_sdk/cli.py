@@ -31,6 +31,7 @@ import os
 import shlex
 import sys
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence, TextIO
 
@@ -59,6 +60,9 @@ from .llm_runtime import (
     ProviderHealthLedger,
     ProviderModelDescriptor,
     ProviderOnboarding,
+    ProviderTool,
+    ProviderToolCall,
+    ProviderToolResult,
     anthropic_provider,
     openai_compatible_provider,
     openai_provider,
@@ -77,6 +81,8 @@ _LOCAL_PROVIDER_NAMES = frozenset({"local", "in_memory"})
 _MAX_WORKFLOW_CHECKPOINT_STORE_BYTES = 1_000_000
 _MAX_BATCH_REQUEST_FILE_BYTES = 4_000_000
 _MAX_BATCH_RESULT_MANIFEST_BYTES = 1_000_000
+_MAX_LOCAL_RESPONSE_SEQUENCE = 32
+_MAX_MCP_PROVIDER_TOOLS = 128
 
 
 class _CliArgumentError(ValueError):
@@ -172,6 +178,11 @@ def _runtime_with_provider(args: argparse.Namespace) -> tuple[LLMRuntime, Provid
     if args.provider in _LOCAL_PROVIDER_NAMES:
         local_response = args.local_response
         local_response_json = args.local_response_json
+        local_response_sequence_json = args.local_response_sequence_json
+        if local_response_json is not None and local_response_sequence_json is not None:
+            raise ValueError(
+                "--local-response-json and --local-response-sequence-json cannot be combined"
+            )
         if local_response_json is not None:
             try:
                 parsed_response = json.loads(local_response_json)
@@ -181,8 +192,47 @@ def _runtime_with_provider(args: argparse.Namespace) -> tuple[LLMRuntime, Provid
                 raise ValueError("--local-response-json must be a JSON object")
         else:
             parsed_response = None
+        if local_response_sequence_json is not None:
+            try:
+                parsed_sequence = json.loads(local_response_sequence_json)
+            except (TypeError, json.JSONDecodeError) as error:
+                raise ValueError("--local-response-sequence-json must be valid JSON") from error
+            if (
+                not isinstance(parsed_sequence, list)
+                or not 1 <= len(parsed_sequence) <= _MAX_LOCAL_RESPONSE_SEQUENCE
+                or any(not isinstance(item, Mapping) for item in parsed_sequence)
+            ):
+                raise ValueError(
+                    "--local-response-sequence-json must be an array of 1 to "
+                    f"{_MAX_LOCAL_RESPONSE_SEQUENCE} JSON objects"
+                )
+            response_sequence = tuple(dict(item) for item in parsed_sequence)
+        else:
+            response_sequence = ()
+        sequence_lock = threading.Lock()
+        sequence_index = 0
 
         def local_handler(_request: Any) -> Mapping[str, Any]:
+            nonlocal sequence_index
+            if response_sequence:
+                with sequence_lock:
+                    if sequence_index >= len(response_sequence):
+                        raise ValueError("local provider response sequence is exhausted")
+                    sequence_item = response_sequence[sequence_index]
+                    sequence_index += 1
+                sequence_text = sequence_item.get("text", sequence_item.get("output_text"))
+                if not isinstance(sequence_text, str):
+                    sequence_text = json.dumps(
+                        sequence_item,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                return {
+                    "text": sequence_text,
+                    "structured": dict(sequence_item),
+                    "tool_calls": list(sequence_item.get("tool_calls", ())),
+                    "request_id": f"local-cli-sequence-{sequence_index}",
+                }
             if parsed_response is not None:
                 return {
                     "text": json.dumps(parsed_response, ensure_ascii=False, separators=(",", ":")),
@@ -210,6 +260,64 @@ def _runtime_with_provider(args: argparse.Namespace) -> tuple[LLMRuntime, Provid
     else:
         onboarding.register_provider(_provider_config(args))
     return runtime, onboarding
+
+
+def _mcp_provider_tools(client: Client) -> tuple[ProviderTool, ...]:
+    """Convert the live MCP catalogue into a bounded model-visible tool surface."""
+
+    schemas = client.list_tools()
+    if len(schemas) > _MAX_MCP_PROVIDER_TOOLS:
+        raise ValueError(
+            "MCP workspace advertises more than "
+            f"{_MAX_MCP_PROVIDER_TOOLS} model-visible tools"
+        )
+    tools: list[ProviderTool] = []
+    seen: set[str] = set()
+    for schema in schemas:
+        tool = ProviderTool.from_mcp_schema(schema)
+        if tool.name in seen:
+            raise ValueError("MCP workspace advertises duplicate tool names")
+        seen.add(tool.name)
+        tools.append(tool)
+    return tuple(tools)
+
+
+def _cli_tool_authorizer(
+    client: Client,
+    *,
+    approve_mission_dispatch: bool,
+) -> Callable[[tuple[ProviderToolCall, ...]], Sequence[ProviderToolResult]]:
+    """Build the CLI's explicit approval boundary for provider-requested MCP calls."""
+
+    def authorize(calls: tuple[ProviderToolCall, ...]) -> Sequence[ProviderToolResult]:
+        if not approve_mission_dispatch:
+            return tuple(
+                ProviderToolResult(
+                    call.call_id,
+                    {"ok": False, "status": "approval_required", "authorization": "operator"},
+                    approved=False,
+                    is_error=True,
+                )
+                for call in calls
+            )
+        results: list[ProviderToolResult] = []
+        for call in calls:
+            try:
+                value = client.call_tool(call.name, call.arguments).require_ok()
+            except Exception:
+                return tuple(
+                    ProviderToolResult(
+                        pending.call_id,
+                        {"ok": False, "status": "tool_execution_failed"},
+                        approved=False,
+                        is_error=True,
+                    )
+                    for pending in calls
+                )
+            results.append(ProviderToolResult(call.call_id, value, approved=True))
+        return tuple(results)
+
+    return authorize
 
 
 def _candidate_args(
@@ -1394,6 +1502,20 @@ def _batch_run(
             if execution_journal is not None:
                 agent_kwargs["execution_journal"] = execution_journal
             agent = AutonomousAgent(_McpWorkspace(client), runtime, **agent_kwargs)
+            needs_provider_tools = args.execution_mode in {"tool_loop", "mission"} or any(
+                isinstance(request.get("options"), Mapping)
+                and request["options"].get("execution_mode") in {"tool_loop", "mission"}
+                for request in requests
+            )
+            provider_tools = _mcp_provider_tools(client) if needs_provider_tools else ()
+            tool_authorizer = (
+                _cli_tool_authorizer(
+                    client,
+                    approve_mission_dispatch=args.approve_mission_dispatch,
+                )
+                if provider_tools
+                else None
+            )
             controller = AutonomousBrainBatchJobController(agent, checkpoint_store)
             controller.restore()
             rehydrate_result = None
@@ -1427,6 +1549,11 @@ def _batch_run(
                         options["workflow_max_stage_calls"] = args.workflow_max_stage_calls
                     if args.workflow_retry_blocked:
                         options["workflow_retry_blocked"] = True
+                if provider_tools and options.get("execution_mode", "provider") in {"tool_loop", "mission"}:
+                    options["provider_tools"] = provider_tools
+                    options["tool_loop_options"] = {
+                        "authorize_and_execute": tool_authorizer,
+                    }
                 return options
 
             run_payload = controller.run(
@@ -1666,6 +1793,11 @@ def _run(
             if execution_journal is not None:
                 agent_kwargs["execution_journal"] = execution_journal
             agent = AutonomousAgent(_McpWorkspace(client), runtime, **agent_kwargs)
+            provider_tools = (
+                _mcp_provider_tools(client)
+                if args.execution_mode in {"tool_loop", "mission"}
+                else ()
+            )
             common = {
                 "task": args.task,
                 "credentials": session,
@@ -1682,6 +1814,14 @@ def _run(
                 "execution_id": args.execution_id,
                 "resume_execution": args.resume_execution,
             }
+            if provider_tools:
+                common["provider_tools"] = provider_tools
+                common["tool_loop_options"] = {
+                    "authorize_and_execute": _cli_tool_authorizer(
+                        client,
+                        approve_mission_dispatch=args.approve_mission_dispatch,
+                    ),
+                }
             if args.automatic:
                 result = agent.run_auto(
                     **common,
@@ -1834,8 +1974,16 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="optional JSON object returned by the explicit local provider",
     )
+    provider_parent.add_argument(
+        "--local-response-sequence-json",
+        default=None,
+        help=(
+            "optional bounded JSON-object response sequence for credentialless tool-loop "
+            "verification"
+        ),
+    )
 
-    status = subparsers.add_parser("provider-status", parents=[provider_parent], help="show redacted provider readiness")
+    subparsers.add_parser("provider-status", parents=[provider_parent], help="show redacted provider readiness")
 
     onboarding = subparsers.add_parser("onboard", parents=[provider_parent], help="collect one short-lived key and show redacted status")
     _add_credential_arguments(onboarding)

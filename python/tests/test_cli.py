@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import io
 import json
+from pathlib import Path
+import sys
 from unittest.mock import patch
 
 from prism_sdk import (
@@ -1061,6 +1063,100 @@ def test_run_requires_explicit_or_automatic_routing_mode() -> None:
     assert code == 2
     assert payload is None
     assert "command failed" in errors
+
+
+def test_keyless_subprocess_tool_loop_discovers_and_executes_a_live_mcp_tool() -> None:
+    fixture = Path(__file__).parent / "autonomous_brain_mcp_server.py"
+    command = f'"{sys.executable.replace(chr(92), "/")}" -u "{fixture.as_posix()}"'
+    response_sequence = json.dumps(
+        [
+            {
+                "tool_calls": [
+                    {
+                        "id": "call-workspace-read",
+                        "name": "workspace_read",
+                        "arguments": {"path": "README.md"},
+                    }
+                ]
+            },
+            {"output_text": "workspace scan complete"},
+        ],
+        separators=(",", ":"),
+    )
+    code, payload, errors = _invoke(
+        "run",
+        "--mcp-command", command,
+        "--task", "inspect the workspace evidence",
+        "--domain", "coding",
+        "--provider", "local",
+        "--model", "local-model",
+        "--model-capability", "reasoning",
+        "--model-capability", "code",
+        "--local-response-sequence-json", response_sequence,
+        "--execution-mode", "tool_loop",
+        "--approve-provider-call",
+        "--approve-mission-dispatch",
+    )
+    assert code == 0
+    assert errors == ""
+    assert payload["result"]["status"] == "completed_provider_tool_loop"
+    loop = payload["result"]["provider_loop"]
+    assert loop["tool_calls"] == 1
+    assert loop["final_response"]["text"] == "workspace scan complete"
+    assert payload["provider_status"]["attempts"] == 2
+    assert payload["credential_session"]["providers"] == []
+    assert payload["secret_material"] == "never_returned"
+
+
+def test_keyless_subprocess_batch_routes_every_builtin_domain(tmp_path) -> None:
+    fixture = Path(__file__).parent / "autonomous_brain_mcp_server.py"
+    command = f'"{sys.executable.replace(chr(92), "/")}" -u "{fixture.as_posix()}"'
+    requests_path = tmp_path / "all-domain-requests.json"
+    requests_path.write_text(
+        json.dumps(
+            {
+                "schema": "aurora-autonomous-batch-requests/0.1",
+                "mode": "domain",
+                "job_id": "keyless-all-domain-001",
+                "requests": [
+                    {"task": f"produce bounded {domain} evidence", "domain": domain}
+                    for domain in AUTONOMOUS_DOMAINS
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    response_sequence = json.dumps(
+        [{"output_text": f"completed {domain}"} for domain in AUTONOMOUS_DOMAINS],
+        separators=(",", ":"),
+    )
+    capabilities = (
+        "reasoning", "code", "web", "data", "science", "biomedical", "operations",
+        "enterprise", "coordination", "multimodal", "evaluation",
+    )
+    args = [
+        "batch-run",
+        "--mcp-command", command,
+        "--requests-file", str(requests_path),
+        "--job-id", "keyless-all-domain-001",
+        "--provider", "local",
+        "--model", "local-model",
+        "--local-response-sequence-json", response_sequence,
+        "--max-parallelism", "1",
+        "--approve-provider-call",
+    ]
+    for capability in capabilities:
+        args.extend(("--model-capability", capability))
+    code, payload, errors = _invoke(*args)
+    assert code == 0
+    assert errors == ""
+    assert payload["batch"]["status"] == "completed"
+    assert payload["batch"]["completed_count"] == len(AUTONOMOUS_DOMAINS)
+    assert payload["batch"]["failed_count"] == 0
+    assert [item["status"] for item in payload["batch"]["items"]] == [
+        "succeeded"
+    ] * len(AUTONOMOUS_DOMAINS)
+    assert payload["credential_session"]["providers"] == []
 
 
 def test_run_automatic_mode_forwards_routing_and_planning_controls_without_provider_payloads() -> None:

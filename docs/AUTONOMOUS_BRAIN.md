@@ -496,6 +496,41 @@ operator can exercise discovery, catalogue selection, health observation, and du
 paths offline. It is a deterministic transport fixture, not an implicit substitute for a real
 provider and not a claim that the fixture has domain expertise.
 
+For native tool-loop verification, set `--execution-mode tool_loop`. The CLI snapshots the live
+MCP `tools/list` catalogue, converts each bounded schema into the provider-neutral tool contract,
+and gives the model only that exact advertised surface. Model-requested calls are not executed by
+the runtime itself: the CLI's approval callback requires `--approve-mission-dispatch`, calls the
+named MCP tool through the already-running workspace process, and returns a caller-approved
+continuation result. Without that flag, the model can propose a tool call but the run ends at
+`tool_authorization_required` without invoking the workspace tool.
+
+The local provider also supports a bounded response sequence for offline integration tests. The
+array contains at most 32 JSON objects; each call consumes one object in order, and `text` or
+`output_text` can provide the response text while `tool_calls` provides provider-neutral tool
+intents. This makes model selection, prompt assembly, provider invocation, MCP discovery, tool
+authorization, continuation, and process cleanup testable without a network request or a key:
+
+```bash
+python -m prism_sdk run \
+  --mcp-command "python path/to/mcp_server.py" \
+  --provider local \
+  --model local-model \
+  --model-capability reasoning \
+  --model-capability code \
+  --domain coding \
+  --task "inspect the workspace evidence" \
+  --execution-mode tool_loop \
+  --local-response-sequence-json '[{"tool_calls":[{"id":"call-1","name":"workspace_read","arguments":{"path":"README.md"}}]},{"output_text":"workspace scan complete"}]' \
+  --approve-provider-call \
+  --approve-mission-dispatch
+```
+
+The sequence is intentionally explicit and fail-closed: combining it with
+`--local-response-json` is rejected, malformed or empty arrays are rejected, and exhaustion is a
+provider failure rather than silent response reuse. The sequence is a development fixture, not a
+learning signal; evaluator-owned evidence is still required before any bandit or online-learning
+update.
+
 The TypeScript SDK exposes the same boundary with `registerInMemoryProvider`. The callback sees
 the provider-neutral request, while the runtime owns bounded projection, health, retries, stream
 validation, and tool-loop continuation:
