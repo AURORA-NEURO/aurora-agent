@@ -9,14 +9,18 @@ import {
   AutonomousWorkflowPortfolioEvidenceWorkWorker,
   InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueue,
   InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueuePersistence,
+  JsonAutonomousWorkflowPortfolioEvidenceWorkQueuePersistence,
   InMemoryAutonomousEvidenceRuntimeJournal,
   InMemoryAutonomousWorkflowPortfolioEvidenceCheckpointStore,
   JsonAutonomousWorkflowPortfolioEvidenceCheckpointStore,
   LLMRuntime,
+  TransactionalJsonAutonomousWorkflowPortfolioEvidenceWorkQueuePersistence,
   TransactionalJsonAutonomousWorkflowPortfolioEvidenceCheckpointStore,
+  WebStorageAutonomousWorkflowPortfolioEvidenceWorkQueueSnapshotTextStore,
   admitAutonomousWorkflowPortfolioEvidenceWorkItems,
   digestJson,
   validateAutonomousWorkflowPortfolioEvidenceCheckpoint,
+  validateAutonomousWorkflowPortfolioEvidenceWorkQueueSnapshot,
 } from "../dist/index.js";
 
 const model = {
@@ -447,7 +451,13 @@ test("portfolio evidence work worker retries bounded failures, reconciles expire
   });
   const leased = expiredQueue.claim("expiry-job:coding", "worker-a", 10, 5_000);
   assert.ok(leased);
-  assert.equal(expiredQueue.claim(leased.work_id, "worker-b", 10, 5_011), null);
+  let expiredExecutorCalls = 0;
+  const expiredRun = await new AutonomousWorkflowPortfolioEvidenceWorkWorker(expiredQueue, () => {
+    expiredExecutorCalls += 1;
+    return { status: "completed", result_digest: "0".repeat(64) };
+  }).run({ workerId: "worker-b", now: 5_011, limit: 1 });
+  assert.equal(expiredRun.reconciled, 1, "a worker reaper reconciles expired leases without stealing them");
+  assert.equal(expiredExecutorCalls, 0);
   assert.equal(expiredQueue.get(leased.work_id)?.status, "reconciliation_required");
   assert.throws(() => expiredQueue.complete(leased.work_id, "worker-a", { status: "completed", resultDigest: "4".repeat(64) }, 5_012), /fenced/);
 
@@ -462,4 +472,55 @@ test("portfolio evidence work worker retries bounded failures, reconciles expire
   await restored.flush();
   await assert.rejects(() => coordinator.flush(), /compare-and-swap conflict/, "a stale coordinator cannot overwrite a newer queue snapshot");
   assert.equal(snapshot.schema, "bioprism-typescript-autonomous-workflow-portfolio-evidence-work-queue/0.1");
+});
+
+test("portfolio evidence work queue has bounded JSON, transactional, and browser-storage persistence", async () => {
+  const queue = new InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueue();
+  const digest = "a".repeat(64);
+  queue.admit({
+    workId: "json-job:item",
+    jobId: "json-job",
+    itemId: "item",
+    domain: "coding",
+    waveIndex: 0,
+    providerStatus: "succeeded",
+    portfolioPlanDigest: digest,
+    providerExecutionDigest: "b".repeat(64),
+    evidencePlanDigest: "c".repeat(64),
+    requestDigest: "d".repeat(64),
+    checkpointDigest: "e".repeat(64),
+    now: 7_000,
+  });
+  const snapshot = queue.snapshot();
+  let encoded = null;
+  const textStore = {
+    read: () => encoded,
+    write: (value) => { encoded = value; },
+    writeIfUnchanged: (expected, value) => {
+      const current = encoded === null ? null : JSON.parse(encoded).snapshot_digest;
+      if (current !== expected) return false;
+      encoded = value;
+      return true;
+    },
+  };
+  const json = new JsonAutonomousWorkflowPortfolioEvidenceWorkQueuePersistence(textStore);
+  await json.write(snapshot);
+  assert.equal((await json.read()).snapshot_digest, snapshot.snapshot_digest);
+  assert.deepEqual(validateAutonomousWorkflowPortfolioEvidenceWorkQueueSnapshot(JSON.parse(encoded)).items.map((item) => item.work_id), ["json-job:item"]);
+
+  const transactional = new TransactionalJsonAutonomousWorkflowPortfolioEvidenceWorkQueuePersistence(textStore);
+  assert.equal(await transactional.writeIfUnchanged("0".repeat(64), snapshot), false);
+  assert.equal(await transactional.writeIfUnchanged(snapshot.snapshot_digest, snapshot), true);
+  const malformed = new JsonAutonomousWorkflowPortfolioEvidenceWorkQueuePersistence({ read: () => "{", write: () => {} });
+  await assert.rejects(() => malformed.read(), /invalid JSON/);
+
+  const values = new Map();
+  const storage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => { values.set(key, value); },
+  };
+  const browserStore = new WebStorageAutonomousWorkflowPortfolioEvidenceWorkQueueSnapshotTextStore(storage, "queue-key");
+  browserStore.write(encoded);
+  assert.equal(browserStore.read(), encoded);
+  assert.throws(() => validateAutonomousWorkflowPortfolioEvidenceWorkQueueSnapshot({ ...snapshot, snapshot_digest: "f".repeat(64) }), /snapshot digest is invalid/);
 });

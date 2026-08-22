@@ -54,6 +54,9 @@ lease-fenced, only direct predecessor-complete items are runnable, and provider 
 leases, retries, evaluator handoffs, dependency failures, cancellation, and reconciliation remain
 explicit. A metadata-only worker and CAS-fenced snapshot coordinator are included. The caller still
 owns the actual item executor, source adapters, and multi-host transaction backend.
+The queue now also exposes bounded JSON and transactional text-store adapters, browser storage
+support, public snapshot validation, and a worker reaper that converts abandoned leases into
+explicit reconciliation rows before new claims are made.
 
 The checkpoint seam now includes an optional atomic compare-and-swap contract plus bounded JSON
 and transactional-JSON adapters. The controller serializes local operations, fences every flush

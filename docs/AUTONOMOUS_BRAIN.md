@@ -1903,6 +1903,11 @@ reconciliation remain separate states. `AutonomousWorkflowPortfolioEvidenceWorkW
 caller-owned item executor and retains only result/error metadata; it never receives task text,
 source values, credentials, or provider payloads. `AutonomousWorkflowPortfolioEvidenceWorkQueuePersistenceCoordinator`
 adds the same serialized flush and optional CAS fence to the queue snapshot.
+For browser, Node, and embedded deployments, `JsonAutonomousWorkflowPortfolioEvidenceWorkQueuePersistence`
+validates bounded serialized snapshots; `TransactionalJsonAutonomousWorkflowPortfolioEvidenceWorkQueuePersistence`
+requires a digest-checked text-store compare-and-swap. The worker reaper calls `reclaimExpired()`
+before claiming new work, so an abandoned lease is quarantined for explicit rehydration instead of
+remaining invisible until a particular item is retried.
 
 Approval is fail-closed: with `approveProviderCall` absent or false, the first ready item returns
 `approval_required`, descendants become `blocked`, and no provider call starts. Hard failures,

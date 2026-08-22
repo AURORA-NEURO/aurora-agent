@@ -83,6 +83,17 @@ export interface AutonomousWorkflowPortfolioEvidenceWorkQueuePersistence {
   writeIfUnchanged?(expectedSnapshotDigest: string | null, snapshot: AutonomousWorkflowPortfolioEvidenceWorkQueueSnapshot): Promise<boolean> | boolean;
 }
 
+/** Minimal text store used by the portable JSON queue persistence adapters. */
+export interface AutonomousWorkflowPortfolioEvidenceWorkQueueSnapshotTextStore {
+  read(): Promise<string | null> | string | null;
+  write(value: string): Promise<void> | void;
+}
+
+/** Text store with an atomic digest fence for multi-worker queue snapshots. */
+export interface AutonomousWorkflowPortfolioEvidenceWorkQueueTransactionalSnapshotTextStore extends AutonomousWorkflowPortfolioEvidenceWorkQueueSnapshotTextStore {
+  writeIfUnchanged(expectedSnapshotDigest: string | null, value: string): Promise<boolean> | boolean;
+}
+
 export interface AutonomousWorkflowPortfolioEvidenceWorkExecution {
   status: "completed" | "awaiting_evaluation" | "failed" | "reconciliation_required";
   result_digest: string | null;
@@ -217,7 +228,7 @@ function validateItem(raw: unknown): AutonomousWorkflowPortfolioEvidenceWorkItem
   return clone(normalized);
 }
 
-function validateSnapshot(raw: unknown, maxItems = MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_ITEMS): AutonomousWorkflowPortfolioEvidenceWorkQueueSnapshot {
+export function validateAutonomousWorkflowPortfolioEvidenceWorkQueueSnapshot(raw: unknown, maxItems = MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_ITEMS): AutonomousWorkflowPortfolioEvidenceWorkQueueSnapshot {
   if (!isObject(raw) || raw.schema !== AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_QUEUE_SCHEMA || !Array.isArray(raw.items)) throw new ArgumentError("portfolio evidence work queue snapshot is malformed");
   const snapshot = raw as unknown as AutonomousWorkflowPortfolioEvidenceWorkQueueSnapshot;
   if (snapshot.retention !== RETENTION || snapshot.secret_material !== SECRET_MATERIAL) throw new ArgumentError("portfolio evidence work queue snapshot retention contract is invalid");
@@ -227,6 +238,90 @@ function validateSnapshot(raw: unknown, maxItems = MAX_AUTONOMOUS_WORKFLOW_PORTF
   const items = snapshot.items.map(validateItem);
   if (new Set(items.map((item) => item.work_id)).size !== items.length) throw new ArgumentError("portfolio evidence work queue snapshot contains duplicate work ids");
   return clone({ ...snapshot, items });
+}
+
+function queueSnapshotBytes(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
+}
+
+/** JSON persistence for browser, Node, or embedded text stores. */
+export class JsonAutonomousWorkflowPortfolioEvidenceWorkQueuePersistence implements AutonomousWorkflowPortfolioEvidenceWorkQueuePersistence {
+  protected readonly store: AutonomousWorkflowPortfolioEvidenceWorkQueueSnapshotTextStore;
+
+  constructor(
+    store: AutonomousWorkflowPortfolioEvidenceWorkQueueSnapshotTextStore,
+    readonly maxItems = MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_ITEMS,
+  ) {
+    if (!store || typeof store.read !== "function" || typeof store.write !== "function") throw new ArgumentError("portfolio evidence work JSON persistence requires a text store");
+    boundedInteger("portfolio evidence work JSON persistence maxItems", maxItems, 1, MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_ITEMS);
+    this.store = store;
+  }
+
+  async read(): Promise<AutonomousWorkflowPortfolioEvidenceWorkQueueSnapshot | null> {
+    const encoded = await this.store.read();
+    if (encoded === null) return null;
+    if (typeof encoded !== "string" || queueSnapshotBytes(encoded) > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_SNAPSHOT_BYTES) throw new ArgumentError("portfolio evidence work JSON persistence text exceeds its bound");
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(encoded);
+    } catch {
+      throw new ArgumentError("portfolio evidence work JSON persistence text is invalid JSON");
+    }
+    return validateAutonomousWorkflowPortfolioEvidenceWorkQueueSnapshot(parsed, this.maxItems);
+  }
+
+  async write(snapshot: AutonomousWorkflowPortfolioEvidenceWorkQueueSnapshot): Promise<void> {
+    await this.store.write(this.encode(snapshot));
+  }
+
+  protected encode(snapshot: AutonomousWorkflowPortfolioEvidenceWorkQueueSnapshot): string {
+    const validated = validateAutonomousWorkflowPortfolioEvidenceWorkQueueSnapshot(snapshot, this.maxItems);
+    const encoded = canonicalJson(validated);
+    if (queueSnapshotBytes(encoded) > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_SNAPSHOT_BYTES) throw new ArgumentError("portfolio evidence work JSON persistence snapshot exceeds its bound");
+    return encoded;
+  }
+}
+
+/** JSON queue persistence variant that requires an atomic compare-and-swap text store. */
+export class TransactionalJsonAutonomousWorkflowPortfolioEvidenceWorkQueuePersistence extends JsonAutonomousWorkflowPortfolioEvidenceWorkQueuePersistence {
+  private readonly transactionalStore: AutonomousWorkflowPortfolioEvidenceWorkQueueTransactionalSnapshotTextStore;
+
+  constructor(
+    store: AutonomousWorkflowPortfolioEvidenceWorkQueueTransactionalSnapshotTextStore,
+    maxItems = MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_ITEMS,
+  ) {
+    super(store, maxItems);
+    if (typeof store.writeIfUnchanged !== "function") throw new ArgumentError("transactional portfolio evidence work JSON persistence requires writeIfUnchanged");
+    this.transactionalStore = store;
+  }
+
+  async writeIfUnchanged(expectedSnapshotDigest: string | null, snapshot: AutonomousWorkflowPortfolioEvidenceWorkQueueSnapshot): Promise<boolean> {
+    const committed = await this.transactionalStore.writeIfUnchanged(expectedSnapshotDigest, this.encode(snapshot));
+    if (typeof committed !== "boolean") throw new ArgumentError("transactional portfolio evidence work JSON persistence returned a non-boolean commit result");
+    return committed;
+  }
+}
+
+/** Browser-compatible single-writer text store for localStorage/sessionStorage-like objects. */
+export class WebStorageAutonomousWorkflowPortfolioEvidenceWorkQueueSnapshotTextStore implements AutonomousWorkflowPortfolioEvidenceWorkQueueSnapshotTextStore {
+  readonly storage: Pick<Storage, "getItem" | "setItem">;
+  readonly key: string;
+
+  constructor(storage: Pick<Storage, "getItem" | "setItem">, key = "aurora.autonomous.portfolio.evidence.work") {
+    if (!storage || typeof storage.getItem !== "function" || typeof storage.setItem !== "function") throw new ArgumentError("portfolio evidence work web storage adapter requires getItem and setItem");
+    if (typeof key !== "string" || !key.trim() || key.length > 256 || key.includes("\u0000")) throw new ArgumentError("portfolio evidence work web storage key is outside its bounds");
+    this.storage = storage;
+    this.key = key;
+  }
+
+  read(): string | null {
+    return this.storage.getItem(this.key);
+  }
+
+  write(value: string): void {
+    if (typeof value !== "string" || queueSnapshotBytes(value) > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_SNAPSHOT_BYTES) throw new ArgumentError("portfolio evidence work web storage value exceeds its bound");
+    this.storage.setItem(this.key, value);
+  }
 }
 
 function nowMs(value: number | undefined): number {
@@ -330,6 +425,23 @@ export class InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueue {
       .sort((left, right) => left.wave_index - right.wave_index || left.available_at - right.available_at || left.created_at - right.created_at || left.work_id.localeCompare(right.work_id))
       .slice(0, boundedLimit)
       .map(clone);
+  }
+
+  /** Reconcile expired leases without requiring a replacement worker to claim each id first. */
+  reclaimExpired(now = Date.now(), limit = MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_ITEMS): AutonomousWorkflowPortfolioEvidenceWorkItem[] {
+    const time = nowMs(now);
+    const boundedLimit = boundedInteger("portfolio evidence work reclaim limit", limit, 1, Math.min(MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_ITEMS, this.maxItems));
+    const expired = [...this.items.values()]
+      .filter((item) => item.status === "leased" && item.lease_until !== null && item.lease_until <= time)
+      .sort((left, right) => left.lease_until! - right.lease_until! || left.work_id.localeCompare(right.work_id))
+      .slice(0, boundedLimit);
+    const reconciled: AutonomousWorkflowPortfolioEvidenceWorkItem[] = [];
+    for (const item of expired) {
+      const next = refresh(item, { status: "reconciliation_required", lease_owner: null, lease_until: null, failure_class: "lease_expired", last_error_class: "lease_expired" }, time);
+      this.items.set(item.work_id, next);
+      reconciled.push(clone(next));
+    }
+    return reconciled;
   }
 
   claim(workId: string, workerId: string, leaseMs = 30_000, now = Date.now()): AutonomousWorkflowPortfolioEvidenceWorkItem | null {
@@ -454,7 +566,7 @@ export class InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueue {
   }
 
   restore(snapshot: AutonomousWorkflowPortfolioEvidenceWorkQueueSnapshot): void {
-    const restored = validateSnapshot(snapshot, this.maxItems);
+    const restored = validateAutonomousWorkflowPortfolioEvidenceWorkQueueSnapshot(snapshot, this.maxItems);
     this.items.clear();
     for (const item of restored.items) this.items.set(item.work_id, item);
   }
@@ -555,13 +667,13 @@ export class InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueuePersistence imp
   }
 
   write(snapshot: AutonomousWorkflowPortfolioEvidenceWorkQueueSnapshot): void {
-    this.snapshotValue = clone(validateSnapshot(snapshot));
+    this.snapshotValue = clone(validateAutonomousWorkflowPortfolioEvidenceWorkQueueSnapshot(snapshot));
   }
 
   writeIfUnchanged(expectedSnapshotDigest: string | null, snapshot: AutonomousWorkflowPortfolioEvidenceWorkQueueSnapshot): boolean {
     const current = this.snapshotValue?.snapshot_digest ?? null;
     if (current !== expectedSnapshotDigest) return false;
-    this.snapshotValue = clone(validateSnapshot(snapshot));
+    this.snapshotValue = clone(validateAutonomousWorkflowPortfolioEvidenceWorkQueueSnapshot(snapshot));
     return true;
   }
 }
@@ -583,8 +695,11 @@ export class AutonomousWorkflowPortfolioEvidenceWorkWorker {
     const time = nowMs(options.now);
     const currentTime = () => options.now === undefined ? Date.now() : time;
     const rows: AutonomousWorkflowPortfolioEvidenceWorkWorkerRow[] = [];
-    const activeLeases = this.queue.rows().filter((item) => item.status === "leased" && item.lease_until !== null && item.lease_until > time).slice(0, limit);
-    const candidates = [...activeLeases, ...this.queue.pending(Math.max(1, limit - activeLeases.length), time)].slice(0, limit);
+    const expiredLeases = this.queue.reclaimExpired(time, limit);
+    for (const expired of expiredLeases) rows.push({ work_id: expired.work_id, item_id: expired.item_id, domain: expired.domain, outcome: "reconciliation_required", attempts: expired.attempts, result_digest: expired.result_digest, error_class: expired.failure_class, lease_retained: false });
+    const remaining = Math.max(0, limit - rows.length);
+    const activeLeases = this.queue.rows().filter((item) => item.status === "leased" && item.lease_until !== null && item.lease_until > time).slice(0, remaining);
+    const candidates = [...activeLeases, ...this.queue.pending(Math.max(1, remaining - activeLeases.length), time)].slice(0, remaining);
     for (const candidate of candidates) {
       if (options.signal?.aborted) break;
       const claimed = this.queue.claim(candidate.work_id, workerId, leaseMs, time);

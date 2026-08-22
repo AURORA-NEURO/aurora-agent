@@ -405,10 +405,14 @@ export {
   MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_LEASE_MS,
   MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_ATTEMPTS,
   MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_SNAPSHOT_BYTES,
+  validateAutonomousWorkflowPortfolioEvidenceWorkQueueSnapshot,
   InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueue,
   admitAutonomousWorkflowPortfolioEvidenceWorkItems,
   AutonomousWorkflowPortfolioEvidenceWorkQueuePersistenceCoordinator,
   InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueuePersistence,
+  JsonAutonomousWorkflowPortfolioEvidenceWorkQueuePersistence,
+  TransactionalJsonAutonomousWorkflowPortfolioEvidenceWorkQueuePersistence,
+  WebStorageAutonomousWorkflowPortfolioEvidenceWorkQueueSnapshotTextStore,
   AutonomousWorkflowPortfolioEvidenceWorkWorker,
 } from "./autonomous-workflow-portfolio-evidence-queue.js";
 export type {
@@ -417,6 +421,8 @@ export type {
   AutonomousWorkflowPortfolioEvidenceWorkItem,
   AutonomousWorkflowPortfolioEvidenceWorkQueueSnapshot,
   AutonomousWorkflowPortfolioEvidenceWorkQueuePersistence,
+  AutonomousWorkflowPortfolioEvidenceWorkQueueSnapshotTextStore,
+  AutonomousWorkflowPortfolioEvidenceWorkQueueTransactionalSnapshotTextStore,
   AutonomousWorkflowPortfolioEvidenceWorkExecution,
   AutonomousWorkflowPortfolioEvidenceWorkWorkerRow,
   AutonomousWorkflowPortfolioEvidenceWorkWorkerRun,
