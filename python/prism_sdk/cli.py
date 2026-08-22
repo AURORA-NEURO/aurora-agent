@@ -27,6 +27,7 @@ import sys
 from typing import Any, Callable, Mapping, Sequence, TextIO
 
 from .autonomy import AUTONOMOUS_DOMAINS, AutonomousAgent
+from .autonomous_model_inventory import AutonomousModelInventoryStore
 from .client import Client
 from .errors import SdkError
 from .evaluators import builtin_autonomous_domain_evaluator_profiles
@@ -216,6 +217,31 @@ def _discover_descriptors(
     )
 
 
+def _inventory_prior_factory(
+    args: argparse.Namespace,
+) -> Callable[[ProviderModelDescriptor], Mapping[str, Any]]:
+    capabilities = tuple(args.model_capability or ())
+
+    def build(descriptor: ProviderModelDescriptor) -> Mapping[str, Any]:
+        context_window_tokens = descriptor.context_window_tokens or args.context_window_tokens
+        max_output_tokens = descriptor.max_output_tokens or min(
+            args.model_max_output_tokens,
+            context_window_tokens,
+        )
+        return {
+            "context_window_tokens": context_window_tokens,
+            "max_output_tokens": min(max_output_tokens, context_window_tokens),
+            "quality": args.quality,
+            "latency_ms": args.latency_ms,
+            "cost_per_million_tokens": args.cost_per_million_tokens,
+            "reliability": args.reliability,
+            "capabilities": capabilities,
+            "enabled": descriptor.metadata.get("archived") is not True,
+        }
+
+    return build
+
+
 def _credential_reader(reader: Callable[[str], str] | None) -> Callable[[str], str]:
     return reader if reader is not None else getpass.getpass
 
@@ -323,6 +349,62 @@ def _discover_models(
         "provider_status": provider_status,
         "credential_session": session.status().to_dict(),
         "authorization": {"model_discovery_approved": args.approve_provider_call},
+        "secret_material": "never_returned",
+    }
+
+
+def _refresh_models(
+    args: argparse.Namespace,
+    *,
+    environ: Mapping[str, str],
+    reader: Callable[[str], str] | None,
+) -> dict[str, Any]:
+    if not args.approve_provider_call:
+        raise ValueError("model inventory refresh requires --approve-provider-call")
+    runtime, onboarding = _runtime_with_provider(args)
+    snapshot_store = (
+        AutonomousModelInventoryStore(args.inventory_store)
+        if args.inventory_store is not None
+        else None
+    )
+    with onboarding.start_session(ttl_seconds=args.ttl_seconds) as session:
+        _collect_credentials(args, session, environ=environ, reader=reader)
+        agent = AutonomousAgent(_OfflineWorkspace(), runtime, model_catalogue=ModelCatalogue())
+        snapshot = agent.refresh_model_inventory(
+            credentials=session,
+            providers=(args.provider,),
+            prior_factory=_inventory_prior_factory(args),
+            limit=args.model_limit,
+            snapshot_store=snapshot_store,
+            refresh_id=args.refresh_id,
+            raise_on_error=args.raise_on_error,
+        )
+        provider_status = runtime.provider_status(args.provider)
+    return {
+        "schema": CLI_SCHEMA,
+        "command": "refresh-models",
+        "provider": args.provider,
+        "snapshot": snapshot,
+        "provider_status": provider_status,
+        "inventory_store": {
+            "persisted": snapshot_store is not None,
+            "snapshot_digest": snapshot.get("snapshot_digest"),
+        },
+        "credential_session": session.status().to_dict(),
+        "authorization": {"model_inventory_refresh_approved": args.approve_provider_call},
+        "secret_material": "never_returned",
+    }
+
+
+def _inventory_status(args: argparse.Namespace) -> dict[str, Any]:
+    store = AutonomousModelInventoryStore(args.inventory_store)
+    snapshot = store.load()
+    return {
+        "schema": CLI_SCHEMA,
+        "command": "inventory-status",
+        "snapshot": None if snapshot is None else snapshot.to_dict(),
+        "available": snapshot is not None,
+        "authorization": "metadata_read_only; no_provider_or_credential_access",
         "secret_material": "never_returned",
     }
 
@@ -486,6 +568,31 @@ def _parser() -> argparse.ArgumentParser:
     discovery.add_argument("--approve-provider-call", action="store_true", help="authorize provider inventory discovery")
     _add_credential_arguments(discovery)
 
+    refresh = subparsers.add_parser(
+        "refresh-models",
+        parents=[provider_parent],
+        help="discover, reconcile, and optionally persist provider models with all-domain coverage",
+    )
+    refresh.add_argument("--model-limit", type=int, default=64, help="maximum provider inventory rows to inspect")
+    refresh.add_argument("--inventory-store", default=None, help="optional metadata-only snapshot path")
+    refresh.add_argument("--refresh-id", default=None, help="caller-owned bounded refresh identity")
+    refresh.add_argument("--model-capability", action="append", default=[], help="caller-declared capability for every discovered model")
+    refresh.add_argument("--context-window-tokens", type=int, default=_DEFAULT_CONTEXT_WINDOW)
+    refresh.add_argument("--model-max-output-tokens", type=int, default=_DEFAULT_MAX_OUTPUT)
+    refresh.add_argument("--quality", type=float, default=0.5)
+    refresh.add_argument("--reliability", type=float, default=0.5)
+    refresh.add_argument("--latency-ms", type=int, default=1_000)
+    refresh.add_argument("--cost-per-million-tokens", type=int, default=0)
+    refresh.add_argument("--raise-on-error", action="store_true", help="fail closed instead of returning a failed provider row")
+    refresh.add_argument("--approve-provider-call", action="store_true", help="authorize provider inventory refresh")
+    _add_credential_arguments(refresh)
+
+    inventory_status = subparsers.add_parser(
+        "inventory-status",
+        help="read a persisted model inventory snapshot without contacting a provider",
+    )
+    inventory_status.add_argument("--inventory-store", required=True, help="metadata-only snapshot path")
+
     run = subparsers.add_parser("run", parents=[provider_parent], help="run one autonomous task through a caller-owned MCP workspace")
     run.add_argument("--mcp-command", required=True, help="MCP executable and arguments; no shell is invoked")
     run.add_argument("--mcp-cwd", default=None, help="working directory for the MCP process")
@@ -566,6 +673,10 @@ def main(
             payload = _onboard(args, environ=env, reader=reader)
         elif args.command == "discover-models":
             payload = _discover_models(args, environ=env, reader=reader)
+        elif args.command == "refresh-models":
+            payload = _refresh_models(args, environ=env, reader=reader)
+        elif args.command == "inventory-status":
+            payload = _inventory_status(args)
         elif args.command == "run":
             payload = _run(args, environ=env, reader=reader, client_factory=client_factory)
         else:  # pragma: no cover - argparse enforces the command set

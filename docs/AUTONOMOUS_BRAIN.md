@@ -203,6 +203,32 @@ python -m prism_sdk run \
   --approve-provider-call
 ```
 
+For a durable provider inventory refresh, use `refresh-models`. It discovers once, derives
+explicit caller-owned routing priors from the typed descriptors, atomically reconciles stale
+provider arms, and computes capability coverage for every reviewed autonomous domain. Repeat
+`--model-capability` for capabilities the caller has actually assessed; provider inventory alone
+does not prove semantic suitability. The optional store contains only the bounded digest-bound
+coverage snapshot:
+
+```bash
+python -m prism_sdk refresh-models \
+  --provider openai \
+  --model-capability reasoning \
+  --model-capability science \
+  --inventory-store .aurora/model-inventory.json \
+  --credential-source environment \
+  --credential-env OPENAI_API_KEY \
+  --approve-provider-call
+
+python -m prism_sdk inventory-status \
+  --inventory-store .aurora/model-inventory.json
+```
+
+`inventory-status` is provider-free and credential-free. A failed provider row never retires
+healthy arms from another provider, and an authoritative successful empty inventory is the only
+state allowed to retire all arms for that provider. `--raise-on-error` changes a refresh failure
+from a redacted status snapshot into a fail-closed command error for automation.
+
 The command accepts no API-key or token argument. By default it uses a no-echo prompt; deployment
 automation can select `--credential-source environment --credential-env OPENAI_API_KEY`. The value
 is converted immediately into a short-lived in-memory session, is passed to the runtime only as an

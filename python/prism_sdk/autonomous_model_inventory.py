@@ -510,7 +510,12 @@ class AutonomousModelInventoryStore:
 
 
 class AutonomousModelInventoryCoordinator:
-    """Refresh live provider inventory and produce domain coverage without selecting a model."""
+    """Refresh live provider inventory and produce domain coverage without selecting a model.
+
+    Callers can provide a static ``priors`` mapping when the model ids are already known, or a
+    ``prior_factory`` that turns each typed descriptor into explicit caller-owned routing priors
+    after one live discovery pass. The factory receives no raw provider response or credential.
+    """
 
     def __init__(self, runtime: LLMRuntime, catalogue: ModelCatalogue, *, clock: Callable[[], float] = time.time) -> None:
         if not isinstance(runtime, LLMRuntime):
@@ -528,7 +533,8 @@ class AutonomousModelInventoryCoordinator:
         *,
         credentials: Mapping[str, CredentialHandle] | CredentialSession | None = None,
         providers: Sequence[str] | None = None,
-        priors: Mapping[str, Mapping[str, Any]],
+        priors: Mapping[str, Mapping[str, Any]] | None = None,
+        prior_factory: Callable[[ProviderModelDescriptor], Mapping[str, Any]] | None = None,
         domain_requirements: Mapping[str, Sequence[str]] = {},
         limit: int = MAX_AUTONOMOUS_MODEL_INVENTORY_MODELS_PER_PROVIDER,
         snapshot_store: AutonomousModelInventoryStore | None = None,
@@ -543,9 +549,14 @@ class AutonomousModelInventoryCoordinator:
             raise AutonomousModelInventoryError("inventory refresh requires at least one provider")
         if len(set(names)) != len(names):
             raise AutonomousModelInventoryError("inventory providers must be unique")
-        if not isinstance(priors, Mapping):
-            raise AutonomousModelInventoryError("inventory priors must be an object")
-        _safe_json(priors)
+        if (priors is None) == (prior_factory is None):
+            raise AutonomousModelInventoryError("inventory requires exactly one prior source")
+        if priors is not None:
+            if not isinstance(priors, Mapping):
+                raise AutonomousModelInventoryError("inventory priors must be an object")
+            _safe_json(priors)
+        if prior_factory is not None and not callable(prior_factory):
+            raise AutonomousModelInventoryError("inventory prior_factory must be callable")
         normalized_requirements = self._normalize_requirements(domain_requirements)
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_AUTONOMOUS_MODEL_INVENTORY_MODELS_PER_PROVIDER:
             raise AutonomousModelInventoryError("inventory limit is outside its bound")
@@ -568,9 +579,20 @@ class AutonomousModelInventoryCoordinator:
                     limit=limit,
                 )
                 descriptor_digest = content_digest([descriptor.to_dict() for descriptor in descriptors])
+                if prior_factory is not None:
+                    resolved_priors_by_arm: dict[str, Mapping[str, Any]] = {}
+                    for descriptor in descriptors:
+                        prior = prior_factory(descriptor)
+                        if not isinstance(prior, Mapping):
+                            raise AutonomousModelInventoryError("inventory prior_factory must return objects")
+                        _safe_json(prior)
+                        resolved_priors_by_arm[descriptor.arm_id] = dict(prior)
+                    resolved_priors: Mapping[str, Mapping[str, Any]] = resolved_priors_by_arm
+                else:
+                    resolved_priors = priors or {}
                 reconciliation = self.catalogue.reconcile_discovered(
                     descriptors,
-                    priors=priors,
+                    priors=resolved_priors,
                     providers=(provider,),
                 )
                 results.append(

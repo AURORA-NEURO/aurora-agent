@@ -11331,7 +11331,8 @@ class AutonomousAgent:
         *,
         credentials: Mapping[str, CredentialHandle] | CredentialSession | None = None,
         providers: Sequence[str] | None = None,
-        priors: Mapping[str, Mapping[str, Any]],
+        priors: Mapping[str, Mapping[str, Any]] | None = None,
+        prior_factory: Callable[[ProviderModelDescriptor], Mapping[str, Any]] | None = None,
         domain_requirements: Mapping[str, Sequence[str]] | None = None,
         limit: int = MAX_PROVIDER_DISCOVERED_MODELS,
         snapshot_store: AutonomousModelInventoryStore | None = None,
@@ -11342,9 +11343,11 @@ class AutonomousAgent:
 
         Discovery is provider-authenticated when required, but the returned snapshot is always
         metadata-only.  Explicit ``priors`` remain mandatory for each discovered ``provider/model``
-        arm; the coordinator reconciles one provider at a time so a failed provider cannot retire
-        models belonging to another provider.  By default the coverage rows are derived from all
-        configured domain packs, making model availability visible before automatic routing.
+        arm, or ``prior_factory`` may derive those priors from each typed descriptor after
+        discovery; the coordinator reconciles one provider at a time so a failed provider cannot
+        retire models belonging to another provider. By default the coverage rows are derived
+        from all configured domain packs, making model availability visible before automatic
+        routing.
         """
 
         if domain_requirements is None:
@@ -11360,6 +11363,7 @@ class AutonomousAgent:
                 credentials=credentials,
                 providers=providers,
                 priors=priors,
+                prior_factory=prior_factory,
                 domain_requirements=domain_requirements,
                 limit=limit,
                 snapshot_store=snapshot_store,

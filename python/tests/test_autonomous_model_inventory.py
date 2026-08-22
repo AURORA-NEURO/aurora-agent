@@ -108,6 +108,46 @@ def test_inventory_retires_stale_models_only_after_successful_authoritative_refr
     assert [row["model"] for row in agent.models()] == ["new-model"]
 
 
+def test_inventory_prior_factory_derives_explicit_metadata_without_second_discovery():
+    rows = [
+        {
+            "id": "factory-model",
+            "context_length": 24_000,
+            "max_output_tokens": 1_500,
+            "capabilities": ["tool_calling"],
+        }
+    ]
+    runtime = _runtime(rows)
+    agent = AutonomousAgent(object(), runtime, model_catalogue=ModelCatalogue())
+    seen: list[str] = []
+
+    def prior_factory(descriptor):
+        seen.append(descriptor.arm_id)
+        return {
+            "quality": 0.73,
+            "latency_ms": 240,
+            "cost_per_million_tokens": 3,
+            "reliability": 0.88,
+            "capabilities": ["reasoning"],
+        }
+
+    snapshot = agent.refresh_model_inventory(
+        providers=("offline",),
+        prior_factory=prior_factory,
+        domain_requirements={"coding": ("reasoning", "tool_calling")},
+        refresh_id="inventory-factory",
+    )
+
+    assert snapshot["status"] == "completed"
+    assert seen == ["offline/factory-model"]
+    candidate = agent.models()[0]
+    assert candidate["context_window_tokens"] == 24_000
+    assert candidate["max_output_tokens"] == 1_500
+    assert candidate["quality"] == 0.73
+    assert set(candidate["capabilities"]) == {"reasoning", "tool_calling"}
+    assert snapshot["coverage"][0]["compatible_count"] == 1
+
+
 def test_failed_provider_does_not_retire_other_provider_arms_or_leak_errors():
     rows = [{"id": "good-model", "context_length": 16_000, "max_output_tokens": 1_000, "capabilities": ["reasoning"]}]
     runtime = _runtime(rows)

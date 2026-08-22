@@ -114,6 +114,79 @@ def test_discover_models_requires_explicit_provider_approval() -> None:
     assert "discovery-gate-secret" not in errors
 
 
+def test_refresh_models_requires_explicit_provider_approval() -> None:
+    code, payload, errors = _invoke(
+        "refresh-models",
+        "--provider", "openai",
+        "--base-url", "https://provider.example",
+        "--credential-source", "environment",
+        "--credential-env", "AURORA_TEST_KEY",
+        environ={"AURORA_TEST_KEY": "refresh-gate-secret"},
+    )
+    assert code == 2
+    assert payload is None
+    assert "command failed" in errors
+    assert "refresh-gate-secret" not in errors
+
+
+def test_refresh_models_passes_typed_prior_factory_and_closes_credentials(tmp_path) -> None:
+    captured: dict[str, object] = {}
+    secret = "refresh-test-secret-that-must-not-appear"
+
+    def fake_refresh(self, **kwargs: object) -> dict[str, object]:
+        captured.update(kwargs)
+        return {
+            "status": "completed",
+            "snapshot_digest": "a" * 64,
+            "providers": [{"provider": "openai", "status": "refreshed"}],
+            "coverage": [],
+        }
+
+    with patch("prism_sdk.cli.AutonomousAgent.refresh_model_inventory", fake_refresh):
+        code, payload, errors = _invoke(
+            "refresh-models",
+            "--provider", "openai",
+            "--base-url", "https://provider.example",
+            "--credential-source", "environment",
+            "--credential-env", "AURORA_TEST_KEY",
+            "--model-capability", "reasoning",
+            "--inventory-store", str(tmp_path / "inventory.json"),
+            "--approve-provider-call",
+            environ={"AURORA_TEST_KEY": secret},
+        )
+    assert code == 0
+    assert errors == ""
+    assert payload["command"] == "refresh-models"
+    assert payload["inventory_store"]["persisted"] is True
+    assert payload["credential_session"]["active"] is False
+    assert payload["authorization"]["model_inventory_refresh_approved"] is True
+    prior_factory = captured["prior_factory"]
+    descriptor = ProviderModelDescriptor(
+        provider="openai",
+        model="factory-model",
+        context_window_tokens=8_192,
+        max_output_tokens=1_024,
+        metadata={"owned_by": "test"},
+    )
+    prior = prior_factory(descriptor)
+    assert prior["quality"] == 0.5
+    assert prior["capabilities"] == ("reasoning",)
+    assert prior["context_window_tokens"] == 8_192
+    assert secret not in json.dumps(payload)
+
+
+def test_inventory_status_is_metadata_only_and_provider_free(tmp_path) -> None:
+    code, payload, errors = _invoke(
+        "inventory-status",
+        "--inventory-store", str(tmp_path / "missing-inventory.json"),
+    )
+    assert code == 0
+    assert errors == ""
+    assert payload["available"] is False
+    assert payload["authorization"] == "metadata_read_only; no_provider_or_credential_access"
+    assert payload["secret_material"] == "never_returned"
+
+
 def test_discover_models_projects_only_typed_metadata_and_closes_credentials() -> None:
     secret = "discovery-test-secret-that-must-not-appear"
     descriptors = (
