@@ -357,6 +357,23 @@ export type {
   AutonomousLearningFeedbackWorkerStatus,
   AutonomousLearningFeedbackWorkerRun,
 } from "./autonomous-learning-worker.js";
+export {
+  AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_SCHEMA,
+  MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_ITEMS,
+  MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_REQUESTS,
+  MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_PARALLELISM,
+  AutonomousWorkflowPortfolioEvidenceExecutionResult,
+  executeAutonomousWorkflowPortfolioEvidence,
+} from "./autonomous-workflow-portfolio-evidence.js";
+export type {
+  AutonomousWorkflowPortfolioEvidenceItemStatus,
+  AutonomousWorkflowPortfolioEvidenceStatus,
+  AutonomousWorkflowPortfolioEvidenceItemRequest,
+  AutonomousWorkflowPortfolioEvidenceRuntimeOptions,
+  AutonomousWorkflowPortfolioEvidenceSupervisorOptions,
+  AutonomousWorkflowPortfolioEvidenceItemJSON,
+  AutonomousWorkflowPortfolioEvidenceJSON,
+} from "./autonomous-workflow-portfolio-evidence.js";
 export type {
   AutonomousAcceptedCrossDomainPlan,
   AutonomousAcceptedPlan,

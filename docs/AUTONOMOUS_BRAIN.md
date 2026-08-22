@@ -1818,6 +1818,40 @@ items still require caller-owned transient rehydration and explicit evidence thr
 `executeWorkflowPortfolioResumable()`. Only value-only reward commands can cross the durable
 outbox boundary.
 
+The evidence boundary can also be driven directly from a completed portfolio with
+`executeWorkflowPortfolioEvidence()`. The caller groups bounded acquisition requests by portfolio
+item, supplies the reviewed evidence plan, and owns the acquirer, projector, evaluator, and
+optional append-only journal. The supervisor verifies that provider execution succeeded, rejects
+requests that cross an item's domain, injects only digest-safe item metadata, and dispatches
+evidence in the same dependency waves as the provider portfolio. Each item uses a domain-scoped
+runtime plan, so acceptance of one domain is not held open by unrelated requirements:
+
+```typescript
+const evidence = await agent.executeWorkflowPortfolioEvidence(execution, {
+  evidencePlan: await agent.evidencePlan(AUTONOMOUS_DOMAIN_NAMES),
+  items: requestsByPortfolioItem,
+  maxParallelism: 4,
+  stopOnFailure: true,
+  journalFor: ({ itemId }) => evidenceJournals.get(itemId),
+  runtime: {
+    acquirer: callerOwnedAcquirer,
+    projector: boundedProjector,
+    evaluator: reviewedEvaluator,
+    rehydrateValue: callerOwnedRehydrator,
+  },
+});
+```
+
+The result reports `completed`, `awaiting_evaluation`, `reconciliation_required`, `failed`,
+`omitted`, and `not_requested` item states. Its JSON form contains only evidence-plan/result,
+receipt, assessment, dependency, retention, and failure metadata; raw acquisition values remain
+available only through the current caller's transient `runtimeFor(itemId)` accessor. Reusing an
+item journal requires value reconciliation and therefore never silently reacquires a source.
+Unapproved provider items are omitted without invoking the evidence adapter, and a failed item can
+stop later dependency waves without inventing downstream evidence. This composes acquisition,
+evaluation, provider execution, learning, and restart boundaries while leaving source authority,
+credentials, and production persistence with the application.
+
 Approval is fail-closed: with `approveProviderCall` absent or false, the first ready item returns
 `approval_required`, descendants become `blocked`, and no provider call starts. Hard failures,
 route review, uncertain effects, turn limits, and child failures are never converted into success;

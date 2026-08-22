@@ -33,6 +33,14 @@ operations remain deployment work. A bounded feedback worker now drains the same
 outbox with conditional leases, receipt-backed crash recovery, retry/terminal-failure reporting,
 and no provider replay; multi-host persistence and operational scheduling remain deployment work.
 
+The portfolio now also has a bounded evidence supervisor. It verifies successful provider items,
+rejects cross-domain requests, scopes each evidence runtime to its item's domain, preserves direct
+predecessor evidence digests, and executes acquisition/projection/evaluation in the portfolio's
+dependency waves. Per-item journals support replay with caller-owned value reconciliation, while
+approval refusals, acquisition failures, pending evaluation, and downstream omissions remain
+explicit. JSON is metadata-only; source acquisition, evaluator authority, and durable journal
+storage remain application-owned.
+
 The autonomous façade now compiles every built-in workflow into a digest-bound evidence plan.
 Python `AutonomousTaskOrchestrator.evidence_plan()` and TypeScript `AutonomousAgent.evidencePlan()`
 report qualified requirements, ambiguous-label handling, coverage, and dependency-safe next
