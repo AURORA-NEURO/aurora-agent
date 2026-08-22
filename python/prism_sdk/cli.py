@@ -29,6 +29,7 @@ from typing import Any, Callable, Mapping, Sequence, TextIO
 
 from .autonomy import AUTONOMOUS_DOMAINS, AutonomousAgent
 from .autonomous_model_inventory import AutonomousModelInventoryStore
+from .brain_learning_store import SQLiteBrainLearningLedger
 from .client import Client
 from .errors import SdkError
 from .evaluators import builtin_autonomous_domain_evaluator_profiles
@@ -36,6 +37,7 @@ from .llm_runtime import (
     LLMRuntime,
     ModelCandidate,
     ModelCatalogue,
+    ProviderHealthLedger,
     ProviderModelDescriptor,
     ProviderOnboarding,
     anthropic_provider,
@@ -435,6 +437,60 @@ def _inventory_status(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def _state_status(args: argparse.Namespace) -> dict[str, Any]:
+    if args.health_store is None and args.learning_store is None:
+        raise ValueError("state-status requires --health-store or --learning-store")
+    health: dict[str, Any] = {
+        "configured": args.health_store is not None,
+        "available": False,
+        "provider_health": {},
+        "model_health": {},
+    }
+    if args.health_store is not None and os.path.exists(args.health_store):
+        health_ledger = ProviderHealthLedger(args.health_store)
+        health.update(
+            {
+                "available": True,
+                "provider_health": health_ledger.health_snapshot(),
+                "model_health": health_ledger.model_health_snapshot(),
+                "record_count": len(health_ledger.records()),
+            }
+        )
+    learning: dict[str, Any] = {
+        "configured": args.learning_store is not None,
+        "available": False,
+        "record_count": 0,
+        "latest_state": None,
+        "domain_learning": {},
+    }
+    if args.learning_store is not None and os.path.exists(args.learning_store):
+        learning_ledger = SQLiteBrainLearningLedger(args.learning_store)
+        try:
+            learning_agent = AutonomousAgent(_OfflineWorkspace(), LLMRuntime(), ledger=learning_ledger)
+            learning.update(
+                {
+                    "available": True,
+                    "record_count": len(learning_ledger.records()),
+                    "latest_state": learning_ledger.latest_state(),
+                    "domain_learning": {
+                        domain: learning_agent.domain_learning_state(domain)
+                        for domain in AUTONOMOUS_DOMAINS
+                    },
+                }
+            )
+        finally:
+            learning_ledger.close()
+    return {
+        "schema": CLI_SCHEMA,
+        "command": "state-status",
+        "health": health,
+        "learning": learning,
+        "authorization": "metadata_read_only; no_provider_or_credential_access",
+        "retention": "value_only_health_and_bandit_metadata",
+        "secret_material": "never_returned",
+    }
+
+
 def _onboard(
     args: argparse.Namespace,
     *,
@@ -479,10 +535,18 @@ def _run(
         raise ValueError("--use-inventory and --discover-models cannot be combined")
     if args.use_inventory and args.inventory_store is None:
         raise ValueError("--inventory-store is required with --use-inventory")
+    if not args.automatic and args.learning_mode == "trajectory":
+        raise ValueError("trajectory learning requires --automatic or a workflow execution API")
     persisted_candidates = _persisted_candidate_args(args) if args.use_inventory else ()
     runtime, onboarding = _runtime_with_provider(args)
     session = onboarding.start_session(ttl_seconds=args.ttl_seconds)
+    health_ledger = None
+    learning_ledger = None
     try:
+        if args.health_store is not None:
+            health_ledger = ProviderHealthLedger(args.health_store)
+        if args.learning_store is not None:
+            learning_ledger = SQLiteBrainLearningLedger(args.learning_store)
         _collect_credentials(
             args,
             session,
@@ -506,11 +570,12 @@ def _run(
             timeout=args.mcp_timeout,
         )
         with client:
-            agent = AutonomousAgent(
-                _McpWorkspace(client),
-                runtime,
-                model_catalogue=catalogue,
-            )
+            agent_kwargs: dict[str, Any] = {"model_catalogue": catalogue}
+            if learning_ledger is not None:
+                agent_kwargs["ledger"] = learning_ledger
+            if health_ledger is not None:
+                agent_kwargs["health_ledger"] = health_ledger
+            agent = AutonomousAgent(_McpWorkspace(client), runtime, **agent_kwargs)
             common = {
                 "task": args.task,
                 "credentials": session,
@@ -528,6 +593,7 @@ def _run(
             if args.automatic:
                 result = agent.run_auto(
                     **common,
+                    learning_mode=args.learning_mode,
                     hints=tuple(args.hint or ()),
                     max_domains=args.max_domains,
                     allow_cross_domain=not args.single_domain,
@@ -537,6 +603,8 @@ def _run(
                     planning_max_output_tokens=args.planning_max_output_tokens,
                 )
             else:
+                if args.learning_mode == "online":
+                    common["learn"] = True
                 result = agent.run(**common, domain=args.domain)
         return {
             "schema": CLI_SCHEMA,
@@ -564,10 +632,17 @@ def _run(
                 "model_discovery_approved": args.approve_provider_call if args.discover_models else False,
                 "mission_dispatch_approved": args.approve_mission_dispatch,
             },
+            "state_persistence": {
+                "health_store_configured": health_ledger is not None,
+                "learning_store_configured": learning_ledger is not None,
+                "learning_mode": args.learning_mode,
+            },
             "secret_material": "never_returned",
         }
     finally:
         session.close()
+        if learning_ledger is not None:
+            learning_ledger.close()
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -639,6 +714,13 @@ def _parser() -> argparse.ArgumentParser:
     )
     inventory_status.add_argument("--inventory-store", required=True, help="metadata-only snapshot path")
 
+    state_status = subparsers.add_parser(
+        "state-status",
+        help="read persisted provider health and bandit state without contacting a provider",
+    )
+    state_status.add_argument("--health-store", default=None, help="provider health JSONL path")
+    state_status.add_argument("--learning-store", default=None, help="SQLite value-only learning ledger path")
+
     run = subparsers.add_parser("run", parents=[provider_parent], help="run one autonomous task through a caller-owned MCP workspace")
     run.add_argument("--mcp-command", required=True, help="MCP executable and arguments; no shell is invoked")
     run.add_argument("--mcp-cwd", default=None, help="working directory for the MCP process")
@@ -657,6 +739,9 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--discover-models", action="store_true", help="discover selectable models through the approved provider inventory endpoint")
     run.add_argument("--use-inventory", action="store_true", help="rehydrate selectable candidates from --inventory-store without rediscovery")
     run.add_argument("--inventory-store", default=None, help="digest-bound metadata-only inventory store for --use-inventory")
+    run.add_argument("--health-store", default=None, help="persist provider/model health observations across runs")
+    run.add_argument("--learning-store", default=None, help="persist value-only online-learning state in SQLite")
+    run.add_argument("--learning-mode", choices=("off", "online", "trajectory"), default="off", help="automatic route learning mode; rewards remain evaluator-gated")
     run.add_argument("--model-limit", type=int, default=64, help="maximum provider inventory rows to inspect when discovering")
     run.add_argument("--model-capability", action="append", default=[], help="declared capability for every model candidate")
     run.add_argument("--required-model-capability", action="append", default=[], help="capability required by this run")
@@ -725,6 +810,8 @@ def main(
             payload = _refresh_models(args, environ=env, reader=reader)
         elif args.command == "inventory-status":
             payload = _inventory_status(args)
+        elif args.command == "state-status":
+            payload = _state_status(args)
         elif args.command == "run":
             payload = _run(args, environ=env, reader=reader, client_factory=client_factory)
         else:  # pragma: no cover - argparse enforces the command set

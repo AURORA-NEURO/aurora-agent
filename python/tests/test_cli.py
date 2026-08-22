@@ -187,6 +187,91 @@ def test_inventory_status_is_metadata_only_and_provider_free(tmp_path) -> None:
     assert payload["secret_material"] == "never_returned"
 
 
+def test_state_status_is_provider_free_and_does_not_create_missing_ledgers(tmp_path) -> None:
+    health_path = tmp_path / "health.jsonl"
+    learning_path = tmp_path / "learning.sqlite"
+    code, payload, errors = _invoke(
+        "state-status",
+        "--health-store", str(health_path),
+        "--learning-store", str(learning_path),
+    )
+    assert code == 0
+    assert errors == ""
+    assert payload["health"]["available"] is False
+    assert payload["learning"]["available"] is False
+    assert payload["authorization"] == "metadata_read_only; no_provider_or_credential_access"
+    assert not health_path.exists()
+    assert not learning_path.exists()
+
+
+def test_run_wires_opt_in_health_and_learning_ledgers_without_exposing_state_or_keys(tmp_path) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    class FakeAgent:
+        def __init__(self, _workspace: object, _runtime: object, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+        def run(self, **kwargs: object) -> dict[str, object]:
+            captured["run"] = kwargs
+            return {"status": "completed"}
+
+    secret = "state-wiring-secret-that-must-not-appear"
+    output = io.StringIO()
+    errors = io.StringIO()
+    health_path = tmp_path / "health.jsonl"
+    learning_path = tmp_path / "learning.sqlite"
+    with patch("prism_sdk.cli.AutonomousAgent", FakeAgent):
+        code = main(
+            (
+                "run",
+                "--mcp-command", "python server.py",
+                "--domain", "science",
+                "--task", "compare independent research sources",
+                "--model", "model-a",
+                "--provider", "openai",
+                "--base-url", "https://provider.example",
+                "--credential-source", "environment",
+                "--credential-env", "AURORA_TEST_KEY",
+                "--health-store", str(health_path),
+                "--learning-store", str(learning_path),
+                "--learning-mode", "online",
+                "--approve-provider-call",
+            ),
+            environ={"AURORA_TEST_KEY": secret},
+            writer=output,
+            error_writer=errors,
+            client_factory=lambda *_args, **_kwargs: FakeClient(),
+        )
+    payload = json.loads(output.getvalue())
+    assert code == 0
+    assert errors.getvalue() == ""
+    assert captured["ledger"].path == learning_path
+    assert captured["health_ledger"].path == health_path
+    assert captured["run"]["learn"] is True
+    assert payload["state_persistence"] == {
+        "health_store_configured": True,
+        "learning_store_configured": True,
+        "learning_mode": "online",
+    }
+    assert secret not in output.getvalue()
+    status_code, state_payload, state_errors = _invoke(
+        "state-status",
+        "--health-store", str(health_path),
+        "--learning-store", str(learning_path),
+    )
+    assert status_code == 0
+    assert state_errors == ""
+    assert state_payload["learning"]["available"] is True
+    assert set(state_payload["learning"]["domain_learning"]) == set(AUTONOMOUS_DOMAINS)
+
+
 def test_discover_models_projects_only_typed_metadata_and_closes_credentials() -> None:
     secret = "discovery-test-secret-that-must-not-appear"
     descriptors = (
@@ -279,6 +364,7 @@ def test_run_automatic_mode_forwards_routing_and_planning_controls_without_provi
                 "--credential-source", "environment",
                 "--credential-env", "AURORA_TEST_KEY",
                 "--planning-mode", "provider",
+                "--learning-mode", "online",
                 "--semantic-routing",
                 "--approve-provider-call",
             ),
@@ -292,6 +378,7 @@ def test_run_automatic_mode_forwards_routing_and_planning_controls_without_provi
     assert errors.getvalue() == ""
     assert captured["hints"] == ("research",)
     assert captured["planning_mode"] == "provider"
+    assert captured["learning_mode"] == "online"
     assert captured["semantic_routing"] is True
     assert captured["allow_cross_domain"] is True
     assert len(captured["model_candidates"]) == 2

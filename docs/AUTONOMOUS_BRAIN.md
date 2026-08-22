@@ -246,6 +246,33 @@ python -m prism_sdk run \
   --approve-provider-call
 ```
 
+Selection evidence can persist independently from the model catalogue. Supply `--health-store`
+to retain bounded provider/model outcome observations and restore historical health overrides on
+the next run. Supply `--learning-store` to use the transactional SQLite value-only ledger for
+bandit state, and choose `--learning-mode online` or `--learning-mode trajectory` for automatic
+routing. Rewards still require the existing evaluator contracts; provider success is never
+treated as a reward. `state-status` reads these stores without contacting a provider:
+
+```bash
+python -m prism_sdk run \
+  --mcp-command "python path/to/mcp_server.py" \
+  --provider openai \
+  --task "compare the retained evidence" \
+  --automatic \
+  --use-inventory \
+  --inventory-store .aurora/model-inventory.json \
+  --health-store .aurora/provider-health.jsonl \
+  --learning-store .aurora/brain-learning.sqlite \
+  --learning-mode online \
+  --credential-source environment \
+  --credential-env OPENAI_API_KEY \
+  --approve-provider-call
+
+python -m prism_sdk state-status \
+  --health-store .aurora/provider-health.jsonl \
+  --learning-store .aurora/brain-learning.sqlite
+```
+
 The command accepts no API-key or token argument. By default it uses a no-echo prompt; deployment
 automation can select `--credential-source environment --credential-env OPENAI_API_KEY`. The value
 is converted immediately into a short-lived in-memory session, is passed to the runtime only as an
