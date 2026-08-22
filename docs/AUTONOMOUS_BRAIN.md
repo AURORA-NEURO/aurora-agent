@@ -3291,6 +3291,71 @@ for (const item of batch.items) {
 }
 ```
 
+For applications that need the complete autonomous feedback loop, `executeCycle()` extends the
+same plan boundary with the existing decision-cycle engine. It can run a single-domain or
+cross-domain route, optionally recall value-only memory, execute the provider, call an explicit
+evaluator, settle the resulting reward into the online bandit, and persist a hash-chained
+restart-safe cycle state. The provider response is never inferred to be a reward: the evaluator
+must return the bounded `evaluator_id`, version, reward, pass/fail, and optional evidence digest
+packet before learning credit is issued.
+
+```typescript
+const cycle = await brain.executeCycle(request, {
+  approveProviderCall: true,
+  cycle: {
+    cycleId: "science-cycle-2026-08-21",
+    decisionStateStore,
+    learning: {
+      controller: learningController,
+      episodeId: "science-episode-1",
+      evaluate: (run) => evaluateWithCallerOwnedEvidence(run),
+    },
+    memory: {
+      store: episodicMemory,
+      episodeId: "science-memory-1",
+      tags: ["science"],
+    },
+  },
+});
+
+if (cycle.status === "completed") {
+  // cycle.cycle.evaluation and cycle.cycle.settlement are value-only learning projections.
+  // cycle.cycle.run.response remains transient to this caller.
+}
+```
+
+The façade chooses `runAutonomousDecisionCycle()` for a single-domain route and
+`runAutonomousCrossDomainDecisionCycle()` for a reviewed fan-out route. The caller supplies
+the evaluator and learning controller through `cycle`; the façade supplies the already-reviewed
+route, capability, hints, and connector observation so the cycle cannot silently re-route or
+drop evidence between planning and execution. Provider planning remains a separate optional
+review phase, and semantic routing is intentionally excluded from `executeCycle()` because this
+entry point already owns a deterministic reviewed route. Call the lower-level decision-cycle
+functions when provider-assisted semantic routing itself is the desired experiment.
+
+Cycle persistence records only the task/route/plan/outcome/evaluation/settlement digests and
+bounded lifecycle state. If a worker restarts after a terminal transition, the caller rehydrates
+the private result through `rehydrateResult`; the persisted digest is checked before the result is
+returned and the provider is not invoked again. If a connector is present, its own receipt journal
+provides the independent replay barrier, so a rehydrated cycle can replay the connector metadata
+without dispatching the connector executor a second time. This gives every domain the same
+closed-loop sequence:
+
+```text
+reviewed plan -> connector observation -> provider/model selection -> response
+      -> explicit evaluator -> value-only memory/evidence -> bandit settlement
+      -> terminal digest or bounded evaluator-requested replan
+```
+
+`executeCycle()` returns a `connector_blocked` or `route_review_required` result before invoking
+the cycle when its prerequisites are not reviewable. `executePlannedCycle()` provides the same
+closed-loop behavior after a persisted `AutonomousBrainPlan` has been rehydrated and its digest
+has been matched to the transient request. Neither method widens tools, approvals, budgets,
+or domain authority based on memory, connector output, evaluator text, or provider suggestions.
+The cross-domain settlement preserves specialist identity and delayed return-to-go credit; the
+single-domain settlement preserves episode identity and next bandit state. Both are caller-owned
+transient results with metadata-only persistence projections.
+
 The façade is intentionally an orchestration boundary, not a claim of general intelligence.
 Routing is vocabulary/catalogue evidence, workflow stages are strategy metadata, connector
 observations are untrusted inputs, provider output still requires evaluation, and learning

@@ -6,6 +6,11 @@ import {
   AutonomousAgent,
   AutonomousBrainFacade,
   AutonomousBrainPlan,
+  AutonomousLearningController,
+  AutonomousOnlineLearner,
+  InMemoryAutonomousDecisionCycleStateStore,
+  InMemoryAutonomousEpisodicMemory,
+  InMemoryAutonomousLearningFeedbackOutboxStore,
   InMemoryAutonomousConnectorReceiptJournal,
   LLMRuntime,
   createBuiltinAutonomousConnectorRuntime,
@@ -79,6 +84,20 @@ test("brain facade creates request-free plans for every built-in domain and exec
   assert.doesNotMatch(JSON.stringify(batch.items.map((item) => item.execution?.plan ?? null)), /debug and verify a bounded repository change/);
 });
 
+test("brain facade closed-loop execution accepts every built-in domain through one provider-neutral entry point", async () => {
+  const runtime = localRuntime();
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const result = await brain.executeCycle({ task: tasks[domain], domain }, { approveProviderCall: true });
+    assert.equal(result.plan.selected_domains.includes(domain), true, domain);
+    assert.ok(["completed", "children_completed"].includes(result.status), `${domain}: ${result.status}`);
+    assert.ok(result.cycle !== null, domain);
+  }
+  assert.ok(runtime.providerStatus("offline").successes >= AUTONOMOUS_DOMAIN_NAMES.length);
+});
+
 test("brain facade runs a connector observation before provider invocation and supports plan replay", async () => {
   const seen = [];
   const runtime = localRuntime((request) => seen.push(request));
@@ -126,6 +145,98 @@ test("brain facade runs a connector observation before provider invocation and s
   assert.equal(replayed.connector.replay, "replayed");
   assert.equal(replayed.connector.dispatch.value, null);
   assert.equal(journal.verifyIntegrity().entries, 1);
+});
+
+test("brain facade composes connector evidence, evaluator reward, online learning, memory, and restart-safe cycle replay", async () => {
+  const seen = [];
+  const runtime = localRuntime((request) => seen.push(request));
+  const agent = new AutonomousAgent(runtime, { learner: new AutonomousOnlineLearner() });
+  agent.registerModel(model);
+  const connectorJournal = new InMemoryAutonomousConnectorReceiptJournal();
+  const offline = createBuiltinAutonomousConnectorRuntime({ domainScoped: true, approvalRequired: false, receiptStore: connectorJournal });
+  const brain = new AutonomousBrainFacade({ agent, connectorOperations: offline.operationFacade });
+  const learningOutbox = new InMemoryAutonomousLearningFeedbackOutboxStore();
+  const learning = new AutonomousLearningController(agent, { feedbackOutbox: learningOutbox });
+  const memory = new InMemoryAutonomousEpisodicMemory();
+  const stateStore = new InMemoryAutonomousDecisionCycleStateStore();
+  const task = "review scientific evidence and report reproducibility gaps";
+  const connector = {
+    domain: "science",
+    capability: "literature",
+    operation_id: "science.reproducible_evidence_acquisition",
+    subject_digest: "d".repeat(64),
+    request: { evidence_digests: ["e".repeat(64)], analysis_digest: "f".repeat(64) },
+    approved: true,
+  };
+  const cycleOptions = {
+    approveProviderCall: true,
+    cycle: {
+      cycleId: "brain-cycle-science",
+      decisionStateStore: stateStore,
+      learning: {
+        controller: learning,
+        episodeId: "brain-learning-science",
+        outbox: { workerId: "brain-cycle-worker" },
+        evaluate: () => ({ evaluator_id: "science-reviewer", evaluator_version: "1", reward: 0.87, passed: true }),
+      },
+      memory: { store: memory, episodeId: "brain-memory-science", tags: ["science"] },
+    },
+  };
+  const reviewedPlan = await brain.plan({ task, domain: "science", connector });
+  const first = await brain.executePlannedCycle(reviewedPlan, { task, domain: "science", connector }, cycleOptions);
+  assert.equal(first.status, "completed");
+  assert.equal(first.cycle.status, "completed");
+  assert.equal(first.cycle.evaluation.reward, 0.87);
+  assert.equal(first.cycle.learning_episode_id, "brain-learning-science");
+  assert.equal(first.cycle.settlement.episode.status, "settled");
+  assert.equal(first.connector.replay, "fresh");
+  assert.equal(first.connector.dispatch.value.status, "partial", "the connector value is caller-transient and never enters the persisted plan");
+  assert.ok(seen.some((request) => request.messages.some((message) => message.content.includes("autonomous-connector-observation"))));
+  assert.equal(JSON.stringify(first.plan).includes(task), false);
+  assert.equal(JSON.stringify(await memory.snapshot()).includes(task), false);
+  assert.equal(learningOutbox.rows().filter((row) => row.status === "applied").length, 1);
+
+  const providerCallsAfterFirstCycle = seen.length;
+  cycleOptions.cycle.rehydrateResult = () => first.cycle;
+  const replayed = await brain.executePlannedCycle(reviewedPlan, { task, domain: "science", connector }, cycleOptions);
+  assert.equal(replayed.status, "completed");
+  assert.equal(replayed.cycle.status, "completed");
+  assert.equal(replayed.connector.replay, "replayed");
+  assert.equal(seen.length, providerCallsAfterFirstCycle, "a terminal persisted cycle rehydrates without another provider invocation");
+  assert.equal(connectorJournal.verifyIntegrity().entries, 1);
+});
+
+test("brain facade sends cross-domain fan-out through the same closed-loop evaluator and learner boundary", async () => {
+  const runtime = localRuntime();
+  const agent = new AutonomousAgent(runtime, { learner: new AutonomousOnlineLearner() });
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+  const learning = new AutonomousLearningController(agent);
+  const result = await brain.executeCycle(
+    { task: "research a biomedical neuroscience experiment with patient EEG evidence", allow_cross_domain: true },
+    {
+      approveProviderCall: true,
+      cycle: {
+        synthesize: false,
+        maxParallelChildren: 2,
+        subtasks: [
+          { id: "bio", domain: "biomedical", task: "review biomedical evidence" },
+          { id: "neuro", domain: "neuroscience", task: "analyze EEG limitations" },
+        ],
+        learning: {
+          controller: learning,
+          trajectoryId: "brain-cross-trajectory",
+          evaluate: (run) => Object.fromEntries(run.learning_episode_ids.map((episodeId) => [episodeId, { evaluator_id: "cross-reviewer", evaluator_version: "1", reward: 0.79, passed: true }])),
+        },
+      },
+    },
+  );
+  assert.equal(result.status, "children_completed");
+  assert.equal(result.cycle.status, "children_completed");
+  assert.equal(result.cycle.run.child_runs.length, 2);
+  assert.equal(Object.keys(result.cycle.evaluation).length, 2);
+  assert.equal(result.cycle.settlement.trajectory.trajectory.trajectory_id, "brain-cross-trajectory");
+  assert.equal(result.plan.cross_domain_plan.children.length, 2);
 });
 
 test("brain facade fails closed on route, connector, and plan identity boundaries", async () => {

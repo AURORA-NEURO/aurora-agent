@@ -362,6 +362,12 @@ export type {
   AutonomousBrainPlanJSON,
   AutonomousBrainExecution,
   AutonomousBrainExecuteOptions,
+  AutonomousBrainSingleCycleOptions,
+  AutonomousBrainCrossDomainCycleOptions,
+  AutonomousBrainCycleOptions,
+  AutonomousBrainCycleResult,
+  AutonomousBrainCycleStatus,
+  AutonomousBrainCycleExecution,
   AutonomousBrainBatchItem,
   AutonomousBrainBatchResult,
 } from "./autonomous-brain-facade.js";

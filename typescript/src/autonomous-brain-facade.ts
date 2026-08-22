@@ -20,6 +20,14 @@ import {
   type AutonomousConnectorOperationExecution,
   type AutonomousConnectorOperationInput,
 } from "./autonomous-connector-facade.js";
+import {
+  runAutonomousCrossDomainDecisionCycle,
+  runAutonomousDecisionCycle,
+  type AutonomousCrossDomainDecisionCycleOptions,
+  type AutonomousCrossDomainDecisionCycleResult,
+  type AutonomousDecisionCycleOptions,
+  type AutonomousDecisionCycleResult,
+} from "./autonomous-cycle.js";
 import { canonicalJson, digestJsonSync } from "./tooling.js";
 import type { JsonObject, JsonValue } from "./types.js";
 
@@ -134,6 +142,39 @@ export interface AutonomousBrainExecuteOptions {
   includeConnectorObservation?: boolean;
   /** Lower-level provider, tool, memory, learning, and effect controls. */
   run?: Omit<AutonomousRunOptions, "domain" | "routeOverride" | "capability" | "context" | "hints" | "allowCrossDomain">;
+}
+
+type AutonomousBrainCycleBoundKeys = "domain" | "routeOverride" | "capability" | "context" | "hints" | "allowCrossDomain" | "semanticRouting";
+
+/** Single-domain cycle controls with route-owned fields reserved for the brain facade. */
+export type AutonomousBrainSingleCycleOptions = Omit<AutonomousDecisionCycleOptions, AutonomousBrainCycleBoundKeys>;
+
+/** Cross-domain cycle controls with route-owned fields reserved for the brain facade. */
+export type AutonomousBrainCrossDomainCycleOptions = Omit<AutonomousCrossDomainDecisionCycleOptions, AutonomousBrainCycleBoundKeys>;
+
+export interface AutonomousBrainCycleOptions {
+  /** Explicit provider approval; defaults to false even when a model is registered. */
+  approveProviderCall?: boolean;
+  /** Run the optional connector operation before the closed-loop cycle; defaults to true. */
+  connectorFirst?: boolean;
+  /** Include the connector's transient bounded observation in the cycle context. */
+  includeConnectorObservation?: boolean;
+  /** Evaluator, memory, learning, provider-planning, persistence, and budget controls. */
+  cycle?: AutonomousBrainSingleCycleOptions | AutonomousBrainCrossDomainCycleOptions;
+}
+
+export type AutonomousBrainCycleResult = AutonomousDecisionCycleResult | AutonomousCrossDomainDecisionCycleResult;
+export type AutonomousBrainCycleStatus = AutonomousBrainCycleResult["status"] | "connector_blocked";
+
+export interface AutonomousBrainCycleExecution {
+  schema: typeof AUTONOMOUS_BRAIN_FACADE_SCHEMA;
+  status: AutonomousBrainCycleStatus;
+  plan: AutonomousBrainPlanJSON;
+  cycle: AutonomousBrainCycleResult | null;
+  connector: AutonomousConnectorOperationExecution | null;
+  error: { error_class: string; failure_code: string } | null;
+  retention: "plan_metadata_only;cycle_response_and_connector_values_transient_to_caller";
+  secret_material: "never_returned";
 }
 
 export interface AutonomousBrainBatchItem {
@@ -412,6 +453,20 @@ export class AutonomousBrainFacade {
     return this.executePrepared(prepared, options);
   }
 
+  /** Execute the closed-loop route -> invoke -> evaluate -> learn cycle behind the same plan boundary. */
+  async executeCycle(input: AutonomousBrainRequest, options: AutonomousBrainCycleOptions = {}): Promise<AutonomousBrainCycleExecution> {
+    const prepared = await this.prepare(input);
+    return this.executeCyclePrepared(prepared, options);
+  }
+
+  /** Rehydrate a persisted brain plan, then run the closed-loop evaluator/learning cycle. */
+  async executePlannedCycle(plan: AutonomousBrainPlan, input: AutonomousBrainRequest, options: AutonomousBrainCycleOptions = {}): Promise<AutonomousBrainCycleExecution> {
+    if (!(plan instanceof AutonomousBrainPlan)) throw new ArgumentError("autonomous brain executePlannedCycle requires a typed plan");
+    const prepared = await this.prepare(input);
+    if (prepared.plan.plan_digest !== plan.plan_digest) throw new ArgumentError("autonomous brain cycle plan does not match the transient request");
+    return this.executeCyclePrepared(prepared, options);
+  }
+
   /** Execute independent brain requests with bounded concurrency and deterministic result order. */
   async executeBatch(inputs: readonly AutonomousBrainRequest[], options: { maxParallelism?: number; stopOnError?: boolean; execution?: AutonomousBrainExecuteOptions } = {}): Promise<AutonomousBrainBatchResult> {
     if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_BRAIN_BATCH) throw new ArgumentError(`autonomous brain batch must contain 1..=${MAX_AUTONOMOUS_BRAIN_BATCH} entries`);
@@ -499,6 +554,49 @@ export class AutonomousBrainFacade {
       ? await this.agent.runCrossDomain(request.task, runOptions as AutonomousCrossDomainRunOptions)
       : await this.agent.run(request.task, { ...runOptions, domain: route.primary_domain ?? undefined });
     return { schema: AUTONOMOUS_BRAIN_FACADE_SCHEMA, status: run.status, plan: plan.toJSON(), run, connector, error: null, retention: "plan_metadata_only;run_and_connector_values_transient_to_caller", secret_material: "never_returned" };
+  }
+
+  private async executeCyclePrepared(prepared: PreparedBrainRequest, options: AutonomousBrainCycleOptions): Promise<AutonomousBrainCycleExecution> {
+    const { request, route, plan } = prepared;
+    const base = (status: AutonomousBrainCycleStatus, cycle: AutonomousBrainCycleResult | null, connector: AutonomousConnectorOperationExecution | null, error: { error_class: string; failure_code: string } | null): AutonomousBrainCycleExecution => ({
+      schema: AUTONOMOUS_BRAIN_FACADE_SCHEMA,
+      status,
+      plan: plan.toJSON(),
+      cycle,
+      connector,
+      error,
+      retention: "plan_metadata_only;cycle_response_and_connector_values_transient_to_caller",
+      secret_material: "never_returned",
+    });
+    if (plan.status === "route_review_required") return base("route_review_required", null, null, null);
+    if (plan.status === "connector_review_required" || (prepared.connectorPlan && prepared.connectorPlan.status !== "ready")) {
+      return base("connector_blocked", null, null, { error_class: "ConnectorOperationError", failure_code: "configuration" });
+    }
+    if (isObject(options.cycle) && Object.prototype.hasOwnProperty.call(options.cycle, "semanticRouting")) throw new ArgumentError("autonomous brain cycle owns its reviewed route; semanticRouting is not available through executeCycle");
+    let connector: AutonomousConnectorOperationExecution | null = null;
+    if (request.connector !== undefined && options.connectorFirst !== false) {
+      if (!this.connectorOperations || !prepared.connectorPlan) throw new ArgumentError("autonomous brain connector plan is unavailable");
+      connector = await this.connectorOperations.executePlanned(prepared.connectorPlan, request.connector);
+      if (!connectorSucceeded(connector.status)) return base("connector_blocked", null, connector, { error_class: "ConnectorOperationError", failure_code: connector.status });
+    }
+    const context = [
+      ...(request.context ?? []),
+      ...(connector && options.includeConnectorObservation !== false ? [observationChunk(connector)] : []),
+    ];
+    const cycleOptions = {
+      ...(options.cycle ?? {}),
+      routeOverride: route,
+      domain: route.primary_domain ?? undefined,
+      capability: request.capability,
+      context,
+      hints: request.hints,
+      allowCrossDomain: request.allow_cross_domain,
+      approveProviderCall: options.approveProviderCall ?? options.cycle?.approveProviderCall ?? false,
+    };
+    const cycle = route.cross_domain
+      ? await runAutonomousCrossDomainDecisionCycle(this.agent, request.task, cycleOptions as AutonomousCrossDomainDecisionCycleOptions)
+      : await runAutonomousDecisionCycle(this.agent, request.task, cycleOptions as AutonomousDecisionCycleOptions);
+    return base(cycle.status, cycle, connector, null);
   }
 }
 
