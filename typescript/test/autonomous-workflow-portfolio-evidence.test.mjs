@@ -4,6 +4,8 @@ import test from "node:test";
 import {
   AUTONOMOUS_DOMAIN_NAMES,
   AutonomousAgent,
+  AutonomousEvidenceAdapterRegistry,
+  AutonomousEvidenceRuntime,
   AutonomousWorkflowPortfolioEvidenceController,
   AutonomousWorkflowPortfolioEvidenceAtomicWorkWorker,
   AutonomousWorkflowPortfolioEvidenceWorkQueueAtomicCoordinator,
@@ -21,6 +23,7 @@ import {
   WebStorageAutonomousWorkflowPortfolioEvidenceWorkQueueSnapshotTextStore,
   admitAutonomousWorkflowPortfolioEvidenceWorkItems,
   digestJson,
+  registerAutonomousEvidenceAdaptersForAllDomains,
   validateAutonomousWorkflowPortfolioEvidenceCheckpoint,
   validateAutonomousWorkflowPortfolioEvidenceWorkQueueSnapshot,
 } from "../dist/index.js";
@@ -588,4 +591,60 @@ test("CAS portfolio evidence coordinators prevent duplicate claims and drive eve
   assert.equal(executions, AUTONOMOUS_DOMAIN_NAMES.length - 1);
   assert.ok(finalSnapshot.items.every((item) => item.status === "completed"));
   assert.doesNotMatch(JSON.stringify(finalSnapshot), /private provider task payload|offline result|source secret/);
+});
+
+test("domain evidence adapter registry routes all twelve domains through scoped transient acquisition", async () => {
+  const agent = agentFor();
+  const evidencePlan = await agent.evidencePlan(AUTONOMOUS_DOMAIN_NAMES);
+  const registry = new AutonomousEvidenceAdapterRegistry();
+  const acquiredDomains = [];
+  const manifests = registerAutonomousEvidenceAdaptersForAllDomains(registry, (domain) => ({
+    adapterId: `source.${domain}`,
+    version: "1.0.0",
+    capabilities: ["bounded_evidence"],
+    sourceKinds: ["caller_fixture"],
+    acquire: (context) => {
+      acquiredDomains.push(context.requirement.domain);
+      return { transient_private_value: `${domain}-value`, domain, source_id: context.request.source_id };
+    },
+    project: (_value, context) => [{ label: context.requirement.label, kind: "fact", status: "observed", value_digest: null, source_digest: context.request.source_digest ?? null, limitations: ["caller_owned_transient_value"] }],
+  }));
+  assert.equal(manifests.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.ok(registry.coverage().every((row) => row.state === "complete"));
+  assert.equal(registry.toJSON().coverage_digest.length, 64);
+  assert.doesNotMatch(JSON.stringify(registry.toJSON()), /transient_private_value|caller_fixture_secret|api_key|access_token/);
+
+  const requests = evidencePlan.requirements.map((requirement, index) => ({
+    requirement_id: requirement.requirement_id,
+    source_id: `adapter-source-${index}`,
+    source_digest: "a".repeat(64),
+    request_id: `adapter-request-${index}`,
+    metadata: { adapter_test: true },
+  }));
+  const runtime = new AutonomousEvidenceRuntime({ plan: evidencePlan, journal: new InMemoryAutonomousEvidenceRuntimeJournal() });
+  const execution = await runtime.execute(requests, {
+    acquirer: registry.createAcquirer(),
+    projector: registry.createProjector(),
+    evaluator: {
+      evaluator_id: "adapter-evaluator",
+      evaluator_version: "1.0.0",
+      evaluate: () => ({ evaluator_id: "adapter-evaluator", evaluator_version: "1.0.0", verdict: "accepted", score: 1, evidence_digest: "b".repeat(64) }),
+    },
+  });
+  assert.equal(execution.json.status, "completed");
+  assert.equal(execution.json.receipts.length, evidencePlan.requirements.length);
+  assert.equal(new Set(acquiredDomains).size, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.doesNotMatch(JSON.stringify(execution.toJSON()), /transient_private_value|coding-value|science-value/);
+
+  registry.register({
+    adapterId: "source.coding.secondary",
+    version: "1.0.0",
+    domains: ["coding"],
+    capabilities: ["bounded_evidence"],
+    sourceKinds: ["caller_fixture"],
+    acquire: () => ({ alternate: true }),
+  });
+  assert.throws(() => registry.resolve("coding"), /ambiguous/);
+  assert.equal(registry.resolve("coding", "source.coding").adapter_id, "source.coding");
+  assert.throws(() => registry.resolve("science", "source.coding"), /not registered for science/);
 });

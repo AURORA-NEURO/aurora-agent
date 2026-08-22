@@ -568,6 +568,23 @@ export type {
   AutonomousEvidenceRuntimeResult,
 } from "./autonomous-evidence-runtime.js";
 export {
+  AUTONOMOUS_EVIDENCE_ADAPTER_REGISTRY_SCHEMA,
+  AUTONOMOUS_EVIDENCE_ADAPTER_MANIFEST_SCHEMA,
+  MAX_AUTONOMOUS_EVIDENCE_ADAPTERS,
+  MAX_AUTONOMOUS_EVIDENCE_ADAPTER_DOMAINS,
+  MAX_AUTONOMOUS_EVIDENCE_ADAPTER_CAPABILITIES,
+  MAX_AUTONOMOUS_EVIDENCE_ADAPTER_SOURCE_KINDS,
+  MAX_AUTONOMOUS_EVIDENCE_ADAPTER_REGISTRY_BYTES,
+  AutonomousEvidenceAdapterRegistry,
+  registerAutonomousEvidenceAdaptersForAllDomains,
+} from "./autonomous-evidence-adapters.js";
+export type {
+  AutonomousEvidenceAdapterManifest,
+  AutonomousEvidenceAdapterCoverage,
+  AutonomousEvidenceAdapterRegistryJSON,
+  AutonomousEvidenceAdapterRegistrationInput,
+} from "./autonomous-evidence-adapters.js";
+export {
   AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA,
   AUTONOMOUS_EVIDENCE_WORK_QUEUE_SCHEMA,
   AUTONOMOUS_EVIDENCE_WORKER_SCHEMA,

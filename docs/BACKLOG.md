@@ -77,6 +77,12 @@ replay/reconciliation metadata. It does not retrieve sources, interpret raw medi
 connectors, or establish truth on its own; external source adapters, domain evaluators, UI, and
 durable production persistence remain application-specific deployment work.
 
+TypeScript now adds an explicit `AutonomousEvidenceAdapterRegistry`. It can register scoped
+caller-owned acquisition/projector functions, report manifest-only coverage for all twelve domains,
+route runtime requests by requirement domain, refuse ambiguous or cross-domain adapter selection,
+and keep raw values outside registry projections and durable metadata. The registry provides the
+process boundary; it does not invent source truth or credentials.
+
 The shared brain lifecycle now includes atomic priority-ordered dequeue and side-effect-safe
 cancellation across the Rust MCP projection, the durable Python SQLite adapter, and the typed
 TypeScript controller. This closes the worker handoff gap while preserving the remaining boundary:

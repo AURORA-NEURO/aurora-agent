@@ -4217,6 +4217,39 @@ returns the evidence values as part of the settlement packet. These adapters are
 scaffolds, not truth or clinical authorities. Applications remain responsible for producing the
 signals, validating sources, and deciding whether a reward is eligible for learning credit.
 
+## Domain-scoped evidence adapters
+
+`AutonomousEvidenceAdapterRegistry` turns the loose evidence-runtime callback into an explicit
+source boundary. Each registration declares its adapter identity, version, supported domains,
+capabilities, and source kinds; the registry refuses unknown domains, ambiguous unqualified
+selection, and an adapter selected outside its registered scope. `createAcquirer()` and
+`createProjector()` route the runtime by the reviewed requirement domain while keeping the raw
+value in the caller-owned adapter/runtime path. `toJSON()` contains manifests and twelve-domain
+coverage only, never credentials, source values, prompts, or adapter closures.
+
+```typescript
+const adapters = new AutonomousEvidenceAdapterRegistry();
+registerAutonomousEvidenceAdaptersForAllDomains(adapters, (domain) => ({
+  adapterId: `source.${domain}`,
+  version: "1.0.0",
+  capabilities: ["bounded_evidence"],
+  sourceKinds: ["caller_fixture"],
+  acquire: (context) => callerSourceResolver(domain, context),
+  project: (value, context) => callerProjection(domain, value, context),
+}));
+
+const result = await new AutonomousEvidenceRuntime({ plan }).execute(requests, {
+  acquirer: adapters.createAcquirer(),
+  projector: adapters.createProjector(),
+  evaluator: callerEvaluator,
+});
+```
+
+The registry provides scope and routing, not truth: source retrieval, credential resolution,
+projection semantics, and evaluator authority remain caller-owned. Use an explicit
+`adapterIdForDomain` map when a domain has multiple registered providers; silent fuzzy selection
+is refused.
+
 ## Durable evidence acquisition workers
 
 The evidence runtime is intentionally caller-owned: it owns the transient acquirer input, projected
