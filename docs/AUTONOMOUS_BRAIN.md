@@ -359,6 +359,42 @@ report `model_catalogue_required` before any model is configured. The report als
 provider registration, credential collection, capacity/capability gaps, and mixed `partial`
 states instead of collapsing them into a misleading boolean.
 
+### Live model inventory synchronization
+
+`readiness()` intentionally does not contact providers. When an application wants to refresh the
+model catalogue, `AutonomousAgent.refresh_model_inventory()` provides the explicit authenticated
+boundary:
+
+```python
+snapshot = agent.refresh_model_inventory(
+    credentials=session,
+    providers=("openai", "anthropic"),
+    priors={
+        "openai/gpt-5": {
+            "quality": 0.82,
+            "reliability": 0.91,
+            "latency_ms": 900,
+            "cost_per_million_tokens": 10,
+        },
+    },
+    snapshot_store=inventory_store,
+)
+```
+
+Discovery rows are projected to secret-free `ProviderModelDescriptor` values. Every row must have
+an explicit caller-owned quality/latency/cost prior before it becomes selectable; the provider
+cannot promote its own inventory into a routing decision. Providers reconcile independently, so a
+credential failure or outage cannot retire another provider's models. A successful authoritative
+empty inventory retires stale arms for that provider, while a failed refresh leaves its prior
+catalogue untouched. The returned snapshot reports refreshed/partial/failed provider status,
+registered/replaced/removed model IDs, a catalogue digest, and static capability coverage for all
+twelve domain packs. Coverage is evidence about declared capabilities only; credentials, health,
+circuit, economics, and semantic quality remain live selection gates.
+
+`AutonomousModelInventoryStore` uses an atomic, digest-checked JSON snapshot containing only
+bounded metadata. It rejects tampered snapshots and never stores prompts, response bodies,
+authorization headers, keys, or opaque credential handles.
+
 If `learn=True` is supplied, the same
 facade runs the explicit evaluator and caller-owned bandit state through the existing online
 learning path; it does not turn a provider response into a reward automatically. An application

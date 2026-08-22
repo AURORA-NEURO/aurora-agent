@@ -87,6 +87,11 @@ from .autonomous_decision_persistence import (
     AutonomousDecisionCycleRehydrationContext,
     AutonomousDecisionCycleStateStore,
 )
+from .autonomous_model_inventory import (
+    AutonomousModelInventoryCoordinator,
+    AutonomousModelInventorySnapshot,
+    AutonomousModelInventoryStore,
+)
 from .evaluators import (
     CompositeDomainEvaluator,
     DomainEvaluatorRegistry,
@@ -10670,6 +10675,7 @@ class AutonomousAgent:
         )
         self.credential_provisioner = credential_provisioner or CredentialProvisioner(self.onboarding)
         self.catalogue = model_catalogue or ModelCatalogue()
+        self.model_inventory = AutonomousModelInventoryCoordinator(runtime, self.catalogue)
         self.brain = brain or AutonomousBrain(workspace, runtime)
         self.ledger = ledger
         self.memory = memory
@@ -10788,6 +10794,54 @@ class AutonomousAgent:
             priors=priors,
             providers=providers,
         )
+
+    def refresh_model_inventory(
+        self,
+        *,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession | None = None,
+        providers: Sequence[str] | None = None,
+        priors: Mapping[str, Mapping[str, Any]],
+        domain_requirements: Mapping[str, Sequence[str]] | None = None,
+        limit: int = MAX_PROVIDER_DISCOVERED_MODELS,
+        snapshot_store: AutonomousModelInventoryStore | None = None,
+        refresh_id: str | None = None,
+        raise_on_error: bool = False,
+    ) -> dict[str, Any]:
+        """Refresh live provider model inventory and expose coverage for every reviewed domain.
+
+        Discovery is provider-authenticated when required, but the returned snapshot is always
+        metadata-only.  Explicit ``priors`` remain mandatory for each discovered ``provider/model``
+        arm; the coordinator reconciles one provider at a time so a failed provider cannot retire
+        models belonging to another provider.  By default the coverage rows are derived from all
+        configured domain packs, making model availability visible before automatic routing.
+        """
+
+        if domain_requirements is None:
+            domain_requirements = {
+                row["domain"]: tuple(row["model_capabilities"])
+                for row in self.orchestrator.pack_registry.catalogue()
+                if isinstance(row, Mapping)
+                and isinstance(row.get("domain"), str)
+                and isinstance(row.get("model_capabilities"), Sequence)
+            }
+        try:
+            snapshot = self.model_inventory.refresh(
+                credentials=credentials,
+                providers=providers,
+                priors=priors,
+                domain_requirements=domain_requirements,
+                limit=limit,
+                snapshot_store=snapshot_store,
+                refresh_id=refresh_id,
+                raise_on_error=raise_on_error,
+            )
+        except Exception as error:
+            if isinstance(error, BrainRunError):
+                raise
+            raise BrainRunError("model inventory refresh failed") from error
+        if not isinstance(snapshot, AutonomousModelInventorySnapshot):
+            raise BrainRunError("model inventory coordinator returned an invalid snapshot")
+        return snapshot.to_dict()
 
     def register_provider(self, config: ProviderConfig) -> None:
         """Register non-secret provider transport metadata for the key-entry flow."""
