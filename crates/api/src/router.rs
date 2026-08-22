@@ -35,7 +35,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const API_VERSION: &str = "v1";
 pub const DEFAULT_MAX_HEADER_BYTES: usize = 32 * 1024;
@@ -10852,6 +10852,7 @@ mod tests {
     use super::*;
     use crate::http::HttpRequest;
     use std::collections::{BTreeMap, BTreeSet};
+    use std::time::{Duration, Instant};
 
     fn request(method: &str, target: &str, body: Value) -> HttpRequest {
         HttpRequest {
