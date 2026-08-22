@@ -12,6 +12,9 @@ license = { text = "Apache-2.0" }
 authors = [{ name = "AURORA-NEURO" }]
 dependencies = []
 
+[project.scripts]
+aurora-agent = "prism_sdk.cli:main"
+
 [tool.setuptools.packages.find]
 where = ["."]
 

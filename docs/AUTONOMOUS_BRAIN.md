@@ -118,6 +118,53 @@ application owns authentication, TLS, CSRF protection, tenancy, rate limits, and
 permissions. The SDK owns the sensitive part after intake—non-echo collection helpers, bounded
 in-memory lifetime, opaque handles, provider matching, expiry/revocation, and redacted readiness.
 
+### Operator process boundary
+
+The Python package now ships a small process boundary for operators and local integrations. It is
+available as `aurora-agent` after installing the Python package, or as `python -m prism_sdk` from
+the Python workspace:
+
+```bash
+python -m prism_sdk catalogue
+python -m prism_sdk evidence-plan --domain research --domain science
+python -m prism_sdk route --task "compare two research hypotheses"
+python -m prism_sdk provider-status --provider openai
+```
+
+`catalogue`, `evidence-plan`, and `route` never contact a provider or collect credentials. They
+project the reviewed twelve-domain catalogue, workflow/evaluator contracts, deterministic routing
+evidence, and evidence requirements as JSON. `provider-status` registers only non-secret provider
+transport metadata and reports the redacted BYOK contract.
+
+For a real invocation, `run` connects to a caller-owned MCP server and keeps the existing brain
+boundaries intact:
+
+```bash
+python -m prism_sdk run \
+  --mcp-command "python path/to/mcp_server.py" \
+  --provider openai \
+  --task "prepare a bounded research plan" \
+  --domain research \
+  --model gpt-5 \
+  --model-capability reasoning \
+  --approve-provider-call
+```
+
+The command accepts no API-key or token argument. By default it uses a no-echo prompt; deployment
+automation can select `--credential-source environment --credential-env OPENAI_API_KEY`. The value
+is converted immediately into a short-lived in-memory session, is passed to the runtime only as an
+opaque handle, and is revoked on exit. The MCP process is launched with `shell=False`, and its
+command is never placed in a provider request. Repeating `--model` creates a selectable candidate
+set, while `--quality`, `--latency-ms`, `--cost-per-million-tokens`, `--reliability`, and capability
+flags provide explicit caller-owned routing priors. Provider calls and mission dispatch remain
+separate approvals (`--approve-provider-call` and `--approve-mission-dispatch`); omitting either
+leaves the brain in its proposal/refusal boundary instead of widening authority implicitly.
+
+The CLI catches parser, transport, provider, and runtime failures at the process boundary without
+echoing exception text. This is intentionally conservative: a host application that needs rich
+diagnostics should consume the typed SDK errors inside its own authenticated logging boundary,
+while the command-line surface remains safe for terminals and automation logs.
+
 ### Credentialless local transport for development and deterministic evaluation
 
 Applications that bring their own local model, test double, or policy-controlled inference service
