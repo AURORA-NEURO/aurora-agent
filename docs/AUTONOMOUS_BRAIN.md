@@ -5006,6 +5006,49 @@ checks connector-kind/domain scope, and binds execution to the plan digest retur
 gateway. It does not accept a key or perform discovery; the configured `ApiClient` and any
 caller-owned credential session remain outside the autonomous metadata boundary.
 
+### Metadata-only autonomous run traces
+
+The TypeScript runtime also exposes an explicit run-level trace for applications that need to
+explain what the autonomous brain decided and where a run stopped. `InMemoryAutonomousRunTraceStore`
+is a bounded hash-chained journal; a deployment can implement the same
+`AutonomousRunTraceStore` contract over its own transactional database or object store. The
+trace records only run/task/route/plan/selection digests, domain identities, provider/model
+metadata, invocation latency and token counts, retry/failure categories, and terminal status.
+Prompts, task text, provider responses, credentials, tool arguments, connector values, and raw
+evidence are never accepted by the trace schema.
+
+Use the explicit traced execution boundary when the trace is required for an invocation:
+
+```typescript
+const traceStore = new InMemoryAutonomousRunTraceStore();
+const traced = await agent.runWithTrace(
+  "review this bounded experiment and report uncertainty",
+  {
+    traceStore,
+    runId: "experiment-review-01",
+    run: {
+      domain: "science",
+      candidates,
+      approveProviderCall: true,
+    },
+  },
+);
+
+console.log(traced.result.status, traced.trace.trace_digest);
+const events = traceStore.events({ run_id: "experiment-review-01" });
+const snapshot = traceStore.snapshot();
+traceStore.verifyIntegrity();
+```
+
+`runWithTrace()` composes with an existing provider observer and propagates through a
+cross-domain route. `runCrossDomainWithTrace()` makes that propagation explicit for specialist
+fan-out and synthesis: the same trace contains every provider turn while its summary exposes
+only counts and digests. A terminal trace state cannot accept later events; snapshot restore
+verifies the complete chain and leaves the live store unchanged when tampering is detected.
+Trace status is intentionally weaker than task truth: `completed` means the reviewed runtime
+boundary completed, not that an evaluator, source, clinical, scientific, or operational claim is
+correct. Independent evaluation and learning remain separate gates.
+
 `AutonomousConnectorRegistry.select_for_domains()` is the explicit decision stage for connector
 routing. It produces a deterministic, digest-bound selection plan for every requested
 domain/capability, preserves all candidate connector and manifest digests for review, and never

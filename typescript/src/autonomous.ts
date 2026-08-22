@@ -31,6 +31,12 @@ import type {
 } from "./autonomous-capabilities.js";
 import type { AutonomousCapabilityJournalStore } from "./autonomous-capability-persistence.js";
 import {
+  autonomousRunTraceStatus,
+  AutonomousRunTraceSession,
+  type AutonomousRunTraceStore,
+  type AutonomousRunTraceSummary,
+} from "./autonomous-run-trace.js";
+import {
   AutonomousConnectorRegistry,
   AutonomousConnectorRuntime,
   type AutonomousConnectorDispatchRequest,
@@ -107,7 +113,7 @@ import {
   type AutonomousModelCandidateDefaults,
   type ProviderModelDiscovery,
 } from "./llm.js";
-import { ToolCatalogue, canonicalJson, digestBytesSync, digestCanonicalJsonText, digestCanonicalJsonTextSync, digestJson } from "./tooling.js";
+import { ToolCatalogue, canonicalJson, digestBytesSync, digestCanonicalJsonText, digestCanonicalJsonTextSync, digestJson, digestJsonSync } from "./tooling.js";
 import type {
   BrainBanditArm,
   BrainBanditContext,
@@ -1030,6 +1036,23 @@ export interface AutonomousCrossDomainRunOptions extends AutonomousRunOptions {
   synthesize?: boolean;
   /** Maximum number of specialist provider calls in flight during bounded fan-out. */
   maxParallelChildren?: number;
+}
+
+/** Explicit caller-owned metadata trace controls for one autonomous run. */
+export interface AutonomousRunWithTraceOptions {
+  traceStore: AutonomousRunTraceStore;
+  runId: string;
+  run?: AutonomousRunOptions;
+}
+
+export interface AutonomousTracedRunResult {
+  result: AutonomousRunResult;
+  trace: AutonomousRunTraceSummary;
+}
+
+export interface AutonomousTracedCrossDomainRunResult {
+  result: AutonomousCrossDomainRunResult;
+  trace: AutonomousRunTraceSummary;
 }
 
 export interface DomainToolExecutor {
@@ -4512,6 +4535,62 @@ export class AutonomousAgent {
       throw error;
     }
     return { schema: AUTONOMOUS_GOAL_LEARNING_SCHEMA, goal: updated, result, result_status: resultStatus, goal_status: updated.status, outcome_digest: outcomeDigest, evaluator_digest: updated.evaluator_digest, learning_state_digest: updated.learning_state_digest, progress_digest: updated.progress_digest, learning_mode: "cross_domain_replan", cycle, retention: AUTONOMOUS_GOAL_RETENTION, secret_material: "never_returned" };
+  }
+
+  /**
+   * Execute one run while retaining a caller-owned, metadata-only hash-chained trace.
+   *
+   * The trace observer is composed with any caller observer and is propagated through
+   * cross-domain children and synthesis. It records provider lifecycle metadata only; the
+   * task, prompt, response, credentials, tool arguments, and transient evidence stay local.
+   */
+  async runWithTrace(task: string, options: AutonomousRunWithTraceOptions): Promise<AutonomousTracedRunResult> {
+    if (!options || typeof options !== "object") throw new ArgumentError("autonomous runWithTrace options must be an object");
+    if (!options.traceStore || typeof options.traceStore.append !== "function" || typeof options.traceStore.events !== "function") throw new ArgumentError("autonomous runWithTrace requires a trace store");
+    const taskText = boundedText("autonomous traced task", task, 32_000);
+    const taskDigest = await digestJson({ task: taskText });
+    const runOptions = options.run ?? {};
+    const initialDomains = [runOptions.domain ?? "cross_domain"] as AutonomousDomainName[];
+    const trace = new AutonomousRunTraceSession(options.traceStore, { run_id: options.runId, task_digest: taskDigest, domains: initialDomains });
+    await trace.started();
+    try {
+      const result = await this.run(taskText, { ...runOptions, observer: composeInvocationObservers(runOptions.observer, trace.providerObserver()) });
+      const routeDomains = result.route.selected_domains.length ? result.route.selected_domains : result.route.primary_domain ? [result.route.primary_domain] : initialDomains;
+      const domains = [...new Set([...routeDomains, ...(result.route.cross_domain ? ["cross_domain" as const] : [])])] as AutonomousDomainName[];
+      const planDigest = result.cross_domain?.blueprint?.plan_digest ?? result.blueprint?.plan.plan_digest ?? null;
+      const selectionDigest = result.selection ? await digestJson(result.selection) : null;
+      await trace.complete({ status: autonomousRunTraceStatus(result.status), domains, route_digest: result.route.route_digest, plan_digest: planDigest, selection_digest: selectionDigest });
+      return { result, trace: await trace.summary() };
+    } catch (error) {
+      const failureClass = error instanceof Error ? error.constructor.name : "UnknownError";
+      const failureCode = error instanceof ProviderRuntimeError ? error.code : error instanceof ArgumentError ? "argument_error" : "runtime_error";
+      await trace.fail({ failure_class: failureClass, failure_code: failureCode, detail_digest: digestJsonSync({ failure_class: failureClass, failure_code: failureCode }) }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  /** Cross-domain variant of runWithTrace; the same trace contains specialist and synthesis turns. */
+  async runCrossDomainWithTrace(task: string, options: AutonomousRunWithTraceOptions): Promise<AutonomousTracedCrossDomainRunResult> {
+    if (!options || typeof options !== "object") throw new ArgumentError("autonomous runCrossDomainWithTrace options must be an object");
+    if (!options.traceStore || typeof options.traceStore.append !== "function" || typeof options.traceStore.events !== "function") throw new ArgumentError("autonomous runCrossDomainWithTrace requires a trace store");
+    const taskText = boundedText("autonomous traced cross-domain task", task, 32_000);
+    const taskDigest = await digestJson({ task: taskText });
+    const runOptions = options.run ?? {};
+    const trace = new AutonomousRunTraceSession(options.traceStore, { run_id: options.runId, task_digest: taskDigest, domains: ["cross_domain"] });
+    await trace.started();
+    try {
+      const result = await this.runCrossDomain(taskText, { ...runOptions, observer: composeInvocationObservers(runOptions.observer, trace.providerObserver()) });
+      const domains = [...new Set([...result.route.selected_domains, "cross_domain"])] as AutonomousDomainName[];
+      const planDigest = result.blueprint?.plan_digest ?? null;
+      const selectionDigest = result.synthesis?.selection ? await digestJson(result.synthesis.selection) : null;
+      await trace.complete({ status: autonomousRunTraceStatus(result.status), domains, route_digest: result.route.route_digest, plan_digest: planDigest, selection_digest: selectionDigest });
+      return { result, trace: await trace.summary() };
+    } catch (error) {
+      const failureClass = error instanceof Error ? error.constructor.name : "UnknownError";
+      const failureCode = error instanceof ProviderRuntimeError ? error.code : error instanceof ArgumentError ? "argument_error" : "runtime_error";
+      await trace.fail({ failure_class: failureClass, failure_code: failureCode, detail_digest: digestJsonSync({ failure_class: failureClass, failure_code: failureCode }) }).catch(() => undefined);
+      throw error;
+    }
   }
 
   async run(task: string, options: AutonomousRunOptions = {}): Promise<AutonomousRunResult> {
