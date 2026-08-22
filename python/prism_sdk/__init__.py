@@ -228,6 +228,18 @@ from .autonomous_connector_workflow import (
     AutonomousConnectorWorkflowAdapter,
     run_autonomous_connector_workflow,
 )
+from .autonomous_connector_mission import (
+    AUTONOMOUS_CONNECTOR_MISSION_SCHEMA,
+    MAX_AUTONOMOUS_CONNECTOR_MISSION_STEP_CALLS,
+    MAX_AUTONOMOUS_CONNECTOR_MISSION_OUTPUT_BYTES,
+    AUTONOMOUS_CONNECTOR_MISSION_STEP_STATUSES,
+    AUTONOMOUS_CONNECTOR_MISSION_RUN_STATUSES,
+    AutonomousConnectorMissionStepContext,
+    AutonomousConnectorMissionStepExecution,
+    AutonomousConnectorMissionAdapter,
+    AutonomousConnectorMissionRun,
+    run_autonomous_connector_mission,
+)
 from .workflow_cycle import (
     AUTONOMOUS_WORKFLOW_CYCLE_SCHEMA,
     AUTONOMOUS_WORKFLOW_CYCLE_CHECKPOINT_SCHEMA,

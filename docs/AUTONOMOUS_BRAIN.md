@@ -191,6 +191,77 @@ or retain handler payloads in health, planning, learning, or receipts. This give
 cross-language offline path for deterministic evaluation and local model bridges while preserving
 the same approval and autonomous-selection gates used in production deployments.
 
+### Connector-backed mission execution and explicit online adaptation
+
+`run_connector_workflow()` is the stage-oriented workflow path. For callers that already have a
+typed `MissionRequest`/`MissionStep` graph, `run_connector_mission()` provides the corresponding
+mission-oriented path without requiring an LLM credential:
+
+```python
+from prism_sdk import (
+    InMemoryAutonomousConnectorFeedbackLedger,
+    MissionRequest,
+    MissionStep,
+)
+
+ledger = InMemoryAutonomousConnectorFeedbackLedger()
+mission = MissionRequest(
+    mission_id="review-001",
+    goal="review a caller-owned repository observation",
+    steps=(MissionStep(
+        id="repository-observation",
+        domain="coding",
+        capability="review",
+        objective="inspect bounded repository metadata",
+        tool="repository_fixture",
+        arguments={
+            "repository_digest": "caller-supplied-digest",
+            "changed_files": ["caller-supplied-file-digest"],
+            "test_results": {"passed": 3},
+        },
+    ),),
+)
+result = agent.run_connector_mission(
+    mission=mission,
+    approved=True,
+    feedback_ledger=ledger,
+    feedback_by_step={
+        "repository-observation": {
+            "feedback_id": "review-001-feedback",
+            "evaluator_id": "caller-reviewer",
+            "evaluator_version": "2026.08",
+            "reward": 0.8,
+            "passed": True,
+            "source": "caller_evaluator",
+        },
+    },
+)
+```
+
+The adapter validates the dependency DAG and exact domain/capability operation contract before
+dispatch. A selection plan is bound into the dispatch request, and the connector runtime still
+owns approval, scope, idempotency, receipt journaling, and executor isolation. Mission checkpoints
+retain step digests, attempt numbers, selection-plan digests, receipt/payload digests, and refusal
+classes; they never retain goals, objectives, arguments, connector values, or credentials. If a
+completed step is needed by a later step after restart, the caller must supply `resume_outputs`.
+If a receipt is replayed, `rehydrate_payload` must return a JSON-safe value with exactly the stored
+payload digest or the mission pauses in `reconciliation_required`.
+
+Connector status is deliberately not reward. A caller evaluator can settle a receipt later through
+`AutonomousConnectorMissionAdapter.settle_evaluator_feedback()` or at dispatch time through
+`feedback_by_step`. The feedback ledger accepts only bounded, explicit `source="caller_evaluator"`
+packets and stores evaluator identity, reward, pass state, and evidence digest. The next mission
+selection may consume the ledger's health/success/reward projection through weighted evidence;
+without a feedback packet, the adapter remains on deterministic lexicographic selection. This is
+an online adaptation seam, not an automatic truth oracle: the embedding application owns the
+rubric, evidence retention, evaluator trust, and decision to persist or discard the next signal.
+
+The built-in offline connector is useful for CI and local development across all twelve domains.
+It accepts metadata-shaped fixtures, returns field/shape/digest observations, rejects secret-shaped
+fields, and never performs network access. Production connector executors can close over a short-
+lived browser session, repository workspace, data client, or provider handle, but those values
+remain transient and outside the mission checkpoint.
+
 ### Non-interactive deployment bootstrap
 
 When no person enters a key, the deployment should register a source resolver during service

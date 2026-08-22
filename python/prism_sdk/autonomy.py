@@ -11385,6 +11385,55 @@ class AutonomousAgent:
         except Exception as error:
             raise BrainRunError("connector workflow execution failed") from error
 
+    def run_connector_mission(
+        self,
+        *,
+        mission: Any,
+        checkpoint: Any | None = None,
+        approved: bool = False,
+        retry_blocked: bool = False,
+        max_step_calls: int | None = None,
+        request_for_step: Callable[[Any], Mapping[str, Any]] | None = None,
+        rehydrate_payload: Callable[[Any], Any] | None = None,
+        resume_outputs: Mapping[str, Any] | None = None,
+        operation_registry: Any | None = None,
+        selection_signals: Mapping[str, Mapping[str, Any]] | None = None,
+        feedback_ledger: Any | None = None,
+        feedback_by_step: Mapping[str, Mapping[str, Any]] | None = None,
+    ) -> Any:
+        """Execute a typed mission DAG through reviewed connectors without model credentials.
+
+        This path preserves the existing ``MissionRequest`` graph while replacing provider-backed
+        tool dispatch with exact connector selection.  Mission checkpoints retain only digests;
+        caller-owned payload/output rehydration is required after restart, and evaluator rewards
+        are accepted only through the explicit feedback ledger.
+        """
+
+        from .autonomous_connector_mission import run_autonomous_connector_mission
+
+        if self.connector_runtime is None:
+            raise BrainRunError("connector runtime is not configured")
+        try:
+            return run_autonomous_connector_mission(
+                self.connector_runtime,
+                mission=mission,
+                checkpoint=checkpoint,
+                approved=approved,
+                retry_blocked=retry_blocked,
+                max_step_calls=max_step_calls,
+                request_for_step=request_for_step,
+                rehydrate_payload=rehydrate_payload,
+                resume_outputs=resume_outputs,
+                operation_registry=operation_registry,
+                selection_signals=selection_signals,
+                feedback_ledger=feedback_ledger,
+                feedback_by_step=feedback_by_step,
+            )
+        except (ArgumentError, BrainRunError):
+            raise
+        except Exception as error:
+            raise BrainRunError("connector mission execution failed") from error
+
     def connector_selection_plan(
         self,
         domains: Sequence[str],
