@@ -98,6 +98,75 @@ test("brain facade closed-loop execution accepts every built-in domain through o
   assert.ok(runtime.providerStatus("offline").successes >= AUTONOMOUS_DOMAIN_NAMES.length);
 });
 
+test("brain facade exposes bounded evaluator-guided replanning across every built-in domain", async () => {
+  const runtime = localRuntime();
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const result = await brain.executeAdaptiveCycle(
+      { task: tasks[domain], domain },
+      {
+        approveProviderCall: true,
+        adaptive: {
+          maxReplans: 0,
+          evaluate: () => ({ evaluator_id: `${domain}-evaluator`, evaluator_version: "1", reward: 0.8, passed: true, replan_requested: false }),
+        },
+      },
+    );
+    assert.equal(result.status, "completed", domain);
+    assert.equal(result.adaptive.attempts.length, 1, domain);
+    assert.equal(result.adaptive.replan_count, 0, domain);
+    assert.equal(result.adaptive.final.status, "completed", domain);
+  }
+  assert.equal(runtime.providerStatus("offline").successes, AUTONOMOUS_DOMAIN_NAMES.length);
+});
+
+test("brain facade keeps adaptive replanning bounded and routes cross-domain fan-out through the same boundary", async () => {
+  const runtime = localRuntime();
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+  let evaluations = 0;
+  const single = await brain.executeAdaptiveCycle(
+    { task: "design a reproducible science experiment", domain: "science" },
+    {
+      approveProviderCall: true,
+      adaptive: {
+        maxReplans: 1,
+        evaluate: () => {
+          evaluations += 1;
+          return { evaluator_id: "bounded-reviewer", evaluator_version: "1", reward: evaluations === 1 ? 0.35 : 0.91, passed: evaluations > 1, replan_requested: evaluations === 1, replan_instruction: evaluations === 1 ? "tighten reproducibility and state uncertainty" : null };
+        },
+      },
+    },
+  );
+  assert.equal(single.status, "completed");
+  assert.equal(single.adaptive.attempts.length, 2);
+  assert.equal(single.adaptive.replan_count, 1);
+  assert.equal(single.adaptive.status, "completed");
+
+  const cross = await brain.executeAdaptiveCycle(
+    { task: "research a biomedical neuroscience experiment with patient EEG evidence", allow_cross_domain: true },
+    {
+      approveProviderCall: true,
+      adaptive: {
+        maxReplans: 0,
+        synthesize: false,
+        maxParallelChildren: 2,
+        subtasks: [
+          { id: "bio", domain: "biomedical", task: "review biomedical evidence" },
+          { id: "neuro", domain: "neuroscience", task: "analyze EEG limitations" },
+        ],
+        evaluate: (run) => ({ evaluator_id: "cross-reviewer", evaluator_version: "1", reward: 0.82, passed: true, replan_requested: false, rewards: {} }),
+      },
+    },
+  );
+  assert.equal(cross.status, "completed");
+  assert.equal(cross.adaptive.attempts.length, 1);
+  assert.equal(cross.adaptive.final.run.child_runs.length, 2);
+});
+
 test("brain facade runs a connector observation before provider invocation and supports plan replay", async () => {
   const seen = [];
   const runtime = localRuntime((request) => seen.push(request));

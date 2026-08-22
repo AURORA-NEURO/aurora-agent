@@ -368,6 +368,12 @@ export type {
   AutonomousBrainCycleResult,
   AutonomousBrainCycleStatus,
   AutonomousBrainCycleExecution,
+  AutonomousBrainSingleAdaptiveCycleOptions,
+  AutonomousBrainCrossDomainAdaptiveCycleOptions,
+  AutonomousBrainAdaptiveCycleOptions,
+  AutonomousBrainAdaptiveCycleResult,
+  AutonomousBrainAdaptiveCycleStatus,
+  AutonomousBrainAdaptiveCycleExecution,
   AutonomousBrainBatchItem,
   AutonomousBrainBatchResult,
 } from "./autonomous-brain-facade.js";

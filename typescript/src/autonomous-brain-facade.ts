@@ -22,11 +22,17 @@ import {
 } from "./autonomous-connector-facade.js";
 import {
   runAutonomousCrossDomainDecisionCycle,
+  runAutonomousCrossDomainReplanCycle,
   runAutonomousDecisionCycle,
+  runAutonomousReplanCycle,
   type AutonomousCrossDomainDecisionCycleOptions,
   type AutonomousCrossDomainDecisionCycleResult,
+  type AutonomousCrossDomainReplanCycleOptions,
+  type AutonomousCrossDomainReplanCycleResult,
   type AutonomousDecisionCycleOptions,
   type AutonomousDecisionCycleResult,
+  type AutonomousReplanCycleOptions,
+  type AutonomousReplanCycleResult,
 } from "./autonomous-cycle.js";
 import { canonicalJson, digestJsonSync } from "./tooling.js";
 import type { JsonObject, JsonValue } from "./types.js";
@@ -174,6 +180,39 @@ export interface AutonomousBrainCycleExecution {
   connector: AutonomousConnectorOperationExecution | null;
   error: { error_class: string; failure_code: string } | null;
   retention: "plan_metadata_only;cycle_response_and_connector_values_transient_to_caller";
+  secret_material: "never_returned";
+}
+
+type AutonomousBrainAdaptiveCycleBoundKeys = AutonomousBrainCycleBoundKeys;
+
+/** Single-domain evaluator-guided loop controls with route-owned fields reserved for the facade. */
+export type AutonomousBrainSingleAdaptiveCycleOptions = Omit<AutonomousReplanCycleOptions, AutonomousBrainAdaptiveCycleBoundKeys>;
+
+/** Cross-domain evaluator-guided loop controls with route-owned fields reserved for the facade. */
+export type AutonomousBrainCrossDomainAdaptiveCycleOptions = Omit<AutonomousCrossDomainReplanCycleOptions, AutonomousBrainAdaptiveCycleBoundKeys>;
+
+export interface AutonomousBrainAdaptiveCycleOptions {
+  /** Explicit provider approval; defaults to false even when a model is registered. */
+  approveProviderCall?: boolean;
+  /** Run the optional connector operation before the first attempt; defaults to true. */
+  connectorFirst?: boolean;
+  /** Include the connector's transient bounded observation in every attempt's context. */
+  includeConnectorObservation?: boolean;
+  /** Evaluator, bounded replan, learning, persistence, memory, and budget controls. */
+  adaptive: AutonomousBrainSingleAdaptiveCycleOptions | AutonomousBrainCrossDomainAdaptiveCycleOptions;
+}
+
+export type AutonomousBrainAdaptiveCycleResult = AutonomousReplanCycleResult | AutonomousCrossDomainReplanCycleResult;
+export type AutonomousBrainAdaptiveCycleStatus = AutonomousBrainAdaptiveCycleResult["status"] | "connector_blocked";
+
+export interface AutonomousBrainAdaptiveCycleExecution {
+  schema: typeof AUTONOMOUS_BRAIN_FACADE_SCHEMA;
+  status: AutonomousBrainAdaptiveCycleStatus;
+  plan: AutonomousBrainPlanJSON;
+  adaptive: AutonomousBrainAdaptiveCycleResult | null;
+  connector: AutonomousConnectorOperationExecution | null;
+  error: { error_class: string; failure_code: string } | null;
+  retention: "plan_metadata_only;adaptive_responses_and_connector_values_transient_to_caller";
   secret_material: "never_returned";
 }
 
@@ -467,6 +506,24 @@ export class AutonomousBrainFacade {
     return this.executeCyclePrepared(prepared, options);
   }
 
+  /**
+   * Execute the bounded evaluator -> learn -> optional replan loop behind the same route,
+   * connector, approval, and metadata-only plan boundary. Replanning is always delegated to
+   * the lower-level capped loop, so evaluator feedback cannot silently widen authority.
+   */
+  async executeAdaptiveCycle(input: AutonomousBrainRequest, options: AutonomousBrainAdaptiveCycleOptions): Promise<AutonomousBrainAdaptiveCycleExecution> {
+    const prepared = await this.prepare(input);
+    return this.executeAdaptiveCyclePrepared(prepared, options);
+  }
+
+  /** Rehydrate a persisted metadata-only plan, then run the bounded adaptive loop. */
+  async executePlannedAdaptiveCycle(plan: AutonomousBrainPlan, input: AutonomousBrainRequest, options: AutonomousBrainAdaptiveCycleOptions): Promise<AutonomousBrainAdaptiveCycleExecution> {
+    if (!(plan instanceof AutonomousBrainPlan)) throw new ArgumentError("autonomous brain executePlannedAdaptiveCycle requires a typed plan");
+    const prepared = await this.prepare(input);
+    if (prepared.plan.plan_digest !== plan.plan_digest) throw new ArgumentError("autonomous brain adaptive cycle plan does not match the transient request");
+    return this.executeAdaptiveCyclePrepared(prepared, options);
+  }
+
   /** Execute independent brain requests with bounded concurrency and deterministic result order. */
   async executeBatch(inputs: readonly AutonomousBrainRequest[], options: { maxParallelism?: number; stopOnError?: boolean; execution?: AutonomousBrainExecuteOptions } = {}): Promise<AutonomousBrainBatchResult> {
     if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_BRAIN_BATCH) throw new ArgumentError(`autonomous brain batch must contain 1..=${MAX_AUTONOMOUS_BRAIN_BATCH} entries`);
@@ -597,6 +654,50 @@ export class AutonomousBrainFacade {
       ? await runAutonomousCrossDomainDecisionCycle(this.agent, request.task, cycleOptions as AutonomousCrossDomainDecisionCycleOptions)
       : await runAutonomousDecisionCycle(this.agent, request.task, cycleOptions as AutonomousDecisionCycleOptions);
     return base(cycle.status, cycle, connector, null);
+  }
+
+  private async executeAdaptiveCyclePrepared(prepared: PreparedBrainRequest, options: AutonomousBrainAdaptiveCycleOptions): Promise<AutonomousBrainAdaptiveCycleExecution> {
+    if (!options || !isObject(options.adaptive) || typeof options.adaptive.evaluate !== "function") throw new ArgumentError("autonomous brain adaptive cycle requires an evaluator callback");
+    const { request, route, plan } = prepared;
+    const base = (status: AutonomousBrainAdaptiveCycleStatus, adaptive: AutonomousBrainAdaptiveCycleResult | null, connector: AutonomousConnectorOperationExecution | null, error: { error_class: string; failure_code: string } | null): AutonomousBrainAdaptiveCycleExecution => ({
+      schema: AUTONOMOUS_BRAIN_FACADE_SCHEMA,
+      status,
+      plan: plan.toJSON(),
+      adaptive,
+      connector,
+      error,
+      retention: "plan_metadata_only;adaptive_responses_and_connector_values_transient_to_caller",
+      secret_material: "never_returned",
+    });
+    if (plan.status === "route_review_required") return base("route_review_required", null, null, null);
+    if (plan.status === "connector_review_required" || (prepared.connectorPlan && prepared.connectorPlan.status !== "ready")) {
+      return base("connector_blocked", null, null, { error_class: "ConnectorOperationError", failure_code: "configuration" });
+    }
+    if (isObject(options.adaptive) && Object.prototype.hasOwnProperty.call(options.adaptive, "semanticRouting")) throw new ArgumentError("autonomous brain adaptive cycle owns its reviewed route; semanticRouting is not available through executeAdaptiveCycle");
+    let connector: AutonomousConnectorOperationExecution | null = null;
+    if (request.connector !== undefined && options.connectorFirst !== false) {
+      if (!this.connectorOperations || !prepared.connectorPlan) throw new ArgumentError("autonomous brain connector plan is unavailable");
+      connector = await this.connectorOperations.executePlanned(prepared.connectorPlan, request.connector);
+      if (!connectorSucceeded(connector.status)) return base("connector_blocked", null, connector, { error_class: "ConnectorOperationError", failure_code: connector.status });
+    }
+    const context = [
+      ...(request.context ?? []),
+      ...(connector && options.includeConnectorObservation !== false ? [observationChunk(connector)] : []),
+    ];
+    const adaptiveOptions = {
+      ...(options.adaptive ?? {}),
+      routeOverride: route,
+      domain: route.primary_domain ?? undefined,
+      capability: request.capability,
+      context,
+      hints: request.hints,
+      allowCrossDomain: request.allow_cross_domain,
+      approveProviderCall: options.approveProviderCall ?? options.adaptive.approveProviderCall ?? false,
+    };
+    const adaptive = route.cross_domain
+      ? await runAutonomousCrossDomainReplanCycle(this.agent, request.task, adaptiveOptions as AutonomousCrossDomainReplanCycleOptions)
+      : await runAutonomousReplanCycle(this.agent, request.task, adaptiveOptions as AutonomousReplanCycleOptions);
+    return base(adaptive.status, adaptive, connector, null);
   }
 }
 

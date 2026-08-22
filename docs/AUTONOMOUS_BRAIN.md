@@ -3356,6 +3356,46 @@ The cross-domain settlement preserves specialist identity and delayed return-to-
 single-domain settlement preserves episode identity and next bandit state. Both are caller-owned
 transient results with metadata-only persistence projections.
 
+For evaluator-directed recovery, the same façade now exposes `executeAdaptiveCycle()` and
+`executePlannedAdaptiveCycle()`. These methods select the reviewed single-domain or cross-domain
+replan engine automatically. The required evaluator returns a value-only reward packet plus an
+explicit `replan_requested` decision; any instruction is screened for credential-shaped content,
+bounded to the SDK limit, and passed as transient context only. The lower-level engines cap
+additional attempts at three, preserve the original route and budget, settle each completed
+attempt independently when learning is enabled, and expose only attempt/evaluation/settlement
+projections at the façade boundary.
+
+```typescript
+const adaptive = await brain.executeAdaptiveCycle(
+  { task: "design and critique a reproducible experiment", domain: "science" },
+  {
+    approveProviderCall: true,
+    adaptive: {
+      maxReplans: 2,
+      evaluate: (run) => {
+        const review = callerOwnedEvaluator(run); // raw evidence remains caller-owned
+        return {
+          evaluator_id: "science-reviewer",
+          evaluator_version: "2026-08-21",
+          reward: review.reward,
+          passed: review.passed,
+          replan_requested: review.needs_revision,
+          replan_instruction: review.needs_revision ? review.instruction : null,
+        };
+      },
+    },
+  },
+);
+```
+
+`adaptive.adaptive` is deliberately separate from ordinary `cycle` controls so a caller cannot
+accidentally treat a one-shot evaluator as a replan evaluator. `adaptive.final` contains the
+last decision-cycle projection, while `adaptive.attempts` and `adaptive.evaluations` make the
+bounded trajectory auditable. A successful evaluator terminates with `completed`; a failed
+evaluation without a requested retry terminates with `completed_without_replan`, and an
+explicit retry after the ceiling terminates with `replan_limit_reached`. Connector review,
+route review, and provider approval remain independent gates before the first attempt.
+
 The façade is intentionally an orchestration boundary, not a claim of general intelligence.
 Routing is vocabulary/catalogue evidence, workflow stages are strategy metadata, connector
 observations are untrusted inputs, provider output still requires evaluation, and learning
