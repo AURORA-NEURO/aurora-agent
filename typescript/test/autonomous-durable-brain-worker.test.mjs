@@ -7,6 +7,7 @@ import {
   AutonomousBrainFacade,
   AutonomousDurableBrainJobWorker,
   LLMRuntime,
+  ProviderSetup,
   ProviderRuntimeError,
   autonomousBrainJobSpecDigest,
 } from "../dist/index.js";
@@ -271,6 +272,89 @@ test("remote brain worker executes cross-domain fan-out and synthesis through th
   assert.equal(completed.status, "succeeded");
   assert.equal(completed.execution.status, "completed");
   assert.ok(completed.execution.run.child_runs.length >= 2);
+});
+
+test("durable worker opens provisioned credentials only after approval across direct, cycle, adaptive, and cross-domain modes", async () => {
+  let providerCalls = 0;
+  const runtime = new LLMRuntime({ fetch: async () => { throw new Error("network must not be reached"); } });
+  const setup = new ProviderSetup(runtime);
+  setup.registerProvider("groq", {
+    transport: {
+      invoke: () => {
+        providerCalls += 1;
+        return { output_text: "credentialed durable worker result" };
+      },
+    },
+  });
+  await setup.provisioner.registerResolver("groq", "test-worker-secret-reference", async () => "test-worker-secret");
+  const agent = new AutonomousAgent(runtime);
+  const credentialedModel = { ...model, provider: "groq", model: "durable-groq-model" };
+  agent.registerModel(credentialedModel);
+  const brain = new AutonomousBrainFacade({ agent });
+  const scope = setup.createCredentialScope(agent, { credentialProviders: ["groq"] });
+  const api = remoteBrainApi();
+  const requests = new Map();
+  const policies = new Map();
+  const resolutions = new Map();
+  const worker = new AutonomousDurableBrainJobWorker({
+    brain,
+    apiClient: api,
+    workerId: "remote-provisioned-worker",
+    credentialScope: scope,
+    resolve: ({ job }) => ({ ...resolutions.get(job.job_id), specDigest: job.spec_digest, policyDigest: policies.get(job.job_id), request: requests.get(job.job_id) }),
+  });
+
+  const jobs = [
+    {
+      request: { task: tasks.coding, domain: "coding" },
+      mode: "execute",
+      resolution: { mode: "execute", execute: { run: { candidates: [credentialedModel] } } },
+    },
+    {
+      request: { task: tasks.science, domain: "science" },
+      mode: "cycle",
+      resolution: { mode: "cycle", cycle: { cycle: { candidates: [credentialedModel] } } },
+    },
+    {
+      request: { task: tasks.evaluation, domain: "evaluation" },
+      mode: "adaptive",
+      resolution: {
+        mode: "adaptive",
+        adaptive: {
+          adaptive: {
+            candidates: [credentialedModel],
+            maxReplans: 0,
+            evaluate: () => ({ evaluator_id: "durable-worker-evaluator", evaluator_version: "1", reward: 0.82, passed: true, replan_requested: false }),
+          },
+        },
+      },
+    },
+    {
+      request: { task: "research a biomedical neuroscience experiment with patient EEG evidence", allow_cross_domain: true },
+      mode: "execute",
+      resolution: { mode: "execute", execute: { run: { candidates: [credentialedModel], maxParallelChildren: 2 } } },
+    },
+  ];
+
+  for (const [index, item] of jobs.entries()) {
+    const selectedPolicy = policy(String.fromCharCode(97 + index));
+    const submitted = await worker.submit({ idempotencyKey: `provisioned-durable-${index}`, request: item.request, mode: item.mode, policyDigest: selectedPolicy });
+    assert.equal(submitted.status, "submitted");
+    requests.set(submitted.job.job_id, item.request);
+    policies.set(submitted.job.job_id, selectedPolicy);
+    resolutions.set(submitted.job.job_id, item.resolution);
+    const waiting = await worker.runOnce(submitted.job.job_id);
+    assert.equal(waiting.status, "waiting_approval", item.mode);
+    assert.equal(runtime.credentials.status("groq").active_handles, 0, `${item.mode} opened credentials before approval`);
+    await worker.approval(submitted.job.job_id, "approve", { authorizationDigest: "c".repeat(64) });
+    const completed = await worker.runOnce(submitted.job.job_id);
+    assert.equal(completed.status, "succeeded", item.mode);
+    assert.equal(runtime.credentials.status("groq").active_handles, 0, `${item.mode} did not close credentials`);
+    assert.equal(JSON.stringify(completed).includes("test-worker-secret"), false);
+  }
+  assert.ok(providerCalls >= jobs.length);
+  assert.equal(JSON.stringify(api.seen).includes("test-worker-secret"), false);
+  assert.equal(JSON.stringify(api.seen).includes("credentialFor"), false);
 });
 
 test("remote brain worker fails closed on spec drift and retains retryable preflight failures as queued work", async () => {

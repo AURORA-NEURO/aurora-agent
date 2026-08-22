@@ -15,6 +15,7 @@ from prism_sdk import (
     DurableBrainControlPlaneAdapter,
     RemoteBrainJobWorker,
     RemoteBrainWorkerError,
+    ProvisionedRemoteBrainCredentialScope,
     autonomous_remote_brain_job_spec_digest,
     autonomous_remote_brain_plan_digest,
     autonomous_remote_brain_route_digest,
@@ -82,6 +83,33 @@ class _BlockingAsyncBrain(_Brain):
         return _Result()
 
 
+class _ProvisionedSession:
+    def __init__(self) -> None:
+        self.closed = False
+        self.handle = object()
+
+    def handles(self) -> dict[str, object]:
+        if self.closed:
+            raise RuntimeError("session already closed")
+        return {"groq": self.handle}
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _ProvisioningBrain(_Brain):
+    def __init__(self) -> None:
+        super().__init__()
+        self.sessions: list[_ProvisionedSession] = []
+        self.provisioning_calls: list[dict[str, object]] = []
+
+    def start_provisioned_credential_session(self, **kwargs: object) -> tuple[_ProvisionedSession, dict[str, object]]:
+        self.provisioning_calls.append(dict(kwargs))
+        session = _ProvisionedSession()
+        self.sessions.append(session)
+        return session, {"ready": True}
+
+
 def _control(tmp_path, seen: list[tuple[str, dict[str, object]]]) -> tuple[BrainControlClient, BrainJobStore]:
     store = BrainJobStore(tmp_path / "remote-brain.sqlite3")
 
@@ -109,6 +137,98 @@ async def _async_control(tmp_path, seen: list[tuple[str, dict[str, object]]]) ->
 
 def _policy(letter: str) -> str:
     return letter * 64
+
+
+def test_remote_worker_provisions_opaque_handles_only_after_approval_and_closes_them(tmp_path):
+    seen: list[tuple[str, dict[str, object]]] = []
+    control, store = _control(tmp_path, seen)
+    brain = _ProvisioningBrain()
+    scope = ProvisionedRemoteBrainCredentialScope(
+        brain,
+        providers=("groq",),
+        ttl_seconds=60,
+        environ={},
+    )
+    request = {"task": "private provisioned task", "domain": "coding"}
+    worker = RemoteBrainJobWorker(
+        brain,
+        control,
+        worker_id="provisioned-worker",
+        credential_scope=scope,
+        resolver=lambda context: {
+            "spec_digest": context["job"]["spec_digest"],
+            "mode": "autonomous",
+            "request": request,
+            "kwargs": {"task": request["task"], "domain": request["domain"]},
+        },
+    )
+    submitted = worker.submit(
+        idempotency_key="provisioned-scope",
+        request=request,
+        mode="autonomous",
+        domain="coding",
+        capability="bounded",
+        risk_class="review",
+    )
+    assert submitted.job is not None
+    waiting = worker.run_once(submitted.job["job_id"])
+    assert waiting is not None and waiting.status == "waiting_approval"
+    assert brain.provisioning_calls == []
+    assert brain.sessions == []
+
+    worker.approval(submitted.job["job_id"], "approve", authorization_digest="d" * 64)
+    completed = worker.run_once(submitted.job["job_id"])
+    assert completed is not None and completed.status == "succeeded"
+    assert len(brain.provisioning_calls) == 1
+    assert brain.provisioning_calls[0]["require_ready"] is True
+    assert brain.calls[-1][1]["credentials"] == {"groq": brain.sessions[0].handle}
+    assert brain.sessions[0].closed is True
+    assert all("credentials" not in arguments for _name, arguments in seen)
+    assert "private provisioned task" not in json.dumps([record.to_dict() for record in store.inventory(limit=64)])
+    store.close()
+
+
+def test_async_remote_worker_provisions_and_closes_scope_in_worker_lifecycle(tmp_path):
+    asyncio.run(_run_async_provisioned_scope(tmp_path))
+
+
+async def _run_async_provisioned_scope(tmp_path):
+    seen: list[tuple[str, dict[str, object]]] = []
+    control, store = await _async_control(tmp_path, seen)
+    brain = _ProvisioningBrain()
+    scope = ProvisionedRemoteBrainCredentialScope(brain, providers=("groq",))
+    request = {"task": "private async provisioned task", "domain": "research"}
+    worker = AsyncRemoteBrainJobWorker(
+        brain,
+        control,
+        worker_id="async-provisioned-worker",
+        credential_scope=scope,
+        resolver=lambda context: {
+            "spec_digest": context["job"]["spec_digest"],
+            "mode": "autonomous",
+            "request": request,
+            "kwargs": {"task": request["task"], "domain": request["domain"]},
+        },
+    )
+    submitted = await worker.submit(
+        idempotency_key="async-provisioned-scope",
+        request=request,
+        mode="autonomous",
+        domain="research",
+        capability="bounded",
+        risk_class="review",
+    )
+    assert submitted.job is not None
+    waiting = await worker.run_once(submitted.job["job_id"])
+    assert waiting is not None and waiting.status == "waiting_approval"
+    assert brain.sessions == []
+    await worker.approval(submitted.job["job_id"], "approve", authorization_digest="e" * 64)
+    completed = await worker.run_once(submitted.job["job_id"])
+    assert completed is not None and completed.status == "succeeded"
+    assert len(brain.sessions) == 1 and brain.sessions[0].closed is True
+    assert brain.calls[-1][1]["credentials"] == {"groq": brain.sessions[0].handle}
+    assert all("credentials" not in arguments for _name, arguments in seen)
+    store.close()
 
 
 def test_remote_worker_approval_gates_all_modes_and_all_domains_without_remote_private_values(tmp_path):

@@ -10,12 +10,12 @@ remote service receives only bounded lifecycle metadata and digests.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import inspect
 import json
 import threading
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Awaitable, Callable, Mapping, Protocol, Sequence
 
 from .brain import BrainRunError
 from .brain_api import AsyncBrainControlClient, BrainControlClient
@@ -181,6 +181,172 @@ class RemoteBrainJobResolution:
     policy_digest: str | None = None
     plan_digest: str | None = None
     route_digest: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RemoteBrainCredentialBinding:
+    """One approved-attempt snapshot of opaque provider credential handles.
+
+    The binding is deliberately not serializable as a job projection.  ``credentials`` contains
+    runtime-owned handles, never raw key material, and ``close`` revokes the snapshot after the
+    runner returns, fails, or is cancelled.
+    """
+
+    credentials: Mapping[str, Any]
+    _close: Callable[[], Any]
+
+    def close(self) -> Any:
+        """Revoke the attempt-scoped handles at the worker boundary."""
+
+        return self._close()
+
+
+class RemoteBrainCredentialScope(Protocol):
+    """Provider-neutral hook for opening credentials after durable approval is released."""
+
+    def open(self, context: Mapping[str, Any]) -> RemoteBrainCredentialBinding | Awaitable[RemoteBrainCredentialBinding]:
+        """Return an opaque binding for one approved job attempt."""
+
+
+class ProvisionedRemoteBrainCredentialScope:
+    """Adapt ``AutonomousBrain`` provisioning into a durable-worker credential scope.
+
+    A fresh ``CredentialSession`` is created for each approved attempt.  Deployment sources are
+    resolved inside ``open``; no key is accepted by this worker or copied into a remote job.  The
+    returned binding owns the session's opaque handles until the worker's ``finally`` block closes
+    it.
+    """
+
+    def __init__(
+        self,
+        brain: Any,
+        *,
+        providers: Sequence[str] | None = None,
+        ttl_seconds: float | None = None,
+        environ: Mapping[str, str] | None = None,
+    ) -> None:
+        if brain is None or not callable(getattr(brain, "start_provisioned_credential_session", None)):
+            raise RemoteBrainWorkerError(
+                "provisioned remote credential scope requires a brain facade with credential provisioning"
+            )
+        if providers is not None:
+            if not isinstance(providers, Sequence) or isinstance(providers, (str, bytes)):
+                raise RemoteBrainWorkerError("provisioned remote credential providers must be a sequence")
+            normalized_providers = tuple(_validate_identifier("credential provider", provider) for provider in providers)
+        else:
+            normalized_providers = None
+        if ttl_seconds is not None and (
+            not isinstance(ttl_seconds, (int, float))
+            or isinstance(ttl_seconds, bool)
+            or ttl_seconds <= 0
+        ):
+            raise RemoteBrainWorkerError("provisioned remote credential ttl_seconds must be positive or None")
+        if environ is not None and not isinstance(environ, Mapping):
+            raise RemoteBrainWorkerError("provisioned remote credential environ must be a mapping")
+        self.brain = brain
+        self.providers = normalized_providers
+        self.ttl_seconds = ttl_seconds
+        self.environ = None if environ is None else dict(environ)
+
+    def open(self, context: Mapping[str, Any]) -> RemoteBrainCredentialBinding:
+        if not isinstance(context, Mapping):
+            raise RemoteBrainWorkerError("remote credential scope context must be a mapping")
+        job_id = _validate_identifier("remote credential scope job_id", context.get("job_id"))
+        attempt = context.get("attempt")
+        if not isinstance(attempt, int) or isinstance(attempt, bool) or attempt < 1:
+            raise RemoteBrainWorkerError("remote credential scope attempt must be a positive integer")
+        if context.get("approval_released") is not True:
+            raise RemoteBrainWorkerError("remote credential scope requires released approval")
+        session, _provisioning = self.brain.start_provisioned_credential_session(
+            providers=self.providers,
+            ttl_seconds=self.ttl_seconds,
+            environ=self.environ,
+            require_ready=True,
+        )
+        if session is None or not callable(getattr(session, "handles", None)) or not callable(getattr(session, "close", None)):
+            if session is not None and callable(getattr(session, "close", None)):
+                session.close()
+            raise RemoteBrainWorkerError("credential provisioning returned an invalid session")
+        try:
+            handles = session.handles()
+            if not isinstance(handles, Mapping):
+                raise RemoteBrainWorkerError("credential provisioning returned invalid opaque handles")
+            # The validated context is intentionally not retained: it is useful only while
+            # opening this attempt and must not become durable worker state.
+            _ = job_id, attempt
+            return RemoteBrainCredentialBinding(credentials=dict(handles), _close=session.close)
+        except Exception:
+            session.close()
+            raise
+
+
+def _assert_scope_resolution_clean(resolution: RemoteBrainJobResolution) -> None:
+    """Reject caller-supplied credential hooks before the scope injects its own handles."""
+
+    seen: set[int] = set()
+
+    def scan(value: Any, depth: int = 0) -> None:
+        if depth > 16:
+            raise RemoteBrainWorkerError("remote brain credential-scoped kwargs are too deeply nested")
+        if isinstance(value, Mapping):
+            identity = id(value)
+            if identity in seen:
+                return
+            seen.add(identity)
+            for key, child in value.items():
+                if isinstance(key, str) and key.replace("_", "").lower() in {"credential", "credentials", "credentialfor"}:
+                    raise RemoteBrainWorkerError("remote brain credential scope rejects caller-supplied credentials")
+                scan(child, depth + 1)
+        elif isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+            identity = id(value)
+            if identity in seen:
+                return
+            seen.add(identity)
+            for child in value:
+                scan(child, depth + 1)
+
+    scan(resolution.kwargs)
+
+
+def _validate_credential_binding(value: Any) -> RemoteBrainCredentialBinding:
+    if not isinstance(value, RemoteBrainCredentialBinding):
+        raise RemoteBrainWorkerError("remote brain credential scope returned an invalid binding")
+    if not isinstance(value.credentials, Mapping):
+        raise RemoteBrainWorkerError("remote brain credential binding handles must be a mapping")
+    if not callable(value.close):
+        raise RemoteBrainWorkerError("remote brain credential binding must be closable")
+    return value
+
+
+def _bind_credential_scope_resolution(
+    resolution: RemoteBrainJobResolution,
+    binding: RemoteBrainCredentialBinding,
+) -> RemoteBrainJobResolution:
+    """Attach handles only to the transient invocation kwargs after approval."""
+
+    kwargs = dict(resolution.kwargs)
+    kwargs["credentials"] = dict(binding.credentials)
+    return replace(resolution, kwargs=kwargs)
+
+
+async def _open_async_credential_scope(
+    scope: RemoteBrainCredentialScope,
+    context: Mapping[str, Any],
+) -> RemoteBrainCredentialBinding:
+    opener = scope.open
+    if inspect.iscoroutinefunction(opener):
+        opened = await opener(context)
+    else:
+        opened = await asyncio.to_thread(opener, context)
+    if inspect.isawaitable(opened):
+        opened = await opened
+    return _validate_credential_binding(opened)
+
+
+async def _close_async_credential_binding(binding: RemoteBrainCredentialBinding) -> None:
+    closed = await asyncio.to_thread(binding.close)
+    if inspect.isawaitable(closed):
+        await closed
 
 
 RemoteBrainJobResolver = Callable[[Mapping[str, Any]], RemoteBrainJobResolution | Mapping[str, Any]]
@@ -387,6 +553,7 @@ class RemoteBrainJobWorker:
         lease_ms: int = 300_000,
         heartbeat_ms: int | None = None,
         retry_preflight_failures: bool = True,
+        credential_scope: RemoteBrainCredentialScope | None = None,
     ) -> None:
         if brain is None:
             raise RemoteBrainWorkerError("remote brain worker requires a brain facade")
@@ -409,7 +576,10 @@ class RemoteBrainJobWorker:
         self.heartbeat_ms = effective_heartbeat
         if not isinstance(retry_preflight_failures, bool):
             raise RemoteBrainWorkerError("remote brain retry_preflight_failures must be boolean")
+        if credential_scope is not None and not callable(getattr(credential_scope, "open", None)):
+            raise RemoteBrainWorkerError("remote brain credential_scope must expose open(context)")
         self.retry_preflight_failures = retry_preflight_failures
+        self.credential_scope = credential_scope
 
     def submit(
         self,
@@ -539,6 +709,7 @@ class RemoteBrainJobWorker:
         thread.start()
         started = False
         resolution: RemoteBrainJobResolution | None = None
+        credential_binding: RemoteBrainCredentialBinding | None = None
         try:
             approval_released = self._approval_released(job["job_id"])
             # Re-entry after approval or a retry must preserve the durable monotonic effect
@@ -557,6 +728,17 @@ class RemoteBrainJobWorker:
                 self._checkpoint(job["job_id"], "provider_approval_required", "preflight", {"spec_digest": job["spec_digest"], "mode": resolution.mode})
                 parked = self._request_approval(job["job_id"], reason="provider approval is required before dispatch")
                 return RemoteBrainJobRun(status="waiting_approval", job=parked, mode=resolution.mode)
+            if self.credential_scope is not None:
+                _assert_scope_resolution_clean(resolution)
+                opened = self.credential_scope.open({
+                    "job_id": job["job_id"],
+                    "attempt": job["attempts"],
+                    "approval_released": True,
+                })
+                if inspect.isawaitable(opened):
+                    raise RemoteBrainWorkerError("sync remote brain credential_scope returned an awaitable")
+                credential_binding = _validate_credential_binding(opened)
+                resolution = _bind_credential_scope_resolution(resolution, credential_binding)
             kwargs = self._approved_kwargs(resolution)
             self._checkpoint(job["job_id"], "dispatch_started", "unknown", {"spec_digest": job["spec_digest"], "mode": resolution.mode})
             started = True
@@ -595,6 +777,8 @@ class RemoteBrainJobWorker:
         finally:
             stop.set()
             thread.join(timeout=max(1.0, self.heartbeat_ms / 1000.0))
+            if credential_binding is not None:
+                credential_binding.close()
 
     def run(self, *, limit: int = 1) -> RemoteBrainJobBatch:
         if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= MAX_AUTONOMOUS_REMOTE_BRAIN_WORKER_BATCH:
@@ -740,6 +924,7 @@ class AsyncRemoteBrainJobWorker:
         lease_ms: int = 300_000,
         heartbeat_ms: int | None = None,
         retry_preflight_failures: bool = True,
+        credential_scope: RemoteBrainCredentialScope | None = None,
     ) -> None:
         if brain is None:
             raise RemoteBrainWorkerError("async remote brain worker requires a brain facade")
@@ -762,7 +947,10 @@ class AsyncRemoteBrainJobWorker:
         self.heartbeat_ms = effective_heartbeat
         if not isinstance(retry_preflight_failures, bool):
             raise RemoteBrainWorkerError("async remote brain retry_preflight_failures must be boolean")
+        if credential_scope is not None and not callable(getattr(credential_scope, "open", None)):
+            raise RemoteBrainWorkerError("async remote brain credential_scope must expose open(context)")
         self.retry_preflight_failures = retry_preflight_failures
+        self.credential_scope = credential_scope
 
     async def submit(
         self,
@@ -920,6 +1108,7 @@ class AsyncRemoteBrainJobWorker:
         heartbeat_task = asyncio.create_task(heartbeat(), name=f"aurora-async-remote-brain-heartbeat-{self.worker_id}")
         started = False
         resolution: RemoteBrainJobResolution | None = None
+        credential_binding: RemoteBrainCredentialBinding | None = None
         try:
             approval_released = await self._approval_released(job["job_id"])
             await self._checkpoint(
@@ -941,6 +1130,17 @@ class AsyncRemoteBrainJobWorker:
                 )
                 parked = await self._request_approval(job["job_id"], reason="provider approval is required before dispatch")
                 return RemoteBrainJobRun(status="waiting_approval", job=parked, mode=resolution.mode)
+            if self.credential_scope is not None:
+                _assert_scope_resolution_clean(resolution)
+                credential_binding = await _open_async_credential_scope(
+                    self.credential_scope,
+                    {
+                        "job_id": job["job_id"],
+                        "attempt": job["attempts"],
+                        "approval_released": True,
+                    },
+                )
+                resolution = _bind_credential_scope_resolution(resolution, credential_binding)
             kwargs = RemoteBrainJobWorker._approved_kwargs(resolution)
             await self._checkpoint(job["job_id"], "dispatch_started", "unknown", {"spec_digest": job["spec_digest"], "mode": resolution.mode})
             started = True
@@ -978,6 +1178,8 @@ class AsyncRemoteBrainJobWorker:
             stop.set()
             heartbeat_task.cancel()
             await asyncio.gather(heartbeat_task, return_exceptions=True)
+            if credential_binding is not None:
+                await _close_async_credential_binding(credential_binding)
 
     async def run(self, *, limit: int = 1) -> RemoteBrainJobBatch:
         if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= MAX_AUTONOMOUS_REMOTE_BRAIN_WORKER_BATCH:
@@ -1139,6 +1341,9 @@ __all__ = [
     "RemoteBrainJobRun",
     "RemoteBrainJobBatch",
     "RemoteBrainJobResolution",
+    "RemoteBrainCredentialBinding",
+    "RemoteBrainCredentialScope",
+    "ProvisionedRemoteBrainCredentialScope",
     "RemoteBrainJobResolver",
     "AsyncRemoteBrainJobResolver",
     "autonomous_remote_brain_job_spec_digest",

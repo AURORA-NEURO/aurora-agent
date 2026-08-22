@@ -146,6 +146,12 @@ export type {
   AutonomousProvisionedBrainAdaptiveCycleOptions,
   SupportedProviderName,
 } from "./provider-setup.js";
+export { AUTONOMOUS_CREDENTIAL_SCOPE_SCHEMA } from "./autonomous-credential-scope.js";
+export type {
+  AutonomousCredentialBinding,
+  AutonomousCredentialScope,
+  AutonomousCredentialScopeContext,
+} from "./autonomous-credential-scope.js";
 export {
   MAX_ALLOWED_TOOLS,
   MISSION_ASSEMBLY_SCHEMA,

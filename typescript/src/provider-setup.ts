@@ -43,6 +43,7 @@ import type {
   AutonomousModelInventoryRefreshOptions,
   AutonomousModelInventorySnapshot,
 } from "./autonomous-model-inventory.js";
+import type { AutonomousCredentialScope } from "./autonomous-credential-scope.js";
 
 /** Redacted provider catalog and setup-flow contract for embedding applications. */
 export const PROVIDER_SETUP_SCHEMA = "bioprism-typescript-provider-setup/0.1" as const;
@@ -417,11 +418,7 @@ export class ProviderSetup {
     if (Object.prototype.hasOwnProperty.call(rawOptions, "credential") || Object.prototype.hasOwnProperty.call(rawOptions, "credentialFor")) {
       throw new CredentialError("provisioned autonomous execution owns credentials; pass deployment sources instead");
     }
-    if (options.requireReady !== undefined && typeof options.requireReady !== "boolean") throw new CredentialError("provisioned autonomous requireReady must be a boolean");
-    if (options.refreshInventory !== undefined && typeof options.refreshInventory !== "boolean") throw new CredentialError("provisioned autonomous refreshInventory must be a boolean");
-    const refreshInventory = options.refreshInventory ?? false;
-    if (!refreshInventory && (options.inventorySpecs !== undefined || options.inventoryOptions !== undefined)) throw new CredentialError("inventory options require refreshInventory=true");
-    if (refreshInventory && (!options.inventorySpecs || options.inventorySpecs.length === 0)) throw new CredentialError("refreshInventory=true requires inventorySpecs");
+    const refreshInventory = this.validateProvisioningControls(options);
 
     const {
       credentialProviders,
@@ -573,6 +570,40 @@ export class ProviderSetup {
   }
 
   /**
+   * Create a deployment-owned scope for durable workers. A new session is opened only after the
+   * worker releases its approval gate and the returned binding must be closed after dispatch.
+   */
+  createCredentialScope(
+    agent: AutonomousAgent,
+    options: AutonomousProvisioningControls = {},
+  ): AutonomousCredentialScope {
+    if (!agent || typeof agent.run !== "function" || typeof agent.refreshModelInventory !== "function") throw new CredentialError("credential scope requires an AutonomousAgent");
+    const refreshInventory = this.validateProvisioningControls(options);
+    const { credentialProviders, credentialTtlMs, environment, requireReady, inventorySpecs, inventoryOptions } = options;
+    return {
+      open: async (context) => {
+        if (!context || typeof context.jobId !== "string" || !context.jobId.trim() || !Number.isSafeInteger(context.attempt) || context.attempt < 1 || context.approvalReleased !== true) throw new CredentialError("credential scope can open only for an approved durable attempt");
+        const session = this.startSession({ ttlMs: credentialTtlMs });
+        try {
+          const provisioning = await this.provision(session, { providers: credentialProviders, environment });
+          if ((requireReady ?? true) && !provisioning.ready) throw new CredentialError(`credential provisioning is incomplete for providers: ${provisioning.required_failures.join(", ")}`);
+          if (refreshInventory) {
+            const inventory = await this.refreshModelInventory(agent, session, inventorySpecs!, inventoryOptions);
+            if (inventory.status !== "completed") throw new CredentialError("requested model inventory refresh did not complete; execution was refused");
+          }
+          return {
+            credentialFor: this.credentialResolver(agent, session),
+            close: () => session.close(),
+          };
+        } catch (error) {
+          session.close();
+          throw error;
+        }
+      },
+    };
+  }
+
+  /**
    * Bridge the protected onboarding session into the agent's model inventory lifecycle.
    * Provider-specific credentials are resolved only at invocation time from the opaque session;
    * this method never accepts, returns, or persists a raw key.
@@ -649,6 +680,16 @@ export class ProviderSetup {
       const metadata = agent.llm.providerMetadata().find((row) => row.provider === provider);
       return metadata?.requires_credential === false ? undefined : session.handle(provider);
     };
+  }
+
+  private validateProvisioningControls(options: AutonomousProvisioningControls): boolean {
+    if (!options || typeof options !== "object") throw new CredentialError("credential provisioning controls are malformed");
+    if (options.requireReady !== undefined && typeof options.requireReady !== "boolean") throw new CredentialError("credential provisioning requireReady must be a boolean");
+    if (options.refreshInventory !== undefined && typeof options.refreshInventory !== "boolean") throw new CredentialError("credential provisioning refreshInventory must be a boolean");
+    const refreshInventory = options.refreshInventory ?? false;
+    if (!refreshInventory && (options.inventorySpecs !== undefined || options.inventoryOptions !== undefined)) throw new CredentialError("inventory options require refreshInventory=true");
+    if (refreshInventory && (!options.inventorySpecs || options.inventorySpecs.length === 0)) throw new CredentialError("refreshInventory=true requires inventorySpecs");
+    return refreshInventory;
   }
 
   private assertSession(session: CredentialSession): void {

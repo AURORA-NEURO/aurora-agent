@@ -1403,6 +1403,39 @@ requeued, while failures after the `unknown` dispatch boundary become reconcilia
 No task, prompt, credentials, evaluator callback, provider result, or exception body enters the
 remote job projection.
 
+For a deployment-managed key path, bind a `ProviderSetup` scope to the durable worker instead of
+rehydrating credential handles inside the resolver. The worker never opens the scope while a job
+is waiting for approval: after release it provisions a fresh session for that attempt, injects
+only the in-memory `credentialFor` resolver, and closes the session on success, refusal, retry, or
+failure. The scope can also refresh the model inventory strictly before dispatch when the caller
+supplies reviewed inventory specs:
+
+```typescript
+const setup = new ProviderSetup(runtime);
+setup.registerProvider("openai");
+const brain = new AutonomousBrainFacade({ agent });
+const credentialScope = setup.createCredentialScope(agent, {
+  credentialProviders: ["openai"],
+  environment: process.env,
+  requireReady: true,
+});
+
+const worker = new AutonomousDurableBrainJobWorker({
+  brain,
+  apiClient,
+  workerId: "brain-worker-1",
+  resolve: protectedJobStore.resolve,
+  credentialScope,
+});
+```
+
+`createCredentialScope()` is intentionally deployment-owned: the application configures an
+environment or resolver source through the normal `ProviderSetup` APIs, while the durable queue
+stores only the job/spec digests and lifecycle metadata. Resolver policies containing
+`credential` or `credentialFor` are rejected when the scope is enabled. The Python
+`ProvisionedRemoteBrainCredentialScope` exposes the same per-attempt contract for
+`RemoteBrainJobWorker` and `AsyncRemoteBrainJobWorker`.
+
 ## Evaluator feedback and delayed-credit learning
 
 `AutonomousWorkflowEvaluator` is the explicit reward boundary for the TypeScript brain. It derives

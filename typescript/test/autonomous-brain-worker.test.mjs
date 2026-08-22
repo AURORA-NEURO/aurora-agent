@@ -443,3 +443,43 @@ test("stale restored workers fail before provider dispatch when the durable snap
   assert.equal(providerCalls, 0);
   assert.equal(persistence.read().jobs[0].state, "waiting_approval");
 });
+
+test("local durable worker credential scopes open only after approval and close after dispatch", async () => {
+  let opens = 0;
+  let closes = 0;
+  let providerCalls = 0;
+  const { brain } = makeBrain(() => { providerCalls += 1; });
+  const scheduler = new InMemoryAutonomousBrainJobScheduler({ maxJobs: 4, clock: () => 16_000 });
+  const request = requestFor("coding");
+  const selectedPolicy = policyDigest("f");
+  scheduler.submit(jobFor(70, request, "execute", selectedPolicy), 16_000);
+  const worker = new AutonomousBrainJobWorker({
+    brain,
+    scheduler,
+    workerId: "worker-scoped",
+    credentialScope: {
+      open: (context) => {
+        opens += 1;
+        assert.equal(context.approvalReleased, true);
+        return { credentialFor: () => undefined, close: () => { closes += 1; } };
+      },
+    },
+    resolve: ({ job }) => ({
+      specDigest: job.spec_digest,
+      policyDigest: selectedPolicy,
+      request,
+      mode: "execute",
+      execute: { run: { candidates: [model] } },
+    }),
+  });
+  const waiting = await worker.runOnce("worker-job-70", 16_001);
+  assert.equal(waiting.status, "waiting_approval");
+  assert.equal(opens, 0);
+  assert.equal(closes, 0);
+  await worker.resumeApproval("worker-job-70", "operator-scoped", "approved", 16_002);
+  const completed = await worker.runOnce("worker-job-70", 16_003);
+  assert.equal(completed.status, "succeeded");
+  assert.equal(opens, 1);
+  assert.equal(closes, 1);
+  assert.equal(providerCalls, 1);
+});

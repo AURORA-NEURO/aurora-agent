@@ -21,6 +21,7 @@ import {
   type AutonomousBrainJobSnapshot,
 } from "./autonomous-brain-jobs.js";
 import type { AutonomousRunTraceStore, AutonomousRunTraceSummary } from "./autonomous-run-trace.js";
+import type { AutonomousCredentialBinding, AutonomousCredentialScope } from "./autonomous-credential-scope.js";
 import { digestJsonSync } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
@@ -71,6 +72,8 @@ export interface AutonomousBrainJobWorkerOptions {
   heartbeatMs?: number;
   /** Retry only typed, retryable failures that occurred before the facade was invoked. */
   retryPreflightFailures?: boolean;
+  /** Open an opaque credential session only after approval is released; never part of job state. */
+  credentialScope?: AutonomousCredentialScope;
 }
 
 export interface AutonomousBrainJobWorkerRun {
@@ -203,6 +206,7 @@ export class AutonomousBrainJobWorker {
   readonly leaseMs: number;
   readonly heartbeatMs: number;
   readonly retryPreflightFailures: boolean;
+  readonly credentialScope?: AutonomousCredentialScope;
   private restored: boolean;
 
   constructor(options: AutonomousBrainJobWorkerOptions) {
@@ -222,6 +226,8 @@ export class AutonomousBrainJobWorker {
     if (this.heartbeatMs >= this.leaseMs) throw new ArgumentError("autonomous brain worker heartbeatMs must be less than leaseMs");
     if (options.retryPreflightFailures !== undefined && typeof options.retryPreflightFailures !== "boolean") throw new ArgumentError("autonomous brain worker retryPreflightFailures must be boolean");
     this.retryPreflightFailures = options.retryPreflightFailures ?? true;
+    if (options.credentialScope !== undefined && typeof options.credentialScope.open !== "function") throw new ArgumentError("autonomous brain worker credentialScope is malformed");
+    this.credentialScope = options.credentialScope;
     this.restored = this.persistence === undefined;
   }
 
@@ -291,6 +297,7 @@ export class AutonomousBrainJobWorker {
     let executionStarted = false;
     let planCompiled = false;
     let resolution: AutonomousBrainJobResolution | null = null;
+    let credentialBinding: AutonomousCredentialBinding | null = null;
     let trace: AutonomousRunTraceSummary | null = null;
     try {
       const approvalReleased = this.scheduler.eventsFor(claimed.job_id).some((event) => event.event_type === "job_approval_released");
@@ -316,7 +323,12 @@ export class AutonomousBrainJobWorker {
         await this.checkpoint(claimed.job_id, { phase: "provider_approval_required", checkpointDigest: digestJsonSync({ plan_digest: plan.plan_digest, mode: resolution.mode }), sideEffectBoundary: "preflight", waitingForApproval: true });
         return this.envelope(this.scheduler.get(claimed.job_id)!, "waiting_approval", resolution.mode, null, null, null, null, null);
       }
-      const approvedResolution = this.approvalBoundResolution(resolution, approvalReleased);
+      let approvedResolution = this.approvalBoundResolution(resolution, approvalReleased);
+      if (this.credentialScope) {
+        this.assertCredentialFreeResolution(approvedResolution);
+        credentialBinding = await this.credentialScope.open({ jobId: claimed.job_id, attempt: claimed.attempts, approvalReleased: true });
+        approvedResolution = this.bindCredentialResolution(approvedResolution, credentialBinding);
+      }
       const shouldTrace = this.traceStore !== undefined;
       await this.checkpoint(claimed.job_id, { phase: "dispatch_started", checkpointDigest: digestJsonSync({ plan_digest: plan.plan_digest, attempt: claimed.attempts }), sideEffectBoundary: "dispatched" });
       executionStarted = true;
@@ -389,6 +401,7 @@ export class AutonomousBrainJobWorker {
       }
     } finally {
       if (heartbeatTimer !== null) clearInterval(heartbeatTimer);
+      credentialBinding?.close();
     }
   }
 
@@ -454,6 +467,43 @@ export class AutonomousBrainJobWorker {
     const job = this.scheduler.fail(jobId, this.workerId, options);
     await this.persist();
     return job;
+  }
+
+  private assertCredentialFreeResolution(value: AutonomousBrainJobResolution): void {
+    const seen = new Set<object>();
+    const scan = (candidate: unknown, depth = 0): void => {
+      if (!candidate || typeof candidate !== "object") return;
+      if (seen.has(candidate)) return;
+      if (depth > 16) throw new ArgumentError("brain credential policy is too deeply nested");
+      seen.add(candidate);
+      const row = candidate as Record<string, unknown>;
+      if (Object.keys(row).some((key) => key.replaceAll("_", "").toLowerCase() === "credential" || key.replaceAll("_", "").toLowerCase() === "credentials" || key.replaceAll("_", "").toLowerCase() === "credentialfor")) throw new ArgumentError("brain credentialScope owns credentials; resolver policy must omit credential fields");
+      for (const child of Object.values(row)) scan(child, depth + 1);
+    };
+    scan(value.execute);
+    scan(value.cycle);
+    scan(value.adaptive);
+  }
+
+  private bindCredentialResolution(value: AutonomousBrainJobResolution, binding: AutonomousCredentialBinding): AutonomousBrainJobResolution {
+    const credentialFor = (provider: string) => binding.credentialFor(provider);
+    const bindProviderPolicy = (policy: unknown): Record<string, unknown> => {
+      const row = isObject(policy) ? { ...policy } : {};
+      const planning = isObject(row.providerPlanning) ? { ...row.providerPlanning, credentialFor } : row.providerPlanning;
+      return { ...row, credentialFor, ...(planning === undefined ? {} : { providerPlanning: planning }) };
+    };
+    if (value.mode === "execute") {
+      const execute = isObject(value.execute) ? { ...value.execute } : {};
+      const run = isObject(execute.run) ? { ...execute.run, credentialFor } : { credentialFor };
+      return { ...value, execute: { ...execute, run } as AutonomousBrainJobResolution["execute"] };
+    }
+    if (value.mode === "cycle") {
+      const cycle = isObject(value.cycle) ? { ...value.cycle } : {};
+      return { ...value, cycle: { ...cycle, cycle: bindProviderPolicy(cycle.cycle) } as AutonomousBrainJobResolution["cycle"] };
+    }
+    const adaptive: Record<string, unknown> = isObject(value.adaptive) ? { ...value.adaptive } : {};
+    const adaptivePolicy = isObject(adaptive.adaptive) ? adaptive.adaptive : {};
+    return { ...value, adaptive: { ...adaptive, adaptive: bindProviderPolicy(adaptivePolicy) } as AutonomousBrainJobResolution["adaptive"] };
   }
 
   private validateResolution(job: AutonomousBrainJob, value: AutonomousBrainJobResolution): void {

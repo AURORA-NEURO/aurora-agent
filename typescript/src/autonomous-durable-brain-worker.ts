@@ -4,6 +4,7 @@ import { autonomousBrainJobSpecDigest, type AutonomousBrainJobExecutionMode, typ
 import type { ApiClient } from "./client.js";
 import { digestJsonSync } from "./tooling.js";
 import type { AutonomousRunTraceStore, AutonomousRunTraceSummary } from "./autonomous-run-trace.js";
+import type { AutonomousCredentialBinding, AutonomousCredentialScope } from "./autonomous-credential-scope.js";
 import type {
   BrainControlEvent,
   BrainJobApprovalAction,
@@ -73,6 +74,8 @@ export interface AutonomousDurableBrainJobWorkerOptions {
   heartbeatMs?: number;
   /** Retry only typed failures that occur before the facade dispatch boundary. */
   retryPreflightFailures?: boolean;
+  /** Open an opaque credential session only after approval is released; never part of job state. */
+  credentialScope?: AutonomousCredentialScope;
 }
 
 export interface AutonomousDurableBrainJobWorkerRun {
@@ -236,6 +239,7 @@ export class AutonomousDurableBrainJobWorker {
   readonly leaseMs: number;
   readonly heartbeatMs: number;
   readonly retryPreflightFailures: boolean;
+  readonly credentialScope?: AutonomousCredentialScope;
 
   constructor(options: AutonomousDurableBrainJobWorkerOptions) {
     if (!options || !(options.brain instanceof AutonomousBrainFacade)) throw new ArgumentError("durable brain worker requires an AutonomousBrainFacade");
@@ -252,6 +256,8 @@ export class AutonomousDurableBrainJobWorker {
     if (this.heartbeatMs >= this.leaseMs) throw new ArgumentError("durable brain worker heartbeatMs must be less than leaseMs");
     if (options.retryPreflightFailures !== undefined && typeof options.retryPreflightFailures !== "boolean") throw new ArgumentError("durable brain worker retryPreflightFailures must be boolean");
     this.retryPreflightFailures = options.retryPreflightFailures ?? true;
+    if (options.credentialScope !== undefined && typeof options.credentialScope.open !== "function") throw new ArgumentError("durable brain worker credentialScope is malformed");
+    this.credentialScope = options.credentialScope;
   }
 
   /** Plan and admit a metadata-only remote job; the request itself remains caller-owned. */
@@ -318,6 +324,7 @@ export class AutonomousDurableBrainJobWorker {
     let executionStarted = false;
     let planCompiled = false;
     let resolution: AutonomousDurableBrainJobResolution | null = null;
+    let credentialBinding: AutonomousCredentialBinding | null = null;
     let trace: AutonomousRunTraceSummary | null = null;
     try {
       const approvalReleased = await this.approvalReleased(job.job_id);
@@ -337,7 +344,12 @@ export class AutonomousDurableBrainJobWorker {
         return this.envelope(validateJob((await this.status(job.job_id)).job), "waiting_approval", resolution.mode, null, null, null, null, null);
       }
       if (heartbeatError !== null) throw new ProviderRuntimeError("durable brain worker lease heartbeat failed before dispatch", { code: "transport" });
-      const approved = this.approvalBoundResolution(resolution);
+      let approved = this.approvalBoundResolution(resolution);
+      if (this.credentialScope) {
+        this.assertCredentialFreeResolution(approved);
+        credentialBinding = await this.credentialScope.open({ jobId: job.job_id, attempt: job.attempts, approvalReleased: true });
+        approved = this.bindCredentialResolution(approved, credentialBinding);
+      }
       await this.checkpoint(job.job_id, { phase: "dispatch_started", checkpointDigest: digestJsonSync({ plan_digest: plan.plan_digest, attempt: job.attempts }), sideEffectBoundary: "unknown" });
       executionStarted = true;
       let result: AutonomousBrainExecution | AutonomousBrainCycleExecution | AutonomousBrainAdaptiveCycleExecution;
@@ -397,6 +409,7 @@ export class AutonomousDurableBrainJobWorker {
       }
     } finally {
       if (heartbeatTimer !== null) clearInterval(heartbeatTimer);
+      credentialBinding?.close();
     }
   }
 
@@ -459,6 +472,43 @@ export class AutonomousDurableBrainJobWorker {
     return validateJob(result.job);
   }
 
+  private assertCredentialFreeResolution(value: AutonomousDurableBrainJobResolution): void {
+    const seen = new Set<object>();
+    const scan = (candidate: unknown, depth = 0): void => {
+      if (!candidate || typeof candidate !== "object") return;
+      if (seen.has(candidate)) return;
+      if (depth > 16) throw new ArgumentError("durable brain credential policy is too deeply nested");
+      seen.add(candidate);
+      const row = candidate as Record<string, unknown>;
+      if (Object.keys(row).some((key) => key.replaceAll("_", "").toLowerCase() === "credential" || key.replaceAll("_", "").toLowerCase() === "credentials" || key.replaceAll("_", "").toLowerCase() === "credentialfor")) throw new ArgumentError("durable brain credentialScope owns credentials; resolver policy must omit credential fields");
+      for (const child of Object.values(row)) scan(child, depth + 1);
+    };
+    scan(value.execute);
+    scan(value.cycle);
+    scan(value.adaptive);
+  }
+
+  private bindCredentialResolution(value: AutonomousDurableBrainJobResolution, binding: AutonomousCredentialBinding): AutonomousDurableBrainJobResolution {
+    const credentialFor = (provider: string) => binding.credentialFor(provider);
+    const bindProviderPolicy = (policy: unknown): Record<string, unknown> => {
+      const row = isObject(policy) ? { ...policy } : {};
+      const planning = isObject(row.providerPlanning) ? { ...row.providerPlanning, credentialFor } : row.providerPlanning;
+      return { ...row, credentialFor, ...(planning === undefined ? {} : { providerPlanning: planning }) };
+    };
+    if (value.mode === "execute") {
+      const execute = isObject(value.execute) ? { ...value.execute } : {};
+      const run = isObject(execute.run) ? { ...execute.run, credentialFor } : { credentialFor };
+      return { ...value, execute: { ...execute, run } as AutonomousBrainJobResolution["execute"] };
+    }
+    if (value.mode === "cycle") {
+      const cycle = isObject(value.cycle) ? { ...value.cycle } : {};
+      return { ...value, cycle: { ...cycle, cycle: bindProviderPolicy(cycle.cycle) } as AutonomousBrainJobResolution["cycle"] };
+    }
+    const adaptive: Record<string, unknown> = isObject(value.adaptive) ? { ...value.adaptive } : {};
+    const adaptivePolicy = isObject(adaptive.adaptive) ? adaptive.adaptive : {};
+    return { ...value, adaptive: { ...adaptive, adaptive: bindProviderPolicy(adaptivePolicy) } as AutonomousBrainJobResolution["adaptive"] };
+  }
+
   private validateResolution(job: BrainJobRecord, value: AutonomousDurableBrainJobResolution): void {
     if (!isObject(value)) throw new ArgumentError("durable brain job resolver must return an object");
     exactKeys(value, ["specDigest", "policyDigest", "request", "mode", "execute", "cycle", "adaptive"], "durable brain job resolver result");
@@ -466,7 +516,7 @@ export class AutonomousDurableBrainJobWorker {
     if (digest("durable brain resolution specDigest", value.specDigest) !== job.spec_digest) throw new ArgumentError("durable brain resolver specDigest does not match the durable job");
     if (autonomousBrainJobSpecDigest({ request: value.request, mode: selectedMode, policyDigest: value.policyDigest ?? null }) !== job.spec_digest) throw new ArgumentError("durable brain request, mode, and policy digest do not match the durable spec");
     if (!isObject(value.request) || typeof value.request.task !== "string" || !value.request.task.trim()) throw new ArgumentError("durable brain resolver request is invalid");
-    if (selectedMode === "adaptive" && (!isObject(value.adaptive) || typeof value.adaptive.evaluate !== "function")) throw new ArgumentError("adaptive durable brain job requires an evaluator policy");
+    if (selectedMode === "adaptive" && (!isObject(value.adaptive) || !isObject(value.adaptive.adaptive) || typeof value.adaptive.adaptive.evaluate !== "function")) throw new ArgumentError("adaptive durable brain job requires an evaluator policy");
   }
 
   private approvalBoundResolution(value: AutonomousDurableBrainJobResolution): AutonomousDurableBrainJobResolution {

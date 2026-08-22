@@ -3820,6 +3820,7 @@ response, and tool-output shaped fields. `RemoteBrainJobRun.result` is transient
 
 ```python
 from prism_sdk import (
+    ProvisionedRemoteBrainCredentialScope,
     RemoteBrainJobWorker,
     autonomous_remote_brain_plan_digest,
     autonomous_remote_brain_route_digest,
@@ -3844,16 +3845,20 @@ def resolve_private_job(context):
             "domain": "research",
             "blueprint": private_cross_domain_blueprint,
             "model_candidates": private_model_catalogue,
-            "credentials": fresh_opaque_handles,
             "cross_domain_options": private_learning_options,
         },
     }
 
+credential_scope = ProvisionedRemoteBrainCredentialScope(
+    brain,
+    providers=("openai",),
+)
 worker = RemoteBrainJobWorker(
     brain,
     control,
     worker_id="brain-worker-1",
     resolver=resolve_private_job,
+    credential_scope=credential_scope,
 )
 submitted = worker.submit(
     idempotency_key="research-run-42",
@@ -3888,6 +3893,12 @@ if run is not None and run.status == "reconciliation_required":
 Approval is recorded while a leased worker still owns the job, then the control plane atomically
 parks it in `waiting_approval`; approval release returns it to `queued` and the next attempt
 rehydrates the private context. The worker preserves the monotonic side-effect boundary across
+the handoff. With `ProvisionedRemoteBrainCredentialScope`, provisioning starts only after that
+approval release, creates a fresh deployment-managed `CredentialSession` per attempt, and closes
+it in the worker's `finally` path. The resolver must therefore omit `credentials` and any
+`credential_for` hook; the scope injects opaque handles transiently into the runner kwargs and
+the remote control plane still receives neither handles nor raw keys. The async worker applies the
+same contract and moves synchronous provisioning/cleanup off the event loop.
 that re-entry, renews the lease during provider work, and never retries an uncertain post-dispatch
 effect automatically. Typed resolver/transport failures before dispatch can be requeued within
 `max_attempts`; spec drift and malformed remote metadata fail closed. The same digest and
