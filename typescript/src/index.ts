@@ -595,6 +595,26 @@ export type {
   AutonomousHttpEvidenceAdapterOptions,
 } from "./autonomous-evidence-http-adapter.js";
 export {
+  AUTONOMOUS_EVIDENCE_RETRY_POLICY_SCHEMA,
+  AUTONOMOUS_EVIDENCE_RETRY_ATTEMPT_SCHEMA,
+  MAX_AUTONOMOUS_EVIDENCE_RETRY_ATTEMPTS,
+  MAX_AUTONOMOUS_EVIDENCE_RETRY_DELAY_MS,
+  AUTONOMOUS_EVIDENCE_DEFAULT_RETRYABLE_FAILURE_CLASSES,
+  AutonomousEvidenceAcquisitionError,
+  AutonomousEvidenceRetryPolicy,
+  createAutonomousEvidenceRetryingAcquirer,
+  classifyAutonomousEvidenceAcquisitionError,
+} from "./autonomous-evidence-retry.js";
+export type {
+  AutonomousEvidenceRetryPolicyJSON,
+  AutonomousEvidenceRetryAttempt,
+  AutonomousEvidenceRetryPolicyOptions,
+  AutonomousEvidenceRetryClassification,
+  AutonomousEvidenceRetryClassifier,
+  AutonomousEvidenceRetryObserver,
+  AutonomousEvidenceRetryAcquirerOptions,
+} from "./autonomous-evidence-retry.js";
+export {
   AUTONOMOUS_EVIDENCE_ADAPTER_SELECTION_SCHEMA,
   AUTONOMOUS_EVIDENCE_ADAPTER_SELECTION_ROW_SCHEMA,
   AUTONOMOUS_EVIDENCE_ADAPTER_SELECTION_STRATEGIES,

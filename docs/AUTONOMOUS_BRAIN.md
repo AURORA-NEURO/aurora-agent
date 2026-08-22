@@ -4258,6 +4258,32 @@ redirect refusal, request/response byte ceilings, JSON validation, and timeout c
 then shared with evidence execution. HTTP refusals become failed evidence receipts, while successful
 source values remain transient and are available to the caller's projector/evaluator only.
 
+For transient source failures, wrap the reviewed acquirer with
+`createAutonomousEvidenceRetryingAcquirer()`. `AutonomousEvidenceRetryPolicy` bounds attempts and
+exponential delay, and retries only explicitly classified `timeout`, `rate_limited`,
+`transport_error`, or `http_5xx` failures by default. Authentication, permission, validation, and
+unknown failures are not retried. Each attempt can emit only domain, attempt number, outcome,
+failure class, latency, and delay metadata; the original error, request, credentials, and raw value
+never enter the attempt record:
+
+```typescript
+const resilient = createAutonomousEvidenceRetryingAcquirer(adapters.createAcquirer(), {
+  maxAttempts: 3,
+  baseDelayMs: 250,
+  maxDelayMs: 2_000,
+  observe: attemptMetadataSink,
+});
+
+await new AutonomousEvidenceRuntime({ plan }).execute(requests, {
+  acquirer: resilient,
+  projector: adapters.createProjector(),
+});
+```
+
+The HTTP evidence bridge emits `AutonomousEvidenceAcquisitionError` with a stable retry class for
+rate limits, timeouts, transport failures, and server errors. The retry wrapper remains caller-owned
+and does not grant source authorization or bypass the existing approval/evaluator boundaries.
+
 When multiple adapters cover a domain, `AutonomousEvidenceAdapterSelector` provides a separate,
 metadata-only decision boundary. Lexicographic selection is deterministic for static deployments;
 `selectAdaptiveForDomains()` accepts caller-produced health, success-rate, evaluator-reward, latency,

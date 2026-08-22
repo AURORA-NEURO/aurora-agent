@@ -16,6 +16,7 @@ import {
   AutonomousEvidenceAdapterRegistry,
   type AutonomousEvidenceAdapterRegistrationInput,
 } from "./autonomous-evidence-adapters.js";
+import { AutonomousEvidenceAcquisitionError } from "./autonomous-evidence-retry.js";
 import { canonicalJson } from "./tooling.js";
 import type { DomainEvidenceProviderConnectorManifest, JsonObject, JsonValue } from "./types.js";
 
@@ -128,7 +129,11 @@ export function createAutonomousHttpEvidenceAdapterRegistration(options: Autonom
       if (!isObject(requestValue)) throw new ArgumentError("HTTP evidence adapter request must be an object");
       const observation = await executor(manifest, requestValue) as AutonomousConnectorObservation;
       if (!(observation instanceof AutonomousConnectorObservation)) throw new ArgumentError("HTTP evidence adapter transport returned an invalid observation");
-      if (observation.status === "error" || observation.status === "refused") throw new ArgumentError(`HTTP evidence adapter source refused: ${observation.failure_class ?? observation.status}`);
+      if (observation.status === "error" || observation.status === "refused") {
+        const failureClass = observation.failure_class ?? observation.status;
+        const retryable = ["rate_limited", "timeout", "transport_error", "http_5xx"].includes(failureClass);
+        throw new AutonomousEvidenceAcquisitionError(failureClass, retryable);
+      }
       return observation.value;
     },
   };

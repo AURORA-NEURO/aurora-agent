@@ -10,6 +10,8 @@ import {
   AutonomousEvidenceAdapterHealthPersistenceCoordinator,
   AutonomousEvidenceAdapterSelectionPlan,
   AutonomousEvidenceAdapterSelector,
+  AutonomousEvidenceAcquisitionError,
+  AutonomousEvidenceRetryPolicy,
   AutonomousEvidenceRuntime,
   AutonomousHttpConnectorPolicy,
   AutonomousHttpConnectorRequest,
@@ -35,6 +37,8 @@ import {
   digestJson,
   registerAutonomousEvidenceAdaptersForAllDomains,
   registerAutonomousHttpEvidenceAdapter,
+  createAutonomousEvidenceRetryingAcquirer,
+  classifyAutonomousEvidenceAcquisitionError,
   validateAutonomousWorkflowPortfolioEvidenceCheckpoint,
   validateAutonomousWorkflowPortfolioEvidenceWorkQueueSnapshot,
 } from "../dist/index.js";
@@ -880,4 +884,60 @@ test("adapter health JSON persistence is bounded, browser-portable, and CAS-fenc
   await writer.flush();
   await staleStore.recordAcquisition({ adapter_id: "persist.science", manifest_digest: `04${"a".repeat(62)}`, domain: "science", outcome: "failure", status: "transport_error", latency_ms: 9, failure_class: "transport_error" });
   await assert.rejects(() => stale.flush(), /stale writer/);
+});
+
+test("bounded evidence retry classifies transient failures and retries every autonomous domain", async () => {
+  const evidencePlan = await agentFor().evidencePlan(AUTONOMOUS_DOMAIN_NAMES);
+  const attempts = new Map();
+  const observations = [];
+  const retrying = createAutonomousEvidenceRetryingAcquirer({
+    acquire: async (context) => {
+      const count = (attempts.get(context.requirement.domain) ?? 0) + 1;
+      attempts.set(context.requirement.domain, count);
+      if (count < 3) throw new AutonomousEvidenceAcquisitionError("timeout", true);
+      return { transient_retry_value: context.requirement.domain };
+    },
+  }, {
+    policy: new AutonomousEvidenceRetryPolicy({ maxAttempts: 4, baseDelayMs: 0, maxDelayMs: 0 }),
+    sleep: async () => {},
+    clock: (() => { let tick = 8_000; return () => tick += 1; })(),
+    observe: (attempt) => { observations.push(attempt); },
+  });
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const requirement = evidencePlan.requirements.find((candidate) => candidate.domain === domain);
+    const value = await retrying.acquire({
+      plan_digest: evidencePlan.plan_digest,
+      requirement,
+      request: { requirement_id: requirement.requirement_id, source_id: `retry-source-${domain}`, request_id: `retry-request-${domain}` },
+      attempt: 1,
+      parent_evidence_digests: [],
+      execution: "caller_owned_adapter;raw_value_transient",
+    });
+    assert.equal(value.transient_retry_value, domain);
+  }
+  assert.equal(attempts.size, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.ok([...attempts.values()].every((count) => count === 3));
+  assert.equal(observations.length, AUTONOMOUS_DOMAIN_NAMES.length * 3);
+  assert.ok(observations.every((attempt) => attempt.domain && attempt.retention === "metadata_only;error_class_only"));
+  assert.equal(observations.filter((attempt) => attempt.status === "retrying").length, AUTONOMOUS_DOMAIN_NAMES.length * 2);
+  assert.equal(observations.filter((attempt) => attempt.status === "succeeded").length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.doesNotMatch(JSON.stringify(observations), /transient_retry_value|api_key|access_token/);
+  assert.equal(classifyAutonomousEvidenceAcquisitionError(new AutonomousEvidenceAcquisitionError("rate_limited", true)).retryable, true);
+
+  let nonRetryableAttempts = 0;
+  const nonRetryable = createAutonomousEvidenceRetryingAcquirer({
+    acquire: async () => { nonRetryableAttempts += 1; throw new AutonomousEvidenceAcquisitionError("auth_refused", false); },
+  }, { maxAttempts: 4, baseDelayMs: 0, sleep: async () => {} });
+  const codingRequirement = evidencePlan.requirements.find((candidate) => candidate.domain === "coding");
+  await assert.rejects(() => nonRetryable.acquire({ plan_digest: evidencePlan.plan_digest, requirement: codingRequirement, request: { requirement_id: codingRequirement.requirement_id, source_id: "nonretry-source" }, attempt: 1, parent_evidence_digests: [], execution: "caller_owned_adapter;raw_value_transient" }), AutonomousEvidenceAcquisitionError);
+  assert.equal(nonRetryableAttempts, 1);
+
+  let exhaustedAttempts = 0;
+  const exhaustedObservations = [];
+  const exhausted = createAutonomousEvidenceRetryingAcquirer({
+    acquire: async () => { exhaustedAttempts += 1; throw new AutonomousEvidenceAcquisitionError("transport_error", true); },
+  }, { maxAttempts: 2, baseDelayMs: 0, maxDelayMs: 0, sleep: async () => {}, observe: (attempt) => exhaustedObservations.push(attempt) });
+  await assert.rejects(() => exhausted.acquire({ plan_digest: evidencePlan.plan_digest, requirement: codingRequirement, request: { requirement_id: codingRequirement.requirement_id, source_id: "exhausted-source" }, attempt: 1, parent_evidence_digests: [], execution: "caller_owned_adapter;raw_value_transient" }), AutonomousEvidenceAcquisitionError);
+  assert.equal(exhaustedAttempts, 2);
+  assert.equal(exhaustedObservations.at(-1).status, "exhausted");
 });

@@ -52,6 +52,13 @@ coordinator serializes local writes and rejects stale multi-host writers instead
 another host's newer health history. Filesystem/database ownership remains with the embedding
 application because this dependency-free SDK does not assume a Node or browser storage runtime.
 
+Evidence acquisition now also has a reusable bounded retry boundary. Typed transient failures from
+the HTTP source bridge can retry with deterministic exponential delay, while authorization,
+validation, unknown, and exhausted failures remain explicit. Per-attempt observations retain only
+domain, attempt, stable failure class, latency, and delay; no original errors, requests, credentials,
+or values are persisted. Caller approval, global rate policy, and source-specific retry semantics
+remain authoritative.
+
 The portfolio now also has a bounded evidence supervisor. It verifies successful provider items,
 rejects cross-domain requests, scopes each evidence runtime to its item's domain, preserves direct
 predecessor evidence digests, and executes acquisition/projection/evaluation in the portfolio's
