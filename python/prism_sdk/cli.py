@@ -1843,6 +1843,8 @@ def _load_batch_requests(args: argparse.Namespace) -> tuple[str, str, list[dict[
             raise ValueError(f"batch request {index} options must be an object")
         if "credentials" in options:
             raise ValueError("batch request options cannot carry credentials")
+        if mode != "domain" and "capability" in options:
+            raise ValueError("batch capability options require domain mode")
         normalized = dict(request)
         normalized["options"] = dict(options)
         normalized_requests.append(normalized)
@@ -2054,6 +2056,9 @@ def _batch_run(
                         options["learning_mode"] = args.learning_mode
                     elif args.learning_mode == "online":
                         options["learn"] = True
+                options.pop("approve_capability", None)
+                if options.get("capability") is not None:
+                    options["approve_capability"] = args.approve_capability
                 if args.workflow_execution:
                     options["workflow_execution"] = True
                     options["allow_cross_domain"] = False
@@ -2135,6 +2140,7 @@ def _batch_run(
             "credential_session": session.status().to_dict(),
             "authorization": {
                 "provider_call_approved": args.approve_provider_call,
+                "capability_approved": args.approve_capability,
                 "mission_dispatch_approved": args.approve_mission_dispatch,
             },
             "secret_material": "never_returned",
@@ -2250,6 +2256,10 @@ def _run(
         not args.automatic and args.domain is None
     ):
         raise ValueError("choose exactly one of --automatic or --domain")
+    if args.capability is not None and args.automatic:
+        raise ValueError("--capability requires an explicit --domain")
+    if args.approve_capability and args.capability is None:
+        raise ValueError("--approve-capability requires --capability")
     if args.domain_tool_domain and not (args.activate_domain_tools or args.approve_domain_tool):
         raise ValueError("--domain-tool-domain requires --activate-domain-tools or --approve-domain-tool")
     if args.domain_tool_bindings_file and args.domain_tool_domain:
@@ -2471,7 +2481,17 @@ def _run(
             else:
                 if args.learning_mode == "online":
                     common["learn"] = True
-                result = agent.run(**common, domain=args.domain)
+                if args.capability is not None:
+                    capability_options = dict(common)
+                    capability_options.pop("capability", None)
+                    result = agent.run_capability(
+                        **capability_options,
+                        domain=args.domain,
+                        capability=args.capability,
+                        approve_capability=args.approve_capability,
+                    )
+                else:
+                    result = agent.run(**common, domain=args.domain)
             if activation_store is not None:
                 agent.save_activation(activation_store)
                 activation_state_after = agent.activation_state()
@@ -2543,6 +2563,7 @@ def _run(
             "authorization": {
                 "provider_call_approved": args.approve_provider_call,
                 "model_discovery_approved": args.approve_provider_call if args.discover_models else False,
+                "capability_approved": args.approve_capability,
                 "mission_dispatch_approved": args.approve_mission_dispatch,
             },
             "state_persistence": {
@@ -2800,7 +2821,8 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--reliability", type=float, default=0.5)
     run.add_argument("--latency-ms", type=int, default=1_000)
     run.add_argument("--cost-per-million-tokens", type=int, default=0)
-    run.add_argument("--capability", default=None, help="domain capability label for the planner")
+    run.add_argument("--capability", default=None, help="focused reviewed domain capability; dispatches through run_capability")
+    run.add_argument("--approve-capability", action="store_true", help="approve a capability contract that requires human review")
     run.add_argument("--execution-mode", choices=("provider", "tool_loop", "mission"), default="provider")
     run.add_argument("--max-steps", type=int, default=8)
     run.add_argument("--requested-output-tokens", type=int, default=2_048)
@@ -2915,6 +2937,7 @@ def _parser() -> argparse.ArgumentParser:
     batch_run.add_argument("--latency-ms", type=int, default=1_000)
     batch_run.add_argument("--cost-per-million-tokens", type=int, default=0)
     batch_run.add_argument("--approve-provider-call", action="store_true", help="authorize provider invocation")
+    batch_run.add_argument("--approve-capability", action="store_true", help="approve capability contracts requiring human review")
     batch_run.add_argument("--approve-mission-dispatch", action="store_true", help="authorize mission effects")
     _add_credential_arguments(batch_run)
     return parser

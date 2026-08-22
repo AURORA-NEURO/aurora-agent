@@ -14079,6 +14079,39 @@ class AutonomousAgent:
             )
         return tuple(prepared), resolved_credentials
 
+    def _invoke_domain_batch_descriptor(
+        self,
+        descriptor: Mapping[str, Any],
+        *,
+        credentials: Mapping[str, CredentialHandle],
+    ) -> Any:
+        """Dispatch one explicit-domain item through focused capability execution when requested."""
+
+        options = dict(descriptor["options"])
+        capability = options.pop("capability", None)
+        approve_capability = options.pop("approve_capability", False)
+        if capability is None:
+            if approve_capability:
+                raise BrainRunError("approve_capability requires a batch capability")
+            return self.run(
+                task=descriptor["task"],
+                domain=descriptor["domain"],
+                credentials=credentials,
+                model_candidates=descriptor["model_candidates"],
+                execution_id=descriptor["execution_id"],
+                **options,
+            )
+        return self.run_capability(
+            task=descriptor["task"],
+            domain=descriptor["domain"],
+            capability=capability,
+            credentials=credentials,
+            model_candidates=descriptor["model_candidates"],
+            execution_id=descriptor["execution_id"],
+            approve_capability=approve_capability,
+            **options,
+        )
+
     @staticmethod
     def _execute_prepared_batch(
         prepared: Sequence[Mapping[str, Any]],
@@ -14217,13 +14250,9 @@ class AutonomousAgent:
             )
 
             def invoke(descriptor: Mapping[str, Any]) -> Any:
-                return self.run(
-                    task=descriptor["task"],
-                    domain=descriptor["domain"],
+                return self._invoke_domain_batch_descriptor(
+                    descriptor,
                     credentials=resolved_credentials,
-                    model_candidates=descriptor["model_candidates"],
-                    execution_id=descriptor["execution_id"],
-                    **descriptor["options"],
                 )
         elif mode == "auto":
             prepared, resolved_credentials = self._prepare_auto_batch_invocations(
@@ -14453,13 +14482,9 @@ class AutonomousAgent:
         )
 
         def invoke(descriptor: Mapping[str, Any]) -> Any:
-            return self.run(
-                task=descriptor["task"],
-                domain=descriptor["domain"],
+            return self._invoke_domain_batch_descriptor(
+                descriptor,
                 credentials=resolved_credentials,
-                model_candidates=descriptor["model_candidates"],
-                execution_id=descriptor["execution_id"],
-                **descriptor["options"],
             )
 
         return self._execute_prepared_batch(

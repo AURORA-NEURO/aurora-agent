@@ -1009,6 +1009,116 @@ def test_run_wires_opt_in_health_and_learning_ledgers_without_exposing_state_or_
     assert set(state_payload["learning"]["domain_learning"]) == set(AUTONOMOUS_DOMAINS)
 
 
+def test_run_capability_flag_dispatches_the_focused_contract() -> None:
+    captured: dict[str, object] = {}
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    class FakeAgent:
+        def __init__(self, _workspace: object, _runtime: object, *, model_catalogue: object) -> None:
+            captured["catalogue"] = model_catalogue
+
+        def run_capability(self, **kwargs: object) -> dict[str, object]:
+            captured["run_capability"] = kwargs
+            return {"status": "completed", "dispatch": "focused_capability"}
+
+    output = io.StringIO()
+    errors = io.StringIO()
+    with patch("prism_sdk.cli.AutonomousAgent", FakeAgent):
+        code = main(
+            (
+                "run",
+                "--mcp-command", "python server.py",
+                "--domain", "coding",
+                "--task", "inspect the bounded repository evidence",
+                "--capability", "debugging",
+                "--approve-capability",
+                "--provider", "local",
+                "--model", "local-model",
+                "--model-capability", "reasoning",
+                "--model-capability", "code",
+                "--approve-provider-call",
+            ),
+            writer=output,
+            error_writer=errors,
+            client_factory=lambda *_args, **_kwargs: FakeClient(),
+        )
+    payload = json.loads(output.getvalue())
+    assert code == 0
+    assert errors.getvalue() == ""
+    forwarded = captured["run_capability"]
+    assert isinstance(forwarded, dict)
+    assert forwarded["domain"] == "coding"
+    assert forwarded["capability"] == "debugging"
+    assert forwarded["approve_capability"] is True
+    assert payload["result"]["dispatch"] == "focused_capability"
+    assert payload["authorization"]["capability_approved"] is True
+
+
+def test_run_rejects_capability_for_automatic_routing() -> None:
+    code, payload, errors = _invoke(
+        "run",
+        "--mcp-command", "python server.py",
+        "--automatic",
+        "--task", "route this bounded task",
+        "--capability", "debugging",
+        "--provider", "local",
+    )
+    assert code == 2
+    assert payload is None
+    assert "command failed" in errors
+
+
+def test_batch_domain_options_dispatch_focused_capability_with_operator_approval(tmp_path) -> None:
+    fixture = Path(__file__).parent / "autonomous_brain_mcp_server.py"
+    command = f'"{sys.executable.replace(chr(92), "/")}" -u "{fixture.as_posix()}"'
+    requests_path = tmp_path / "capability-batch.json"
+    requests_path.write_text(
+        json.dumps(
+            {
+                "schema": "aurora-autonomous-batch-requests/0.1",
+                "mode": "domain",
+                "job_id": "capability-batch-001",
+                "requests": [
+                    {
+                        "task": "inspect bounded repository evidence",
+                        "domain": "coding",
+                        "options": {"capability": "debugging"},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    code, payload, errors = _invoke(
+        "batch-run",
+        "--mcp-command", command,
+        "--requests-file", str(requests_path),
+        "--job-id", "capability-batch-001",
+        "--provider", "local",
+        "--model", "local-model",
+        "--model-capability", "reasoning",
+        "--model-capability", "code",
+        "--local-response-sequence-json", json.dumps(
+            [{"output_text": "focused capability batch completed"}],
+            separators=(",", ":"),
+        ),
+        "--max-parallelism", "1",
+        "--approve-provider-call",
+        "--approve-capability",
+    )
+    assert code == 0
+    assert errors == ""
+    assert payload["batch"]["status"] == "completed"
+    assert payload["batch"]["items"][0]["status"] == "succeeded"
+    assert payload["authorization"]["capability_approved"] is True
+
+
 def test_discover_models_projects_only_typed_metadata_and_closes_credentials() -> None:
     secret = "discovery-test-secret-that-must-not-appear"
     descriptors = (
