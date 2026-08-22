@@ -1094,6 +1094,7 @@ def test_keyless_subprocess_tool_loop_discovers_and_executes_a_live_mcp_tool() -
         "--model-capability", "code",
         "--local-response-sequence-json", response_sequence,
         "--execution-mode", "tool_loop",
+        "--allow-mcp-tool", "workspace_read",
         "--approve-provider-call",
         "--approve-mission-dispatch",
     )
@@ -1104,8 +1105,70 @@ def test_keyless_subprocess_tool_loop_discovers_and_executes_a_live_mcp_tool() -
     assert loop["tool_calls"] == 1
     assert loop["final_response"]["text"] == "workspace scan complete"
     assert payload["provider_status"]["attempts"] == 2
+    assert payload["tool_surface"]["mode"] == "live_mcp"
+    assert payload["tool_surface"]["exposed_tools"] == ["workspace_read"]
+    assert payload["tool_surface"]["authority"] == "caller_approved_only"
     assert payload["credential_session"]["providers"] == []
     assert payload["secret_material"] == "never_returned"
+
+
+def test_keyless_tool_loop_rejects_invalid_mcp_arguments_before_workspace_effect() -> None:
+    fixture = Path(__file__).parent / "autonomous_brain_mcp_server.py"
+    command = f'"{sys.executable.replace(chr(92), "/")}" -u "{fixture.as_posix()}"'
+    response_sequence = json.dumps(
+        [
+            {
+                "tool_calls": [
+                    {
+                        "id": "call-invalid-arguments",
+                        "name": "workspace_read",
+                        "arguments": {"path": 7},
+                    }
+                ]
+            }
+        ],
+        separators=(",", ":"),
+    )
+    code, payload, errors = _invoke(
+        "run",
+        "--mcp-command", command,
+        "--task", "inspect the workspace evidence",
+        "--domain", "coding",
+        "--provider", "local",
+        "--model", "local-model",
+        "--model-capability", "reasoning",
+        "--model-capability", "code",
+        "--local-response-sequence-json", response_sequence,
+        "--execution-mode", "tool_loop",
+        "--allow-mcp-tool", "workspace_read",
+        "--approve-provider-call",
+        "--approve-mission-dispatch",
+    )
+    assert code == 0
+    assert errors == ""
+    assert payload["result"]["status"] == "tool_authorization_required"
+    assert payload["result"]["provider_loop"]["tool_calls"] == 1
+    assert payload["provider_status"]["attempts"] == 1
+
+
+def test_keyless_tool_loop_rejects_unknown_mcp_allowlist_before_provider_dispatch() -> None:
+    fixture = Path(__file__).parent / "autonomous_brain_mcp_server.py"
+    command = f'"{sys.executable.replace(chr(92), "/")}" -u "{fixture.as_posix()}"'
+    code, payload, errors = _invoke(
+        "run",
+        "--mcp-command", command,
+        "--task", "inspect the workspace evidence",
+        "--domain", "coding",
+        "--provider", "local",
+        "--model", "local-model",
+        "--model-capability", "reasoning",
+        "--model-capability", "code",
+        "--execution-mode", "tool_loop",
+        "--allow-mcp-tool", "not_advertised",
+    )
+    assert code == 2
+    assert payload is None
+    assert "command failed" in errors
 
 
 def test_keyless_subprocess_batch_routes_every_builtin_domain(tmp_path) -> None:
@@ -1156,6 +1219,7 @@ def test_keyless_subprocess_batch_routes_every_builtin_domain(tmp_path) -> None:
     assert [item["status"] for item in payload["batch"]["items"]] == [
         "succeeded"
     ] * len(AUTONOMOUS_DOMAINS)
+    assert payload["tool_surface"]["mode"] == "not_requested"
     assert payload["credential_session"]["providers"] == []
 
 

@@ -67,6 +67,7 @@ from .llm_runtime import (
     openai_compatible_provider,
     openai_provider,
 )
+from .tooling import ToolCatalogue
 
 
 CLI_SCHEMA = "aurora-autonomous-cli/0.1"
@@ -206,6 +207,16 @@ def _runtime_with_provider(args: argparse.Namespace) -> tuple[LLMRuntime, Provid
                     "--local-response-sequence-json must be an array of 1 to "
                     f"{_MAX_LOCAL_RESPONSE_SEQUENCE} JSON objects"
                 )
+            for item in parsed_sequence:
+                raw_calls = item.get("tool_calls", [])
+                if (
+                    not isinstance(raw_calls, list)
+                    or len(raw_calls) > _MAX_MCP_PROVIDER_TOOLS
+                    or any(not isinstance(call, Mapping) for call in raw_calls)
+                ):
+                    raise ValueError(
+                        "--local-response-sequence-json tool_calls must be a bounded array of objects"
+                    )
             response_sequence = tuple(dict(item) for item in parsed_sequence)
         else:
             response_sequence = ()
@@ -262,8 +273,13 @@ def _runtime_with_provider(args: argparse.Namespace) -> tuple[LLMRuntime, Provid
     return runtime, onboarding
 
 
-def _mcp_provider_tools(client: Client) -> tuple[ProviderTool, ...]:
-    """Convert the live MCP catalogue into a bounded model-visible tool surface."""
+def _mcp_provider_tools(
+    client: Client,
+    *,
+    allow_tools: Sequence[str] = (),
+    deny_tools: Sequence[str] = (),
+) -> tuple[tuple[ProviderTool, ...], ToolCatalogue]:
+    """Convert the live MCP catalogue into a bounded, schema-checked tool surface."""
 
     schemas = client.list_tools()
     if len(schemas) > _MAX_MCP_PROVIDER_TOOLS:
@@ -271,25 +287,70 @@ def _mcp_provider_tools(client: Client) -> tuple[ProviderTool, ...]:
             "MCP workspace advertises more than "
             f"{_MAX_MCP_PROVIDER_TOOLS} model-visible tools"
         )
+    catalogue = ToolCatalogue.from_definitions(schemas)
+    names = {definition.name for definition in catalogue.definitions}
+    allowed = set(allow_tools)
+    denied = set(deny_tools)
+    if any(not isinstance(name, str) or not name.strip() for name in (*allow_tools, *deny_tools)):
+        raise ValueError("MCP tool policy names must be non-empty strings")
+    unknown_allowed = sorted(allowed.difference(names))
+    unknown_denied = sorted(denied.difference(names))
+    if unknown_allowed:
+        raise ValueError("MCP allowlist names absent from tools/list: " + ", ".join(unknown_allowed))
+    if unknown_denied:
+        raise ValueError("MCP denylist names absent from tools/list: " + ", ".join(unknown_denied))
+    selected_names = names if not allowed else allowed
+    selected_names.difference_update(denied)
+    selected_schemas = tuple(
+        schema
+        for schema in schemas
+        if isinstance(schema, Mapping) and schema.get("name") in selected_names
+    )
+    selected_catalogue = ToolCatalogue.from_definitions(selected_schemas)
     tools: list[ProviderTool] = []
     seen: set[str] = set()
-    for schema in schemas:
+    for schema in selected_schemas:
         tool = ProviderTool.from_mcp_schema(schema)
         if tool.name in seen:
             raise ValueError("MCP workspace advertises duplicate tool names")
         seen.add(tool.name)
         tools.append(tool)
-    return tuple(tools)
+    return tuple(tools), selected_catalogue
 
 
 def _cli_tool_authorizer(
     client: Client,
     *,
+    catalogue: ToolCatalogue,
     approve_mission_dispatch: bool,
 ) -> Callable[[tuple[ProviderToolCall, ...]], Sequence[ProviderToolResult]]:
     """Build the CLI's explicit approval boundary for provider-requested MCP calls."""
 
     def authorize(calls: tuple[ProviderToolCall, ...]) -> Sequence[ProviderToolResult]:
+        if len({call.call_id for call in calls}) != len(calls):
+            return tuple(
+                ProviderToolResult(
+                    call.call_id,
+                    {"ok": False, "status": "duplicate_tool_call_id"},
+                    approved=False,
+                    is_error=True,
+                )
+                for call in calls
+            )
+        plans = []
+        for call in calls:
+            try:
+                plans.append(catalogue.plan(call.name, call.arguments))
+            except Exception:
+                return tuple(
+                    ProviderToolResult(
+                        pending.call_id,
+                        {"ok": False, "status": "tool_arguments_rejected"},
+                        approved=False,
+                        is_error=True,
+                    )
+                    for pending in calls
+                )
         if not approve_mission_dispatch:
             return tuple(
                 ProviderToolResult(
@@ -301,9 +362,9 @@ def _cli_tool_authorizer(
                 for call in calls
             )
         results: list[ProviderToolResult] = []
-        for call in calls:
+        for call, plan in zip(calls, plans):
             try:
-                value = client.call_tool(call.name, call.arguments).require_ok()
+                value = client.call_tool(call.name, plan.to_mcp_arguments()).require_ok()
             except Exception:
                 return tuple(
                     ProviderToolResult(
@@ -1475,6 +1536,14 @@ def _batch_run(
     health_ledger = None
     learning_ledger = None
     execution_journal = None
+    tool_surface: dict[str, Any] = {
+        "mode": "not_requested",
+        "exposed_count": 0,
+        "catalogue_digest": None,
+        "exposed_tools": [],
+        "authority": "not_applicable",
+        "retention": "tool_names_and_schema_digest_only",
+    }
     try:
         if args.health_store is not None:
             health_ledger = ProviderHealthLedger(args.health_store)
@@ -1507,15 +1576,38 @@ def _batch_run(
                 and request["options"].get("execution_mode") in {"tool_loop", "mission"}
                 for request in requests
             )
-            provider_tools = _mcp_provider_tools(client) if needs_provider_tools else ()
+            provider_tools, tool_catalogue = (
+                _mcp_provider_tools(
+                    client,
+                    allow_tools=tuple(args.allow_mcp_tool or ()),
+                    deny_tools=tuple(args.deny_mcp_tool or ()),
+                )
+                if needs_provider_tools
+                else ((), None)
+            )
             tool_authorizer = (
                 _cli_tool_authorizer(
                     client,
+                    catalogue=tool_catalogue,
                     approve_mission_dispatch=args.approve_mission_dispatch,
                 )
-                if provider_tools
+                if provider_tools and tool_catalogue is not None
                 else None
             )
+            if needs_provider_tools:
+                assert tool_catalogue is not None
+                tool_surface = {
+                    "mode": "live_mcp",
+                    "exposed_count": len(tool_catalogue.definitions),
+                    "catalogue_digest": tool_catalogue.digest,
+                    "exposed_tools": sorted(
+                        definition.name for definition in tool_catalogue.definitions
+                    ),
+                    "allowlist": sorted(set(args.allow_mcp_tool or ())),
+                    "denylist": sorted(set(args.deny_mcp_tool or ())),
+                    "authority": "caller_approved_only",
+                    "retention": "tool_names_and_schema_digest_only",
+                }
             controller = AutonomousBrainBatchJobController(agent, checkpoint_store)
             controller.restore()
             rehydrate_result = None
@@ -1598,6 +1690,7 @@ def _batch_run(
                 "retention": "checkpoint_digests_and_success_statuses_only; task_text_and_provider_values_not_persisted",
             },
             "provider_status": runtime.provider_status(args.provider),
+            "tool_surface": tool_surface,
             "credential_session": session.status().to_dict(),
             "authorization": {
                 "provider_call_approved": args.approve_provider_call,
@@ -1755,6 +1848,14 @@ def _run(
     health_ledger = None
     learning_ledger = None
     execution_journal = None
+    tool_surface: dict[str, Any] = {
+        "mode": "not_requested",
+        "exposed_count": 0,
+        "catalogue_digest": None,
+        "exposed_tools": [],
+        "authority": "not_applicable",
+        "retention": "tool_names_and_schema_digest_only",
+    }
     try:
         if args.health_store is not None:
             health_ledger = ProviderHealthLedger(args.health_store)
@@ -1793,11 +1894,29 @@ def _run(
             if execution_journal is not None:
                 agent_kwargs["execution_journal"] = execution_journal
             agent = AutonomousAgent(_McpWorkspace(client), runtime, **agent_kwargs)
-            provider_tools = (
-                _mcp_provider_tools(client)
+            provider_tools, tool_catalogue = (
+                _mcp_provider_tools(
+                    client,
+                    allow_tools=tuple(args.allow_mcp_tool or ()),
+                    deny_tools=tuple(args.deny_mcp_tool or ()),
+                )
                 if args.execution_mode in {"tool_loop", "mission"}
-                else ()
+                else ((), None)
             )
+            if args.execution_mode in {"tool_loop", "mission"}:
+                assert tool_catalogue is not None
+                tool_surface = {
+                    "mode": "live_mcp",
+                    "exposed_count": len(tool_catalogue.definitions),
+                    "catalogue_digest": tool_catalogue.digest,
+                    "exposed_tools": sorted(
+                        definition.name for definition in tool_catalogue.definitions
+                    ),
+                    "allowlist": sorted(set(args.allow_mcp_tool or ())),
+                    "denylist": sorted(set(args.deny_mcp_tool or ())),
+                    "authority": "caller_approved_only",
+                    "retention": "tool_names_and_schema_digest_only",
+                }
             common = {
                 "task": args.task,
                 "credentials": session,
@@ -1819,6 +1938,7 @@ def _run(
                 common["tool_loop_options"] = {
                     "authorize_and_execute": _cli_tool_authorizer(
                         client,
+                        catalogue=tool_catalogue,
                         approve_mission_dispatch=args.approve_mission_dispatch,
                     ),
                 }
@@ -1898,6 +2018,7 @@ def _run(
             },
             "result": result,
             "provider_status": runtime.provider_status(args.provider),
+            "tool_surface": tool_surface,
             "credential_session": session.status().to_dict(),
             "authorization": {
                 "provider_call_approved": args.approve_provider_call,
@@ -1981,6 +2102,18 @@ def _parser() -> argparse.ArgumentParser:
             "optional bounded JSON-object response sequence for credentialless tool-loop "
             "verification"
         ),
+    )
+    provider_parent.add_argument(
+        "--allow-mcp-tool",
+        action="append",
+        default=[],
+        help="restrict model-visible MCP tools to these names; repeatable",
+    )
+    provider_parent.add_argument(
+        "--deny-mcp-tool",
+        action="append",
+        default=[],
+        help="remove these names from the model-visible MCP tool surface; repeatable",
     )
 
     subparsers.add_parser("provider-status", parents=[provider_parent], help="show redacted provider readiness")

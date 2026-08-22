@@ -504,6 +504,15 @@ named MCP tool through the already-running workspace process, and returns a call
 continuation result. Without that flag, the model can propose a tool call but the run ends at
 `tool_authorization_required` without invoking the workspace tool.
 
+The live surface is schema-checked twice: once when `tools/list` is converted into provider
+functions, and again immediately before an approved MCP call. `--allow-mcp-tool` can be repeated
+to expose an explicit subset, while `--deny-mcp-tool` removes named tools from the model surface;
+unknown names, duplicate tool definitions, invalid arguments, and duplicate provider call ids
+fail closed before a workspace effect. The same policy applies to batch items and automatic or
+cross-domain routes, so domain fan-out cannot silently widen the tool boundary.
+The CLI result exposes only the tool-surface mode, selected names, count, catalogue digest, and
+approval posture for operator auditing; it does not persist schemas, arguments, or tool results.
+
 The local provider also supports a bounded response sequence for offline integration tests. The
 array contains at most 32 JSON objects; each call consumes one object in order, and `text` or
 `output_text` can provide the response text while `tool_calls` provides provider-neutral tool
