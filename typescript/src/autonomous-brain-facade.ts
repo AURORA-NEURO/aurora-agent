@@ -13,6 +13,8 @@ import {
   type AutonomousRouteProposal,
   type AutonomousRunOptions,
   type AutonomousRunResult,
+  type AutonomousModelSelectionPreview,
+  type AutonomousModelSelectionPreviewOptions,
   type AutonomousTaskBlueprint,
 } from "./autonomous.js";
 import {
@@ -767,6 +769,25 @@ export class AutonomousBrainFacade {
   /** Return the redacted provider/model/tool posture needed to render onboarding UI. */
   async readiness(options: AutonomousBrainReadinessOptions = {}): Promise<AutonomousBrainReadinessReport> {
     return this.agent.readiness(options);
+  }
+
+  /**
+   * Preview the exact domain-scoped model ranking without dispatching a provider or domain tool.
+   * An explicit domain is required so a UI cannot mistake lexical routing for model eligibility.
+   */
+  async modelSelectionPreview(
+    input: AutonomousBrainRequest,
+    options: Omit<AutonomousModelSelectionPreviewOptions, "domain"> = {},
+  ): Promise<AutonomousModelSelectionPreview> {
+    const request = validateRequest(input);
+    if (request.domain === undefined) throw new ArgumentError("model selection preview requires an explicit domain");
+    if (request.connector !== undefined) throw new ArgumentError("model selection preview does not accept connector dispatch inputs");
+    return this.agent.modelSelectionPreview(request.task, {
+      ...options,
+      domain: request.domain,
+      capability: options.capability ?? request.capability,
+      context: options.context ?? request.context,
+    });
   }
 
   /** Recompute keyless readiness and activation metadata without dispatching a provider or tool. */

@@ -88,6 +88,44 @@ test("brain facade creates request-free plans for every built-in domain and exec
   assert.doesNotMatch(JSON.stringify(batch.items.map((item) => item.execution?.plan ?? null)), /debug and verify a bounded repository change/);
 });
 
+test("brain facade previews provider-free model selection for every built-in domain", async () => {
+  const runtime = localRuntime();
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+  const beforeAttempts = runtime.providerStatus("offline").attempts;
+
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const task = tasks[domain];
+    const preview = await brain.modelSelectionPreview({ task, domain });
+    assert.equal(preview.schema, "bioprism-typescript-autonomous-model-selection-preview/0.1", domain);
+    assert.equal(preview.status, "selected", domain);
+    assert.equal(preview.domain, domain);
+    assert.equal(preview.candidate_count, 1);
+    assert.equal(preview.eligible_candidate_count, 1);
+    assert.equal(preview.selection_audit.selected_model?.provider, "offline");
+    assert.equal(preview.review.provider_call, "not_started");
+    assert.equal(preview.execution, "preview_only; no_provider_or_domain_tool_invocation");
+    assert.equal(preview.authority_posture, "selection_review_only; preview_does_not_authorize_provider_or_effects");
+    assert.equal(preview.secret_material, "never_returned");
+    assert.equal(preview.selection_context_digest.length, 64);
+    assert.equal(preview.execution_plan_digest.length, 64);
+    assert.ok(!JSON.stringify(preview).includes(task), domain);
+  }
+  assert.equal(runtime.providerStatus("offline").attempts, beforeAttempts);
+
+  const unconfiguredRuntime = new LLMRuntime({ fetch: async () => { throw new Error("provider must not be contacted"); } });
+  const unconfiguredAgent = new AutonomousAgent(unconfiguredRuntime);
+  unconfiguredAgent.registerModel(model);
+  const refused = await new AutonomousBrainFacade({ agent: unconfiguredAgent }).modelSelectionPreview({
+    task: tasks.coding,
+    domain: "coding",
+  });
+  assert.equal(refused.status, "refused_no_eligible_model");
+  assert.equal(refused.eligible_candidate_count, 0);
+  assert.equal(refused.review.next_action, "resolve_model_provider_or_credential_gates");
+});
+
 test("brain facade closed-loop execution accepts every built-in domain through one provider-neutral entry point", async () => {
   const runtime = localRuntime();
   const agent = new AutonomousAgent(runtime);

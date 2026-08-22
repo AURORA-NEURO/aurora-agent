@@ -144,11 +144,13 @@ export const AUTONOMOUS_MODEL_REFRESH_SCHEMA = "bioprism-typescript-autonomous-m
 export const AUTONOMOUS_MODEL_CATALOGUE_REFRESH_SCHEMA = "bioprism-typescript-autonomous-model-catalogue-refresh/0.1" as const;
 export const AUTONOMOUS_MODEL_CATALOGUE_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-model-catalogue-snapshot/0.1" as const;
 export const AUTONOMOUS_READINESS_SCHEMA = "bioprism-autonomous-agent-readiness/0.1" as const;
+export const AUTONOMOUS_MODEL_SELECTION_PREVIEW_SCHEMA = "bioprism-typescript-autonomous-model-selection-preview/0.1" as const;
 export const AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN = 8;
 export const AUTONOMOUS_CROSS_DOMAIN_MAX_CONCURRENCY = 4;
 export const AUTONOMOUS_MODEL_CATALOGUE_REFRESH_MAX_PROVIDERS = 32;
 export const AUTONOMOUS_MODEL_CATALOGUE_MAX_MODELS = 128;
 export const AUTONOMOUS_MODEL_CATALOGUE_MAX_SNAPSHOT_BYTES = 1_000_000;
+export const MAX_AUTONOMOUS_MODEL_SELECTION_PREVIEW_BYTES = 250_000;
 const AUTONOMOUS_BANDIT_MAX_ARMS = 512;
 
 export const AUTONOMOUS_DOMAIN_NAMES = [
@@ -502,6 +504,50 @@ export interface AutonomousReadinessReport extends JsonObject {
   credential_posture: "caller_supplied_opaque_handles";
   secret_material: "never_returned";
   readiness_digest: string;
+}
+
+export type AutonomousModelSelectionPreviewStatus = "selected" | "refused_no_eligible_model";
+
+export interface AutonomousModelSelectionPreviewOptions {
+  domain: AutonomousDomainName;
+  capability?: string;
+  context?: readonly AutonomousPromptChunk[];
+  candidates?: readonly AutonomousModelCandidate[];
+  estimatedInputTokens?: number;
+  requestedOutputTokens?: number;
+  maxCostPerMillionTokens?: number;
+  maxLatencyMs?: number;
+  minQuality?: number;
+  minSelectionConfidence?: number;
+}
+
+/** Provider-free projection of the exact selection request that execution would use. */
+export interface AutonomousModelSelectionPreview extends JsonObject {
+  schema: typeof AUTONOMOUS_MODEL_SELECTION_PREVIEW_SCHEMA;
+  status: AutonomousModelSelectionPreviewStatus;
+  domain: AutonomousDomainName;
+  capability: string;
+  risk_class: string;
+  workflow_id: string;
+  workflow_digest: string;
+  domain_pack_digest: string;
+  selection_context_digest: string;
+  execution_plan_digest: string;
+  required_model_capabilities: string[];
+  candidate_count: number;
+  eligible_candidate_count: number;
+  selection_audit: AutonomousSelectionDecision;
+  review: {
+    provider_call: "not_started";
+    domain_tools: "not_started";
+    caller_approval_required: true;
+    next_action: "review_selection_and_approve_provider_call" | "resolve_model_provider_or_credential_gates";
+  };
+  execution: "preview_only; no_provider_or_domain_tool_invocation";
+  authority_posture: "selection_review_only; preview_does_not_authorize_provider_or_effects";
+  credential_posture: "caller_opaque_handles_only; no_handles_returned";
+  retention: "metadata_only_model_ranking_and_digests";
+  secret_material: "never_returned";
 }
 
 export interface AutonomousTaskBlueprint extends JsonObject {
@@ -3415,6 +3461,127 @@ export class AutonomousAgent {
       : { configured: false, registry_digest: null, connector_count: 0, execution: "caller_owned_connector_registry_not_configured", secret_material: "never_returned" as const };
     const descriptor = { schema: AUTONOMOUS_READINESS_SCHEMA, providers: providerRows, models: [...modelRows].sort((left, right) => `${left.provider}/${left.model}`.localeCompare(`${right.provider}/${right.model}`)), domains: domainRows, workflows: profiles.map((profile) => profile.workflow), domain_packs: domainPacks, model_capability_coverage: { domain_count: capabilityRows.length, rows: capabilityRows, evidence_posture: "static_caller_declared_capabilities_only" }, model_health: this.llm.modelHealthSnapshot(), learning, tooling: { configured: this.toolCatalogue !== undefined, catalogue_digest: this.toolCatalogue?.digest ?? null, available_tool_count: toolNames.size, execution: "catalogue_metadata_only; registration_is_not_authorization", activation_status: activation.status }, connectors: connectorReadiness, activation, next_actions: [...nextActions].sort(), readiness_state: readinessState, execution: "not_started; no_provider_or_tool_calls" as const, credential_posture: "caller_supplied_opaque_handles" as const, secret_material: "never_returned" as const };
     return { ...descriptor, readiness_digest: await digestJson(descriptor) };
+  }
+
+  /**
+   * Preview the domain-scoped selector without contacting a provider, connector, or tool.
+   *
+   * The method compiles the same prompt/workflow identity used by ``run`` and then asks only
+   * the local/value-only selection runtime for a ranking. The task and prompt remain transient;
+   * the returned projection contains only model metadata, eligibility evidence, and digests.
+   */
+  async modelSelectionPreview(
+    task: string,
+    options: AutonomousModelSelectionPreviewOptions,
+  ): Promise<AutonomousModelSelectionPreview> {
+    const taskText = boundedText("autonomous model selection preview task", task, 32_000);
+    if (!options || !AUTONOMOUS_DOMAIN_NAMES.includes(options.domain)) {
+      throw new ArgumentError("autonomous model selection preview requires a built-in domain");
+    }
+    const estimatedInputTokens = options.estimatedInputTokens ?? 4_096;
+    const requestedOutputTokens = options.requestedOutputTokens ?? 1_024;
+    for (const [name, value, maximum] of [
+      ["estimatedInputTokens", estimatedInputTokens, 10_000_000],
+      ["requestedOutputTokens", requestedOutputTokens, 10_000_000],
+    ] as const) {
+      if (!Number.isSafeInteger(value) || value < 1 || value > maximum) {
+        throw new ArgumentError(`autonomous model selection preview ${name} is outside its bounds`);
+      }
+    }
+    const blueprintEnvelope = await this.blueprint(taskText, {
+      domain: options.domain,
+      capability: options.capability,
+      context: options.context,
+      maxInputTokens: estimatedInputTokens,
+    });
+    const blueprint = blueprintEnvelope.blueprint;
+    if (!blueprint || blueprintEnvelope.route.cross_domain) {
+      throw new ProviderRuntimeError("autonomous model selection preview requires a single-domain blueprint");
+    }
+    const candidates = (options.candidates === undefined
+      ? this.models()
+      : [...options.candidates].map((candidate) => normalizeAutonomousModelCandidate(candidate)));
+    if (!candidates.length) throw new ProviderRuntimeError("autonomous model selection preview requires model candidates");
+    const messages: ProviderMessage[] = blueprint.prompt.messages.map((message) => ({
+      role: message.role,
+      content: message.content,
+    }));
+    const request: ProviderRequest = {
+      model: "selection-preview",
+      messages,
+      maxOutputTokens: requestedOutputTokens,
+    };
+    const executionPlan: AutonomousExecutionPlan = {
+      task: taskText,
+      domain: blueprint.domain_profile.domain,
+      capability: blueprint.selection_context.capability,
+      riskClass: blueprint.domain_profile.risk_class,
+      taskFamily: blueprint.selection_context.task_family ?? undefined,
+      learningContextDigest: blueprint.learning_context_digest,
+      requiredCapabilities: [...blueprint.required_capabilities],
+      maxCostPerMillionTokens: options.maxCostPerMillionTokens,
+      maxLatencyMs: options.maxLatencyMs,
+      minQuality: options.minQuality,
+      minSelectionConfidence: options.minSelectionConfidence,
+      candidates,
+      request,
+    };
+    const selection = await this.runtime.select(executionPlan);
+    const eligibleCandidateCount = selection.ranking.filter((row) => row.eligible).length;
+    const executionPlanDigest = await digestJson({
+      task_digest: blueprint.task_digest,
+      domain: blueprint.domain_profile.domain,
+      capability: blueprint.selection_context.capability,
+      risk_class: blueprint.domain_profile.risk_class,
+      workflow_id: blueprint.workflow.workflow_id,
+      workflow_digest: blueprint.workflow.workflow_digest,
+      prompt_digest: blueprint.prompt.prompt_digest,
+      plan_digest: blueprint.plan.plan_digest,
+      learning_context_digest: blueprint.learning_context_digest,
+      required_capabilities: [...blueprint.required_capabilities],
+      candidates,
+      selection_constraints: {
+        estimated_input_tokens: estimatedInputTokens,
+        requested_output_tokens: requestedOutputTokens,
+        max_cost_per_million_tokens: options.maxCostPerMillionTokens ?? null,
+        max_latency_ms: options.maxLatencyMs ?? null,
+        min_quality: options.minQuality ?? null,
+        min_selection_confidence: options.minSelectionConfidence ?? null,
+      },
+    });
+    const selected = selection.selected_model !== null;
+    const preview: AutonomousModelSelectionPreview = {
+      schema: AUTONOMOUS_MODEL_SELECTION_PREVIEW_SCHEMA,
+      status: selected ? "selected" : "refused_no_eligible_model",
+      domain: blueprint.domain_profile.domain,
+      capability: blueprint.selection_context.capability,
+      risk_class: blueprint.domain_profile.risk_class,
+      workflow_id: blueprint.workflow.workflow_id,
+      workflow_digest: blueprint.workflow.workflow_digest,
+      domain_pack_digest: blueprint.domain_pack.pack_digest,
+      selection_context_digest: blueprint.learning_context_digest,
+      execution_plan_digest: executionPlanDigest,
+      required_model_capabilities: [...blueprint.required_capabilities],
+      candidate_count: candidates.length,
+      eligible_candidate_count: eligibleCandidateCount,
+      selection_audit: structuredClone(selection),
+      review: {
+        provider_call: "not_started",
+        domain_tools: "not_started",
+        caller_approval_required: true,
+        next_action: selected ? "review_selection_and_approve_provider_call" : "resolve_model_provider_or_credential_gates",
+      },
+      execution: "preview_only; no_provider_or_domain_tool_invocation",
+      authority_posture: "selection_review_only; preview_does_not_authorize_provider_or_effects",
+      credential_posture: "caller_opaque_handles_only; no_handles_returned",
+      retention: "metadata_only_model_ranking_and_digests",
+      secret_material: "never_returned",
+    };
+    const encoded = JSON.stringify(preview);
+    if (!encoded || bytes(encoded) > MAX_AUTONOMOUS_MODEL_SELECTION_PREVIEW_BYTES) {
+      throw new ProviderRuntimeError("autonomous model selection preview exceeds its bounded size");
+    }
+    return structuredClone(preview);
   }
 
   async route(task: string, options: { domain?: AutonomousDomainName; hints?: readonly string[]; minConfidence?: number; minMargin?: number; maxDomains?: number; allowCrossDomain?: boolean } = {}): Promise<AutonomousRouteProposal> {

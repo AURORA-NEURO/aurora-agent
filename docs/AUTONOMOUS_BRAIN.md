@@ -1438,6 +1438,13 @@ call. The projection retains only model-arm metadata and digests, marks `provide
 The preview is therefore suitable for an onboarding screen and can be compared with the later
 execution selection audit without treating routing confidence as answer correctness.
 
+The TypeScript facade exposes the same boundary as `brain.modelSelectionPreview({ task, domain })`.
+Both language surfaces require an explicit domain for this operation, so a caller cannot confuse
+provider-free lexical routing with model eligibility. TypeScript uses the runtime's local selector
+and health/credential posture; a configured `in_memory` provider is eligible without a key, while
+an unregistered or credential-gated provider returns the same reviewable refusal metadata without
+attempting transport.
+
 ### Reviewed capability packs for every domain
 
 The domain profile and workflow are joined by an `AutonomousDomainPack` for every built-in domain:
