@@ -1908,6 +1908,12 @@ validates bounded serialized snapshots; `TransactionalJsonAutonomousWorkflowPort
 requires a digest-checked text-store compare-and-swap. The worker reaper calls `reclaimExpired()`
 before claiming new work, so an abandoned lease is quarantined for explicit rehydration instead of
 remaining invisible until a particular item is retried.
+When multiple hosts share one queue, use
+`AutonomousWorkflowPortfolioEvidenceWorkQueueAtomicCoordinator` and
+`AutonomousWorkflowPortfolioEvidenceAtomicWorkWorker`. The coordinator reloads before each
+admit/claim/renew/complete/fail/reconcile/requeue/cancel/reap transition and retries a bounded
+compare-and-swap conflict. Thus a concurrent claim either commits one lease or observes the
+already-leased item; a local snapshot flush alone is not sufficient for this guarantee.
 
 Approval is fail-closed: with `approveProviderCall` absent or false, the first ready item returns
 `approval_required`, descendants become `blocked`, and no provider call starts. Hard failures,

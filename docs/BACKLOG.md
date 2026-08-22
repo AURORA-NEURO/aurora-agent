@@ -57,6 +57,10 @@ owns the actual item executor, source adapters, and multi-host transaction backe
 The queue now also exposes bounded JSON and transactional text-store adapters, browser storage
 support, public snapshot validation, and a worker reaper that converts abandoned leases into
 explicit reconciliation rows before new claims are made.
+For genuinely shared workers, the CAS coordinator and atomic worker now reload and commit every
+queue transition, retry bounded conflicts, and prevent duplicate claims after two hosts restore
+the same snapshot. The backing text store still must provide a real atomic compare-and-swap;
+the SDK cannot manufacture distributed consensus from an ordinary read/write store.
 
 The checkpoint seam now includes an optional atomic compare-and-swap contract plus bounded JSON
 and transactional-JSON adapters. The controller serializes local operations, fences every flush

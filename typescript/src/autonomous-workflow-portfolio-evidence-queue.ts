@@ -658,6 +658,145 @@ export class AutonomousWorkflowPortfolioEvidenceWorkQueuePersistenceCoordinator 
   }
 }
 
+/**
+ * CAS-backed state-transition coordinator for workers that share one queue snapshot.
+ *
+ * A normal persistence coordinator is useful for one process: it serializes local flushes but
+ * intentionally leaves claim/complete operations in memory until the caller flushes. This
+ * coordinator reloads the latest snapshot before every mutation and commits the resulting
+ * transition through `writeIfUnchanged`. A concurrent claim therefore either wins the fence or
+ * retries against the newer lease; it cannot execute the same item merely because two workers
+ * restored the same snapshot at the same time.
+ */
+export class AutonomousWorkflowPortfolioEvidenceWorkQueueAtomicCoordinator {
+  private operationTail: Promise<void> = Promise.resolve();
+
+  constructor(
+    readonly queue: InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueue,
+    readonly persistence: AutonomousWorkflowPortfolioEvidenceWorkQueuePersistence,
+    readonly maxConflictRetries = 4,
+  ) {
+    if (!(queue instanceof InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueue)) throw new ArgumentError("portfolio evidence atomic coordinator requires a typed queue");
+    if (!persistence || typeof persistence.read !== "function" || typeof persistence.writeIfUnchanged !== "function") throw new ArgumentError("portfolio evidence atomic coordinator requires compare-and-swap persistence");
+    boundedInteger("portfolio evidence atomic coordinator maxConflictRetries", maxConflictRetries, 1, 16);
+  }
+
+  async restore(): Promise<{ status: "empty" | "restored"; snapshot_digest: string | null; items: number }> {
+    return this.enqueue(async () => {
+      const snapshot = await this.persistence.read();
+      if (snapshot === null) {
+        this.restoreEmpty();
+        return { status: "empty", snapshot_digest: null, items: 0 };
+      }
+      this.queue.restore(snapshot);
+      return { status: "restored", snapshot_digest: snapshot.snapshot_digest, items: snapshot.items.length };
+    });
+  }
+
+  async snapshot(): Promise<AutonomousWorkflowPortfolioEvidenceWorkQueueSnapshot> {
+    return this.enqueue(async () => {
+      await this.loadLatest();
+      return this.queue.snapshot();
+    });
+  }
+
+  async get(workId: string): Promise<AutonomousWorkflowPortfolioEvidenceWorkItem | null> {
+    return this.enqueue(async () => {
+      await this.loadLatest();
+      return this.queue.get(workId);
+    });
+  }
+
+  async pending(limit = MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_ITEMS, now = Date.now()): Promise<AutonomousWorkflowPortfolioEvidenceWorkItem[]> {
+    return this.enqueue(async () => {
+      await this.loadLatest();
+      return this.queue.pending(limit, now);
+    });
+  }
+
+  async rows(): Promise<AutonomousWorkflowPortfolioEvidenceWorkItem[]> {
+    return this.enqueue(async () => {
+      await this.loadLatest();
+      return this.queue.rows();
+    });
+  }
+
+  async admit(input: Parameters<InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueue["admit"]>[0]): Promise<AutonomousWorkflowPortfolioEvidenceWorkItem> {
+    return this.transact((queue) => queue.admit(input));
+  }
+
+  async claim(workId: string, workerId: string, leaseMs = 30_000, now = Date.now()): Promise<AutonomousWorkflowPortfolioEvidenceWorkItem | null> {
+    return this.transact((queue) => queue.claim(workId, workerId, leaseMs, now));
+  }
+
+  async renew(workId: string, workerId: string, leaseMs = 30_000, now = Date.now()): Promise<AutonomousWorkflowPortfolioEvidenceWorkItem> {
+    return this.transact((queue) => queue.renew(workId, workerId, leaseMs, now));
+  }
+
+  async complete(workId: string, workerId: string, result: { status: "completed" | "awaiting_evaluation"; resultDigest: string }, now = Date.now()): Promise<AutonomousWorkflowPortfolioEvidenceWorkItem> {
+    return this.transact((queue) => queue.complete(workId, workerId, result, now));
+  }
+
+  async fail(workId: string, workerId: string, errorClass: AutonomousWorkflowPortfolioEvidenceWorkFailureClass, retryable: boolean, resultDigest: string | null = null, now = Date.now()): Promise<AutonomousWorkflowPortfolioEvidenceWorkItem> {
+    return this.transact((queue) => queue.fail(workId, workerId, errorClass, retryable, resultDigest, now));
+  }
+
+  async reconcile(workId: string, workerId: string, errorClass: AutonomousWorkflowPortfolioEvidenceWorkFailureClass = "rehydration_missing", now = Date.now()): Promise<AutonomousWorkflowPortfolioEvidenceWorkItem> {
+    return this.transact((queue) => queue.reconcile(workId, workerId, errorClass, now));
+  }
+
+  async requeue(workId: string, now = Date.now()): Promise<AutonomousWorkflowPortfolioEvidenceWorkItem> {
+    return this.transact((queue) => queue.requeue(workId, now));
+  }
+
+  async cancel(workId: string, errorClass: AutonomousWorkflowPortfolioEvidenceWorkFailureClass = "unknown", now = Date.now()): Promise<AutonomousWorkflowPortfolioEvidenceWorkItem> {
+    return this.transact((queue) => queue.cancel(workId, errorClass, now));
+  }
+
+  async bindCheckpointDigest(jobId: string, checkpoint: string | null, now = Date.now()): Promise<number> {
+    return this.transact((queue) => queue.bindCheckpointDigest(jobId, checkpoint, now));
+  }
+
+  async reclaimExpired(now = Date.now(), limit = MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_ITEMS): Promise<AutonomousWorkflowPortfolioEvidenceWorkItem[]> {
+    return this.transact((queue) => queue.reclaimExpired(now, limit));
+  }
+
+  private restoreEmpty(): void {
+    this.queue.restore(new InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueue(this.queue.maxItems).snapshot());
+  }
+
+  private async loadLatest(): Promise<string | null> {
+    const snapshot = await this.persistence.read();
+    if (snapshot === null) {
+      this.restoreEmpty();
+      return null;
+    }
+    this.queue.restore(snapshot);
+    return snapshot.snapshot_digest;
+  }
+
+  private async transact<T>(operation: (queue: InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueue) => T): Promise<T> {
+    return this.enqueue(async () => {
+      for (let attempt = 0; attempt < this.maxConflictRetries; attempt += 1) {
+        const expected = await this.loadLatest();
+        const before = this.queue.snapshot();
+        const result = operation(this.queue);
+        const after = this.queue.snapshot();
+        if (after.snapshot_digest === before.snapshot_digest) return result;
+        const committed = await this.persistence.writeIfUnchanged!(expected, after);
+        if (committed) return result;
+      }
+      throw new ArgumentError("portfolio evidence work queue atomic transition conflicted repeatedly; reload before continuing");
+    });
+  }
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const queued = this.operationTail.then(() => operation());
+    this.operationTail = queued.then(() => undefined, () => undefined);
+    return queued;
+  }
+}
+
 /** In-memory fenced persistence adapter for local workers and tests. */
 export class InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueuePersistence implements AutonomousWorkflowPortfolioEvidenceWorkQueuePersistence {
   private snapshotValue: AutonomousWorkflowPortfolioEvidenceWorkQueueSnapshot | null = null;
@@ -724,6 +863,82 @@ export class AutonomousWorkflowPortfolioEvidenceWorkWorker {
       } catch {
         const failed = this.queue.fail(claimed.work_id, workerId, "executor_error", true, null, currentTime());
         rows.push({ work_id: failed.work_id, item_id: failed.item_id, domain: failed.domain, outcome: failed.status === "queued" ? "retry_scheduled" : "failed", attempts: failed.attempts, result_digest: failed.result_digest, error_class: failed.last_error_class, lease_retained: false });
+      }
+    }
+    return {
+      schema: AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_QUEUE_SCHEMA,
+      worker_id: workerId,
+      inspected: rows.length,
+      completed: rows.filter((row) => row.outcome === "completed").length,
+      awaiting_evaluation: rows.filter((row) => row.outcome === "awaiting_evaluation").length,
+      retried: rows.filter((row) => row.outcome === "retry_scheduled").length,
+      failed: rows.filter((row) => row.outcome === "failed").length,
+      reconciled: rows.filter((row) => row.outcome === "reconciliation_required").length,
+      leased_elsewhere: rows.filter((row) => row.outcome === "leased_elsewhere").length,
+      rows,
+      retention: "metadata_only_receipts_and_digests_no_values",
+      secret_material: "never_returned",
+    };
+  }
+}
+
+/**
+ * Distributed-safe worker that performs every queue transition through a CAS coordinator.
+ * The executor still receives only one transient work identity and must rehydrate private task,
+ * source, evaluator, and provider state from the embedding application.
+ */
+export class AutonomousWorkflowPortfolioEvidenceAtomicWorkWorker {
+  constructor(
+    readonly coordinator: AutonomousWorkflowPortfolioEvidenceWorkQueueAtomicCoordinator,
+    readonly execute: (item: AutonomousWorkflowPortfolioEvidenceWorkItem, context: { renew: (leaseMs?: number, now?: number) => Promise<AutonomousWorkflowPortfolioEvidenceWorkItem> }) => Promise<AutonomousWorkflowPortfolioEvidenceWorkExecution> | AutonomousWorkflowPortfolioEvidenceWorkExecution,
+  ) {
+    if (!(coordinator instanceof AutonomousWorkflowPortfolioEvidenceWorkQueueAtomicCoordinator)) throw new ArgumentError("portfolio evidence atomic worker requires a CAS coordinator");
+    if (typeof execute !== "function") throw new ArgumentError("portfolio evidence atomic worker requires an executor");
+  }
+
+  async run(options: { workerId?: string; limit?: number; leaseMs?: number; now?: number; signal?: { readonly aborted: boolean } } = {}): Promise<AutonomousWorkflowPortfolioEvidenceWorkWorkerRun> {
+    const workerId = identifier("portfolio evidence atomic worker_id", options.workerId ?? "portfolio-evidence-atomic-worker");
+    const limit = boundedInteger("portfolio evidence atomic worker limit", options.limit ?? MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_ITEMS, 1, MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_ITEMS);
+    const leaseMs = boundedInteger("portfolio evidence atomic worker lease_ms", options.leaseMs ?? 30_000, 1, MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_LEASE_MS);
+    const time = nowMs(options.now);
+    const currentTime = () => options.now === undefined ? Date.now() : time;
+    const rows: AutonomousWorkflowPortfolioEvidenceWorkWorkerRow[] = [];
+    const expiredLeases = await this.coordinator.reclaimExpired(time, limit);
+    for (const expired of expiredLeases) rows.push({ work_id: expired.work_id, item_id: expired.item_id, domain: expired.domain, outcome: "reconciliation_required", attempts: expired.attempts, result_digest: expired.result_digest, error_class: expired.failure_class, lease_retained: false });
+    const remaining = Math.max(0, limit - rows.length);
+    const currentRows = await this.coordinator.rows();
+    const activeLeases = currentRows.filter((item) => item.status === "leased" && item.lease_until !== null && item.lease_until > time).slice(0, remaining);
+    const pending = remaining > 0 ? await this.coordinator.pending(Math.max(1, remaining - activeLeases.length), time) : [];
+    const candidates = [...activeLeases, ...pending].slice(0, remaining);
+    for (const candidate of candidates) {
+      if (options.signal?.aborted) break;
+      const claimed = await this.coordinator.claim(candidate.work_id, workerId, leaseMs, time);
+      if (!claimed) {
+        const current = await this.coordinator.get(candidate.work_id);
+        rows.push({ work_id: candidate.work_id, item_id: candidate.item_id, domain: candidate.domain, outcome: current?.status === "reconciliation_required" ? "reconciliation_required" : "leased_elsewhere", attempts: current?.attempts ?? candidate.attempts, result_digest: current?.result_digest ?? null, error_class: current?.failure_class ?? null, lease_retained: false });
+        continue;
+      }
+      try {
+        const outcome = await this.execute(claimed, { renew: (renewLeaseMs = leaseMs, renewAt = currentTime()) => this.coordinator.renew(claimed.work_id, workerId, renewLeaseMs, renewAt) });
+        if (!outcome || !["completed", "awaiting_evaluation", "failed", "reconciliation_required"].includes(outcome.status)) throw new ArgumentError("portfolio evidence atomic executor returned a malformed status");
+        if (outcome.status === "completed" || outcome.status === "awaiting_evaluation") {
+          const finished = await this.coordinator.complete(claimed.work_id, workerId, { status: outcome.status, resultDigest: outcome.result_digest ?? "" }, currentTime());
+          rows.push({ work_id: finished.work_id, item_id: finished.item_id, domain: finished.domain, outcome: outcome.status, attempts: finished.attempts, result_digest: finished.result_digest, error_class: finished.failure_class, lease_retained: false });
+        } else if (outcome.status === "reconciliation_required") {
+          const reconciled = await this.coordinator.reconcile(claimed.work_id, workerId, outcome.error_class ?? "rehydration_missing", currentTime());
+          rows.push({ work_id: reconciled.work_id, item_id: reconciled.item_id, domain: reconciled.domain, outcome: "reconciliation_required", attempts: reconciled.attempts, result_digest: reconciled.result_digest, error_class: reconciled.failure_class, lease_retained: false });
+        } else {
+          const failed = await this.coordinator.fail(claimed.work_id, workerId, outcome.error_class ?? "executor_error", outcome.retryable === true, outcome.result_digest, currentTime());
+          rows.push({ work_id: failed.work_id, item_id: failed.item_id, domain: failed.domain, outcome: failed.status === "queued" ? "retry_scheduled" : "failed", attempts: failed.attempts, result_digest: failed.result_digest, error_class: failed.last_error_class, lease_retained: false });
+        }
+      } catch {
+        try {
+          const failed = await this.coordinator.fail(claimed.work_id, workerId, "executor_error", true, null, currentTime());
+          rows.push({ work_id: failed.work_id, item_id: failed.item_id, domain: failed.domain, outcome: failed.status === "queued" ? "retry_scheduled" : "failed", attempts: failed.attempts, result_digest: failed.result_digest, error_class: failed.last_error_class, lease_retained: false });
+        } catch {
+          const current = await this.coordinator.get(claimed.work_id);
+          rows.push({ work_id: claimed.work_id, item_id: claimed.item_id, domain: claimed.domain, outcome: current?.status === "reconciliation_required" ? "reconciliation_required" : "leased_elsewhere", attempts: current?.attempts ?? claimed.attempts, result_digest: current?.result_digest ?? null, error_class: current?.failure_class ?? "executor_error", lease_retained: false });
+        }
       }
     }
     return {

@@ -5,6 +5,8 @@ import {
   AUTONOMOUS_DOMAIN_NAMES,
   AutonomousAgent,
   AutonomousWorkflowPortfolioEvidenceController,
+  AutonomousWorkflowPortfolioEvidenceAtomicWorkWorker,
+  AutonomousWorkflowPortfolioEvidenceWorkQueueAtomicCoordinator,
   AutonomousWorkflowPortfolioEvidenceWorkQueuePersistenceCoordinator,
   AutonomousWorkflowPortfolioEvidenceWorkWorker,
   InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueue,
@@ -523,4 +525,67 @@ test("portfolio evidence work queue has bounded JSON, transactional, and browser
   browserStore.write(encoded);
   assert.equal(browserStore.read(), encoded);
   assert.throws(() => validateAutonomousWorkflowPortfolioEvidenceWorkQueueSnapshot({ ...snapshot, snapshot_digest: "f".repeat(64) }), /snapshot digest is invalid/);
+});
+
+test("CAS portfolio evidence coordinators prevent duplicate claims and drive every domain through atomic worker transitions", async () => {
+  const agent = agentFor();
+  const providerExecution = await agent.executeWorkflowPortfolio(portfolioRequests(), { planOptions: { requireAllDomains: true }, approveProviderCall: true });
+  const evidencePlan = await agent.evidencePlan(AUTONOMOUS_DOMAIN_NAMES);
+  const seedQueue = new InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueue();
+  admitAutonomousWorkflowPortfolioEvidenceWorkItems(seedQueue, {
+    jobId: "atomic-job",
+    execution: providerExecution,
+    evidencePlanDigest: evidencePlan.plan_digest,
+    itemRequestDigests: AUTONOMOUS_DOMAIN_NAMES.map((_, index) => `${String(index + 11).padStart(2, "0")}`.repeat(32)),
+    now: 8_000,
+  });
+  const persistence = new InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueuePersistence();
+  await persistence.write(seedQueue.snapshot());
+  const originalRead = persistence.read.bind(persistence);
+  const waiters = [];
+  let coordinatedReads = 0;
+  let casConflicts = 0;
+  const sharedPersistence = {
+    read: () => {
+      const snapshot = originalRead();
+      if (coordinatedReads < 2) {
+        coordinatedReads += 1;
+        return new Promise((resolve) => {
+          waiters.push(() => resolve(snapshot));
+          if (waiters.length === 2) for (const release of waiters.splice(0)) release();
+        });
+      }
+      return snapshot;
+    },
+    write: (snapshot) => persistence.write(snapshot),
+    writeIfUnchanged: (expected, snapshot) => {
+      const committed = persistence.writeIfUnchanged(expected, snapshot);
+      if (!committed) casConflicts += 1;
+      return committed;
+    },
+  };
+  const coordinatorA = new AutonomousWorkflowPortfolioEvidenceWorkQueueAtomicCoordinator(new InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueue(), sharedPersistence);
+  const coordinatorB = new AutonomousWorkflowPortfolioEvidenceWorkQueueAtomicCoordinator(new InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueue(), sharedPersistence);
+  const [claimA, claimB] = await Promise.all([
+    coordinatorA.claim("atomic-job:portfolio-coding", "worker-a", 30_000, 8_000),
+    coordinatorB.claim("atomic-job:portfolio-coding", "worker-b", 30_000, 8_000),
+  ]);
+  assert.equal([claimA, claimB].filter(Boolean).length, 1, "only one coordinator can commit the root lease");
+  assert.ok(casConflicts >= 1, "the losing coordinator observes a compare-and-swap conflict");
+  const ownerCoordinator = claimA ? coordinatorA : coordinatorB;
+  await ownerCoordinator.complete("atomic-job:portfolio-coding", claimA ? "worker-a" : "worker-b", { status: "completed", resultDigest: "0".repeat(64) }, 8_001);
+
+  let executions = 0;
+  const worker = new AutonomousWorkflowPortfolioEvidenceAtomicWorkWorker(coordinatorA, () => {
+    executions += 1;
+    return { status: "completed", result_digest: "1".repeat(64) };
+  });
+  for (let index = 1; index < AUTONOMOUS_DOMAIN_NAMES.length; index += 1) {
+    const run = await worker.run({ workerId: "atomic-worker", limit: 1, now: 8_002 + index });
+    assert.equal(run.completed, 1, `atomic worker completes dependency wave ${index}`);
+  }
+  const finalSnapshot = await coordinatorB.snapshot();
+  assert.equal(executions, AUTONOMOUS_DOMAIN_NAMES.length - 1);
+  assert.ok(finalSnapshot.items.every((item) => item.status === "completed"));
+  assert.doesNotMatch(JSON.stringify(finalSnapshot), /private provider task payload|offline result|source secret/);
 });

@@ -409,11 +409,13 @@ export {
   InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueue,
   admitAutonomousWorkflowPortfolioEvidenceWorkItems,
   AutonomousWorkflowPortfolioEvidenceWorkQueuePersistenceCoordinator,
+  AutonomousWorkflowPortfolioEvidenceWorkQueueAtomicCoordinator,
   InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueuePersistence,
   JsonAutonomousWorkflowPortfolioEvidenceWorkQueuePersistence,
   TransactionalJsonAutonomousWorkflowPortfolioEvidenceWorkQueuePersistence,
   WebStorageAutonomousWorkflowPortfolioEvidenceWorkQueueSnapshotTextStore,
   AutonomousWorkflowPortfolioEvidenceWorkWorker,
+  AutonomousWorkflowPortfolioEvidenceAtomicWorkWorker,
 } from "./autonomous-workflow-portfolio-evidence-queue.js";
 export type {
   AutonomousWorkflowPortfolioEvidenceWorkStatus,
