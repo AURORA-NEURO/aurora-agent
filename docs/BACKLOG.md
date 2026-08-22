@@ -65,6 +65,14 @@ non-transient, and authorization failures remain terminal. Failover projections 
 identity, manifest digest, rank, stable failure class, and counters, so fallback cannot silently
 widen source scope or persist source payloads.
 
+Evidence routing now also has an operational-readiness projection. The TypeScript
+`AutonomousEvidenceReadinessAuditor` combines twelve-domain coverage, the current digest-bound
+selection plan, optional persisted adapter health, and bounded retry/failover policy into a
+metadata-only `ready`/`degraded`/`blocked`/`missing` report with explicit counts and digests. The
+strict default requires observed health and refuses open circuits; a caller can explicitly choose
+a permissive degraded posture for startup or review UI. The audit never dispatches a source or
+provider and does not replace external liveness, credential, incident, or authorization systems.
+
 The portfolio now also has a bounded evidence supervisor. It verifies successful provider items,
 rejects cross-domain requests, scopes each evidence runtime to its item's domain, preserves direct
 predecessor evidence digests, and executes acquisition/projection/evaluation in the portfolio's

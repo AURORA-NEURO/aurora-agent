@@ -4348,6 +4348,50 @@ current-manifest adapter clears the score/margin gates, the plan abstains. Use
 CAS result into an explicit stale-writer refusal; it never merges conflicting histories silently.
 Production callers still own the atomic backing store, approval UX, and external authorization.
 
+### Evidence operational readiness
+
+`AutonomousEvidenceReadinessAuditor` turns the preceding registry, selector, health ledger,
+retry policy, and failover policy into one bounded operational projection. For each requested
+domain it reports coverage, registered adapter identities, candidate and eligibility counts, the
+selected manifest, selection reason, health attempts/rates/circuit state, and the digest of the
+bounded retry/failover posture. It classifies a domain as `ready`, `degraded`, `blocked`, or
+`missing`; the aggregate is `ready`, `degraded`, or `blocked`, with explicit counts and a
+content-addressed report.
+
+The audit is intentionally read-only. It can require a minimum number of health observations,
+failure-circuit threshold, and minimum success rate, but it never interprets those metrics as
+source truth and never authorizes acquisition. An unobserved selected route is blocked under the
+default strict policy or degraded under an explicitly permissive policy. Missing coverage,
+selection abstention, manifest drift, open circuits, and below-threshold health remain visible as
+different metadata reasons. The report includes the registry, selection-plan, health-snapshot,
+policy, retry-policy, and failover-policy digests, while retaining no credentials, task text,
+prompts, requests, errors, or raw source values. This gives a deployment an admission/UI/ops
+signal before it invokes a source, without pretending that an in-memory health store is durable
+telemetry or that a provider has been externally validated.
+
+```typescript
+const readiness = new AutonomousEvidenceReadinessAuditor(adapters, health);
+const report = await readiness.audit(AUTONOMOUS_DOMAIN_NAMES, {
+  policy: new AutonomousEvidenceReadinessPolicy({
+    requireHealth: true,
+    minAttempts: 3,
+    failureThreshold: 0.75,
+    minSuccessRate: 0.5,
+  }),
+});
+
+if (report.status !== "ready") {
+  // The caller decides whether to pause, ask for review, or use a reviewed fallback.
+  console.warn(report.toJSON());
+}
+```
+
+The auditor supports an already reviewed selection plan or can create a deterministic static
+plan itself; adaptive selection is opt-in and requires the caller's health store. The resulting
+projection does not dispatch a provider, source adapter, retry, or failover candidate, so it is
+safe to run at startup and before an approval prompt. It also does not replace external liveness,
+credential checks, on-call ownership, incident response, or provider-specific source contracts.
+
 ## Durable evidence acquisition workers
 
 The evidence runtime is intentionally caller-owned: it owns the transient acquirer input, projected

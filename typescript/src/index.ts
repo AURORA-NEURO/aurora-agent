@@ -682,6 +682,28 @@ export type {
   AutonomousEvidenceAdapterHealthAcquirerOptions,
 } from "./autonomous-evidence-adapter-health.js";
 export {
+  AUTONOMOUS_EVIDENCE_READINESS_SCHEMA,
+  AUTONOMOUS_EVIDENCE_READINESS_DOMAIN_SCHEMA,
+  AUTONOMOUS_EVIDENCE_READINESS_POLICY_SCHEMA,
+  MAX_AUTONOMOUS_EVIDENCE_READINESS_DOMAINS,
+  MAX_AUTONOMOUS_EVIDENCE_READINESS_BYTES,
+  AUTONOMOUS_EVIDENCE_READINESS_STATUSES,
+  AutonomousEvidenceReadinessPolicy,
+  AutonomousEvidenceReadinessDomain,
+  AutonomousEvidenceReadinessReport,
+  AutonomousEvidenceReadinessAuditor,
+} from "./autonomous-evidence-readiness.js";
+export type {
+  AutonomousEvidenceReadinessStatus,
+  AutonomousEvidenceReadinessOverallStatus,
+  AutonomousEvidenceReadinessPolicyJSON,
+  AutonomousEvidenceReadinessPolicyOptions,
+  AutonomousEvidenceReadinessHealthProjection,
+  AutonomousEvidenceReadinessDomainJSON,
+  AutonomousEvidenceReadinessReportJSON,
+  AutonomousEvidenceReadinessAuditOptions,
+} from "./autonomous-evidence-readiness.js";
+export {
   AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA,
   AUTONOMOUS_EVIDENCE_WORK_QUEUE_SCHEMA,
   AUTONOMOUS_EVIDENCE_WORKER_SCHEMA,

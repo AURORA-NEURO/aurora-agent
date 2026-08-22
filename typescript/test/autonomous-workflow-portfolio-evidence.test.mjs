@@ -13,6 +13,8 @@ import {
   AutonomousEvidenceAcquisitionError,
   AutonomousEvidenceFailoverPolicy,
   AutonomousEvidenceRetryPolicy,
+  AutonomousEvidenceReadinessAuditor,
+  AutonomousEvidenceReadinessPolicy,
   AutonomousEvidenceRuntime,
   AutonomousHttpConnectorPolicy,
   AutonomousHttpConnectorRequest,
@@ -993,4 +995,61 @@ test("reviewed evidence adapter failover uses the next eligible candidate only w
   await assert.rejects(() => createAutonomousEvidenceAdapterFailoverAcquirer(registry, selection, { maxFailovers: 1, retryPolicy: new AutonomousEvidenceRetryPolicy({ maxAttempts: 1, baseDelayMs: 0 }), classify: () => ({ failure_class: "auth_refused", retryable: false }), observeFailover: (event) => refusedEvents.push(event) }).acquire({ plan_digest: evidencePlan.plan_digest, requirement: evidencePlan.requirements.find((candidate) => candidate.domain === "coding"), request: { requirement_id: evidencePlan.requirements.find((candidate) => candidate.domain === "coding").requirement_id, source_id: "refused-source" }, attempt: 1, parent_evidence_digests: [], execution: "caller_owned_adapter;raw_value_transient" }), AutonomousEvidenceAcquisitionError);
   assert.equal(refusedEvents.length, 1);
   assert.equal(refusedEvents[0].status, "candidate_failed");
+});
+
+test("evidence readiness audits coverage, selection, health, and bounded policies without dispatch", async () => {
+  const registry = new AutonomousEvidenceAdapterRegistry();
+  let dispatches = 0;
+  for (const tier of ["aa", "zz"]) {
+    registerAutonomousEvidenceAdaptersForAllDomains(registry, (domain) => ({
+      adapterId: `readiness.${tier}.${domain}`,
+      version: "1.0.0",
+      capabilities: ["bounded_evidence"],
+      sourceKinds: ["caller_fixture"],
+      acquire: () => { dispatches += 1; return { transient_readiness_value: `${tier}-${domain}` }; },
+    }));
+  }
+  const store = new InMemoryAutonomousEvidenceAdapterHealthStore({ clock: () => 10_000 });
+  const auditor = new AutonomousEvidenceReadinessAuditor(registry, store);
+  const permissive = await auditor.audit(AUTONOMOUS_DOMAIN_NAMES, {
+    policy: new AutonomousEvidenceReadinessPolicy({ requireHealth: false }),
+  });
+  assert.equal(permissive.status, "degraded");
+  assert.equal(permissive.degraded_count, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(permissive.blocked_count, 0);
+  assert.ok(permissive.domains.every((row) => row.selected_adapter_id?.startsWith("readiness.aa.")));
+  assert.equal(dispatches, 0);
+  assert.doesNotMatch(JSON.stringify(permissive.toJSON()), /transient_readiness_value|api_key|access_token/);
+
+  const plan = new AutonomousEvidenceAdapterSelector(registry).selectForDomains(AUTONOMOUS_DOMAIN_NAMES, { capability: "bounded_evidence" });
+  for (const row of plan.rows) {
+    const manifest = registry.resolve(row.domain, row.adapter_id);
+    await store.recordAcquisition({ adapter_id: manifest.adapter_id, manifest_digest: manifest.manifest_digest, domain: row.domain, outcome: "success", status: "success", latency_ms: 4 });
+  }
+  const ready = await auditor.audit(AUTONOMOUS_DOMAIN_NAMES, { selectionPlan: plan });
+  assert.equal(ready.status, "ready");
+  assert.equal(ready.ready_count, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(ready.complete, true);
+  assert.ok(ready.health_snapshot_digest?.length === 64);
+  assert.equal(ready.domains.every((row) => row.status === "ready" && row.health.circuit === "closed"), true);
+  assert.equal(ready.toJSON().report_digest.length, 64);
+  assert.equal(dispatches, 0);
+
+  const coding = plan.rows.find((row) => row.domain === "coding");
+  const codingManifest = registry.resolve("coding", coding.adapter_id);
+  for (let index = 0; index < 3; index += 1) {
+    await store.recordAcquisition({ adapter_id: codingManifest.adapter_id, manifest_digest: codingManifest.manifest_digest, domain: "coding", outcome: "failure", status: "timeout", latency_ms: 20 + index, failure_class: "timeout" });
+  }
+  const degraded = await auditor.audit(AUTONOMOUS_DOMAIN_NAMES, { selectionPlan: plan, policy: new AutonomousEvidenceReadinessPolicy({ requireHealth: false }) });
+  assert.equal(degraded.status, "blocked");
+  assert.equal(degraded.domains.find((row) => row.domain === "coding")?.status, "blocked");
+  assert.equal(degraded.domains.find((row) => row.domain === "coding")?.reason, "selected_adapter_health_circuit_open");
+  assert.equal(degraded.domains.filter((row) => row.domain !== "coding").every((row) => row.status === "ready"), true);
+  assert.equal(dispatches, 0);
+
+  const empty = await new AutonomousEvidenceReadinessAuditor(new AutonomousEvidenceAdapterRegistry()).audit(AUTONOMOUS_DOMAIN_NAMES);
+  assert.equal(empty.status, "blocked");
+  assert.equal(empty.missing_count, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(empty.domains.every((row) => row.status === "missing" && row.coverage_state === "missing"), true);
+  assert.equal(empty.health_snapshot_digest, null);
 });
