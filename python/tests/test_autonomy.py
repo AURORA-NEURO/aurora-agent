@@ -1132,6 +1132,7 @@ def test_builtin_domain_registry_covers_every_autonomous_domain_and_blueprint_re
             "autonomy-constraints",
             "autonomy-desired-outputs",
             "autonomy-user-context",
+            "autonomy-evidence-plan",
         ]
         assert blueprint.plan["steps"][0]["effect"] == "provider_call"
         structured = brain.prepare_autonomous(

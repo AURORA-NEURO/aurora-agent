@@ -152,7 +152,7 @@ test("prompt and plan construction preserve budgets, omissions, dependencies, an
     ],
   });
   assert.equal(prompt.complete, false);
-  assert.deepEqual(prompt.included_context_ids, ["required"]);
+  assert.deepEqual(prompt.included_context_ids, ["required", "autonomy-evidence-plan"]);
   assert.deepEqual(prompt.omitted_context_ids, ["optional-large"]);
   assert.equal(prompt.prompt_digest.length, 64);
 

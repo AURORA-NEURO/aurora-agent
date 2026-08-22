@@ -231,6 +231,13 @@ from .autonomy import (
     builtin_autonomous_workflow_strategies,
     builtin_autonomous_domain_profiles,
 )
+from .autonomous_evidence import (
+    AUTONOMOUS_EVIDENCE_PLAN_SCHEMA,
+    AUTONOMOUS_EVIDENCE_REQUIREMENT_SCHEMA,
+    AutonomousEvidencePlan,
+    AutonomousEvidenceRequirement,
+    build_autonomous_evidence_plan,
+)
 from .autonomous_connector_workflow import (
     AUTONOMOUS_CONNECTOR_WORKFLOW_ADAPTER_SCHEMA,
     MAX_AUTONOMOUS_CONNECTOR_WORKFLOW_STAGE_REQUEST_BYTES,
@@ -5023,6 +5030,11 @@ __all__ = [
     "AutonomousWorkflowStageResult",
     "builtin_autonomous_workflow_strategies",
     "builtin_autonomous_domain_profiles",
+    "AUTONOMOUS_EVIDENCE_PLAN_SCHEMA",
+    "AUTONOMOUS_EVIDENCE_REQUIREMENT_SCHEMA",
+    "AutonomousEvidencePlan",
+    "AutonomousEvidenceRequirement",
+    "build_autonomous_evidence_plan",
     "AUTONOMOUS_CONNECTOR_WORKFLOW_ADAPTER_SCHEMA",
     "MAX_AUTONOMOUS_CONNECTOR_WORKFLOW_STAGE_REQUEST_BYTES",
     "MAX_AUTONOMOUS_CONNECTOR_WORKFLOW_STAGE_CALLS",

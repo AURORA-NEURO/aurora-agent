@@ -275,6 +275,22 @@ export type {
   DomainToolExecutor,
 } from "./autonomous.js";
 export {
+  AUTONOMOUS_EVIDENCE_PLAN_SCHEMA,
+  AUTONOMOUS_EVIDENCE_REQUIREMENT_SCHEMA,
+  AUTONOMOUS_EVIDENCE_COVERAGE_STATUSES,
+  MAX_AUTONOMOUS_EVIDENCE_WORKFLOWS,
+  MAX_AUTONOMOUS_EVIDENCE_REQUIREMENTS,
+  MAX_AUTONOMOUS_EVIDENCE_PLAN_BYTES,
+  AutonomousEvidencePlan,
+  buildAutonomousEvidencePlan,
+} from "./autonomous-evidence.js";
+export type {
+  AutonomousEvidenceCoverageStatus,
+  AutonomousEvidenceRequirement,
+  AutonomousEvidencePlanJSON,
+  AutonomousEvidencePlanOptions,
+} from "./autonomous-evidence.js";
+export {
   AUTONOMOUS_CONNECTOR_REGISTRY_SCHEMA,
   AUTONOMOUS_CONNECTOR_DISPATCH_SCHEMA,
   AUTONOMOUS_CONNECTOR_RECEIPT_SCHEMA,

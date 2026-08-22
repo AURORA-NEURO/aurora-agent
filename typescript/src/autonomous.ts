@@ -40,6 +40,7 @@ import {
 import { AutonomousEffectBoundary, AutonomousEffectReconciliationRequiredError, type AutonomousEffectExecutionContext } from "./autonomous-effects.js";
 import type { AutonomousLearningController } from "./autonomous-learning.js";
 import { taskFacetDigests } from "./autonomous-memory.js";
+import { buildAutonomousEvidencePlan, type AutonomousEvidencePlan, type AutonomousEvidencePlanJSON } from "./autonomous-evidence.js";
 import type {
   AutonomousEpisodicMemoryStore,
   AutonomousMemoryEpisode,
@@ -504,6 +505,7 @@ export interface AutonomousTaskBlueprint extends JsonObject {
   domain_profile: AutonomousDomainProfile;
   domain_pack: AutonomousDomainPack;
   workflow: AutonomousWorkflow;
+  evidence_plan: AutonomousEvidencePlanJSON;
   selection_context: BrainModelSelectionContext;
   learning_context_digest: string;
   required_capabilities: string[];
@@ -1740,10 +1742,12 @@ async function buildTaskBlueprint(
   const activeToolNames = [...new Set(options.activeToolNames ?? [])].sort();
   const selectedToolNames = [...new Set(options.selectedToolNames ?? activeToolNames)].sort();
   const pack = await buildDomainPack(profile);
+  const evidencePlan = await buildAutonomousEvidencePlan([profile.workflow]);
   const prompt = await assembleAutonomousPrompt(profile, taskText, {
     context: options.context,
     maxInputTokens: options.maxInputTokens,
     stageIds: profile.workflow.stages.map((stage) => stage.id),
+    evidencePlan,
   });
   const plan = await compileAutonomousPlan(profile, taskText, {
     taskDigest,
@@ -1766,6 +1770,7 @@ async function buildTaskBlueprint(
     domain_profile: profile,
     domain_pack: pack,
     workflow: profile.workflow,
+    evidence_plan: evidencePlan.toJSON(),
     selection_context: selectionContext,
     learning_context_digest: learningContextDigest,
     required_capabilities: profile.required_model_capabilities,
@@ -1966,7 +1971,7 @@ function assertSafeTransientValue(value: unknown, depth = 0): void {
 export async function assembleAutonomousPrompt(
   profile: AutonomousDomainProfile,
   task: string,
-  options: { context?: readonly AutonomousPromptChunk[]; outputContract?: string; maxInputTokens?: number; stageIds?: readonly string[] } = {},
+  options: { context?: readonly AutonomousPromptChunk[]; outputContract?: string; maxInputTokens?: number; stageIds?: readonly string[]; evidencePlan?: AutonomousEvidencePlan } = {},
 ): Promise<AutonomousPromptResult> {
   const taskText = boundedText("autonomous prompt task", task, 32_000);
   const maxInputTokens = options.maxInputTokens ?? 8_192;
@@ -1982,6 +1987,7 @@ export async function assembleAutonomousPrompt(
   const outputContract = options.outputContract ?? "Return a structured answer with observations, inferences, uncertainty, evidence gaps, and next actions. Do not claim unobserved effects.";
   boundedText("autonomous prompt output contract", outputContract, 16_000);
   const stageIds = options.stageIds ?? profile.workflow.stages.map((stage) => stage.id);
+  const evidencePlan = options.evidencePlan ?? await buildAutonomousEvidencePlan([profile.workflow]);
   const system = `${profile.system_instructions}\n\nGuardrails:\n${profile.guardrails.map((guardrail) => `- ${guardrail}`).join("\n")}`;
   const developer = `Domain: ${profile.domain}\nRisk class: ${profile.risk_class}\nCapability: ${profile.default_capability}\nWorkflow: ${profile.workflow.workflow_id}\nStages: ${stageIds.join(", ")}\n\n${outputContract}`;
   const requiredMessages: AutonomousPromptMessage[] = [
@@ -1992,6 +1998,12 @@ export async function assembleAutonomousPrompt(
   const estimate = (messages: readonly { content: string }[]) => Math.max(1, Math.ceil(messages.reduce((sum, message) => sum + bytes(message.content), 0) / 4));
   if (estimate(requiredMessages) > maxInputTokens) throw new ArgumentError("autonomous prompt required content exceeds maxInputTokens");
   const sorted = [...context].sort((left, right) => Number(right.required ?? false) - Number(left.required ?? false) || (right.priority ?? 0) - (left.priority ?? 0) || left.id.localeCompare(right.id));
+  // Small caller budgets still receive a digest-bound evidence contract. The
+  // full requirement catalogue remains available from the blueprint/facade;
+  // the prompt uses a compact projection when the caller explicitly budgets a
+  // very small context window.
+  const evidencePrompt = maxInputTokens < 2_048 ? evidencePlan.toPromptJSON() : evidencePlan.toJSON();
+  sorted.push({ id: "autonomy-evidence-plan", content: JSON.stringify(evidencePrompt), required: true, priority: 988 });
   const included: AutonomousPromptChunk[] = [];
   const omitted: string[] = [];
   const messages = [...requiredMessages];
@@ -3407,6 +3419,17 @@ export class AutonomousAgent {
       return { ...descriptor, route_digest: await digestJson(descriptor) };
     }
     return routeAutonomousTask(taskText, options);
+  }
+
+  /** Compile evidence requirements and dependency-safe next stages without dispatching work. */
+  async evidencePlan(
+    domains: readonly AutonomousDomainName[] = AUTONOMOUS_DOMAIN_NAMES,
+    options: { availableEvidence?: readonly string[]; completedStages?: Readonly<Record<string, readonly string[]>> } = {},
+  ): Promise<AutonomousEvidencePlan> {
+    if (!Array.isArray(domains) || domains.length < 1 || domains.length > AUTONOMOUS_DOMAIN_NAMES.length) throw new ArgumentError("evidencePlan domains are outside their bounds");
+    if (new Set(domains).size !== domains.length || domains.some((domain) => !AUTONOMOUS_DOMAIN_NAMES.includes(domain))) throw new ArgumentError("evidencePlan domains must be unique built-in domains");
+    const profiles = await Promise.all(domains.map((domain) => profileFor(domain)));
+    return buildAutonomousEvidencePlan(profiles.map((profile) => profile.workflow), options);
   }
 
   async blueprint(task: string, options: { domain?: AutonomousDomainName; routeOverride?: AutonomousRouteProposal; capability?: string; context?: readonly AutonomousPromptChunk[]; hints?: readonly string[]; maxInputTokens?: number; tools?: readonly string[]; subtasks?: readonly AutonomousCrossDomainSubtask[] } = {}): Promise<AutonomousAutoBlueprint> {

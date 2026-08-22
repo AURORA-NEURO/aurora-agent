@@ -32,6 +32,10 @@ from typing import Any, Callable, Mapping, Sequence
 
 from .authoring import content_digest
 from .errors import ArgumentError
+from .autonomous_evidence import (
+    AutonomousEvidencePlan,
+    build_autonomous_evidence_plan,
+)
 from .brain import (
     AutonomousBrain,
     BRAIN_CONTEXT_LEARNING_STATE_SCHEMA,
@@ -2871,6 +2875,11 @@ class AutonomousTaskBlueprint:
     plan: Mapping[str, Any]
     required_capabilities: tuple[str, ...]
 
+    def evidence_plan(self) -> AutonomousEvidencePlan:
+        """Return the deterministic evidence contract for this blueprint's workflow."""
+
+        return build_autonomous_evidence_plan((self.workflow,))
+
     def to_dict(self) -> dict[str, Any]:
         prompt_public = {
             "system_digest": content_digest(self.prompt.get("system", "")),
@@ -2903,6 +2912,7 @@ class AutonomousTaskBlueprint:
             "domain_profile": self.profile.to_dict(),
             "domain_pack": self.domain_pack.to_dict(),
             "workflow": self.workflow.to_dict(),
+            "evidence_plan": self.evidence_plan().to_dict(),
             "selection_context": dict(self.selection_context),
             "required_capabilities": list(self.required_capabilities),
             "prompt": prompt_public,
@@ -5212,6 +5222,7 @@ class AutonomousPromptBuilder:
         if len(memory_episodes) > MAX_AUTONOMY_MEMORY_ITEMS:
             raise BrainRunError(f"memory_episodes may contain at most {MAX_AUTONOMY_MEMORY_ITEMS} entries")
         safe_memory = [_safe_json("memory episode", episode, maximum=200_000) for episode in memory_episodes]
+        evidence_plan = build_autonomous_evidence_plan((workflow,))
         context: list[dict[str, Any]] = [
             {
                 "id": "autonomy-domain-policy",
@@ -5396,6 +5407,15 @@ class AutonomousPromptBuilder:
                     "priority": 700,
                 }
             )
+        context.append(
+            {
+                "id": "autonomy-evidence-plan",
+                "role": "developer",
+                "content": _json_text(evidence_plan.to_dict()),
+                "required": True,
+                "priority": 988,
+            }
+        )
         output_contract = (
             "Return a useful bounded response. Separate observations, reasoning, assumptions, "
             "recommendations, and uncertainty. State what would verify the result. Do not claim "
@@ -6582,6 +6602,7 @@ class AutonomousTaskOrchestrator:
                 )
             )
         )
+        evidence_plan = build_autonomous_evidence_plan((workflow,))
         selection_context = {
             "schema": AUTONOMY_SCHEMA,
             "workflow": "autonomous_task",
@@ -6601,6 +6622,9 @@ class AutonomousTaskOrchestrator:
             "workflow_digest": workflow.workflow_digest,
             "workflow_stage_ids": [stage.id for stage in workflow.stages],
             "workflow_evaluator_signals": list(workflow.evaluator_signals),
+            "evidence_plan_digest": evidence_plan.plan_digest,
+            "evidence_requirement_count": len(evidence_plan.requirements),
+            "evidence_next_stage_ids": list(evidence_plan.next_stage_ids),
             "task_digest": spec.task_digest,
             "user_context_digest": spec.context_digest,
             "context_keys": sorted(str(key) for key in spec.context),
@@ -6651,6 +6675,32 @@ class AutonomousTaskOrchestrator:
             prompt=prompt,
             plan=plan,
             required_capabilities=required,
+        )
+
+    def evidence_plan(
+        self,
+        domains: Sequence[str] = AUTONOMOUS_DOMAINS,
+        *,
+        available_evidence: Sequence[str] = (),
+        completed_stages: Mapping[str, Sequence[str]] | None = None,
+    ) -> AutonomousEvidencePlan:
+        """Compile the reviewed evidence contract for one or more autonomous domains.
+
+        This is a planning-only operation.  It is useful before a provider call to decide which
+        caller-owned files, connector reads, tool observations, or human reviews are still needed.
+        It never dispatches a connector, turns a label into proof, or stores raw evidence.
+        """
+
+        if not isinstance(domains, Sequence) or isinstance(domains, (str, bytes)) or not domains:
+            raise BrainRunError("evidence_plan domains must contain at least one domain")
+        normalized = tuple(_identifier("evidence_plan domain", domain) for domain in domains)
+        if len(normalized) != len(set(normalized)):
+            raise BrainRunError("evidence_plan domains must be unique")
+        workflows = tuple(self.workflow_registry.resolve(domain) for domain in normalized)
+        return build_autonomous_evidence_plan(
+            workflows,
+            available_evidence=available_evidence,
+            completed_stages=completed_stages,
         )
 
     @staticmethod

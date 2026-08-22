@@ -432,6 +432,45 @@ retry must therefore receive the caller-owned parts again. The façade does not 
 download URLs, interpret pixels, or establish domain truth; those remain explicit connector and
 domain-evaluator responsibilities.
 
+### Evidence-first planning across every domain
+
+Every reviewed domain workflow now compiles into a single `AutonomousEvidencePlan`. The plan
+turns each stage's `evidence_outputs`, dependencies, capabilities, and evaluator signals into
+fully qualified requirements such as `science:evidence:evidence_map`. It reports the first
+dependency-safe stages, missing requirements, covered requirements, a coverage ratio, and a
+digest-bound contract. A short label only satisfies a requirement when it is unambiguous; callers
+can provide fully qualified requirement IDs when several domains emit labels such as
+`observations` or `limitations`.
+
+```python
+plan = agent.evidence_plan(
+    domains=("coding", "science", "evaluation"),
+    available_evidence=("coding:inspect:observations",),
+    completed_stages={"coding": ["scope"]},
+)
+print(plan.to_dict()["missing_requirement_ids"])
+print(plan.to_dict()["next_stage_ids"])
+```
+
+```typescript
+const plan = await agent.evidencePlan(["coding", "science", "evaluation"], {
+  availableEvidence: ["coding:inspect:observations"],
+  completedStages: { coding: ["scope"] },
+});
+console.log(plan.toJSON().missing_requirement_ids);
+console.log(plan.toJSON().next_stage_ids);
+```
+
+Autonomous task blueprints include this plan, and prompt assembly includes it as a required
+developer contract. When a caller supplies a very small prompt budget, the prompt carries a
+compact digest-bound projection while the blueprint retains the complete requirement catalogue.
+The model is therefore told which evidence outputs are expected before it answers, while the plan
+still does not authorize a provider, tool, connector, or effect and does not claim that any
+evidence was acquired. Raw source material remains caller-owned; a connector or workflow executor
+must produce and evaluate it separately. The same contract is generated for all twelve built-in
+domains and for each specialist in a cross-domain fan-out, so integrations can use one evidence
+UI, acquisition scheduler, or evaluator adapter without domain-specific special cases.
+
 ### Non-interactive deployment bootstrap
 
 When no person enters a key, the deployment should register a source resolver during service
