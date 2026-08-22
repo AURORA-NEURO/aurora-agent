@@ -75,6 +75,16 @@ import {
   type AutonomousEvidenceRuntimeJournal,
   type AutonomousEvidenceRuntimeResult,
 } from "./autonomous-evidence-runtime.js";
+import type { AutonomousEvidenceAdapterRegistry } from "./autonomous-evidence-adapters.js";
+import type { AutonomousEvidenceAdapterHealthStore } from "./autonomous-evidence-adapter-health.js";
+import type { AutonomousEvidenceProviderContractRegistry } from "./autonomous-evidence-provider-contract.js";
+import type {
+  AutonomousEvidenceExecutionController,
+  AutonomousEvidenceExecutionOptions,
+  AutonomousEvidenceExecutionPlan,
+  AutonomousEvidenceExecutionPrepareOptions,
+  AutonomousEvidenceExecutionResult,
+} from "./autonomous-evidence-execution.js";
 import type {
   AutonomousEpisodicMemoryStore,
   AutonomousMemoryEpisode,
@@ -879,6 +889,19 @@ export interface AutonomousAgentOptions {
   connectorRegistry?: AutonomousConnectorRegistry;
   /** Optional connector runtime with approval, replay, and receipt boundaries. */
   connectorRuntime?: AutonomousConnectorRuntime;
+}
+
+/** High-level composition options for the reviewed source-evidence lifecycle. */
+export interface AutonomousReviewedEvidenceExecutionOptions {
+  availableEvidence?: readonly string[];
+  completedStages?: Readonly<Record<string, readonly string[]>>;
+  prepare?: AutonomousReviewedEvidencePreparationOptions;
+  execute?: AutonomousEvidenceExecutionOptions;
+}
+
+/** Preparation options that keep the caller-owned evidence health ledger at the facade boundary. */
+export interface AutonomousReviewedEvidencePreparationOptions extends AutonomousEvidenceExecutionPrepareOptions {
+  healthStore?: AutonomousEvidenceAdapterHealthStore;
 }
 
 /** Caller-owned controls for one provider-assisted planning proposal. */
@@ -3879,6 +3902,52 @@ export class AutonomousAgent {
     const { availableEvidence, completedStages, journal, ...executeOptions } = options;
     const runtime = await this.evidenceRuntime(domains, { availableEvidence, completedStages, journal });
     return runtime.execute(requests, executeOptions);
+  }
+
+  /** Create the reviewed evidence controller without coupling the brain facade to source transport. */
+  async createEvidenceExecutionController(
+    registry: AutonomousEvidenceAdapterRegistry,
+    healthStore?: AutonomousEvidenceAdapterHealthStore,
+  ): Promise<AutonomousEvidenceExecutionController> {
+    const { AutonomousEvidenceExecutionController } = await import("./autonomous-evidence-execution.js");
+    return new AutonomousEvidenceExecutionController(registry, healthStore);
+  }
+
+  /** Compile, select, readiness-audit, and bind a reviewed evidence execution plan from the brain facade. */
+  async prepareReviewedEvidence(
+    registry: AutonomousEvidenceAdapterRegistry,
+    domains: readonly AutonomousDomainName[] = AUTONOMOUS_DOMAIN_NAMES,
+    options: AutonomousReviewedEvidencePreparationOptions = {},
+  ): Promise<AutonomousEvidenceExecutionPlan> {
+    const plan = await this.evidencePlan(domains);
+    const { healthStore, ...controllerOptions } = options;
+    const controller = await this.createEvidenceExecutionController(registry, healthStore);
+    return controller.prepare(plan, controllerOptions);
+  }
+
+  /**
+   * Run the complete reviewed evidence lifecycle from the high-level brain facade. Preparation
+   * remains separate in the returned plan, source dispatch still requires explicit approval, and
+   * provider contract bindings are carried forward automatically when supplied at preparation.
+   */
+  async executeReviewedEvidence(
+    registry: AutonomousEvidenceAdapterRegistry,
+    domains: readonly AutonomousDomainName[],
+    requests: readonly AutonomousEvidenceAcquisitionRequest[],
+    options: AutonomousReviewedEvidenceExecutionOptions = {},
+  ): Promise<AutonomousEvidenceExecutionResult> {
+    const plan = await this.evidencePlan(domains, { availableEvidence: options.availableEvidence, completedStages: options.completedStages });
+    const prepareOptions = options.prepare ?? {};
+    const { healthStore, ...controllerPrepareOptions } = prepareOptions;
+    const controller = await this.createEvidenceExecutionController(registry, healthStore);
+    const executionPlan = await controller.prepare(plan, controllerPrepareOptions);
+    const executeOptions: AutonomousEvidenceExecutionOptions = {
+      ...(options.execute ?? {}),
+      ...(controllerPrepareOptions.providerContracts !== undefined && options.execute?.providerContracts === undefined
+        ? { providerContracts: controllerPrepareOptions.providerContracts }
+        : {}),
+    };
+    return controller.execute(executionPlan, plan, requests, executeOptions);
   }
 
   async blueprint(task: string, options: { domain?: AutonomousDomainName; routeOverride?: AutonomousRouteProposal; capability?: string; context?: readonly AutonomousPromptChunk[]; hints?: readonly string[]; maxInputTokens?: number; tools?: readonly string[]; subtasks?: readonly AutonomousCrossDomainSubtask[] } = {}): Promise<AutonomousAutoBlueprint> {

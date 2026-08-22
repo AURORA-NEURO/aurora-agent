@@ -81,6 +81,15 @@ the existing evidence runtime. Projection, evaluator, journal, and value rehydra
 caller-owned, and plan preparation performs zero source calls. This closes the composition gap
 without claiming source truth, provider authorization, or durable external execution.
 
+Provider-specific evidence semantics now also have an explicit
+`AutonomousEvidenceProviderContractRegistry`: protocol, operation, domain/capability/source scope,
+auth posture, freshness, pagination, and required request metadata are bound to an exact adapter
+manifest and carried into the execution-plan digest. Every primary and fallback attempt validates
+that contract before dispatch, and `AutonomousAgent` exposes reviewed prepare/execute helpers that
+carry the contract and caller-owned health store through the same boundary. This still does not
+implement provider clients, credential storage, source truth interpretation, or external
+authentication/session resolution; those remain deployment-owned.
+
 The portfolio now also has a bounded evidence supervisor. It verifies successful provider items,
 rejects cross-domain requests, scopes each evidence runtime to its item's domain, preserves direct
 predecessor evidence digests, and executes acquisition/projection/evaluation in the portfolio's

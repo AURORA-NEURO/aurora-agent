@@ -17,6 +17,7 @@ import {
   type AutonomousEvidenceRetryClassifier,
 } from "./autonomous-evidence-retry.js";
 import type { AutonomousEvidenceAcquirer, AutonomousEvidenceAcquisitionContext } from "./autonomous-evidence-runtime.js";
+import type { AutonomousEvidenceProviderContractRegistry } from "./autonomous-evidence-provider-contract.js";
 import type { JsonObject, JsonValue } from "./types.js";
 
 /** Explicit fallback policy for digest-bound evidence adapter candidates. */
@@ -54,6 +55,8 @@ export interface AutonomousEvidenceFailoverPolicyOptions {
 }
 
 export interface AutonomousEvidenceFailoverAcquirerOptions extends AutonomousEvidenceFailoverPolicyOptions {
+  /** Optional provider/source contract registry enforced for every primary and fallback attempt. */
+  providerContracts?: AutonomousEvidenceProviderContractRegistry;
   classify?: AutonomousEvidenceRetryClassifier;
   observeFailover?: (event: AutonomousEvidenceFailoverEvent) => void | Promise<void>;
   observeAttempt?: (attempt: AutonomousEvidenceRetryAttempt) => void | Promise<void>;
@@ -154,7 +157,9 @@ export function createAutonomousEvidenceAdapterFailoverAcquirer(
       for (let candidateIndex = 0; candidateIndex < candidates.length && candidateIndex <= policy.max_failovers; candidateIndex += 1) {
         const candidateId = candidates[candidateIndex]!;
         const manifest = routeFor(registry, row, candidateId);
-        const candidateAcquirer = registry.createAcquirer({ adapterIdForDomain: { [row.domain]: candidateId } as Partial<Record<AutonomousDomainName, string>> });
+        const candidateAcquirer = options.providerContracts
+          ? options.providerContracts.createAcquirerForAdapter(candidateId, row.domain)
+          : registry.createAcquirer({ adapterIdForDomain: { [row.domain]: candidateId } as Partial<Record<AutonomousDomainName, string>> });
         const resilient = createAutonomousEvidenceRetryingAcquirer(candidateAcquirer, {
           policy: policy.retry_policy,
           classify: options.classify,

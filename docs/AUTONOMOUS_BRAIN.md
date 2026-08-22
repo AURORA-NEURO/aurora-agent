@@ -4390,7 +4390,8 @@ The auditor supports an already reviewed selection plan or can create a determin
 plan itself; adaptive selection is opt-in and requires the caller's health store. The resulting
 projection does not dispatch a provider, source adapter, retry, or failover candidate, so it is
 safe to run at startup and before an approval prompt. It also does not replace external liveness,
-credential checks, on-call ownership, incident response, or provider-specific source contracts.
+credential checks, on-call ownership, incident response, provider-specific source clients, or
+domain-truth interpretation.
 
 ### Reviewed evidence execution orchestration
 
@@ -4431,6 +4432,51 @@ only its metadata projection. The initiating application retains transient sourc
 provider payloads; durable callers can pass the existing journal and rehydration seams. This
 controller is therefore a useful end-to-end source lifecycle, not a claim that an external source
 is truthful, current, credentialed, or safe to use without caller review.
+
+### Provider-specific evidence contracts
+
+The generic adapter manifest is complemented by `AutonomousEvidenceProviderContractRegistry`.
+Each contract binds a provider identity, protocol, supported operations, domain/capability/source
+scope, authentication posture, freshness and pagination semantics, and required request metadata
+to one exact adapter manifest digest. The registry refuses overlapping adapter/domain bindings and
+fails closed when the adapter catalogue changes after registration. Its projection contains only
+contract identities, digests, coverage, and declared semantics; credentials, request values, raw
+responses, and provider sessions remain caller-owned.
+
+When a contract registry is included in `AutonomousEvidenceExecutionController.prepare`, its
+digest is carried into the reviewed execution plan. Every primary and fallback attempt then checks
+the live binding, required evidence capabilities, required metadata, and declared operation before
+calling the adapter. `AutonomousAgent.prepareReviewedEvidence` and
+`AutonomousAgent.executeReviewedEvidence` expose this complete lifecycle at the high-level brain
+facade, while still requiring explicit source-dispatch approval. This is a provider-specific
+semantic gate, not a provider client: production callers still supply the credential/session,
+protocol implementation, source interpretation, and domain-truth evaluator.
+
+```typescript
+const contracts = new AutonomousEvidenceProviderContractRegistry(adapters);
+contracts.register({
+  contractId: "literature.search",
+  version: "1",
+  provider: "caller-literature-service",
+  protocol: "http_json",
+  operations: ["search"],
+  domains: ["science"],
+  capabilities: ["literature_search"],
+  sourceKinds: ["json"],
+  authMode: "caller_managed_credential",
+  freshness: "bounded_cache",
+  pagination: "cursor",
+  requiredMetadata: ["operation", "query"],
+  operationMetadataKey: "operation",
+  adapterId: "literature-adapter",
+});
+
+const reviewed = await agent.prepareReviewedEvidence(
+  adapters,
+  ["science"],
+  { providerContracts: contracts, healthStore },
+);
+```
 
 ## Durable evidence acquisition workers
 

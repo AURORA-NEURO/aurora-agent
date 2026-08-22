@@ -477,6 +477,8 @@ export type {
   AutonomousWorkflowToolContext,
   AutonomousDomainToolExecutionReceipt,
   AutonomousAgentOptions,
+  AutonomousReviewedEvidenceExecutionOptions,
+  AutonomousReviewedEvidencePreparationOptions,
   AutonomousModelRefreshResult,
   AutonomousModelRefreshSpec,
   AutonomousModelRefreshFailure,
@@ -584,6 +586,30 @@ export type {
   AutonomousEvidenceAdapterRegistryJSON,
   AutonomousEvidenceAdapterRegistrationInput,
 } from "./autonomous-evidence-adapters.js";
+export {
+  AUTONOMOUS_EVIDENCE_PROVIDER_CONTRACT_SCHEMA,
+  AUTONOMOUS_EVIDENCE_PROVIDER_CONTRACT_REGISTRY_SCHEMA,
+  MAX_AUTONOMOUS_EVIDENCE_PROVIDER_CONTRACTS,
+  MAX_AUTONOMOUS_EVIDENCE_PROVIDER_CONTRACT_OPERATIONS,
+  MAX_AUTONOMOUS_EVIDENCE_PROVIDER_CONTRACT_METADATA_KEYS,
+  MAX_AUTONOMOUS_EVIDENCE_PROVIDER_CONTRACT_BYTES,
+  AUTONOMOUS_EVIDENCE_PROVIDER_PROTOCOLS,
+  AUTONOMOUS_EVIDENCE_PROVIDER_AUTH_MODES,
+  AUTONOMOUS_EVIDENCE_PROVIDER_FRESHNESS_MODES,
+  AUTONOMOUS_EVIDENCE_PROVIDER_PAGINATION_MODES,
+  AutonomousEvidenceProviderContract,
+  AutonomousEvidenceProviderContractRegistry,
+} from "./autonomous-evidence-provider-contract.js";
+export type {
+  AutonomousEvidenceProviderProtocol,
+  AutonomousEvidenceProviderAuthMode,
+  AutonomousEvidenceProviderFreshnessMode,
+  AutonomousEvidenceProviderPaginationMode,
+  AutonomousEvidenceProviderContractJSON,
+  AutonomousEvidenceProviderContractInput,
+  AutonomousEvidenceProviderContractCoverage,
+  AutonomousEvidenceProviderContractRegistryJSON,
+} from "./autonomous-evidence-provider-contract.js";
 export {
   AUTONOMOUS_HTTP_EVIDENCE_ADAPTER_SCHEMA,
   MAX_AUTONOMOUS_HTTP_EVIDENCE_REQUEST_BYTES,
