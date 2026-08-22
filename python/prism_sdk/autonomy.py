@@ -13659,6 +13659,13 @@ class AutonomousAgent:
             )
         if self.tool_registry is not None and "provider_tools" not in resolved_options:
             selected_tools = self.tool_registry.tools_for(tool_domains or None)
+            registered_tool_names = {tool.name for tool in selected_tools}
+            reviewed_tool_names = {
+                binding.name
+                for profile in builtin_autonomous_domain_tool_profiles()
+                for binding in profile.bindings
+            }
+            custom_tool_names = registered_tool_names.difference(reviewed_tool_names)
             if activation_state.status == "revoked":
                 selected_tools = ()
             elif activation_state.plan_digest is not None:
@@ -13672,6 +13679,12 @@ class AutonomousAgent:
                     capability=capability_focus,
                 )
                 selected_names = set(portfolio_packet["selected_tool_names"])
+                # A caller-owned binding may intentionally describe a capability that is not
+                # present in the reviewed built-in pack. Keep those explicitly registered tools
+                # visible to the provider; the runtime still applies schema validation and the
+                # separate read-only/effect approval gate at execution time.
+                if capability_focus is None:
+                    selected_names.update(custom_tool_names)
                 if selected_names:
                     selected_tools = tuple(tool for tool in selected_tools if tool.name in selected_names)
             pack_capabilities: set[str] = set()
@@ -13686,6 +13699,10 @@ class AutonomousAgent:
             pack_tools = tuple(
                 tool for tool in selected_tools
                 if tool.capability in pack_capabilities
+            )
+            caller_tools = tuple(
+                tool for tool in selected_tools
+                if tool.name in custom_tool_names and tool.capability not in pack_capabilities
             )
             if capability_focus is not None:
                 focused_tools: list[AutonomousDomainTool] = []
@@ -13710,8 +13727,13 @@ class AutonomousAgent:
             # in the reviewed built-in pack. Keep it visible rather than silently dropping it;
             # pack matching is a narrowing aid when there is at least one reviewed match, never
             # an authorization mechanism or a way to hide caller-registered tools.
+            provider_surface = (
+                pack_tools
+                if capability_focus is not None
+                else (*pack_tools, *caller_tools)
+            )
             resolved_options["provider_tools"] = tuple(
-                tool.to_provider_tool() for tool in (pack_tools if capability_focus is not None else (pack_tools or selected_tools))
+                tool.to_provider_tool() for tool in provider_surface
             )
             if portfolio_packet is not None:
                 caller_context = resolved_options.get("context")

@@ -91,6 +91,8 @@ _MAX_BATCH_REQUEST_FILE_BYTES = 4_000_000
 _MAX_BATCH_RESULT_MANIFEST_BYTES = 1_000_000
 _MAX_LOCAL_RESPONSE_SEQUENCE = 32
 _MAX_MCP_PROVIDER_TOOLS = 128
+_MAX_DOMAIN_TOOL_BINDING_FILE_BYTES = 512_000
+CLI_DOMAIN_TOOL_BINDINGS_SCHEMA = "aurora-cli-domain-tool-bindings/0.1"
 
 
 class _CliArgumentError(ValueError):
@@ -331,10 +333,12 @@ def _cli_tool_authorizer(
     catalogue: ToolCatalogue,
     approve_mission_dispatch: bool,
     allowed_tools: Sequence[str] | None = None,
+    read_only_tools: Sequence[str] = (),
 ) -> Callable[[tuple[ProviderToolCall, ...]], Sequence[ProviderToolResult]]:
     """Build the CLI's explicit approval boundary for provider-requested MCP calls."""
 
     allowed = None if allowed_tools is None else frozenset(allowed_tools)
+    read_only = frozenset(read_only_tools)
 
     def authorize(calls: tuple[ProviderToolCall, ...]) -> Sequence[ProviderToolResult]:
         if len({call.call_id for call in calls}) != len(calls):
@@ -371,11 +375,15 @@ def _cli_tool_authorizer(
                     )
                     for pending in calls
                 )
-        if not approve_mission_dispatch:
+        if not approve_mission_dispatch and any(call.name not in read_only for call in calls):
             return tuple(
                 ProviderToolResult(
                     call.call_id,
-                    {"ok": False, "status": "approval_required", "authorization": "operator"},
+                    {
+                        "ok": False,
+                        "status": "approval_required",
+                        "authorization": "operator",
+                    },
                     approved=False,
                     is_error=True,
                 )
@@ -587,6 +595,132 @@ def _activation_persistence_projection(
         "state_digest": None if state is None else state.get("state_digest"),
         "status": None if state is None else state.get("status"),
         "retention": "activation_digests_and_status_only; credentials_and_handles_never_persisted",
+    }
+
+
+def _registered_tool_posture(agent: AutonomousAgent) -> frozenset[str]:
+    """Return the names of registered read-only tools for the CLI approval boundary."""
+
+    registry = agent.tool_registry
+    if registry is None:
+        return frozenset()
+    return frozenset(tool.name for tool in registry.tools_for() if tool.read_only)
+
+
+def _load_domain_tool_bindings_file(
+    path: str,
+) -> tuple[dict[str, Mapping[str, Any]], str]:
+    """Load a strict caller-owned domain binding policy without accepting payload values."""
+
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError("domain tool bindings file path must be non-empty")
+    try:
+        raw = Path(path).read_bytes()
+    except OSError as error:
+        raise ValueError("domain tool bindings file could not be read") from error
+    if len(raw) > _MAX_DOMAIN_TOOL_BINDING_FILE_BYTES:
+        raise ValueError("domain tool bindings file exceeds its bounded size")
+    try:
+        document = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("domain tool bindings file must contain valid UTF-8 JSON") from error
+    if not isinstance(document, Mapping) or document.get("schema") != CLI_DOMAIN_TOOL_BINDINGS_SCHEMA:
+        raise ValueError("domain tool bindings file schema is invalid")
+    bindings = document.get("bindings")
+    if not isinstance(bindings, Mapping) or not bindings:
+        raise ValueError("domain tool bindings file requires a non-empty bindings object")
+    if len(bindings) > _MAX_MCP_PROVIDER_TOOLS:
+        raise ValueError("domain tool bindings file contains too many bindings")
+    allowed_fields = {
+        "name",
+        "tool",
+        "domains",
+        "capability",
+        "risk_class",
+        "read_only",
+        "approval_required",
+    }
+    normalized: dict[str, Mapping[str, Any]] = {}
+    for key, value in bindings.items():
+        if not isinstance(key, str) or not key.strip():
+            raise ValueError("domain tool binding keys must be non-empty strings")
+        if not isinstance(value, Mapping):
+            raise ValueError(f"domain tool binding {key!r} must be an object")
+        unknown = sorted(set(value).difference(allowed_fields))
+        if unknown:
+            raise ValueError(f"domain tool binding {key!r} contains unsupported fields")
+        row = dict(value)
+        row.setdefault("name", key)
+        if row.get("name") != key or (
+            row.get("tool") is not None and row.get("tool") != key
+        ):
+            raise ValueError(f"domain tool binding {key!r} does not match its name")
+        domains = row.get("domains")
+        if not isinstance(domains, Sequence) or isinstance(domains, (str, bytes)) or not domains:
+            raise ValueError(f"domain tool binding {key!r} requires domains")
+        if any(not isinstance(domain, str) for domain in domains):
+            raise ValueError(f"domain tool binding {key!r} contains malformed domains")
+        unknown_domains = sorted(set(domains).difference(AUTONOMOUS_DOMAINS))
+        if unknown_domains:
+            raise ValueError(f"domain tool binding {key!r} contains unsupported domains")
+        normalized[key] = row
+    return normalized, content_digest(normalized)
+
+
+def _register_domain_tool_bindings_file(
+    agent: AutonomousAgent,
+    catalogue: ToolCatalogue,
+    path: str,
+    *,
+    approve_mission_dispatch: bool = False,
+) -> dict[str, Any]:
+    """Register explicit application policy for custom live MCP tools."""
+
+    bindings, file_digest = _load_domain_tool_bindings_file(path)
+    registered = agent.register_workspace_tools(
+        bindings,
+        catalogue=catalogue,
+        require_all=False,
+    )
+    runtime = agent.tool_runtime
+    if runtime is not None:
+        # AutonomousAgent intentionally installs its registered runtime ahead of caller-supplied
+        # raw loop callbacks. Bind the CLI's explicit operator decision at that authoritative
+        # runtime boundary so effectful custom tools remain denied by default and become runnable
+        # only for this invocation when the separate mission gate is present.
+        prior_approval = runtime.approve
+        runtime.approve = (
+            (lambda tool, call: bool(approve_mission_dispatch) and (
+                prior_approval is None or bool(prior_approval(tool, call))
+            ))
+        )
+    read_only_count = sum(1 for row in bindings.values() if row.get("read_only", True) is True)
+    effectful_count = len(bindings) - read_only_count
+    state = agent.activation_state()
+    registry = agent.tool_registry
+    return {
+        "requested": True,
+        "mode": "explicit_file",
+        "file_digest": file_digest,
+        "binding_count": len(bindings),
+        "domains": sorted({
+            domain
+            for row in bindings.values()
+            for domain in row.get("domains", ())
+            if isinstance(domain, str)
+        }),
+        "registered_tools": sorted(
+            row["name"]
+            for row in registered
+            if isinstance(row, Mapping) and isinstance(row.get("name"), str)
+        ),
+        "read_only_count": read_only_count,
+        "effectful_count": effectful_count,
+        "registry_digest": None if registry is None else registry.digest,
+        "activation_status": state.get("status"),
+        "activation_authority": "caller_supplied_binding_metadata; execution_separately_gated",
+        "effect_authority": "separate_operator_mission_dispatch_required",
+        "retention": "file_digest_registry_digest_tool_names_and_risk_counts_only",
     }
 
 
@@ -1725,6 +1859,12 @@ def _batch_run(
     mode, job_id, requests = _load_batch_requests(args)
     if args.domain_tool_domain and not (args.activate_domain_tools or args.approve_domain_tool):
         raise ValueError("--domain-tool-domain requires --activate-domain-tools or --approve-domain-tool")
+    if args.domain_tool_bindings_file and args.domain_tool_domain:
+        raise ValueError("--domain-tool-domain cannot be combined with --domain-tool-bindings-file")
+    if args.domain_tool_bindings_file and (
+        args.activate_domain_tools or args.approve_domain_tool or args.resume_activation
+    ):
+        raise ValueError("--domain-tool-bindings-file cannot be combined with curated activation flags")
     activation_store, loaded_activation_state, activation_resumed = _load_activation_store(args)
     if args.resume_batch and args.batch_checkpoint_store is None:
         raise ValueError("--resume-batch requires --batch-checkpoint-store")
@@ -1815,7 +1955,10 @@ def _batch_run(
             domain_activation_requested = bool(
                 args.activate_domain_tools or args.approve_domain_tool
             )
-            domain_registry_requested = domain_activation_requested or activation_resumed
+            binding_file_requested = args.domain_tool_bindings_file is not None
+            domain_registry_requested = (
+                domain_activation_requested or activation_resumed or binding_file_requested
+            )
             provider_tools, tool_catalogue = (
                 _mcp_provider_tools(
                     client,
@@ -1826,7 +1969,17 @@ def _batch_run(
                 else ((), None)
             )
             domain_binding = None
-            if domain_activation_requested:
+            if binding_file_requested:
+                assert tool_catalogue is not None
+                domain_binding = _register_domain_tool_bindings_file(
+                    agent,
+                    tool_catalogue,
+                    args.domain_tool_bindings_file,
+                    approve_mission_dispatch=args.approve_mission_dispatch,
+                )
+                tool_surface["domain_binding"] = domain_binding
+                tool_surface["mode"] = "domain_registry"
+            elif domain_activation_requested:
                 assert tool_catalogue is not None
                 domain_binding = _activate_domain_tools(
                     agent,
@@ -1853,11 +2006,12 @@ def _batch_run(
                         if domain_binding is not None
                         else None
                     ),
+                    read_only_tools=_registered_tool_posture(agent),
                 )
                 if provider_tools and tool_catalogue is not None
                 else None
             )
-            if needs_provider_tools or domain_activation_requested:
+            if needs_provider_tools or domain_registry_requested:
                 assert tool_catalogue is not None
                 tool_surface = {
                     "mode": "live_mcp",
@@ -2098,6 +2252,12 @@ def _run(
         raise ValueError("choose exactly one of --automatic or --domain")
     if args.domain_tool_domain and not (args.activate_domain_tools or args.approve_domain_tool):
         raise ValueError("--domain-tool-domain requires --activate-domain-tools or --approve-domain-tool")
+    if args.domain_tool_bindings_file and args.domain_tool_domain:
+        raise ValueError("--domain-tool-domain cannot be combined with --domain-tool-bindings-file")
+    if args.domain_tool_bindings_file and (
+        args.activate_domain_tools or args.approve_domain_tool or args.resume_activation
+    ):
+        raise ValueError("--domain-tool-bindings-file cannot be combined with curated activation flags")
     activation_store, loaded_activation_state, activation_resumed = _load_activation_store(args)
     command = _parse_mcp_command(args.mcp_command)
     if args.discover_models and not args.approve_provider_call:
@@ -2194,7 +2354,10 @@ def _run(
             domain_activation_requested = bool(
                 args.activate_domain_tools or args.approve_domain_tool
             )
-            domain_registry_requested = domain_activation_requested or activation_resumed
+            binding_file_requested = args.domain_tool_bindings_file is not None
+            domain_registry_requested = (
+                domain_activation_requested or activation_resumed or binding_file_requested
+            )
             provider_tools, tool_catalogue = (
                 _mcp_provider_tools(
                     client,
@@ -2219,7 +2382,17 @@ def _run(
                     "retention": "tool_names_and_schema_digest_only",
                 }
             domain_binding = None
-            if domain_activation_requested:
+            if binding_file_requested:
+                assert tool_catalogue is not None
+                domain_binding = _register_domain_tool_bindings_file(
+                    agent,
+                    tool_catalogue,
+                    args.domain_tool_bindings_file,
+                    approve_mission_dispatch=args.approve_mission_dispatch,
+                )
+                tool_surface["domain_binding"] = domain_binding
+                tool_surface["mode"] = "domain_registry"
+            elif domain_activation_requested:
                 assert tool_catalogue is not None
                 domain_binding = _activate_domain_tools(
                     agent,
@@ -2263,6 +2436,7 @@ def _run(
                         client,
                         catalogue=tool_catalogue,
                         approve_mission_dispatch=args.approve_mission_dispatch,
+                        read_only_tools=_registered_tool_posture(agent),
                     ),
                 }
             elif domain_registry_requested and args.execution_mode in {"tool_loop", "mission"}:
@@ -2275,6 +2449,7 @@ def _run(
                         catalogue=tool_catalogue,
                         approve_mission_dispatch=args.approve_mission_dispatch,
                         allowed_tools=registered_names,
+                        read_only_tools=_registered_tool_posture(agent),
                     ),
                 }
             if args.automatic:
@@ -2657,6 +2832,11 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="rehydrate approved domain bindings from --activation-store after live catalogue validation",
     )
+    run.add_argument(
+        "--domain-tool-bindings-file",
+        default=None,
+        help="strict JSON file declaring caller-owned domains, capabilities, and risk posture for live MCP tools",
+    )
     run.add_argument("--run-id", default=None)
     run.add_argument("--approve-provider-call", action="store_true", help="authorize provider invocation")
     run.add_argument("--approve-mission-dispatch", action="store_true", help="authorize mission effects")
@@ -2716,6 +2896,11 @@ def _parser() -> argparse.ArgumentParser:
         "--resume-activation",
         action="store_true",
         help="rehydrate approved domain bindings from --activation-store after live catalogue validation",
+    )
+    batch_run.add_argument(
+        "--domain-tool-bindings-file",
+        default=None,
+        help="strict JSON file declaring caller-owned domains, capabilities, and risk posture for live MCP tools",
     )
     batch_run.add_argument("--learning-mode", choices=("off", "online", "trajectory"), default=None, help="automatic route learning mode")
     batch_run.add_argument("--workflow-execution", action="store_true", help="enable checkpointable workflow execution for automatic requests")

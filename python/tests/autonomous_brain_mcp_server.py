@@ -72,6 +72,19 @@ for raw in sys.stdin:
                             "additionalProperties": False,
                         },
                     },
+                    {
+                        "name": "repository_update",
+                        "description": "Apply a bounded repository mutation for explicit policy tests.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "path": {"type": "string"},
+                                "content": {"type": "string"},
+                            },
+                            "required": ["path", "content"],
+                            "additionalProperties": False,
+                        },
+                    },
                 ]
             },
         )
@@ -153,6 +166,17 @@ for raw in sys.stdin:
                     "scope": scope,
                     "repository": "fixture-repository",
                     "evidence": ["repository_catalog_completed"],
+                },
+            )
+        elif name == "repository_update":
+            path = arguments.get("path", "") if isinstance(arguments, dict) else ""
+            tool_result(
+                request_id,
+                {
+                    "ok": True,
+                    "path": path,
+                    "status": "repository_update_completed",
+                    "evidence": ["repository_update_completed"],
                 },
             )
         else:

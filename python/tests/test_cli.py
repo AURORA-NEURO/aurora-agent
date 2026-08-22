@@ -1283,6 +1283,116 @@ def test_cli_persists_and_rehydrates_redacted_domain_activation(tmp_path) -> Non
     assert "persistent repository evidence" not in json.dumps(status)
 
 
+def test_cli_custom_domain_binding_file_applies_read_only_and_effect_gates(tmp_path) -> None:
+    fixture = Path(__file__).parent / "autonomous_brain_mcp_server.py"
+    command = f'"{sys.executable.replace(chr(92), "/")}" -u "{fixture.as_posix()}"'
+    bindings_path = tmp_path / "domain-bindings.json"
+    bindings_path.write_text(
+        json.dumps(
+            {
+                "schema": "aurora-cli-domain-tool-bindings/0.1",
+                "bindings": {
+                    "repository_catalog": {
+                        "domains": list(AUTONOMOUS_DOMAINS),
+                        "capability": "repository_inspection",
+                        "risk_class": "read_only",
+                        "read_only": True,
+                        "approval_required": False,
+                    },
+                    "repository_update": {
+                        "domains": ["coding"],
+                        "capability": "repository_mutation",
+                        "risk_class": "external_effect",
+                        "read_only": False,
+                        "approval_required": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def invoke(sequence: list[dict[str, object]], *extra: str):
+        return _invoke(
+            "run",
+            "--mcp-command", command,
+            "--task", "inspect and optionally update repository evidence",
+            "--domain", "coding",
+            "--provider", "local",
+            "--model", "local-model",
+            "--model-capability", "reasoning",
+            "--model-capability", "code",
+            "--local-response-sequence-json", json.dumps(sequence, separators=(",", ":")),
+            "--execution-mode", "tool_loop",
+            "--allow-mcp-tool", "repository_catalog",
+            "--allow-mcp-tool", "repository_update",
+            "--domain-tool-bindings-file", str(bindings_path),
+            "--approve-provider-call",
+            *extra,
+        )
+
+    read_code, read_payload, read_errors = invoke(
+        [
+            {
+                "tool_calls": [
+                    {
+                        "id": "call-custom-read",
+                        "name": "repository_catalog",
+                        "arguments": {"scope": "custom-policy"},
+                    }
+                ]
+            },
+            {"output_text": "custom read-only policy completed"},
+        ]
+    )
+    assert read_code == 0
+    assert read_errors == ""
+    assert read_payload["result"]["status"] == "completed_provider_tool_loop"
+    binding = read_payload["tool_surface"]["domain_binding"]
+    assert binding["mode"] == "explicit_file"
+    assert binding["binding_count"] == 2
+    assert binding["domains"] == sorted(AUTONOMOUS_DOMAINS)
+    assert binding["read_only_count"] == 1
+    assert binding["effectful_count"] == 1
+    assert binding["registered_tools"] == ["repository_catalog", "repository_update"]
+
+    blocked_code, blocked_payload, blocked_errors = invoke(
+        [
+            {
+                "tool_calls": [
+                    {
+                        "id": "call-custom-effect",
+                        "name": "repository_update",
+                        "arguments": {"path": "README.md", "content": "bounded"},
+                    }
+                ]
+            }
+        ]
+    )
+    assert blocked_code == 0, blocked_errors
+    assert blocked_errors == ""
+    assert blocked_payload["result"]["status"] == "tool_authorization_required"
+
+    approved_code, approved_payload, approved_errors = invoke(
+        [
+            {
+                "tool_calls": [
+                    {
+                        "id": "call-custom-effect-approved",
+                        "name": "repository_update",
+                        "arguments": {"path": "README.md", "content": "bounded"},
+                    }
+                ]
+            },
+            {"output_text": "custom effect approved and completed"},
+        ],
+        "--approve-mission-dispatch",
+    )
+    assert approved_code == 0
+    assert approved_errors == ""
+    assert approved_payload["result"]["status"] == "completed_provider_tool_loop"
+
+
 def test_keyless_tool_loop_rejects_unknown_mcp_allowlist_before_provider_dispatch() -> None:
     fixture = Path(__file__).parent / "autonomous_brain_mcp_server.py"
     command = f'"{sys.executable.replace(chr(92), "/")}" -u "{fixture.as_posix()}"'

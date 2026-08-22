@@ -561,6 +561,71 @@ and integrity digests only. `activation-status` and the execution result both la
 metadata-only state; activation does not authorize provider invocation, tool effects, or human
 decisions.
 
+Applications that own their MCP tool taxonomy can supply a strict binding file instead of using
+the reviewed built-in profile. This is the extension point for domain-specific tools: the live
+MCP schema remains authoritative, while the file supplies the caller's exact domain, capability,
+risk, and approval policy. It contains no executor, credential, argument, or output value:
+
+```json
+{
+  "schema": "aurora-cli-domain-tool-bindings/0.1",
+  "bindings": {
+    "repository_catalog": {
+      "domains": ["coding", "science"],
+      "capability": "repository_inspection",
+      "risk_class": "read_only",
+      "read_only": true,
+      "approval_required": false
+    },
+    "repository_update": {
+      "domains": ["coding"],
+      "capability": "repository_mutation",
+      "risk_class": "external_effect",
+      "read_only": false,
+      "approval_required": true
+    }
+  }
+}
+```
+
+Use it with `run` or `batch-run`:
+
+```bash
+python -m prism_sdk run \
+  --mcp-command "python path/to/mcp_server.py" \
+  --provider local \
+  --model local-model \
+  --domain coding \
+  --task "inspect and, if approved, update repository evidence" \
+  --execution-mode tool_loop \
+  --domain-tool-bindings-file .aurora/domain-tools.json \
+  --allow-mcp-tool repository_catalog \
+  --allow-mcp-tool repository_update \
+  --approve-provider-call
+
+# The same command with the separate effect gate allows repository_update to run.
+python -m prism_sdk run \
+  --mcp-command "python path/to/mcp_server.py" \
+  --provider local \
+  --model local-model \
+  --domain coding \
+  --task "inspect and, if approved, update repository evidence" \
+  --execution-mode tool_loop \
+  --domain-tool-bindings-file .aurora/domain-tools.json \
+  --allow-mcp-tool repository_catalog \
+  --allow-mcp-tool repository_update \
+  --approve-provider-call \
+  --approve-mission-dispatch
+```
+
+Read-only bindings can execute after provider approval; effectful bindings always return
+`tool_authorization_required` until `--approve-mission-dispatch` is supplied. The binding file
+cannot be combined with curated activation or activation resume flags, and it is re-supplied on
+each process start rather than treated as durable authorization. The result retains only the file
+digest, live-catalogue digest, registry digest, names, domain counts, and read-only/effectful
+counts. Exact tool names must be present in the fresh `tools/list` response, and malformed domain
+or safety fields fail closed before the tool call.
+
 The local provider also supports a bounded response sequence for offline integration tests. The
 array contains at most 32 JSON objects; each call consumes one object in order, and `text` or
 `output_text` can provide the response text while `tool_calls` provides provider-neutral tool
