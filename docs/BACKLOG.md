@@ -324,6 +324,12 @@ task/prompt/credential/provider values caller-owned, bind idempotency to digests
 bound retries, quarantine uncertain post-dispatch work, and expose restart-checked metadata
 snapshots. These close local scheduling and SDK portability gaps; multi-host consensus, tenant
 fairness, external delivery guarantees, and provider-specific execution remain absent.
+The Python side now also ships `DurableBrainControlPlaneAdapter` and its async façade: a concrete
+application-owned transport over the SQLite journal with fail-closed authorization, queued approval
+admission, restart-safe lifecycle calls, and digest-only projections aligned with the Rust
+`brain_job_*` vocabulary. This closes the missing local durable transport seam; HTTP/MCP identity,
+multi-host consensus, tenant fairness, external delivery guarantees, and provider-specific
+execution remain deployment-owned.
 The MCP control-plane projection now also exposes the matching remote lifecycle vocabulary:
 `brain_job_claim`, `brain_job_renew`, `brain_job_checkpoint`, `brain_job_complete`,
 `brain_job_fail`, and `brain_job_reconcile`. The TypeScript `AutonomousDurableJobController`

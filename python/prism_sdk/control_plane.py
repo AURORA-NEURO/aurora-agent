@@ -189,22 +189,32 @@ class BrainApprovalRouter:
                 return existing
         approval_id = uuid.uuid4().hex
         try:
-            updated = self.store.checkpoint(
-                job_id,
-                worker_id,
-                phase="approval_requested",
-                checkpoint={
-                    **dict(current.checkpoint),
-                    "approval_id": approval_id,
-                    "approval_scope": approval_scope,
-                    "request_digest": request_digest,
-                    "required_role": required_role,
-                    "requested_by": worker_id,
-                    "created_ns": self._now_ns(),
-                },
-                side_effect_boundary=current.side_effect_boundary,
-                waiting_for_approval=True,
-            )
+            if current.state == "queued":
+                updated = self.store.request_approval(
+                    job_id,
+                    requester=worker_id,
+                    approval_id=approval_id,
+                    approval_scope=approval_scope,
+                    request_digest=request_digest,
+                    required_role=required_role,
+                )
+            else:
+                updated = self.store.checkpoint(
+                    job_id,
+                    worker_id,
+                    phase="approval_requested",
+                    checkpoint={
+                        **dict(current.checkpoint),
+                        "approval_id": approval_id,
+                        "approval_scope": approval_scope,
+                        "request_digest": request_digest,
+                        "required_role": required_role,
+                        "requested_by": worker_id,
+                        "created_ns": self._now_ns(),
+                    },
+                    side_effect_boundary=current.side_effect_boundary,
+                    waiting_for_approval=True,
+                )
         except BrainJobError as error:
             raise BrainRunError("approval request could not be recorded") from error
         request = self._from_job(updated)

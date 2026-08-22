@@ -549,6 +549,14 @@ class BrainControlClient:
 
         return cls(invoke)
 
+    @classmethod
+    def from_durable(cls, adapter: Any) -> "BrainControlClient":
+        """Bind to an application-owned durable brain transport adapter."""
+
+        if not hasattr(adapter, "call_tool"):
+            raise BrainControlError("durable adapter must expose call_tool")
+        return cls(adapter.call_tool)
+
     def _invoke(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
         payload = self._call_tool(name, dict(arguments))
         if not isinstance(payload, Mapping):
@@ -636,6 +644,14 @@ class AsyncBrainControlClient:
             return result.require_ok()
 
         return cls(invoke)
+
+    @classmethod
+    def from_durable(cls, adapter: Any) -> "AsyncBrainControlClient":
+        """Bind to an async application-owned durable brain transport adapter."""
+
+        if not hasattr(adapter, "call_tool"):
+            raise BrainControlError("async durable adapter must expose call_tool")
+        return cls(adapter.call_tool)
 
     async def _invoke(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
         payload = await self._call_tool(name, dict(arguments))

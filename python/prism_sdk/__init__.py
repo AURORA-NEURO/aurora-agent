@@ -127,6 +127,13 @@ from .brain_api import (
     BrainJobSubmission,
     BrainReplayRequest,
 )
+from .durable_brain_transport import (
+    AsyncDurableBrainControlPlaneAdapter,
+    DURABLE_BRAIN_TRANSPORT_SCHEMA,
+    DurableBrainAuthorizationError,
+    DurableBrainControlPlaneAdapter,
+    DurableBrainTransportError,
+)
 from .evaluators import (
     DOMAIN_EVALUATOR_SCHEMA,
     DomainEvaluationEvidence,

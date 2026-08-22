@@ -254,6 +254,32 @@ decisions, and emit only bounded job metadata, health values, and normalized eva
 They are intentionally not credential clients: collect keys through ProviderOnboarding, invoke
 through LLMRuntime, and report only value-only outcome metadata back to the control plane.
 
+For a restart-safe application-owned host, `DurableBrainControlPlaneAdapter` exposes the same
+`brain_job_*` tool names over `BrainJobStore` rather than duplicating the state machine in an HTTP
+handler. Mutations fail closed until the host supplies an authorization callback; the callback
+receives only operation metadata and digests. `AsyncDurableBrainControlPlaneAdapter` runs the
+SQLite transaction in a worker thread for async hosts. Both adapters project idempotency keys,
+checkpoint bodies, failure text, result metadata, and reconciliation notes as digests only:
+
+```python
+from prism_sdk import (
+    BrainControlClient,
+    BrainJobStore,
+    DurableBrainControlPlaneAdapter,
+)
+
+with BrainJobStore("brain-jobs.sqlite3") as store:
+    transport = DurableBrainControlPlaneAdapter(
+        store,
+        authorizer=lambda operation, metadata: application_policy_allows(operation, metadata),
+    )
+    control = BrainControlClient.from_durable(transport)
+```
+
+The adapter does not collect or inspect provider keys and does not rehydrate prompts, plans,
+responses, or domain evidence. The embedding application remains responsible for its protected
+resolver, identity provider, HTTP/MCP authentication, and external-effect verification.
+
 The package also includes dependency-free authoring builders for digest-bound benchmark packs,
 set-valued decision cells, deterministic metamorphic mutations, versioned oracle manifests,
 evidence judgements, reference panels, evidence-conditioned BioCapability audit requests, evaluation requests, and typed metrics observations,

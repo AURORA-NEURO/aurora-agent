@@ -569,6 +569,77 @@ class BrainJobStore:
             result_metadata={} if result_metadata is None else result_metadata,
         )
 
+    def request_approval(
+        self,
+        job_id: str,
+        *,
+        requester: str,
+        approval_id: str,
+        approval_scope: str,
+        request_digest: str,
+        required_role: str = "operator",
+    ) -> BrainJobRecord:
+        """Park a queued job at an approval boundary without taking a worker lease.
+
+        The MCP projection can request approval for a queued job because the request itself is
+        an admission decision, not execution.  The older ``checkpoint(..., waiting_for_approval
+        =True)`` path remains the correct operation for a leased worker that discovers an approval
+        requirement mid-run.  Keeping both paths in the store prevents an HTTP/MCP adapter from
+        having to mutate SQLite state outside the journal's transition helper.
+        """
+
+        job_id = _job_text("job_id", job_id, MAX_JOB_ID_BYTES)
+        requester = _job_text("approval requester", requester, MAX_JOB_ID_BYTES)
+        approval_id = _job_text("approval_id", approval_id, MAX_JOB_ID_BYTES)
+        approval_scope = _job_text("approval_scope", approval_scope, MAX_JOB_CHECKPOINT_BYTES)
+        required_role = _job_text("required_role", required_role, 128)
+        if not _valid_digest(request_digest):
+            raise BrainJobError("approval request_digest must be a lowercase SHA-256 digest")
+        with self._lock:
+            self._begin_locked()
+            try:
+                row = self._connection.execute("SELECT * FROM brain_jobs WHERE job_id = ?", (job_id,)).fetchone()
+                if row is None:
+                    raise BrainJobError("unknown brain job")
+                record = self._row_to_record(row)
+                if record.state == "waiting_approval":
+                    existing = record.checkpoint
+                    if (
+                        existing.get("approval_id") == approval_id
+                        and existing.get("request_digest") == request_digest
+                    ):
+                        self._connection.execute("COMMIT")
+                        return record
+                    raise BrainJobError("brain job already has a different approval request")
+                if record.state != "queued":
+                    raise BrainJobError(f"cannot request approval while job is in state {record.state!r}")
+                checkpoint = {
+                    **dict(record.checkpoint),
+                    "phase": "approval_requested",
+                    "approval_id": approval_id,
+                    "approval_scope": approval_scope,
+                    "request_digest": request_digest,
+                    "required_role": required_role,
+                    "requested_by": requester,
+                    "created_ns": self._now_ns(),
+                }
+                self._transition_locked(
+                    record,
+                    event_type="job_approval_requested",
+                    state="waiting_approval",
+                    reason=None,
+                    lease_owner=None,
+                    lease_expires_ns=None,
+                    checkpoint=checkpoint,
+                )
+                self._connection.execute("COMMIT")
+                return self._row_to_record(
+                    self._connection.execute("SELECT * FROM brain_jobs WHERE job_id = ?", (job_id,)).fetchone()
+                )
+            except Exception:
+                self._connection.execute("ROLLBACK")
+                raise
+
     def resume_waiting(self, job_id: str, *, approver: str, reason: str = "caller approval granted") -> BrainJobRecord:
         """Release a waiting-approval job back to the queue without dispatching it."""
 
@@ -642,10 +713,20 @@ class BrainJobStore:
                 self._connection.execute("ROLLBACK")
                 raise
 
-    def fail(self, job_id: str, worker_id: str, *, reason: str, retryable: bool = False) -> BrainJobRecord:
+    def fail(
+        self,
+        job_id: str,
+        worker_id: str,
+        *,
+        reason: str,
+        retryable: bool = False,
+        reason_digest: str | None = None,
+    ) -> BrainJobRecord:
         reason = _job_text("job failure reason", reason, MAX_JOB_REASON_BYTES)
         if not isinstance(retryable, bool):
             raise BrainJobError("retryable must be boolean")
+        if reason_digest is not None and not _valid_digest(reason_digest):
+            raise BrainJobError("reason_digest must be a lowercase SHA-256 digest")
         with self._lock:
             self._begin_locked()
             try:
@@ -664,6 +745,8 @@ class BrainJobStore:
                     "phase": "failed",
                     "reason": reason,
                 }
+                if reason_digest is not None:
+                    checkpoint["reason_digest"] = reason_digest
                 self._transition_locked(
                     record,
                     event_type=event_type,

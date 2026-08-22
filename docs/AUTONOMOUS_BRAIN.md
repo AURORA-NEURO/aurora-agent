@@ -2707,10 +2707,21 @@ control-plane contract. The MCP server exposes:
   profile. It is an offline evaluator only; it does not contact a provider or replay a domain tool.
 
 The same tools are reachable through the existing /v1/tools/{name} HTTP route and stdio
-tools/call. The typed Python bridge keeps the wire shape consistent. The lifecycle operations are
-an in-memory MCP projection (`scope: mcp_process`); restart-safe claims, leases, checkpoints, and
-reconciliation remain authoritative in `BrainJobStore`, which deployments should call directly or
-place behind their durable transport adapter:
+tools/call. The typed Python bridge keeps the wire shape consistent. The Rust lifecycle operations
+remain an in-memory MCP projection (`scope: mcp_process`), while Python now ships a concrete
+`DurableBrainControlPlaneAdapter` over the restart-safe `BrainJobStore`. That adapter exposes the
+same `brain_job_*` tool names, applies SQLite transactions through the existing state machine,
+supports queued approval admission, and projects Python-only checkpoint/reason/result fields as
+digests. Its async counterpart delegates the same transactions to a worker thread instead of
+creating a second state machine.
+
+The durable adapter fails closed unless the host supplies an application-owned authorization
+callback. The callback receives only operation metadata, worker digests, job IDs, and any caller
+authorization digest; a caller-supplied digest is evidence metadata rather than authentication.
+The adapter never returns idempotency keys, prompts, task payloads, provider responses, credential
+handles, raw checkpoint bodies, failure text, or reconciliation evidence. Applications still own
+HTTP/MCP authentication, provider-key collection, task/prompt rehydration, identity policy, and
+external-effect verification:
 
 The TypeScript `AutonomousBrainControlPlaneMonitor` provides the matching caller-side boundary
 over an `ApiClient`-compatible object. It validates job identity, domain, attempt ceilings,
@@ -2725,9 +2736,16 @@ from prism_sdk import (
     BrainControlClient,
     BrainJobSubmission,
     BrainReplayRequest,
+    BrainJobStore,
+    DurableBrainControlPlaneAdapter,
 )
 
-control = BrainControlClient.from_http(api)  # or BrainControlClient.from_mcp(client)
+store = BrainJobStore("brain-jobs.sqlite3")
+adapter = DurableBrainControlPlaneAdapter(
+    store,
+    authorizer=lambda operation, metadata: application_policy_allows(operation, metadata),
+)
+control = BrainControlClient.from_durable(adapter)
 receipt = control.submit_job(
     BrainJobSubmission(
         idempotency_key="request-001",
@@ -2753,6 +2771,10 @@ control.replay(
 )
 `
 
+For a durable local host, bind `BrainControlClient.from_durable(adapter)` or
+`AsyncBrainControlClient.from_durable(async_adapter)` instead. The resulting client can be
+passed through the same TypeScript/Python lifecycle controller contract as the MCP/HTTP route.
+
 Use ProviderOnboarding and LLMRuntime for the actual BYOK invocation. The normal sequence is:
 
 1. register non-secret provider transport metadata;
@@ -2766,11 +2788,11 @@ Use ProviderOnboarding and LLMRuntime for the actual BYOK invocation. The normal
    revoking or expiring the handle.
 
 The Rust projection is bounded process state and intentionally does not pretend to be a durable
-queue. A worker that must survive restart should submit the same metadata to BrainJobStore,
-rehydrate the task/prompt/plan/evaluator from its own resolver, and use the MCP/HTTP projection
-for operator visibility. This split prevents a public MCP endpoint from becoming an accidental
-secret vault or transcript archive while keeping model selection, invocation, approvals, replay,
-and online adaptation connected in one inspectable workflow.
+queue. A worker that must survive restart should submit the same metadata to BrainJobStore through
+the durable adapter, rehydrate the task/prompt/plan/evaluator from its own resolver, and use the
+MCP/HTTP projection for operator visibility when desired. This split prevents a public MCP endpoint
+from becoming an accidental secret vault or transcript archive while keeping model selection,
+invocation, approvals, replay, and online adaptation connected in one inspectable workflow.
 
 ## Decision loop
 
