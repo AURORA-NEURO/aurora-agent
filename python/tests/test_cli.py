@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+from unittest.mock import patch
 
 from prism_sdk import AUTONOMOUS_DOMAINS
 from prism_sdk.cli import main
@@ -104,3 +105,74 @@ def test_cli_rejects_invalid_commands_without_echoing_argument_text() -> None:
     assert code != 0
     assert payload is None
     assert secret not in errors
+
+
+def test_run_requires_explicit_or_automatic_routing_mode() -> None:
+    code, payload, errors = _invoke(
+        "run",
+        "--mcp-command", "python server.py",
+        "--task", "inspect the repository",
+        "--model", "offline-model",
+        "--credential-source", "environment",
+        "--credential-env", "AURORA_TEST_KEY",
+        environ={"AURORA_TEST_KEY": "routing-test-value"},
+    )
+    assert code == 2
+    assert payload is None
+    assert "command failed" in errors
+
+
+def test_run_automatic_mode_forwards_routing_and_planning_controls_without_provider_payloads() -> None:
+    captured: dict[str, object] = {}
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    class FakeAgent:
+        def __init__(self, _workspace: object, _runtime: object, *, model_catalogue: object) -> None:
+            captured["catalogue"] = model_catalogue
+
+        def run_auto(self, **kwargs: object) -> dict[str, object]:
+            captured.update(kwargs)
+            return {"status": "completed", "route": {"selected_domains": ["research"]}}
+
+    secret = "cli-automatic-test-value"
+    output = io.StringIO()
+    errors = io.StringIO()
+    with patch("prism_sdk.cli.AutonomousAgent", FakeAgent):
+        code = main(
+            (
+                "run",
+                "--mcp-command", "python server.py",
+                "--automatic",
+                "--task", "compare independent research sources",
+                "--hint", "research",
+                "--model", "model-a",
+                "--model", "model-b",
+                "--provider", "openai",
+                "--base-url", "https://provider.example",
+                "--credential-source", "environment",
+                "--credential-env", "AURORA_TEST_KEY",
+                "--planning-mode", "provider",
+                "--semantic-routing",
+                "--approve-provider-call",
+            ),
+            environ={"AURORA_TEST_KEY": secret},
+            writer=output,
+            error_writer=errors,
+            client_factory=lambda *_args, **_kwargs: FakeClient(),
+        )
+    payload = json.loads(output.getvalue())
+    assert code == 0
+    assert errors.getvalue() == ""
+    assert captured["hints"] == ("research",)
+    assert captured["planning_mode"] == "provider"
+    assert captured["semantic_routing"] is True
+    assert captured["allow_cross_domain"] is True
+    assert len(captured["model_candidates"]) == 2
+    assert payload["routing_mode"] == "automatic"
+    assert secret not in output.getvalue()

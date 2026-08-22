@@ -150,6 +150,27 @@ python -m prism_sdk run \
   --approve-provider-call
 ```
 
+The same command can let the reviewed autonomous router choose one or more domains instead of
+requiring a domain argument:
+
+```bash
+python -m prism_sdk run \
+  --mcp-command "python path/to/mcp_server.py" \
+  --automatic \
+  --task "compare the implementation, dataset, and evaluation evidence" \
+  --hint research \
+  --model gpt-5 \
+  --model-capability reasoning \
+  --approve-provider-call
+```
+
+Automatic mode retains the deterministic route proposal, can fan out across up to three reviewed
+domains, and returns a review-required result when confidence, margin, or domain coverage is
+insufficient. `--single-domain` disables fan-out. `--semantic-routing` asks the configured model
+for a bounded routing proposal, while `--planning-mode provider` asks it to prioritize only the
+already-reviewed workflow stages; both remain separate provider approval boundaries and neither
+can create a new domain, capability, connector, credential, or effect.
+
 The command accepts no API-key or token argument. By default it uses a no-echo prompt; deployment
 automation can select `--credential-source environment --credential-env OPENAI_API_KEY`. The value
 is converted immediately into a short-lived in-memory session, is passed to the runtime only as an

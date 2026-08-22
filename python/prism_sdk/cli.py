@@ -281,6 +281,10 @@ def _run(
     reader: Callable[[str], str] | None,
     client_factory: Callable[..., Client] = Client,
 ) -> dict[str, Any]:
+    if (args.automatic and args.domain is not None) or (
+        not args.automatic and args.domain is None
+    ):
+        raise ValueError("choose exactly one of --automatic or --domain")
     command = _parse_mcp_command(args.mcp_command)
     candidates = _candidate_args(args)
     runtime, onboarding = _runtime_with_provider(args)
@@ -304,24 +308,37 @@ def _run(
                 runtime,
                 model_catalogue=catalogue,
             )
-            result = agent.run(
-                task=args.task,
-                domain=args.domain,
-                credentials=session,
-                model_candidates=candidates,
-                capability=args.capability,
-                required_model_capabilities=tuple(args.required_model_capability or ()),
-                execution_mode=args.execution_mode,
-                max_steps=args.max_steps,
-                requested_output_tokens=args.requested_output_tokens,
-                max_output_tokens=args.requested_output_tokens,
-                approve_provider_call=args.approve_provider_call,
-                approve_mission_dispatch=args.approve_mission_dispatch,
-                run_id=args.run_id,
-            )
+            common = {
+                "task": args.task,
+                "credentials": session,
+                "model_candidates": candidates,
+                "capability": args.capability,
+                "required_model_capabilities": tuple(args.required_model_capability or ()),
+                "execution_mode": args.execution_mode,
+                "max_steps": args.max_steps,
+                "requested_output_tokens": args.requested_output_tokens,
+                "max_output_tokens": args.requested_output_tokens,
+                "approve_provider_call": args.approve_provider_call,
+                "approve_mission_dispatch": args.approve_mission_dispatch,
+                "run_id": args.run_id,
+            }
+            if args.automatic:
+                result = agent.run_auto(
+                    **common,
+                    hints=tuple(args.hint or ()),
+                    max_domains=args.max_domains,
+                    allow_cross_domain=not args.single_domain,
+                    semantic_routing=args.semantic_routing,
+                    planning_mode=args.planning_mode,
+                    planning_run_id=args.planning_run_id,
+                    planning_max_output_tokens=args.planning_max_output_tokens,
+                )
+            else:
+                result = agent.run(**common, domain=args.domain)
         return {
             "schema": CLI_SCHEMA,
             "command": "run",
+            "routing_mode": "automatic" if args.automatic else "explicit_domain",
             "result": result,
             "provider_status": runtime.provider_status(args.provider),
             "credential_session": session.status().to_dict(),
@@ -375,7 +392,15 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--mcp-cwd", default=None, help="working directory for the MCP process")
     run.add_argument("--mcp-timeout", type=float, default=_DEFAULT_TIMEOUT)
     run.add_argument("--task", required=True)
-    run.add_argument("--domain", required=True, choices=AUTONOMOUS_DOMAINS)
+    run.add_argument("--domain", choices=AUTONOMOUS_DOMAINS, help="explicit domain; omit when using --automatic")
+    run.add_argument("--automatic", action="store_true", help="route the task across the reviewed domain catalogue")
+    run.add_argument("--hint", action="append", default=[], help="automatic-routing hint; repeatable")
+    run.add_argument("--max-domains", type=int, default=3, help="maximum domains for automatic routing")
+    run.add_argument("--single-domain", action="store_true", help="prevent automatic cross-domain fan-out")
+    run.add_argument("--semantic-routing", action="store_true", help="use an approved provider call to refine routing")
+    run.add_argument("--planning-mode", choices=("deterministic", "provider"), default="deterministic")
+    run.add_argument("--planning-run-id", default=None)
+    run.add_argument("--planning-max-output-tokens", type=int, default=1_024)
     run.add_argument("--model", action="append", required=True, help="candidate model; repeat to enable model selection")
     run.add_argument("--model-capability", action="append", default=[], help="declared capability for every model candidate")
     run.add_argument("--required-model-capability", action="append", default=[], help="capability required by this run")

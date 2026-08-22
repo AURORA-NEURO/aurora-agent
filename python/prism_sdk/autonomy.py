@@ -14965,6 +14965,10 @@ class AutonomousAgent:
                     raise BrainRunError(
                         "learning_mode='trajectory' for a single-domain route requires workflow_execution=True"
                     )
+                execution_kwargs.setdefault(
+                    "execution_mode",
+                    blueprint.blueprint.spec.execution_mode,
+                )
                 result = self.run(
                     task=task,
                     domain=blueprint.route.selected_domains[0],
