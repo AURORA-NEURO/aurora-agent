@@ -15,6 +15,7 @@ import {
   AutonomousEvidenceRetryPolicy,
   AutonomousEvidenceReadinessAuditor,
   AutonomousEvidenceReadinessPolicy,
+  AutonomousEvidenceExecutionController,
   AutonomousEvidenceRuntime,
   AutonomousHttpConnectorPolicy,
   AutonomousHttpConnectorRequest,
@@ -1052,4 +1053,89 @@ test("evidence readiness audits coverage, selection, health, and bounded policie
   assert.equal(empty.missing_count, AUTONOMOUS_DOMAIN_NAMES.length);
   assert.equal(empty.domains.every((row) => row.status === "missing" && row.coverage_state === "missing"), true);
   assert.equal(empty.health_snapshot_digest, null);
+});
+
+test("evidence execution controller composes reviewed readiness, approval, failover, and runtime dispatch across every domain", async () => {
+  const agent = agentFor();
+  const evidencePlan = await agent.evidencePlan(AUTONOMOUS_DOMAIN_NAMES);
+  const registry = new AutonomousEvidenceAdapterRegistry();
+  let dispatches = 0;
+  let failPrimary = false;
+  for (const tier of ["aa", "zz"]) {
+    registerAutonomousEvidenceAdaptersForAllDomains(registry, (domain) => ({
+      adapterId: `execution.${tier}.${domain}`,
+      version: "1.0.0",
+      capabilities: ["bounded_evidence"],
+      sourceKinds: ["caller_fixture"],
+      acquire: () => {
+        dispatches += 1;
+        if (tier === "aa" && failPrimary) throw new AutonomousEvidenceAcquisitionError("transport_error", true);
+        return { transient_execution_value: `${tier}-${domain}` };
+      },
+    }));
+  }
+  const store = new InMemoryAutonomousEvidenceAdapterHealthStore({ clock: () => 20_000 });
+  const controller = new AutonomousEvidenceExecutionController(registry, store);
+  const failoverPolicy = new AutonomousEvidenceFailoverPolicy({ maxFailovers: 1, retryPolicy: new AutonomousEvidenceRetryPolicy({ maxAttempts: 1, baseDelayMs: 0 }) });
+
+  const blocked = await controller.prepare(evidencePlan, { failoverPolicy });
+  assert.equal(blocked.status, "blocked");
+  assert.equal(dispatches, 0);
+  await assert.rejects(() => controller.execute(blocked, evidencePlan, [], { approveSourceDispatch: true }), /blocked/);
+  assert.equal(dispatches, 0);
+
+  for (const row of blocked.selection_plan.rows) {
+    const manifest = registry.resolve(row.domain, row.adapter_id);
+    await store.recordAcquisition({ adapter_id: manifest.adapter_id, manifest_digest: manifest.manifest_digest, domain: row.domain, outcome: "success", status: "success", latency_ms: 3 });
+  }
+  const ready = await controller.prepare(evidencePlan, { failoverPolicy });
+  assert.equal(ready.status, "ready_for_review");
+  assert.equal(ready.readiness.status, "ready");
+  assert.equal(dispatches, 0);
+  const tampered = await controller.prepare(evidencePlan, { failoverPolicy });
+  tampered.selection_plan.rows[0].reason = "tampered";
+  assert.throws(() => tampered.verify(registry, evidencePlan), /not bound to readiness|plan digest/);
+
+  const requests = evidencePlan.requirements.map((requirement, index) => ({
+    requirement_id: requirement.requirement_id,
+    source_id: `execution-source-${index}`,
+    source_digest: "c".repeat(64),
+    request_id: `execution-request-${index}`,
+  }));
+  const result = await controller.execute(ready, evidencePlan, requests, {
+    approveSourceDispatch: true,
+    sleep: async () => {},
+    projector: {
+      project: (_value, context) => [{ label: context.requirement.label, kind: "fact", status: "observed", value_digest: null, source_digest: context.request.source_digest ?? null }],
+    },
+    evaluator: {
+      evaluator_id: "execution-evaluator",
+      evaluator_version: "1.0.0",
+      evaluate: () => ({ evaluator_id: "execution-evaluator", evaluator_version: "1.0.0", verdict: "accepted", score: 1, evidence_digest: "d".repeat(64) }),
+    },
+  });
+  assert.equal(result.status, "completed");
+  assert.equal(result.runtime.json.receipts.length, evidencePlan.requirements.length);
+  assert.equal(dispatches, evidencePlan.requirements.length);
+  assert.equal(result.toJSON().result_digest.length, 64);
+  assert.doesNotMatch(JSON.stringify(result.toJSON()), /transient_execution_value|api_key|access_token/);
+
+  failPrimary = true;
+  const stale = await controller.prepare(evidencePlan, { failoverPolicy });
+  assert.equal(stale.status, "ready_for_review");
+  const beforeFallback = dispatches;
+  const fallbackResult = await controller.execute(stale, evidencePlan, requests, {
+    approveSourceDispatch: true,
+    sleep: async () => {},
+    projector: {
+      project: (_value, context) => [{ label: context.requirement.label, kind: "fact", status: "observed", value_digest: null, source_digest: context.request.source_digest ?? null }],
+    },
+    evaluator: {
+      evaluator_id: "execution-evaluator",
+      evaluator_version: "1.0.0",
+      evaluate: () => ({ evaluator_id: "execution-evaluator", evaluator_version: "1.0.0", verdict: "accepted", score: 1, evidence_digest: "d".repeat(64) }),
+    },
+  });
+  assert.equal(fallbackResult.status, "completed");
+  assert.equal(dispatches, beforeFallback + evidencePlan.requirements.length * 2);
 });

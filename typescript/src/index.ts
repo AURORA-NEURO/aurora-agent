@@ -704,6 +704,22 @@ export type {
   AutonomousEvidenceReadinessAuditOptions,
 } from "./autonomous-evidence-readiness.js";
 export {
+  AUTONOMOUS_EVIDENCE_EXECUTION_PLAN_SCHEMA,
+  AUTONOMOUS_EVIDENCE_EXECUTION_RESULT_SCHEMA,
+  MAX_AUTONOMOUS_EVIDENCE_EXECUTION_REQUESTS,
+  MAX_AUTONOMOUS_EVIDENCE_EXECUTION_PLAN_BYTES,
+  AutonomousEvidenceExecutionPlan,
+  AutonomousEvidenceExecutionResult,
+  AutonomousEvidenceExecutionController,
+} from "./autonomous-evidence-execution.js";
+export type {
+  AutonomousEvidenceExecutionPlanStatus,
+  AutonomousEvidenceExecutionPlanJSON,
+  AutonomousEvidenceExecutionPrepareOptions,
+  AutonomousEvidenceExecutionOptions,
+  AutonomousEvidenceExecutionResultJSON,
+} from "./autonomous-evidence-execution.js";
+export {
   AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA,
   AUTONOMOUS_EVIDENCE_WORK_QUEUE_SCHEMA,
   AUTONOMOUS_EVIDENCE_WORKER_SCHEMA,

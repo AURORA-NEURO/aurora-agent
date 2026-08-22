@@ -4392,6 +4392,46 @@ projection does not dispatch a provider, source adapter, retry, or failover cand
 safe to run at startup and before an approval prompt. It also does not replace external liveness,
 credential checks, on-call ownership, incident response, or provider-specific source contracts.
 
+### Reviewed evidence execution orchestration
+
+`AutonomousEvidenceExecutionController` composes that read-only readiness audit with the actual
+caller-owned evidence runtime. `prepare(evidencePlan, ...)` binds the evidence-plan digest, exact
+domain order, registry digest, selection plan, readiness policy/report, retry policy, failover
+budget, and optional degraded-dispatch posture into one `AutonomousEvidenceExecutionPlan`.
+Preparation never invokes a source. A plan with missing coverage, selection abstention, an open
+health circuit, or insufficient strict health remains `blocked`; a ready plan remains
+`ready_for_review` and still has no authority to dispatch.
+
+`execute(plan, evidencePlan, requests, ...)` verifies the live registry and evidence-plan
+identity, requires `approveSourceDispatch: true`, reruns readiness against the same selection and
+policies, and refuses if the health/report digest changed after review. Only then does it compose
+the selected adapter with the reviewed retry/failover policy and hand it to
+`AutonomousEvidenceRuntime`. Projection, evaluator, journal, value rehydration, and parent
+evidence digests remain explicit caller inputs. Failover is not inferred: the exact budget from
+the reviewed plan is carried into execution, and tool/provider authorization is still outside
+this evidence boundary.
+
+```typescript
+const controller = new AutonomousEvidenceExecutionController(adapters, health);
+const reviewed = await controller.prepare(evidencePlan, {
+  adaptiveSelection: true,
+  healthSelectionOptions: { capability: "bounded_evidence", min_attempts: 3 },
+  failoverPolicy: new AutonomousEvidenceFailoverPolicy({ maxFailovers: 1 }),
+});
+
+const result = await controller.execute(reviewed, evidencePlan, requests, {
+  approveSourceDispatch: true,
+  projector: callerProjector,
+  evaluator: callerEvaluator,
+});
+```
+
+The execution result exposes the runtime's existing completed/partial/pending/failed status and
+only its metadata projection. The initiating application retains transient source values and
+provider payloads; durable callers can pass the existing journal and rehydration seams. This
+controller is therefore a useful end-to-end source lifecycle, not a claim that an external source
+is truthful, current, credentialed, or safe to use without caller review.
+
 ## Durable evidence acquisition workers
 
 The evidence runtime is intentionally caller-owned: it owns the transient acquirer input, projected

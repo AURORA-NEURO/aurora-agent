@@ -73,6 +73,14 @@ strict default requires observed health and refuses open circuits; a caller can 
 a permissive degraded posture for startup or review UI. The audit never dispatches a source or
 provider and does not replace external liveness, credential, incident, or authorization systems.
 
+Evidence routing now also has a reviewed execution controller. The TypeScript
+`AutonomousEvidenceExecutionController` binds the evidence plan, selection, readiness image,
+retry policy, and explicit failover budget into one reviewable plan; execution revalidates the
+registry and readiness digest, requires explicit source-dispatch approval, and only then invokes
+the existing evidence runtime. Projection, evaluator, journal, and value rehydration remain
+caller-owned, and plan preparation performs zero source calls. This closes the composition gap
+without claiming source truth, provider authorization, or durable external execution.
+
 The portfolio now also has a bounded evidence supervisor. It verifies successful provider items,
 rejects cross-domain requests, scopes each evidence runtime to its item's domain, preserves direct
 predecessor evidence digests, and executes acquisition/projection/evaluation in the portfolio's
