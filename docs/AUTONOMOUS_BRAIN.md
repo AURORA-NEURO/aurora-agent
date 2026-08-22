@@ -4028,6 +4028,30 @@ and bandit-selection path without retaining prompts, responses, credentials, or 
 The worker is still a single-process scheduler adapter: multi-host transactions, provider-side
 idempotency, and secret manager/session ownership remain deployment responsibilities.
 
+When a worker is paired with `AutonomousBrainJobSchedulerPersistenceCoordinator`, persistence is an
+explicit startup gate rather than an implicit best effort. Call `await worker.restore()` before the
+first claim; execution fails closed until restore succeeds. The worker flushes the metadata-only
+snapshot after claims, lease heartbeats, checkpoints, retry transitions, approval release,
+reconciliation, and terminal completion. Use `worker.resumeApproval(...)` and `worker.reconcile(...)`
+for those caller transitions so the corresponding state change is flushed through the same adapter:
+
+```typescript
+const persistence = new InMemoryAutonomousBrainJobSchedulerPersistence();
+const lifecycle = new AutonomousBrainJobSchedulerPersistenceCoordinator(scheduler, persistence);
+const worker = new AutonomousBrainJobWorker({ brain, scheduler, persistence: lifecycle, workerId, resolve });
+
+await worker.restore(); // required once after process startup
+const waiting = await worker.runOnce(jobId);
+if (waiting?.status === "waiting_approval") {
+  await worker.resumeApproval(jobId, "operator-42", "reviewed scope");
+}
+```
+
+If a persistence write fails, the worker raises a typed configuration failure and does not proceed
+to provider dispatch. The coordinator remains caller-owned: an IndexedDB, SQLite, Postgres, or
+object-store adapter must provide the atomic snapshot write and cross-process fencing required by
+the deployment.
+
 ## Provider-neutral boundary
 
 The current Python runtime supports:

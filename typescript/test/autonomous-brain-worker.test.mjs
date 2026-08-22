@@ -7,9 +7,11 @@ import {
   AutonomousBrainFacade,
   AutonomousBrainJobWorker,
   InMemoryAutonomousBrainJobScheduler,
+  InMemoryAutonomousBrainJobSchedulerPersistence,
   InMemoryAutonomousModelHealthStore,
   InMemoryAutonomousRunTraceStore,
   LLMRuntime,
+  AutonomousBrainJobSchedulerPersistenceCoordinator,
   ProviderRuntimeError,
   autonomousBrainJobSpecDigest,
 } from "../dist/index.js";
@@ -345,4 +347,66 @@ test("worker batch reports retry backpressure without hot-looping a queued job",
   assert.equal(batch.failed_count, 0);
   assert.equal(calls, 1);
   assert.equal(scheduler.get("worker-job-50").state, "queued");
+});
+
+test("worker restores a metadata-only scheduler and persists approval recovery across every domain", async () => {
+  const { brain } = makeBrain();
+  const persistence = new InMemoryAutonomousBrainJobSchedulerPersistence();
+  const initialScheduler = new InMemoryAutonomousBrainJobScheduler({ maxJobs: 32, clock: () => 14_000 });
+  const initialController = new AutonomousBrainJobSchedulerPersistenceCoordinator(initialScheduler, persistence);
+  const policies = new Map();
+  for (let index = 0; index < AUTONOMOUS_DOMAIN_NAMES.length; index += 1) {
+    const domain = AUTONOMOUS_DOMAIN_NAMES[index];
+    const request = requestFor(domain);
+    const policy = policyDigest("abcdef"[index % 6]);
+    policies.set(`worker-job-restart-${index}`, policy);
+    initialScheduler.submit({
+      jobId: `worker-job-restart-${index}`,
+      idempotencyKey: `restart-idempotency-${index}-private-task-never-retained`,
+      specDigest: autonomousBrainJobSpecDigest({ request, mode: "execute", policyDigest: policy }),
+      domain,
+      capability: request.capability,
+      riskClass: "review",
+      maxAttempts: 3,
+    }, 14_000);
+  }
+  await initialController.flush();
+
+  const restartedScheduler = new InMemoryAutonomousBrainJobScheduler({ maxJobs: 32, clock: () => 14_000 });
+  const restartedController = new AutonomousBrainJobSchedulerPersistenceCoordinator(restartedScheduler, persistence);
+  const worker = new AutonomousBrainJobWorker({
+    brain,
+    scheduler: restartedScheduler,
+    persistence: restartedController,
+    workerId: "worker-restarted",
+    resolve: ({ job }) => {
+      const request = requestFor(job.domain);
+      return {
+        specDigest: job.spec_digest,
+        policyDigest: policies.get(job.job_id),
+        request,
+        mode: "execute",
+        execute: { approveProviderCall: true, run: { candidates: [model] } },
+      };
+    },
+  });
+  await assert.rejects(worker.runOnce("worker-job-restart-0", 14_001), /restore before execution/);
+  const restored = await worker.restore();
+  assert.equal(restored.jobs.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(JSON.stringify(restored).includes("private-task-never-retained"), false);
+
+  for (let index = 0; index < AUTONOMOUS_DOMAIN_NAMES.length; index += 1) {
+    const jobId = `worker-job-restart-${index}`;
+    const waiting = await worker.runOnce(jobId, 14_100 + index);
+    assert.equal(waiting.status, "waiting_approval", jobId);
+    assert.equal(persistence.read().jobs.find((job) => job.job_id === jobId).state, "waiting_approval", jobId);
+    await worker.resumeApproval(jobId, "operator-restart", "approved after process restart", 14_200 + index);
+    assert.equal(persistence.read().jobs.find((job) => job.job_id === jobId).state, "queued", jobId);
+    const completed = await worker.runOnce(jobId, 14_300 + index);
+    assert.equal(completed.status, "succeeded", jobId);
+    assert.equal(persistence.read().jobs.find((job) => job.job_id === jobId).state, "succeeded", jobId);
+  }
+  assert.equal(restartedScheduler.inventory({ limit: 32 }).every((job) => job.state === "succeeded"), true);
+  assert.equal(restartedScheduler.verifyIntegrity().verified, true);
+  assert.equal(JSON.stringify(persistence.read()).includes("review a bounded"), false);
 });

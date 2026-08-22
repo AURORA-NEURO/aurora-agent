@@ -13,7 +13,12 @@ import {
 } from "./autonomous-brain-facade.js";
 import {
   InMemoryAutonomousBrainJobScheduler,
+  AutonomousBrainJobSchedulerPersistenceCoordinator,
   type AutonomousBrainJob,
+  type AutonomousBrainJobCheckpointOptions,
+  type AutonomousBrainJobFailureOptions,
+  type AutonomousBrainJobReconciliationOptions,
+  type AutonomousBrainJobSnapshot,
 } from "./autonomous-brain-jobs.js";
 import type { AutonomousRunTraceStore, AutonomousRunTraceSummary } from "./autonomous-run-trace.js";
 import { digestJsonSync } from "./tooling.js";
@@ -61,6 +66,7 @@ export interface AutonomousBrainJobWorkerOptions {
   workerId: string;
   resolve: AutonomousBrainJobResolver;
   traceStore?: AutonomousRunTraceStore;
+  persistence?: AutonomousBrainJobSchedulerPersistenceCoordinator;
   leaseMs?: number;
   heartbeatMs?: number;
   /** Retry only typed, retryable failures that occurred before the facade was invoked. */
@@ -193,9 +199,11 @@ export class AutonomousBrainJobWorker {
   readonly workerId: string;
   readonly resolve: AutonomousBrainJobResolver;
   readonly traceStore?: AutonomousRunTraceStore;
+  readonly persistence?: AutonomousBrainJobSchedulerPersistenceCoordinator;
   readonly leaseMs: number;
   readonly heartbeatMs: number;
   readonly retryPreflightFailures: boolean;
+  private restored: boolean;
 
   constructor(options: AutonomousBrainJobWorkerOptions) {
     if (!options || !(options.brain instanceof AutonomousBrainFacade)) throw new ArgumentError("autonomous brain job worker requires an AutonomousBrainFacade");
@@ -207,17 +215,55 @@ export class AutonomousBrainJobWorker {
     this.resolve = options.resolve;
     if (options.traceStore !== undefined && (typeof options.traceStore.append !== "function" || typeof options.traceStore.events !== "function")) throw new ArgumentError("autonomous brain job worker traceStore is malformed");
     this.traceStore = options.traceStore;
+    if (options.persistence !== undefined && (!(options.persistence instanceof AutonomousBrainJobSchedulerPersistenceCoordinator) || options.persistence.scheduler !== this.scheduler)) throw new ArgumentError("autonomous brain job worker persistence must own the supplied scheduler");
+    this.persistence = options.persistence;
     this.leaseMs = boundedInteger("autonomous brain worker leaseMs", options.leaseMs ?? 60_000, 1, 600_000);
     this.heartbeatMs = boundedInteger("autonomous brain worker heartbeatMs", options.heartbeatMs ?? Math.min(30_000, Math.floor(this.leaseMs / 3)), 1, MAX_AUTONOMOUS_BRAIN_WORKER_HEARTBEAT_MS);
     if (this.heartbeatMs >= this.leaseMs) throw new ArgumentError("autonomous brain worker heartbeatMs must be less than leaseMs");
     if (options.retryPreflightFailures !== undefined && typeof options.retryPreflightFailures !== "boolean") throw new ArgumentError("autonomous brain worker retryPreflightFailures must be boolean");
     this.retryPreflightFailures = options.retryPreflightFailures ?? true;
+    this.restored = this.persistence === undefined;
+  }
+
+  /** Restore the metadata-only scheduler before any worker claim or dispatch. */
+  async restore(): Promise<AutonomousBrainJobSnapshot | null> {
+    if (this.persistence === undefined) {
+      this.restored = true;
+      return null;
+    }
+    const snapshot = await this.persistence.restore();
+    this.restored = true;
+    return snapshot;
+  }
+
+  /** Flush the current scheduler snapshot through the caller-owned persistence adapter. */
+  async flush(): Promise<AutonomousBrainJobSnapshot | null> {
+    this.assertRestored();
+    return this.persist();
+  }
+
+  /** Resume an approval through the same durable boundary used by worker execution. */
+  async resumeApproval(jobId: string, approver: string, reason?: string, now?: number): Promise<AutonomousBrainJob> {
+    this.assertRestored();
+    const job = this.scheduler.resumeApproval(jobId, approver, reason, now);
+    await this.persist();
+    return job;
+  }
+
+  /** Reconcile an uncertain dispatch and durably persist the caller's decision. */
+  async reconcile(jobId: string, options: AutonomousBrainJobReconciliationOptions): Promise<AutonomousBrainJob> {
+    this.assertRestored();
+    const job = this.scheduler.reconcile(jobId, options);
+    await this.persist();
+    return job;
   }
 
   async runOnce(jobId?: string, now?: number): Promise<AutonomousBrainJobWorkerRun | null> {
+    this.assertRestored();
     const claimed = jobId === undefined
       ? this.scheduler.claimNext(this.workerId, this.leaseMs, now)
       : this.scheduler.claim(jobId, this.workerId, this.leaseMs, now);
+    await this.persist();
     if (claimed === null) return null;
     if (["succeeded", "failed", "dead_lettered", "cancelled", "reconciliation_required"].includes(claimed.state)) {
       return this.envelope(claimed, "already_terminal", null, null, null, null, null, null);
@@ -231,6 +277,7 @@ export class AutonomousBrainJobWorker {
       heartbeatRunning = true;
       try {
         this.scheduler.renew(claimed.job_id, this.workerId, this.leaseMs);
+        await this.persist();
       } catch (error) {
         heartbeatError = error;
       } finally {
@@ -247,7 +294,7 @@ export class AutonomousBrainJobWorker {
     let trace: AutonomousRunTraceSummary | null = null;
     try {
       const approvalReleased = this.scheduler.eventsFor(claimed.job_id).some((event) => event.event_type === "job_approval_released");
-      this.scheduler.checkpoint(claimed.job_id, this.workerId, {
+      await this.checkpoint(claimed.job_id, {
         phase: "resolving_private_spec",
         checkpointDigest: digestJsonSync({ schema: AUTONOMOUS_BRAIN_JOB_WORKER_SCHEMA, job_id: claimed.job_id, spec_digest: claimed.spec_digest, attempt: claimed.attempts }),
         sideEffectBoundary: claimed.side_effect_boundary === "not_started" ? "not_started" : "preflight",
@@ -257,21 +304,21 @@ export class AutonomousBrainJobWorker {
       const plan = await this.brain.plan(resolution.request);
       if (!requestDomainCovered(plan, claimed.domain)) throw new ArgumentError("rehydrated brain request is outside the durable job domain");
       if (plan.status === "route_review_required") {
-        this.scheduler.checkpoint(claimed.job_id, this.workerId, { phase: "route_review_required", checkpointDigest: digestJsonSync({ plan_digest: plan.plan_digest, route_digest: plan.route.route_digest }), sideEffectBoundary: "preflight", waitingForApproval: true });
+        await this.checkpoint(claimed.job_id, { phase: "route_review_required", checkpointDigest: digestJsonSync({ plan_digest: plan.plan_digest, route_digest: plan.route.route_digest }), sideEffectBoundary: "preflight", waitingForApproval: true });
         return this.envelope(this.scheduler.get(claimed.job_id)!, "waiting_approval", resolution.mode, null, null, null, null, null);
       }
       planCompiled = true;
-      this.scheduler.checkpoint(claimed.job_id, this.workerId, { phase: "plan_compiled", checkpointDigest: digestJsonSync({ plan_digest: plan.plan_digest, route_digest: plan.route.route_digest, mode: resolution.mode }), sideEffectBoundary: "preflight" });
+      await this.checkpoint(claimed.job_id, { phase: "plan_compiled", checkpointDigest: digestJsonSync({ plan_digest: plan.plan_digest, route_digest: plan.route.route_digest, mode: resolution.mode }), sideEffectBoundary: "preflight" });
       // The durable worker owns a second approval gate around the entire rehydrated dispatch.
       // Do not even invoke the facade before the scheduler records an explicit release; this
       // prevents a connector or provider-planning callback from doing work during a pause.
       if (!approvalReleased) {
-        this.scheduler.checkpoint(claimed.job_id, this.workerId, { phase: "provider_approval_required", checkpointDigest: digestJsonSync({ plan_digest: plan.plan_digest, mode: resolution.mode }), sideEffectBoundary: "preflight", waitingForApproval: true });
+        await this.checkpoint(claimed.job_id, { phase: "provider_approval_required", checkpointDigest: digestJsonSync({ plan_digest: plan.plan_digest, mode: resolution.mode }), sideEffectBoundary: "preflight", waitingForApproval: true });
         return this.envelope(this.scheduler.get(claimed.job_id)!, "waiting_approval", resolution.mode, null, null, null, null, null);
       }
       const approvedResolution = this.approvalBoundResolution(resolution, approvalReleased);
       const shouldTrace = this.traceStore !== undefined;
-      this.scheduler.checkpoint(claimed.job_id, this.workerId, { phase: "dispatch_started", checkpointDigest: digestJsonSync({ plan_digest: plan.plan_digest, attempt: claimed.attempts }), sideEffectBoundary: "dispatched" });
+      await this.checkpoint(claimed.job_id, { phase: "dispatch_started", checkpointDigest: digestJsonSync({ plan_digest: plan.plan_digest, attempt: claimed.attempts }), sideEffectBoundary: "dispatched" });
       executionStarted = true;
       if (heartbeatError !== null) throw heartbeatError;
       let result: AutonomousBrainExecution | AutonomousBrainCycleExecution | AutonomousBrainAdaptiveCycleExecution;
@@ -298,20 +345,20 @@ export class AutonomousBrainJobWorker {
       if (heartbeatError !== null) throw heartbeatError;
       const status = statusOf(result);
       if (APPROVAL_STATUSES.has(status)) {
-        this.scheduler.checkpoint(claimed.job_id, this.workerId, { phase: status, checkpointDigest: resultDigest(result, trace), sideEffectBoundary: approvalBoundary(result), waitingForApproval: true });
+        await this.checkpoint(claimed.job_id, { phase: status, checkpointDigest: resultDigest(result, trace), sideEffectBoundary: approvalBoundary(result), waitingForApproval: true });
         return this.envelope(this.scheduler.get(claimed.job_id)!, "waiting_approval", resolution.mode, result, null, null, trace, null);
       }
       if (status === "reconciliation_required") {
-        this.scheduler.checkpoint(claimed.job_id, this.workerId, { phase: status, checkpointDigest: resultDigest(result, trace), sideEffectBoundary: "unknown" });
-        const quarantined = this.scheduler.fail(claimed.job_id, this.workerId, { reason: "brain execution requires caller reconciliation", retryable: false });
+        await this.checkpoint(claimed.job_id, { phase: status, checkpointDigest: resultDigest(result, trace), sideEffectBoundary: "unknown" });
+        const quarantined = await this.fail(claimed.job_id, { reason: "brain execution requires caller reconciliation", retryable: false });
         return this.envelope(quarantined, "reconciliation_required", resolution.mode, result, null, null, trace, null);
       }
       if (status !== "completed") {
-        this.scheduler.checkpoint(claimed.job_id, this.workerId, { phase: `terminal_${status}`, checkpointDigest: resultDigest(result, trace), sideEffectBoundary: "dispatched" });
-        const failed = this.scheduler.fail(claimed.job_id, this.workerId, { reason: `brain execution ended with ${status}`, retryable: false });
+        await this.checkpoint(claimed.job_id, { phase: `terminal_${status}`, checkpointDigest: resultDigest(result, trace), sideEffectBoundary: "dispatched" });
+        const failed = await this.fail(claimed.job_id, { reason: `brain execution ended with ${status}`, retryable: false });
         return this.envelope(failed, failed.state === "reconciliation_required" ? "reconciliation_required" : "failed", resolution.mode, result, null, null, trace, null);
       }
-      const completed = this.scheduler.complete(claimed.job_id, this.workerId, resultDigest(result, trace));
+      const completed = await this.complete(claimed.job_id, resultDigest(result, trace));
       return this.envelope(completed, "succeeded", resolution.mode, result, null, null, trace, null);
     } catch (error) {
       const projection = errorProjection(error);
@@ -319,9 +366,9 @@ export class AutonomousBrainJobWorker {
       if (!current || current.lease_owner !== this.workerId || !["leased", "running"].includes(current.state)) throw error;
       try {
         const boundary = executionStarted ? "unknown" : planCompiled ? "preflight" : "not_started";
-        this.scheduler.checkpoint(claimed.job_id, this.workerId, { phase: "worker_execution_error", checkpointDigest: digestJsonSync({ error_class: projection.errorClass, failure_code: projection.failureCode }), sideEffectBoundary: boundary });
+        await this.checkpoint(claimed.job_id, { phase: "worker_execution_error", checkpointDigest: digestJsonSync({ error_class: projection.errorClass, failure_code: projection.failureCode }), sideEffectBoundary: boundary });
         const retryablePreflight = !executionStarted && this.retryPreflightFailures && error instanceof ProviderRuntimeError && error.retryable;
-        const failed = this.scheduler.fail(claimed.job_id, this.workerId, {
+        const failed = await this.fail(claimed.job_id, {
           reason: executionStarted
             ? "worker execution outcome is uncertain; reconciliation required"
             : retryablePreflight
@@ -374,6 +421,39 @@ export class AutonomousBrainJobWorker {
       retention: RETENTION,
       secret_material: SECRET_MATERIAL,
     };
+  }
+
+  private assertRestored(): void {
+    if (!this.restored) throw new ArgumentError("autonomous brain job worker requires scheduler restore before execution");
+  }
+
+  private async persist(): Promise<AutonomousBrainJobSnapshot | null> {
+    if (this.persistence === undefined) return null;
+    try {
+      return await this.persistence.flush();
+    } catch (error) {
+      const wrapped = new ProviderRuntimeError("autonomous brain worker persistence failed", { code: "configuration" });
+      (wrapped as Error & { cause?: unknown }).cause = error;
+      throw wrapped;
+    }
+  }
+
+  private async checkpoint(jobId: string, options: AutonomousBrainJobCheckpointOptions): Promise<AutonomousBrainJob> {
+    const job = this.scheduler.checkpoint(jobId, this.workerId, options);
+    await this.persist();
+    return job;
+  }
+
+  private async complete(jobId: string, resultDigest: string | null): Promise<AutonomousBrainJob> {
+    const job = this.scheduler.complete(jobId, this.workerId, resultDigest);
+    await this.persist();
+    return job;
+  }
+
+  private async fail(jobId: string, options: AutonomousBrainJobFailureOptions): Promise<AutonomousBrainJob> {
+    const job = this.scheduler.fail(jobId, this.workerId, options);
+    await this.persist();
+    return job;
   }
 
   private validateResolution(job: AutonomousBrainJob, value: AutonomousBrainJobResolution): void {
