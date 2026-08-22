@@ -241,6 +241,73 @@ test("brain facade batches adaptive single and cross-domain loops through per-it
   assert.equal(batch.items[2].execution.adaptive.final.run.child_runs.length, 2);
 });
 
+test("brain facade resumes metadata-only batches through caller-owned rehydration and rejects tampering", async () => {
+  const runtime = localRuntime();
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const initialBrain = new AutonomousBrainFacade({ agent });
+  const connector = createBuiltinAutonomousConnectorRuntime({ domainScoped: true, approvalRequired: false });
+  const resumedBrain = new AutonomousBrainFacade({ agent, connectorOperations: connector.operationFacade });
+  const requests = [
+    { task: tasks.coding, domain: "coding" },
+    {
+      task: "review scientific evidence and state reproducibility gaps",
+      domain: "science",
+      connector: {
+        domain: "science",
+        capability: "literature",
+        operation_id: "science.reproducible_evidence_acquisition",
+        subject_digest: "a".repeat(64),
+        request: {
+          hypothesis: "h1",
+          evidence_digests: ["b".repeat(64)],
+          analysis_digest: "c".repeat(64),
+        },
+        approved: true,
+      },
+    },
+  ];
+  const checkpoints = [];
+  const first = await initialBrain.executeBatchResumable(requests, {
+    jobId: "typescript-restartable-batch",
+    maxParallelism: 1,
+    stopOnError: true,
+    execution: { approveProviderCall: true },
+    checkpointSink: (checkpoint) => checkpoints.push(checkpoint),
+  });
+  assert.equal(first.status, "partial");
+  assert.deepEqual(first.items.map((item) => item.status), ["succeeded", "failed"]);
+  assert.deepEqual(checkpoints.at(-1).completed_indices, [0]);
+  assert.doesNotMatch(JSON.stringify(checkpoints.at(-1)), /debug and verify|offline:offline-model|hypothesis/);
+
+  const restored = await resumedBrain.executeBatchResumable(requests, {
+    jobId: "typescript-restartable-batch",
+    maxParallelism: 1,
+    stopOnError: true,
+    execution: { approveProviderCall: true },
+    checkpoint: checkpoints.at(-1),
+    checkpointSink: (checkpoint) => checkpoints.push(checkpoint),
+    rehydrateExecution: (context) => first.items[context.index].execution,
+  });
+  assert.equal(restored.status, "completed");
+  assert.deepEqual(restored.items.map((item) => item.status), ["succeeded", "succeeded"]);
+  assert.equal(checkpoints.at(-1).status, "completed");
+
+  const tampered = structuredClone(checkpoints.at(-1));
+  tampered.request_digests[0] = "0".repeat(64);
+  await assert.rejects(
+    resumedBrain.executeBatchResumable(requests, {
+      jobId: "typescript-restartable-batch",
+      maxParallelism: 1,
+      stopOnError: true,
+      execution: { approveProviderCall: true },
+      checkpoint: tampered,
+      rehydrateExecution: (context) => restored.items[context.index].execution,
+    }),
+    /checkpoint/i,
+  );
+});
+
 test("brain facade exposes a keyless readiness and activation lifecycle for onboarding", async () => {
   const runtime = localRuntime();
   const agent = new AutonomousAgent(runtime);

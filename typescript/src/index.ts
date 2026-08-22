@@ -344,11 +344,13 @@ export type {
 export {
   AUTONOMOUS_BRAIN_FACADE_SCHEMA,
   AUTONOMOUS_BRAIN_BATCH_SCHEMA,
+  AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA,
   AUTONOMOUS_BRAIN_CYCLE_BATCH_SCHEMA,
   AUTONOMOUS_BRAIN_ADAPTIVE_BATCH_SCHEMA,
   AUTONOMOUS_BRAIN_SUMMARY_SCHEMA,
   MAX_AUTONOMOUS_BRAIN_BATCH,
   MAX_AUTONOMOUS_BRAIN_PARALLELISM,
+  MAX_AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_BYTES,
   MAX_AUTONOMOUS_BRAIN_CONTEXT_CHUNKS,
   MAX_AUTONOMOUS_BRAIN_OBSERVATION_BYTES,
   AutonomousBrainPlan,
@@ -389,6 +391,9 @@ export type {
   AutonomousBrainActivationSnapshotStore,
   AutonomousBrainBatchItem,
   AutonomousBrainBatchResult,
+  AutonomousBrainBatchCheckpointJSON,
+  AutonomousBrainBatchRehydrationContext,
+  AutonomousBrainResumableBatchOptions,
 } from "./autonomous-brain-facade.js";
 export {
   AUTONOMOUS_CONNECTOR_OPERATION_REGISTRY_SCHEMA,

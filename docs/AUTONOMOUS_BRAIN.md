@@ -454,6 +454,48 @@ only `task` descriptors and delegates deterministic routing, abstention, optiona
 planning, learning-mode selection, and the existing approval gates per item. Route abstentions and
 planning reviews become visible `refused` items rather than silently selecting a domain.
 
+For a worker queue that must survive a process restart, `agent.run_resumable_batch()` adds an
+explicit metadata-only job checkpoint. The caller supplies a bounded `job_id`, a checkpoint
+sink, and—when resuming—a `rehydrate_result(context)` callback. The callback receives only the
+job/index/mode/request/task/result digests; it must return the caller-owned transient successful
+result. The runner verifies that result against the checkpoint before dispatching any unfinished
+item, and only successful items are skipped. Failed, refused, or omitted items are intentionally
+eligible for a later retry.
+
+```python
+checkpoints = []
+first = agent.run_resumable_batch(
+    requests,
+    job_id="evaluation-sweep-2026-08-21",
+    mode="domain",  # also: "auto" or "cross_domain"
+    credentials=session,
+    max_parallelism=4,
+    stop_on_error=True,
+    options_factory=lambda _request, _index: {"approve_provider_call": True},
+    checkpoint_sink=checkpoints.append,  # atomically persist checkpoints in production
+)
+
+resumed = agent.run_resumable_batch(
+    requests,
+    job_id="evaluation-sweep-2026-08-21",
+    mode="domain",
+    credentials=session,
+    checkpoint=checkpoints[-1].to_dict(),
+    rehydrate_result=lambda context: load_transient_result(context.index),
+    checkpoint_sink=checkpoints.append,
+)
+```
+
+`AutonomousBatchCheckpoint` stores the mode, ordered request digests, successful item indexes,
+redacted result digests, concurrency controls, and its own content digest. It never stores task
+text, options, prompts, provider/model values, credentials, tool arguments, responses, or error
+messages. The checkpoint binds the request shape and task/subtask digests; the caller must reuse
+the same options factory and credential session after restart, and may use its own policy digest
+outside the SDK when those transient controls need stronger identity binding. A changed request,
+job, mode, control, checkpoint digest, or rehydrated result fails closed before a provider call.
+The sink is caller-owned and should write atomically; the SDK does not pretend that a metadata
+checkpoint can reconstruct a provider conversation.
+
 The TypeScript façade exposes the same onboarding idea through a domain-wide readiness audit:
 
 ```typescript
@@ -3335,6 +3377,41 @@ for (const item of batch.items) {
   console.log(item.index, item.status, item.task_digest, item.execution?.status);
 }
 ```
+
+`executeBatchResumable()` provides the same restart barrier for the ordinary TypeScript brain
+batch. Its `checkpointSink` receives a digest-bound `AutonomousBrainBatchCheckpointJSON`, and its
+`rehydrateExecution(context)` callback is given only digest metadata. The facade rehydrates and
+verifies every successful execution before any new provider or connector dispatch; unfinished
+items are retried with the same input-order accounting. The checkpoint is deliberately not a
+provider conversation snapshot, so the application retains transient executions and credentials
+in its own protected store.
+
+```typescript
+const first = await brain.executeBatchResumable(requests, {
+  jobId: "evaluation-sweep-2026-08-21",
+  maxParallelism: 4,
+  stopOnError: true,
+  execution: { approveProviderCall: true },
+  checkpointSink: async (checkpoint) => atomicJobStore.put(checkpoint),
+});
+
+const resumed = await brain.executeBatchResumable(requests, {
+  jobId: "evaluation-sweep-2026-08-21",
+  maxParallelism: 4,
+  stopOnError: true,
+  execution: { approveProviderCall: true },
+  checkpoint: await atomicJobStore.get(),
+  rehydrateExecution: (context) => transientExecutionStore.get(context.index),
+  checkpointSink: async (checkpoint) => atomicJobStore.put(checkpoint),
+});
+```
+
+The Python and TypeScript checkpoint projections intentionally use language-qualified schemas
+but the same security contract: ordered request identity, successful-index replay, caller-owned
+rehydration, bounded controls, tamper-evident content digests, and no raw payload retention.
+Closed-loop cycle batches continue to use their existing cycle/decision persistence surfaces;
+applications needing resumable evaluator settlement should persist those cycle checkpoints
+alongside the batch job rather than treating a provider response as a reward.
 
 For applications that need the complete autonomous feedback loop, `executeCycle()` extends the
 same plan boundary with the existing decision-cycle engine. It can run a single-domain or

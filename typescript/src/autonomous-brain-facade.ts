@@ -52,11 +52,13 @@ import type { JsonObject, JsonValue } from "./types.js";
  */
 export const AUTONOMOUS_BRAIN_FACADE_SCHEMA = "bioprism-typescript-autonomous-brain-facade/0.1" as const;
 export const AUTONOMOUS_BRAIN_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-batch/0.1" as const;
+export const AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA = "bioprism-typescript-autonomous-brain-batch-checkpoint/0.1" as const;
 export const AUTONOMOUS_BRAIN_CYCLE_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-cycle-batch/0.1" as const;
 export const AUTONOMOUS_BRAIN_ADAPTIVE_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-adaptive-batch/0.1" as const;
 export const AUTONOMOUS_BRAIN_SUMMARY_SCHEMA = "bioprism-typescript-autonomous-brain-plan-summary/0.1" as const;
 export const MAX_AUTONOMOUS_BRAIN_BATCH = 64;
 export const MAX_AUTONOMOUS_BRAIN_PARALLELISM = 8;
+export const MAX_AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_BYTES = 128_000;
 export const MAX_AUTONOMOUS_BRAIN_CONTEXT_CHUNKS = 128;
 export const MAX_AUTONOMOUS_BRAIN_OBSERVATION_BYTES = 1_000_000;
 
@@ -311,6 +313,43 @@ export interface AutonomousBrainBatchResult {
   secret_material: "never_returned";
 }
 
+export type AutonomousBrainBatchMode = "brain";
+
+export interface AutonomousBrainBatchRehydrationContext {
+  job_id: string;
+  index: number;
+  mode: AutonomousBrainBatchMode;
+  request_digest: string;
+  task_digest: string;
+  expected_result_digest: string;
+}
+
+export interface AutonomousBrainBatchCheckpointJSON {
+  schema: typeof AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA;
+  job_id: string;
+  mode: AutonomousBrainBatchMode;
+  batch_input_digest: string;
+  request_digests: string[];
+  completed_indices: number[];
+  completed_result_digests: string[];
+  max_parallelism: number;
+  stop_on_error: boolean;
+  status: "running" | "partial" | "completed";
+  checkpoint_digest: string;
+  retention: "request_and_result_digests_only;tasks_prompts_credentials_and_payloads_never_persisted";
+  secret_material: "never_returned";
+}
+
+export interface AutonomousBrainResumableBatchOptions {
+  jobId: string;
+  maxParallelism?: number;
+  stopOnError?: boolean;
+  execution?: AutonomousBrainExecuteOptions;
+  checkpoint?: AutonomousBrainBatchCheckpointJSON;
+  checkpointSink?: (checkpoint: AutonomousBrainBatchCheckpointJSON) => Promise<void> | void;
+  rehydrateExecution?: (context: AutonomousBrainBatchRehydrationContext) => Promise<AutonomousBrainExecution> | AutonomousBrainExecution;
+}
+
 interface PreparedBrainRequest {
   readonly request: AutonomousBrainRequest;
   readonly route: AutonomousRouteProposal;
@@ -390,7 +429,63 @@ function batchStatus(completed: number, failed: number, omitted: number): "compl
 }
 
 function batchDigest(items: readonly { index: number; status: string; task_digest: string | null; error_class?: string; failure_code?: string; execution?: { plan: { plan_digest: string }; status: string } }[]): string {
-  return digestJsonSync(items.map((item) => ({ index: item.index, status: item.status, task_digest: item.task_digest, error_class: item.error_class ?? null, failure_code: item.failure_code ?? null, plan_digest: item.execution?.plan.plan_digest ?? null, execution_status: item.execution?.status ?? null })));
+  return digestJsonSync(items.map((item) => batchItemProjection(item)));
+}
+
+function batchItemProjection(item: { index: number; status: string; task_digest: string | null; error_class?: string; failure_code?: string; execution?: { plan: { plan_digest: string }; status: string } }): Record<string, unknown> {
+  return { index: item.index, status: item.status, task_digest: item.task_digest, error_class: item.error_class ?? null, failure_code: item.failure_code ?? null, plan_digest: item.execution?.plan.plan_digest ?? null, execution_status: item.execution?.status ?? null };
+}
+
+function batchItemDigest(item: { index: number; status: string; task_digest: string | null; error_class?: string; failure_code?: string; execution?: { plan: { plan_digest: string }; status: string } }): string {
+  return digestJsonSync(batchItemProjection(item));
+}
+
+function brainBatchTaskDigest(input: AutonomousBrainRequest): string {
+  return digestJsonSync({ task: input.task });
+}
+
+function brainBatchRequestDigest(input: AutonomousBrainRequest, index: number): string {
+  return digestJsonSync({
+    index,
+    mode: "brain",
+    task_digest: brainBatchTaskDigest(input),
+    domain: input.domain ?? null,
+    capability: input.capability ?? null,
+    hints_digest: digestJsonSync(input.hints ?? []),
+    allow_cross_domain: input.allow_cross_domain ?? true,
+    context_digest: input.context === undefined ? null : digestJsonSync(input.context),
+    connector_digest: input.connector === undefined ? null : digestJsonSync(input.connector),
+  });
+}
+
+function checkpointText(name: string, value: unknown): string {
+  return boundedIdentifier(name, value);
+}
+
+function validateBrainBatchCheckpoint(value: unknown): AutonomousBrainBatchCheckpointJSON {
+  if (!isObject(value) || value.schema !== AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA || value.mode !== "brain") throw new ArgumentError("autonomous brain batch checkpoint schema is invalid");
+  const jobId = checkpointText("autonomous brain batch checkpoint job_id", value.job_id);
+  const batchInputDigest = digest("autonomous brain batch checkpoint batch_input_digest", value.batch_input_digest);
+  const requestDigests = value.request_digests;
+  if (!Array.isArray(requestDigests) || requestDigests.length < 1 || requestDigests.length > MAX_AUTONOMOUS_BRAIN_BATCH || requestDigests.some((entry) => typeof entry !== "string" || !/^[0-9a-f]{64}$/.test(entry))) throw new ArgumentError("autonomous brain batch checkpoint request_digests are invalid");
+  if (!Array.isArray(value.completed_indices) || value.completed_indices.length > requestDigests.length || value.completed_indices.some((entry) => !Number.isSafeInteger(entry) || (entry as number) < 0 || (entry as number) >= requestDigests.length)) throw new ArgumentError("autonomous brain batch checkpoint completed_indices are invalid");
+  const completedIndices = [...(value.completed_indices as number[])];
+  if (new Set(completedIndices).size !== completedIndices.length || completedIndices.some((entry, index) => index > 0 && entry <= completedIndices[index - 1]!)) throw new ArgumentError("autonomous brain batch checkpoint completed_indices must be sorted and unique");
+  if (!Array.isArray(value.completed_result_digests) || value.completed_result_digests.length !== completedIndices.length || value.completed_result_digests.some((entry) => typeof entry !== "string" || !/^[0-9a-f]{64}$/.test(entry))) throw new ArgumentError("autonomous brain batch checkpoint result digests are invalid");
+  if (!Number.isSafeInteger(value.max_parallelism) || (value.max_parallelism as number) < 1 || (value.max_parallelism as number) > MAX_AUTONOMOUS_BRAIN_PARALLELISM) throw new ArgumentError("autonomous brain batch checkpoint maxParallelism is invalid");
+  if (typeof value.stop_on_error !== "boolean" || !["running", "partial", "completed"].includes(value.status as string)) throw new ArgumentError("autonomous brain batch checkpoint controls are invalid");
+  if (value.status === "completed" && completedIndices.length !== requestDigests.length) throw new ArgumentError("completed autonomous brain batch checkpoint is incomplete");
+  const payload = { schema: AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA, job_id: jobId, mode: "brain" as const, batch_input_digest: batchInputDigest, request_digests: [...requestDigests as string[]], completed_indices: completedIndices, completed_result_digests: [...(value.completed_result_digests as string[])], max_parallelism: value.max_parallelism as number, stop_on_error: value.stop_on_error as boolean, status: value.status as "running" | "partial" | "completed" };
+  if (new TextEncoder().encode(JSON.stringify(payload)).byteLength > MAX_AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_BYTES) throw new ArgumentError("autonomous brain batch checkpoint exceeds its bounded size");
+  if (digestJsonSync(payload) !== value.checkpoint_digest) throw new ArgumentError("autonomous brain batch checkpoint digest is invalid");
+  if (value.retention !== "request_and_result_digests_only;tasks_prompts_credentials_and_payloads_never_persisted" || value.secret_material !== "never_returned") throw new ArgumentError("autonomous brain batch checkpoint retention contract is invalid");
+  return { ...payload, checkpoint_digest: value.checkpoint_digest as string, retention: value.retention, secret_material: value.secret_material };
+}
+
+function makeBrainBatchCheckpoint(input: { jobId: string; requestDigests: readonly string[]; batchInputDigest: string; completed: readonly { index: number; item: AutonomousBrainBatchItem }[]; maxParallelism: number; stopOnError: boolean; status: "running" | "partial" | "completed" }): AutonomousBrainBatchCheckpointJSON {
+  const payload = { schema: AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA, job_id: input.jobId, mode: "brain" as const, batch_input_digest: input.batchInputDigest, request_digests: [...input.requestDigests], completed_indices: input.completed.map((entry) => entry.index), completed_result_digests: input.completed.map((entry) => batchItemDigest(entry.item)), max_parallelism: input.maxParallelism, stop_on_error: input.stopOnError, status: input.status };
+  if (new TextEncoder().encode(JSON.stringify(payload)).byteLength > MAX_AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_BYTES) throw new ArgumentError("autonomous brain batch checkpoint exceeds its bounded size");
+  return { ...payload, checkpoint_digest: digestJsonSync(payload), retention: "request_and_result_digests_only;tasks_prompts_credentials_and_payloads_never_persisted", secret_material: "never_returned" };
 }
 
 function projectTaskBlueprint(blueprint: AutonomousTaskBlueprint, routeDigest: string): AutonomousBrainDomainPlanSummary {
@@ -718,6 +813,107 @@ export class AutonomousBrainFacade {
       retention: "metadata_only_tasks_and_provider_connector_values_transient",
       secret_material: "never_returned",
     };
+  }
+
+  /**
+   * Execute the ordinary batch with metadata-only restart checkpoints.
+   *
+   * Completed items are never trusted merely because they appear in a checkpoint: the caller's
+   * rehydrator must return each transient execution and the facade verifies its task and redacted
+   * outcome digest before dispatching any new item. Checkpoint sinks are caller-owned and should
+   * use an atomic write; task text, prompts, credentials, provider responses, and connector
+   * observations are intentionally absent from every checkpoint.
+   */
+  async executeBatchResumable(inputs: readonly AutonomousBrainRequest[], options: AutonomousBrainResumableBatchOptions): Promise<AutonomousBrainBatchResult> {
+    if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_BRAIN_BATCH) throw new ArgumentError(`autonomous brain resumable batch must contain 1..=${MAX_AUTONOMOUS_BRAIN_BATCH} entries`);
+    if (!options || options.jobId === undefined) throw new ArgumentError("autonomous brain resumable batch requires jobId");
+    const normalizedInputs = inputs.map((input) => validateRequest(input));
+    const { maxParallelism, stopOnError } = boundedBatchControls(options);
+    const jobId = checkpointText("autonomous brain batch jobId", options.jobId);
+    if (options.checkpointSink !== undefined && typeof options.checkpointSink !== "function") throw new ArgumentError("autonomous brain batch checkpointSink must be callable");
+    if (options.rehydrateExecution !== undefined && typeof options.rehydrateExecution !== "function") throw new ArgumentError("autonomous brain batch rehydrateExecution must be callable");
+    const taskDigests = normalizedInputs.map((input) => brainBatchTaskDigest(input));
+    const requestDigests = normalizedInputs.map((input, index) => brainBatchRequestDigest(input, index));
+    const batchInputDigest = digestJsonSync({ schema: AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA, mode: "brain", request_digests: requestDigests });
+    const restored = options.checkpoint === undefined ? null : validateBrainBatchCheckpoint(options.checkpoint);
+    if (restored !== null) {
+      if (restored.job_id !== jobId || restored.batch_input_digest !== batchInputDigest || JSON.stringify(restored.request_digests) !== JSON.stringify(requestDigests)) throw new ArgumentError("autonomous brain batch checkpoint does not match the current requests");
+      if (restored.max_parallelism !== maxParallelism || restored.stop_on_error !== stopOnError) throw new ArgumentError("autonomous brain batch checkpoint controls do not match");
+      if (restored.completed_indices.length > 0 && options.rehydrateExecution === undefined) throw new ArgumentError("resuming an autonomous brain batch requires rehydrateExecution");
+    }
+    const items: Array<AutonomousBrainBatchItem | undefined> = new Array(normalizedInputs.length);
+    if (restored !== null) {
+      for (let position = 0; position < restored.completed_indices.length; position += 1) {
+        const index = restored.completed_indices[position]!;
+        const context: AutonomousBrainBatchRehydrationContext = { job_id: jobId, index, mode: "brain", request_digest: requestDigests[index]!, task_digest: taskDigests[index]!, expected_result_digest: restored.completed_result_digests[position]! };
+        let execution: AutonomousBrainExecution;
+        try {
+          execution = await options.rehydrateExecution!(context);
+        } catch {
+          throw new ArgumentError(`autonomous brain batch rehydration failed for item ${index}`);
+        }
+        if (!execution || execution.status !== "completed" || execution.plan.task_digest !== taskDigests[index]) throw new ArgumentError(`rehydrated autonomous brain batch item ${index} is not a matching successful execution`);
+        const item: AutonomousBrainBatchItem = { index, status: "succeeded", task_digest: taskDigests[index]!, execution };
+        if (batchItemDigest(item) !== restored.completed_result_digests[position]) throw new ArgumentError(`rehydrated autonomous brain batch item ${index} does not match its checkpoint digest`);
+        items[index] = item;
+      }
+    }
+    let persistChain: Promise<void> = Promise.resolve();
+    const queueCheckpoint = (snapshot: readonly (AutonomousBrainBatchItem | undefined)[], status: "running" | "partial" | "completed"): void => {
+      if (options.checkpointSink === undefined) return;
+      const completed = snapshot.flatMap((item, index) => item?.status === "succeeded" ? [{ index, item }] : []);
+      const checkpoint = makeBrainBatchCheckpoint({ jobId, requestDigests, batchInputDigest, completed, maxParallelism, stopOnError, status });
+      persistChain = persistChain.then(() => options.checkpointSink!(checkpoint));
+    };
+    queueCheckpoint(items, "running");
+    let nextIndex = 0;
+    let halted = false;
+    const worker = async (): Promise<void> => {
+      while (true) {
+        const index = nextIndex;
+        nextIndex += 1;
+        if (index >= normalizedInputs.length) return;
+        if (items[index] !== undefined) continue;
+        if (halted) {
+          items[index] = { index, status: "omitted", task_digest: null };
+          continue;
+        }
+        try {
+          const execution = await this.execute(normalizedInputs[index]!, options.execution);
+          const succeeded = execution.status === "completed";
+          const refused = batchRefused(execution.status);
+          const item: AutonomousBrainBatchItem = { index, status: succeeded ? "succeeded" : refused ? "refused" : "failed", task_digest: execution.plan.task_digest, execution };
+          items[index] = item;
+          if (succeeded) queueCheckpoint([...items], "running");
+          if (stopOnError && !succeeded) halted = true;
+        } catch (error) {
+          const projection = errorProjection(error);
+          items[index] = { index, status: stopOnError ? "failed" : "refused", task_digest: null, ...projection };
+          if (stopOnError) halted = true;
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(maxParallelism, normalizedInputs.length) }, () => worker()));
+    const normalized = items.map((item, index) => item ?? { index, status: "failed" as const, task_digest: null, error_class: "AutonomousBrainError", failure_code: "missing_batch_result" });
+    const completed = normalized.filter((item) => item.status === "succeeded").length;
+    const failed = normalized.filter((item) => item.status === "failed" || item.status === "refused").length;
+    const omitted = normalized.filter((item) => item.status === "omitted").length;
+    const result: AutonomousBrainBatchResult = {
+      schema: AUTONOMOUS_BRAIN_BATCH_SCHEMA,
+      status: batchStatus(completed, failed, omitted),
+      items: normalized,
+      completed_count: completed,
+      failed_count: failed,
+      omitted_count: omitted,
+      max_parallelism: maxParallelism,
+      stop_on_error: stopOnError,
+      batch_digest: batchDigest(normalized),
+      retention: "metadata_only_tasks_and_provider_connector_values_transient",
+      secret_material: "never_returned",
+    };
+    queueCheckpoint(normalized, result.status === "completed" ? "completed" : "partial");
+    await persistChain;
+    return result;
   }
 
   /** Execute ordinary closed-loop cycles with bounded concurrency and deterministic result order. */

@@ -11,6 +11,8 @@ from prism_sdk import (
     AUTONOMOUS_AGENT_BATCH_SCHEMA,
     AutonomousAgent,
     AutonomousBatchResult,
+    AutonomousBatchCheckpoint,
+    BrainRunError,
     AutonomousDomainRegistry,
     InMemoryProvider,
     LLMRuntime,
@@ -539,3 +541,154 @@ def test_agent_run_cross_domain_batch_preserves_child_order_and_shared_approval_
     assert result.items[0].result is not None
     assert result.items[0].result.status == "children_completed"
     assert result.items[0].result.execution_child_ids == ("coding", "data")
+
+
+def test_agent_run_resumable_batch_rehydrates_successes_and_rejects_tampering() -> None:
+    runtime = LLMRuntime()
+    calls: list[str] = []
+
+    def handler(request: ProviderRequest) -> Mapping[str, Any]:
+        calls.append(request.model)
+        return {"output_text": "offline resumable answer"}
+
+    runtime.register_in_memory_provider("offline", handler)
+    required = {
+        capability
+        for profile in AutonomousDomainRegistry.with_builtin_profiles().catalogue()
+        for capability in profile["required_model_capabilities"]
+    }
+    required.update({"tool_calling", "structured_output"})
+    agent = AutonomousAgent(
+        _OfflineWorkspace(),
+        runtime,
+        model_catalogue=ModelCatalogue(
+            [{
+                "provider": "offline",
+                "model": "offline-model",
+                "capabilities": sorted(required),
+                "context_window_tokens": 32_000,
+                "max_output_tokens": 2_048,
+                "quality": 0.9,
+                "latency_ms": 1,
+                "cost_per_million_tokens": 0,
+                "reliability": 0.99,
+            }]
+        ),
+    )
+    requests = (
+        {"task": "complete a resumable coding review", "domain": "coding"},
+        {"task": "complete a resumable data review", "domain": "data"},
+    )
+    fail_second = True
+    checkpoints: list[AutonomousBatchCheckpoint] = []
+
+    def options_factory(_request: Mapping[str, Any], index: int) -> Mapping[str, Any]:
+        return {
+            "approve_provider_call": True,
+            "max_steps": 0 if fail_second and index == 1 else 32,
+        }
+
+    first = agent.run_resumable_batch(
+        requests,
+        job_id="restartable-batch",
+        credentials={},
+        max_parallelism=1,
+        options_factory=options_factory,
+        checkpoint_sink=checkpoints.append,
+    )
+    assert first.status == "partial"
+    assert first.items[0].status == "succeeded"
+    assert first.items[1].status == "failed"
+    assert checkpoints[-1].completed_indices == (0,)
+    public_checkpoint = json.dumps(checkpoints[-1].to_dict())
+    assert "resumable coding review" not in public_checkpoint
+    assert "offline resumable answer" not in public_checkpoint
+
+    fail_second = False
+    restored = agent.run_resumable_batch(
+        requests,
+        job_id="restartable-batch",
+        credentials={},
+        max_parallelism=1,
+        options_factory=options_factory,
+        checkpoint=checkpoints[-1].to_dict(),
+        checkpoint_sink=checkpoints.append,
+        rehydrate_result=lambda context: first.results[context.index],
+    )
+    assert restored.status == "completed"
+    assert [item.status for item in restored.items] == ["succeeded", "succeeded"]
+    assert len(calls) == 2
+    assert checkpoints[-1].status == "completed"
+
+    tampered = checkpoints[-1].to_dict()
+    tampered["request_digests"][0] = "0" * 64
+    with pytest.raises(BrainRunError, match="digest"):
+        agent.run_resumable_batch(
+            requests,
+            job_id="restartable-batch",
+            credentials={},
+            max_parallelism=1,
+            options_factory=options_factory,
+            checkpoint=tampered,
+            rehydrate_result=lambda context: restored.results[context.index],
+        )
+
+
+def test_agent_run_resumable_batch_supports_route_first_and_cross_domain_modes() -> None:
+    runtime = LLMRuntime()
+    runtime.register_in_memory_provider("offline", lambda _request: {"output_text": "offline route"})
+    required = {
+        capability
+        for profile in AutonomousDomainRegistry.with_builtin_profiles().catalogue()
+        for capability in profile["required_model_capabilities"]
+    }
+    required.update({"tool_calling", "structured_output"})
+    catalogue = ModelCatalogue([{
+        "provider": "offline",
+        "model": "offline-model",
+        "capabilities": sorted(required),
+        "context_window_tokens": 32_000,
+        "max_output_tokens": 2_048,
+        "quality": 0.9,
+        "latency_ms": 1,
+        "cost_per_million_tokens": 0,
+        "reliability": 0.99,
+    }])
+    agent = AutonomousAgent(_OfflineWorkspace(), runtime, model_catalogue=catalogue)
+    options = lambda _request, _index: {"approve_provider_call": True}
+
+    auto_checkpoints: list[AutonomousBatchCheckpoint] = []
+    auto = agent.run_resumable_batch(
+        ({"task": "perform a bounded coding review"},),
+        job_id="route-first-batch",
+        mode="auto",
+        credentials={},
+        max_parallelism=1,
+        options_factory=options,
+        checkpoint_sink=auto_checkpoints.append,
+    )
+    assert auto.status == "completed"
+    assert auto.items[0].result is not None
+    assert auto.items[0].result.status == "completed"
+    assert auto_checkpoints[-1].mode == "auto"
+
+    cross_checkpoints: list[AutonomousBatchCheckpoint] = []
+    cross = agent.run_resumable_batch(
+        ({
+            "task": "inspect coding and data readiness",
+            "subtasks": (
+                {"id": "coding", "domain": "coding", "task": "inspect coding readiness"},
+                {"id": "data", "domain": "data", "task": "inspect data readiness"},
+            ),
+        },),
+        job_id="cross-domain-batch",
+        mode="cross_domain",
+        credentials={},
+        max_parallelism=1,
+        options_factory=lambda _request, _index: {"approve_provider_call": True, "synthesize": False},
+        checkpoint_sink=cross_checkpoints.append,
+    )
+    assert cross.status == "completed"
+    assert cross.items[0].result is not None
+    assert cross.items[0].result.status == "children_completed"
+    assert cross_checkpoints[-1].mode == "cross_domain"

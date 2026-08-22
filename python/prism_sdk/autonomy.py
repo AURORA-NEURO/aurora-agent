@@ -139,6 +139,7 @@ from .tooling import ToolCatalogue, ToolDefinition
 
 AUTONOMY_SCHEMA = "bioprism-python-autonomous-task/0.1"
 AUTONOMOUS_AGENT_BATCH_SCHEMA = "bioprism-python-autonomous-agent-batch/0.1"
+AUTONOMOUS_BATCH_CHECKPOINT_SCHEMA = "bioprism-python-autonomous-batch-checkpoint/0.1"
 AUTONOMOUS_EXECUTION_MODES = ("provider", "tool_loop", "mission")
 AUTONOMOUS_LEARNING_MODES = ("off", "online", "trajectory")
 AUTONOMOUS_PLANNING_MODES = ("deterministic", "provider")
@@ -149,6 +150,9 @@ MAX_AUTONOMY_LIST_ITEMS = 64
 MAX_AUTONOMY_MEMORY_ITEMS = 32
 MAX_AUTONOMOUS_AGENT_BATCH = 64
 MAX_AUTONOMOUS_AGENT_PARALLELISM = 8
+MAX_AUTONOMOUS_BATCH_CHECKPOINT_BYTES = 128_000
+AUTONOMOUS_BATCH_MODES = ("domain", "auto", "cross_domain")
+AUTONOMOUS_BATCH_CHECKPOINT_STATUSES = ("running", "partial", "completed")
 MAX_AUTONOMOUS_WORKFLOW_STAGE_EVIDENCE = 32
 MAX_AUTONOMOUS_WORKFLOW_CHECKPOINT_BYTES = 1_000_000
 MAX_AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_BYTES = 1_000_000
@@ -3072,6 +3076,173 @@ def _batch_digest(items: Sequence["AutonomousBatchItem"]) -> str:
             for item in items
         ]
     )
+
+
+def _batch_request_digest(descriptor: Mapping[str, Any], mode: str) -> str:
+    """Bind a prepared request without retaining its task, subtasks, options, or credentials."""
+
+    if mode not in AUTONOMOUS_BATCH_MODES:
+        raise BrainRunError("autonomous batch mode is unsupported")
+    payload: dict[str, Any] = {
+        "index": descriptor["index"],
+        "mode": mode,
+        "task_digest": descriptor["task_digest"],
+    }
+    if mode == "domain":
+        payload["domain"] = descriptor["domain"]
+    elif mode == "cross_domain":
+        subtasks = descriptor.get("subtasks") or ()
+        payload["subtask_digests"] = [
+            {
+                "id": subtask.get("id"),
+                "domain": subtask.get("domain"),
+                "task_digest": content_digest({"task": subtask.get("task")}),
+            }
+            for subtask in subtasks
+            if isinstance(subtask, Mapping)
+        ]
+    return content_digest(payload)
+
+
+def _batch_item_digest(item: "AutonomousBatchItem") -> str:
+    """Digest the redacted item projection used for restart validation."""
+
+    return content_digest(item.to_dict())
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousBatchRehydrationContext:
+    """Opaque metadata supplied to a caller-owned result rehydrator after restart."""
+
+    job_id: str
+    index: int
+    mode: str
+    request_digest: str
+    task_digest: str
+    expected_result_digest: str
+
+    def __post_init__(self) -> None:
+        _identifier("batch rehydration job_id", self.job_id)
+        if self.mode not in AUTONOMOUS_BATCH_MODES:
+            raise BrainRunError("batch rehydration mode is unsupported")
+        if not isinstance(self.index, int) or isinstance(self.index, bool) or self.index < 0:
+            raise BrainRunError("batch rehydration index must be a non-negative integer")
+        _route_digest(self.request_digest, "batch rehydration request_digest")
+        _route_digest(self.task_digest, "batch rehydration task_digest")
+        _route_digest(self.expected_result_digest, "batch rehydration expected_result_digest")
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousBatchCheckpoint:
+    """Metadata-only, restart-safe progress for one bounded task batch.
+
+    The checkpoint deliberately stores only request and result digests. A caller-owned
+    ``rehydrate_result`` callback must provide the transient result for every completed item;
+    the callback never receives a task, prompt, credential, provider response, or tool payload.
+    """
+
+    job_id: str
+    mode: str
+    batch_input_digest: str
+    request_digests: tuple[str, ...]
+    completed_indices: tuple[int, ...] = ()
+    completed_result_digests: tuple[str, ...] = ()
+    max_parallelism: int = 4
+    stop_on_error: bool = False
+    status: str = "running"
+
+    def __post_init__(self) -> None:
+        _identifier("batch checkpoint job_id", self.job_id)
+        if self.mode not in AUTONOMOUS_BATCH_MODES:
+            raise BrainRunError("batch checkpoint mode is unsupported")
+        _route_digest(self.batch_input_digest, "batch checkpoint batch_input_digest")
+        requests = _sequence("batch checkpoint request_digests", self.request_digests, maximum=MAX_AUTONOMOUS_AGENT_BATCH)
+        for digest in requests:
+            _route_digest(digest, "batch checkpoint request digest")
+        if not 1 <= len(requests) <= MAX_AUTONOMOUS_AGENT_BATCH:
+            raise BrainRunError("batch checkpoint request_digests must contain 1..64 entries")
+        if not isinstance(self.completed_indices, Sequence) or isinstance(self.completed_indices, (str, bytes)):
+            raise BrainRunError("batch checkpoint completed_indices must be a sequence")
+        indices = tuple(self.completed_indices)
+        if len(indices) > MAX_AUTONOMOUS_AGENT_BATCH or any(not isinstance(index, int) or isinstance(index, bool) for index in indices):
+            raise BrainRunError("batch checkpoint completed_indices must contain integers")
+        if tuple(sorted(set(indices))) != indices or any(index < 0 or index >= len(requests) for index in indices):
+            raise BrainRunError("batch checkpoint completed_indices must be sorted, unique, and in range")
+        result_digests = _sequence(
+            "batch checkpoint completed_result_digests",
+            self.completed_result_digests,
+            maximum=MAX_AUTONOMOUS_AGENT_BATCH,
+        )
+        for digest in result_digests:
+            _route_digest(digest, "batch checkpoint completed result digest")
+        if len(result_digests) != len(indices):
+            raise BrainRunError("batch checkpoint result digests must align with completed indices")
+        if not isinstance(self.max_parallelism, int) or isinstance(self.max_parallelism, bool) or not 1 <= self.max_parallelism <= MAX_AUTONOMOUS_AGENT_PARALLELISM:
+            raise BrainRunError("batch checkpoint max_parallelism is outside its bound")
+        if not isinstance(self.stop_on_error, bool):
+            raise BrainRunError("batch checkpoint stop_on_error must be boolean")
+        if self.status not in AUTONOMOUS_BATCH_CHECKPOINT_STATUSES:
+            raise BrainRunError("batch checkpoint status is unsupported")
+        if self.status == "completed" and len(indices) != len(requests):
+            raise BrainRunError("completed batch checkpoint must contain every request index")
+        payload = self._payload(requests=requests, indices=indices, result_digests=result_digests)
+        if len(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")) > MAX_AUTONOMOUS_BATCH_CHECKPOINT_BYTES:
+            raise BrainRunError("batch checkpoint exceeds the bounded size")
+        object.__setattr__(self, "request_digests", requests)
+        object.__setattr__(self, "completed_indices", indices)
+        object.__setattr__(self, "completed_result_digests", result_digests)
+
+    def _payload(
+        self,
+        *,
+        requests: Sequence[str] | None = None,
+        indices: Sequence[int] | None = None,
+        result_digests: Sequence[str] | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_BATCH_CHECKPOINT_SCHEMA,
+            "job_id": self.job_id,
+            "mode": self.mode,
+            "batch_input_digest": self.batch_input_digest,
+            "request_digests": list(self.request_digests if requests is None else requests),
+            "completed_indices": list(self.completed_indices if indices is None else indices),
+            "completed_result_digests": list(self.completed_result_digests if result_digests is None else result_digests),
+            "max_parallelism": self.max_parallelism,
+            "stop_on_error": self.stop_on_error,
+            "status": self.status,
+        }
+
+    @property
+    def checkpoint_digest(self) -> str:
+        return content_digest(self._payload())
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            **self._payload(),
+            "checkpoint_digest": self.checkpoint_digest,
+            "retention": "request_and_result_digests_only;tasks_prompts_credentials_and_payloads_never_persisted",
+            "secret_material": "never_returned",
+        }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "AutonomousBatchCheckpoint":
+        if not isinstance(value, Mapping) or value.get("schema") != AUTONOMOUS_BATCH_CHECKPOINT_SCHEMA:
+            raise BrainRunError("batch checkpoint has an invalid schema")
+        checkpoint = cls(
+            job_id=value.get("job_id"),
+            mode=value.get("mode"),
+            batch_input_digest=value.get("batch_input_digest"),
+            request_digests=tuple(value.get("request_digests", ())),
+            completed_indices=tuple(value.get("completed_indices", ())),
+            completed_result_digests=tuple(value.get("completed_result_digests", ())),
+            max_parallelism=value.get("max_parallelism", 4),
+            stop_on_error=value.get("stop_on_error", False),
+            status=value.get("status", "running"),
+        )
+        supplied_digest = value.get("checkpoint_digest")
+        if supplied_digest is not None and supplied_digest != checkpoint.checkpoint_digest:
+            raise BrainRunError("batch checkpoint digest does not match its contents")
+        return checkpoint
 
 
 @dataclass(frozen=True, slots=True)
@@ -13576,9 +13747,15 @@ class AutonomousAgent:
         invoke: Callable[[Mapping[str, Any]], Any],
         max_parallelism: int,
         stop_on_error: bool,
+        initial_items: Sequence[AutonomousBatchItem | None] | None = None,
+        on_progress: Callable[[Sequence[AutonomousBatchItem | None]], Any] | None = None,
     ) -> AutonomousBatchResult:
         workers = min(max_parallelism, len(prepared))
-        items: list[AutonomousBatchItem | None] = [None] * len(prepared)
+        if initial_items is not None and len(initial_items) != len(prepared):
+            raise BrainRunError("autonomous batch initial item state must align with requests")
+        items: list[AutonomousBatchItem | None] = list(initial_items) if initial_items is not None else [None] * len(prepared)
+        if any(item is not None and item.index != index for index, item in enumerate(items)):
+            raise BrainRunError("autonomous batch initial item state has an invalid index")
         lock = Lock()
         next_index = 0
         halted = False
@@ -13591,6 +13768,8 @@ class AutonomousAgent:
                         return
                     index = next_index
                     next_index += 1
+                    if items[index] is not None:
+                        continue
                     if halted:
                         items[index] = AutonomousBatchItem(
                             index=index,
@@ -13619,6 +13798,8 @@ class AutonomousAgent:
                     )
                 with lock:
                     items[index] = item
+                    if on_progress is not None and item.status == "succeeded":
+                        on_progress(tuple(items))
                     if stop_on_error and item.status != "succeeded":
                         halted = True
 
@@ -13652,6 +13833,185 @@ class AutonomousAgent:
             stop_on_error=stop_on_error,
             batch_digest=_batch_digest(normalized),
         )
+
+    def run_resumable_batch(
+        self,
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        job_id: str,
+        mode: str = "domain",
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        options_factory: Callable[[Mapping[str, Any], int], Mapping[str, Any]] | None = None,
+        max_parallelism: int = 4,
+        stop_on_error: bool = False,
+        checkpoint: AutonomousBatchCheckpoint | Mapping[str, Any] | None = None,
+        checkpoint_sink: Callable[[AutonomousBatchCheckpoint], Any] | None = None,
+        rehydrate_result: Callable[[AutonomousBatchRehydrationContext], Any] | None = None,
+    ) -> AutonomousBatchResult:
+        """Run a restart-safe batch with caller-owned metadata checkpointing.
+
+        ``mode`` selects ``run_batch``, ``run_auto_batch``, or ``run_cross_domain_batch`` semantics.
+        A checkpoint skips only items previously proven successful; every skipped item is restored
+        through ``rehydrate_result`` and its redacted item digest is verified before any new
+        provider call. The task list, options, prompts, credentials, provider values, and raw
+        results remain transient. The caller should persist each checkpoint atomically and pass
+        the same options factory and credential session after a restart.
+        """
+
+        job_id = _identifier("autonomous batch job_id", job_id)
+        if mode not in AUTONOMOUS_BATCH_MODES:
+            raise BrainRunError("autonomous batch mode must be one of: domain, auto, cross_domain")
+        max_parallelism, stop_on_error = self._batch_controls(max_parallelism, stop_on_error)
+        if checkpoint_sink is not None and not callable(checkpoint_sink):
+            raise BrainRunError("autonomous batch checkpoint_sink must be callable or None")
+        if rehydrate_result is not None and not callable(rehydrate_result):
+            raise BrainRunError("autonomous batch rehydrate_result must be callable or None")
+
+        if mode == "domain":
+            prepared, resolved_credentials = self._prepare_batch_invocations(
+                requests,
+                credentials=credentials,
+                model_candidates=model_candidates,
+                options_factory=options_factory,
+                cross_domain=False,
+            )
+
+            def invoke(descriptor: Mapping[str, Any]) -> Any:
+                return self.run(
+                    task=descriptor["task"],
+                    domain=descriptor["domain"],
+                    credentials=resolved_credentials,
+                    model_candidates=descriptor["model_candidates"],
+                    execution_id=descriptor["execution_id"],
+                    **descriptor["options"],
+                )
+        elif mode == "auto":
+            prepared, resolved_credentials = self._prepare_auto_batch_invocations(
+                requests,
+                credentials=credentials,
+                model_candidates=model_candidates,
+                options_factory=options_factory,
+            )
+
+            def invoke(descriptor: Mapping[str, Any]) -> Any:
+                return self.run_auto(
+                    task=descriptor["task"],
+                    credentials=resolved_credentials,
+                    model_candidates=descriptor["model_candidates"],
+                    execution_id=descriptor["execution_id"],
+                    **descriptor["options"],
+                )
+        else:
+            prepared, resolved_credentials = self._prepare_batch_invocations(
+                requests,
+                credentials=credentials,
+                model_candidates=model_candidates,
+                options_factory=options_factory,
+                cross_domain=True,
+            )
+
+            def invoke(descriptor: Mapping[str, Any]) -> Any:
+                return self.run_cross_domain(
+                    task=descriptor["task"],
+                    subtasks=descriptor["subtasks"],
+                    credentials=resolved_credentials,
+                    model_candidates=descriptor["model_candidates"],
+                    execution_id=descriptor["execution_id"],
+                    **descriptor["options"],
+                )
+
+        request_digests = tuple(_batch_request_digest(descriptor, mode) for descriptor in prepared)
+        batch_input_digest = content_digest({"schema": AUTONOMOUS_BATCH_CHECKPOINT_SCHEMA, "mode": mode, "request_digests": list(request_digests)})
+        current_checkpoint: AutonomousBatchCheckpoint | None
+        if checkpoint is None:
+            current_checkpoint = None
+        elif isinstance(checkpoint, AutonomousBatchCheckpoint):
+            current_checkpoint = checkpoint
+        elif isinstance(checkpoint, Mapping):
+            current_checkpoint = AutonomousBatchCheckpoint.from_dict(checkpoint)
+        else:
+            raise BrainRunError("autonomous batch checkpoint must be a checkpoint, mapping, or None")
+        if current_checkpoint is not None:
+            if current_checkpoint.job_id != job_id:
+                raise BrainRunError("autonomous batch checkpoint job_id does not match")
+            if current_checkpoint.mode != mode:
+                raise BrainRunError("autonomous batch checkpoint mode does not match")
+            if current_checkpoint.batch_input_digest != batch_input_digest or current_checkpoint.request_digests != request_digests:
+                raise BrainRunError("autonomous batch checkpoint requests do not match the current batch")
+            if current_checkpoint.max_parallelism != max_parallelism or current_checkpoint.stop_on_error != stop_on_error:
+                raise BrainRunError("autonomous batch checkpoint execution controls do not match")
+            if current_checkpoint.completed_indices and rehydrate_result is None:
+                raise BrainRunError("resuming a batch requires rehydrate_result for completed items")
+
+        items: list[AutonomousBatchItem | None] = [None] * len(prepared)
+        if current_checkpoint is not None:
+            for index, expected_result_digest in zip(
+                current_checkpoint.completed_indices,
+                current_checkpoint.completed_result_digests,
+            ):
+                descriptor = prepared[index]
+                context = AutonomousBatchRehydrationContext(
+                    job_id=job_id,
+                    index=index,
+                    mode=mode,
+                    request_digest=request_digests[index],
+                    task_digest=descriptor["task_digest"],
+                    expected_result_digest=expected_result_digest,
+                )
+                try:
+                    result = rehydrate_result(context) if rehydrate_result is not None else None
+                except Exception as error:
+                    raise BrainRunError(f"autonomous batch result rehydration failed for item {index}") from error
+                status, _result_status = _batch_result_classification(result)
+                if status != "succeeded":
+                    raise BrainRunError(f"rehydrated autonomous batch item {index} is not successful")
+                item = AutonomousBatchItem(
+                    index=index,
+                    status="succeeded",
+                    task_digest=descriptor["task_digest"],
+                    result=result,
+                )
+                if _batch_item_digest(item) != expected_result_digest:
+                    raise BrainRunError(f"rehydrated autonomous batch item {index} does not match its checkpoint digest")
+                items[index] = item
+
+        def persist(status: str) -> None:
+            if checkpoint_sink is None:
+                return
+            completed_items = [
+                (index, item)
+                for index, item in enumerate(items)
+                if item is not None and item.status == "succeeded"
+            ]
+            value = AutonomousBatchCheckpoint(
+                job_id=job_id,
+                mode=mode,
+                batch_input_digest=batch_input_digest,
+                request_digests=request_digests,
+                completed_indices=tuple(index for index, _item in completed_items),
+                completed_result_digests=tuple(_batch_item_digest(item) for _index, item in completed_items),
+                max_parallelism=max_parallelism,
+                stop_on_error=stop_on_error,
+                status=status,
+            )
+            checkpoint_sink(value)
+
+        def persist_progress(snapshot: Sequence[AutonomousBatchItem | None]) -> None:
+            items[:] = snapshot
+            persist("running")
+
+        persist("running")
+        result = self._execute_prepared_batch(
+            prepared,
+            invoke=invoke,
+            max_parallelism=max_parallelism,
+            stop_on_error=stop_on_error,
+            initial_items=items,
+            on_progress=persist_progress,
+        )
+        persist("completed" if result.status == "completed" else "partial")
+        return result
 
     def _prepare_auto_batch_invocations(
         self,
@@ -14812,8 +15172,10 @@ class AutonomousAgent:
 __all__ = [
     "AUTONOMY_SCHEMA",
     "AUTONOMOUS_AGENT_BATCH_SCHEMA",
+    "AUTONOMOUS_BATCH_CHECKPOINT_SCHEMA",
     "MAX_AUTONOMOUS_AGENT_BATCH",
     "MAX_AUTONOMOUS_AGENT_PARALLELISM",
+    "MAX_AUTONOMOUS_BATCH_CHECKPOINT_BYTES",
     "AUTONOMOUS_DOMAINS",
     "AUTONOMOUS_EXECUTION_MODES",
     "AUTONOMOUS_LEARNING_MODES",
@@ -14885,6 +15247,8 @@ __all__ = [
     "AutonomousAutoResult",
     "AutonomousBatchItem",
     "AutonomousBatchResult",
+    "AutonomousBatchRehydrationContext",
+    "AutonomousBatchCheckpoint",
     "AutonomousLearningResult",
     "AutonomousAgent",
     "AutonomousWorkflowCheckpoint",
