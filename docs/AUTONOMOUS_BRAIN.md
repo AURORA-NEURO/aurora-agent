@@ -4050,7 +4050,11 @@ if (waiting?.status === "waiting_approval") {
 If a persistence write fails, the worker raises a typed configuration failure and does not proceed
 to provider dispatch. The coordinator remains caller-owned: an IndexedDB, SQLite, Postgres, or
 object-store adapter must provide the atomic snapshot write and cross-process fencing required by
-the deployment.
+the deployment. Adapters that may be shared by multiple workers should implement the optional
+`writeIfUnchanged(expectedSnapshotDigest, snapshot)` method. The coordinator then uses the last
+restored/committed snapshot digest as a compare-and-swap fence; a stale worker receives a typed
+conflict before it can invoke the facade. Adapters that implement only `write()` remain suitable
+for single-writer persistence, but do not claim distributed lease safety.
 
 ## Provider-neutral boundary
 

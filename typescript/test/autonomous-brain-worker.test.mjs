@@ -410,3 +410,36 @@ test("worker restores a metadata-only scheduler and persists approval recovery a
   assert.equal(restartedScheduler.verifyIntegrity().verified, true);
   assert.equal(JSON.stringify(persistence.read()).includes("review a bounded"), false);
 });
+
+test("stale restored workers fail before provider dispatch when the durable snapshot fence changes", async () => {
+  let providerCalls = 0;
+  const { brain } = makeBrain(() => { providerCalls += 1; });
+  const persistence = new InMemoryAutonomousBrainJobSchedulerPersistence();
+  const seed = new InMemoryAutonomousBrainJobScheduler({ maxJobs: 4, clock: () => 15_000 });
+  const seedController = new AutonomousBrainJobSchedulerPersistenceCoordinator(seed, persistence);
+  const request = requestFor("coding");
+  const policy = policyDigest("e");
+  seed.submit(jobFor(60, request, "execute", policy), 15_000);
+  await seedController.flush();
+
+  const leftScheduler = new InMemoryAutonomousBrainJobScheduler({ maxJobs: 4, clock: () => 15_000 });
+  const rightScheduler = new InMemoryAutonomousBrainJobScheduler({ maxJobs: 4, clock: () => 15_000 });
+  const leftController = new AutonomousBrainJobSchedulerPersistenceCoordinator(leftScheduler, persistence);
+  const rightController = new AutonomousBrainJobSchedulerPersistenceCoordinator(rightScheduler, persistence);
+  const resolve = ({ job }) => ({
+    specDigest: job.spec_digest,
+    policyDigest: policy,
+    request,
+    mode: "execute",
+    execute: { approveProviderCall: true, run: { candidates: [model] } },
+  });
+  const leftWorker = new AutonomousBrainJobWorker({ brain, scheduler: leftScheduler, persistence: leftController, workerId: "worker-left", resolve });
+  const rightWorker = new AutonomousBrainJobWorker({ brain, scheduler: rightScheduler, persistence: rightController, workerId: "worker-right", resolve });
+  await leftWorker.restore();
+  await rightWorker.restore();
+  const waiting = await leftWorker.runOnce("worker-job-60", 15_001);
+  assert.equal(waiting.status, "waiting_approval");
+  await assert.rejects(rightWorker.runOnce("worker-job-60", 15_002), /persistence failed/);
+  assert.equal(providerCalls, 0);
+  assert.equal(persistence.read().jobs[0].state, "waiting_approval");
+});

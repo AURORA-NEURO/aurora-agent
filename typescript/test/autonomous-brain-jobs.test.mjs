@@ -127,6 +127,38 @@ test("restart snapshots recover active leases and reject tampering", async () =>
   assert.equal(JSON.stringify(restarted.snapshot()).includes("secret-task-never-retained"), false);
 });
 
+test("shared snapshot persistence rejects a stale scheduler writer", async () => {
+  const persistence = new InMemoryAutonomousBrainJobSchedulerPersistence();
+  const seed = new InMemoryAutonomousBrainJobScheduler({ clock: () => 2_000 });
+  const seedController = new AutonomousBrainJobSchedulerPersistenceCoordinator(seed, persistence);
+  seed.submit(submission(9), 2_000);
+  await seedController.flush();
+
+  const left = new InMemoryAutonomousBrainJobScheduler({ clock: () => 2_000 });
+  const right = new InMemoryAutonomousBrainJobScheduler({ clock: () => 2_000 });
+  const leftController = new AutonomousBrainJobSchedulerPersistenceCoordinator(left, persistence);
+  const rightController = new AutonomousBrainJobSchedulerPersistenceCoordinator(right, persistence);
+  await leftController.restore();
+  await rightController.restore();
+  left.claim("job-9", "worker-left", 10_000, 2_001);
+  await leftController.flush();
+  right.claim("job-9", "worker-right", 10_000, 2_001);
+  await assert.rejects(rightController.flush(), /compare-and-swap conflict/);
+  assert.equal(persistence.read().jobs[0].lease_owner, "worker-left");
+  assert.equal(persistence.read().jobs[0].state, "leased");
+});
+
+test("one coordinator serializes overlapping snapshot flushes", async () => {
+  const persistence = new InMemoryAutonomousBrainJobSchedulerPersistence();
+  const scheduler = new InMemoryAutonomousBrainJobScheduler({ clock: () => 2_500 });
+  const controller = new AutonomousBrainJobSchedulerPersistenceCoordinator(scheduler, persistence);
+  scheduler.submit(submission(10), 2_500);
+  const snapshots = await Promise.all([controller.flush(), controller.flush(), controller.flush()]);
+  assert.equal(snapshots.length, 3);
+  assert.equal(new Set(snapshots.map((snapshot) => snapshot.snapshot_digest)).size, 1);
+  assert.equal(persistence.read().snapshot_digest, snapshots.at(-1).snapshot_digest);
+});
+
 test("capacity, cancellation, and checkpoint bounds fail closed", () => {
   const scheduler = new InMemoryAutonomousBrainJobScheduler({ maxJobs: 1, clock: () => 0 });
   scheduler.submit(submission(6));

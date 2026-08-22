@@ -127,6 +127,11 @@ export interface AutonomousBrainJobSnapshot extends JsonObject {
 export interface AutonomousBrainJobSchedulerPersistence {
   read(): Promise<AutonomousBrainJobSnapshot | null> | AutonomousBrainJobSnapshot | null;
   write(snapshot: AutonomousBrainJobSnapshot): Promise<void> | void;
+  /**
+   * Optional atomic snapshot fence for shared stores. Returning false means another scheduler
+   * committed a newer snapshot after this coordinator restored its expected digest.
+   */
+  writeIfUnchanged?(expectedSnapshotDigest: string | null, snapshot: AutonomousBrainJobSnapshot): Promise<boolean> | boolean;
 }
 
 export interface AutonomousBrainJobSchedulerOptions {
@@ -577,21 +582,41 @@ export class InMemoryAutonomousBrainJobScheduler {
 
 /** Caller-owned persistence lifecycle around the in-memory scheduler. */
 export class AutonomousBrainJobSchedulerPersistenceCoordinator {
+  private expectedSnapshotDigest: string | null = null;
+  private operationTail: Promise<void> = Promise.resolve();
+
   constructor(readonly scheduler: InMemoryAutonomousBrainJobScheduler, readonly persistence: AutonomousBrainJobSchedulerPersistence) {
     if (!(scheduler instanceof InMemoryAutonomousBrainJobScheduler)) throw new ArgumentError("brain job persistence requires a typed scheduler");
     if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new ArgumentError("brain job persistence is malformed");
   }
 
   async restore(): Promise<AutonomousBrainJobSnapshot | null> {
-    const snapshot = await this.persistence.read();
-    if (snapshot !== null) this.scheduler.restore(snapshot);
-    return snapshot;
+    return this.enqueue(async () => {
+      const snapshot = await this.persistence.read();
+      if (snapshot !== null) this.scheduler.restore(snapshot);
+      this.expectedSnapshotDigest = snapshot?.snapshot_digest ?? null;
+      return snapshot;
+    });
   }
 
   async flush(): Promise<AutonomousBrainJobSnapshot> {
-    const snapshot = this.scheduler.snapshot();
-    await this.persistence.write(snapshot);
-    return snapshot;
+    return this.enqueue(async () => {
+      const snapshot = this.scheduler.snapshot();
+      if (typeof this.persistence.writeIfUnchanged === "function") {
+        const committed = await this.persistence.writeIfUnchanged(this.expectedSnapshotDigest, snapshot);
+        if (!committed) throw new ArgumentError("brain job persistence compare-and-swap conflict; reload the scheduler before continuing");
+      } else {
+        await this.persistence.write(snapshot);
+      }
+      this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      return snapshot;
+    });
+  }
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const queued = this.operationTail.then(() => operation());
+    this.operationTail = queued.then(() => undefined, () => undefined);
+    return queued;
   }
 }
 
@@ -604,5 +629,12 @@ export class InMemoryAutonomousBrainJobSchedulerPersistence implements Autonomou
 
   write(snapshot: AutonomousBrainJobSnapshot): void {
     this.snapshotValue = JSON.parse(JSON.stringify(snapshot)) as AutonomousBrainJobSnapshot;
+  }
+
+  writeIfUnchanged(expectedSnapshotDigest: string | null, snapshot: AutonomousBrainJobSnapshot): boolean {
+    const currentSnapshotDigest = this.snapshotValue?.snapshot_digest ?? null;
+    if (currentSnapshotDigest !== expectedSnapshotDigest) return false;
+    this.snapshotValue = JSON.parse(JSON.stringify(snapshot)) as AutonomousBrainJobSnapshot;
+    return true;
   }
 }
