@@ -3106,6 +3106,37 @@ receipts, replay barriers, and evaluator-driven adaptive selection across all tw
 Connector completion is still not task-quality proof; explicit evidence evaluation remains the
 only source of learning credit.
 
+For a useful credentialless TypeScript bootstrap, `createBuiltinAutonomousConnectorRuntime()`
+installs deterministic local registrations for every autonomous domain, attaches the default
+operation registry, and returns `{ operationRegistry, registry, runtime, registrations }`. The
+runtime still requires the normal selection-plan and approval gates, so this convenience does not
+turn local registration into authorization. Each built-in operation accepts only caller-supplied
+JSON metadata, projects field names/shapes/counts/digests, and returns a transient `observed` or
+`partial` observation. It never echoes the input values, contacts a provider, or accepts
+credential-shaped fields. Use `domainScoped: false` for one compact all-domain registration, or
+leave the default `domainScoped: true` to preserve exact per-domain capability portfolios:
+
+```typescript
+const offline = createBuiltinAutonomousConnectorRuntime({
+  domainScoped: true,
+  approvalRequired: false, // the surrounding mission/workflow approval gate still applies
+  receiptStore: new InMemoryAutonomousConnectorReceiptJournal(),
+});
+const agent = new AutonomousAgent(llm, {
+  connectorRegistry: offline.registry,
+  connectorRuntime: offline.runtime,
+});
+const plan = agent.selectConnectors(["science"], {
+  capability: "literature",
+});
+```
+
+The built-in request contract binds `operation_id` and `subject_digest`. Durable mission and
+workflow adapters add those identities automatically when given the matching operation registry;
+callers can then run every domain offline before supplying real browser, repository, data, FHIR,
+or model-backed connector executors. Local observations are deliberately evaluator inputs, not
+independent scientific, clinical, operational, or business evidence.
+
 #### Binding connectors to durable workflow and mission execution
 
 The connector runtime is not a parallel orchestration system. TypeScript can bind it directly to

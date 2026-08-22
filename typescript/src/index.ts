@@ -308,6 +308,23 @@ export type {
   AutonomousConnectorDispatchResult,
 } from "./autonomous-connectors.js";
 export {
+  AUTONOMOUS_BUILTIN_CONNECTOR_SCHEMA,
+  AUTONOMOUS_BUILTIN_CONNECTOR_ID,
+  AUTONOMOUS_BUILTIN_CONNECTOR_VERSION,
+  AUTONOMOUS_BUILTIN_CONNECTOR_PROVIDER,
+  MAX_AUTONOMOUS_BUILTIN_INPUT_BYTES,
+  MAX_AUTONOMOUS_BUILTIN_FIELDS,
+  MAX_AUTONOMOUS_BUILTIN_FIELD_NAME_BYTES,
+  MAX_AUTONOMOUS_BUILTIN_SEQUENCE_ITEMS,
+  MAX_AUTONOMOUS_BUILTIN_SHAPE_DEPTH,
+  AutonomousBuiltinConnectorAdapter,
+  builtinAutonomousConnectorRegistration,
+  registerBuiltinAutonomousConnectors,
+  builtinAutonomousDomainConnectorRegistrations,
+  registerBuiltinAutonomousDomainConnectors,
+  createBuiltinAutonomousConnectorRuntime,
+} from "./autonomous-builtin-connectors.js";
+export {
   AUTONOMOUS_CONNECTOR_OPERATION_REGISTRY_SCHEMA,
   AUTONOMOUS_CONNECTOR_OPERATION_SCHEMA,
   AUTONOMOUS_CONNECTOR_WORK_ITEM_SCHEMA,

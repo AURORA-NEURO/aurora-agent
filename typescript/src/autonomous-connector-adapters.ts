@@ -121,10 +121,15 @@ function selectionInputs(
   };
 }
 
-function attachOperation(request: JsonObject, operation: ReturnType<typeof operationFor>, label: string): JsonObject {
+function attachOperation(request: JsonObject, operation: ReturnType<typeof operationFor>, label: string, subjectDigest?: string): JsonObject {
   if (!operation) return request;
   if (request.operation_id !== undefined && request.operation_id !== operation.operation_id) throw new ArgumentError(`${label} request operation_id does not match its domain operation`);
-  return { ...request, operation_id: operation.operation_id };
+  if (subjectDigest !== undefined && request.subject_digest !== undefined && request.subject_digest !== subjectDigest) throw new ArgumentError(`${label} request subject_digest does not match its execution identity`);
+  return {
+    ...request,
+    operation_id: operation.operation_id,
+    ...(subjectDigest === undefined ? {} : { subject_digest: request.subject_digest ?? subjectDigest }),
+  };
 }
 
 async function connectorValue(
@@ -231,7 +236,7 @@ async function workflowPlan(
   return registry.selectForDomains([domain], { capability, ...selectionInputs(domain, capability, options.selectionSignals, options.feedbackLedger, options.selectionStrategy) });
 }
 
-function defaultWorkflowRequest(context: AutonomousWorkflowStageExecutionContext, operation: ReturnType<typeof operationFor>): JsonObject {
+function defaultWorkflowRequest(context: AutonomousWorkflowStageExecutionContext, operation: ReturnType<typeof operationFor>, subjectDigest: string): JsonObject {
   return {
     stage_id: context.stage.id,
     workflow_id: context.workflow.workflow_id,
@@ -239,6 +244,7 @@ function defaultWorkflowRequest(context: AutonomousWorkflowStageExecutionContext
     task_digest: context.task_digest,
     objective: context.stage.objective,
     ...(operation ? { operation_id: operation.operation_id } : {}),
+    ...(operation ? { subject_digest: subjectDigest } : {}),
   };
 }
 
@@ -259,6 +265,7 @@ export function autonomousConnectorWorkflowStageExecutor(options: AutonomousWork
     const plan = connectorPlan(await workflowPlan(context, options, registry), domain, capability);
     const stageDigest = await digestJson(context.stage);
     const identityDigest = await digestJson({ job_id: context.job_id, stage_id: context.stage.id, stage_attempt: context.stage_attempt, execution_contract_digest: context.execution_contract_digest });
+    const subjectDigest = await digestJson({ schema: "bioprism-typescript-autonomous-connector-subject/0.1", workflow_id: context.workflow.workflow_id, stage_id: context.stage.id, stage_digest: stageDigest, task_digest: context.task_digest, attempt: context.stage_attempt });
     const request = new AutonomousConnectorDispatchRequest({
       dispatch_id: boundedAdapterId(`workflow-dispatch-${identityDigest.slice(0, 48)}`, "workflow connector dispatch_id"),
       execution_id: boundedAdapterId(`workflow-execution-${identityDigest.slice(0, 48)}`, "workflow connector execution_id"),
@@ -266,7 +273,7 @@ export function autonomousConnectorWorkflowStageExecutor(options: AutonomousWork
       connector_id: plan.connectorId,
       domains: [domain],
       capability,
-      request: attachOperation(await (options.requestForStage?.(context) ?? defaultWorkflowRequest(context, operation)), operation, "workflow connector"),
+      request: attachOperation(await (options.requestForStage?.(context) ?? defaultWorkflowRequest(context, operation, subjectDigest)), operation, "workflow connector", subjectDigest),
       parent_digests: [context.route.route_digest, context.workflow.workflow_digest, context.execution_contract_digest, stageDigest],
       attempt_id: boundedAdapterId(`a${context.stage_attempt}`, "workflow connector attempt_id"),
       selection_plan_digest: plan.plan.plan_digest,
@@ -290,7 +297,7 @@ async function missionPlan(
   return registry.selectForDomains([domain], { capability: context.step.capability, ...selectionInputs(domain, context.step.capability, options.selectionSignals, options.feedbackLedger, options.selectionStrategy) });
 }
 
-function defaultMissionRequest(context: AutonomousMissionStepExecutionContext, goalDigest: string, operation: ReturnType<typeof operationFor>): JsonObject {
+function defaultMissionRequest(context: AutonomousMissionStepExecutionContext, goalDigest: string, operation: ReturnType<typeof operationFor>, subjectDigest: string): JsonObject {
   // Keep both the structured argument envelope and the flattened recommended fields.
   // Connector contracts can consume stable fields without needing to understand the
   // mission transport, while the envelope remains available for custom adapters.
@@ -304,6 +311,7 @@ function defaultMissionRequest(context: AutonomousMissionStepExecutionContext, g
     goal_digest: goalDigest,
     arguments: context.arguments,
     ...(operation ? { operation_id: operation.operation_id } : {}),
+    ...(operation ? { subject_digest: subjectDigest } : {}),
   };
 }
 
@@ -324,7 +332,8 @@ export function autonomousConnectorMissionStepExecutor(options: AutonomousMissio
     const plan = connectorPlan(await missionPlan(context, options, registry), domain, context.step.capability);
     const stepDigest = await digestJson({ id: context.step.id, domain, capability: context.step.capability, objective: context.step.objective, tool: context.step.tool });
     const identityDigest = await digestJson({ mission_id: context.mission_id, step_id: context.step.id, attempt: context.execution_attempt, argument_digest: argumentDigest });
-    const requestPayload = attachOperation(await (options.requestForStep?.(context) ?? defaultMissionRequest(context, goalDigest, operation)), operation, "mission connector");
+    const subjectDigest = await digestJson({ schema: "bioprism-typescript-autonomous-connector-subject/0.1", mission_id: context.mission_id, step_id: context.step.id, step_digest: stepDigest, goal_digest: goalDigest, argument_digest: argumentDigest, attempt: context.execution_attempt });
+    const requestPayload = attachOperation(await (options.requestForStep?.(context) ?? defaultMissionRequest(context, goalDigest, operation, subjectDigest)), operation, "mission connector", subjectDigest);
     const request = new AutonomousConnectorDispatchRequest({
       dispatch_id: boundedAdapterId(`mission-dispatch-${identityDigest.slice(0, 48)}`, "mission connector dispatch_id"),
       execution_id: boundedAdapterId(`mission-execution-${identityDigest.slice(0, 48)}`, "mission connector execution_id"),
@@ -333,7 +342,7 @@ export function autonomousConnectorMissionStepExecutor(options: AutonomousMissio
       domains: [domain],
       capability: context.step.capability,
       request: requestPayload,
-      parent_digests: [stepDigest, argumentDigest, goalDigest, ...(operation ? [operation.operation_digest] : []), ...(Object.keys(context.dependency_outputs).length ? [await digestJson(context.dependency_outputs)] : [])],
+      parent_digests: [stepDigest, argumentDigest, goalDigest, subjectDigest, ...(operation ? [operation.operation_digest] : []), ...(Object.keys(context.dependency_outputs).length ? [await digestJson(context.dependency_outputs)] : [])],
       attempt_id: boundedAdapterId(`a${context.execution_attempt}`, "mission connector attempt_id"),
       selection_plan_digest: plan.plan.plan_digest,
       approved: options.approved === true,
