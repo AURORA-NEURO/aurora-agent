@@ -18,6 +18,7 @@ use bioprism_brain::{record_brain_outcome, BrainOutcomeRecordRequest};
 use bioprism_ids::ContentHash;
 use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) const CONTROL_SCHEMA: &str = "bioprism-brain-control-plane/0.1";
 pub(crate) const JOB_SCHEMA: &str = "bioprism-brain-job/0.1";
@@ -31,6 +32,9 @@ const MAX_EVENTS: usize = 8_192;
 const MAX_HEALTH_ROWS: usize = 1_024;
 const MAX_ID_BYTES: usize = 256;
 const MAX_REASON_BYTES: usize = 2_048;
+const MAX_PHASE_BYTES: usize = 128;
+const MIN_LEASE_MS: u64 = 100;
+const MAX_LEASE_MS: u64 = 86_400_000;
 const MAX_SIGNAL_COUNT: usize = 64;
 const MAX_REFERENCE_COUNT: usize = 64;
 const MAX_LIMITATION_COUNT: usize = 32;
@@ -59,9 +63,15 @@ struct JobRecord {
     max_attempts: u64,
     state: String,
     attempts: u64,
+    lease_owner: Option<String>,
+    lease_expires_ns: Option<u64>,
     side_effect_boundary: String,
+    recovered_after_restart: bool,
     checkpoint_digest: Option<String>,
     reason_digest: Option<String>,
+    result_digest: Option<String>,
+    reconciliation_outcome: Option<String>,
+    reconciliation_digest: Option<String>,
     created_sequence: u64,
     updated_sequence: u64,
     record_digest: String,
@@ -252,9 +262,15 @@ impl BrainControlState {
             max_attempts,
             state: "queued".into(),
             attempts: 0,
+            lease_owner: None,
+            lease_expires_ns: None,
             side_effect_boundary: "not_started".into(),
+            recovered_after_restart: false,
             checkpoint_digest,
             reason_digest: None,
+            result_digest: None,
+            reconciliation_outcome: None,
+            reconciliation_digest: None,
             created_sequence: 0,
             updated_sequence: 0,
             record_digest: String::new(),
@@ -437,6 +453,453 @@ impl BrainControlState {
             },
             "durability": durability_posture(),
         }))
+    }
+
+    /// Claim a queued job for a bounded worker lease.
+    ///
+    /// This is deliberately a metadata-only lease. The worker still resolves the private
+    /// specification locally and owns provider invocation. An expired lease is recovered before
+    /// a new claim: work before external dispatch returns to the queue, while work at or after
+    /// dispatch is quarantined for reconciliation and is never silently replayed.
+    pub(crate) fn job_claim(&mut self, arguments: &Value) -> Result<Value, String> {
+        let object = object(arguments, "brain_job_claim")?;
+        reject_unknown(object, &["job_id", "worker_id", "lease_ms"])?;
+        let job_id = text(object, "job_id", MAX_ID_BYTES)?;
+        let worker_id = text(object, "worker_id", MAX_ID_BYTES)?;
+        let lease_ms = bounded_u64(object, "lease_ms", MIN_LEASE_MS, MAX_LEASE_MS, 60_000)?;
+        let now = control_now_ns();
+        self.recover_expired_lease(&job_id, now)?;
+        let current = self
+            .jobs
+            .get(&job_id)
+            .cloned()
+            .ok_or_else(|| format!("unknown brain job_id {job_id:?}"))?;
+
+        if matches!(
+            current.state.as_str(),
+            "succeeded" | "failed" | "dead_lettered" | "cancelled"
+        ) {
+            return Ok(job_transition_result(&current, "claim", Value::Null, true));
+        }
+        if current.state == "reconciliation_required" {
+            return Err(
+                "brain job requires operator reconciliation before it can be claimed".into(),
+            );
+        }
+        if current.state == "waiting_approval" {
+            return Err("brain job is waiting for caller approval".into());
+        }
+        if matches!(current.state.as_str(), "leased" | "running") {
+            if current.lease_owner.as_deref() == Some(worker_id.as_str()) {
+                return Ok(job_transition_result(&current, "claim", Value::Null, true));
+            }
+            return Err("brain job is already leased by another worker".into());
+        }
+        if current.state != "queued" {
+            return Err(format!(
+                "cannot claim brain job while it is in state {:?}",
+                current.state
+            ));
+        }
+        if current.attempts >= current.max_attempts {
+            let event = self.append_event(
+                &job_id,
+                "job_dead_lettered",
+                json!({
+                    "reason": "maximum attempts exhausted",
+                    "attempts": current.attempts,
+                    "max_attempts": current.max_attempts,
+                }),
+            )?;
+            let job = self
+                .jobs
+                .get_mut(&job_id)
+                .ok_or_else(|| "brain job disappeared during claim".to_string())?;
+            job.state = "dead_lettered".into();
+            job.lease_owner = None;
+            job.lease_expires_ns = None;
+            update_record_event(job, &event);
+            return Ok(job_transition_result(job, "claim", event, false));
+        }
+
+        let expires = now.saturating_add(lease_ms.saturating_mul(1_000_000));
+        let event = self.append_event(
+            &job_id,
+            "job_claimed",
+            json!({
+                "worker_id_digest": digest_value(&json!(worker_id))?,
+                "lease_expires_ns": expires,
+                "attempts": current.attempts.saturating_add(1),
+            }),
+        )?;
+        let job = self
+            .jobs
+            .get_mut(&job_id)
+            .ok_or_else(|| "brain job disappeared during claim".to_string())?;
+        job.state = "leased".into();
+        job.attempts = job.attempts.saturating_add(1);
+        job.lease_owner = Some(worker_id);
+        job.lease_expires_ns = Some(expires);
+        job.reason_digest = None;
+        update_record_event(job, &event);
+        Ok(job_transition_result(job, "claim", event, false))
+    }
+
+    /// Extend an active lease only when the same worker still owns it.
+    pub(crate) fn job_renew(&mut self, arguments: &Value) -> Result<Value, String> {
+        let object = object(arguments, "brain_job_renew")?;
+        reject_unknown(object, &["job_id", "worker_id", "lease_ms"])?;
+        let job_id = text(object, "job_id", MAX_ID_BYTES)?;
+        let worker_id = text(object, "worker_id", MAX_ID_BYTES)?;
+        let lease_ms = bounded_u64(object, "lease_ms", MIN_LEASE_MS, MAX_LEASE_MS, 60_000)?;
+        let now = control_now_ns();
+        let current = self
+            .jobs
+            .get(&job_id)
+            .cloned()
+            .ok_or_else(|| format!("unknown brain job_id {job_id:?}"))?;
+        require_active_lease(&current, &worker_id, now)?;
+        let expires = now.saturating_add(lease_ms.saturating_mul(1_000_000));
+        let event = self.append_event(
+            &job_id,
+            "job_lease_renewed",
+            json!({
+                "worker_id_digest": digest_value(&json!(worker_id))?,
+                "lease_expires_ns": expires,
+            }),
+        )?;
+        let job = self
+            .jobs
+            .get_mut(&job_id)
+            .ok_or_else(|| "brain job disappeared during lease renewal".to_string())?;
+        job.lease_expires_ns = Some(expires);
+        update_record_event(job, &event);
+        Ok(job_transition_result(job, "renew", event, false))
+    }
+
+    /// Persist a phase/checkpoint digest and optionally pause at an approval boundary.
+    pub(crate) fn job_checkpoint(&mut self, arguments: &Value) -> Result<Value, String> {
+        let object = object(arguments, "brain_job_checkpoint")?;
+        reject_unknown(
+            object,
+            &[
+                "job_id",
+                "worker_id",
+                "phase",
+                "checkpoint_digest",
+                "side_effect_boundary",
+                "waiting_for_approval",
+            ],
+        )?;
+        let job_id = text(object, "job_id", MAX_ID_BYTES)?;
+        let worker_id = text(object, "worker_id", MAX_ID_BYTES)?;
+        let phase = text(object, "phase", MAX_PHASE_BYTES)?;
+        let checkpoint_digest = digest(object, "checkpoint_digest")?;
+        let boundary = text_with_default(object, "side_effect_boundary", "not_started", 32)?;
+        validate_side_effect_boundary(&boundary)?;
+        let waiting_for_approval = bool_with_default(object, "waiting_for_approval", false)?;
+        let now = control_now_ns();
+        let current = self
+            .jobs
+            .get(&job_id)
+            .cloned()
+            .ok_or_else(|| format!("unknown brain job_id {job_id:?}"))?;
+        require_active_lease(&current, &worker_id, now)?;
+        if boundary_order(&boundary) < boundary_order(&current.side_effect_boundary) {
+            return Err("side_effect_boundary cannot move backwards".into());
+        }
+        let next_state = if waiting_for_approval {
+            "waiting_approval"
+        } else {
+            "running"
+        };
+        let event = self.append_event(
+            &job_id,
+            "job_checkpointed",
+            json!({
+                "worker_id_digest": digest_value(&json!(worker_id))?,
+                "phase": phase,
+                "checkpoint_digest": checkpoint_digest,
+                "side_effect_boundary": boundary,
+                "state": next_state,
+            }),
+        )?;
+        let job = self
+            .jobs
+            .get_mut(&job_id)
+            .ok_or_else(|| "brain job disappeared during checkpoint".to_string())?;
+        job.state = next_state.into();
+        job.checkpoint_digest = Some(checkpoint_digest);
+        job.side_effect_boundary = boundary;
+        if waiting_for_approval {
+            job.lease_owner = None;
+            job.lease_expires_ns = None;
+        } else {
+            job.lease_owner = Some(worker_id);
+        }
+        job.reason_digest = None;
+        update_record_event(job, &event);
+        Ok(job_transition_result(job, "checkpoint", event, false))
+    }
+
+    /// Complete a leased job with a digest-bound caller-owned result.
+    pub(crate) fn job_complete(&mut self, arguments: &Value) -> Result<Value, String> {
+        let object = object(arguments, "brain_job_complete")?;
+        reject_unknown(object, &["job_id", "worker_id", "result_digest"])?;
+        let job_id = text(object, "job_id", MAX_ID_BYTES)?;
+        let worker_id = text(object, "worker_id", MAX_ID_BYTES)?;
+        let result_digest = digest(object, "result_digest")?;
+        let current = self
+            .jobs
+            .get(&job_id)
+            .cloned()
+            .ok_or_else(|| format!("unknown brain job_id {job_id:?}"))?;
+        require_active_lease(&current, &worker_id, control_now_ns())?;
+        let event = self.append_event(
+            &job_id,
+            "job_completed",
+            json!({
+                "worker_id_digest": digest_value(&json!(worker_id))?,
+                "result_digest": result_digest,
+            }),
+        )?;
+        let job = self
+            .jobs
+            .get_mut(&job_id)
+            .ok_or_else(|| "brain job disappeared during completion".to_string())?;
+        job.state = "succeeded".into();
+        job.lease_owner = None;
+        job.lease_expires_ns = None;
+        job.result_digest = Some(result_digest);
+        job.reason_digest = None;
+        update_record_event(job, &event);
+        Ok(job_transition_result(job, "complete", event, false))
+    }
+
+    /// Fail a leased job, retrying only before an external-effect boundary.
+    pub(crate) fn job_fail(&mut self, arguments: &Value) -> Result<Value, String> {
+        let object = object(arguments, "brain_job_fail")?;
+        reject_unknown(object, &["job_id", "worker_id", "reason", "retryable"])?;
+        let job_id = text(object, "job_id", MAX_ID_BYTES)?;
+        let worker_id = text(object, "worker_id", MAX_ID_BYTES)?;
+        let reason = text(object, "reason", MAX_REASON_BYTES)?;
+        let retryable = bool_with_default(object, "retryable", false)?;
+        let current = self
+            .jobs
+            .get(&job_id)
+            .cloned()
+            .ok_or_else(|| format!("unknown brain job_id {job_id:?}"))?;
+        require_active_lease(&current, &worker_id, control_now_ns())?;
+        let reason_digest = digest_value(&json!(reason))?;
+        let (state, event_type) = if matches!(
+            current.side_effect_boundary.as_str(),
+            "dispatched" | "unknown"
+        ) {
+            ("reconciliation_required", "job_reconciliation_required")
+        } else if retryable && current.attempts < current.max_attempts {
+            ("queued", "job_retry_queued")
+        } else if current.attempts >= current.max_attempts {
+            ("dead_lettered", "job_dead_lettered")
+        } else {
+            ("failed", "job_failed")
+        };
+        let event = self.append_event(
+            &job_id,
+            event_type,
+            json!({
+                "worker_id_digest": digest_value(&json!(worker_id))?,
+                "reason_digest": reason_digest,
+                "retryable": retryable,
+                "side_effect_boundary": current.side_effect_boundary,
+            }),
+        )?;
+        let job = self
+            .jobs
+            .get_mut(&job_id)
+            .ok_or_else(|| "brain job disappeared during failure".to_string())?;
+        job.state = state.into();
+        job.lease_owner = None;
+        job.lease_expires_ns = None;
+        job.reason_digest = Some(reason_digest);
+        update_record_event(job, &event);
+        Ok(job_transition_result(job, "fail", event, false))
+    }
+
+    /// Resolve an uncertain external effect without implicitly replaying it.
+    pub(crate) fn job_reconcile(&mut self, arguments: &Value) -> Result<Value, String> {
+        let object = object(arguments, "brain_job_reconcile")?;
+        reject_unknown(
+            object,
+            &[
+                "job_id",
+                "outcome",
+                "evidence_digest",
+                "evidence_kind",
+                "operator",
+                "reason",
+                "effect_absent",
+            ],
+        )?;
+        let job_id = text(object, "job_id", MAX_ID_BYTES)?;
+        let outcome = text(object, "outcome", 32)?;
+        if !matches!(
+            outcome.as_str(),
+            "succeeded" | "failed" | "not_executed" | "unknown"
+        ) {
+            return Err("outcome must be succeeded, failed, not_executed, or unknown".into());
+        }
+        let evidence_digest = digest(object, "evidence_digest")?;
+        let evidence_kind = text_with_default(object, "evidence_kind", "caller_observation", 128)?;
+        let operator = text_with_default(object, "operator", "caller", MAX_ID_BYTES)?;
+        let reason = text_with_default(
+            object,
+            "reason",
+            "caller reconciled uncertain external state",
+            MAX_REASON_BYTES,
+        )?;
+        let effect_absent = bool_with_default(object, "effect_absent", false)?;
+        if outcome == "not_executed" && !effect_absent {
+            return Err("not_executed reconciliation requires effect_absent=true".into());
+        }
+        let decision = json!({
+            "schema": "bioprism-brain-job-reconciliation/0.1",
+            "outcome": outcome,
+            "evidence_digest": evidence_digest,
+            "evidence_kind": evidence_kind,
+            "operator": operator,
+            "reason_digest": digest_value(&json!(reason))?,
+            "effect_absent": effect_absent,
+        });
+        let decision_digest = digest_value(&decision)?;
+        let current = self
+            .jobs
+            .get(&job_id)
+            .cloned()
+            .ok_or_else(|| format!("unknown brain job_id {job_id:?}"))?;
+        if current.reconciliation_digest.as_deref() == Some(decision_digest.as_str()) {
+            return Ok(job_transition_result(
+                &current,
+                "reconcile",
+                Value::Null,
+                true,
+            ));
+        }
+        if current.state != "reconciliation_required" {
+            return Err("brain job is not awaiting reconciliation".into());
+        }
+        if current.reconciliation_outcome.is_some()
+            && current.reconciliation_outcome.as_deref() != Some("unknown")
+        {
+            return Err("job already has a different reconciliation decision".into());
+        }
+        if outcome == "not_executed" && current.attempts >= current.max_attempts {
+            return Err("reconciliation retry is unavailable after maximum attempts".into());
+        }
+        let (state, event_type, boundary) = match outcome.as_str() {
+            "succeeded" => (
+                "succeeded",
+                "job_reconciled_succeeded",
+                current.side_effect_boundary.clone(),
+            ),
+            "failed" => (
+                "failed",
+                "job_reconciled_failed",
+                current.side_effect_boundary.clone(),
+            ),
+            "not_executed" => (
+                "queued",
+                "job_reconciliation_retry_queued",
+                "not_started".into(),
+            ),
+            _ => (
+                "reconciliation_required",
+                "job_reconciliation_deferred",
+                current.side_effect_boundary.clone(),
+            ),
+        };
+        let event = self.append_event(
+            &job_id,
+            event_type,
+            json!({
+                "decision_digest": decision_digest,
+                "outcome": outcome,
+                "evidence_digest": evidence_digest,
+                "evidence_kind": evidence_kind,
+                "operator": operator,
+                "reason_digest": digest_value(&json!(reason))?,
+                "effect_absent": effect_absent,
+                "side_effect_boundary": boundary,
+            }),
+        )?;
+        let job = self
+            .jobs
+            .get_mut(&job_id)
+            .ok_or_else(|| "brain job disappeared during reconciliation".to_string())?;
+        job.state = state.into();
+        job.side_effect_boundary = boundary;
+        job.lease_owner = None;
+        job.lease_expires_ns = None;
+        job.reason_digest = Some(digest_value(&json!(reason))?);
+        job.reconciliation_outcome = Some(outcome);
+        job.reconciliation_digest = Some(decision_digest);
+        update_record_event(job, &event);
+        Ok(job_transition_result(job, "reconcile", event, false))
+    }
+
+    fn recover_expired_lease(&mut self, job_id: &str, now: u64) -> Result<(), String> {
+        let current = self
+            .jobs
+            .get(job_id)
+            .cloned()
+            .ok_or_else(|| format!("unknown brain job_id {job_id:?}"))?;
+        let Some(expires) = current.lease_expires_ns else {
+            return Ok(());
+        };
+        if !matches!(current.state.as_str(), "leased" | "running") || expires > now {
+            return Ok(());
+        }
+        let unsafe_boundary = matches!(
+            current.side_effect_boundary.as_str(),
+            "dispatched" | "unknown"
+        );
+        let state = if unsafe_boundary {
+            "reconciliation_required"
+        } else {
+            "queued"
+        };
+        let event_type = if unsafe_boundary {
+            "job_reconciliation_required"
+        } else {
+            "job_lease_expired"
+        };
+        let reason = if unsafe_boundary {
+            "lease expired after or near external dispatch; operator reconciliation required"
+        } else {
+            "lease expired before external dispatch; job returned to queue"
+        };
+        let event = self.append_event(
+            job_id,
+            event_type,
+            json!({
+                "previous_state": current.state,
+                "previous_worker_id_digest": current.lease_owner.map(|worker| digest_value(&json!(worker))).transpose()?,
+                "previous_lease_expires_ns": expires,
+                "side_effect_boundary": current.side_effect_boundary,
+                "recovered_state": state,
+                "reason_digest": digest_value(&json!(reason))?,
+            }),
+        )?;
+        let job = self
+            .jobs
+            .get_mut(job_id)
+            .ok_or_else(|| "brain job disappeared during lease recovery".to_string())?;
+        job.state = state.into();
+        job.lease_owner = None;
+        job.lease_expires_ns = None;
+        job.recovered_after_restart = true;
+        job.reason_digest = Some(digest_value(&json!(reason))?);
+        update_record_event(job, &event);
+        Ok(())
     }
 
     pub(crate) fn model_health(&mut self, arguments: &Value) -> Result<Value, String> {
@@ -875,6 +1338,78 @@ impl BrainControlState {
     }
 }
 
+fn control_now_ns() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos().min(u64::MAX as u128) as u64)
+        .unwrap_or(0)
+}
+
+fn validate_side_effect_boundary(boundary: &str) -> Result<(), String> {
+    if matches!(
+        boundary,
+        "not_started" | "preflight" | "dispatched" | "unknown"
+    ) {
+        Ok(())
+    } else {
+        Err("side_effect_boundary must be not_started, preflight, dispatched, or unknown".into())
+    }
+}
+
+fn boundary_order(boundary: &str) -> u8 {
+    match boundary {
+        "not_started" => 0,
+        "preflight" => 1,
+        "dispatched" => 2,
+        "unknown" => 3,
+        _ => u8::MAX,
+    }
+}
+
+fn require_active_lease(job: &JobRecord, worker_id: &str, now: u64) -> Result<(), String> {
+    if !matches!(job.state.as_str(), "leased" | "running") {
+        return Err(format!(
+            "brain job must be leased or running; current state is {:?}",
+            job.state
+        ));
+    }
+    if job.lease_owner.as_deref() != Some(worker_id) {
+        return Err("brain job lease is owned by another worker".into());
+    }
+    if job.lease_expires_ns.is_none_or(|expires| expires <= now) {
+        return Err("brain job lease has expired".into());
+    }
+    Ok(())
+}
+
+fn update_record_event(job: &mut JobRecord, event: &Value) {
+    job.updated_sequence = event
+        .get("sequence")
+        .and_then(Value::as_u64)
+        .unwrap_or(job.updated_sequence);
+    if let Some(digest) = event.get("event_digest").and_then(Value::as_str) {
+        job.record_digest = digest.to_string();
+    }
+}
+
+fn job_transition_result(
+    job: &JobRecord,
+    operation: &str,
+    event: Value,
+    idempotent: bool,
+) -> Value {
+    json!({
+        "schema": CONTROL_SCHEMA,
+        "ok": true,
+        "operation": operation,
+        "idempotent": idempotent,
+        "job": job.to_value(),
+        "event": event,
+        "retention": "metadata_only_hash_chained",
+        "durability": durability_posture(),
+    })
+}
+
 impl JobRecord {
     fn to_value(&self) -> Value {
         json!({
@@ -889,12 +1424,15 @@ impl JobRecord {
             "max_attempts": self.max_attempts,
             "state": self.state,
             "attempts": self.attempts,
-            "lease_owner": Value::Null,
-            "lease_expires_ns": Value::Null,
+            "lease_owner": self.lease_owner,
+            "lease_expires_ns": self.lease_expires_ns,
             "checkpoint_digest": self.checkpoint_digest,
             "side_effect_boundary": self.side_effect_boundary,
-            "recovered_after_restart": false,
+            "recovered_after_restart": self.recovered_after_restart,
             "reason_digest": self.reason_digest,
+            "result_digest": self.result_digest,
+            "reconciliation_outcome": self.reconciliation_outcome,
+            "reconciliation_digest": self.reconciliation_digest,
             "created_sequence": self.created_sequence,
             "updated_sequence": self.updated_sequence,
             "record_digest": self.record_digest,
@@ -1306,6 +1844,36 @@ pub(crate) fn tool_definitions() -> Vec<Value> {
             "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"job_id": {"type": "string", "maxLength": 256}, "action": {"type": "string", "enum": ["request", "approve", "deny"]}, "reason": {"type": "string", "maxLength": 2048}, "authorization_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}, "required": ["job_id", "action"]}
         }),
         json!({
+            "name": "brain_job_claim",
+            "description": "Atomically claim a queued metadata-only brain job for a bounded worker lease. Expired work before dispatch is requeued; expired work at or after dispatch is quarantined for reconciliation. Worker identifiers are digested in the event journal and never authorize provider access.",
+            "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"job_id": {"type": "string", "maxLength": 256}, "worker_id": {"type": "string", "maxLength": 256}, "lease_ms": {"type": "integer", "minimum": 100, "maximum": 86400000}}, "required": ["job_id", "worker_id"]}
+        }),
+        json!({
+            "name": "brain_job_renew",
+            "description": "Renew an active brain job lease only for its current worker owner. Renewal never changes the side-effect boundary and refuses expired or mismatched leases.",
+            "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"job_id": {"type": "string", "maxLength": 256}, "worker_id": {"type": "string", "maxLength": 256}, "lease_ms": {"type": "integer", "minimum": 100, "maximum": 86400000}}, "required": ["job_id", "worker_id"]}
+        }),
+        json!({
+            "name": "brain_job_checkpoint",
+            "description": "Persist a digest-bound execution phase and monotonic side-effect boundary for an owned job. Checkpoint payloads remain caller-owned. waiting_for_approval releases the lease and prevents dispatch until approval returns the job to queued.",
+            "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"job_id": {"type": "string", "maxLength": 256}, "worker_id": {"type": "string", "maxLength": 256}, "phase": {"type": "string", "maxLength": 128}, "checkpoint_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "side_effect_boundary": {"type": "string", "enum": ["not_started", "preflight", "dispatched", "unknown"]}, "waiting_for_approval": {"type": "boolean"}}, "required": ["job_id", "worker_id", "phase", "checkpoint_digest"]}
+        }),
+        json!({
+            "name": "brain_job_complete",
+            "description": "Complete an owned active job with a digest-bound caller-owned result. The result body and provider response never cross this value-only control-plane boundary.",
+            "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"job_id": {"type": "string", "maxLength": 256}, "worker_id": {"type": "string", "maxLength": 256}, "result_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}, "required": ["job_id", "worker_id", "result_digest"]}
+        }),
+        json!({
+            "name": "brain_job_fail",
+            "description": "Record a bounded worker failure. Retryable failures before external dispatch return to queued; failures at or after dispatch enter reconciliation_required; exhausted attempts dead-letter without replay.",
+            "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"job_id": {"type": "string", "maxLength": 256}, "worker_id": {"type": "string", "maxLength": 256}, "reason": {"type": "string", "maxLength": 2048}, "retryable": {"type": "boolean"}}, "required": ["job_id", "worker_id", "reason"]}
+        }),
+        json!({
+            "name": "brain_job_reconcile",
+            "description": "Resolve an uncertain external effect with caller-supplied evidence digest and bounded operator metadata. succeeded/failed close the job; not_executed can requeue only with effect_absent=true; unknown records a deferred decision and remains quarantined.",
+            "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"job_id": {"type": "string", "maxLength": 256}, "outcome": {"type": "string", "enum": ["succeeded", "failed", "not_executed", "unknown"]}, "evidence_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "evidence_kind": {"type": "string", "maxLength": 128}, "operator": {"type": "string", "maxLength": 256}, "reason": {"type": "string", "maxLength": 2048}, "effect_absent": {"type": "boolean"}}, "required": ["job_id", "outcome", "evidence_digest"]}
+        }),
+        json!({
             "name": "brain_model_health",
             "description": "Record or inspect bounded provider/model health. Only status, latency, quality, usage counts, registration posture, and credential readiness booleans are accepted; no credential material or provider payload is accepted.",
             "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"operation": {"type": "string", "enum": ["snapshot", "record"]}, "provider": {"type": "string", "maxLength": 256}, "model": {"type": "string", "maxLength": 256}, "status": {"type": "string", "enum": ["success", "failure", "timeout", "rate_limited", "circuit_open", "unknown"]}, "latency_ms": {"type": "integer", "minimum": 0, "maximum": 600000}, "quality": {"type": "number", "minimum": 0, "maximum": 1}, "tokens": {"type": "integer", "minimum": 0, "maximum": 1000000000}, "registered": {"type": "boolean"}, "credential_ready": {"type": "boolean"}, "eligible": {"type": "boolean"}}, "required": []}
@@ -1347,6 +1915,124 @@ mod tests {
         assert!(state
             .job_approval(&json!({"job_id": job_id, "action": "approve"}))
             .is_err());
+    }
+
+    #[test]
+    fn lifecycle_claim_checkpoint_retry_reconcile_and_complete_are_fail_closed() {
+        let mut state = BrainControlState::default();
+        let submitted = state
+            .submit_job(&json!({
+                "idempotency_key": "lifecycle-001",
+                "spec_digest": "a".repeat(64),
+                "domain": "engineering",
+                "capability": "code_change",
+                "risk_class": "reversible",
+                "max_attempts": 3,
+            }))
+            .unwrap();
+        let job_id = submitted["job"]["job_id"].as_str().unwrap().to_string();
+        let claim = state
+            .job_claim(&json!({
+                "job_id": job_id,
+                "worker_id": "worker-a",
+                "lease_ms": 100,
+            }))
+            .unwrap();
+        assert_eq!(claim["job"]["state"], json!("leased"));
+        assert_eq!(claim["job"]["attempts"], json!(1));
+        assert!(state
+            .job_renew(&json!({
+                "job_id": claim["job"]["job_id"],
+                "worker_id": "worker-b",
+                "lease_ms": 100,
+            }))
+            .is_err());
+        let checkpoint = state
+            .job_checkpoint(&json!({
+                "job_id": claim["job"]["job_id"],
+                "worker_id": "worker-a",
+                "phase": "preflight",
+                "checkpoint_digest": "b".repeat(64),
+                "side_effect_boundary": "preflight",
+            }))
+            .unwrap();
+        assert_eq!(checkpoint["job"]["state"], json!("running"));
+        let retry = state
+            .job_fail(&json!({
+                "job_id": claim["job"]["job_id"],
+                "worker_id": "worker-a",
+                "reason": "provider timeout before dispatch",
+                "retryable": true,
+            }))
+            .unwrap();
+        assert_eq!(retry["job"]["state"], json!("queued"));
+
+        let second_claim = state
+            .job_claim(&json!({
+                "job_id": claim["job"]["job_id"],
+                "worker_id": "worker-c",
+                "lease_ms": 100,
+            }))
+            .unwrap();
+        state
+            .job_checkpoint(&json!({
+                "job_id": second_claim["job"]["job_id"],
+                "worker_id": "worker-c",
+                "phase": "dispatch",
+                "checkpoint_digest": "c".repeat(64),
+                "side_effect_boundary": "dispatched",
+            }))
+            .unwrap();
+        let quarantined = state
+            .job_fail(&json!({
+                "job_id": second_claim["job"]["job_id"],
+                "worker_id": "worker-c",
+                "reason": "worker lost response after dispatch",
+                "retryable": true,
+            }))
+            .unwrap();
+        assert_eq!(
+            quarantined["job"]["state"],
+            json!("reconciliation_required")
+        );
+        assert!(state
+            .job_reconcile(&json!({
+                "job_id": second_claim["job"]["job_id"],
+                "outcome": "not_executed",
+                "evidence_digest": "d".repeat(64),
+            }))
+            .is_err());
+        let requeued = state
+            .job_reconcile(&json!({
+                "job_id": second_claim["job"]["job_id"],
+                "outcome": "not_executed",
+                "evidence_digest": "d".repeat(64),
+                "effect_absent": true,
+            }))
+            .unwrap();
+        assert_eq!(requeued["job"]["state"], json!("queued"));
+        assert_eq!(
+            requeued["job"]["side_effect_boundary"],
+            json!("not_started")
+        );
+
+        let final_claim = state
+            .job_claim(&json!({
+                "job_id": second_claim["job"]["job_id"],
+                "worker_id": "worker-d",
+                "lease_ms": 100,
+            }))
+            .unwrap();
+        let completed = state
+            .job_complete(&json!({
+                "job_id": final_claim["job"]["job_id"],
+                "worker_id": "worker-d",
+                "result_digest": "e".repeat(64),
+            }))
+            .unwrap();
+        assert_eq!(completed["job"]["state"], json!("succeeded"));
+        assert_eq!(completed["job"]["result_digest"], json!("e".repeat(64)));
+        assert_eq!(completed["job"]["lease_owner"], Value::Null);
     }
 
     #[test]

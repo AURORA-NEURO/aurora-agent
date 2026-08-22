@@ -324,6 +324,13 @@ task/prompt/credential/provider values caller-owned, bind idempotency to digests
 bound retries, quarantine uncertain post-dispatch work, and expose restart-checked metadata
 snapshots. These close local scheduling and SDK portability gaps; multi-host consensus, tenant
 fairness, external delivery guarantees, and provider-specific execution remain absent.
+The MCP control-plane projection now also exposes the matching remote lifecycle vocabulary:
+`brain_job_claim`, `brain_job_renew`, `brain_job_checkpoint`, `brain_job_complete`,
+`brain_job_fail`, and `brain_job_reconcile`. The TypeScript `AutonomousDurableJobController`
+claims and renews its worker lease, records a digest-only execution admission before entering the
+local provider boundary, and settles completion or failure without sending payloads. The Rust
+projection remains process-scoped; Python `BrainJobStore` is still the restart-safe authority and
+multi-host persistence, authentication, and external effect verification remain deployment-owned.
 Python now also includes a credentialless `local-offline` built-in connector adapter covering all
 twelve operation contracts. It projects caller-supplied fixture metadata into digests, shapes,
 counts, and explicit `observed`/`partial` outcomes so routing, approval, worker recovery, replay,

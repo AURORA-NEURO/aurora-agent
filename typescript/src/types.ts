@@ -808,6 +808,9 @@ export interface BrainJobRecord extends JsonObject {
   side_effect_boundary: string;
   recovered_after_restart: boolean;
   reason_digest?: string | null;
+  result_digest?: string | null;
+  reconciliation_outcome?: BrainJobReconcileOutcome | null;
+  reconciliation_digest?: string | null;
   created_sequence: number;
   updated_sequence: number;
   record_digest: string;
@@ -867,6 +870,65 @@ export interface BrainJobEventsResult extends JsonObject {
   chain: "sha256_prev_digest" | string;
   retention: string;
   durability: BrainControlDurability;
+}
+
+export interface BrainJobLifecycleResult extends JsonObject {
+  schema: string;
+  ok: boolean;
+  operation: "claim" | "renew" | "checkpoint" | "complete" | "fail" | "reconcile" | string;
+  idempotent: boolean;
+  job: BrainJobRecord;
+  event: BrainControlEvent | null;
+  retention: string;
+  durability: BrainControlDurability;
+}
+
+export interface BrainJobClaimArgs extends JsonObject {
+  job_id: string;
+  worker_id: string;
+  lease_ms?: number;
+}
+
+export interface BrainJobRenewArgs extends JsonObject {
+  job_id: string;
+  worker_id: string;
+  lease_ms?: number;
+}
+
+export type BrainJobSideEffectBoundary = "not_started" | "preflight" | "dispatched" | "unknown";
+
+export interface BrainJobCheckpointArgs extends JsonObject {
+  job_id: string;
+  worker_id: string;
+  phase: string;
+  checkpoint_digest: string;
+  side_effect_boundary?: BrainJobSideEffectBoundary;
+  waiting_for_approval?: boolean;
+}
+
+export interface BrainJobCompleteArgs extends JsonObject {
+  job_id: string;
+  worker_id: string;
+  result_digest: string;
+}
+
+export interface BrainJobFailArgs extends JsonObject {
+  job_id: string;
+  worker_id: string;
+  reason: string;
+  retryable?: boolean;
+}
+
+export type BrainJobReconcileOutcome = "succeeded" | "failed" | "not_executed" | "unknown";
+
+export interface BrainJobReconcileArgs extends JsonObject {
+  job_id: string;
+  outcome: BrainJobReconcileOutcome;
+  evidence_digest: string;
+  evidence_kind?: string;
+  operator?: string;
+  reason?: string;
+  effect_absent?: boolean;
 }
 
 export type BrainJobApprovalAction = "request" | "approve" | "deny";

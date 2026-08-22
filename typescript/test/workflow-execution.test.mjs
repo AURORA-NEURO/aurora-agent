@@ -770,6 +770,32 @@ test("durable job controller sends only metadata, preserves server approval, and
       serverState = args.action === "request" ? "waiting_approval" : "queued";
       return projection({ job: { ...job, state: serverState }, authorization: { posture: "caller_proof", verified_by_server: false, execution: "not_started" } });
     },
+    async brainJobClaim(args) {
+      seen.push({ operation: "claim", args });
+      serverState = "leased";
+      job.attempts += 1;
+      return projection({ operation: "claim", idempotent: false, job: { ...job, state: serverState, attempts: job.attempts, lease_owner: args.worker_id, lease_expires_ns: 1 } });
+    },
+    async brainJobRenew(args) {
+      seen.push({ operation: "renew", args });
+      return projection({ operation: "renew", idempotent: false, job: { ...job, state: serverState, lease_owner: args.worker_id, lease_expires_ns: 2 } });
+    },
+    async brainJobCheckpoint(args) {
+      seen.push({ operation: "checkpoint", args });
+      serverState = args.waiting_for_approval ? "waiting_approval" : "running";
+      job.side_effect_boundary = args.side_effect_boundary;
+      return projection({ operation: "checkpoint", idempotent: false, job: { ...job, state: serverState, side_effect_boundary: args.side_effect_boundary, checkpoint_digest: args.checkpoint_digest } });
+    },
+    async brainJobComplete(args) {
+      seen.push({ operation: "complete", args });
+      serverState = "succeeded";
+      return projection({ operation: "complete", idempotent: false, job: { ...job, state: serverState, result_digest: args.result_digest, lease_owner: null, lease_expires_ns: null } });
+    },
+    async brainJobFail(args) {
+      seen.push({ operation: "fail", args });
+      serverState = "reconciliation_required";
+      return projection({ operation: "fail", idempotent: false, job: { ...job, state: serverState, lease_owner: null, lease_expires_ns: null } });
+    },
   };
   const llm = new LLMRuntime({
     credentials: new CredentialStore(),
@@ -798,6 +824,10 @@ test("durable job controller sends only metadata, preserves server approval, and
   assert.equal(executed.local.status, "paused");
   assert.equal(executed.local.completed_stage_count, 1);
   assert.equal(calls, 1);
+  assert.equal(executed.job.state, "running");
+  assert.ok(seen.some((row) => row.operation === "claim"));
+  assert.ok(seen.some((row) => row.operation === "renew"));
+  assert.ok(seen.filter((row) => row.operation === "checkpoint").length >= 2);
   assert.ok(seen.every((row) => !Object.prototype.hasOwnProperty.call(row.args, "prompt")));
 
   serverState = "queued";

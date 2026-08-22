@@ -57,7 +57,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `POST /v1/domain-workflows/reconciliations/persistence/flush` | Force an atomic reconciliation registry checkpoint |
 | `GET /v1/tools` | The exact MCP tool definitions |
 | `POST /v1/tools/{name}` | Call any tool with a JSON object body; delegates to the MCP dispatcher |
-| `POST /v1/tools/brain_job_submit`, `POST /v1/tools/brain_job_status`, `POST /v1/tools/brain_job_events`, `POST /v1/tools/brain_job_approval` | Value-only autonomous-brain job admission, status, cursor events, and caller-authenticated approval checkpoints |
+| `POST /v1/tools/brain_job_submit`, `POST /v1/tools/brain_job_status`, `POST /v1/tools/brain_job_events`, `POST /v1/tools/brain_job_approval`, `POST /v1/tools/brain_job_claim`, `POST /v1/tools/brain_job_renew`, `POST /v1/tools/brain_job_checkpoint`, `POST /v1/tools/brain_job_complete`, `POST /v1/tools/brain_job_fail`, `POST /v1/tools/brain_job_reconcile` | Value-only autonomous-brain admission, observation, approval, lease, checkpoint, settlement, retry, and external-effect reconciliation operations |
 | `POST /v1/tools/brain_model_health`, `POST /v1/tools/brain_replay_evaluate` | Value-only provider/model health observations and digest-bound offline domain replay |
 | `POST /v1/missions` | Validate and submit an asynchronous `agent_mission` job |
 | `GET /v1/missions/persistence` | Inspect bounded checkpoint configuration and on-disk size |

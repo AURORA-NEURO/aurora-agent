@@ -22,6 +22,7 @@ import { digestJson } from "./tooling.js";
 import type {
   BrainJobApprovalResult,
   BrainJobEventsResult,
+  BrainJobLifecycleResult,
   BrainJobRecord,
   BrainJobStatusResult,
   JsonObject,
@@ -230,7 +231,7 @@ export interface AutonomousDurableJobExecutionResult {
   schema: typeof AUTONOMOUS_DURABLE_JOB_SCHEMA;
   job: BrainJobRecord;
   local: AutonomousWorkflowExecutionResult;
-  server_job_posture: "control_plane_projection;completion_requires_external_worker_reconciliation";
+  server_job_posture: "control_plane_projection;completion_requires_external_worker_reconciliation" | "control_plane_projection;worker_lifecycle_recorded;durable_authority_remains_brain_job_store";
   private_spec: "caller_owned;task_prompt_response_and_credentials_not_sent_to_control_plane";
 }
 
@@ -1081,12 +1082,40 @@ export class AutonomousDurableJobController {
   readonly agent: AutonomousAgent;
   readonly apiClient: ApiClient;
   readonly executor: AutonomousWorkflowExecutor;
+  readonly workerId: string;
 
-  constructor(agent: AutonomousAgent, apiClient: ApiClient, store: AutonomousWorkflowCheckpointStore) {
+  constructor(agent: AutonomousAgent, apiClient: ApiClient, store: AutonomousWorkflowCheckpointStore, workerId = "typescript-durable-worker") {
     if (!apiClient || typeof apiClient.brainJobSubmit !== "function" || typeof apiClient.brainJobStatus !== "function" || typeof apiClient.brainJobEvents !== "function" || typeof apiClient.brainJobApproval !== "function") throw new ArgumentError("durable job controller requires brain job ApiClient methods");
+    if (typeof workerId !== "string" || !workerId.trim() || workerId.length > 256 || !/^[A-Za-z][A-Za-z0-9_.:+-]*$/.test(workerId)) throw new ArgumentError("durable job controller workerId must be a bounded identifier");
     this.agent = agent;
     this.apiClient = apiClient;
     this.executor = new AutonomousWorkflowExecutor(agent, store);
+    this.workerId = workerId;
+  }
+
+  private lifecycleAvailable(): boolean {
+    const client = this.apiClient as unknown as Record<string, unknown>;
+    return ["brainJobClaim", "brainJobRenew", "brainJobCheckpoint", "brainJobComplete", "brainJobFail"].every((name) => typeof client[name] === "function");
+  }
+
+  private async lifecycleClaim(jobId: string): Promise<BrainJobLifecycleResult> {
+    return projectControlPlane(await this.apiClient.brainJobClaim({ job_id: jobId, worker_id: this.workerId, lease_ms: 300_000 }), "brain job claim");
+  }
+
+  private async lifecycleRenew(jobId: string): Promise<BrainJobLifecycleResult> {
+    return projectControlPlane(await this.apiClient.brainJobRenew({ job_id: jobId, worker_id: this.workerId, lease_ms: 300_000 }), "brain job renew");
+  }
+
+  private async lifecycleCheckpoint(jobId: string, checkpointDigest: string, phase: string, sideEffectBoundary: "not_started" | "preflight" | "dispatched" | "unknown", waitingForApproval: boolean): Promise<BrainJobLifecycleResult> {
+    return projectControlPlane(await this.apiClient.brainJobCheckpoint({ job_id: jobId, worker_id: this.workerId, phase, checkpoint_digest: checkpointDigest, side_effect_boundary: sideEffectBoundary, waiting_for_approval: waitingForApproval }), "brain job checkpoint");
+  }
+
+  private async lifecycleComplete(jobId: string, resultDigest: string): Promise<BrainJobLifecycleResult> {
+    return projectControlPlane(await this.apiClient.brainJobComplete({ job_id: jobId, worker_id: this.workerId, result_digest: resultDigest }), "brain job complete");
+  }
+
+  private async lifecycleFail(jobId: string, reason: string, retryable: boolean): Promise<BrainJobLifecycleResult> {
+    return projectControlPlane(await this.apiClient.brainJobFail({ job_id: jobId, worker_id: this.workerId, reason, retryable }), "brain job fail");
   }
 
   async submit(task: string, options: AutonomousDurableJobSubmitOptions): Promise<AutonomousDurableJobSubmission> {
@@ -1122,14 +1151,45 @@ export class AutonomousDurableJobController {
 
   async execute(jobId: string, task: string, options: Omit<AutonomousWorkflowExecuteOptions, "jobId"> = {}): Promise<AutonomousDurableJobExecutionResult> {
     const normalizedJobId = boundedJobId(jobId);
-    const server = await this.status(normalizedJobId);
+    let server = await this.status(normalizedJobId);
     if (server.job.state === "waiting_approval") {
       return { schema: AUTONOMOUS_DURABLE_JOB_SCHEMA, job: server.job, local: { schema: AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA, status: "approval_required", job_id: normalizedJobId, blueprint: null, checkpoint: null, route: null, semantic_route_status: null, events: [], stage_results: [], completed_stage_count: 0, total_stage_count: 0, plan_refinement_digest: null, learning_episode_ids: [], recovery: "caller_rehydrates_task_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only" }, server_job_posture: "control_plane_projection;completion_requires_external_worker_reconciliation", private_spec: "caller_owned;task_prompt_response_and_credentials_not_sent_to_control_plane" };
     }
-    if (server.job.state !== "queued") throw new ProviderRuntimeError(`brain job ${normalizedJobId} is not executable in state ${server.job.state}`);
+    const lifecycle = this.lifecycleAvailable();
+    if (lifecycle) {
+      if (!["queued", "leased", "running"].includes(server.job.state)) throw new ProviderRuntimeError(`brain job ${normalizedJobId} is not executable in state ${server.job.state}`);
+      const claimed = await this.lifecycleClaim(normalizedJobId);
+      server = { ...server, job: claimed.job };
+    } else if (server.job.state !== "queued") {
+      throw new ProviderRuntimeError(`brain job ${normalizedJobId} is not executable in state ${server.job.state}`);
+    }
     if (!AUTONOMOUS_DOMAIN_NAMES.includes(server.job.domain as AutonomousDomainName)) throw new ProviderRuntimeError(`brain job ${normalizedJobId} has an unsupported autonomous domain`);
+    if (lifecycle) {
+      const admissionDigest = await digestJson({ job_id: normalizedJobId, spec_digest: server.job.spec_digest, worker_id: this.workerId, phase: "execution_admitted" });
+      // The controller cannot observe the exact instant a provider side effect begins inside the
+      // local executor. Mark the remote boundary unknown before entering it so a thrown provider
+      // error or worker crash can never be retried as if no external effect might have occurred.
+      await this.lifecycleCheckpoint(normalizedJobId, admissionDigest, "execution_admitted", "unknown", false);
+    }
     const local = await this.executor.start(task, { ...options, domain: server.job.domain as AutonomousDomainName, jobId: normalizedJobId });
-    const refreshed = await this.status(normalizedJobId);
-    return { schema: AUTONOMOUS_DURABLE_JOB_SCHEMA, job: refreshed.job, local, server_job_posture: "control_plane_projection;completion_requires_external_worker_reconciliation", private_spec: "caller_owned;task_prompt_response_and_credentials_not_sent_to_control_plane" };
+    if (!lifecycle) {
+      const refreshed = await this.status(normalizedJobId);
+      return { schema: AUTONOMOUS_DURABLE_JOB_SCHEMA, job: refreshed.job, local, server_job_posture: "control_plane_projection;completion_requires_external_worker_reconciliation", private_spec: "caller_owned;task_prompt_response_and_credentials_not_sent_to_control_plane" };
+    }
+    await this.lifecycleRenew(normalizedJobId);
+    const checkpointDigest = local.checkpoint?.checkpoint_digest ?? await digestJson({ job_id: normalizedJobId, status: local.status, completed_stage_count: local.completed_stage_count, total_stage_count: local.total_stage_count });
+    const sideEffectBoundary = "unknown" as const;
+    let settled: BrainJobLifecycleResult;
+    if (local.status === "approval_required") {
+      settled = await this.lifecycleCheckpoint(normalizedJobId, checkpointDigest, "waiting_approval", sideEffectBoundary, true);
+    } else if (local.status === "completed") {
+      const resultDigest = await digestJson({ job_id: normalizedJobId, status: local.status, checkpoint_digest: checkpointDigest, completed_stage_count: local.completed_stage_count, total_stage_count: local.total_stage_count });
+      settled = await this.lifecycleComplete(normalizedJobId, resultDigest);
+    } else if (local.status === "paused") {
+      settled = await this.lifecycleCheckpoint(normalizedJobId, checkpointDigest, "paused", sideEffectBoundary, false);
+    } else {
+      settled = await this.lifecycleFail(normalizedJobId, `local workflow ended with status ${local.status}`, false);
+    }
+    return { schema: AUTONOMOUS_DURABLE_JOB_SCHEMA, job: settled.job, local, server_job_posture: "control_plane_projection;worker_lifecycle_recorded;durable_authority_remains_brain_job_store", private_spec: "caller_owned;task_prompt_response_and_credentials_not_sent_to_control_plane" };
   }
 }

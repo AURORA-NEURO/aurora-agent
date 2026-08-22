@@ -9,10 +9,16 @@ import pytest
 from prism_sdk import (
     AsyncBrainControlClient,
     BrainApprovalCommand,
+    BrainJobClaimCommand,
+    BrainJobCheckpointCommand,
+    BrainJobCompleteCommand,
     BrainControlClient,
     BrainControlError,
     BrainEventPageRequest,
+    BrainJobFailCommand,
     BrainHealthObservation,
+    BrainJobReconcileCommand,
+    BrainJobRenewCommand,
     BrainJobSubmission,
     BrainReplayRequest,
 )
@@ -116,14 +122,58 @@ def test_sync_facade_adapts_http_style_transport_and_typed_commands() -> None:
         )
     )
     client.job_events(BrainEventPageRequest(limit=2))
+    client.claim_job(BrainJobClaimCommand(job_id="job-001", worker_id="worker-a", lease_ms=1000))
+    client.renew_job(BrainJobRenewCommand(job_id="job-001", worker_id="worker-a", lease_ms=1000))
+    client.checkpoint_job(
+        BrainJobCheckpointCommand(
+            job_id="job-001",
+            worker_id="worker-a",
+            phase="preflight",
+            checkpoint_digest="c" * 64,
+            side_effect_boundary="preflight",
+        )
+    )
+    client.complete_job(BrainJobCompleteCommand(job_id="job-001", worker_id="worker-a", result_digest="d" * 64))
+    client.fail_job(BrainJobFailCommand(job_id="job-001", worker_id="worker-a", reason="timeout", retryable=True))
+    client.reconcile_job(
+        BrainJobReconcileCommand(
+            job_id="job-001",
+            outcome="not_executed",
+            evidence_digest="e" * 64,
+            effect_absent=True,
+        )
+    )
     assert [name for name, _ in calls] == [
         "brain_job_submit",
         "brain_job_approval",
         "brain_model_health",
         "brain_job_events",
+        "brain_job_claim",
+        "brain_job_renew",
+        "brain_job_checkpoint",
+        "brain_job_complete",
+        "brain_job_fail",
+        "brain_job_reconcile",
     ]
     assert "authorization_digest" in calls[1][1]
     assert "secret" not in json.dumps(calls)
+
+
+def test_job_reconciliation_and_checkpoint_commands_fail_closed() -> None:
+    with pytest.raises(BrainControlError):
+        BrainJobCheckpointCommand(
+            job_id="job-001",
+            worker_id="worker-a",
+            phase="dispatch",
+            checkpoint_digest="a" * 64,
+            side_effect_boundary="not-a-boundary",
+        )
+    with pytest.raises(BrainControlError):
+        BrainJobReconcileCommand(
+            job_id="job-001",
+            outcome="not_executed",
+            evidence_digest="a" * 64,
+        )
 
 
 def test_async_facade_adapts_awaitable_transport() -> None:

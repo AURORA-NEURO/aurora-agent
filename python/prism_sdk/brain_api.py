@@ -2,7 +2,8 @@
 
 The control-plane client is intentionally narrower than prism_sdk.llm_runtime. Provider keys are
 collected by ProviderOnboarding and remain behind an in-memory CredentialHandle; this module
-accepts only the resulting value-free job, health, approval, and replay metadata.
+accepts only value-free job admission, leases, checkpoints, settlement, reconciliation, health,
+approval, and replay metadata.
 
 BrainControlClient.from_http and BrainControlClient.from_mcp use the existing transports, so
 applications do not need a second network protocol or a secret-bearing API. The asynchronous
@@ -167,6 +168,134 @@ class BrainApprovalCommand:
         if self.authorization_digest is not None:
             result["authorization_digest"] = self.authorization_digest
         return result
+
+
+@dataclass(frozen=True, slots=True)
+class BrainJobClaimCommand:
+    """Claim a metadata-only job for a bounded worker lease."""
+
+    job_id: str
+    worker_id: str
+    lease_ms: int = 60_000
+
+    def __post_init__(self) -> None:
+        _text("job_id", self.job_id)
+        _text("worker_id", self.worker_id)
+        _bounded_uint("lease_ms", self.lease_ms, 100, 86_400_000, 60_000)
+
+    def to_arguments(self) -> dict[str, Any]:
+        return {"job_id": self.job_id, "worker_id": self.worker_id, "lease_ms": self.lease_ms}
+
+
+@dataclass(frozen=True, slots=True)
+class BrainJobRenewCommand(BrainJobClaimCommand):
+    """Renew an active metadata-only job lease for its current worker."""
+
+
+@dataclass(frozen=True, slots=True)
+class BrainJobCheckpointCommand:
+    """Persist a phase/checkpoint digest without sending checkpoint payloads."""
+
+    job_id: str
+    worker_id: str
+    phase: str
+    checkpoint_digest: str
+    side_effect_boundary: str = "not_started"
+    waiting_for_approval: bool = False
+
+    def __post_init__(self) -> None:
+        _text("job_id", self.job_id)
+        _text("worker_id", self.worker_id)
+        _text("phase", self.phase, 128)
+        _digest("checkpoint_digest", self.checkpoint_digest)
+        if self.side_effect_boundary not in {"not_started", "preflight", "dispatched", "unknown"}:
+            raise BrainControlError("side_effect_boundary must be not_started, preflight, dispatched, or unknown")
+        if not isinstance(self.waiting_for_approval, bool):
+            raise BrainControlError("waiting_for_approval must be a boolean")
+
+    def to_arguments(self) -> dict[str, Any]:
+        return {
+            "job_id": self.job_id,
+            "worker_id": self.worker_id,
+            "phase": self.phase,
+            "checkpoint_digest": self.checkpoint_digest,
+            "side_effect_boundary": self.side_effect_boundary,
+            "waiting_for_approval": self.waiting_for_approval,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class BrainJobCompleteCommand:
+    """Complete an owned job with a digest for caller-owned result metadata."""
+
+    job_id: str
+    worker_id: str
+    result_digest: str
+
+    def __post_init__(self) -> None:
+        _text("job_id", self.job_id)
+        _text("worker_id", self.worker_id)
+        _digest("result_digest", self.result_digest)
+
+    def to_arguments(self) -> dict[str, Any]:
+        return {"job_id": self.job_id, "worker_id": self.worker_id, "result_digest": self.result_digest}
+
+
+@dataclass(frozen=True, slots=True)
+class BrainJobFailCommand:
+    """Record a bounded failure; the server decides retry versus reconciliation."""
+
+    job_id: str
+    worker_id: str
+    reason: str
+    retryable: bool = False
+
+    def __post_init__(self) -> None:
+        _text("job_id", self.job_id)
+        _text("worker_id", self.worker_id)
+        _text("reason", self.reason, _MAX_REASON_BYTES)
+        if not isinstance(self.retryable, bool):
+            raise BrainControlError("retryable must be a boolean")
+
+    def to_arguments(self) -> dict[str, Any]:
+        return {"job_id": self.job_id, "worker_id": self.worker_id, "reason": self.reason, "retryable": self.retryable}
+
+
+@dataclass(frozen=True, slots=True)
+class BrainJobReconcileCommand:
+    """Resolve an uncertain external effect using evidence and operator metadata digests."""
+
+    job_id: str
+    outcome: str
+    evidence_digest: str
+    evidence_kind: str = "caller_observation"
+    operator: str = "caller"
+    reason: str = "caller reconciled uncertain external state"
+    effect_absent: bool = False
+
+    def __post_init__(self) -> None:
+        _text("job_id", self.job_id)
+        if self.outcome not in {"succeeded", "failed", "not_executed", "unknown"}:
+            raise BrainControlError("outcome must be succeeded, failed, not_executed, or unknown")
+        _digest("evidence_digest", self.evidence_digest)
+        _text("evidence_kind", self.evidence_kind, 128)
+        _text("operator", self.operator)
+        _text("reason", self.reason, _MAX_REASON_BYTES)
+        if not isinstance(self.effect_absent, bool):
+            raise BrainControlError("effect_absent must be a boolean")
+        if self.outcome == "not_executed" and not self.effect_absent:
+            raise BrainControlError("not_executed reconciliation requires effect_absent=True")
+
+    def to_arguments(self) -> dict[str, Any]:
+        return {
+            "job_id": self.job_id,
+            "outcome": self.outcome,
+            "evidence_digest": self.evidence_digest,
+            "evidence_kind": self.evidence_kind,
+            "operator": self.operator,
+            "reason": self.reason,
+            "effect_absent": self.effect_absent,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -355,6 +484,30 @@ def _as_approval(value: BrainApprovalCommand | Mapping[str, Any]) -> BrainApprov
     return value if isinstance(value, BrainApprovalCommand) else BrainApprovalCommand(**dict(value))
 
 
+def _as_claim(value: BrainJobClaimCommand | Mapping[str, Any]) -> BrainJobClaimCommand:
+    return value if isinstance(value, BrainJobClaimCommand) else BrainJobClaimCommand(**dict(value))
+
+
+def _as_renew(value: BrainJobRenewCommand | Mapping[str, Any]) -> BrainJobRenewCommand:
+    return value if isinstance(value, BrainJobRenewCommand) else BrainJobRenewCommand(**dict(value))
+
+
+def _as_checkpoint(value: BrainJobCheckpointCommand | Mapping[str, Any]) -> BrainJobCheckpointCommand:
+    return value if isinstance(value, BrainJobCheckpointCommand) else BrainJobCheckpointCommand(**dict(value))
+
+
+def _as_complete(value: BrainJobCompleteCommand | Mapping[str, Any]) -> BrainJobCompleteCommand:
+    return value if isinstance(value, BrainJobCompleteCommand) else BrainJobCompleteCommand(**dict(value))
+
+
+def _as_fail(value: BrainJobFailCommand | Mapping[str, Any]) -> BrainJobFailCommand:
+    return value if isinstance(value, BrainJobFailCommand) else BrainJobFailCommand(**dict(value))
+
+
+def _as_reconcile(value: BrainJobReconcileCommand | Mapping[str, Any]) -> BrainJobReconcileCommand:
+    return value if isinstance(value, BrainJobReconcileCommand) else BrainJobReconcileCommand(**dict(value))
+
+
 def _as_health(value: BrainHealthObservation | Mapping[str, Any]) -> BrainHealthObservation:
     return value if isinstance(value, BrainHealthObservation) else BrainHealthObservation(**dict(value))
 
@@ -419,6 +572,24 @@ class BrainControlClient:
 
     def approval(self, request: BrainApprovalCommand | Mapping[str, Any]) -> dict[str, Any]:
         return self._invoke("brain_job_approval", _as_approval(request).to_arguments())
+
+    def claim_job(self, request: BrainJobClaimCommand | Mapping[str, Any]) -> dict[str, Any]:
+        return self._invoke("brain_job_claim", _as_claim(request).to_arguments())
+
+    def renew_job(self, request: BrainJobRenewCommand | Mapping[str, Any]) -> dict[str, Any]:
+        return self._invoke("brain_job_renew", _as_renew(request).to_arguments())
+
+    def checkpoint_job(self, request: BrainJobCheckpointCommand | Mapping[str, Any]) -> dict[str, Any]:
+        return self._invoke("brain_job_checkpoint", _as_checkpoint(request).to_arguments())
+
+    def complete_job(self, request: BrainJobCompleteCommand | Mapping[str, Any]) -> dict[str, Any]:
+        return self._invoke("brain_job_complete", _as_complete(request).to_arguments())
+
+    def fail_job(self, request: BrainJobFailCommand | Mapping[str, Any]) -> dict[str, Any]:
+        return self._invoke("brain_job_fail", _as_fail(request).to_arguments())
+
+    def reconcile_job(self, request: BrainJobReconcileCommand | Mapping[str, Any]) -> dict[str, Any]:
+        return self._invoke("brain_job_reconcile", _as_reconcile(request).to_arguments())
 
     def record_health(
         self,
@@ -490,6 +661,24 @@ class AsyncBrainControlClient:
     async def approval(self, request: BrainApprovalCommand | Mapping[str, Any]) -> dict[str, Any]:
         return await self._invoke("brain_job_approval", _as_approval(request).to_arguments())
 
+    async def claim_job(self, request: BrainJobClaimCommand | Mapping[str, Any]) -> dict[str, Any]:
+        return await self._invoke("brain_job_claim", _as_claim(request).to_arguments())
+
+    async def renew_job(self, request: BrainJobRenewCommand | Mapping[str, Any]) -> dict[str, Any]:
+        return await self._invoke("brain_job_renew", _as_renew(request).to_arguments())
+
+    async def checkpoint_job(self, request: BrainJobCheckpointCommand | Mapping[str, Any]) -> dict[str, Any]:
+        return await self._invoke("brain_job_checkpoint", _as_checkpoint(request).to_arguments())
+
+    async def complete_job(self, request: BrainJobCompleteCommand | Mapping[str, Any]) -> dict[str, Any]:
+        return await self._invoke("brain_job_complete", _as_complete(request).to_arguments())
+
+    async def fail_job(self, request: BrainJobFailCommand | Mapping[str, Any]) -> dict[str, Any]:
+        return await self._invoke("brain_job_fail", _as_fail(request).to_arguments())
+
+    async def reconcile_job(self, request: BrainJobReconcileCommand | Mapping[str, Any]) -> dict[str, Any]:
+        return await self._invoke("brain_job_reconcile", _as_reconcile(request).to_arguments())
+
     async def record_health(
         self,
         observation: BrainHealthObservation | Mapping[str, Any],
@@ -513,6 +702,12 @@ __all__ = [
     "BrainControlClient",
     "BrainControlError",
     "BrainControlRefusal",
+    "BrainJobClaimCommand",
+    "BrainJobCheckpointCommand",
+    "BrainJobCompleteCommand",
+    "BrainJobFailCommand",
+    "BrainJobReconcileCommand",
+    "BrainJobRenewCommand",
     "BrainEventPageRequest",
     "BrainHealthObservation",
     "BrainJobSubmission",

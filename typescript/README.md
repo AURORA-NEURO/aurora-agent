@@ -1291,15 +1291,18 @@ continue. `InMemoryAutonomousWorkflowCycleStateStore` and
 for a caller-owned durable adapter.
 
 When a deployment also needs a server-visible queue, `AutonomousDurableJobController` bridges that
-local worker to the value-only `brain_job_submit`, `brain_job_status`, `brain_job_events`, and
-`brain_job_approval` operations. Submission sends only an idempotency key, task/spec digest,
+local worker to the value-only `brain_job_submit`, `brain_job_status`, `brain_job_events`,
+`brain_job_approval`, `brain_job_claim`, `brain_job_renew`, `brain_job_checkpoint`,
+`brain_job_complete`, `brain_job_fail`, and `brain_job_reconcile` operations. Submission sends only an idempotency key, task/spec digest,
 domain, capability, risk class, retry budget, priority, and optional checkpoint digest. The server
 record is a control-plane projection: it never receives the task, prompt, model transcript, tool
 payload, credential, or provider response. A worker reads the projection, honors a server-side
 approval pause, rehydrates the task and an unexpired BYOK credential locally, and then runs the
 matching domain workflow through `AutonomousWorkflowExecutor`. The controller validates the server
-domain against the built-in catalogue and does not claim server completion; an external worker or
-reconciliation process must record that relationship in its own system.
+domain against the built-in catalogue. When lifecycle methods are available it claims a bounded
+worker lease, records an `unknown` effect boundary before local provider execution, renews before
+settlement, and records digest-only completion or failure; lightweight observation-only clients
+retain the explicit external-reconciliation posture.
 
 ## Evaluator feedback and delayed-credit learning
 
@@ -1373,7 +1376,9 @@ stores a provider secret, or assumes that a serialized snapshot is authorization
   never treats these joins as fetched bytes, verified provider signatures, provider authentication,
   or release approval. `bundleVerify` separately exposes explicit Ed25519 bundle verification with
   typed key-validity and fail-closed refusal fields; it does not authenticate a key registry.
-- `brainJobSubmit`, `brainJobStatus`, `brainJobEvents`, `brainJobApproval`, `brainModelHealth`,
+- `brainJobSubmit`, `brainJobStatus`, `brainJobEvents`, `brainJobApproval`, `brainJobClaim`,
+  `brainJobRenew`, `brainJobCheckpoint`, `brainJobComplete`, `brainJobFail`,
+  `brainJobReconcile`, `brainModelHealth`,
   and `brainReplayEvaluate` expose the value-only autonomous-brain control plane. They accept
   metadata, bounded signals, and digests only; prompts, task payloads, provider responses, and
   credentials remain in the application-owned worker and `LLMRuntime` boundary.

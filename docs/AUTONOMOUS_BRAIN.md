@@ -2684,6 +2684,19 @@ control-plane contract. The MCP server exposes:
 - brain_job_approval: moves a queued job into waiting_approval, or returns it to queued
   after a caller-authenticated authorization proof digest. The transport records that the proof
   was supplied but does not verify identity and never dispatches work.
+- brain_job_claim and brain_job_renew: atomically acquire and extend bounded worker leases. The
+  server checks owner identity, expiry, and terminal state; competing workers are refused. Lease
+  expiry before dispatch requeues work, while expiry at or after dispatch enters
+  reconciliation_required.
+- brain_job_checkpoint: stores only a phase and checkpoint digest, enforces the monotonic
+  not_started -> preflight -> dispatched -> unknown boundary, and can release the lease into
+  waiting_approval. The checkpoint body remains caller-owned.
+- brain_job_complete and brain_job_fail: settle an owned lease with a result digest or bounded
+  failure reason. Retryable pre-dispatch failures requeue within max_attempts; post-dispatch
+  failures are quarantined and exhausted attempts are dead-lettered.
+- brain_job_reconcile: records an evidence digest and bounded operator decision for an uncertain
+  external effect. Only explicit effect_absent=true can return a quarantined job to queued; the
+  transport never infers that an external effect did not happen.
 - brain_model_health: records and projects provider/model status, latency, bounded quality,
   usage counts, registration posture, and credential readiness. A runtime can feed the resulting
   provider_health map into brain_model_select to hard-gate open circuits or unready providers,
@@ -2694,7 +2707,10 @@ control-plane contract. The MCP server exposes:
   profile. It is an offline evaluator only; it does not contact a provider or replay a domain tool.
 
 The same tools are reachable through the existing /v1/tools/{name} HTTP route and stdio
-tools/call. The typed Python bridge keeps the wire shape consistent:
+tools/call. The typed Python bridge keeps the wire shape consistent. The lifecycle operations are
+an in-memory MCP projection (`scope: mcp_process`); restart-safe claims, leases, checkpoints, and
+reconciliation remain authoritative in `BrainJobStore`, which deployments should call directly or
+place behind their durable transport adapter:
 
 The TypeScript `AutonomousBrainControlPlaneMonitor` provides the matching caller-side boundary
 over an `ApiClient`-compatible object. It validates job identity, domain, attempt ceilings,
@@ -2759,7 +2775,8 @@ and online adaptation connected in one inspectable workflow.
 ## Decision loop
 
 The `bioprism-brain` crate exposes the deterministic decision operations through MCP, and the
-transport control plane above adds the job, approval, health, and replay lifecycle:
+transport control plane above adds the job, approval, lease, checkpoint, settlement,
+reconciliation, health, and replay lifecycle:
 
 - `brain_model_select` applies capability, context-window, quality, latency, and cost gates, then
   ranks eligible models with deterministic utility plus an exploration bonus. Its optional

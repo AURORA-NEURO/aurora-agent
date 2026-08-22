@@ -15862,6 +15862,45 @@ fn brain_control_plane_is_idempotent_hash_chained_and_approval_gated() {
     assert_eq!(events["events"].as_array().unwrap().len(), 3);
     assert_eq!(events["chain"], json!("sha256_prev_digest"));
     assert!(events["head_digest"].as_str().unwrap().len() == 64);
+
+    let claimed = call(
+        &mut server,
+        "brain_job_claim",
+        json!({"job_id": job_id, "worker_id": "worker-a", "lease_ms": 1000}),
+    );
+    assert_eq!(claimed["__isError"], json!(false));
+    assert_eq!(claimed["job"]["state"], json!("leased"));
+    assert_eq!(claimed["job"]["attempts"], json!(1));
+    let renewed = call(
+        &mut server,
+        "brain_job_renew",
+        json!({"job_id": job_id, "worker_id": "worker-a", "lease_ms": 1000}),
+    );
+    assert_eq!(renewed["__isError"], json!(false));
+    let checkpointed = call(
+        &mut server,
+        "brain_job_checkpoint",
+        json!({
+            "job_id": job_id,
+            "worker_id": "worker-a",
+            "phase": "preflight",
+            "checkpoint_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "side_effect_boundary": "preflight",
+        }),
+    );
+    assert_eq!(checkpointed["__isError"], json!(false));
+    assert_eq!(checkpointed["job"]["state"], json!("running"));
+    let completed = call(
+        &mut server,
+        "brain_job_complete",
+        json!({
+            "job_id": job_id,
+            "worker_id": "worker-a",
+            "result_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        }),
+    );
+    assert_eq!(completed["__isError"], json!(false));
+    assert_eq!(completed["job"]["state"], json!("succeeded"));
 }
 
 #[test]

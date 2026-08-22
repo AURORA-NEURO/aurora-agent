@@ -1647,6 +1647,12 @@ impl Server {
             "brain_job_status" => self.brain_job_status(&arguments),
             "brain_job_events" => self.brain_job_events(&arguments),
             "brain_job_approval" => self.brain_job_approval(&arguments),
+            "brain_job_claim" => self.brain_job_claim(&arguments),
+            "brain_job_renew" => self.brain_job_renew(&arguments),
+            "brain_job_checkpoint" => self.brain_job_checkpoint(&arguments),
+            "brain_job_complete" => self.brain_job_complete(&arguments),
+            "brain_job_fail" => self.brain_job_fail(&arguments),
+            "brain_job_reconcile" => self.brain_job_reconcile(&arguments),
             "brain_model_health" => self.brain_model_health(&arguments),
             "brain_replay_evaluate" => self.brain_replay_evaluate(&arguments),
             "domain_evidence_harmonization_coverage" => {
@@ -2079,6 +2085,48 @@ impl Server {
             .lock()
             .map_err(|_| "brain control-plane state is unavailable".to_string())?
             .job_approval(arguments)
+    }
+
+    fn brain_job_claim(&self, arguments: &Value) -> Result<Value, String> {
+        self.brain_control_state
+            .lock()
+            .map_err(|_| "brain control-plane state is unavailable".to_string())?
+            .job_claim(arguments)
+    }
+
+    fn brain_job_renew(&self, arguments: &Value) -> Result<Value, String> {
+        self.brain_control_state
+            .lock()
+            .map_err(|_| "brain control-plane state is unavailable".to_string())?
+            .job_renew(arguments)
+    }
+
+    fn brain_job_checkpoint(&self, arguments: &Value) -> Result<Value, String> {
+        self.brain_control_state
+            .lock()
+            .map_err(|_| "brain control-plane state is unavailable".to_string())?
+            .job_checkpoint(arguments)
+    }
+
+    fn brain_job_complete(&self, arguments: &Value) -> Result<Value, String> {
+        self.brain_control_state
+            .lock()
+            .map_err(|_| "brain control-plane state is unavailable".to_string())?
+            .job_complete(arguments)
+    }
+
+    fn brain_job_fail(&self, arguments: &Value) -> Result<Value, String> {
+        self.brain_control_state
+            .lock()
+            .map_err(|_| "brain control-plane state is unavailable".to_string())?
+            .job_fail(arguments)
+    }
+
+    fn brain_job_reconcile(&self, arguments: &Value) -> Result<Value, String> {
+        self.brain_control_state
+            .lock()
+            .map_err(|_| "brain control-plane state is unavailable".to_string())?
+            .job_reconcile(arguments)
     }
 
     fn brain_model_health(&self, arguments: &Value) -> Result<Value, String> {
@@ -35619,7 +35667,7 @@ pub fn workspace_capabilities() -> Value {
             "domains": ["model selection", "prompt assembly", "bounded autonomous planning", "online bandit adaptation", "evaluator-backed learning evidence", "provider-neutral invocation contracts"],
             "crates": ["bioprism-brain", "bioprism-runtime", "bioprism-routing", "bioprism-adaptive"],
             "python_artifacts": ["python/prism_sdk/llm_runtime.py", "python/prism_sdk/brain.py"],
-            "mcp_tools": ["brain_model_select", "brain_model_select_contextual", "brain_prompt_assemble", "brain_plan", "brain_bandit_select", "brain_bandit_update", "brain_outcome_record", "brain_job_submit", "brain_job_status", "brain_job_events", "brain_job_approval", "brain_model_health", "brain_replay_evaluate"],
+            "mcp_tools": ["brain_model_select", "brain_model_select_contextual", "brain_prompt_assemble", "brain_plan", "brain_bandit_select", "brain_bandit_update", "brain_outcome_record", "brain_job_submit", "brain_job_status", "brain_job_events", "brain_job_approval", "brain_job_claim", "brain_job_renew", "brain_job_checkpoint", "brain_job_complete", "brain_job_fail", "brain_job_reconcile", "brain_model_health", "brain_replay_evaluate"],
             "cli_entrypoints": [],
             "status": "available"
         },

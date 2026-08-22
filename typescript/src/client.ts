@@ -481,8 +481,15 @@ import type {
   BrainBanditUpdate,
   BrainJobApprovalArgs,
   BrainJobApprovalResult,
+  BrainJobClaimArgs,
+  BrainJobCheckpointArgs,
+  BrainJobCompleteArgs,
   BrainJobEventsArgs,
   BrainJobEventsResult,
+  BrainJobFailArgs,
+  BrainJobLifecycleResult,
+  BrainJobReconcileArgs,
+  BrainJobRenewArgs,
   BrainJobStatusArgs,
   BrainJobStatusResult,
   BrainJobSubmitArgs,
@@ -1867,6 +1874,87 @@ export class ApiClient {
     if ((args.action === "approve" || args.action === "deny") && (typeof args.authorization_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.authorization_digest))) throw new ArgumentError("approve and deny require a lowercase authorization_digest");
     if (args.reason !== undefined && (typeof args.reason !== "string" || args.reason.length > 2048)) throw new ArgumentError("reason must be at most 2048 characters");
     return this.callTool<BrainJobApprovalResult>("brain_job_approval", args, options);
+  }
+
+  /** Claim a queued metadata-only job for a bounded worker lease. */
+  async brainJobClaim(
+    args: BrainJobClaimArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainJobLifecycleResult>> {
+    if (!isObject(args) || typeof args.job_id !== "string" || !args.job_id.trim()) throw new ArgumentError("brain job claim job_id must be a non-empty string");
+    if (typeof args.worker_id !== "string" || !args.worker_id.trim() || args.worker_id.length > 256) throw new ArgumentError("brain job claim worker_id must be a bounded non-empty string");
+    rejectBrainSecretFields(args, "brain job claim");
+    validateOptionalBoundedInteger(args.lease_ms, 100, 86_400_000, "lease_ms");
+    return this.callTool<BrainJobLifecycleResult>("brain_job_claim", args, options);
+  }
+
+  /** Renew an active lease only for its current worker owner. */
+  async brainJobRenew(
+    args: BrainJobRenewArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainJobLifecycleResult>> {
+    if (!isObject(args) || typeof args.job_id !== "string" || !args.job_id.trim()) throw new ArgumentError("brain job renew job_id must be a non-empty string");
+    if (typeof args.worker_id !== "string" || !args.worker_id.trim() || args.worker_id.length > 256) throw new ArgumentError("brain job renew worker_id must be a bounded non-empty string");
+    rejectBrainSecretFields(args, "brain job renew");
+    validateOptionalBoundedInteger(args.lease_ms, 100, 86_400_000, "lease_ms");
+    return this.callTool<BrainJobLifecycleResult>("brain_job_renew", args, options);
+  }
+
+  /** Persist a digest-bound phase and monotonic side-effect boundary without sending checkpoint payloads. */
+  async brainJobCheckpoint(
+    args: BrainJobCheckpointArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainJobLifecycleResult>> {
+    if (!isObject(args) || typeof args.job_id !== "string" || !args.job_id.trim()) throw new ArgumentError("brain job checkpoint job_id must be a non-empty string");
+    if (typeof args.worker_id !== "string" || !args.worker_id.trim() || args.worker_id.length > 256) throw new ArgumentError("brain job checkpoint worker_id must be a bounded non-empty string");
+    if (typeof args.phase !== "string" || !args.phase.trim() || args.phase.length > 128) throw new ArgumentError("brain job checkpoint phase must be a bounded non-empty string");
+    if (typeof args.checkpoint_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.checkpoint_digest)) throw new ArgumentError("checkpoint_digest must be a lowercase SHA-256 digest");
+    if (args.side_effect_boundary !== undefined && !["not_started", "preflight", "dispatched", "unknown"].includes(args.side_effect_boundary)) throw new ArgumentError("side_effect_boundary is invalid");
+    if (args.waiting_for_approval !== undefined && typeof args.waiting_for_approval !== "boolean") throw new ArgumentError("waiting_for_approval must be boolean");
+    rejectBrainSecretFields(args, "brain job checkpoint");
+    return this.callTool<BrainJobLifecycleResult>("brain_job_checkpoint", args, options);
+  }
+
+  /** Complete an active job with a digest for the caller-owned result. */
+  async brainJobComplete(
+    args: BrainJobCompleteArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainJobLifecycleResult>> {
+    if (!isObject(args) || typeof args.job_id !== "string" || !args.job_id.trim()) throw new ArgumentError("brain job complete job_id must be a non-empty string");
+    if (typeof args.worker_id !== "string" || !args.worker_id.trim() || args.worker_id.length > 256) throw new ArgumentError("brain job complete worker_id must be a bounded non-empty string");
+    if (typeof args.result_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.result_digest)) throw new ArgumentError("result_digest must be a lowercase SHA-256 digest");
+    rejectBrainSecretFields(args, "brain job complete");
+    return this.callTool<BrainJobLifecycleResult>("brain_job_complete", args, options);
+  }
+
+  /** Fail an active job with bounded reason metadata; the server decides retry versus quarantine. */
+  async brainJobFail(
+    args: BrainJobFailArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainJobLifecycleResult>> {
+    if (!isObject(args) || typeof args.job_id !== "string" || !args.job_id.trim()) throw new ArgumentError("brain job fail job_id must be a non-empty string");
+    if (typeof args.worker_id !== "string" || !args.worker_id.trim() || args.worker_id.length > 256) throw new ArgumentError("brain job fail worker_id must be a bounded non-empty string");
+    if (typeof args.reason !== "string" || !args.reason.trim() || args.reason.length > 2048) throw new ArgumentError("reason must be a bounded non-empty string");
+    if (args.retryable !== undefined && typeof args.retryable !== "boolean") throw new ArgumentError("retryable must be boolean");
+    rejectBrainSecretFields(args, "brain job fail");
+    return this.callTool<BrainJobLifecycleResult>("brain_job_fail", args, options);
+  }
+
+  /** Resolve uncertain external effects using a digest-bound caller/operator decision. */
+  async brainJobReconcile(
+    args: BrainJobReconcileArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainJobLifecycleResult>> {
+    if (!isObject(args) || typeof args.job_id !== "string" || !args.job_id.trim()) throw new ArgumentError("brain job reconcile job_id must be a non-empty string");
+    if (!["succeeded", "failed", "not_executed", "unknown"].includes(args.outcome)) throw new ArgumentError("outcome must be succeeded, failed, not_executed, or unknown");
+    if (typeof args.evidence_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.evidence_digest)) throw new ArgumentError("evidence_digest must be a lowercase SHA-256 digest");
+    if (args.evidence_kind !== undefined && (typeof args.evidence_kind !== "string" || !args.evidence_kind.trim() || args.evidence_kind.length > 128)) throw new ArgumentError("evidence_kind must be a bounded non-empty string");
+    if (args.operator !== undefined && (typeof args.operator !== "string" || !args.operator.trim() || args.operator.length > 256)) throw new ArgumentError("operator must be a bounded non-empty string");
+    if (args.reason !== undefined && (typeof args.reason !== "string" || !args.reason.trim() || args.reason.length > 2048)) throw new ArgumentError("reason must be a bounded non-empty string");
+    if (args.effect_absent !== undefined && typeof args.effect_absent !== "boolean") throw new ArgumentError("effect_absent must be boolean");
+    if (args.outcome === "not_executed" && args.effect_absent !== true) throw new ArgumentError("not_executed reconciliation requires effect_absent=true");
+    rejectBrainSecretFields(args, "brain job reconcile");
+    return this.callTool<BrainJobLifecycleResult>("brain_job_reconcile", args, options);
   }
 
   /** Record or inspect provider/model posture without accepting credential material or payloads. */
