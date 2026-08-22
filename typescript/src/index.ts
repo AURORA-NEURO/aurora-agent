@@ -585,6 +585,16 @@ export type {
   AutonomousEvidenceAdapterRegistrationInput,
 } from "./autonomous-evidence-adapters.js";
 export {
+  AUTONOMOUS_HTTP_EVIDENCE_ADAPTER_SCHEMA,
+  MAX_AUTONOMOUS_HTTP_EVIDENCE_REQUEST_BYTES,
+  MAX_AUTONOMOUS_HTTP_EVIDENCE_REQUEST_DEPTH,
+  createAutonomousHttpEvidenceAdapterRegistration,
+  registerAutonomousHttpEvidenceAdapter,
+} from "./autonomous-evidence-http-adapter.js";
+export type {
+  AutonomousHttpEvidenceAdapterOptions,
+} from "./autonomous-evidence-http-adapter.js";
+export {
   AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA,
   AUTONOMOUS_EVIDENCE_WORK_QUEUE_SCHEMA,
   AUTONOMOUS_EVIDENCE_WORKER_SCHEMA,

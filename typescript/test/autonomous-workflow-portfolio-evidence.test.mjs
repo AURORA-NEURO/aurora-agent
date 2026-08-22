@@ -6,6 +6,8 @@ import {
   AutonomousAgent,
   AutonomousEvidenceAdapterRegistry,
   AutonomousEvidenceRuntime,
+  AutonomousHttpConnectorPolicy,
+  AutonomousHttpConnectorRequest,
   AutonomousWorkflowPortfolioEvidenceController,
   AutonomousWorkflowPortfolioEvidenceAtomicWorkWorker,
   AutonomousWorkflowPortfolioEvidenceWorkQueueAtomicCoordinator,
@@ -24,6 +26,7 @@ import {
   admitAutonomousWorkflowPortfolioEvidenceWorkItems,
   digestJson,
   registerAutonomousEvidenceAdaptersForAllDomains,
+  registerAutonomousHttpEvidenceAdapter,
   validateAutonomousWorkflowPortfolioEvidenceCheckpoint,
   validateAutonomousWorkflowPortfolioEvidenceWorkQueueSnapshot,
 } from "../dist/index.js";
@@ -647,4 +650,58 @@ test("domain evidence adapter registry routes all twelve domains through scoped 
   assert.throws(() => registry.resolve("coding"), /ambiguous/);
   assert.equal(registry.resolve("coding", "source.coding").adapter_id, "source.coding");
   assert.throws(() => registry.resolve("science", "source.coding"), /not registered for science/);
+});
+
+test("HTTP evidence adapters execute bounded source calls for every domain and preserve refusal states", async () => {
+  const agent = agentFor();
+  const evidencePlan = await agent.evidencePlan(AUTONOMOUS_DOMAIN_NAMES);
+  const registry = new AutonomousEvidenceAdapterRegistry();
+  const policy = new AutonomousHttpConnectorPolicy({ allowedHosts: ["127.0.0.1"], requireHttps: false, allowLoopback: true, timeoutMs: 1_000, maxResponseBytes: 64_000 });
+  let calls = 0;
+  const fakeFetch = async (_url, init) => {
+    calls += 1;
+    assert.equal(init.redirect, "error");
+    assert.equal(init.method, "POST");
+    return new Response(JSON.stringify({ source_value: "transient-http-value", accepted: true }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    registerAutonomousHttpEvidenceAdapter(registry, {
+      adapterId: `http.${domain}`,
+      version: "1.0.0",
+      domain,
+      capabilities: ["http_json_evidence"],
+      policy,
+      fetch: fakeFetch,
+      endpointResolver: (_manifest, request) => new AutonomousHttpConnectorRequest({ method: "POST", url: "http://127.0.0.1/evidence", body: request }),
+      requestForContext: (context) => ({ operation_id: `evidence.${domain}`, subject_digest: "a".repeat(64), requirement_id: context.requirement.requirement_id, source_id: context.request.source_id }),
+      headerResolver: () => ({ "X-Caller-Context": "opaque-session" }),
+      project: (_value, context) => [{ label: context.requirement.label, kind: "fact", status: "observed", source_digest: context.request.source_digest ?? null, value_digest: null, limitations: ["HTTP source interpretation remains caller-owned"] }],
+    });
+  }
+  const requests = evidencePlan.requirements.map((requirement, index) => ({ requirement_id: requirement.requirement_id, source_id: `http-source-${index}`, source_digest: "b".repeat(64), request_id: `http-request-${index}` }));
+  const runtime = new AutonomousEvidenceRuntime({ plan: evidencePlan });
+  const result = await runtime.execute(requests, {
+    acquirer: registry.createAcquirer(),
+    projector: registry.createProjector(),
+    evaluator: { evaluator_id: "http-evaluator", evaluator_version: "1.0.0", evaluate: () => ({ evaluator_id: "http-evaluator", evaluator_version: "1.0.0", verdict: "accepted", score: 1, evidence_digest: "c".repeat(64) }) },
+  });
+  assert.equal(result.json.status, "completed");
+  assert.equal(calls, evidencePlan.requirements.length);
+  assert.doesNotMatch(JSON.stringify(result.toJSON()), /transient-http-value|opaque-session/);
+
+  const failurePlan = await agent.evidencePlan(["coding"]);
+  const failureRegistry = new AutonomousEvidenceAdapterRegistry();
+  registerAutonomousHttpEvidenceAdapter(failureRegistry, {
+    adapterId: "http.failure",
+    version: "1.0.0",
+    domain: "coding",
+    capabilities: ["http_json_evidence"],
+    policy,
+    fetch: async () => new Response("forbidden", { status: 403 }),
+    endpointResolver: () => new AutonomousHttpConnectorRequest({ method: "GET", url: "http://127.0.0.1/evidence" }),
+    requestForContext: () => ({ operation_id: "evidence.coding", subject_digest: "d".repeat(64) }),
+  });
+  const failed = await new AutonomousEvidenceRuntime({ plan: failurePlan }).execute(failurePlan.requirements.map((requirement, index) => ({ requirement_id: requirement.requirement_id, source_id: `failure-source-${index}` })), { acquirer: failureRegistry.createAcquirer() });
+  assert.equal(failed.json.status, "failed");
+  assert.equal(failed.json.receipts.every((receipt) => receipt.status === "failed"), true);
 });

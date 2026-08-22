@@ -4250,6 +4250,14 @@ projection semantics, and evaluator authority remain caller-owned. Use an explic
 `adapterIdForDomain` map when a domain has multiple registered providers; silent fuzzy selection
 is refused.
 
+For concrete HTTP sources, `createAutonomousHttpEvidenceAdapterRegistration()` and
+`registerAutonomousHttpEvidenceAdapter()` bridge the existing bounded HTTP connector into this
+registry. The caller supplies the endpoint resolver, request projection, optional header resolver,
+fetch implementation, and explicit `AutonomousHttpConnectorPolicy`; host allowlists, HTTPS policy,
+redirect refusal, request/response byte ceilings, JSON validation, and timeout classification are
+then shared with evidence execution. HTTP refusals become failed evidence receipts, while successful
+source values remain transient and are available to the caller's projector/evaluator only.
+
 ## Durable evidence acquisition workers
 
 The evidence runtime is intentionally caller-owned: it owns the transient acquirer input, projected

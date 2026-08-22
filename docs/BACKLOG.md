@@ -82,6 +82,10 @@ caller-owned acquisition/projector functions, report manifest-only coverage for 
 route runtime requests by requirement domain, refuse ambiguous or cross-domain adapter selection,
 and keep raw values outside registry projections and durable metadata. The registry provides the
 process boundary; it does not invent source truth or credentials.
+The existing bounded HTTP connector now has a direct evidence bridge with caller-owned endpoint and
+request resolvers, explicit header/fetch seams, shared host/HTTPS/size/timeout policy, and refused
+HTTP status propagation into failed evidence receipts. Offline tests exercise that bridge across all
+twelve domains without opening a network connection.
 
 The shared brain lifecycle now includes atomic priority-ordered dequeue and side-effect-safe
 cancellation across the Rust MCP projection, the durable Python SQLite adapter, and the typed
