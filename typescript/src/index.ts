@@ -335,9 +335,11 @@ export {
   MAX_AUTONOMOUS_CONNECTOR_INTENT_HINTS,
   AUTONOMOUS_CONNECTOR_INTENT_JOB_SCHEMA,
   MAX_AUTONOMOUS_CONNECTOR_INTENT_JOB_ITEMS,
+  AUTONOMOUS_CONNECTOR_INTENT_CONTROLLER_SCHEMA,
   AutonomousConnectorOperationPlan,
   AutonomousConnectorOperationFacade,
   AutonomousConnectorIntentFacade,
+  AutonomousConnectorIntentJobController,
   createAutonomousConnectorIntentFacade,
   createAutonomousConnectorOperationFacade,
 } from "./autonomous-connector-facade.js";
@@ -353,6 +355,9 @@ export type {
   AutonomousConnectorIntentPlanJSON,
   AutonomousConnectorIntentExecution,
   AutonomousConnectorIntentJob,
+  AutonomousConnectorIntentControllerProjection,
+  AutonomousConnectorIntentControllerSubmission,
+  AutonomousConnectorIntentControllerExecution,
 } from "./autonomous-connector-facade.js";
 export {
   AUTONOMOUS_BRAIN_FACADE_SCHEMA,

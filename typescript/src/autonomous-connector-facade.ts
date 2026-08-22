@@ -13,8 +13,10 @@ import {
   AutonomousConnectorOperationContract,
   AutonomousConnectorOperationRegistry,
   AutonomousConnectorWorkItem,
+  AutonomousConnectorWorkQueuePersistenceCoordinator,
   AutonomousConnectorWorker,
   InMemoryAutonomousConnectorWorkQueue,
+  type AutonomousConnectorWorkQueuePersistence,
   type AutonomousConnectorWorkerRun,
 } from "./autonomous-connector-worker.js";
 import { digestJsonSync } from "./tooling.js";
@@ -40,6 +42,7 @@ export const MAX_AUTONOMOUS_CONNECTOR_INTENT_TASK_BYTES = 128_000;
 export const MAX_AUTONOMOUS_CONNECTOR_INTENT_HINTS = 32;
 export const AUTONOMOUS_CONNECTOR_INTENT_JOB_SCHEMA = "bioprism-typescript-autonomous-connector-intent-job/0.1" as const;
 export const MAX_AUTONOMOUS_CONNECTOR_INTENT_JOB_ITEMS = 32;
+export const AUTONOMOUS_CONNECTOR_INTENT_CONTROLLER_SCHEMA = "bioprism-typescript-autonomous-connector-intent-controller/0.1" as const;
 
 const SECRET_FIELD_MARKERS = new Set([
   "apikey", "authorization", "bearer", "credential", "credentials", "password", "secret", "secretkey",
@@ -401,6 +404,26 @@ export interface AutonomousConnectorIntentJob extends JsonObject {
   retention: "metadata_only_task_request_plan_and_connector_values_not_retained";
   secret_material: "never_returned";
   job_digest: string;
+}
+
+export interface AutonomousConnectorIntentControllerProjection extends JsonObject {
+  schema: typeof AUTONOMOUS_CONNECTOR_INTENT_CONTROLLER_SCHEMA;
+  status: "empty" | "restored" | "flushed" | "submitted" | "executed";
+  snapshot_digest: string | null;
+  items: number;
+  persisted: true;
+  retention: "metadata_only_task_request_plan_connector_values_not_retained";
+  secret_material: "never_returned";
+}
+
+export interface AutonomousConnectorIntentControllerSubmission extends AutonomousConnectorIntentControllerProjection {
+  status: "submitted";
+  job: AutonomousConnectorIntentJob;
+}
+
+export interface AutonomousConnectorIntentControllerExecution extends AutonomousConnectorIntentControllerProjection {
+  status: "executed";
+  worker: AutonomousConnectorWorkerRun;
 }
 
 interface PreparedOperation {
@@ -840,6 +863,101 @@ export class AutonomousConnectorIntentFacade {
       return { plan: prepared.plan, request: prepared.request };
     });
     return worker.run({ ...options, workIds: [...selections.keys()] });
+  }
+}
+
+/**
+ * Application-facing restart boundary for intent jobs.
+ *
+ * This controller makes the safe lifecycle hard to misuse: restore is explicit at startup,
+ * every accepted submission is flushed as one verified metadata-only snapshot, worker state is
+ * flushed even when a transient rehydrator throws, and partial enqueue attempts restore the
+ * previous queue image. It never stores task text, request values, connector payloads, or keys.
+ */
+export class AutonomousConnectorIntentJobController {
+  readonly persistence: AutonomousConnectorWorkQueuePersistenceCoordinator;
+  private restored = false;
+
+  constructor(
+    readonly intent: AutonomousConnectorIntentFacade,
+    readonly queue: InMemoryAutonomousConnectorWorkQueue,
+    persistence: AutonomousConnectorWorkQueuePersistence,
+  ) {
+    if (!(intent instanceof AutonomousConnectorIntentFacade)) throw new ArgumentError("connector intent job controller requires an intent facade");
+    if (!(queue instanceof InMemoryAutonomousConnectorWorkQueue)) throw new ArgumentError("connector intent job controller requires a typed work queue");
+    this.persistence = new AutonomousConnectorWorkQueuePersistenceCoordinator(queue, persistence);
+  }
+
+  private requireRestored(): void {
+    if (!this.restored) throw new ArgumentError("connector intent job controller must restore before enqueue or execution");
+  }
+
+  private projection<S extends AutonomousConnectorIntentControllerProjection["status"]>(status: S, snapshotDigest: string | null, items: number): AutonomousConnectorIntentControllerProjection & { status: S } {
+    return {
+      schema: AUTONOMOUS_CONNECTOR_INTENT_CONTROLLER_SCHEMA,
+      status,
+      snapshot_digest: snapshotDigest,
+      items,
+      persisted: true,
+      retention: "metadata_only_task_request_plan_connector_values_not_retained",
+      secret_material: "never_returned",
+    };
+  }
+
+  async restore(): Promise<AutonomousConnectorIntentControllerProjection> {
+    const result = await this.persistence.restore();
+    this.restored = true;
+    return this.projection(result.status, result.snapshot_digest, result.items);
+  }
+
+  async flush(): Promise<AutonomousConnectorIntentControllerProjection> {
+    this.requireRestored();
+    const snapshot = await this.persistence.flush();
+    return this.projection("flushed", snapshot.snapshot_digest, snapshot.items.length);
+  }
+
+  async enqueue(
+    plan: AutonomousConnectorIntentPlanJSON,
+    input: AutonomousConnectorIntentInput & { jobId: string },
+    options: { maxAttempts?: number; now?: number } = {},
+  ): Promise<AutonomousConnectorIntentControllerSubmission> {
+    this.requireRestored();
+    if (!input || typeof input !== "object" || typeof input.jobId !== "string") throw new ArgumentError("connector intent controller input requires jobId");
+    const before = this.queue.snapshot();
+    try {
+      const job = await this.intent.enqueue(plan, input, this.queue, options);
+      const snapshot = await this.persistence.flush();
+      return { ...this.projection("submitted", snapshot.snapshot_digest, snapshot.items.length), job };
+    } catch (error) {
+      this.queue.restore(before);
+      try {
+        await this.persistence.persistence.write(before);
+      } catch {
+        // Preserve the original error. The in-process queue is restored and the caller can
+        // retry or surface the persistence adapter's own I/O failure explicitly.
+      }
+      throw error;
+    }
+  }
+
+  async runQueued(
+    plan: AutonomousConnectorIntentPlanJSON,
+    input: AutonomousConnectorIntentInput & { jobId: string },
+    options: { workerId?: string; limit?: number; leaseMs?: number; now?: number } = {},
+  ): Promise<AutonomousConnectorIntentControllerExecution> {
+    this.requireRestored();
+    if (!input || typeof input !== "object" || typeof input.jobId !== "string") throw new ArgumentError("connector intent controller input requires jobId");
+    let worker: AutonomousConnectorWorkerRun | null = null;
+    let workerError: unknown = null;
+    try {
+      worker = await this.intent.runQueued(plan, input, this.queue, options);
+    } catch (error) {
+      workerError = error;
+    }
+    const snapshot = await this.persistence.flush();
+    if (workerError !== null) throw workerError;
+    if (worker === null) throw new ArgumentError("connector intent worker returned no result");
+    return { ...this.projection("executed", snapshot.snapshot_digest, snapshot.items.length), worker };
   }
 }
 

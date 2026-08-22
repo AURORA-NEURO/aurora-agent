@@ -25,6 +25,7 @@ from .autonomous_connector_worker import (
     AutonomousConnectorOperationContract,
     AutonomousConnectorOperationRegistry,
     AutonomousConnectorWorkItem,
+    AutonomousConnectorWorkQueuePersistenceCoordinator,
     AutonomousConnectorWorker,
     InMemoryAutonomousConnectorWorkQueue,
 )
@@ -61,6 +62,9 @@ MAX_AUTONOMOUS_CONNECTOR_INTENT_TASK_BYTES = 128_000
 MAX_AUTONOMOUS_CONNECTOR_INTENT_HINTS = 32
 AUTONOMOUS_CONNECTOR_INTENT_JOB_SCHEMA = "bioprism-python-autonomous-connector-intent-job/0.1"
 MAX_AUTONOMOUS_CONNECTOR_INTENT_JOB_ITEMS = 32
+AUTONOMOUS_CONNECTOR_INTENT_CONTROLLER_SCHEMA = (
+    "bioprism-python-autonomous-connector-intent-controller/0.1"
+)
 
 
 def _parent_digests(value: Sequence[str] | None) -> tuple[str, ...]:
@@ -1336,6 +1340,140 @@ class AutonomousConnectorIntentFacade:
         )
 
 
+class AutonomousConnectorIntentJobController:
+    """Own the restart-safe lifecycle around a metadata-only intent job.
+
+    The lower-level facade intentionally leaves persistence orchestration to the caller so it
+    remains usable with databases, queues, and service-owned stores. This controller is the
+    application-facing process boundary: startup must explicitly restore the queue, submission
+    flushes one verified snapshot, execution flushes the post-worker state, and a partially
+    enqueued job is rolled back to its pre-submit snapshot. It never persists the task, request
+    values, plans, connector payloads, or credentials.
+    """
+
+    def __init__(
+        self,
+        intent: AutonomousConnectorIntentFacade,
+        queue: InMemoryAutonomousConnectorWorkQueue,
+        persistence: Any,
+    ) -> None:
+        if not isinstance(intent, AutonomousConnectorIntentFacade):
+            raise ArgumentError("connector intent job controller requires an intent facade")
+        if not isinstance(queue, InMemoryAutonomousConnectorWorkQueue):
+            raise ArgumentError("connector intent job controller requires a typed work queue")
+        self.intent = intent
+        self.queue = queue
+        self.persistence = AutonomousConnectorWorkQueuePersistenceCoordinator(queue, persistence)
+        self._restored = False
+
+    def _require_restored(self) -> None:
+        if not self._restored:
+            raise ArgumentError(
+                "connector intent job controller must restore before enqueue or execution"
+            )
+
+    @staticmethod
+    def _projection(*, status: str, snapshot_digest: str | None, items: int) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_CONNECTOR_INTENT_CONTROLLER_SCHEMA,
+            "status": status,
+            "snapshot_digest": snapshot_digest,
+            "items": items,
+            "persisted": True,
+            "retention": "metadata_only_task_request_plan_connector_values_not_retained",
+            "secret_material": "never_returned",
+        }
+
+    def restore(self) -> dict[str, Any]:
+        """Restore the queue exactly once at process startup and verify its registry binding."""
+
+        result = self.persistence.restore()
+        self._restored = True
+        return self._projection(
+            status=result["status"],
+            snapshot_digest=result["snapshot_digest"],
+            items=result["items"],
+        )
+
+    def flush(self) -> dict[str, Any]:
+        """Persist the current verified queue snapshot without accepting transient values."""
+
+        self._require_restored()
+        snapshot = self.persistence.flush()
+        return self._projection(
+            status="flushed",
+            snapshot_digest=snapshot["snapshot_digest"],
+            items=len(snapshot["items"]),
+        )
+
+    def enqueue(
+        self,
+        plan: AutonomousConnectorIntentPlan,
+        intent_input: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Submit and atomically persist one reviewed intent job.
+
+        ``intent_input`` is transient and must contain the same ``job_id`` and task metadata
+        used to build ``plan``. The returned projection is safe to store or send to a control
+        plane; it contains the metadata-only job and the resulting snapshot digest only.
+        """
+
+        self._require_restored()
+        if not isinstance(intent_input, Mapping):
+            raise ArgumentError("connector intent controller input must be an object")
+        if "job_id" not in intent_input:
+            raise ArgumentError("connector intent controller input requires job_id")
+        before = self.queue.snapshot()
+        try:
+            job = self.intent.enqueue(plan, queue=self.queue, **dict(intent_input))
+            snapshot = self.persistence.flush()
+        except BaseException:
+            self.queue.restore(before)
+            try:
+                self.persistence.persistence.write(before)
+            except BaseException:
+                # Preserve the original failure. The queue remains restored in-process; a
+                # caller-owned persistence adapter can surface its own I/O failure on retry.
+                pass
+            raise
+        return {
+            **self._projection(
+                status="submitted",
+                snapshot_digest=snapshot["snapshot_digest"],
+                items=len(snapshot["items"]),
+            ),
+            "job": job.to_dict(),
+        }
+
+    def run_queued(
+        self,
+        plan: AutonomousConnectorIntentPlan,
+        intent_input: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Rehydrate transient input, execute the reviewed job, and persist worker state."""
+
+        self._require_restored()
+        if not isinstance(intent_input, Mapping):
+            raise ArgumentError("connector intent controller input must be an object")
+        if "job_id" not in intent_input:
+            raise ArgumentError("connector intent controller input requires job_id")
+        worker: dict[str, Any] | None = None
+        try:
+            worker = self.intent.run_queued(plan, queue=self.queue, **dict(intent_input))
+        finally:
+            # Persist leases, retry backoff, completions, and reconciliation states even when a
+            # caller-owned rehydrator raises outside the worker's typed error projection.
+            snapshot = self.persistence.flush()
+        return {
+            **self._projection(
+                status="executed",
+                snapshot_digest=snapshot["snapshot_digest"],
+                items=len(snapshot["items"]),
+            ),
+            "worker": worker,
+        }
+
+
 __all__ = [
     "AUTONOMOUS_CONNECTOR_OPERATION_FACADE_SCHEMA",
     "AUTONOMOUS_CONNECTOR_OPERATION_BATCH_SCHEMA",
@@ -1348,6 +1486,7 @@ __all__ = [
     "MAX_AUTONOMOUS_CONNECTOR_INTENT_HINTS",
     "AUTONOMOUS_CONNECTOR_INTENT_JOB_SCHEMA",
     "MAX_AUTONOMOUS_CONNECTOR_INTENT_JOB_ITEMS",
+    "AUTONOMOUS_CONNECTOR_INTENT_CONTROLLER_SCHEMA",
     "AutonomousConnectorOperationInput",
     "AutonomousConnectorOperationPlan",
     "AutonomousConnectorOperationExecution",
@@ -1358,4 +1497,5 @@ __all__ = [
     "AutonomousConnectorIntentExecution",
     "AutonomousConnectorIntentJob",
     "AutonomousConnectorIntentFacade",
+    "AutonomousConnectorIntentJobController",
 ]

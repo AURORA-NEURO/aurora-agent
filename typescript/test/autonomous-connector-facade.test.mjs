@@ -5,6 +5,7 @@ import {
   AUTONOMOUS_DOMAIN_NAMES,
   ArgumentError,
   AutonomousConnectorIntentFacade,
+  AutonomousConnectorIntentJobController,
   AutonomousConnectorOperationFacade,
   AutonomousConnectorOperationRegistry,
   AutonomousConnectorRegistry,
@@ -13,6 +14,18 @@ import {
   InMemoryAutonomousConnectorWorkQueue,
   createBuiltinAutonomousConnectorRuntime,
 } from "../dist/index.js";
+
+class SnapshotStore {
+  snapshot = null;
+
+  read() {
+    return this.snapshot;
+  }
+
+  write(snapshot) {
+    this.snapshot = snapshot;
+  }
+}
 
 function input(domain, operationRegistry, overrides = {}) {
   const operation = operationRegistry.forDomain(domain)[0];
@@ -217,4 +230,62 @@ test("intent facade queues and recovers cross-domain jobs without retaining tran
     intent.runQueued(plan, { ...input, jobId: "intent-job-1", requestByDomain: { ...input.requestByDomain, data: { fixture_value: "tampered" } } }, queue, { workerId: "intent-worker-2", now: 1_001 }),
     /does not match/,
   );
+});
+
+test("intent job controller restores, persists, rehydrates, and rolls back partial submission", async () => {
+  const fixture = createBuiltinAutonomousConnectorRuntime({ domainScoped: true, approvalRequired: false });
+  const intent = new AutonomousConnectorIntentFacade({ operationFacade: fixture.operationFacade });
+  const input = {
+    task: "Profile a dataset schema and reproduce the scientific evidence.",
+    hints: ["data", "science"],
+    maxDomains: 2,
+    allowCrossDomain: true,
+    requestByDomain: {
+      data: { schema: { columns: ["id"] }, fixture_value: "controller-private-data" },
+      science: { hypothesis: "controller-private-science" },
+    },
+    approved: true,
+  };
+  const plan = await intent.plan(input);
+  const queue = new InMemoryAutonomousConnectorWorkQueue(fixture.operationRegistry);
+  const store = new SnapshotStore();
+  const controller = new AutonomousConnectorIntentJobController(intent, queue, store);
+  await assert.rejects(
+    controller.enqueue(plan, { ...input, jobId: "controller-job-1" }),
+    /restore before/,
+  );
+  assert.equal((await controller.restore()).status, "empty");
+
+  const submitted = await controller.enqueue(plan, { ...input, jobId: "controller-job-1" }, { now: 1_000 });
+  assert.equal(submitted.status, "submitted");
+  assert.equal(submitted.items, 2);
+  assert.equal(JSON.stringify(submitted).includes(input.task), false);
+  assert.equal(JSON.stringify(submitted).includes("controller-private-data"), false);
+  assert.equal(JSON.stringify(store.snapshot).includes(input.task), false);
+  assert.equal(JSON.stringify(store.snapshot).includes("controller-private-data"), false);
+
+  const restartedQueue = new InMemoryAutonomousConnectorWorkQueue(fixture.operationRegistry);
+  const restartedController = new AutonomousConnectorIntentJobController(intent, restartedQueue, store);
+  assert.equal((await restartedController.restore()).status, "restored");
+  const executed = await restartedController.runQueued(
+    plan,
+    { ...input, jobId: "controller-job-1" },
+    { workerId: "controller-worker-1", now: 1_000 },
+  );
+  assert.equal(executed.status, "executed");
+  assert.equal(executed.worker.completed, 2);
+  assert.ok(executed.worker.rows.every((row) => row.value_retained === false));
+  assert.ok(store.snapshot.items.every((item) => item.status === "completed"));
+  assert.equal(JSON.stringify(store.snapshot).includes(input.task), false);
+
+  const boundedQueue = new InMemoryAutonomousConnectorWorkQueue(fixture.operationRegistry, 1);
+  const boundedStore = new SnapshotStore();
+  const boundedController = new AutonomousConnectorIntentJobController(intent, boundedQueue, boundedStore);
+  await boundedController.restore();
+  await assert.rejects(
+    boundedController.enqueue(plan, { ...input, jobId: "controller-overflow" }),
+    /queue is full/,
+  );
+  assert.deepEqual(boundedQueue.rows(), []);
+  assert.deepEqual(boundedStore.snapshot.items, []);
 });

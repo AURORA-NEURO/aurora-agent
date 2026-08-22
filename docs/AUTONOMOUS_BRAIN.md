@@ -4538,6 +4538,57 @@ the worker never infers reward from HTTP status, connector health, model self-re
 count. This preserves the separation between execution, evaluation, and adaptation across every
 autonomous domain.
 
+#### The restart-safe intent job controller
+
+Applications that want one process boundary for startup recovery, durable submission, and worker
+execution can use `AutonomousConnectorIntentJobController`. The lower-level facade remains
+available for services that need to compose their own queue lifecycle, but the controller is the
+recommended embedding surface when a job should be accepted only after a verified queue restore:
+
+```python
+from prism_sdk import AutonomousConnectorIntentJobController, InMemoryAutonomousConnectorWorkQueue
+
+queue = InMemoryAutonomousConnectorWorkQueue()
+controller = AutonomousConnectorIntentJobController(intent, queue, queue_snapshot_store)
+controller.restore()  # required once after process startup
+
+submitted = controller.enqueue(plan, {
+    "job_id": "research-job-42",
+    "task": task,
+    "hints": ("data", "science"),
+    "max_domains": 2,
+    "request_by_domain": requests,
+    "approved": True,
+})
+
+# After restart, construct a new queue/controller pair and restore before running.
+completed = controller.run_queued(plan, {
+    "job_id": "research-job-42",
+    "task": task,
+    "hints": ("data", "science"),
+    "max_domains": 2,
+    "request_by_domain": requests,
+    "approved": True,
+    "worker_id": "worker-a",
+})
+```
+
+The TypeScript surface has the same lifecycle with `restore()`, `enqueue(plan, input, options)`,
+and `runQueued(plan, input, options)`. `restore()` is an explicit safety gate: enqueue and
+execution fail closed until the caller-owned persistence adapter has supplied a verified queue
+image. Successful enqueue flushes one digest-bound snapshot. If a multi-domain enqueue fails
+after adding only some rows, the controller restores the pre-submit image and writes that
+baseline back to the adapter, preserving the original error. Execution flushes leases, retries,
+completions, and reconciliation states even when transient rehydration or execution raises.
+
+The controller projection and queue snapshot contain only job/work identities, operation and
+selection digests, bounded status/lease metadata, retry state, and retention declarations. It
+never stores task text, hints, request mappings, prompts, plans, connector payloads, provider
+observations, or credentials. The caller keeps the reviewed plan and transient task/request
+rehydration data in its own protected store, while this controller owns the durable work image
+and its atomic lifecycle. The same contract applies to single-domain and cross-domain jobs,
+including composite operation capabilities and all twelve built-in domains.
+
 ### Evidence integrity and independent evaluator mesh
 
 The TypeScript workflow evaluator derives its evidence identity from a canonical packet: stage

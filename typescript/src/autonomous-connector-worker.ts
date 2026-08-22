@@ -371,7 +371,7 @@ function validateWorkItem(raw: unknown, operationRegistry: AutonomousConnectorOp
     operation_id: identifier("autonomous connector work operation_id", raw.operation_id),
     operation_digest: digest("autonomous connector work operation_digest", raw.operation_digest) as string,
     domain: domain("autonomous connector work domain", raw.domain),
-    capability: identifier("autonomous connector work capability", raw.capability),
+    capability: capabilityValue("autonomous connector work capability", raw.capability),
     connector_id: identifier("autonomous connector work connector_id", raw.connector_id),
     selection_plan_digest: digest("autonomous connector work selection_plan_digest", raw.selection_plan_digest) as string,
     request_digest: digest("autonomous connector work request_digest", raw.request_digest) as string,

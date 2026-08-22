@@ -14,6 +14,7 @@ from prism_sdk import (
     AutonomousConnectorOperationRegistry,
     AutonomousConnectorOperationFacade,
     AutonomousConnectorOperationInput,
+    AutonomousConnectorIntentJobController,
     AutonomousConnectorIntentPlan,
     InMemoryAutonomousConnectorWorkQueue,
     LLMRuntime,
@@ -22,6 +23,17 @@ from prism_sdk import (
     register_builtin_autonomous_connectors,
 )
 from prism_sdk.errors import ArgumentError
+
+
+class _SnapshotStore:
+    def __init__(self):
+        self.snapshot = None
+
+    def read(self):
+        return self.snapshot
+
+    def write(self, snapshot):
+        self.snapshot = snapshot
 
 
 def _request(operation_id: str, domain: str, connector_id: str, plan_digest: str, *, approved: bool = True):
@@ -159,6 +171,64 @@ def test_builtin_registration_is_agent_ready_and_rejects_secret_shaped_input() -
             selection_plan_digest=plan.plan_digest,
             approved=True,
         )
+
+
+def test_intent_job_controller_restores_flushes_and_rolls_back_partial_submission() -> None:
+    agent = AutonomousAgent(object(), LLMRuntime())
+    agent.register_builtin_connectors(approval_required=True)
+    intent = agent.connector_intent_facade()
+    request_by_domain = {
+        "data": {"schema": {"columns": ["id"]}, "fixture_value": "controller-private-data"},
+        "science": {"hypothesis": "controller-private-science"},
+    }
+    transient = {
+        "task": "Profile a dataset schema and reproduce the scientific evidence.",
+        "hints": ("data", "science"),
+        "max_domains": 2,
+        "allow_cross_domain": True,
+        "request_by_domain": request_by_domain,
+        "approved": True,
+    }
+    plan = intent.plan(**transient)
+    queue = InMemoryAutonomousConnectorWorkQueue()
+    store = _SnapshotStore()
+    controller = AutonomousConnectorIntentJobController(intent, queue, store)
+    with pytest.raises(ArgumentError, match="restore before"):
+        controller.enqueue(plan, {"job_id": "controller-job-1", **transient})
+
+    restored = controller.restore()
+    assert restored["status"] == "empty"
+    submitted = controller.enqueue(plan, {"job_id": "controller-job-1", **transient, "now": 1_000})
+    serialized = json.dumps(submitted)
+    assert submitted["status"] == "submitted"
+    assert submitted["items"] == 2
+    assert transient["task"] not in serialized
+    assert "controller-private-data" not in serialized
+    assert "controller-private-science" not in serialized
+    assert transient["task"] not in json.dumps(store.snapshot)
+    assert "controller-private-data" not in json.dumps(store.snapshot)
+
+    restarted_queue = InMemoryAutonomousConnectorWorkQueue()
+    restarted_controller = AutonomousConnectorIntentJobController(intent, restarted_queue, store)
+    assert restarted_controller.restore()["status"] == "restored"
+    executed = restarted_controller.run_queued(
+        plan,
+        {"job_id": "controller-job-1", **transient, "worker_id": "controller-worker-1", "now": 1_000},
+    )
+    assert executed["status"] == "executed"
+    assert executed["worker"]["completed"] == 2
+    assert all(row["value_retained"] is False for row in executed["worker"]["rows"])
+    assert all(item["status"] == "completed" for item in store.snapshot["items"])
+    assert transient["task"] not in json.dumps(store.snapshot)
+
+    bounded_queue = InMemoryAutonomousConnectorWorkQueue(max_items=1)
+    bounded_store = _SnapshotStore()
+    bounded_controller = AutonomousConnectorIntentJobController(intent, bounded_queue, bounded_store)
+    bounded_controller.restore()
+    with pytest.raises(ArgumentError, match="queue is full"):
+        bounded_controller.enqueue(plan, {"job_id": "controller-overflow", **transient})
+    assert bounded_queue.rows() == ()
+    assert bounded_store.snapshot["items"] == []
 
 
 def test_builtin_adapter_reports_sparse_fixtures_as_partial() -> None:
