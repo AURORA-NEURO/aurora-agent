@@ -755,6 +755,29 @@ state or returns the explicit empty state used for first-run exploration; `run(.
 uses that state automatically unless the caller supplies another state. The ledger and memory
 remain append-only/value-only persistence owned by the embedding application.
 
+For a multi-worker deployment, `SQLiteBrainLearningLedger` provides the same interface with a
+transactional store:
+
+```python
+from prism_sdk import SQLiteBrainLearningLedger
+
+with SQLiteBrainLearningLedger("state/brain-learning.sqlite3") as ledger:
+    agent = AutonomousAgent(
+        workspace,
+        runtime,
+        ledger=ledger,
+        memory=BrainEpisodicMemory("state/brain-memory.sqlite3"),
+    )
+    state = agent.learning_state()  # restart-safe model-arm priors
+```
+
+The SQLite implementation uses `BEGIN IMMEDIATE`, full synchronous writes, bounded record and
+byte capacity, episode-identity idempotency, and digest verification on every read. It stores the
+same evaluator/bandit projection as the JSONL ledger, not a broader audit trail: prompts, provider
+responses, credentials, headers, tool arguments, and raw evidence remain outside the store. This
+makes concurrent online reward updates serialize safely while preserving the explicit evaluator as
+the only reward authority.
+
 `ModelCatalogue` stores only deterministic model metadata and rejects credential-shaped metadata
 fields; it is safe to populate before a user has supplied any key. `agent.readiness()` projects
 provider registration, credential readiness, and model eligibility without exposing secret material.

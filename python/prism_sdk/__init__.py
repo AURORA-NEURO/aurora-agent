@@ -45,6 +45,10 @@ from .brain import (
     MissionAuthorizationReceipt,
     MissionToolAuthorizer,
 )
+from .brain_learning_store import (
+    SQLITE_BRAIN_LEARNING_SCHEMA,
+    SQLiteBrainLearningLedger,
+)
 from .memory import (
     BrainEpisodicMemory,
     BrainMemoryError,
@@ -2948,6 +2952,8 @@ __all__ = [
     "BRAIN_EVALUATOR_MESH_SCHEMA",
     "AUTONOMOUS_EVALUATOR_MESH_SCHEMA",
     "BrainLearningLedger",
+    "SQLITE_BRAIN_LEARNING_SCHEMA",
+    "SQLiteBrainLearningLedger",
     "BrainLearningEpisode",
     "BrainLearningTrajectory",
     "BrainLearningTrajectoryResult",
