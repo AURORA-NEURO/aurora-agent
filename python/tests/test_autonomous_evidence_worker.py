@@ -13,6 +13,7 @@ from prism_sdk import (
     build_autonomous_evidence_plan,
     builtin_autonomous_domain_profiles,
     builtin_autonomous_workflow_strategies,
+    SQLiteAutonomousEvidenceWorkQueuePersistence,
 )
 
 
@@ -181,3 +182,27 @@ def test_work_queue_rejects_credential_shaped_metadata_before_persistence():
             },
             now=6_000,
         )
+
+
+def test_sqlite_persistence_restores_metadata_only_queue_across_process_objects(tmp_path):
+    plan = _single_domain_plan("science")
+    request = _request(plan.requirements[0])
+    path = tmp_path / "evidence-work-queue.sqlite3"
+    queue = InMemoryAutonomousEvidenceWorkQueue()
+    with SQLiteAutonomousEvidenceWorkQueuePersistence(path) as persistence:
+        coordinator = AutonomousEvidenceWorkQueuePersistenceCoordinator(queue, persistence)
+        assert coordinator.restore()["status"] == "empty"
+        queue.enqueue(work_id="sqlite-evidence", plan=plan, request=request, now=7_000)
+        snapshot = coordinator.flush()
+        assert snapshot["snapshot_digest"]
+
+    reopened = InMemoryAutonomousEvidenceWorkQueue()
+    with SQLiteAutonomousEvidenceWorkQueuePersistence(path) as persistence:
+        coordinator = AutonomousEvidenceWorkQueuePersistenceCoordinator(reopened, persistence)
+        restored = coordinator.restore()
+        assert restored["status"] == "restored"
+        assert restored["items"] == 1
+        assert reopened.get("sqlite-evidence").request_digest == queue.get("sqlite-evidence").request_digest
+
+    assert b"transient-evidence" not in path.read_bytes()
+    assert b"caller-secret" not in path.read_bytes()

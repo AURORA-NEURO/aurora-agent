@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 import json
 import math
+from pathlib import Path
+import sqlite3
 import threading
 import time
 from typing import Any, Callable, Mapping, Sequence
@@ -30,6 +32,7 @@ from .errors import ArgumentError
 AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA = "bioprism-python-autonomous-evidence-work-item/0.1"
 AUTONOMOUS_EVIDENCE_WORK_QUEUE_SCHEMA = "bioprism-python-autonomous-evidence-work-queue/0.1"
 AUTONOMOUS_EVIDENCE_WORKER_SCHEMA = "bioprism-python-autonomous-evidence-worker/0.1"
+AUTONOMOUS_EVIDENCE_WORK_QUEUE_SQLITE_SCHEMA = "bioprism-python-autonomous-evidence-work-queue-sqlite/0.1"
 MAX_AUTONOMOUS_EVIDENCE_WORK_ITEMS = 4_096
 MAX_AUTONOMOUS_EVIDENCE_WORK_ATTEMPTS = 32
 MAX_AUTONOMOUS_EVIDENCE_WORK_BATCH = 128
@@ -289,6 +292,35 @@ def _work_item_from_mapping(value: Mapping[str, Any]) -> AutonomousEvidenceWorkI
     )
 
 
+def _validated_snapshot(value: Mapping[str, Any], maximum: int) -> tuple[dict[str, Any], dict[str, AutonomousEvidenceWorkItem]]:
+    if not isinstance(value, Mapping):
+        raise ArgumentError("autonomous evidence work queue snapshot must be a mapping")
+    expected_keys = {"schema", "items", "retention", "secret_material", "snapshot_digest"}
+    if set(value) != expected_keys or value.get("schema") != AUTONOMOUS_EVIDENCE_WORK_QUEUE_SCHEMA:
+        raise ArgumentError("autonomous evidence work queue snapshot is malformed")
+    if value.get("retention") != "metadata_only_request_and_values_caller_owned" or value.get("secret_material") != "never_returned":
+        raise ArgumentError("autonomous evidence work queue snapshot retention is invalid")
+    items = value.get("items")
+    if not isinstance(items, Sequence) or isinstance(items, (str, bytes, bytearray)):
+        raise ArgumentError("autonomous evidence work queue snapshot items are malformed")
+    if len(items) > maximum:
+        raise ArgumentError("autonomous evidence work queue snapshot exceeds max_items")
+    descriptor = {key: child for key, child in value.items() if key != "snapshot_digest"}
+    observed_digest = _digest("autonomous evidence work queue snapshot snapshot_digest", value.get("snapshot_digest"))
+    if content_digest(descriptor) != observed_digest:
+        raise ArgumentError("autonomous evidence work queue snapshot digest is invalid")
+    normalized = dict(value)
+    if len(canonical_json(normalized).encode("utf-8")) > MAX_AUTONOMOUS_EVIDENCE_WORK_SNAPSHOT_BYTES:
+        raise ArgumentError("autonomous evidence work queue snapshot exceeds its byte bound")
+    restored: dict[str, AutonomousEvidenceWorkItem] = {}
+    for raw in items:
+        item = _work_item_from_mapping(raw)
+        if item.work_id in restored:
+            raise ArgumentError("autonomous evidence work queue snapshot contains duplicate work ids")
+        restored[item.work_id] = item
+    return normalized, restored
+
+
 def _result_metadata(item: AutonomousEvidenceWorkItem, result: AutonomousEvidenceRuntimeResult) -> tuple[str, str, str | None, str, str]:
     if not isinstance(result, AutonomousEvidenceRuntimeResult):
         raise ArgumentError("evidence work result must be a typed runtime result")
@@ -507,21 +539,7 @@ class InMemoryAutonomousEvidenceWorkQueue:
         return snapshot
 
     def restore(self, snapshot: Mapping[str, Any]) -> None:
-        if not isinstance(snapshot, Mapping) or snapshot.get("schema") != AUTONOMOUS_EVIDENCE_WORK_QUEUE_SCHEMA or not isinstance(snapshot.get("items"), Sequence) or isinstance(snapshot.get("items"), (str, bytes)):
-            raise ArgumentError("autonomous evidence work queue snapshot is malformed")
-        if snapshot.get("retention") != "metadata_only_request_and_values_caller_owned" or snapshot.get("secret_material") != "never_returned":
-            raise ArgumentError("autonomous evidence work queue snapshot retention is invalid")
-        descriptor = {key: value for key, value in snapshot.items() if key != "snapshot_digest"}
-        if content_digest(descriptor) != snapshot.get("snapshot_digest"):
-            raise ArgumentError("autonomous evidence work queue snapshot digest is invalid")
-        if len(snapshot["items"]) > self.max_items:
-            raise ArgumentError("autonomous evidence work queue snapshot exceeds max_items")
-        restored: dict[str, AutonomousEvidenceWorkItem] = {}
-        for raw in snapshot["items"]:
-            item = _work_item_from_mapping(raw)
-            if item.work_id in restored:
-                raise ArgumentError("autonomous evidence work queue snapshot contains duplicate work ids")
-            restored[item.work_id] = item
+        _, restored = _validated_snapshot(snapshot, self.max_items)
         with self._lock:
             self._items = restored
 
@@ -546,6 +564,106 @@ class AutonomousEvidenceWorkQueuePersistenceCoordinator:
         snapshot = self.queue.snapshot()
         self.persistence.write(snapshot)
         return snapshot
+
+
+class SQLiteAutonomousEvidenceWorkQueuePersistence:
+    """Transactional SQLite snapshot adapter for metadata-only evidence work queues."""
+
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        max_items: int = MAX_AUTONOMOUS_EVIDENCE_WORK_ITEMS,
+        busy_timeout_ms: int = 5_000,
+    ) -> None:
+        if not isinstance(path, (str, Path)) or not str(path):
+            raise ArgumentError("autonomous evidence work SQLite path must be non-empty")
+        self.max_items = _bounded_integer("autonomous evidence work SQLite max_items", max_items, 1, MAX_AUTONOMOUS_EVIDENCE_WORK_ITEMS)
+        self.busy_timeout_ms = _bounded_integer("autonomous evidence work SQLite busy_timeout_ms", busy_timeout_ms, 1, 120_000)
+        self.path = str(path)
+        self._lock = threading.RLock()
+        if self.path != ":memory:":
+            Path(self.path).parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self._connection = sqlite3.connect(self.path, isolation_level=None, check_same_thread=False)
+            self._connection.row_factory = sqlite3.Row
+            self._connection.execute("PRAGMA synchronous=FULL")
+            self._connection.execute(f"PRAGMA busy_timeout={self.busy_timeout_ms}")
+            self._connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS autonomous_evidence_work_queue_snapshots (
+                    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                    persistence_schema TEXT NOT NULL,
+                    schema TEXT NOT NULL,
+                    snapshot_json TEXT NOT NULL,
+                    snapshot_digest TEXT NOT NULL,
+                    updated_at INTEGER NOT NULL
+                )
+                """
+            )
+        except sqlite3.Error as error:
+            raise ArgumentError("could not initialize autonomous evidence work SQLite persistence") from error
+
+    def close(self) -> None:
+        with self._lock:
+            self._connection.close()
+
+    def __enter__(self) -> "SQLiteAutonomousEvidenceWorkQueuePersistence":
+        return self
+
+    def __exit__(self, *_: Any) -> None:
+        self.close()
+
+    def read(self) -> dict[str, Any] | None:
+        with self._lock:
+            try:
+                row = self._connection.execute(
+                    "SELECT persistence_schema, schema, snapshot_json, snapshot_digest FROM autonomous_evidence_work_queue_snapshots WHERE singleton = 1"
+                ).fetchone()
+            except sqlite3.Error as error:
+                raise ArgumentError("could not read autonomous evidence work SQLite persistence") from error
+        if row is None:
+            return None
+        if row["persistence_schema"] != AUTONOMOUS_EVIDENCE_WORK_QUEUE_SQLITE_SCHEMA or row["schema"] != AUTONOMOUS_EVIDENCE_WORK_QUEUE_SCHEMA:
+            raise ArgumentError("autonomous evidence work SQLite snapshot schema is invalid")
+        try:
+            snapshot = json.loads(str(row["snapshot_json"]))
+        except (TypeError, ValueError) as error:
+            raise ArgumentError("autonomous evidence work SQLite snapshot JSON is invalid") from error
+        if not isinstance(snapshot, Mapping) or snapshot.get("snapshot_digest") != row["snapshot_digest"]:
+            raise ArgumentError("autonomous evidence work SQLite snapshot digest is invalid")
+        normalized, _ = _validated_snapshot(snapshot, self.max_items)
+        return normalized
+
+    def write(self, snapshot: Mapping[str, Any]) -> None:
+        normalized, _ = _validated_snapshot(snapshot, self.max_items)
+        encoded = canonical_json(normalized)
+        digest = str(normalized["snapshot_digest"])
+        now = _now_ms(None)
+        with self._lock:
+            try:
+                self._connection.execute("BEGIN IMMEDIATE")
+                self._connection.execute(
+                    """
+                    INSERT INTO autonomous_evidence_work_queue_snapshots
+                        (singleton, persistence_schema, schema, snapshot_json, snapshot_digest, updated_at)
+                    VALUES (1, ?, ?, ?, ?, ?)
+                    ON CONFLICT(singleton) DO UPDATE SET
+                        persistence_schema = excluded.persistence_schema,
+                        schema = excluded.schema,
+                        snapshot_json = excluded.snapshot_json,
+                        snapshot_digest = excluded.snapshot_digest,
+                        updated_at = excluded.updated_at
+                    """,
+                    (AUTONOMOUS_EVIDENCE_WORK_QUEUE_SQLITE_SCHEMA, AUTONOMOUS_EVIDENCE_WORK_QUEUE_SCHEMA, encoded, digest, now),
+                )
+                self._connection.execute("COMMIT")
+            except sqlite3.Error as error:
+                try:
+                    self._connection.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+                raise ArgumentError("could not write autonomous evidence work SQLite persistence") from error
 
 
 @dataclass(frozen=True, slots=True)
@@ -676,6 +794,7 @@ __all__ = [
     "AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA",
     "AUTONOMOUS_EVIDENCE_WORK_QUEUE_SCHEMA",
     "AUTONOMOUS_EVIDENCE_WORKER_SCHEMA",
+    "AUTONOMOUS_EVIDENCE_WORK_QUEUE_SQLITE_SCHEMA",
     "MAX_AUTONOMOUS_EVIDENCE_WORK_ITEMS",
     "MAX_AUTONOMOUS_EVIDENCE_WORK_ATTEMPTS",
     "MAX_AUTONOMOUS_EVIDENCE_WORK_BATCH",
@@ -684,6 +803,7 @@ __all__ = [
     "AutonomousEvidenceWorkItem",
     "InMemoryAutonomousEvidenceWorkQueue",
     "AutonomousEvidenceWorkQueuePersistenceCoordinator",
+    "SQLiteAutonomousEvidenceWorkQueuePersistence",
     "AutonomousEvidenceWorkerRow",
     "AutonomousEvidenceWorker",
 ]

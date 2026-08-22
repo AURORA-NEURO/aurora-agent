@@ -3045,10 +3045,13 @@ run = worker.run(worker_id="evidence-worker-1", limit=32)
 TypeScript exposes the same boundary through `InMemoryAutonomousEvidenceWorkQueue`,
 `AutonomousEvidenceWorkQueuePersistenceCoordinator`, and `AutonomousEvidenceWorker`. The
 rehydrator returns `{ plan, runtime, request, execute }`; `execute` remains the caller-owned
-runtime configuration. Both SDKs intentionally provide an in-memory queue plus a persistence
-coordinator rather than pretending to be a distributed consensus system. Applications can attach
-an SQLite, transactional, or service-backed adapter to `read()`/`write()` while preserving the
-same snapshot schema, fencing rules, and metadata-only retention contract.
+runtime configuration. Python also ships `SQLiteAutonomousEvidenceWorkQueuePersistence` for a
+transactional single-database deployment; call the coordinator's `flush()` after each durable queue
+transition and `restore()` during process startup. Both SDKs intentionally keep the queue contract
+separate from distributed consensus. TypeScript applications can attach an IndexedDB, transactional,
+or service-backed adapter to `read()`/`write()`, while Python applications can use SQLite or an
+equivalent adapter, preserving the same snapshot schema, fencing rules, and metadata-only retention
+contract.
 
 This worker is the safe handoff between autonomous planning and real source adapters: it can execute
 all built-in autonomous domains, but it does not decide what a source means, grant a credential,
