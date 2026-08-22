@@ -2991,6 +2991,70 @@ returns the evidence values as part of the settlement packet. These adapters are
 scaffolds, not truth or clinical authorities. Applications remain responsible for producing the
 signals, validating sources, and deciding whether a reward is eligible for learning credit.
 
+## Durable evidence acquisition workers
+
+The evidence runtime is intentionally caller-owned: it owns the transient acquirer input, projected
+value, evaluator, and journal, but it does not know how to retrieve a source or store credentials.
+`AutonomousEvidenceWorkQueue` and `AutonomousEvidenceWorker` add the missing process boundary for
+real deployments. They persist only a bounded work identity, requirement/source digests, lease and
+attempt metadata, receipt/assessment/result digests, and explicit lifecycle state. They never persist
+the source payload, prompt, credential, request metadata value, evaluator input, or projected value.
+
+The queue has explicit states for `queued`, `leased`, `completed`, `failed`,
+`awaiting_evaluation`, `reconciliation_required`, and `cancelled`. Lease ownership is fenced, lease
+expiry is observable, retry ceilings are bounded, and snapshot digests detect tampering. A runtime
+that reaches `awaiting_evaluation` is not automatically retried: the application must rehydrate the
+value and explicitly call `requeue(...)` after deciding that reevaluation is safe. A missing or
+conflicting rehydration is quarantined as `reconciliation_required`, which prevents duplicate source
+acquisition after a restart or uncertain external side effect.
+
+```python
+from prism_sdk import (
+    AutonomousEvidenceWorker,
+    InMemoryAutonomousEvidenceWorkQueue,
+)
+
+queue = InMemoryAutonomousEvidenceWorkQueue()
+queue.enqueue(
+    work_id="science-evidence-001",
+    plan=evidence_plan,
+    request={
+        "requirement_id": evidence_plan.requirements[0].requirement_id,
+        "source_id": "caller-owned-source-001",
+        "source_digest": source_digest,
+        "metadata": {"retrieval_mode": "caller_adapter"},
+    },
+)
+
+worker = AutonomousEvidenceWorker(queue, lambda item: {
+    # Resolve the plan, journal, short-lived source handle, and runtime from
+    # the caller's own persistence/secret boundary. Never return raw values
+    # from the rehydrator or store them in the queue snapshot.
+    "plan": evidence_plan,
+    "request": caller_rehydrate_request(item),
+    "runtime": caller_rehydrate_runtime(item),
+    "execute": {
+        "acquirer": caller_acquirer,
+        "projector": caller_projector,
+        "evaluator": caller_evaluator,
+    },
+})
+run = worker.run(worker_id="evidence-worker-1", limit=32)
+```
+
+TypeScript exposes the same boundary through `InMemoryAutonomousEvidenceWorkQueue`,
+`AutonomousEvidenceWorkQueuePersistenceCoordinator`, and `AutonomousEvidenceWorker`. The
+rehydrator returns `{ plan, runtime, request, execute }`; `execute` remains the caller-owned
+runtime configuration. Both SDKs intentionally provide an in-memory queue plus a persistence
+coordinator rather than pretending to be a distributed consensus system. Applications can attach
+an SQLite, transactional, or service-backed adapter to `read()`/`write()` while preserving the
+same snapshot schema, fencing rules, and metadata-only retention contract.
+
+This worker is the safe handoff between autonomous planning and real source adapters: it can execute
+all built-in autonomous domains, but it does not decide what a source means, grant a credential,
+authorize an external action, or turn provider success into learning reward. Those decisions remain
+with the caller-owned acquirer, evaluator, approval layer, and value-only learning ledger.
+
 ## Cross-process control plane and offline adaptation
 
 `BrainControlPlane` exposes the durable job journal as a bounded cursor stream for worker

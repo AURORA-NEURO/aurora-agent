@@ -327,6 +327,30 @@ export type {
   AutonomousEvidenceRuntimeResult,
 } from "./autonomous-evidence-runtime.js";
 export {
+  AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA,
+  AUTONOMOUS_EVIDENCE_WORK_QUEUE_SCHEMA,
+  AUTONOMOUS_EVIDENCE_WORKER_SCHEMA,
+  MAX_AUTONOMOUS_EVIDENCE_WORK_ATTEMPTS,
+  MAX_AUTONOMOUS_EVIDENCE_WORK_BATCH,
+  MAX_AUTONOMOUS_EVIDENCE_WORK_ITEMS,
+  MAX_AUTONOMOUS_EVIDENCE_WORK_LEASE_MS,
+  MAX_AUTONOMOUS_EVIDENCE_WORK_SNAPSHOT_BYTES,
+  AutonomousEvidenceWorkQueuePersistenceCoordinator,
+  AutonomousEvidenceWorker,
+  InMemoryAutonomousEvidenceWorkQueue,
+} from "./autonomous-evidence-worker.js";
+export type {
+  AutonomousEvidenceWorkFailureClass,
+  AutonomousEvidenceWorkItem,
+  AutonomousEvidenceWorkQueuePersistence,
+  AutonomousEvidenceWorkQueueSnapshot,
+  AutonomousEvidenceWorkRehydration,
+  AutonomousEvidenceWorkRehydrator,
+  AutonomousEvidenceWorkerRow,
+  AutonomousEvidenceWorkerRun,
+  AutonomousEvidenceWorkStatus,
+} from "./autonomous-evidence-worker.js";
+export {
   AUTONOMOUS_CONNECTOR_REGISTRY_SCHEMA,
   AUTONOMOUS_CONNECTOR_DISPATCH_SCHEMA,
   AUTONOMOUS_CONNECTOR_RECEIPT_SCHEMA,
