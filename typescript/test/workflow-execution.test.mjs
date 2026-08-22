@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   AutonomousAgent,
   AutonomousDurableJobController,
+  AutonomousDurableJobWorker,
   AutonomousExecutionController,
   InMemoryAutonomousExecutionJournal,
   AutonomousWorkflowPersistenceCoordinator,
@@ -15,6 +16,7 @@ import {
   builtinAutonomousDomainProfiles,
   digestJson,
   openaiCompatibleProvider,
+  ProviderRuntimeError,
 } from "../dist/index.js";
 
 function jsonResponse(payload, status = 200) {
@@ -51,6 +53,98 @@ function workflowStagePayload(init, fallbackStage = "stage") {
     notes: `completed ${stageId} with bounded test evidence`,
     next_actions: [],
   };
+}
+
+function remoteJobFixture() {
+  let state = "queued";
+  let job = {
+    schema: "brain-job",
+    job_id: "remote-worker-job-1",
+    idempotency_key_digest: "a".repeat(64),
+    spec_digest: "b".repeat(64),
+    domain: "coding",
+    capability: "coding_delivery",
+    risk_class: "engineering_change",
+    priority: 10,
+    max_attempts: 3,
+    state,
+    attempts: 0,
+    lease_owner: null,
+    lease_expires_ns: null,
+    side_effect_boundary: "not_started",
+    recovered_after_restart: false,
+    created_sequence: 1,
+    updated_sequence: 1,
+    record_digest: "c".repeat(64),
+    spec: "not_returned",
+    retention: "metadata_only",
+  };
+  const seen = [];
+  const projection = (structuredContent) => ({ ok: true, mcp: { result: { structuredContent } } });
+  const withJob = (extra = {}) => ({ ...job, state, ...extra });
+  const api = {
+    async brainJobSubmit(args) {
+      seen.push({ operation: "submit", args });
+      job = { ...job, spec_digest: args.spec_digest };
+      return projection({ job: withJob() });
+    },
+    async brainJobStatus(args) {
+      seen.push({ operation: "status", args });
+      return projection({ job: withJob() });
+    },
+    async brainJobEvents(args) {
+      seen.push({ operation: "events", args });
+      return projection({ events: [], after: args.after ?? 0, next_after: args.after ?? 0, head_digest: "d".repeat(64), chain: "sha256_prev_digest", retention: "metadata_only" });
+    },
+    async brainJobApproval(args) {
+      seen.push({ operation: "approval", args });
+      state = args.action === "request" ? "waiting_approval" : "queued";
+      return projection({ job: withJob(), authorization: { posture: "caller_proof", verified_by_server: false, execution: "not_started" } });
+    },
+    async brainJobClaimNext(args) {
+      seen.push({ operation: "claim_next", args });
+      if (state !== "queued") return projection({ operation: "claim_next", claimed: false, idempotent: false, job: null, event: null });
+      state = "leased";
+      job = { ...job, attempts: job.attempts + 1, lease_owner: args.worker_id, lease_expires_ns: 1 };
+      return projection({ operation: "claim_next", claimed: true, idempotent: false, job: withJob(), event: null });
+    },
+    async brainJobClaim(args) {
+      seen.push({ operation: "claim", args });
+      if (state === "leased" && job.lease_owner === args.worker_id) return projection({ operation: "claim", idempotent: true, job: withJob(), event: null });
+      state = "leased";
+      job = { ...job, lease_owner: args.worker_id, lease_expires_ns: 1 };
+      return projection({ operation: "claim", idempotent: false, job: withJob(), event: null });
+    },
+    async brainJobRenew(args) {
+      seen.push({ operation: "renew", args });
+      job = { ...job, lease_expires_ns: 2 };
+      return projection({ operation: "renew", idempotent: false, job: withJob(), event: null });
+    },
+    async brainJobCheckpoint(args) {
+      seen.push({ operation: "checkpoint", args });
+      state = args.waiting_for_approval ? "waiting_approval" : "running";
+      job = { ...job, side_effect_boundary: args.side_effect_boundary, checkpoint_digest: args.checkpoint_digest };
+      return projection({ operation: "checkpoint", idempotent: false, job: withJob(), event: null });
+    },
+    async brainJobComplete(args) {
+      seen.push({ operation: "complete", args });
+      state = "succeeded";
+      job = { ...job, result_digest: args.result_digest, lease_owner: null, lease_expires_ns: null };
+      return projection({ operation: "complete", idempotent: false, job: withJob(), event: null });
+    },
+    async brainJobFail(args) {
+      seen.push({ operation: "fail", args });
+      state = args.retryable ? "queued" : "failed";
+      job = { ...job, lease_owner: null, lease_expires_ns: null };
+      return projection({ operation: "fail", idempotent: false, job: withJob(), event: null });
+    },
+    async brainJobCancel(args) {
+      seen.push({ operation: "cancel", args });
+      state = "cancelled";
+      return projection({ operation: "cancel", cancelled: true, reconciliation_required: false, idempotent: false, job: withJob(), event: null });
+    },
+  };
+  return { api, seen, get state() { return state; }, get job() { return job; } };
 }
 
 test("workflow executor checkpoints stages, pauses at a bounded budget, and resumes by digest", async () => {
@@ -848,4 +942,102 @@ test("durable job controller sends only metadata, preserves server approval, and
     () => controller.execute("server-job-1", task, { candidates: agent.models(), approveProviderCall: true, maxStages: 1 }),
     /unsupported autonomous domain/,
   );
+});
+
+test("remote durable worker claims, rehydrates, verifies, and settles a private all-domain workflow", async () => {
+  let providerCalls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      providerCalls += 1;
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify(workflowStagePayload(init)) }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("remote-worker", "https://remote-worker.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel({ ...model(), provider: "remote-worker", model: "remote-worker-model" });
+  const fixture = remoteJobFixture();
+  const controller = new AutonomousDurableJobController(agent, fixture.api, new InMemoryAutonomousWorkflowCheckpointStore(), "remote-worker-1");
+  const task = "Review a bounded coding workflow through the remote queue";
+  const submitted = await controller.submit(task, { idempotencyKey: "remote-worker-request", domain: "coding", candidates: agent.models() });
+  const worker = new AutonomousDurableJobWorker(controller, ({ job }) => {
+    assert.equal(job.spec, "not_returned");
+    return { task, options: { candidates: agent.models(), approveProviderCall: true, maxStages: 1 } };
+  });
+  const run = await worker.runOnce();
+  assert.equal(run.status, "paused");
+  assert.equal(run.job_id, submitted.job.job_id);
+  assert.equal(run.execution.local.completed_stage_count, 1);
+  assert.equal(providerCalls, 1);
+  assert.ok(fixture.seen.some((row) => row.operation === "claim_next"));
+  assert.ok(fixture.seen.some((row) => row.operation === "checkpoint" && row.args.side_effect_boundary === "unknown"));
+  assert.equal(await worker.runOnce(), null, "a running job is not duplicated by an empty dequeue");
+  assert.ok(fixture.seen.every((row) => !Object.prototype.hasOwnProperty.call(row.args, "task")));
+  assert.ok(fixture.seen.every((row) => !Object.prototype.hasOwnProperty.call(row.args, "prompt")));
+  assert.ok(JSON.stringify(run).includes("never_returned"));
+});
+
+test("remote durable worker fails closed on private task/spec drift before provider dispatch", async () => {
+  let providerCalls = 0;
+  const llm = new LLMRuntime({ credentials: new CredentialStore(), fetch: async () => { providerCalls += 1; throw new Error("provider must not be called"); } });
+  llm.registerProvider(openaiCompatibleProvider("remote-drift", "https://remote-drift.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel({ ...model(), provider: "remote-drift", model: "remote-drift-model" });
+  const fixture = remoteJobFixture();
+  const controller = new AutonomousDurableJobController(agent, fixture.api, new InMemoryAutonomousWorkflowCheckpointStore(), "remote-drift-worker");
+  const original = "Original task bound to the submitted durable job";
+  await controller.submit(original, { idempotencyKey: "remote-drift-request", domain: "coding", candidates: agent.models() });
+  const worker = new AutonomousDurableJobWorker(controller, () => ({ task: "Tampered private task must never dispatch", options: { candidates: agent.models(), approveProviderCall: true } }));
+  const run = await worker.runOnce();
+  assert.equal(run.status, "failed");
+  assert.equal(run.error_class, "ProviderRuntimeError");
+  assert.equal(run.job.state, "failed");
+  assert.equal(providerCalls, 0);
+  assert.equal(fixture.seen.some((row) => row.operation === "checkpoint"), false);
+  assert.ok(fixture.seen.some((row) => row.operation === "fail"));
+  assert.equal(JSON.stringify(run).includes("Tampered private task"), false);
+  assert.equal(JSON.stringify(fixture.seen).includes("Tampered private task"), false);
+});
+
+test("remote durable worker preserves retryable preflight failures as queued work", async () => {
+  const llm = new LLMRuntime({ credentials: new CredentialStore(), fetch: async () => { throw new Error("provider must not be called"); } });
+  llm.registerProvider(openaiCompatibleProvider("remote-retry", "https://remote-retry.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel({ ...model(), provider: "remote-retry", model: "remote-retry-model" });
+  const fixture = remoteJobFixture();
+  const controller = new AutonomousDurableJobController(agent, fixture.api, new InMemoryAutonomousWorkflowCheckpointStore(), "remote-retry-worker");
+  const task = "Retry this bounded remote preflight";
+  await controller.submit(task, { idempotencyKey: "remote-retry-request", domain: "coding", candidates: agent.models() });
+  const worker = new AutonomousDurableJobWorker(
+    controller,
+    () => { throw new ProviderRuntimeError("temporary resolver outage", { retryable: true, code: "transport" }); },
+  );
+  const run = await worker.runOnce();
+  assert.equal(run.status, "retry_scheduled");
+  assert.equal(run.retryable, true);
+  assert.equal(run.job.state, "queued");
+  assert.equal(fixture.seen.at(-1).args.retryable, true);
+});
+
+test("remote durable worker rejects resolver attempts to override the leased job identity", async () => {
+  let providerCalls = 0;
+  const llm = new LLMRuntime({ credentials: new CredentialStore(), fetch: async () => { providerCalls += 1; throw new Error("provider must not be called"); } });
+  llm.registerProvider(openaiCompatibleProvider("remote-job-id", "https://remote-job-id.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel({ ...model(), provider: "remote-job-id", model: "remote-job-id-model" });
+  const fixture = remoteJobFixture();
+  const controller = new AutonomousDurableJobController(agent, fixture.api, new InMemoryAutonomousWorkflowCheckpointStore(), "remote-job-id-worker");
+  const task = "Reject a resolver that attempts to move execution to another durable job";
+  await controller.submit(task, { idempotencyKey: "remote-job-id-request", domain: "coding", candidates: agent.models() });
+  const worker = new AutonomousDurableJobWorker(controller, () => ({
+    task,
+    options: { jobId: "attacker-selected-job", candidates: agent.models(), approveProviderCall: true },
+  }));
+  const run = await worker.runOnce();
+  assert.equal(run.status, "failed");
+  assert.equal(run.error_class, "ArgumentError");
+  assert.equal(run.job.state, "failed");
+  assert.equal(providerCalls, 0);
+  assert.ok(fixture.seen.some((row) => row.operation === "fail"));
+  assert.equal(JSON.stringify(fixture.seen).includes("attacker-selected-job"), false);
 });

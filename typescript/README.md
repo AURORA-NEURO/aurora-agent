@@ -1307,6 +1307,30 @@ worker lease, records an `unknown` effect boundary before local provider executi
 settlement, and records digest-only completion or failure; lightweight observation-only clients
 retain the explicit external-reconciliation posture.
 
+For a pull-based service, browser, or Node worker, `AutonomousDurableJobWorker` calls
+`brain_job_claim_next`, asks a caller-owned resolver to rehydrate the private task and execution
+policy, recomputes the route/task digest, and invokes the controller only after the identity and
+domain match. Empty queues return `null`; retryable resolver failures requeue with bounded
+`retry_scheduled` status, while spec drift and malformed private state fail before provider
+dispatch. The worker preserves approval pauses, unknown side-effect quarantine, and all-domain
+workflow execution through the same controller. It never forwards resolver task text, prompts,
+credentials, or exception messages to the control plane:
+
+```typescript
+const worker = new AutonomousDurableJobWorker(controller, ({ job }) => {
+  const privateSpec = protectedJobStore.resolve(job.job_id); // caller-owned
+  return {
+    task: privateSpec.task,
+    options: {
+      candidates: privateSpec.models,
+      credentials: privateSpec.credentials,
+      approveProviderCall: privateSpec.approved,
+    },
+  };
+});
+const run = await worker.run({ limit: 8 });
+```
+
 ## Evaluator feedback and delayed-credit learning
 
 `AutonomousWorkflowEvaluator` is the explicit reward boundary for the TypeScript brain. It derives

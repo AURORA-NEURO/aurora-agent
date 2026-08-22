@@ -43,6 +43,8 @@ export const AUTONOMOUS_WORKFLOW_MAX_STAGES_PER_CALL = 32;
 export const AUTONOMOUS_WORKFLOW_MAX_EVENTS = 256;
 export const AUTONOMOUS_WORKFLOW_MAX_JOBS = 1_024;
 export const AUTONOMOUS_WORKFLOW_MAX_SNAPSHOT_BYTES = 4 * 1024 * 1024;
+export const AUTONOMOUS_DURABLE_JOB_WORKER_SCHEMA = "bioprism-typescript-autonomous-durable-job-worker/0.1" as const;
+export const AUTONOMOUS_DURABLE_JOB_WORKER_MAX_BATCH = 64;
 
 export type AutonomousWorkflowCheckpointStatus = "running" | "paused" | "completed" | "failed";
 export type AutonomousWorkflowExecutionStatus = "completed" | "paused" | "approval_required" | "failed" | "stage_blocked" | "stage_proposed" | "stage_not_attempted" | "route_review_required";
@@ -235,6 +237,65 @@ export interface AutonomousDurableJobExecutionResult {
   local: AutonomousWorkflowExecutionResult;
   server_job_posture: "control_plane_projection;completion_requires_external_worker_reconciliation" | "control_plane_projection;worker_lifecycle_recorded;durable_authority_remains_brain_job_store";
   private_spec: "caller_owned;task_prompt_response_and_credentials_not_sent_to_control_plane";
+}
+
+export interface AutonomousDurableJobResolutionContext {
+  job: BrainJobRecord;
+  attempt: number;
+}
+
+/** Private task and execution policy rehydrated by the application, never the control plane. */
+export interface AutonomousDurableJobResolution {
+  task: string;
+  options?: Omit<AutonomousWorkflowExecuteOptions, "jobId">;
+}
+
+export type AutonomousDurableJobResolver = (
+  context: AutonomousDurableJobResolutionContext,
+) => Promise<AutonomousDurableJobResolution> | AutonomousDurableJobResolution;
+
+export interface AutonomousDurableJobWorkerOptions {
+  /** Retry only resolver/control-plane failures that are proven to be pre-dispatch and retryable. */
+  retryPreflightFailures?: boolean;
+}
+
+export type AutonomousDurableJobWorkerStatus =
+  | "succeeded"
+  | "approval_required"
+  | "paused"
+  | "retry_scheduled"
+  | "failed"
+  | "reconciliation_required"
+  | "empty";
+
+export interface AutonomousDurableJobWorkerRun {
+  schema: typeof AUTONOMOUS_DURABLE_JOB_WORKER_SCHEMA;
+  worker_id: string;
+  status: Exclude<AutonomousDurableJobWorkerStatus, "empty">;
+  job_id: string;
+  job: BrainJobRecord;
+  execution: AutonomousDurableJobExecutionResult | null;
+  error_class: string | null;
+  retryable: boolean;
+  retention: "remote_job_metadata_only;private_spec_rehydrated_by_caller";
+  secret_material: "never_returned";
+}
+
+export interface AutonomousDurableJobWorkerBatch {
+  schema: typeof AUTONOMOUS_DURABLE_JOB_WORKER_SCHEMA;
+  worker_id: string;
+  status: "completed" | "partial" | "empty";
+  runs: AutonomousDurableJobWorkerRun[];
+  claimed_count: number;
+  succeeded_count: number;
+  approval_required_count: number;
+  paused_count: number;
+  retry_scheduled_count: number;
+  failed_count: number;
+  reconciliation_count: number;
+  batch_digest: string;
+  retention: "remote_job_metadata_only;private_spec_rehydrated_by_caller";
+  secret_material: "never_returned";
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -1120,6 +1181,14 @@ export class AutonomousDurableJobController {
     return projectControlPlane(await this.apiClient.brainJobFail({ job_id: jobId, worker_id: this.workerId, reason, retryable }), "brain job fail");
   }
 
+  /** Record a bounded worker refusal without forwarding exception text or private task values. */
+  async fail(jobId: string, reason = "durable worker execution failed", retryable = false): Promise<BrainJobLifecycleResult> {
+    if (!this.lifecycleAvailable()) throw new ProviderRuntimeError("durable job failure settlement is not available on this control-plane client", { code: "configuration" });
+    if (typeof reason !== "string" || !reason.trim() || reason.length > 2_048) throw new ArgumentError("durable job failure reason is outside its bound");
+    if (typeof retryable !== "boolean") throw new ArgumentError("durable job failure retryable must be boolean");
+    return this.lifecycleFail(boundedJobId(jobId), reason, retryable);
+  }
+
   async submit(task: string, options: AutonomousDurableJobSubmitOptions): Promise<AutonomousDurableJobSubmission> {
     const route = await this.agent.route(task, { domain: options.domain, hints: options.hints });
     if (route.abstained || !route.primary_domain || route.cross_domain) return { schema: AUTONOMOUS_DURABLE_JOB_SCHEMA, status: "route_review_required", route, blueprint: null, job: null, spec_digest: null, execution: "not_started", private_spec: "caller_owned;task_prompt_response_and_credentials_not_sent_to_control_plane" };
@@ -1180,6 +1249,11 @@ export class AutonomousDurableJobController {
       throw new ProviderRuntimeError(`brain job ${normalizedJobId} is not executable in state ${server.job.state}`);
     }
     if (!AUTONOMOUS_DOMAIN_NAMES.includes(server.job.domain as AutonomousDomainName)) throw new ProviderRuntimeError(`brain job ${normalizedJobId} has an unsupported autonomous domain`);
+    const domain = server.job.domain as AutonomousDomainName;
+    const route = await this.agent.route(task, { domain });
+    if (route.abstained || route.cross_domain || route.primary_domain !== domain || route.task_digest !== server.job.spec_digest) {
+      throw new ProviderRuntimeError("rehydrated task does not match the durable brain job specification", { code: "configuration" });
+    }
     if (lifecycle) {
       const admissionDigest = await digestJson({ job_id: normalizedJobId, spec_digest: server.job.spec_digest, worker_id: this.workerId, phase: "execution_admitted" });
       // The controller cannot observe the exact instant a provider side effect begins inside the
@@ -1187,16 +1261,16 @@ export class AutonomousDurableJobController {
       // error or worker crash can never be retried as if no external effect might have occurred.
       await this.lifecycleCheckpoint(normalizedJobId, admissionDigest, "execution_admitted", "unknown", false);
     }
-    const local = await this.executor.start(task, { ...options, domain: server.job.domain as AutonomousDomainName, jobId: normalizedJobId });
+    const local = await this.executor.start(task, { ...options, domain, jobId: normalizedJobId });
     if (!lifecycle) {
       const refreshed = await this.status(normalizedJobId);
       return { schema: AUTONOMOUS_DURABLE_JOB_SCHEMA, job: refreshed.job, local, server_job_posture: "control_plane_projection;completion_requires_external_worker_reconciliation", private_spec: "caller_owned;task_prompt_response_and_credentials_not_sent_to_control_plane" };
     }
     await this.lifecycleRenew(normalizedJobId);
     const checkpointDigest = local.checkpoint?.checkpoint_digest ?? await digestJson({ job_id: normalizedJobId, status: local.status, completed_stage_count: local.completed_stage_count, total_stage_count: local.total_stage_count });
-    const sideEffectBoundary = "unknown" as const;
+    const sideEffectBoundary: "preflight" | "unknown" = local.status === "route_review_required" ? "preflight" : "unknown";
     let settled: BrainJobLifecycleResult;
-    if (local.status === "approval_required") {
+    if (local.status === "approval_required" || local.status === "route_review_required") {
       settled = await this.lifecycleCheckpoint(normalizedJobId, checkpointDigest, "waiting_approval", sideEffectBoundary, true);
     } else if (local.status === "completed") {
       const resultDigest = await digestJson({ job_id: normalizedJobId, status: local.status, checkpoint_digest: checkpointDigest, completed_stage_count: local.completed_stage_count, total_stage_count: local.total_stage_count });
@@ -1207,5 +1281,124 @@ export class AutonomousDurableJobController {
       settled = await this.lifecycleFail(normalizedJobId, `local workflow ended with status ${local.status}`, false);
     }
     return { schema: AUTONOMOUS_DURABLE_JOB_SCHEMA, job: settled.job, local, server_job_posture: "control_plane_projection;worker_lifecycle_recorded;durable_authority_remains_brain_job_store", private_spec: "caller_owned;task_prompt_response_and_credentials_not_sent_to_control_plane" };
+  }
+}
+
+/**
+ * Pull-based remote worker for the value-only brain control plane.
+ *
+ * The resolver is the only place where task text, credentials, model candidates, and provider
+ * policy are rehydrated. Before execution, the worker recomputes the deterministic route digest
+ * and domain binding; drift is settled as a non-retryable pre-dispatch failure and never reaches
+ * the provider boundary. This gives browser, service, notebook, and Node workers one identical
+ * all-domain queue handoff without turning the remote job store into a prompt archive.
+ */
+export class AutonomousDurableJobWorker {
+  readonly controller: AutonomousDurableJobController;
+  readonly workerId: string;
+  readonly resolve: AutonomousDurableJobResolver;
+  readonly retryPreflightFailures: boolean;
+
+  constructor(controller: AutonomousDurableJobController, resolve: AutonomousDurableJobResolver, options: AutonomousDurableJobWorkerOptions = {}) {
+    if (!(controller instanceof AutonomousDurableJobController)) throw new ArgumentError("durable job worker requires an AutonomousDurableJobController");
+    if (typeof resolve !== "function") throw new ArgumentError("durable job worker resolver must be callable");
+    if (options.retryPreflightFailures !== undefined && typeof options.retryPreflightFailures !== "boolean") throw new ArgumentError("durable job worker retryPreflightFailures must be boolean");
+    this.controller = controller;
+    this.workerId = controller.workerId;
+    this.resolve = resolve;
+    this.retryPreflightFailures = options.retryPreflightFailures ?? true;
+  }
+
+  async runOnce(): Promise<AutonomousDurableJobWorkerRun | null> {
+    const claimed = await this.controller.claimNext();
+    if (!claimed.claimed || claimed.job === null) return null;
+    const job = claimed.job;
+    let errorClass: string | null = null;
+    let executionCalled = false;
+    try {
+      if (!job.lease_owner || job.lease_owner !== this.workerId) throw new ProviderRuntimeError("durable control plane returned a job without this worker lease", { code: "protocol" });
+      if (job.state !== "leased" && job.state !== "running") throw new ProviderRuntimeError("durable control plane returned a non-executable claimed job", { code: "protocol" });
+      const resolution = await this.resolve({ job, attempt: job.attempts });
+      if (!resolution || typeof resolution !== "object" || typeof resolution.task !== "string" || !resolution.task.trim()) throw new ArgumentError("durable job resolver must return a bounded task");
+      if (resolution.options !== undefined && (!resolution.options || typeof resolution.options !== "object" || Array.isArray(resolution.options))) throw new ArgumentError("durable job resolver options must be an object");
+      exactKeys(resolution as unknown as Record<string, unknown>, ["task", "options"], "durable job resolver result");
+      if (resolution.options !== undefined && Object.prototype.hasOwnProperty.call(resolution.options, "jobId")) throw new ArgumentError("durable job resolver cannot override the leased job id");
+      executionCalled = true;
+      const execution = await this.controller.execute(job.job_id, resolution.task, resolution.options ?? {});
+      const status = execution.job.state === "reconciliation_required"
+        ? "reconciliation_required"
+        : execution.local.status === "completed"
+          ? "succeeded"
+          : execution.local.status === "approval_required" || execution.local.status === "route_review_required"
+            ? "approval_required"
+            : execution.local.status === "paused"
+              ? "paused"
+              : "failed";
+      return this.envelope(execution.job, status, execution, null, false);
+    } catch (error) {
+      errorClass = error instanceof ProviderRuntimeError || error instanceof ArgumentError ? error.name : "AutonomousDurableJobWorkerError";
+      const retryable = !executionCalled && this.retryPreflightFailures && error instanceof ProviderRuntimeError && error.retryable;
+      try {
+        const failed = await this.controller.fail(job.job_id, retryable ? "durable worker preflight retry scheduled" : "durable worker execution failed", retryable);
+        const status: Exclude<AutonomousDurableJobWorkerStatus, "empty"> = failed.job.state === "reconciliation_required"
+          ? "reconciliation_required"
+          : failed.job.state === "queued"
+            ? "retry_scheduled"
+            : "failed";
+        return this.envelope(failed.job, status, null, errorClass, retryable);
+      } catch (settlementError) {
+        const wrapped = new ProviderRuntimeError("durable worker failure could not be settled", { code: "configuration" });
+        (wrapped as Error & { cause?: unknown }).cause = settlementError;
+        throw wrapped;
+      }
+    }
+  }
+
+  async run(options: { limit?: number } = {}): Promise<AutonomousDurableJobWorkerBatch> {
+    const limit = workflowBoundedInteger(options.limit ?? 1, "durable job worker limit", AUTONOMOUS_DURABLE_JOB_WORKER_MAX_BATCH, 1);
+    const runs: AutonomousDurableJobWorkerRun[] = [];
+    for (let index = 0; index < limit; index += 1) {
+      const result = await this.runOnce();
+      if (result === null) break;
+      runs.push(result);
+      if (result.status === "approval_required" || result.status === "paused" || result.status === "retry_scheduled" || result.status === "reconciliation_required") break;
+    }
+    const succeeded = runs.filter((run) => run.status === "succeeded").length;
+    const approvalRequired = runs.filter((run) => run.status === "approval_required").length;
+    const paused = runs.filter((run) => run.status === "paused").length;
+    const retryScheduled = runs.filter((run) => run.status === "retry_scheduled").length;
+    const failed = runs.filter((run) => run.status === "failed").length;
+    const reconciliation = runs.filter((run) => run.status === "reconciliation_required").length;
+    return {
+      schema: AUTONOMOUS_DURABLE_JOB_WORKER_SCHEMA,
+      worker_id: this.workerId,
+      status: runs.length === 0 ? "empty" : failed > 0 || approvalRequired > 0 || paused > 0 || retryScheduled > 0 || reconciliation > 0 ? "partial" : "completed",
+      runs,
+      claimed_count: runs.length,
+      succeeded_count: succeeded,
+      approval_required_count: approvalRequired,
+      paused_count: paused,
+      retry_scheduled_count: retryScheduled,
+      failed_count: failed,
+      reconciliation_count: reconciliation,
+      batch_digest: await digestJson(runs.map((run) => ({ job_id: run.job_id, status: run.status, record_digest: run.job.record_digest, error_class: run.error_class }))),
+      retention: "remote_job_metadata_only;private_spec_rehydrated_by_caller",
+      secret_material: "never_returned",
+    };
+  }
+
+  private envelope(job: BrainJobRecord, status: Exclude<AutonomousDurableJobWorkerStatus, "empty">, execution: AutonomousDurableJobExecutionResult | null, errorClass: string | null, retryable: boolean): AutonomousDurableJobWorkerRun {
+    return {
+      schema: AUTONOMOUS_DURABLE_JOB_WORKER_SCHEMA,
+      worker_id: this.workerId,
+      status,
+      job_id: job.job_id,
+      job,
+      execution,
+      error_class: errorClass,
+      retryable,
+      retention: "remote_job_metadata_only;private_spec_rehydrated_by_caller",
+      secret_material: "never_returned",
+    };
   }
 }

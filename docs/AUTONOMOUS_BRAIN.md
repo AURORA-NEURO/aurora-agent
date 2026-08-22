@@ -4081,6 +4081,18 @@ and bandit-selection path without retaining prompts, responses, credentials, or 
 The worker is still a single-process scheduler adapter: multi-host transactions, provider-side
 idempotency, and secret manager/session ownership remain deployment responsibilities.
 
+The server-visible equivalent is `AutonomousDurableJobWorker` over
+`AutonomousDurableJobController`. It atomically pulls `brain_job_claim_next`, hands only the
+metadata projection to a caller-owned resolver, recomputes the deterministic route/task digest,
+and invokes the local workflow executor only after the rehydrated private task matches the remote
+specification. This closes the queue-to-provider handoff for service, browser, and Node workers
+without putting task text, prompts, credentials, model candidates, or exception bodies into the
+control plane. Empty queues are explicit; retryable preflight resolver failures return to `queued`
+with `retry_scheduled`, while spec drift fails before dispatch and any error after the unknown
+boundary is settled conservatively through the existing reconciliation lifecycle. The same
+controller maps every built-in single-domain workflow profile through the shared domain catalogue;
+cross-domain routing remains an explicit review outcome rather than an implicit remote dispatch.
+
 When a worker is paired with `AutonomousBrainJobSchedulerPersistenceCoordinator`, persistence is an
 explicit startup gate rather than an implicit best effort. Call `await worker.restore()` before the
 first claim; execution fails closed until restore succeeds. The worker flushes the metadata-only
