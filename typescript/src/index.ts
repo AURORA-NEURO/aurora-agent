@@ -282,6 +282,24 @@ export type {
   DomainToolExecutor,
 } from "./autonomous.js";
 export {
+  AUTONOMOUS_OFFLINE_SCENARIO_SCHEMA,
+  AUTONOMOUS_OFFLINE_SCENARIO_REPLAY_SCHEMA,
+  MAX_AUTONOMOUS_OFFLINE_SCENARIO_CASES,
+  MAX_AUTONOMOUS_OFFLINE_SCENARIO_BYTES,
+  AutonomousOfflineScenarioHarness,
+} from "./autonomous-scenario.js";
+export type {
+  AutonomousOfflineScenarioCase,
+  AutonomousOfflineScenarioExecutionMetadata,
+  AutonomousOfflineScenarioEvidenceContext,
+  AutonomousOfflineScenarioEvidenceFactory,
+  AutonomousOfflineScenarioRunOptions,
+  AutonomousOfflineScenarioAllDomainsOptions,
+  AutonomousOfflineScenarioCaseReport,
+  AutonomousOfflineScenarioReport,
+  AutonomousOfflineScenarioReplayResult,
+} from "./autonomous-scenario.js";
+export {
   AUTONOMOUS_EVIDENCE_PLAN_SCHEMA,
   AUTONOMOUS_EVIDENCE_REQUIREMENT_SCHEMA,
   AUTONOMOUS_EVIDENCE_COVERAGE_STATUSES,

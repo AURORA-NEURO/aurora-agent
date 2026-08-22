@@ -1474,6 +1474,58 @@ credentials. The approval projection contains only task/candidate digests, bound
 model-arm metadata, and the value-only selection audit; it never contains a key, handle, prompt,
 provider response, or raw task text.
 
+### Offline all-domain scenario matrix
+
+For integration tests, local development, and evaluator-worker contract checks, both SDKs expose an
+offline scenario harness. It composes the same selection preview, digest-bound approval handoff,
+local provider invocation, specialized domain evaluator, and explicit bandit settlement used by a
+production embedding. The harness never treats transport success as quality. The caller supplies
+the value-only evidence packet, so a successful local response with missing or failing evidence
+still produces a failed evaluator decision and a bounded negative learning signal.
+
+The Python harness settles through `brain_outcome_record` and therefore exercises the same durable
+Rust/Python learning boundary as a live run:
+
+```python
+from prism_sdk import (
+    AUTONOMOUS_DOMAINS,
+    AutonomousOfflineScenarioHarness,
+    DomainEvaluatorRegistry,
+)
+
+evaluators = DomainEvaluatorRegistry.with_builtin_autonomous_profiles()
+harness = AutonomousOfflineScenarioHarness(agent, evaluator_registry=evaluators)
+
+def evidence_for(context):
+    domain = context["preview"]["domain"]
+    profile = evaluators.resolve_for_autonomous_domain(domain).profile
+    signals = {signal: 1.0 for signal in profile.required_signals}
+    signals.update({signal: 1.0 for signal in profile.signal_weights})
+    return {
+        "domain": domain,
+        "capability": "caller-review",
+        "risk_class": "bounded-review",
+        "signals": signals,
+        "references": ["a" * 64],
+        "limitations": ["caller-declared signals only"],
+    }
+
+report = harness.run_all(credentials={}, evidence_for=evidence_for)
+assert report["case_count"] == len(AUTONOMOUS_DOMAINS)
+replay = harness.replay(report)  # no provider call; verifies evaluator identity and digests
+assert replay["idempotent"] is True
+```
+
+The TypeScript equivalent uses `AutonomousOfflineScenarioHarness` with an
+`AutonomousOnlineLearner` attached to the `AutonomousAgent`. `runAll()` accepts one task per
+domain and an `evidenceFor` callback; the learner records an outcome digest and selection-contract
+digest for every completed case. `replay(report)` revalidates the report digest and evaluator
+identity, then relies on the learner's credited-outcome ledger to make duplicate settlement a
+no-op. Neither report contains task text, prompt messages, provider response text, credentials,
+evidence bodies, or raw tool envelopes—only model identity, status, evaluator fields, and SHA-256
+digests. The built-in evaluator registry covers all twelve domains and rejects cross-domain
+evidence, secret-shaped fields, unsupported payloads, and tampered references.
+
 ### Reviewed capability packs for every domain
 
 The domain profile and workflow are joined by an `AutonomousDomainPack` for every built-in domain:

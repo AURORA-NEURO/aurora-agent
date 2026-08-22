@@ -237,6 +237,13 @@ from .autonomy import (
     builtin_autonomous_workflow_strategies,
     builtin_autonomous_domain_profiles,
 )
+from .autonomy_scenarios import (
+    AUTONOMOUS_OFFLINE_SCENARIO_SCHEMA,
+    AUTONOMOUS_OFFLINE_SCENARIO_REPLAY_SCHEMA,
+    MAX_AUTONOMOUS_OFFLINE_SCENARIO_CASES,
+    MAX_AUTONOMOUS_OFFLINE_SCENARIO_BYTES,
+    AutonomousOfflineScenarioHarness,
+)
 from .autonomous_evidence import (
     AUTONOMOUS_EVIDENCE_PLAN_SCHEMA,
     AUTONOMOUS_EVIDENCE_REQUIREMENT_SCHEMA,
@@ -4980,6 +4987,11 @@ __all__ = [
     "DomainEvaluatorRegistry",
     "builtin_domain_profiles",
     "builtin_autonomous_domain_evaluator_profiles",
+    "AUTONOMOUS_OFFLINE_SCENARIO_SCHEMA",
+    "AUTONOMOUS_OFFLINE_SCENARIO_REPLAY_SCHEMA",
+    "MAX_AUTONOMOUS_OFFLINE_SCENARIO_CASES",
+    "MAX_AUTONOMOUS_OFFLINE_SCENARIO_BYTES",
+    "AutonomousOfflineScenarioHarness",
     "AUTONOMOUS_DOMAINS",
     "AUTONOMOUS_EXECUTION_MODES",
     "AUTONOMOUS_LEARNING_MODES",
