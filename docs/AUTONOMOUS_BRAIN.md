@@ -4268,6 +4268,46 @@ candidate drift before `createAcquirerFromSelection()` constructs an explicit do
 route. A selection plan never authorizes source dispatch and never contains credentials, source
 requests, raw values, or prompts; the caller must still perform approval and invoke the acquirer.
 
+### Restart-safe adapter health and feedback
+
+`InMemoryAutonomousEvidenceAdapterHealthStore` is the reference implementation for the caller-owned
+health boundary. `AutonomousEvidenceAdapterHealthController` can wrap a reviewed selection plan so
+each acquisition outcome and evaluator verdict becomes a bounded, domain-scoped observation. The
+ledger stores only adapter/manifest identity, outcome, latency/cost, evaluator reward, and digests;
+the acquired value and evaluator input remain transient. Its events form a hash chain and its
+snapshot carries a digest, so a persistence adapter can restore health without silently accepting
+tampering or applying observations to a replaced adapter manifest:
+
+```typescript
+const health = new InMemoryAutonomousEvidenceAdapterHealthStore();
+const healthController = new AutonomousEvidenceAdapterHealthController(health, adapters);
+const initial = healthController.selector.selectForDomains(AUTONOMOUS_DOMAIN_NAMES, {
+  capability: "bounded_evidence",
+});
+const observedAcquirer = healthController.createObservedAcquirerFromSelection(initial);
+const observedEvaluator = healthController.createObservedEvaluatorFromSelection(initial, callerEvaluator);
+
+await new AutonomousEvidenceRuntime({ plan }).execute(requests, {
+  acquirer: observedAcquirer,
+  projector: adapters.createProjector(),
+  evaluator: observedEvaluator,
+});
+
+const next = await healthController.selectAdaptiveForDomains(AUTONOMOUS_DOMAIN_NAMES, {
+  capability: "bounded_evidence",
+  min_attempts: 3,
+  failure_threshold: 0.75,
+  minScore: 0.55,
+  minMargin: 0.05,
+});
+```
+
+Adaptive selection is run independently for each domain, so a failing coding source does not
+poison science or operations. An open failure circuit makes that adapter ineligible; if no
+current-manifest adapter clears the score/margin gates, the plan abstains. Use
+`AutonomousEvidenceAdapterHealthPersistenceCoordinator` with an application-owned atomic store for
+restart, and retain the existing approval boundary before turning an adaptive plan into dispatch.
+
 ## Durable evidence acquisition workers
 
 The evidence runtime is intentionally caller-owned: it owns the transient acquirer input, projected

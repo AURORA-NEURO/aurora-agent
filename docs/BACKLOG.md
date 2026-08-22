@@ -39,6 +39,13 @@ abstention, candidate/registry drift detection, and an explicit acquirer handoff
 source authorization or credentials into the selection plan. Provider-specific signal production,
 approval UX, and durable operational health aggregation remain integration work.
 
+The evidence adapter health loop is now implemented as a TypeScript reference subsystem. It records
+digest-bound acquisition and evaluator observations, derives domain-scoped adaptive signals,
+opens bounded failure circuits, wraps selected acquirers/evaluators, and persists a hash-chained
+metadata-only snapshot. Restart restore and stale/tampered snapshot refusal are tested across all
+twelve domains. Production applications still own the atomic backing store, approval UX, and any
+provider-specific cost/health telemetry.
+
 The portfolio now also has a bounded evidence supervisor. It verifies successful provider items,
 rejects cross-domain requests, scopes each evidence runtime to its item's domain, preserves direct
 predecessor evidence digests, and executes acquisition/projection/evaluation in the portfolio's

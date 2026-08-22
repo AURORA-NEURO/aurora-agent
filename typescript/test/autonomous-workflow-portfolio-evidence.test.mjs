@@ -5,6 +5,8 @@ import {
   AUTONOMOUS_DOMAIN_NAMES,
   AutonomousAgent,
   AutonomousEvidenceAdapterRegistry,
+  AutonomousEvidenceAdapterHealthController,
+  AutonomousEvidenceAdapterHealthPersistenceCoordinator,
   AutonomousEvidenceAdapterSelectionPlan,
   AutonomousEvidenceAdapterSelector,
   AutonomousEvidenceRuntime,
@@ -19,6 +21,7 @@ import {
   InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueuePersistence,
   JsonAutonomousWorkflowPortfolioEvidenceWorkQueuePersistence,
   InMemoryAutonomousEvidenceRuntimeJournal,
+  InMemoryAutonomousEvidenceAdapterHealthStore,
   InMemoryAutonomousWorkflowPortfolioEvidenceCheckpointStore,
   JsonAutonomousWorkflowPortfolioEvidenceCheckpointStore,
   LLMRuntime,
@@ -761,4 +764,66 @@ test("evidence adapter selection ranks explicit signals, abstains conservatively
     acquire: () => ({ drift: true }),
   });
   assert.throws(() => rehydrated.verify(registry), /stale or tampered/);
+});
+
+test("adapter health persists runtime outcomes and drives per-domain failover without retaining values", async () => {
+  const agent = agentFor();
+  const evidencePlan = await agent.evidencePlan(AUTONOMOUS_DOMAIN_NAMES);
+  const registry = new AutonomousEvidenceAdapterRegistry();
+  for (const tier of ["fast", "slow"]) {
+    registerAutonomousEvidenceAdaptersForAllDomains(registry, (domain) => ({
+      adapterId: `health.${tier}.${domain}`,
+      version: "1.0.0",
+      capabilities: ["bounded_evidence"],
+      sourceKinds: ["caller_fixture"],
+      acquire: () => ({ transient_health_value: `${tier}-${domain}` }),
+      project: (_value, context) => [{ label: context.requirement.label, kind: "fact", status: "observed", value_digest: null }],
+    }));
+  }
+  const route = Object.fromEntries(AUTONOMOUS_DOMAIN_NAMES.map((domain) => [domain, `health.fast.${domain}`]));
+  const store = new InMemoryAutonomousEvidenceAdapterHealthStore({ clock: (() => { let tick = 1_000; return () => tick += 10; })() });
+  const controller = new AutonomousEvidenceAdapterHealthController(store, registry);
+  const staticPlan = controller.selector.selectForDomains(AUTONOMOUS_DOMAIN_NAMES, { capability: "bounded_evidence" });
+  const observedAcquirer = controller.createObservedAcquirerFromSelection(staticPlan, { cost_units_by_adapter: Object.fromEntries(AUTONOMOUS_DOMAIN_NAMES.map((domain) => [`health.fast.${domain}`, 2])) });
+  const observedEvaluator = controller.createObservedEvaluatorFromSelection(staticPlan, {
+    evaluator_id: "health-evaluator",
+    evaluator_version: "1.0.0",
+    evaluate: () => ({ evaluator_id: "health-evaluator", evaluator_version: "1.0.0", verdict: "accepted", score: 0.85, evidence_digest: "e".repeat(64) }),
+  });
+  const requests = evidencePlan.requirements.map((requirement, index) => ({ requirement_id: requirement.requirement_id, source_id: `health-source-${index}`, source_digest: "a".repeat(64), request_id: `health-request-${index}` }));
+  const runtime = new AutonomousEvidenceRuntime({ plan: evidencePlan });
+  const execution = await runtime.execute(requests, {
+    acquirer: observedAcquirer,
+    projector: registry.createProjector({ adapterIdForDomain: route }),
+    evaluator: observedEvaluator,
+  });
+  assert.equal(execution.json.status, "completed");
+  assert.equal(store.health().length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.ok(store.health().every((row) => row.attempts >= 1 && row.success_rate === 1 && row.quality_observations >= 1));
+  assert.doesNotMatch(JSON.stringify(await store.snapshot()), /transient_health_value|api_key|access_token/);
+
+  const codingFast = registry.resolve("coding", route.coding);
+  const codingSlow = registry.resolve("coding", "health.slow.coding");
+  for (let index = 0; index < 3; index += 1) {
+    await store.recordAcquisition({ adapter_id: codingFast.adapter_id, manifest_digest: codingFast.manifest_digest, domain: "coding", outcome: "failure", status: "timeout", latency_ms: 100 + index, failure_class: "timeout" });
+  }
+  await store.recordAcquisition({ adapter_id: codingSlow.adapter_id, manifest_digest: codingSlow.manifest_digest, domain: "coding", outcome: "success", status: "success", latency_ms: 12 });
+  const adaptive = await controller.selectAdaptiveForDomains(AUTONOMOUS_DOMAIN_NAMES, { capability: "bounded_evidence", min_attempts: 3, failure_threshold: 0.75, minScore: 0.1, minMargin: 0 });
+  assert.equal(adaptive.complete, true);
+  assert.equal(adaptive.rows.find((row) => row.domain === "coding")?.adapter_id, "health.slow.coding");
+  assert.ok(adaptive.rows.filter((row) => row.domain !== "coding").every((row) => row.adapter_id?.startsWith("health.fast.")));
+  assert.doesNotMatch(JSON.stringify(adaptive.toJSON()), /transient_health_value|api_key|access_token/);
+
+  const persisted = {};
+  const coordinator = new AutonomousEvidenceAdapterHealthPersistenceCoordinator(store, {
+    read: () => persisted.snapshot ?? null,
+    write: (snapshot) => { persisted.snapshot = snapshot; },
+  });
+  const snapshot = await coordinator.flush();
+  const restored = new InMemoryAutonomousEvidenceAdapterHealthStore();
+  await new AutonomousEvidenceAdapterHealthPersistenceCoordinator(restored, { read: () => snapshot, write: () => {} }).restore();
+  assert.deepEqual(restored.health(), store.health());
+  const tampered = structuredClone(snapshot);
+  tampered.events[0].observation.adapter_id = "health.tampered";
+  await assert.rejects(() => restored.restore(tampered), /snapshot digest mismatch/);
 });

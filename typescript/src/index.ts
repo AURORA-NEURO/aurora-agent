@@ -613,6 +613,35 @@ export type {
   AutonomousEvidenceAdapterSelectionOptions,
 } from "./autonomous-evidence-adapter-selection.js";
 export {
+  AUTONOMOUS_EVIDENCE_ADAPTER_HEALTH_SCHEMA,
+  AUTONOMOUS_EVIDENCE_ADAPTER_HEALTH_OBSERVATION_SCHEMA,
+  AUTONOMOUS_EVIDENCE_ADAPTER_HEALTH_EVENT_SCHEMA,
+  AUTONOMOUS_EVIDENCE_ADAPTER_HEALTH_RECEIPT_SCHEMA,
+  AUTONOMOUS_EVIDENCE_ADAPTER_HEALTH_SNAPSHOT_SCHEMA,
+  MAX_AUTONOMOUS_EVIDENCE_ADAPTER_HEALTH_EVENTS,
+  MAX_AUTONOMOUS_EVIDENCE_ADAPTER_HEALTH_QUERY_LIMIT,
+  MAX_AUTONOMOUS_EVIDENCE_ADAPTER_HEALTH_ADAPTERS,
+  InMemoryAutonomousEvidenceAdapterHealthStore,
+  AutonomousEvidenceAdapterHealthPersistenceCoordinator,
+  AutonomousEvidenceAdapterHealthController,
+} from "./autonomous-evidence-adapter-health.js";
+export type {
+  AutonomousEvidenceAdapterHealthOutcome,
+  AutonomousEvidenceAdapterHealthObservationKind,
+  AutonomousEvidenceAdapterHealthObservationInput,
+  AutonomousEvidenceAdapterHealthObservation,
+  AutonomousEvidenceAdapterHealth,
+  AutonomousEvidenceAdapterHealthEvent,
+  AutonomousEvidenceAdapterHealthReceipt,
+  AutonomousEvidenceAdapterHealthSnapshot,
+  AutonomousEvidenceAdapterHealthQuery,
+  AutonomousEvidenceAdapterHealthSelectionOptions,
+  AutonomousEvidenceAdapterHealthPersistence,
+  AutonomousEvidenceAdapterHealthStore,
+  AutonomousEvidenceAdapterHealthSelectionBridgeOptions,
+  AutonomousEvidenceAdapterHealthAcquirerOptions,
+} from "./autonomous-evidence-adapter-health.js";
+export {
   AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA,
   AUTONOMOUS_EVIDENCE_WORK_QUEUE_SCHEMA,
   AUTONOMOUS_EVIDENCE_WORKER_SCHEMA,
