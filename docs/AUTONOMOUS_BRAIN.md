@@ -1796,6 +1796,28 @@ await agent.executeWorkflowPortfolio(requests, {
 The bridge routes value-only evidence through the existing domain adapters; it does not read
 provider responses, acquire sources, turn a score into truth, or authorize tools/effects.
 
+When settlement is queued through the learning feedback outbox, a deployment can drain it with
+`AutonomousLearningFeedbackWorker`. The worker uses the outbox's conditional leases and the
+controller's settlement receipts, so a crash after learner mutation is replay-safe and a second
+worker cannot claim an active lease. Its bounded run projection reports applied, failed, leased,
+remaining, and command-result digests only:
+
+```typescript
+const feedbackWorker = new AutonomousLearningFeedbackWorker(learning);
+const feedbackRun = await feedbackWorker.run({
+  workerId: "feedback-worker-a",
+  limit: 64,
+  maxRounds: 4,
+  maxCommands: 256,
+});
+// feedbackRun.status is drained, bounded, failed, or leased_elsewhere.
+```
+
+This worker is deliberately a feedback worker, not a hidden provider executor: pending portfolio
+items still require caller-owned transient rehydration and explicit evidence through
+`executeWorkflowPortfolioResumable()`. Only value-only reward commands can cross the durable
+outbox boundary.
+
 Approval is fail-closed: with `approveProviderCall` absent or false, the first ready item returns
 `approval_required`, descendants become `blocked`, and no provider call starts. Hard failures,
 route review, uncertain effects, turn limits, and child failures are never converted into success;

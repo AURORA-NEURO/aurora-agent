@@ -29,7 +29,9 @@ provider completion alone still never produces reward. A reusable TypeScript eva
 routs caller-owned value-only evidence through the reviewed twelve-domain registry, binds its
 contract catalogue digest into resumable learning policy, and refuses incomplete custom registry
 coverage or cross-domain evidence; source acquisition, truth authority, and production evaluator
-operations remain deployment work.
+operations remain deployment work. A bounded feedback worker now drains the same value-only
+outbox with conditional leases, receipt-backed crash recovery, retry/terminal-failure reporting,
+and no provider replay; multi-host persistence and operational scheduling remain deployment work.
 
 The autonomous façade now compiles every built-in workflow into a digest-bound evidence plan.
 Python `AutonomousTaskOrchestrator.evidence_plan()` and TypeScript `AutonomousAgent.evidencePlan()`

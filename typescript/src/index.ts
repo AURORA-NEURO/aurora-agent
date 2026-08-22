@@ -346,6 +346,17 @@ export type {
   AutonomousWorkflowPortfolioEvaluatorBridgeOptions,
   AutonomousWorkflowPortfolioEvaluatorBridge,
 } from "./autonomous-workflow-portfolio-learning.js";
+export {
+  AUTONOMOUS_LEARNING_FEEDBACK_WORKER_SCHEMA,
+  MAX_AUTONOMOUS_LEARNING_FEEDBACK_WORKER_ROUNDS,
+  MAX_AUTONOMOUS_LEARNING_FEEDBACK_WORKER_COMMANDS,
+  MAX_AUTONOMOUS_LEARNING_FEEDBACK_WORKER_LEASE_MS,
+  AutonomousLearningFeedbackWorker,
+} from "./autonomous-learning-worker.js";
+export type {
+  AutonomousLearningFeedbackWorkerStatus,
+  AutonomousLearningFeedbackWorkerRun,
+} from "./autonomous-learning-worker.js";
 export type {
   AutonomousAcceptedCrossDomainPlan,
   AutonomousAcceptedPlan,
