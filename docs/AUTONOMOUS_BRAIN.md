@@ -1601,6 +1601,40 @@ domain and cross-domain work; explicit caller tools remain compatibility input b
 subject to activation, catalogue, provider, and effect gates. This keeps model-visible tools
 small enough to be useful without converting discovery or selection into authority.
 
+For applications that need one reviewed plan spanning several domain workflows, the TypeScript
+facade also exposes `planWorkflowPortfolio()`. Each item supplies an explicit domain and task,
+may depend on earlier items, and is compiled through the same route, workflow, evidence, and
+tool-plan contracts used by ordinary execution. The portfolio returns only item/task/request
+digests, workflow and plan identities, stage ids, dependency waves, coverage, and blocked or
+failed classifications; task text, context, prompts, credentials, and provider output remain
+caller-owned. `requireAllDomains: true` is a convenient no-provider readiness gate for a complete
+twelve-domain installation:
+
+```typescript
+const portfolio = await agent.planWorkflowPortfolio(
+  domains.map((domain, index) => ({
+    id: `domain-${domain}`,
+    domain,
+    task: tasks[domain],
+    dependsOn: index === 0 ? [] : [`domain-${domains[index - 1]}`],
+  })),
+  { requireAllDomains: true, allowPartial: false },
+);
+
+// Review portfolio.coverage, dependency_graph, and each item before dispatch.
+// portfolio.execution is not_started; no provider, connector, or tool was invoked.
+```
+
+The portfolio compiler rejects duplicate ids, unknown dependencies, self-dependencies, and
+oversized input. Cycles become explicit blocked items rather than being silently reordered, and
+an item whose prerequisite failed is blocked without being dispatched. After a restart, the
+caller rehydrates the original transient requests and invokes `verifyWorkflowPortfolio()`; the
+verifier recompiles the plan and reports per-item task/request/workflow/plan drift without
+reinvoking a provider or tool. `validateAutonomousWorkflowPortfolioPlan()` also checks the
+content digest, coverage projection, dependency graph, and retention markers before a saved plan
+can shape execution. The plan is a review artifact, not authorization for providers, tools,
+connectors, or effects.
+
 Packs do not contain task text, prompts, keys, provider payloads, tool arguments, or outputs. They
 are reviewed planning and evidence metadata, not a source of truth. A production application can
 replace a pack registry, but the orchestrator refuses to run when a pack is missing or its workflow

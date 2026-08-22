@@ -40,6 +40,12 @@ import {
 import { AutonomousEffectBoundary, AutonomousEffectReconciliationRequiredError, type AutonomousEffectExecutionContext } from "./autonomous-effects.js";
 import type { AutonomousLearningController } from "./autonomous-learning.js";
 import type { AutonomousModelInventoryRefreshOptions, AutonomousModelInventorySnapshot } from "./autonomous-model-inventory.js";
+import type {
+  AutonomousWorkflowPortfolioItemRequest,
+  AutonomousWorkflowPortfolioPlan,
+  AutonomousWorkflowPortfolioPlanOptions,
+  AutonomousWorkflowPortfolioVerification,
+} from "./autonomous-workflow-portfolio.js";
 import { taskFacetDigests } from "./autonomous-memory.js";
 import { buildAutonomousEvidencePlan, type AutonomousEvidencePlan, type AutonomousEvidencePlanJSON } from "./autonomous-evidence.js";
 import {
@@ -3746,6 +3752,29 @@ export class AutonomousAgent {
       return { ...descriptor, route_digest: await digestJson(descriptor) };
     }
     return routeAutonomousTask(taskText, options);
+  }
+
+  /**
+   * Compile multiple explicit domain workflows into one dependency-aware, metadata-only
+   * portfolio. This is planning authority only: it does not invoke a provider, tool, connector,
+   * credential, or external effect.
+   */
+  async planWorkflowPortfolio(
+    requests: readonly AutonomousWorkflowPortfolioItemRequest[],
+    options: AutonomousWorkflowPortfolioPlanOptions = {},
+  ): Promise<AutonomousWorkflowPortfolioPlan> {
+    const { planAutonomousWorkflowPortfolio } = await import("./autonomous-workflow-portfolio.js");
+    return planAutonomousWorkflowPortfolio(this, requests, options);
+  }
+
+  /** Recompile a caller-rehydrated portfolio and compare every digest-bound workflow identity. */
+  async verifyWorkflowPortfolio(
+    plan: AutonomousWorkflowPortfolioPlan,
+    requests: readonly AutonomousWorkflowPortfolioItemRequest[],
+    options: AutonomousWorkflowPortfolioPlanOptions = {},
+  ): Promise<AutonomousWorkflowPortfolioVerification> {
+    const { verifyAutonomousWorkflowPortfolio } = await import("./autonomous-workflow-portfolio.js");
+    return verifyAutonomousWorkflowPortfolio(this, plan, requests, options);
   }
 
   /** Compile evidence requirements and dependency-safe next stages without dispatching work. */

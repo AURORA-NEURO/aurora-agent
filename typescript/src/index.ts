@@ -232,6 +232,29 @@ export type {
   AutonomousModelInventoryPersistence,
   AutonomousModelInventoryRefreshOptions,
 } from "./autonomous-model-inventory.js";
+export {
+  AUTONOMOUS_WORKFLOW_PORTFOLIO_SCHEMA,
+  AUTONOMOUS_WORKFLOW_PORTFOLIO_VERIFICATION_SCHEMA,
+  MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ITEMS,
+  MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_DEPENDENCIES,
+  MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_HINTS,
+  planAutonomousWorkflowPortfolio,
+  verifyAutonomousWorkflowPortfolio,
+  validateAutonomousWorkflowPortfolioPlan,
+} from "./autonomous-workflow-portfolio.js";
+export type {
+  AutonomousWorkflowPortfolioItemStatus,
+  AutonomousWorkflowPortfolioStatus,
+  AutonomousWorkflowPortfolioItemRequest,
+  AutonomousWorkflowPortfolioPlanOptions,
+  AutonomousWorkflowPortfolioPolicy,
+  AutonomousWorkflowPortfolioItem,
+  AutonomousWorkflowPortfolioCoverage,
+  AutonomousWorkflowPortfolioDependencyGraph,
+  AutonomousWorkflowPortfolioPlan,
+  AutonomousWorkflowPortfolioMismatch,
+  AutonomousWorkflowPortfolioVerification,
+} from "./autonomous-workflow-portfolio.js";
 export type {
   AutonomousAcceptedCrossDomainPlan,
   AutonomousAcceptedPlan,

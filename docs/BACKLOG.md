@@ -10,6 +10,13 @@ are excluded from the coverage denominator — they specify no behaviour.
 A module leaves this list when a crate cites it, which is the same weak criterion coverage
 uses. This file tracks *attention*, not completeness.
 
+The TypeScript autonomous facade now also has a digest-bound workflow portfolio compiler. It
+composes explicit per-domain blueprints into a dependency-checked portfolio, reports complete,
+partial, blocked, cycle, and prerequisite-failure states, and replays the non-executing compiler
+to detect task/request/workflow/plan drift after restart. It is intentionally a planning and
+verification artifact: it does not replace provider-specific adapters, source interpretation,
+external validation, durable multi-host scheduling, or authorization.
+
 The autonomous façade now compiles every built-in workflow into a digest-bound evidence plan.
 Python `AutonomousTaskOrchestrator.evidence_plan()` and TypeScript `AutonomousAgent.evidencePlan()`
 report qualified requirements, ambiguous-label handling, coverage, and dependency-safe next
