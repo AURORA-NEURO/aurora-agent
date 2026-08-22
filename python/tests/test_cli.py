@@ -1151,6 +1151,55 @@ def test_keyless_tool_loop_rejects_invalid_mcp_arguments_before_workspace_effect
     assert payload["provider_status"]["attempts"] == 1
 
 
+def test_keyless_tool_loop_can_activate_curated_domain_registry_bindings() -> None:
+    fixture = Path(__file__).parent / "autonomous_brain_mcp_server.py"
+    command = f'"{sys.executable.replace(chr(92), "/")}" -u "{fixture.as_posix()}"'
+    response_sequence = json.dumps(
+        [
+            {
+                "tool_calls": [
+                    {
+                        "id": "call-repository-catalog",
+                        "name": "repository_catalog",
+                        "arguments": {"scope": "bounded"},
+                    }
+                ]
+            },
+            {"output_text": "curated repository evidence complete"},
+        ],
+        separators=(",", ":"),
+    )
+    code, payload, errors = _invoke(
+        "run",
+        "--mcp-command", command,
+        "--task", "inspect the repository evidence",
+        "--domain", "coding",
+        "--provider", "local",
+        "--model", "local-model",
+        "--model-capability", "reasoning",
+        "--model-capability", "code",
+        "--local-response-sequence-json", response_sequence,
+        "--execution-mode", "tool_loop",
+        "--allow-mcp-tool", "repository_catalog",
+        "--activate-domain-tools",
+        "--approve-provider-call",
+        "--approve-mission-dispatch",
+    )
+    assert code == 0
+    assert errors == ""
+    assert payload["result"]["status"] == "completed_provider_tool_loop"
+    assert payload["result"]["provider_loop"]["final_response"]["text"] == "curated repository evidence complete"
+    binding = payload["tool_surface"]["domain_binding"]
+    assert payload["tool_surface"]["mode"] == "domain_registry"
+    assert binding["domains"] == ["coding"]
+    assert binding["proposed_count"] == 1
+    assert binding["approved_tools"] == ["repository_catalog"]
+    assert binding["registered_tools"] == ["repository_catalog"]
+    assert binding["activation_status"] == "ready"
+    assert binding["activation_authority"] == "activation_approved_tools_only"
+    assert payload["result"]["provider_loop"]["tool_calls"] == 1
+
+
 def test_keyless_tool_loop_rejects_unknown_mcp_allowlist_before_provider_dispatch() -> None:
     fixture = Path(__file__).parent / "autonomous_brain_mcp_server.py"
     command = f'"{sys.executable.replace(chr(92), "/")}" -u "{fixture.as_posix()}"'
@@ -1206,6 +1255,7 @@ def test_keyless_subprocess_batch_routes_every_builtin_domain(tmp_path) -> None:
         "--model", "local-model",
         "--local-response-sequence-json", response_sequence,
         "--max-parallelism", "1",
+        "--activate-domain-tools",
         "--approve-provider-call",
     ]
     for capability in capabilities:
@@ -1219,7 +1269,12 @@ def test_keyless_subprocess_batch_routes_every_builtin_domain(tmp_path) -> None:
     assert [item["status"] for item in payload["batch"]["items"]] == [
         "succeeded"
     ] * len(AUTONOMOUS_DOMAINS)
-    assert payload["tool_surface"]["mode"] == "not_requested"
+    assert payload["tool_surface"]["mode"] == "domain_registry"
+    binding = payload["tool_surface"]["domain_binding"]
+    assert binding["domains"] == list(AUTONOMOUS_DOMAINS)
+    assert binding["registered_tools"] == ["repository_catalog"]
+    assert binding["proposed_count"] == 1
+    assert binding["activation_status"] == "partially_activated"
     assert payload["credential_session"]["providers"] == []
 
 

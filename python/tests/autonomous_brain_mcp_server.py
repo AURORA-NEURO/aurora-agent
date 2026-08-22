@@ -1,7 +1,7 @@
 """Deterministic MCP workspace used by the keyless autonomous brain integration test.
 
 This fixture deliberately implements the smallest real stdio boundary needed by the CLI:
-brain selection/prompt/plan calls, live tool discovery, and one read-only workspace tool. It
+brain selection/prompt/plan calls, live tool discovery, and read-only workspace tools. It
 does not accept credentials, open a network socket, or persist model/provider values.
 """
 
@@ -61,7 +61,17 @@ for raw in sys.stdin:
                             "required": ["path"],
                             "additionalProperties": False,
                         },
-                    }
+                    },
+                    {
+                        "name": "repository_catalog",
+                        "description": "Read bounded repository metadata for the coding domain.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {"scope": {"type": "string"}},
+                            "required": ["scope"],
+                            "additionalProperties": False,
+                        },
+                    },
                 ]
             },
         )
@@ -132,6 +142,17 @@ for raw in sys.stdin:
                     "path": path,
                     "content": "fixture workspace evidence",
                     "evidence": ["workspace_read_completed"],
+                },
+            )
+        elif name == "repository_catalog":
+            scope = arguments.get("scope", "") if isinstance(arguments, dict) else ""
+            tool_result(
+                request_id,
+                {
+                    "ok": True,
+                    "scope": scope,
+                    "repository": "fixture-repository",
+                    "evidence": ["repository_catalog_completed"],
                 },
             )
         else:

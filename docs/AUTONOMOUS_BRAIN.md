@@ -513,6 +513,37 @@ cross-domain routes, so domain fan-out cannot silently widen the tool boundary.
 The CLI result exposes only the tool-surface mode, selected names, count, catalogue digest, and
 approval posture for operator auditing; it does not persist schemas, arguments, or tool results.
 
+When the live server exposes one of the reviewed exact tool names, the CLI can also activate the
+domain registry instead of passing the raw MCP surface directly to the brain. Use
+`--activate-domain-tools` to plan and activate every matching read-only binding in the task scope
+(or all twelve domains for automatic and batch work), or repeat `--approve-domain-tool` to select
+specific exact names. `--domain-tool-domain` narrows the reviewed scope. Unknown names,
+effectful profile rows, and unclassified tools remain outside the registry and are reported as
+review metadata. The resulting run uses the registry's activation-approved names for provider
+tool selection and for the MCP authorizer; it cannot be widened by a model tool call or a raw
+request-file option. This activation is still separate from `--approve-mission-dispatch`, which
+is required for any tool effect:
+
+```bash
+python -m prism_sdk run \
+  --mcp-command "python path/to/mcp_server.py" \
+  --provider local \
+  --model local-model \
+  --domain coding \
+  --task "inspect repository evidence" \
+  --execution-mode tool_loop \
+  --activate-domain-tools \
+  --domain-tool-domain coding \
+  --approve-provider-call \
+  --approve-mission-dispatch
+```
+
+The JSON result adds a metadata-only `tool_surface.domain_binding` projection containing the
+catalogue/profile/activation digests, domain coverage counts, registered names, and activation
+status. It never returns a schema, argument, result, credential, or provider payload. The same
+path is available to `batch-run`; its activation scope defaults to all twelve domains so a single
+bounded job can reuse the registry across domain, automatic, and cross-domain items.
+
 The local provider also supports a bounded response sequence for offline integration tests. The
 array contains at most 32 JSON objects; each call consumes one object in order, and `text` or
 `output_text` can provide the response text while `tool_calls` provides provider-neutral tool
