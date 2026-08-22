@@ -1560,7 +1560,7 @@ that hook for all twelve built-in domains, including untouched first-run explora
 These reads make per-domain learning explicit; they do not invent a reward, infer a model's domain
 skill, or treat transport success as evaluator evidence.
 
-### Restart-safe TypeScript decision cycles
+### Restart-safe decision cycles across both SDKs
 
 The TypeScript façade now exposes the same autonomous boundary as a durable local orchestration
 cursor. `runAutonomousDecisionCycle()` and
@@ -1659,6 +1659,55 @@ commit. Ambiguous provider execution is resumed only with caller-owned rehydrati
 under the original approval/budget contract. The cross-domain variant persists the same lifecycle
 while preserving exact specialist/synthesis episode coverage and delayed-credit trajectory
 identity, so partial fan-out cannot invent a synthesis reward.
+
+The Python façade now exposes the same ordinary-cycle cursor through
+`AutonomousDecisionCycle`, `InMemoryAutonomousDecisionCycleStateStore`, and
+`AutonomousDecisionCyclePersistenceCoordinator`. `AutonomousAgent.run_auto(...)` can bind a
+caller-owned store with `decision_cycle_id="..."` and `decision_cycle_store=...`; it records the
+route, optional provider-planning, execution, and terminal boundaries without changing the normal
+provider or approval policy. A restart is never guessed: callers must set
+`resume_decision_cycle=True` and provide `decision_cycle_rehydrate_result`, which returns the
+private `AutonomousAutoResult` from caller-owned storage. The SDK verifies the route digest,
+outcome digest, terminal status, task digest, mode, learning flags, and trajectory identity before
+returning it, so a rehydration callback cannot substitute a different result or trigger a duplicate
+provider call.
+
+```python
+from prism_sdk import (
+    AutonomousDecisionCyclePersistenceCoordinator,
+    InMemoryAutonomousDecisionCycleStateStore,
+)
+
+cycle_store = InMemoryAutonomousDecisionCycleStateStore()
+result = agent.run_auto(
+    task="review the next bounded implementation step",
+    credentials=session,
+    decision_cycle_id="job-42",
+    decision_cycle_store=cycle_store,
+    approve_provider_call=True,
+)
+
+# Flush only the digest-bound cursor. The private result belongs in its own store.
+AutonomousDecisionCyclePersistenceCoordinator(cycle_store, database_cycle_snapshots).flush()
+
+resumed = agent.run_auto(
+    task="review the next bounded implementation step",
+    credentials=session,
+    decision_cycle_id="job-42",
+    decision_cycle_store=cycle_store,
+    resume_decision_cycle=True,
+    decision_cycle_rehydrate_result=result_store.load_auto_result,
+)
+```
+
+The Python state schema is versioned separately for SDK diagnostics but has the same fields and
+invariants as TypeScript: exact keys, six phases, generation-linked SHA-256 state digests,
+aggregate snapshot digests, duplicate-cycle rejection, bounded metadata, and secret/payload-shaped
+field rejection. The transition handle is also useful for custom Python workers that need to
+persist `evaluation_pending` or `settlement_pending` around a domain-specific evaluator; it never
+turns transport status into reward. All twelve built-in domains use the same route and recovery
+contract, with `cross_domain` cycles retaining the caller's trajectory identity when learning is
+enabled.
 
 ### TypeScript episodic recall on direct runs
 

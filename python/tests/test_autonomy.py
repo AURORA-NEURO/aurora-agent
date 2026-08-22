@@ -29,6 +29,8 @@ from prism_sdk import (
     AutonomousCrossDomainCheckpoint,
     AutonomousCrossDomainResult,
     AutonomousCrossDomainReplanResult,
+    AutonomousDecisionCycle,
+    InMemoryAutonomousDecisionCycleStateStore,
     AutonomousRoutingHoldoutCase,
     AutonomousRoutingHoldoutEvaluator,
     AutonomousTaskRouter,
@@ -3969,6 +3971,52 @@ def test_builtin_workflow_learning_signal_contract_covers_every_domain():
             assert len(result.evaluations) == 1
             assert result.evaluations[0].decision.passed is True
             assert result.replan_requested is False
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_run_auto_binds_a_restart_safe_decision_cycle_without_reinvoking_on_rehydration():
+    runtime, store, server, thread = _runtime()
+    agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+    cycle_store = InMemoryAutonomousDecisionCycleStateStore()
+    try:
+        with agent.onboarding.start_session(session_id="decision-cycle-session") as session:
+            session.register_value("openai", "decision-cycle-secret")
+            result = agent.run_auto(
+                task="fix the Rust tests in the repository",
+                credentials=session,
+                approve_provider_call=True,
+                decision_cycle_id="decision-cycle-1",
+                decision_cycle_store=cycle_store,
+            )
+            assert result.status == "completed"
+            persisted = cycle_store.load("decision-cycle-1")
+            assert persisted is not None and persisted.phase == "terminal"
+            assert persisted.terminal_status == "completed"
+            public_state = json.dumps(persisted.to_dict())
+            assert "decision-cycle-secret" not in public_state
+            assert "fix the Rust tests" not in public_state
+
+            with pytest.raises(BrainRunError, match="resume_decision_cycle"):
+                agent.run_auto(
+                    task="fix the Rust tests in the repository",
+                    credentials=session,
+                    approve_provider_call=True,
+                    decision_cycle_id="decision-cycle-1",
+                    decision_cycle_store=cycle_store,
+                )
+
+            resumed = agent.run_auto(
+                task="fix the Rust tests in the repository",
+                credentials=session,
+                decision_cycle_id="decision-cycle-1",
+                decision_cycle_store=cycle_store,
+                resume_decision_cycle=True,
+                decision_cycle_rehydrate_result=lambda _context: result,
+            )
+            assert resumed.to_dict() == result.to_dict()
     finally:
         server.shutdown()
         thread.join(timeout=2)

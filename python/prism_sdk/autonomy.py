@@ -82,6 +82,11 @@ from .autonomy_persistence import (
     AutonomousExecutionPolicy,
     AutonomyPersistenceError,
 )
+from .autonomous_decision_persistence import (
+    AutonomousDecisionCycle,
+    AutonomousDecisionCycleRehydrationContext,
+    AutonomousDecisionCycleStateStore,
+)
 from .evaluators import (
     CompositeDomainEvaluator,
     DomainEvaluatorRegistry,
@@ -13096,6 +13101,10 @@ class AutonomousAgent:
         workflow_max_stage_calls: int | None = None,
         execution_id: str | None = None,
         resume_execution: bool = False,
+        decision_cycle_id: str | None = None,
+        decision_cycle_store: AutonomousDecisionCycleStateStore | None = None,
+        resume_decision_cycle: bool = False,
+        decision_cycle_rehydrate_result: Callable[[AutonomousDecisionCycleRehydrationContext], Any] | None = None,
         **kwargs: Any,
     ) -> AutonomousAutoResult:
         """Route and execute a task, returning review-required instead of guessing silently.
@@ -13125,6 +13134,13 @@ class AutonomousAgent:
         acceptance.
         An abstained route never invokes a provider.
         """
+
+        if (decision_cycle_id is None) != (decision_cycle_store is None):
+            raise BrainRunError("decision_cycle_id and decision_cycle_store must be supplied together")
+        if not isinstance(resume_decision_cycle, bool):
+            raise BrainRunError("resume_decision_cycle must be a boolean")
+        if decision_cycle_rehydrate_result is not None and not callable(decision_cycle_rehydrate_result):
+            raise BrainRunError("decision_cycle_rehydrate_result must be callable or None")
 
         if not isinstance(workflow_execution, bool):
             raise BrainRunError("workflow_execution must be a boolean")
@@ -13263,16 +13279,58 @@ class AutonomousAgent:
                 allow_cross_domain=allow_cross_domain,
                 **prepare_options,
             )
+        decision_cycle: AutonomousDecisionCycle | None = None
+        if decision_cycle_store is not None:
+            cycle_mode = "single_domain" if len(blueprint.route.selected_domains) == 1 else "cross_domain"
+            cycle_learning = explicit_learning or learning_mode != "off"
+            cycle_trajectory = kwargs.get("trajectory_id")
+            if cycle_mode == "cross_domain" and cycle_learning and cycle_trajectory is None:
+                cycle_trajectory = f"{decision_cycle_id}-trajectory"
+            decision_cycle = AutonomousDecisionCycle(
+                decision_cycle_store,
+                cycle_id=decision_cycle_id,
+                task=task,
+                mode=cycle_mode,
+                learning_enabled=cycle_learning,
+                evaluation_enabled=cycle_learning,
+                trajectory_id=cycle_trajectory,
+            )
+            if decision_cycle.restored:
+                if not resume_decision_cycle:
+                    raise BrainRunError("persisted decision cycle requires resume_decision_cycle=True")
+                if decision_cycle_rehydrate_result is None:
+                    raise BrainRunError("decision-cycle resume requires decision_cycle_rehydrate_result")
+                rehydrated = decision_cycle_rehydrate_result(decision_cycle.context())
+                if not isinstance(rehydrated, AutonomousAutoResult):
+                    raise BrainRunError("decision-cycle rehydrator must return an AutonomousAutoResult")
+                if decision_cycle.state.route_digest is not None and rehydrated.route.route_digest != decision_cycle.state.route_digest:
+                    raise BrainRunError("rehydrated decision result does not match the persisted route digest")
+                if decision_cycle.state.outcome_digest is not None:
+                    if content_digest(rehydrated.to_dict()) != decision_cycle.state.outcome_digest:
+                        raise BrainRunError("rehydrated decision result does not match the persisted outcome digest")
+                if decision_cycle.state.terminal_status is not None and rehydrated.status != decision_cycle.state.terminal_status:
+                    raise BrainRunError("rehydrated decision result does not match the persisted terminal status")
+                return rehydrated
+            decision_cycle.advance(phase="route_pending", route_digest=blueprint.route.route_digest)
+
         if blueprint.route.abstained:
-            return AutonomousAutoResult(
+            result = AutonomousAutoResult(
                 status="route_review_required",
                 route=blueprint.route,
                 learning_mode=learning_mode,
                 planning_mode=planning_mode,
             )
+            if decision_cycle is not None:
+                decision_cycle.terminal(
+                    "route_review_required",
+                    outcome_digest=content_digest(result.to_dict()),
+                )
+            return result
 
         planning_result: AutonomousPlanRefinementResult | AutonomousCrossDomainPlanRefinementResult | None = None
         if planning_mode == "provider":
+            if decision_cycle is not None:
+                decision_cycle.advance(phase="planning_pending")
             planning_candidates = self._resolve_candidates(model_candidates)
             planning_credentials = self._credential_mapping(credentials)
             planning_state = kwargs.get("bandit_state")
@@ -13315,6 +13373,11 @@ class AutonomousAgent:
                     planning_mode=planning_mode,
                     planning=planning_result,
                 )
+            if decision_cycle is not None:
+                decision_cycle.advance(
+                    phase="planning_pending",
+                    plan_refinement_digest=content_digest(planning_result.to_dict()),
+                )
             if blueprint.blueprint is not None:
                 if not isinstance(planning_result, AutonomousPlanRefinementResult):
                     raise BrainRunError("single-domain provider planning returned the wrong proposal type")
@@ -13337,6 +13400,8 @@ class AutonomousAgent:
             or workflow_max_stage_calls is not None
         ):
             raise BrainRunError("workflow options require workflow_execution=True")
+        if decision_cycle is not None:
+            decision_cycle.advance(phase="execution_pending")
         execution_kwargs = dict(kwargs)
         for key in {
             "context",
@@ -13553,7 +13618,7 @@ class AutonomousAgent:
                     resume_execution=resume_execution,
                     **execution_kwargs,
                 )
-        return AutonomousAutoResult(
+        automatic_result = AutonomousAutoResult(
             status="completed",
             route=blueprint.route,
             result=result,
@@ -13561,6 +13626,12 @@ class AutonomousAgent:
             planning_mode=planning_mode,
             planning=planning_result,
         )
+        if decision_cycle is not None:
+            decision_cycle.terminal(
+                "completed",
+                outcome_digest=content_digest(automatic_result.to_dict()),
+            )
+        return automatic_result
 
     def run_cross_domain_learning(
         self,
