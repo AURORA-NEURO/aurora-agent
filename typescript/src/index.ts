@@ -308,6 +308,26 @@ export type {
   AutonomousConnectorDispatchResult,
 } from "./autonomous-connectors.js";
 export {
+  AUTONOMOUS_HTTP_CONNECTOR_ADAPTER_SCHEMA,
+  MAX_AUTONOMOUS_HTTP_REQUEST_BYTES,
+  MAX_AUTONOMOUS_HTTP_RESPONSE_BYTES,
+  MAX_AUTONOMOUS_HTTP_HEADERS,
+  MAX_AUTONOMOUS_HTTP_HEADER_BYTES,
+  MAX_AUTONOMOUS_HTTP_URL_BYTES,
+  MAX_AUTONOMOUS_HTTP_TIMEOUT_MS,
+  AUTONOMOUS_HTTP_METHODS,
+  AUTONOMOUS_HTTP_FAILURE_CLASSES,
+  AutonomousHttpConnectorPolicy,
+  AutonomousHttpConnectorRequest,
+  createAutonomousHttpConnectorExecutor,
+} from "./autonomous-http-connector.js";
+export type {
+  AutonomousHttpConnectorEndpointResolver,
+  AutonomousHttpConnectorHeaderResolver,
+  AutonomousHttpConnectorFetch,
+  AutonomousHttpConnectorFailureClass,
+} from "./autonomous-http-connector.js";
+export {
   AUTONOMOUS_BUILTIN_CONNECTOR_SCHEMA,
   AUTONOMOUS_BUILTIN_CONNECTOR_ID,
   AUTONOMOUS_BUILTIN_CONNECTOR_VERSION,

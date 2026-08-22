@@ -236,14 +236,19 @@ The next Python autonomous integration layer now adds a restart-safe hash-chaine
 for direct domain-tool receipts and a caller-owned connector registry/dispatcher over the typed
 provider-manifest contract. These enforce exact twelve-domain scope, capability and approval
 gates, transient connector values, credential-shaped request rejection, idempotent receipt
-deduplication, and tamper/capacity failures. They still do not implement external provider
-clients, key storage, network retrieval, distributed workers, durable queues, or an OTLP exporter;
-those remain explicit integration work rather than hidden behind a local callback.
+deduplication, and tamper/capacity failures. They still do not implement provider-specific
+clients, key storage, domain response interpretation, distributed workers, durable queues, or an
+OTLP exporter; those remain explicit integration work rather than hidden behind a local callback.
+Both SDKs now also include a policy-gated, provider-neutral HTTP transport adapter with explicit
+host/scheme/method admission, transient header resolution, no redirects, bounded request/response
+bytes, timeout classification, and digest-only non-JSON/oversized projections. It closes the
+generic transport seam without claiming provider-specific auth, pagination, source validation, or
+multi-host delivery.
 The connector layer now also has a typed API source-plan/source-execute bridge that binds the
 returned plan digest before retrieval and keeps connector scope separate from provider payloads.
 This makes the existing gateway usable from the autonomous runtime without turning it into a
 credential client or silently enabling discovery; concrete provider-specific adapters and external
-network/auth execution remain caller-owned.
+authentication/session resolution, source interpretation, and domain validation remain caller-owned.
 Connector dispatch now also accepts a caller-owned restart-safe receipt store. The bounded,
 fsynced connector JSONL journal verifies a hash chain, deduplicates exact identities, rejects
 conflicting outcomes, and returns a metadata-only replay barrier after restart; a new attempt

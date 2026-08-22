@@ -262,6 +262,73 @@ fields, and never performs network access. Production connector executors can cl
 lived browser session, repository workspace, data client, or provider handle, but those values
 remain transient and outside the mission checkpoint.
 
+### Bounded provider-neutral HTTP connector transport
+
+The connector registry remains provider-neutral, but applications that need a real external
+evidence call can now compose the same reviewed registration with a policy-gated HTTP executor.
+`create_autonomous_http_connector_executor()` exists in both SDKs. It takes a caller-owned endpoint
+resolver and an optional transient header resolver; neither resolver output is copied into a
+manifest, request receipt, checkpoint, journal, or error message.
+
+```python
+from prism_sdk import (
+    AutonomousHttpConnectorPolicy,
+    AutonomousHttpConnectorRequest,
+    create_autonomous_http_connector_executor,
+)
+
+transport = create_autonomous_http_connector_executor(
+    lambda manifest, request: AutonomousHttpConnectorRequest(
+        method="GET",
+        url=f"https://evidence.example.test/v1/items/{request['item_digest']}",
+    ),
+    policy=AutonomousHttpConnectorPolicy(
+        allowed_hosts=("evidence.example.test",),
+        require_https=True,
+        timeout_seconds=20,
+        max_response_bytes=1_000_000,
+    ),
+    header_resolver=lambda manifest, request: caller_owned_short_lived_headers(manifest, request),
+)
+```
+
+The TypeScript surface has the same admission contract:
+
+```ts
+const transport = createAutonomousHttpConnectorExecutor(
+  (_manifest, request) => new AutonomousHttpConnectorRequest({
+    method: "GET",
+    url: `https://evidence.example.test/v1/items/${request.item_digest}`,
+  }),
+  {
+    policy: new AutonomousHttpConnectorPolicy({
+      allowedHosts: ["evidence.example.test"],
+      requireHttps: true,
+      timeoutMs: 20_000,
+      maxResponseBytes: 1_000_000,
+    }),
+    headerResolver: (manifest, request) => callerOwnedShortLivedHeaders(manifest, request),
+  },
+);
+```
+
+Admission fails closed unless the caller supplies an explicit host allowlist. HTTPS is the default;
+loopback and plain HTTP are test-only choices that must be explicitly enabled. Methods, headers,
+URL length, request bytes, response bytes, nesting depth, and timeout are bounded. Redirects are
+disabled, URL credentials/fragments and credential-shaped query/body fields are refused, and
+response status is projected into stable `auth_refused`, `not_found`, `rate_limited`, timeout,
+transport, or HTTP-class failures. A successful JSON response is transient evidence. Empty and
+non-JSON responses produce bounded metadata and a SHA-256 body digest; oversized responses are
+rejected without retaining their body. The existing observation/receipt layer still rejects
+credential-shaped JSON, so an upstream access token cannot silently become evidence.
+
+This adapter is deliberately not a provider catalogue or an authentication product. The caller
+still owns provider paths, pagination, query semantics, key intake, secret-manager access, source
+interpretation, domain-truth validation, and any external retry/idempotency contract. A normal
+deployment should resolve a short-lived credential session inside `header_resolver`; it should not
+put a raw key in the connector request, URL, task, prompt, or durable state. Local tests can inject
+an in-process opener/fetch and explicitly enable loopback without contacting an external service.
+
 ### Non-interactive deployment bootstrap
 
 When no person enters a key, the deployment should register a source resolver during service
