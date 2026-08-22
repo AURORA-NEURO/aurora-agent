@@ -4469,6 +4469,64 @@ returns the prior receipt without calling the executor again. Worker reports con
 attempts, receipt projections, failure classes, and payload digests; `value_retained` is always
 false. This makes a process restart safe without turning a queue worker into a transcript store.
 
+#### Durable intent jobs across all domains
+
+The high-level intent facade now has a queue-backed path, so applications do not need to manually
+translate a routed task into domain operation requests. `enqueue()` recomputes the reviewed intent
+plan, binds each selected operation to a queue row, and returns only work IDs and digests.
+`run_queued()` accepts the same transient task/request inputs after a restart, recomputes the plan,
+and refuses to run if any route, operation, connector, selection, approval, or request digest has
+changed.
+
+```python
+from prism_sdk import InMemoryAutonomousConnectorWorkQueue
+
+intent = agent.connector_intent_facade()
+task = "Profile a dataset schema and reproduce the scientific evidence."
+requests = {
+    "data": {"schema": {"columns": ["id"]}},
+    "science": {"hypothesis": "caller-fixture"},
+}
+plan = intent.plan(
+    task=task,
+    hints=("data", "science"),
+    max_domains=2,
+    request_by_domain=requests,
+    approved=True,
+)
+queue = InMemoryAutonomousConnectorWorkQueue()
+job = intent.enqueue(
+    plan,
+    job_id="research-job-42",
+    queue=queue,
+    task=task,
+    hints=("data", "science"),
+    max_domains=2,
+    request_by_domain=requests,
+    approved=True,
+)
+report = intent.run_queued(
+    plan,
+    job_id="research-job-42",
+    queue=queue,
+    task=task,
+    hints=("data", "science"),
+    max_domains=2,
+    request_by_domain=requests,
+    approved=True,
+    worker_id="worker-a",
+)
+```
+
+The TypeScript equivalent is `intent.enqueue(plan, { ...input, jobId }, queue)` followed by
+`intent.runQueued(plan, { ...input, jobId }, queue)`. The queue remains the restart boundary: callers persist
+its verified snapshot with the existing persistence coordinator, while task text and request
+metadata are rehydrated from their own protected job store. A changed request intentionally fails
+plan verification instead of silently creating a new autonomous action. Route abstention and
+missing connector states produce a metadata-only review job with no queue dispatch. This bridges
+ordinary task intake, all-domain routing, durable leases, replay barriers, and explicit evaluator
+settlement without making lexical routing an authorization decision.
+
 Transport success is not evaluator reward. `InMemoryAutonomousConnectorFeedbackLedger` (and the
 equivalent TypeScript class) accepts only a caller-supplied `source="caller_evaluator"`, evaluator
 identity/version, bounded reward, pass/fail value, and optional evidence digest tied to a receipt.

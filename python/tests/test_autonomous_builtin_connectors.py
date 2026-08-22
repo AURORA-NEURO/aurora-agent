@@ -15,6 +15,7 @@ from prism_sdk import (
     AutonomousConnectorOperationFacade,
     AutonomousConnectorOperationInput,
     AutonomousConnectorIntentPlan,
+    InMemoryAutonomousConnectorWorkQueue,
     LLMRuntime,
     builtin_autonomous_connector_registration,
     content_digest,
@@ -322,3 +323,93 @@ def test_intent_facade_routes_and_executes_single_and_cross_domain_tasks_without
     )
     assert refused_route.status == "route_review_required"
     assert refused_route.selections == ()
+
+
+def test_intent_facade_enqueues_and_recovers_cross_domain_jobs_without_persisting_transient_values() -> None:
+    agent = AutonomousAgent(object(), LLMRuntime())
+    agent.register_builtin_connectors(approval_required=True)
+    intent = agent.connector_intent_facade()
+    request_by_domain = {
+        "data": {"schema": {"columns": ["id"]}, "fixture_value": "data-private-transient"},
+        "science": {"hypothesis": "science-private-transient"},
+    }
+    task = "Profile a dataset schema and reproduce the scientific evidence."
+    plan = intent.plan(
+        task=task,
+        hints=("data", "science"),
+        max_domains=2,
+        allow_cross_domain=True,
+        request_by_domain=request_by_domain,
+        approved=True,
+    )
+    queue = InMemoryAutonomousConnectorWorkQueue()
+    job = intent.enqueue(
+        plan,
+        job_id="intent-job-1",
+        queue=queue,
+        task=task,
+        hints=("data", "science"),
+        max_domains=2,
+        allow_cross_domain=True,
+        request_by_domain=request_by_domain,
+        approved=True,
+        now=1_000,
+    )
+    assert job.status == "queued"
+    assert job.enqueued_count == 2
+    assert job.omitted_count == 0
+    serialized_job = json.dumps(job.to_dict())
+    assert task not in serialized_job
+    assert "data-private-transient" not in serialized_job
+    assert "science-private-transient" not in serialized_job
+    assert all("request_digest" not in item for item in job.items)
+    assert all("subject_digest" not in item for item in job.items)
+    assert all("raw" not in json.dumps(item) for item in job.items)
+    other_job = intent.enqueue(
+        plan,
+        job_id="intent-job-2",
+        queue=queue,
+        task=task,
+        hints=("data", "science"),
+        max_domains=2,
+        allow_cross_domain=True,
+        request_by_domain=request_by_domain,
+        approved=True,
+        now=1_000,
+    )
+
+    worker_result = intent.run_queued(
+        plan,
+        job_id="intent-job-1",
+        queue=queue,
+        task=task,
+        hints=("data", "science"),
+        max_domains=2,
+        allow_cross_domain=True,
+        request_by_domain=request_by_domain,
+        approved=True,
+        worker_id="intent-worker-1",
+        now=1_000,
+    )
+    assert worker_result["completed"] == 2
+    assert worker_result["reconciled"] == 0
+    assert "data-private-transient" not in json.dumps(worker_result)
+    assert "science-private-transient" not in json.dumps(worker_result)
+    assert all(row["value_retained"] is False for row in worker_result["rows"])
+    assert all(queue.get(item["work_id"]).status == "completed" for item in job.items)
+    assert all(queue.get(item["work_id"]).status == "queued" for item in other_job.items)
+
+    with pytest.raises(ArgumentError, match="does not match"):
+        intent.run_queued(
+            plan,
+            job_id="intent-job-1",
+            queue=queue,
+            task=task,
+            hints=("data", "science"),
+            max_domains=2,
+            allow_cross_domain=True,
+            request_by_domain={"data": {"fixture_value": "tampered"}, "science": request_by_domain["science"]},
+            approved=True,
+            worker_id="intent-worker-2",
+            now=1_001,
+        )

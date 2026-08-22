@@ -24,6 +24,9 @@ from .authoring import content_digest
 from .autonomous_connector_worker import (
     AutonomousConnectorOperationContract,
     AutonomousConnectorOperationRegistry,
+    AutonomousConnectorWorkItem,
+    AutonomousConnectorWorker,
+    InMemoryAutonomousConnectorWorkQueue,
 )
 from .autonomous_connectors import (
     AUTONOMOUS_CONNECTOR_SELECTION_STRATEGIES,
@@ -56,6 +59,8 @@ MAX_AUTONOMOUS_CONNECTOR_FACADE_REQUEST_BYTES = 2_000_000
 AUTONOMOUS_CONNECTOR_INTENT_SCHEMA = "bioprism-python-autonomous-connector-intent/0.1"
 MAX_AUTONOMOUS_CONNECTOR_INTENT_TASK_BYTES = 128_000
 MAX_AUTONOMOUS_CONNECTOR_INTENT_HINTS = 32
+AUTONOMOUS_CONNECTOR_INTENT_JOB_SCHEMA = "bioprism-python-autonomous-connector-intent-job/0.1"
+MAX_AUTONOMOUS_CONNECTOR_INTENT_JOB_ITEMS = 32
 
 
 def _parent_digests(value: Sequence[str] | None) -> tuple[str, ...]:
@@ -389,6 +394,22 @@ class AutonomousConnectorOperationFacade:
         if prepared.dispatch is None:
             raise BrainRunError("connector operation plan has no eligible connector")
         return self._dispatch(prepared)
+
+    def prepare_dispatch(
+        self,
+        plan: AutonomousConnectorOperationPlan,
+        value: AutonomousConnectorOperationInput | Mapping[str, Any],
+    ) -> tuple[AutonomousConnectorSelectionPlan, AutonomousConnectorDispatchRequest]:
+        """Rehydrate a reviewed plan into a transient worker request without dispatching it."""
+
+        if not isinstance(plan, AutonomousConnectorOperationPlan):
+            raise ArgumentError("connector operation prepare_dispatch requires a typed plan")
+        prepared = self._prepare(self._coerce(value))
+        if prepared.plan.plan_digest != plan.plan_digest:
+            raise ArgumentError("connector operation plan does not match the supplied transient request")
+        if prepared.dispatch is None:
+            raise BrainRunError("connector operation plan has no eligible connector")
+        return prepared.plan.selection_plan, prepared.dispatch
 
     def execute_batch(
         self,
@@ -858,6 +879,57 @@ class AutonomousConnectorIntentExecution:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class AutonomousConnectorIntentJob:
+    """Metadata-only queue submission for a reviewed intent plan.
+
+    Queue rows contain only operation, request, selection, and replay digests.  The caller must
+    re-supply transient request metadata when a worker resumes the job.
+    """
+
+    job_id: str
+    plan_digest: str
+    status: str
+    items: tuple[Mapping[str, Any], ...]
+    enqueued_count: int
+    omitted_count: int
+    job_digest: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        _identifier("connector intent job_id", self.job_id)
+        _digest("connector intent job plan_digest", self.plan_digest)
+        if self.status not in {"queued", "route_review_required", "connector_review_required", "partial"}:
+            raise ArgumentError("connector intent job status is invalid")
+        if not isinstance(self.items, Sequence) or isinstance(self.items, (str, bytes)):
+            raise ArgumentError("connector intent job items must be a sequence")
+        if len(self.items) > MAX_AUTONOMOUS_CONNECTOR_INTENT_JOB_ITEMS:
+            raise ArgumentError("connector intent job contains too many items")
+        for item in self.items:
+            if not isinstance(item, Mapping):
+                raise ArgumentError("connector intent job item must be an object")
+        if isinstance(self.enqueued_count, bool) or not isinstance(self.enqueued_count, int) or self.enqueued_count < 0:
+            raise ArgumentError("connector intent job enqueued_count is invalid")
+        if isinstance(self.omitted_count, bool) or not isinstance(self.omitted_count, int) or self.omitted_count < 0:
+            raise ArgumentError("connector intent job omitted_count is invalid")
+        object.__setattr__(self, "job_digest", content_digest(self._descriptor()))
+
+    def _descriptor(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_CONNECTOR_INTENT_JOB_SCHEMA,
+            "job_id": self.job_id,
+            "plan_digest": self.plan_digest,
+            "status": self.status,
+            "items": [dict(item) for item in self.items],
+            "enqueued_count": self.enqueued_count,
+            "omitted_count": self.omitted_count,
+            "retention": "metadata_only_task_request_plan_and_connector_values_not_retained",
+            "secret_material": "never_returned",
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        return {**self._descriptor(), "job_digest": self.job_digest}
+
+
 class AutonomousConnectorIntentFacade:
     """Route a user task to exact reviewed connector operations across all domains.
 
@@ -1067,6 +1139,202 @@ class AutonomousConnectorIntentFacade:
         status = "completed" if failed == 0 and omitted == 0 else "partial" if executions else "failed"
         return AutonomousConnectorIntentExecution(status, current, normalized, tuple(executions))
 
+    def enqueue(
+        self,
+        plan: AutonomousConnectorIntentPlan,
+        *,
+        job_id: str,
+        queue: InMemoryAutonomousConnectorWorkQueue,
+        task: str,
+        hints: Sequence[str] = (),
+        request_by_domain: Mapping[str, Mapping[str, Any]] | None = None,
+        capability: str | None = None,
+        max_domains: int = 3,
+        allow_cross_domain: bool = True,
+        min_confidence: float = 0.25,
+        min_margin: float = 0.10,
+        approved: bool = False,
+        selection_strategy: str = "lexicographic_connector_id",
+        selection_signals: Mapping[str, Mapping[str, Any]] | None = None,
+        max_attempts: int = 3,
+        now: int | None = None,
+    ) -> AutonomousConnectorIntentJob:
+        """Submit a reviewed intent as bounded queue work.
+
+        The task and request metadata are used only to recompute and bind the reviewed plan. The
+        queue receives typed dispatch requests whose durable projection is digest-only.
+        """
+
+        if not isinstance(plan, AutonomousConnectorIntentPlan):
+            raise ArgumentError("connector intent enqueue requires a typed plan")
+        if not isinstance(queue, InMemoryAutonomousConnectorWorkQueue):
+            raise ArgumentError("connector intent enqueue requires a typed work queue")
+        _identifier("connector intent job_id", job_id)
+        current = self.plan(
+            task=task,
+            hints=hints,
+            request_by_domain=request_by_domain,
+            capability=capability,
+            max_domains=max_domains,
+            allow_cross_domain=allow_cross_domain,
+            min_confidence=min_confidence,
+            min_margin=min_margin,
+            approved=approved,
+            selection_strategy=selection_strategy,
+            selection_signals=selection_signals,
+        )
+        if current.plan_digest != plan.plan_digest:
+            raise ArgumentError("connector intent job plan does not match the supplied transient task metadata")
+        if len(current.selections) > MAX_AUTONOMOUS_CONNECTOR_INTENT_JOB_ITEMS:
+            raise ArgumentError("connector intent job contains too many selections")
+        if current.status != "ready":
+            items = tuple(
+                {
+                    "index": index,
+                    "domain": selection.domain,
+                    "status": "omitted",
+                    "work_id": None,
+                    "operation_plan_digest": selection.operation_plan.plan_digest,
+                    "queue_item_digest": None,
+                }
+                for index, selection in enumerate(current.selections)
+            )
+            return AutonomousConnectorIntentJob(
+                job_id=job_id,
+                plan_digest=current.plan_digest,
+                status=current.status,
+                items=items,
+                enqueued_count=0,
+                omitted_count=len(items),
+            )
+        items: list[dict[str, Any]] = []
+        for index, selection in enumerate(current.selections):
+            raw_request = {} if request_by_domain is None else request_by_domain.get(selection.domain, {})
+            operation_input = AutonomousConnectorOperationInput(
+                domain=selection.domain,
+                capability=selection.capability,
+                operation_id=selection.operation_id,
+                request=raw_request,
+                approved=approved,
+                selection_strategy=selection_strategy,
+                selection_signals=selection_signals,
+            )
+            selection_plan, dispatch = self.operation_facade.prepare_dispatch(
+                selection.operation_plan,
+                operation_input,
+            )
+            work_id = f"{job_id}-{index}"
+            queued = queue.enqueue(
+                work_id=work_id,
+                operation_id=selection.operation_id,
+                request=dispatch,
+                selection_plan_digest=selection_plan.plan_digest,
+                max_attempts=max_attempts,
+                now=now,
+            )
+            items.append(
+                {
+                    "index": index,
+                    "domain": selection.domain,
+                    "status": "queued",
+                    "work_id": queued.work_id,
+                    "operation_plan_digest": selection.operation_plan.plan_digest,
+                    "queue_item_digest": queued.item_digest,
+                }
+            )
+        return AutonomousConnectorIntentJob(
+            job_id=job_id,
+            plan_digest=current.plan_digest,
+            status="queued",
+            items=tuple(items),
+            enqueued_count=len(items),
+            omitted_count=0,
+        )
+
+    def run_queued(
+        self,
+        plan: AutonomousConnectorIntentPlan,
+        *,
+        job_id: str,
+        queue: InMemoryAutonomousConnectorWorkQueue,
+        task: str,
+        hints: Sequence[str] = (),
+        request_by_domain: Mapping[str, Mapping[str, Any]] | None = None,
+        capability: str | None = None,
+        max_domains: int = 3,
+        allow_cross_domain: bool = True,
+        min_confidence: float = 0.25,
+        min_margin: float = 0.10,
+        approved: bool = False,
+        selection_strategy: str = "lexicographic_connector_id",
+        selection_signals: Mapping[str, Mapping[str, Any]] | None = None,
+        worker_id: str = "connector-intent-worker",
+        limit: int = 64,
+        lease_ms: int = 30_000,
+        now: int | None = None,
+    ) -> dict[str, Any]:
+        """Recover and execute queued intent work using caller-resupplied transient metadata."""
+
+        if not isinstance(plan, AutonomousConnectorIntentPlan):
+            raise ArgumentError("connector intent run_queued requires a typed plan")
+        if not isinstance(queue, InMemoryAutonomousConnectorWorkQueue):
+            raise ArgumentError("connector intent run_queued requires a typed work queue")
+        _identifier("connector intent job_id", job_id)
+        current = self.plan(
+            task=task,
+            hints=hints,
+            request_by_domain=request_by_domain,
+            capability=capability,
+            max_domains=max_domains,
+            allow_cross_domain=allow_cross_domain,
+            min_confidence=min_confidence,
+            min_margin=min_margin,
+            approved=approved,
+            selection_strategy=selection_strategy,
+            selection_signals=selection_signals,
+        )
+        if current.plan_digest != plan.plan_digest:
+            raise ArgumentError("connector intent worker plan does not match the supplied transient task metadata")
+
+        selections = {
+            f"{job_id}-{index}": selection
+            for index, selection in enumerate(current.selections)
+        }
+
+        def rehydrate(item: AutonomousConnectorWorkItem) -> dict[str, Any]:
+            selection = selections.get(item.work_id)
+            if selection is None or selection.domain != item.domain or selection.operation_id != item.operation_id:
+                raise ArgumentError("connector intent worker item is outside the reviewed plan")
+            raw_request = {} if request_by_domain is None else request_by_domain.get(selection.domain, {})
+            operation_input = AutonomousConnectorOperationInput(
+                domain=selection.domain,
+                capability=selection.capability,
+                operation_id=selection.operation_id,
+                request=raw_request,
+                approved=approved,
+                selection_strategy=selection_strategy,
+                selection_signals=selection_signals,
+            )
+            selection_plan, dispatch = self.operation_facade.prepare_dispatch(
+                selection.operation_plan,
+                operation_input,
+            )
+            if dispatch.request_digest != item.request_digest or selection_plan.plan_digest != item.selection_plan_digest:
+                raise ArgumentError("connector intent worker item identity does not match the reviewed plan")
+            return {"plan": selection_plan, "request": dispatch}
+
+        return AutonomousConnectorWorker(
+            self.operation_facade.runtime,
+            queue,
+            rehydrate,
+        ).run(
+            worker_id=worker_id,
+            limit=limit,
+            lease_ms=lease_ms,
+            now=now,
+            work_ids=tuple(selections),
+        )
+
 
 __all__ = [
     "AUTONOMOUS_CONNECTOR_OPERATION_FACADE_SCHEMA",
@@ -1078,6 +1346,8 @@ __all__ = [
     "AUTONOMOUS_CONNECTOR_INTENT_SCHEMA",
     "MAX_AUTONOMOUS_CONNECTOR_INTENT_TASK_BYTES",
     "MAX_AUTONOMOUS_CONNECTOR_INTENT_HINTS",
+    "AUTONOMOUS_CONNECTOR_INTENT_JOB_SCHEMA",
+    "MAX_AUTONOMOUS_CONNECTOR_INTENT_JOB_ITEMS",
     "AutonomousConnectorOperationInput",
     "AutonomousConnectorOperationPlan",
     "AutonomousConnectorOperationExecution",
@@ -1086,5 +1356,6 @@ __all__ = [
     "AutonomousConnectorIntentSelection",
     "AutonomousConnectorIntentPlan",
     "AutonomousConnectorIntentExecution",
+    "AutonomousConnectorIntentJob",
     "AutonomousConnectorIntentFacade",
 ]

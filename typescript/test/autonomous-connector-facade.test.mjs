@@ -10,6 +10,7 @@ import {
   AutonomousConnectorRegistry,
   AutonomousConnectorRuntime,
   InMemoryAutonomousConnectorReceiptJournal,
+  InMemoryAutonomousConnectorWorkQueue,
   createBuiltinAutonomousConnectorRuntime,
 } from "../dist/index.js";
 
@@ -175,4 +176,45 @@ test("intent facade routes single and cross-domain tasks to exact reviewed opera
   const reviewPlan = await intent.plan({ task: "unclassifiable fixture", allowCrossDomain: false, minConfidence: 1 });
   assert.equal(reviewPlan.status, "route_review_required");
   assert.deepEqual(reviewPlan.selections, []);
+});
+
+test("intent facade queues and recovers cross-domain jobs without retaining transient task values", async () => {
+  const fixture = createBuiltinAutonomousConnectorRuntime({ domainScoped: true, approvalRequired: false });
+  const intent = new AutonomousConnectorIntentFacade({ operationFacade: fixture.operationFacade });
+  const input = {
+    task: "Profile a dataset schema and reproduce the scientific evidence.",
+    hints: ["data", "science"],
+    maxDomains: 2,
+    allowCrossDomain: true,
+    requestByDomain: {
+      data: { schema: { columns: ["id"] }, fixture_value: "data-private-transient" },
+      science: { hypothesis: "science-private-transient" },
+    },
+    approved: true,
+  };
+  const plan = await intent.plan(input);
+  const queue = new InMemoryAutonomousConnectorWorkQueue(fixture.operationRegistry);
+  const job = await intent.enqueue(plan, { ...input, jobId: "intent-job-1" }, queue, { now: 1_000 });
+  assert.equal(job.status, "queued");
+  assert.equal(job.enqueued_count, 2);
+  assert.equal(job.omitted_count, 0);
+  assert.equal(JSON.stringify(job).includes(input.task), false);
+  assert.equal(JSON.stringify(job).includes("data-private-transient"), false);
+  assert.equal(JSON.stringify(job).includes("science-private-transient"), false);
+  assert.ok(job.items.every((item) => item.queue_item_digest && item.status === "queued"));
+  const otherJob = await intent.enqueue(plan, { ...input, jobId: "intent-job-2" }, queue, { now: 1_000 });
+
+  const worker = await intent.runQueued(plan, { ...input, jobId: "intent-job-1" }, queue, { workerId: "intent-worker-1", now: 1_000 });
+  assert.equal(worker.completed, 2);
+  assert.equal(worker.reconciled, 0);
+  assert.equal(JSON.stringify(worker).includes("data-private-transient"), false);
+  assert.equal(JSON.stringify(worker).includes("science-private-transient"), false);
+  assert.ok(worker.rows.every((row) => row.value_retained === false));
+  assert.ok(job.items.every((item) => queue.get(item.work_id).status === "completed"));
+  assert.ok(otherJob.items.every((item) => queue.get(item.work_id).status === "queued"));
+
+  await assert.rejects(
+    intent.runQueued(plan, { ...input, jobId: "intent-job-1", requestByDomain: { ...input.requestByDomain, data: { fixture_value: "tampered" } } }, queue, { workerId: "intent-worker-2", now: 1_001 }),
+    /does not match/,
+  );
 });

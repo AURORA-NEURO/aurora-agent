@@ -340,7 +340,7 @@ class AutonomousConnectorWorkItem:
     item_digest: str = field(default="")
 
     def __post_init__(self) -> None:
-        for name, value in (("work_id", self.work_id), ("operation_id", self.operation_id), ("capability", self.capability), ("connector_id", self.connector_id), ("dispatch_id", self.dispatch_id), ("execution_id", self.execution_id), ("call_id", self.call_id)):
+        for name, value in (("work_id", self.work_id), ("operation_id", self.operation_id), ("connector_id", self.connector_id), ("dispatch_id", self.dispatch_id), ("execution_id", self.execution_id), ("call_id", self.call_id)):
             _identifier(f"autonomous connector work {name}", value)
         if self.domain not in AUTONOMOUS_DOMAIN_NAMES:
             raise ArgumentError("autonomous connector work domain is unsupported")
@@ -716,13 +716,26 @@ class AutonomousConnectorWorker:
         self.queue = queue
         self.rehydrate = rehydrate
 
-    def run(self, *, worker_id: str = "connector-worker", limit: int = 64, lease_ms: int = 30_000, now: int | None = None, aborted: Callable[[], bool] | None = None) -> dict[str, Any]:
+    def run(self, *, worker_id: str = "connector-worker", limit: int = 64, lease_ms: int = 30_000, now: int | None = None, aborted: Callable[[], bool] | None = None, work_ids: Sequence[str] | None = None) -> dict[str, Any]:
         worker_id = _identifier("autonomous connector worker_id", worker_id)
         limit = _bounded_integer("autonomous connector worker limit", limit, minimum=1, maximum=MAX_AUTONOMOUS_CONNECTOR_WORK_BATCH)
         lease_ms = _bounded_integer("autonomous connector worker lease_ms", lease_ms, minimum=1, maximum=MAX_AUTONOMOUS_CONNECTOR_WORK_LEASE_MS)
+        if work_ids is not None:
+            if not isinstance(work_ids, Sequence) or isinstance(work_ids, (str, bytes)) or not 1 <= len(work_ids) <= MAX_AUTONOMOUS_CONNECTOR_WORK_BATCH:
+                raise ArgumentError("autonomous connector worker work_ids are outside their bound")
+            normalized_work_ids = tuple(_identifier("autonomous connector worker work_id", value) for value in work_ids)
+            if len(set(normalized_work_ids)) != len(normalized_work_ids):
+                raise ArgumentError("autonomous connector worker work_ids contain duplicates")
+        else:
+            normalized_work_ids = None
         deterministic_now = now is not None
         current = _now_ms(now)
-        candidates = self.queue.pending(limit=limit, now=current)
+        pending_limit = MAX_AUTONOMOUS_CONNECTOR_WORK_BATCH if normalized_work_ids is not None else limit
+        pending = self.queue.pending(limit=pending_limit, now=current)
+        candidates = tuple(
+            item for item in pending
+            if normalized_work_ids is None or item.work_id in normalized_work_ids
+        )[:limit]
         rows: list[AutonomousConnectorWorkerRow] = []
         for candidate in candidates:
             if aborted is not None and aborted():

@@ -12,6 +12,10 @@ import {
 import {
   AutonomousConnectorOperationContract,
   AutonomousConnectorOperationRegistry,
+  AutonomousConnectorWorkItem,
+  AutonomousConnectorWorker,
+  InMemoryAutonomousConnectorWorkQueue,
+  type AutonomousConnectorWorkerRun,
 } from "./autonomous-connector-worker.js";
 import { digestJsonSync } from "./tooling.js";
 import type { JsonObject } from "./types.js";
@@ -34,6 +38,8 @@ export const MAX_AUTONOMOUS_CONNECTOR_FACADE_PARENT_DIGESTS = 128;
 export const AUTONOMOUS_CONNECTOR_INTENT_SCHEMA = "bioprism-typescript-autonomous-connector-intent/0.1" as const;
 export const MAX_AUTONOMOUS_CONNECTOR_INTENT_TASK_BYTES = 128_000;
 export const MAX_AUTONOMOUS_CONNECTOR_INTENT_HINTS = 32;
+export const AUTONOMOUS_CONNECTOR_INTENT_JOB_SCHEMA = "bioprism-typescript-autonomous-connector-intent-job/0.1" as const;
+export const MAX_AUTONOMOUS_CONNECTOR_INTENT_JOB_ITEMS = 32;
 
 const SECRET_FIELD_MARKERS = new Set([
   "apikey", "authorization", "bearer", "credential", "credentials", "password", "secret", "secretkey",
@@ -377,6 +383,26 @@ export interface AutonomousConnectorIntentExecution {
   secret_material: "never_returned";
 }
 
+export interface AutonomousConnectorIntentJob extends JsonObject {
+  schema: typeof AUTONOMOUS_CONNECTOR_INTENT_JOB_SCHEMA;
+  job_id: string;
+  plan_digest: string;
+  status: "queued" | "route_review_required" | "connector_review_required" | "partial";
+  items: Array<{
+    index: number;
+    domain: AutonomousDomainName;
+    status: "queued" | "omitted";
+    work_id: string | null;
+    operation_plan_digest: string;
+    queue_item_digest: string | null;
+  }>;
+  enqueued_count: number;
+  omitted_count: number;
+  retention: "metadata_only_task_request_plan_and_connector_values_not_retained";
+  secret_material: "never_returned";
+  job_digest: string;
+}
+
 interface PreparedOperation {
   readonly operation: AutonomousConnectorOperationContract;
   readonly request: JsonObject;
@@ -421,6 +447,15 @@ export class AutonomousConnectorOperationFacade {
     if (prepared.plan.plan_digest !== plan.plan_digest) throw new ArgumentError("connector operation plan does not match the supplied transient request");
     if (!prepared.dispatch) throw new ProviderRuntimeError("connector operation plan has no eligible connector", { code: "configuration" });
     return this.dispatch(prepared);
+  }
+
+  /** Rehydrate a reviewed operation plan into a transient worker request without dispatching. */
+  prepareDispatch(plan: AutonomousConnectorOperationPlan, input: AutonomousConnectorOperationInput): { plan: AutonomousConnectorSelectionPlan; request: AutonomousConnectorDispatchRequest } {
+    if (!(plan instanceof AutonomousConnectorOperationPlan)) throw new ArgumentError("connector operation prepareDispatch requires a typed plan");
+    const prepared = this.prepare(input);
+    if (prepared.plan.plan_digest !== plan.plan_digest) throw new ArgumentError("connector operation plan does not match the supplied transient request");
+    if (!prepared.dispatch) throw new ProviderRuntimeError("connector operation plan has no eligible connector", { code: "configuration" });
+    return { plan: prepared.plan.selection_plan, request: prepared.dispatch };
   }
 
   /** Execute independent operations with bounded concurrency and deterministic result ordering. */
@@ -708,6 +743,103 @@ export class AutonomousConnectorIntentFacade {
       retention: "metadata_only_task_and_request_values;dispatch_values_transient",
       secret_material: "never_returned",
     };
+  }
+
+  /** Submit a reviewed intent as metadata-only, restart-safe connector work items. */
+  enqueue(
+    plan: AutonomousConnectorIntentPlanJSON,
+    input: AutonomousConnectorIntentInput & { jobId: string },
+    queue: InMemoryAutonomousConnectorWorkQueue,
+    options: { maxAttempts?: number; now?: number } = {},
+  ): Promise<AutonomousConnectorIntentJob> {
+    return this.enqueueInternal(plan, input, queue, options);
+  }
+
+  private async enqueueInternal(
+    plan: AutonomousConnectorIntentPlanJSON,
+    input: AutonomousConnectorIntentInput & { jobId: string },
+    queue: InMemoryAutonomousConnectorWorkQueue,
+    options: { maxAttempts?: number; now?: number },
+  ): Promise<AutonomousConnectorIntentJob> {
+    if (!plan || typeof plan !== "object" || typeof plan.plan_digest !== "string") throw new ArgumentError("connector intent enqueue requires a typed plan projection");
+    if (!(queue instanceof InMemoryAutonomousConnectorWorkQueue)) throw new ArgumentError("connector intent enqueue requires a typed work queue");
+    const jobId = identifier("connector intent jobId", input.jobId);
+    const current = await this.plan(input);
+    if (current.plan_digest !== plan.plan_digest) throw new ArgumentError("connector intent job plan does not match the supplied transient task metadata");
+    if (current.selections.length > MAX_AUTONOMOUS_CONNECTOR_INTENT_JOB_ITEMS) throw new ArgumentError("connector intent job contains too many selections");
+    const descriptor = (status: AutonomousConnectorIntentJob["status"], items: AutonomousConnectorIntentJob["items"], enqueued: number, omitted: number): AutonomousConnectorIntentJob => {
+      const base = {
+        schema: AUTONOMOUS_CONNECTOR_INTENT_JOB_SCHEMA,
+        job_id: jobId,
+        plan_digest: current.plan_digest,
+        status,
+        items,
+        enqueued_count: enqueued,
+        omitted_count: omitted,
+        retention: "metadata_only_task_request_plan_and_connector_values_not_retained" as const,
+        secret_material: "never_returned" as const,
+      };
+      return { ...base, job_digest: digestJsonSync(base) };
+    };
+    if (current.status !== "ready") {
+      const items = current.selections.map((selection, index) => ({ index, domain: selection.domain, status: "omitted" as const, work_id: null, operation_plan_digest: selection.operation_plan.plan_digest, queue_item_digest: null }));
+      return descriptor(current.status, items, 0, items.length);
+    }
+    const items: AutonomousConnectorIntentJob["items"] = [];
+    for (let index = 0; index < current.selections.length; index += 1) {
+      const selection = current.selections[index]!;
+      const prepared = this.operationFacade.prepareDispatch(AutonomousConnectorOperationPlan.fromJSON(selection.operation_plan), {
+        domain: selection.domain,
+        capability: selection.capability,
+        operation_id: selection.operation_id,
+        request: input.requestByDomain?.[selection.domain] ?? {},
+        approved: input.approved ?? false,
+        selection_strategy: input.selectionStrategy,
+        selection_signals: input.selectionSignals,
+      });
+      const workId = `${jobId}-${index}`;
+      const queued = queue.enqueue({
+        work_id: workId,
+        operation_id: selection.operation_id,
+        request: prepared.request,
+        selection_plan_digest: prepared.plan.plan_digest,
+        max_attempts: options.maxAttempts ?? 3,
+        now: options.now,
+      });
+      items.push({ index, domain: selection.domain, status: "queued", work_id: queued.work_id, operation_plan_digest: selection.operation_plan.plan_digest, queue_item_digest: queued.item_digest });
+    }
+    return descriptor("queued", items, items.length, 0);
+  }
+
+  /** Recover and execute queued intent work after transient task metadata is re-supplied. */
+  async runQueued(
+    plan: AutonomousConnectorIntentPlanJSON,
+    input: AutonomousConnectorIntentInput & { jobId: string },
+    queue: InMemoryAutonomousConnectorWorkQueue,
+    options: { workerId?: string; limit?: number; leaseMs?: number; now?: number } = {},
+  ): Promise<AutonomousConnectorWorkerRun> {
+    if (!plan || typeof plan !== "object" || typeof plan.plan_digest !== "string") throw new ArgumentError("connector intent runQueued requires a typed plan projection");
+    if (!(queue instanceof InMemoryAutonomousConnectorWorkQueue)) throw new ArgumentError("connector intent runQueued requires a typed work queue");
+    const jobId = identifier("connector intent jobId", input.jobId);
+    const current = await this.plan(input);
+    if (current.plan_digest !== plan.plan_digest) throw new ArgumentError("connector intent worker plan does not match the supplied transient task metadata");
+    const selections = new Map(current.selections.map((selection, index) => [`${jobId}-${index}`, selection]));
+    const worker = new AutonomousConnectorWorker(this.operationFacade.runtime, queue, (item: AutonomousConnectorWorkItem) => {
+      const selection = selections.get(item.work_id);
+      if (!selection || selection.domain !== item.domain || selection.operation_id !== item.operation_id) throw new ArgumentError("connector intent worker item is outside the reviewed plan");
+      const prepared = this.operationFacade.prepareDispatch(AutonomousConnectorOperationPlan.fromJSON(selection.operation_plan), {
+        domain: selection.domain,
+        capability: selection.capability,
+        operation_id: selection.operation_id,
+        request: input.requestByDomain?.[selection.domain] ?? {},
+        approved: input.approved ?? false,
+        selection_strategy: input.selectionStrategy,
+        selection_signals: input.selectionSignals,
+      });
+      if (prepared.request.request_digest !== item.request_digest || prepared.plan.plan_digest !== item.selection_plan_digest) throw new ArgumentError("connector intent worker item identity does not match the reviewed plan");
+      return { plan: prepared.plan, request: prepared.request };
+    });
+    return worker.run({ ...options, workIds: [...selections.keys()] });
   }
 }
 

@@ -687,13 +687,16 @@ export class AutonomousConnectorWorker {
     if (typeof rehydrate !== "function") throw new ArgumentError("autonomous connector worker requires a rehydrator");
   }
 
-  async run(options: { workerId?: string; limit?: number; leaseMs?: number; now?: number; signal?: { readonly aborted: boolean } } = {}): Promise<AutonomousConnectorWorkerRun> {
+  async run(options: { workerId?: string; limit?: number; leaseMs?: number; now?: number; signal?: { readonly aborted: boolean }; workIds?: readonly string[] } = {}): Promise<AutonomousConnectorWorkerRun> {
     const workerId = identifier("autonomous connector worker_id", options.workerId ?? "connector-worker");
     const limit = boundedInteger("autonomous connector worker limit", options.limit ?? 64, 1, MAX_AUTONOMOUS_CONNECTOR_WORK_BATCH);
     const leaseMs = boundedInteger("autonomous connector worker lease_ms", options.leaseMs ?? 30_000, 1, MAX_AUTONOMOUS_CONNECTOR_WORK_LEASE_MS);
+    const normalizedWorkIds = options.workIds === undefined ? null : options.workIds.map((workId) => identifier("autonomous connector worker work_id", workId));
+    if (normalizedWorkIds !== null && (normalizedWorkIds.length < 1 || normalizedWorkIds.length > MAX_AUTONOMOUS_CONNECTOR_WORK_BATCH || new Set(normalizedWorkIds).size !== normalizedWorkIds.length)) throw new ArgumentError("autonomous connector worker workIds are outside their bound");
     const time = nowMs(options.now);
     const currentTime = () => options.now === undefined ? Date.now() : time;
-    const candidates = this.queue.pending(limit, time);
+    const pending = this.queue.pending(normalizedWorkIds === null ? limit : MAX_AUTONOMOUS_CONNECTOR_WORK_BATCH, time);
+    const candidates = pending.filter((item) => normalizedWorkIds === null || normalizedWorkIds.includes(item.work_id)).slice(0, limit);
     const rows: AutonomousConnectorWorkerRow[] = [];
     for (const candidate of candidates) {
       if (options.signal?.aborted) break;

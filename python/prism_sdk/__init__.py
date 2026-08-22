@@ -373,9 +373,12 @@ from .autonomous_connector_facade import (
     AUTONOMOUS_CONNECTOR_INTENT_SCHEMA,
     MAX_AUTONOMOUS_CONNECTOR_INTENT_TASK_BYTES,
     MAX_AUTONOMOUS_CONNECTOR_INTENT_HINTS,
+    AUTONOMOUS_CONNECTOR_INTENT_JOB_SCHEMA,
+    MAX_AUTONOMOUS_CONNECTOR_INTENT_JOB_ITEMS,
     AutonomousConnectorIntentSelection,
     AutonomousConnectorIntentPlan,
     AutonomousConnectorIntentExecution,
+    AutonomousConnectorIntentJob,
     AutonomousConnectorIntentFacade,
 )
 from .autonomous_builtin_connectors import (
