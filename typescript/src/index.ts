@@ -337,6 +337,15 @@ export type {
   AutonomousWorkflowPortfolioExecutionControllerRun,
   AutonomousWorkflowPortfolioExecutionControllerRunOptions,
 } from "./autonomous-workflow-portfolio-resumable.js";
+export {
+  AUTONOMOUS_WORKFLOW_PORTFOLIO_EVALUATOR_BRIDGE_SCHEMA,
+  createAutonomousWorkflowPortfolioEvaluatorBridge,
+} from "./autonomous-workflow-portfolio-learning.js";
+export type {
+  AutonomousWorkflowPortfolioDomainEvidenceContext,
+  AutonomousWorkflowPortfolioEvaluatorBridgeOptions,
+  AutonomousWorkflowPortfolioEvaluatorBridge,
+} from "./autonomous-workflow-portfolio-learning.js";
 export type {
   AutonomousAcceptedCrossDomainPlan,
   AutonomousAcceptedPlan,

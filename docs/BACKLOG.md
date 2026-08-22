@@ -25,7 +25,11 @@ remain separate integration work. Portfolio items now also bind the existing exp
 idempotent learner settlement, and optional feedback outbox into the same twelve-domain surface.
 Evaluator policy digests, learning episode identity, pending feedback, and settlement failure are
 checkpoint-visible without persisting task text, evidence bodies, provider responses, or keys;
-provider completion alone still never produces reward.
+provider completion alone still never produces reward. A reusable TypeScript evaluator bridge now
+routs caller-owned value-only evidence through the reviewed twelve-domain registry, binds its
+contract catalogue digest into resumable learning policy, and refuses incomplete custom registry
+coverage or cross-domain evidence; source acquisition, truth authority, and production evaluator
+operations remain deployment work.
 
 The autonomous façade now compiles every built-in workflow into a digest-bound evidence plan.
 Python `AutonomousTaskOrchestrator.evidence_plan()` and TypeScript `AutonomousAgent.evidencePlan()`

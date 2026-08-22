@@ -1765,6 +1765,37 @@ If `evaluateItem` is omitted while learning is enabled, completed items remain
 replaying the provider. `learningPolicyDigest` binds a resumable checkpoint to the caller's
 evaluator contract, while reward/evidence bodies and task/output values remain transient.
 
+For the reviewed built-in domain rubrics, `createAutonomousWorkflowPortfolioEvaluatorBridge()`
+removes repetitive callback routing without taking evidence authority away from the caller. It
+requires a bounded `evidenceFor` callback, resolves the adapter from the item domain, refuses a
+registry that does not cover all twelve domains, and exposes the registry contract digest as the
+checkpoint `learningPolicyDigest`:
+
+```typescript
+const evaluator = createAutonomousWorkflowPortfolioEvaluatorBridge({
+  evidenceFor: ({ domain, required_signals }) => ({
+    evidence: {
+      domain,
+      capability: "caller_owned_review",
+      risk_class: "review_only",
+      signals: Object.fromEntries(required_signals.map((signal) => [signal, 1])),
+      references: [],
+      limitations: [],
+    },
+  }),
+});
+
+await agent.executeWorkflowPortfolio(requests, {
+  learning,
+  learningPolicyDigest: evaluator.learningPolicyDigest,
+  evaluateItem: evaluator.evaluateItem,
+  approveProviderCall: true,
+});
+```
+
+The bridge routes value-only evidence through the existing domain adapters; it does not read
+provider responses, acquire sources, turn a score into truth, or authorize tools/effects.
+
 Approval is fail-closed: with `approveProviderCall` absent or false, the first ready item returns
 `approval_required`, descendants become `blocked`, and no provider call starts. Hard failures,
 route review, uncertain effects, turn limits, and child failures are never converted into success;
