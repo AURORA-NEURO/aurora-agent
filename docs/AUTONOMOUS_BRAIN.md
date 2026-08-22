@@ -4589,6 +4589,56 @@ rehydration data in its own protected store, while this controller owns the dura
 and its atomic lifecycle. The same contract applies to single-domain and cross-domain jobs,
 including composite operation capabilities and all twelve built-in domains.
 
+#### The restart-safe autonomous brain batch controller
+
+The ordinary brain batch engine already verifies request identities and caller-owned result
+rehydration, but applications should not have to manually reconstruct its startup and checkpoint
+lifecycle. `AutonomousBrainBatchJobController` wraps that engine for routed, domain, and
+cross-domain batches. It requires an explicit `restore()` before a run, serializes checkpoint
+mutation, validates the checkpoint before each write, and exposes only a bounded controller
+projection. The store is intentionally caller-owned so a deployment can use a transaction,
+conditional object write, or an append-and-compact journal:
+
+```python
+from prism_sdk import (
+    AutonomousBrainBatchJobController,
+    InMemoryAutonomousBatchCheckpointStore,
+)
+
+store = InMemoryAutonomousBatchCheckpointStore()
+controller = AutonomousBrainBatchJobController(agent, store)
+controller.restore()  # required after every process start
+
+run = controller.run(
+    requests,
+    job_id="brain-batch-42",
+    credentials={},
+    mode="domain",  # also "auto" or "cross_domain"
+    max_parallelism=4,
+    options_factory=lambda _request, _index: {"approve_provider_call": True},
+)
+assert run["batch"].status in {"completed", "partial", "failed"}
+```
+
+The TypeScript equivalent is `new AutonomousBrainBatchJobController(brain, store)`, followed by
+`await controller.restore()` and `await controller.run(inputs, { jobId, execution })`. On a
+restart, construct a new controller against the same store and provide
+`rehydrateExecution(context)` for completed items; the controller passes the restored checkpoint
+to the facade, which verifies every request digest and result digest before making a new provider
+call. `flush()` re-writes the last verified image and is safe to call between external commit
+steps. A second run is rejected while a first run is active, preventing two processes sharing one
+controller instance from racing its checkpoint image; multi-process fencing remains the
+responsibility of the caller-owned store.
+
+The persisted image contains only the job/mode identity, request digests, completed indices,
+result digests, bounded concurrency controls, status, and retention markers. It never contains
+task text, prompts, model output, connector requests or observations, tool arguments, or
+credentials. The in-memory stores are test/local wiring aids, not a claim of distributed
+durability; production callers must implement `read`/`write` with their own atomic persistence
+and fencing policy. Since the controller delegates to the same route, plan, provider, connector,
+evaluator, and learning boundaries, the contract covers all twelve built-in domains without
+introducing domain-specific execution shortcuts.
+
 ### Evidence integrity and independent evaluator mesh
 
 The TypeScript workflow evaluator derives its evidence identity from a canonical packet: stage

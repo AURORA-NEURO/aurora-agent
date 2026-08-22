@@ -5,6 +5,8 @@ import {
   AUTONOMOUS_DOMAIN_NAMES,
   AutonomousAgent,
   AutonomousBrainFacade,
+  AutonomousBrainBatchJobController,
+  InMemoryAutonomousBrainBatchCheckpointStore,
   AutonomousBrainPlan,
   AutonomousCapabilityActivation,
   AutonomousCapabilityActivationStore,
@@ -306,6 +308,73 @@ test("brain facade resumes metadata-only batches through caller-owned rehydratio
     }),
     /checkpoint/i,
   );
+});
+
+test("brain batch controller owns restore, persistence, restart rehydration, and checkpoint tamper rejection", async () => {
+  const runtime = localRuntime();
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const initialBrain = new AutonomousBrainFacade({ agent });
+  const requests = [
+    { task: tasks.coding, domain: "coding" },
+    {
+      task: "review science evidence through a caller-owned connector",
+      domain: "science",
+      connector: {
+        domain: "science",
+        capability: "literature",
+        operation_id: "science.reproducible_evidence_acquisition",
+        subject_digest: "a".repeat(64),
+        request: { hypothesis: "controller-hypothesis", evidence_digests: ["b".repeat(64)], analysis_digest: "c".repeat(64) },
+        approved: true,
+      },
+    },
+  ];
+  const store = new InMemoryAutonomousBrainBatchCheckpointStore();
+  const controller = new AutonomousBrainBatchJobController(initialBrain, store);
+  await assert.rejects(
+    controller.run(requests, { jobId: "typescript-controller-job", maxParallelism: 1, stopOnError: true, execution: { approveProviderCall: true } }),
+    /restore/i,
+  );
+  const empty = await controller.restore();
+  assert.equal(empty.status, "empty");
+  const first = await controller.run(requests, {
+    jobId: "typescript-controller-job",
+    maxParallelism: 1,
+    stopOnError: true,
+    execution: { approveProviderCall: true },
+  });
+  assert.equal(first.batch.status, "partial");
+  assert.deepEqual(first.batch.items.map((item) => item.status), ["succeeded", "failed"]);
+  const persisted = store.read();
+  assert.ok(persisted);
+  assert.equal(first.controller.completed_items, 1);
+  assert.doesNotMatch(JSON.stringify(persisted), /debug and verify|controller-hypothesis|offline:offline-model/);
+
+  const connector = createBuiltinAutonomousConnectorRuntime({ domainScoped: true, approvalRequired: false });
+  const resumedBrain = new AutonomousBrainFacade({ agent, connectorOperations: connector.operationFacade });
+  const restarted = new AutonomousBrainBatchJobController(resumedBrain, store);
+  const restored = await restarted.restore();
+  assert.equal(restored.status, "restored");
+  const completed = await restarted.run(requests, {
+    jobId: "typescript-controller-job",
+    maxParallelism: 1,
+    stopOnError: true,
+    execution: { approveProviderCall: true },
+    rehydrateExecution: (context) => first.batch.items[context.index].execution,
+  });
+  assert.equal(completed.batch.status, "completed");
+  assert.deepEqual(completed.batch.items.map((item) => item.status), ["succeeded", "succeeded"]);
+  assert.equal(completed.controller.status, "completed");
+  assert.equal(store.read().status, "completed");
+
+  const tampered = structuredClone(store.read());
+  tampered.request_digests[0] = "0".repeat(64);
+  const invalid = new AutonomousBrainBatchJobController(resumedBrain, {
+    read: () => tampered,
+    write: () => {},
+  });
+  await assert.rejects(invalid.restore(), /checkpoint/i);
 });
 
 test("brain facade exposes a keyless readiness and activation lifecycle for onboarding", async () => {

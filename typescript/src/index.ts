@@ -363,6 +363,7 @@ export {
   AUTONOMOUS_BRAIN_FACADE_SCHEMA,
   AUTONOMOUS_BRAIN_BATCH_SCHEMA,
   AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA,
+  AUTONOMOUS_BRAIN_BATCH_CONTROLLER_SCHEMA,
   AUTONOMOUS_BRAIN_CYCLE_BATCH_SCHEMA,
   AUTONOMOUS_BRAIN_ADAPTIVE_BATCH_SCHEMA,
   AUTONOMOUS_BRAIN_SUMMARY_SCHEMA,
@@ -373,6 +374,8 @@ export {
   MAX_AUTONOMOUS_BRAIN_OBSERVATION_BYTES,
   AutonomousBrainPlan,
   AutonomousBrainFacade,
+  AutonomousBrainBatchJobController,
+  InMemoryAutonomousBrainBatchCheckpointStore,
   createAutonomousBrainFacade,
 } from "./autonomous-brain-facade.js";
 export type {
@@ -412,6 +415,11 @@ export type {
   AutonomousBrainBatchCheckpointJSON,
   AutonomousBrainBatchRehydrationContext,
   AutonomousBrainResumableBatchOptions,
+  AutonomousBrainBatchCheckpointStore,
+  AutonomousBrainBatchControllerStatus,
+  AutonomousBrainBatchControllerProjection,
+  AutonomousBrainBatchControllerRun,
+  AutonomousBrainBatchControllerRunOptions,
 } from "./autonomous-brain-facade.js";
 export {
   AUTONOMOUS_CONNECTOR_OPERATION_REGISTRY_SCHEMA,

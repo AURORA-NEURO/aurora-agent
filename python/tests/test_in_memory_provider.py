@@ -12,6 +12,8 @@ from prism_sdk import (
     AutonomousAgent,
     AutonomousBatchResult,
     AutonomousBatchCheckpoint,
+    AutonomousBrainBatchJobController,
+    InMemoryAutonomousBatchCheckpointStore,
     BrainRunError,
     AutonomousDomainRegistry,
     InMemoryProvider,
@@ -632,6 +634,92 @@ def test_agent_run_resumable_batch_rehydrates_successes_and_rejects_tampering() 
             checkpoint=tampered,
             rehydrate_result=lambda context: restored.results[context.index],
         )
+
+
+def test_autonomous_brain_batch_controller_owns_restore_persistence_restart_and_tamper_rejection() -> None:
+    runtime = LLMRuntime()
+    runtime.register_in_memory_provider("offline", lambda _request: {"output_text": "offline controller answer"})
+    required = {
+        capability
+        for profile in AutonomousDomainRegistry.with_builtin_profiles().catalogue()
+        for capability in profile["required_model_capabilities"]
+    }
+    required.update({"tool_calling", "structured_output"})
+    agent = AutonomousAgent(
+        _OfflineWorkspace(),
+        runtime,
+        model_catalogue=ModelCatalogue(
+            [{
+                "provider": "offline",
+                "model": "offline-model",
+                "capabilities": sorted(required),
+                "context_window_tokens": 32_000,
+                "max_output_tokens": 2_048,
+                "quality": 0.9,
+                "latency_ms": 1,
+                "cost_per_million_tokens": 0,
+                "reliability": 0.99,
+            }]
+        ),
+    )
+    requests = (
+        {"task": "complete a controller coding review", "domain": "coding"},
+        {"task": "complete a controller data review", "domain": "data"},
+    )
+    fail_second = True
+
+    def options_factory(_request: Mapping[str, Any], index: int) -> Mapping[str, Any]:
+        return {"approve_provider_call": True, "max_steps": 0 if fail_second and index == 1 else 32}
+
+    store = InMemoryAutonomousBatchCheckpointStore()
+    controller = AutonomousBrainBatchJobController(agent, store)
+    with pytest.raises(BrainRunError, match="restore"):
+        controller.run(requests, job_id="python-controller-job", credentials={}, max_parallelism=1, options_factory=options_factory)
+    assert controller.restore()["status"] == "empty"
+    first = controller.run(
+        requests,
+        job_id="python-controller-job",
+        credentials={},
+        max_parallelism=1,
+        stop_on_error=True,
+        options_factory=options_factory,
+    )
+    assert first["batch"].status == "partial"
+    assert [item.status for item in first["batch"].items] == ["succeeded", "failed"]
+    persisted = store.read()
+    assert persisted is not None
+    assert first["controller"]["completed_items"] == 1
+    encoded = json.dumps(persisted, sort_keys=True)
+    assert "controller coding review" not in encoded
+    assert "offline controller answer" not in encoded
+
+    fail_second = False
+    restarted = AutonomousBrainBatchJobController(agent, store)
+    assert restarted.restore()["status"] == "restored"
+    completed = restarted.run(
+        requests,
+        job_id="python-controller-job",
+        credentials={},
+        max_parallelism=1,
+        stop_on_error=True,
+        options_factory=options_factory,
+        rehydrate_result=lambda context: first["batch"].items[context.index].result,
+    )
+    assert completed["batch"].status == "completed"
+    assert [item.status for item in completed["batch"].items] == ["succeeded", "succeeded"]
+    assert completed["controller"]["status"] == "completed"
+    assert store.read()["status"] == "completed"  # type: ignore[index]
+
+    tampered = dict(store.read() or {})
+    tampered["request_digests"] = ["0" * 64, *tampered["request_digests"][1:]]
+    tampered_store = type(
+        "TamperedStore",
+        (),
+        {"read": lambda _self: tampered, "write": lambda _self, _value: None},
+    )()
+    invalid = AutonomousBrainBatchJobController(agent, tampered_store)
+    with pytest.raises(BrainRunError, match="digest|checkpoint"):
+        invalid.restore()
 
 
 def test_agent_run_resumable_batch_supports_route_first_and_cross_domain_modes() -> None:

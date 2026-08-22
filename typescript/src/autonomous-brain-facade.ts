@@ -54,6 +54,7 @@ import type { JsonObject, JsonValue } from "./types.js";
 export const AUTONOMOUS_BRAIN_FACADE_SCHEMA = "bioprism-typescript-autonomous-brain-facade/0.1" as const;
 export const AUTONOMOUS_BRAIN_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-batch/0.1" as const;
 export const AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA = "bioprism-typescript-autonomous-brain-batch-checkpoint/0.1" as const;
+export const AUTONOMOUS_BRAIN_BATCH_CONTROLLER_SCHEMA = "bioprism-typescript-autonomous-brain-batch-controller/0.1" as const;
 export const AUTONOMOUS_BRAIN_CYCLE_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-cycle-batch/0.1" as const;
 export const AUTONOMOUS_BRAIN_ADAPTIVE_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-adaptive-batch/0.1" as const;
 export const AUTONOMOUS_BRAIN_SUMMARY_SCHEMA = "bioprism-typescript-autonomous-brain-plan-summary/0.1" as const;
@@ -350,6 +351,33 @@ export interface AutonomousBrainResumableBatchOptions {
   checkpointSink?: (checkpoint: AutonomousBrainBatchCheckpointJSON) => Promise<void> | void;
   rehydrateExecution?: (context: AutonomousBrainBatchRehydrationContext) => Promise<AutonomousBrainExecution> | AutonomousBrainExecution;
 }
+
+/** Caller-owned storage for one verified metadata-only brain batch checkpoint. */
+export interface AutonomousBrainBatchCheckpointStore {
+  read(): Promise<AutonomousBrainBatchCheckpointJSON | null> | AutonomousBrainBatchCheckpointJSON | null;
+  write(checkpoint: AutonomousBrainBatchCheckpointJSON): Promise<void> | void;
+}
+
+export type AutonomousBrainBatchControllerStatus = "empty" | "restored" | "flushed" | "completed" | "partial" | "failed";
+
+export interface AutonomousBrainBatchControllerProjection extends JsonObject {
+  schema: typeof AUTONOMOUS_BRAIN_BATCH_CONTROLLER_SCHEMA;
+  status: AutonomousBrainBatchControllerStatus;
+  job_id: string | null;
+  checkpoint_digest: string | null;
+  completed_items: number;
+  total_items: number | null;
+  persisted: true;
+  retention: "metadata_only_request_and_result_digests;task_prompt_provider_connector_values_never_persisted";
+  secret_material: "never_returned";
+}
+
+export interface AutonomousBrainBatchControllerRun {
+  controller: AutonomousBrainBatchControllerProjection;
+  batch: AutonomousBrainBatchResult;
+}
+
+export type AutonomousBrainBatchControllerRunOptions = Omit<AutonomousBrainResumableBatchOptions, "checkpoint" | "checkpointSink">;
 
 interface PreparedBrainRequest {
   readonly request: AutonomousBrainRequest;
@@ -1147,6 +1175,109 @@ export class AutonomousBrainFacade {
       ? await runAutonomousCrossDomainReplanCycle(this.agent, request.task, adaptiveOptions as AutonomousCrossDomainReplanCycleOptions)
       : await runAutonomousReplanCycle(this.agent, request.task, adaptiveOptions as AutonomousReplanCycleOptions);
     return base(adaptive.status, adaptive, connector, null);
+  }
+}
+
+/**
+ * Own the process lifecycle around the verified resumable brain batch engine.
+ *
+ * The facade deliberately accepts a checkpoint sink so infrastructure can choose a database,
+ * object store, or journal. This controller is the safer application boundary: startup restore
+ * is explicit, only one run may mutate a checkpoint at a time, every checkpoint is validated
+ * before it reaches the store, and task text, prompts, provider values, connector observations,
+ * and credentials remain transient by construction.
+ */
+export class AutonomousBrainBatchJobController {
+  private checkpoint: AutonomousBrainBatchCheckpointJSON | null = null;
+  private restored = false;
+  private running = false;
+
+  constructor(readonly brain: AutonomousBrainFacade, readonly persistence: AutonomousBrainBatchCheckpointStore) {
+    if (!(brain instanceof AutonomousBrainFacade)) throw new ArgumentError("autonomous brain batch controller requires an AutonomousBrainFacade");
+    if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new ArgumentError("autonomous brain batch checkpoint store is malformed");
+  }
+
+  private requireRestored(): void {
+    if (!this.restored) throw new ArgumentError("autonomous brain batch controller must restore before execution");
+  }
+
+  private requireIdle(): void {
+    if (this.running) throw new ArgumentError("autonomous brain batch controller already has a run in progress");
+  }
+
+  private projection(status: AutonomousBrainBatchControllerStatus, totalItems: number | null = null, jobId: string | null = this.checkpoint?.job_id ?? null): AutonomousBrainBatchControllerProjection {
+    return {
+      schema: AUTONOMOUS_BRAIN_BATCH_CONTROLLER_SCHEMA,
+      status,
+      job_id: jobId,
+      checkpoint_digest: this.checkpoint?.checkpoint_digest ?? null,
+      completed_items: this.checkpoint?.completed_indices.length ?? 0,
+      total_items: totalItems ?? (this.checkpoint?.request_digests.length ?? null),
+      persisted: true,
+      retention: "metadata_only_request_and_result_digests;task_prompt_provider_connector_values_never_persisted",
+      secret_material: "never_returned",
+    };
+  }
+
+  /** Restore and verify the last checkpoint before accepting any execution request. */
+  async restore(): Promise<AutonomousBrainBatchControllerProjection> {
+    this.requireIdle();
+    const raw = await this.persistence.read();
+    this.checkpoint = raw === null ? null : validateBrainBatchCheckpoint(raw);
+    this.restored = true;
+    return this.projection(this.checkpoint === null ? "empty" : "restored");
+  }
+
+  /** Re-write the last verified checkpoint through the caller-owned store. */
+  async flush(): Promise<AutonomousBrainBatchControllerProjection> {
+    this.requireRestored();
+    this.requireIdle();
+    if (this.checkpoint === null) return this.projection("empty");
+    const verified = validateBrainBatchCheckpoint(this.checkpoint);
+    await this.persistence.write(verified);
+    this.checkpoint = verified;
+    return this.projection("flushed");
+  }
+
+  /** Run a routed/domain/cross-domain batch while the controller owns persistence and restart state. */
+  async run(inputs: readonly AutonomousBrainRequest[], options: AutonomousBrainBatchControllerRunOptions): Promise<AutonomousBrainBatchControllerRun> {
+    this.requireRestored();
+    this.requireIdle();
+    if (!options || typeof options !== "object" || typeof options.jobId !== "string") throw new ArgumentError("autonomous brain batch controller run requires jobId");
+    const runtimeOptions = options as AutonomousBrainResumableBatchOptions & Record<string, unknown>;
+    if (Object.prototype.hasOwnProperty.call(runtimeOptions, "checkpoint") || Object.prototype.hasOwnProperty.call(runtimeOptions, "checkpointSink")) throw new ArgumentError("autonomous brain batch controller owns checkpoint and checkpointSink");
+    this.running = true;
+    try {
+      const batch = await this.brain.executeBatchResumable(inputs, {
+        ...options,
+        checkpoint: this.checkpoint ?? undefined,
+        checkpointSink: async (checkpoint) => {
+          const verified = validateBrainBatchCheckpoint(checkpoint);
+          await this.persistence.write(verified);
+          this.checkpoint = verified;
+        },
+      });
+      return { controller: this.projection(batch.status, inputs.length, options.jobId), batch };
+    } finally {
+      this.running = false;
+    }
+  }
+}
+
+/** A small verified store useful for local processes, tests, and wiring examples. */
+export class InMemoryAutonomousBrainBatchCheckpointStore implements AutonomousBrainBatchCheckpointStore {
+  private checkpoint: AutonomousBrainBatchCheckpointJSON | null = null;
+
+  constructor(initial?: AutonomousBrainBatchCheckpointJSON | null) {
+    if (initial !== undefined && initial !== null) this.checkpoint = validateBrainBatchCheckpoint(initial);
+  }
+
+  read(): AutonomousBrainBatchCheckpointJSON | null {
+    return this.checkpoint === null ? null : structuredClone(this.checkpoint);
+  }
+
+  write(checkpoint: AutonomousBrainBatchCheckpointJSON): void {
+    this.checkpoint = structuredClone(validateBrainBatchCheckpoint(checkpoint));
   }
 }
 
