@@ -9,6 +9,7 @@ import {
   type AutonomousConnectorReceiptStore,
 } from "./autonomous-connectors.js";
 import { AutonomousConnectorOperationRegistry } from "./autonomous-connector-worker.js";
+import { AutonomousConnectorOperationFacade } from "./autonomous-connector-facade.js";
 import { canonicalJson, digestJsonSync } from "./tooling.js";
 import type {
   DomainEvidenceProviderConnectorManifest,
@@ -305,6 +306,7 @@ export function createBuiltinAutonomousConnectorRuntime(options: {
   operationRegistry: AutonomousConnectorOperationRegistry;
   registry: AutonomousConnectorRegistry;
   runtime: AutonomousConnectorRuntime;
+  operationFacade: AutonomousConnectorOperationFacade;
   registrations: AutonomousConnectorRegistration[];
 } {
   const operationRegistry = options.operationRegistry ?? new AutonomousConnectorOperationRegistry();
@@ -317,5 +319,6 @@ export function createBuiltinAutonomousConnectorRuntime(options: {
     receiptStore: options.receiptStore,
     receiptSink: options.receiptSink,
   });
-  return { operationRegistry, registry, runtime, registrations };
+  const operationFacade = new AutonomousConnectorOperationFacade({ registry, runtime, operationRegistry });
+  return { operationRegistry, registry, runtime, operationFacade, registrations };
 }

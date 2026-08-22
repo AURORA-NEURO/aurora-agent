@@ -325,6 +325,23 @@ export {
   createBuiltinAutonomousConnectorRuntime,
 } from "./autonomous-builtin-connectors.js";
 export {
+  AUTONOMOUS_CONNECTOR_OPERATION_FACADE_SCHEMA,
+  AUTONOMOUS_CONNECTOR_OPERATION_BATCH_SCHEMA,
+  MAX_AUTONOMOUS_CONNECTOR_FACADE_BATCH,
+  MAX_AUTONOMOUS_CONNECTOR_FACADE_PARALLELISM,
+  MAX_AUTONOMOUS_CONNECTOR_FACADE_PARENT_DIGESTS,
+  AutonomousConnectorOperationPlan,
+  AutonomousConnectorOperationFacade,
+  createAutonomousConnectorOperationFacade,
+} from "./autonomous-connector-facade.js";
+export type {
+  AutonomousConnectorOperationInput,
+  AutonomousConnectorOperationPlanJSON,
+  AutonomousConnectorOperationExecution,
+  AutonomousConnectorOperationBatchItem,
+  AutonomousConnectorOperationBatchResult,
+} from "./autonomous-connector-facade.js";
+export {
   AUTONOMOUS_CONNECTOR_OPERATION_REGISTRY_SCHEMA,
   AUTONOMOUS_CONNECTOR_OPERATION_SCHEMA,
   AUTONOMOUS_CONNECTOR_WORK_ITEM_SCHEMA,

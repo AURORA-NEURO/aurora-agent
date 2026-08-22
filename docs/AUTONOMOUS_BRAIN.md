@@ -3108,7 +3108,8 @@ only source of learning credit.
 
 For a useful credentialless TypeScript bootstrap, `createBuiltinAutonomousConnectorRuntime()`
 installs deterministic local registrations for every autonomous domain, attaches the default
-operation registry, and returns `{ operationRegistry, registry, runtime, registrations }`. The
+operation registry, attaches an `operationFacade`, and returns `{ operationRegistry, registry,
+runtime, operationFacade, registrations }`. The
 runtime still requires the normal selection-plan and approval gates, so this convenience does not
 turn local registration into authorization. Each built-in operation accepts only caller-supplied
 JSON metadata, projects field names/shapes/counts/digests, and returns a transient `observed` or
@@ -3136,6 +3137,40 @@ workflow adapters add those identities automatically when given the matching ope
 callers can then run every domain offline before supplying real browser, repository, data, FHIR,
 or model-backed connector executors. Local observations are deliberately evaluator inputs, not
 independent scientific, clinical, operational, or business evidence.
+
+For non-durable application code, `AutonomousConnectorOperationFacade` composes the same contract
+without making callers hand-build a dispatch request. It resolves the operation registry, checks
+domain/capability scope, selects a connector, derives replay-safe identities, and returns a
+request-free plan. `execute()` then rehydrates the transient metadata and dispatches only through
+that plan; `executePlanned()` refuses changed metadata before an executor can run. The facade also
+offers bounded parallel batches with deterministic item ordering and explicit refused/failed/
+omitted states:
+
+```typescript
+const connectorOps = new AutonomousConnectorOperationFacade({
+  registry: offline.registry,
+  runtime: offline.runtime,
+  operationRegistry: offline.operationRegistry,
+});
+const operationInput = {
+  domain: "science",
+  capability: "literature",
+  operation_id: "science.reproducible_evidence_acquisition",
+  subject_digest: callerSubjectDigest,
+  request: { evidence_digests: [callerEvidenceDigest], analysis_digest: callerAnalysisDigest },
+  approved: true,
+};
+const reviewed = connectorOps.plan(operationInput);
+const execution = await connectorOps.executePlanned(reviewed, operationInput);
+const batch = await connectorOps.executeBatch(domainInputs, { maxParallelism: 4 });
+```
+
+Plans contain operation, subject, request, selection, and approval digests only. Dispatch values
+remain transient, receipt journals retain metadata only, credential-shaped fields are rejected
+before hashing, and an approval transition receives a distinct replay identity so an earlier
+approval refusal cannot poison a later explicitly approved attempt. A connector status of
+`observed` or `partial` is still transport/evidence posture, never evaluator reward or proof that
+the underlying domain task is correct.
 
 #### Binding connectors to durable workflow and mission execution
 
