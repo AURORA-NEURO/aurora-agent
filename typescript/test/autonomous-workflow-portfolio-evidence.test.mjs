@@ -5,11 +5,16 @@ import {
   AUTONOMOUS_DOMAIN_NAMES,
   AutonomousAgent,
   AutonomousWorkflowPortfolioEvidenceController,
+  AutonomousWorkflowPortfolioEvidenceWorkQueuePersistenceCoordinator,
+  AutonomousWorkflowPortfolioEvidenceWorkWorker,
+  InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueue,
+  InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueuePersistence,
   InMemoryAutonomousEvidenceRuntimeJournal,
   InMemoryAutonomousWorkflowPortfolioEvidenceCheckpointStore,
   JsonAutonomousWorkflowPortfolioEvidenceCheckpointStore,
   LLMRuntime,
   TransactionalJsonAutonomousWorkflowPortfolioEvidenceCheckpointStore,
+  admitAutonomousWorkflowPortfolioEvidenceWorkItems,
   digestJson,
   validateAutonomousWorkflowPortfolioEvidenceCheckpoint,
 } from "../dist/index.js";
@@ -368,4 +373,93 @@ test("portfolio evidence checkpoints reject tampering, request drift, and evalua
     }),
     /checkpoint controls do not match/,
   );
+});
+
+test("portfolio evidence work queue admits every domain, enforces dependency waves, and fences leases", async () => {
+  const agent = agentFor();
+  const providerExecution = await agent.executeWorkflowPortfolio(portfolioRequests(), {
+    planOptions: { requireAllDomains: true },
+    approveProviderCall: true,
+  });
+  const evidencePlan = await agent.evidencePlan(AUTONOMOUS_DOMAIN_NAMES);
+  const queue = new InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueue();
+  const admitted = admitAutonomousWorkflowPortfolioEvidenceWorkItems(queue, {
+    jobId: "evidence-work-job",
+    execution: providerExecution,
+    evidencePlanDigest: evidencePlan.plan_digest,
+    itemRequestDigests: AUTONOMOUS_DOMAIN_NAMES.map((_, index) => `${String(index + 1).padStart(2, "0")}`.repeat(32)),
+    checkpointDigest: "a".repeat(64),
+    now: 1_000,
+  });
+
+  assert.equal(admitted.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(queue.pending().length, 1, "only the root wave is claimable initially");
+  const first = queue.claim("evidence-work-job:portfolio-coding", "worker-a", 30_000, 1_000);
+  assert.equal(first?.domain, "coding");
+  assert.equal(queue.claim(first.work_id, "worker-b", 30_000, 1_001), null, "an active lease is not stealable");
+  queue.complete(first.work_id, "worker-a", { status: "completed", resultDigest: "b".repeat(64) }, 1_002);
+
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES.slice(1)) {
+    const next = queue.pending(1, 2_000)[0];
+    assert.equal(next?.item_id, `portfolio-${domain}`);
+    const claimed = queue.claim(next.work_id, "worker-a", 30_000, 2_000);
+    assert.ok(claimed);
+    queue.complete(claimed.work_id, "worker-a", { status: "completed", resultDigest: "c".repeat(64) }, 2_001);
+  }
+
+  assert.ok(queue.rows().every((item) => item.status === "completed"));
+  assert.equal(queue.bindCheckpointDigest("evidence-work-job", "d".repeat(64), 3_000), AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.doesNotMatch(JSON.stringify(queue.snapshot()), /private provider task payload|offline result|source secret/);
+});
+
+test("portfolio evidence work worker retries bounded failures, reconciles expired leases, and restores through fenced persistence", async () => {
+  const agent = agentFor();
+  const providerExecution = await agent.executeWorkflowPortfolio([{ id: "coding", task: "worker task", domain: "coding" }], { approveProviderCall: true });
+  const queue = new InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueue();
+  admitAutonomousWorkflowPortfolioEvidenceWorkItems(queue, {
+    jobId: "worker-job",
+    execution: providerExecution,
+    evidencePlanDigest: "e".repeat(64),
+    itemRequestDigests: ["f".repeat(64)],
+    maxAttempts: 2,
+    now: 1_000,
+  });
+  let attempts = 0;
+  const worker = new AutonomousWorkflowPortfolioEvidenceWorkWorker(queue, () => {
+    attempts += 1;
+    return attempts === 1
+      ? { status: "failed", result_digest: null, error_class: "transport_error", retryable: true }
+      : { status: "completed", result_digest: "1".repeat(64) };
+  });
+  const firstRun = await worker.run({ workerId: "worker-a", now: 1_000 });
+  assert.equal(firstRun.retried, 1);
+  const secondRun = await worker.run({ workerId: "worker-a", now: 2_001 });
+  assert.equal(secondRun.completed, 1);
+  assert.equal(queue.get("worker-job:coding")?.status, "completed");
+
+  const expiredQueue = new InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueue();
+  admitAutonomousWorkflowPortfolioEvidenceWorkItems(expiredQueue, {
+    jobId: "expiry-job",
+    execution: providerExecution,
+    evidencePlanDigest: "2".repeat(64),
+    itemRequestDigests: ["3".repeat(64)],
+    now: 5_000,
+  });
+  const leased = expiredQueue.claim("expiry-job:coding", "worker-a", 10, 5_000);
+  assert.ok(leased);
+  assert.equal(expiredQueue.claim(leased.work_id, "worker-b", 10, 5_011), null);
+  assert.equal(expiredQueue.get(leased.work_id)?.status, "reconciliation_required");
+  assert.throws(() => expiredQueue.complete(leased.work_id, "worker-a", { status: "completed", resultDigest: "4".repeat(64) }, 5_012), /fenced/);
+
+  const persistence = new InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueuePersistence();
+  const coordinator = new AutonomousWorkflowPortfolioEvidenceWorkQueuePersistenceCoordinator(queue, persistence);
+  const snapshot = await coordinator.flush();
+  const restoredQueue = new InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueue();
+  const restored = new AutonomousWorkflowPortfolioEvidenceWorkQueuePersistenceCoordinator(restoredQueue, persistence);
+  assert.equal((await restored.restore()).status, "restored");
+  assert.equal(restoredQueue.get("worker-job:coding")?.item_digest, queue.get("worker-job:coding")?.item_digest);
+  restoredQueue.bindCheckpointDigest("worker-job", "5".repeat(64), 3_000);
+  await restored.flush();
+  await assert.rejects(() => coordinator.flush(), /compare-and-swap conflict/, "a stale coordinator cannot overwrite a newer queue snapshot");
+  assert.equal(snapshot.schema, "bioprism-typescript-autonomous-workflow-portfolio-evidence-work-queue/0.1");
 });

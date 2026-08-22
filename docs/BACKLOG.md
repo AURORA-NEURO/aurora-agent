@@ -48,6 +48,13 @@ and value rehydration, so a restart cannot silently reacquire evidence. Tampered
 policy drift fails before adapter dispatch. The checkpoint store remains an application-owned
 atomic adapter, and multi-host consensus/lease coordination is still deployment work.
 
+The portfolio evidence runtime now also has a dependency-aware multi-worker work queue. Admission
+binds every domain item to the reviewed provider/evidence/request/checkpoint identities; claims are
+lease-fenced, only direct predecessor-complete items are runnable, and provider refusals, expired
+leases, retries, evaluator handoffs, dependency failures, cancellation, and reconciliation remain
+explicit. A metadata-only worker and CAS-fenced snapshot coordinator are included. The caller still
+owns the actual item executor, source adapters, and multi-host transaction backend.
+
 The checkpoint seam now includes an optional atomic compare-and-swap contract plus bounded JSON
 and transactional-JSON adapters. The controller serializes local operations, fences every flush
 against the restored digest, and surfaces stale-writer conflicts instead of overwriting progress;

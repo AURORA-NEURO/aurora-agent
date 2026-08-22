@@ -398,6 +398,29 @@ export type {
   AutonomousWorkflowPortfolioEvidenceControllerRun,
   AutonomousWorkflowPortfolioEvidenceControllerRunOptions,
 } from "./autonomous-workflow-portfolio-evidence-resumable.js";
+export {
+  AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_QUEUE_SCHEMA,
+  AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_ITEM_SCHEMA,
+  MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_ITEMS,
+  MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_LEASE_MS,
+  MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_ATTEMPTS,
+  MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_SNAPSHOT_BYTES,
+  InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueue,
+  admitAutonomousWorkflowPortfolioEvidenceWorkItems,
+  AutonomousWorkflowPortfolioEvidenceWorkQueuePersistenceCoordinator,
+  InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueuePersistence,
+  AutonomousWorkflowPortfolioEvidenceWorkWorker,
+} from "./autonomous-workflow-portfolio-evidence-queue.js";
+export type {
+  AutonomousWorkflowPortfolioEvidenceWorkStatus,
+  AutonomousWorkflowPortfolioEvidenceWorkFailureClass,
+  AutonomousWorkflowPortfolioEvidenceWorkItem,
+  AutonomousWorkflowPortfolioEvidenceWorkQueueSnapshot,
+  AutonomousWorkflowPortfolioEvidenceWorkQueuePersistence,
+  AutonomousWorkflowPortfolioEvidenceWorkExecution,
+  AutonomousWorkflowPortfolioEvidenceWorkWorkerRow,
+  AutonomousWorkflowPortfolioEvidenceWorkWorkerRun,
+} from "./autonomous-workflow-portfolio-evidence-queue.js";
 export type {
   AutonomousAcceptedCrossDomainPlan,
   AutonomousAcceptedPlan,

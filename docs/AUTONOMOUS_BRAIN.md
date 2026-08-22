@@ -1892,6 +1892,18 @@ external compare-and-swap. A stale worker receives an explicit conflict and must
 checkpoint rather than overwriting another worker's evidence progress. Plain JSON stores remain
 supported for single-writer deployments, but do not claim multi-host safety.
 
+Deployments that need multiple evidence workers can admit the reviewed portfolio into
+`InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueue` through
+`admitAutonomousWorkflowPortfolioEvidenceWorkItems()`. Every work row binds the job/item/domain,
+dependency wave, provider execution, evidence plan, request, and current checkpoint digests.
+Claims are lease-fenced and dependency-aware: only successful provider items whose direct
+predecessors are complete become runnable. Expired leases, provider approval refusals, dependency
+failures, missing rehydration, evaluator handoffs, bounded retries, cancellation, and explicit
+reconciliation remain separate states. `AutonomousWorkflowPortfolioEvidenceWorkWorker` invokes a
+caller-owned item executor and retains only result/error metadata; it never receives task text,
+source values, credentials, or provider payloads. `AutonomousWorkflowPortfolioEvidenceWorkQueuePersistenceCoordinator`
+adds the same serialized flush and optional CAS fence to the queue snapshot.
+
 Approval is fail-closed: with `approveProviderCall` absent or false, the first ready item returns
 `approval_required`, descendants become `blocked`, and no provider call starts. Hard failures,
 route review, uncertain effects, turn limits, and child failures are never converted into success;
