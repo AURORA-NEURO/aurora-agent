@@ -31,6 +31,7 @@ from typing import Any, Callable, Mapping, Sequence, TextIO
 
 from .autonomy import AUTONOMOUS_DOMAINS, AutonomousAgent
 from .autonomous_model_inventory import AutonomousModelInventoryStore
+from .autonomy_persistence import AutonomousExecutionJournal
 from .brain import BrainEvaluatorDecision, BrainLearningEpisode, BrainOutcomeEvaluator
 from .brain_learning_store import SQLiteBrainLearningLedger
 from .client import Client
@@ -53,6 +54,7 @@ CLI_SCHEMA = "aurora-autonomous-cli/0.1"
 _DEFAULT_CONTEXT_WINDOW = 128_000
 _DEFAULT_MAX_OUTPUT = 4_096
 _DEFAULT_TIMEOUT = 30.0
+_LOCAL_PROVIDER_NAMES = frozenset({"local", "in_memory"})
 
 
 class _CliArgumentError(ValueError):
@@ -145,7 +147,46 @@ def _provider_config(args: argparse.Namespace):
 def _runtime_with_provider(args: argparse.Namespace) -> tuple[LLMRuntime, ProviderOnboarding]:
     runtime = LLMRuntime()
     onboarding = ProviderOnboarding(runtime)
-    onboarding.register_provider(_provider_config(args))
+    if args.provider in _LOCAL_PROVIDER_NAMES:
+        local_response = args.local_response
+        local_response_json = args.local_response_json
+        if local_response_json is not None:
+            try:
+                parsed_response = json.loads(local_response_json)
+            except (TypeError, json.JSONDecodeError) as error:
+                raise ValueError("--local-response-json must be valid JSON") from error
+            if not isinstance(parsed_response, Mapping):
+                raise ValueError("--local-response-json must be a JSON object")
+        else:
+            parsed_response = None
+
+        def local_handler(_request: Any) -> Mapping[str, Any]:
+            if parsed_response is not None:
+                return {
+                    "text": json.dumps(parsed_response, ensure_ascii=False, separators=(",", ":")),
+                    "structured": dict(parsed_response),
+                    "request_id": "local-cli-request",
+                }
+            return {
+                "text": local_response,
+                "request_id": "local-cli-request",
+            }
+
+        local_model = args.local_model
+        onboarding.register_provider(
+            runtime.register_in_memory_provider(
+                args.provider,
+                local_handler,
+                model_discovery_handler=lambda: {
+                    "data": [{
+                        "id": local_model,
+                        "owned_by": "aurora-local",
+                    }]
+                },
+            )
+        )
+    else:
+        onboarding.register_provider(_provider_config(args))
     return runtime, onboarding
 
 
@@ -238,9 +279,14 @@ def _discover_descriptors(
 ) -> tuple[ProviderModelDescriptor, ...]:
     if not args.approve_provider_call:
         raise ValueError("model discovery requires --approve-provider-call")
+    credential = (
+        None
+        if not runtime.provider_requires_credential(args.provider)
+        else session.handle(args.provider)
+    )
     return runtime.discover_models(
         args.provider,
-        credential=session.handle(args.provider),
+        credential=credential,
         path=args.models_path,
         limit=args.model_limit,
     )
@@ -282,6 +328,8 @@ def _collect_credentials(
     environ: Mapping[str, str],
     reader: Callable[[str], str] | None,
 ) -> None:
+    if not session.onboarding.runtime.provider_requires_credential(args.provider):
+        return
     if args.credential_source == "environment":
         session.configure_from_environment(
             args.provider,
@@ -628,6 +676,80 @@ def _learning_status(args: argparse.Namespace) -> dict[str, Any]:
         ledger.close()
 
 
+def _execution_event_projection(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Project one hash-verified execution transition without transient execution values."""
+
+    event = row.get("event")
+    if not isinstance(event, Mapping):
+        return {
+            "sequence": row.get("sequence"),
+            "event_digest": row.get("event_digest"),
+            "retention": "metadata_only_hash_chained",
+        }
+    allowed = (
+        "execution_id",
+        "kind",
+        "domain",
+        "capability",
+        "risk_class",
+        "status",
+        "policy_digest",
+    )
+    return {
+        "sequence": row.get("sequence"),
+        "event_digest": row.get("event_digest"),
+        **{key: event[key] for key in allowed if key in event},
+        "retention": "metadata_only_hash_chained",
+    }
+
+
+def _execution_status(args: argparse.Namespace) -> dict[str, Any]:
+    """Inspect hash-verified execution checkpoints without contacting a provider."""
+
+    if not os.path.exists(args.execution_store):
+        return {
+            "schema": CLI_SCHEMA,
+            "command": "execution-status",
+            "available": False,
+            "execution_store": args.execution_store,
+            "executions": [],
+            "events": [],
+            "authorization": "metadata_read_only; no_provider_or_credential_access",
+            "retention": "metadata_only_hash_chained_execution_state",
+            "secret_material": "never_returned",
+        }
+    journal = AutonomousExecutionJournal(args.execution_store)
+    rows = journal.events(execution_id=args.execution_id, limit=args.limit)
+    execution_ids = sorted({
+        row.get("event", {}).get("execution_id")
+        for row in rows
+        if isinstance(row.get("event"), Mapping)
+        and isinstance(row.get("event", {}).get("execution_id"), str)
+    })
+    executions: list[dict[str, Any]] = []
+    for execution_id in execution_ids:
+        state = journal.state(execution_id)
+        if state is None:
+            continue
+        executions.append({
+            "execution_id": execution_id,
+            "state": state.to_dict(),
+        })
+    return {
+        "schema": CLI_SCHEMA,
+        "command": "execution-status",
+        "available": True,
+        "execution_store": args.execution_store,
+        "execution_id_filter": args.execution_id,
+        "event_count": len(rows),
+        "executions": executions,
+        "events": [_execution_event_projection(row) for row in rows],
+        "authorization": "metadata_read_only; no_provider_or_credential_access",
+        "retention": "metadata_only_hash_chained_execution_state",
+        "secret_material": "never_returned",
+    }
+
+
 def _settle_learning(
     args: argparse.Namespace,
     *,
@@ -705,7 +827,12 @@ def _onboard(
             environ=environ,
             reader=reader,
         )
-        provider_status = session.provider_statuses()[0]
+        provider_statuses = session.provider_statuses()
+        provider_status = (
+            provider_statuses[0]
+            if provider_statuses
+            else onboarding.status(args.provider)
+        )
     status = session.status().to_dict()
     return {
         "schema": CLI_SCHEMA,
@@ -742,11 +869,14 @@ def _run(
     session = onboarding.start_session(ttl_seconds=args.ttl_seconds)
     health_ledger = None
     learning_ledger = None
+    execution_journal = None
     try:
         if args.health_store is not None:
             health_ledger = ProviderHealthLedger(args.health_store)
         if args.learning_store is not None:
             learning_ledger = SQLiteBrainLearningLedger(args.learning_store)
+        if args.execution_store is not None:
+            execution_journal = AutonomousExecutionJournal(args.execution_store)
         _collect_credentials(
             args,
             session,
@@ -775,6 +905,8 @@ def _run(
                 agent_kwargs["ledger"] = learning_ledger
             if health_ledger is not None:
                 agent_kwargs["health_ledger"] = health_ledger
+            if execution_journal is not None:
+                agent_kwargs["execution_journal"] = execution_journal
             agent = AutonomousAgent(_McpWorkspace(client), runtime, **agent_kwargs)
             common = {
                 "task": args.task,
@@ -789,6 +921,8 @@ def _run(
                 "approve_provider_call": args.approve_provider_call,
                 "approve_mission_dispatch": args.approve_mission_dispatch,
                 "run_id": args.run_id,
+                "execution_id": args.execution_id,
+                "resume_execution": args.resume_execution,
             }
             if args.automatic:
                 result = agent.run_auto(
@@ -806,6 +940,18 @@ def _run(
                 if args.learning_mode == "online":
                     common["learn"] = True
                 result = agent.run(**common, domain=args.domain)
+        execution_id = args.execution_id
+        execution_state = None
+        if execution_journal is not None:
+            if execution_id is None:
+                rows = execution_journal.events(limit=execution_journal.max_events)
+                if rows and isinstance(rows[-1].get("event"), Mapping):
+                    candidate_id = rows[-1]["event"].get("execution_id")
+                    if isinstance(candidate_id, str):
+                        execution_id = candidate_id
+            if execution_id is not None:
+                state = execution_journal.state(execution_id)
+                execution_state = None if state is None else state.to_dict()
         return {
             "schema": CLI_SCHEMA,
             "command": "run",
@@ -836,7 +982,19 @@ def _run(
                 "health_store_configured": health_ledger is not None,
                 "learning_store_configured": learning_ledger is not None,
                 "learning_mode": args.learning_mode,
+                "execution_store_configured": execution_journal is not None,
+                "execution_id": execution_id,
+                "resume_execution": args.resume_execution,
             },
+            "execution": (
+                {
+                    "execution_id": execution_id,
+                    "state": execution_state,
+                    "retention": "metadata_only_hash_chained",
+                }
+                if execution_journal is not None
+                else None
+            ),
             "secret_material": "never_returned",
         }
     finally:
@@ -874,6 +1032,21 @@ def _parser() -> argparse.ArgumentParser:
     provider_parent.add_argument("--base-url", help="provider base URL; required for custom providers")
     provider_parent.add_argument("--provider-path", default=None, help="custom OpenAI-compatible path")
     provider_parent.add_argument("--models-path", default=None, help="custom model inventory path")
+    provider_parent.add_argument(
+        "--local-model",
+        default="local-model",
+        help="model identifier exposed by the explicit credentialless local provider",
+    )
+    provider_parent.add_argument(
+        "--local-response",
+        default="Local provider completed the requested task.",
+        help="bounded text returned by the explicit local provider",
+    )
+    provider_parent.add_argument(
+        "--local-response-json",
+        default=None,
+        help="optional JSON object returned by the explicit local provider",
+    )
 
     status = subparsers.add_parser("provider-status", parents=[provider_parent], help="show redacted provider readiness")
 
@@ -929,6 +1102,14 @@ def _parser() -> argparse.ArgumentParser:
     learning_status.add_argument("--episode-id", default=None, help="optionally project one episode identity")
     learning_status.add_argument("--limit", type=int, default=128, help="maximum pending/replay rows to return")
 
+    execution_status = subparsers.add_parser(
+        "execution-status",
+        help="inspect hash-verified autonomous execution checkpoints without contacting a provider",
+    )
+    execution_status.add_argument("--execution-store", required=True, help="metadata-only execution journal path")
+    execution_status.add_argument("--execution-id", default=None, help="optionally filter one execution identity")
+    execution_status.add_argument("--limit", type=int, default=256, help="maximum execution transitions to return")
+
     settle_learning = subparsers.add_parser(
         "settle-learning",
         help="settle one prevalidated value-only evaluator decision without a provider call",
@@ -966,6 +1147,9 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--inventory-store", default=None, help="digest-bound metadata-only inventory store for --use-inventory")
     run.add_argument("--health-store", default=None, help="persist provider/model health observations across runs")
     run.add_argument("--learning-store", default=None, help="persist value-only online-learning state in SQLite")
+    run.add_argument("--execution-store", default=None, help="persist hash-chained metadata-only execution checkpoints")
+    run.add_argument("--execution-id", default=None, help="stable execution identity for persistence/resume")
+    run.add_argument("--resume-execution", action="store_true", help="explicitly resume the named non-terminal execution")
     run.add_argument("--learning-mode", choices=("off", "online", "trajectory"), default="off", help="automatic route learning mode; rewards remain evaluator-gated")
     run.add_argument("--model-limit", type=int, default=64, help="maximum provider inventory rows to inspect when discovering")
     run.add_argument("--model-capability", action="append", default=[], help="declared capability for every model candidate")
@@ -1039,6 +1223,8 @@ def main(
             payload = _state_status(args)
         elif args.command == "learning-status":
             payload = _learning_status(args)
+        elif args.command == "execution-status":
+            payload = _execution_status(args)
         elif args.command == "settle-learning":
             payload = _settle_learning(args, client_factory=client_factory)
         elif args.command == "run":

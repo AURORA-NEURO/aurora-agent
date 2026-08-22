@@ -11,6 +11,10 @@ python -m prism_sdk evidence-plan --domain science
 python -m prism_sdk provider-status --provider openai
 ```
 
+For keyless local development, the same boundary supports an explicit credentialless fixture:
+`python -m prism_sdk provider-status --provider local` and `run --provider local --model local-model`
+use the runtime's bounded in-memory transport; no key or network provider is contacted.
+
 Use `run` with a caller-owned MCP server when you are ready to invoke a provider. Keys are accepted
 only through a hidden prompt or an explicitly named environment variable; they are never command
 line arguments, MCP arguments, plans, or persisted state. See [the autonomous brain guide](docs/AUTONOMOUS_BRAIN.md#operator-process-boundary)

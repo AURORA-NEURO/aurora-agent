@@ -6,6 +6,8 @@ from unittest.mock import patch
 
 from prism_sdk import (
     AUTONOMOUS_DOMAINS,
+    AutonomousExecutionJournal,
+    AutonomousExecutionPolicy,
     BRAIN_LEARNING_EPISODE_SCHEMA,
     ModelCandidate,
     ModelCatalogue,
@@ -66,6 +68,43 @@ def test_provider_status_never_collects_or_returns_a_key() -> None:
     assert payload["instructions"]["next_action"] == "collect_user_credential"
     assert "api_key" not in encoded
     assert "secret_material" in encoded
+
+
+def test_explicit_local_provider_is_ready_without_a_credential_or_network() -> None:
+    code, payload, errors = _invoke("provider-status", "--provider", "local")
+    assert code == 0
+    assert errors == ""
+    assert payload["status"]["ready"] is True
+    assert payload["status"]["requires_credential"] is False
+    assert payload["instructions"]["next_action"] == "ready"
+    assert payload["provider"]["transport"] == "in_memory"
+
+    code, onboarded, errors = _invoke(
+        "onboard",
+        "--provider", "local",
+        reader=lambda _prompt: (_ for _ in ()).throw(AssertionError("local onboarding prompted")),
+    )
+    assert code == 0
+    assert errors == ""
+    assert onboarded["provider"]["ready"] is True
+    assert onboarded["session"]["providers"] == []
+
+
+def test_local_provider_discovery_is_explicitly_approved_but_keyless() -> None:
+    secret = "must-not-be-read-by-local-provider"
+    code, payload, errors = _invoke(
+        "discover-models",
+        "--provider", "local",
+        "--approve-provider-call",
+        "--credential-source", "environment",
+        "--credential-env", "SHOULD_NOT_BE_READ",
+        environ={"SHOULD_NOT_BE_READ": secret},
+    )
+    assert code == 0
+    assert errors == ""
+    assert payload["models"][0]["model"] == "local-model"
+    assert payload["credential_session"]["providers"] == []
+    assert secret not in json.dumps(payload)
 
 
 def test_onboard_uses_no_echo_reader_and_closes_the_credential_session() -> None:
@@ -212,6 +251,39 @@ def test_state_status_is_provider_free_and_does_not_create_missing_ledgers(tmp_p
     assert not learning_path.exists()
 
 
+def test_execution_status_is_provider_free_and_projects_hash_verified_state(tmp_path) -> None:
+    path = tmp_path / "executions.jsonl"
+    journal = AutonomousExecutionJournal(path)
+    journal.begin(
+        execution_id="execution-cli-1",
+        domain="coding",
+        capability="implementation",
+        risk_class="engineering_change",
+        policy=AutonomousExecutionPolicy(),
+    )
+    code, payload, errors = _invoke(
+        "execution-status",
+        "--execution-store", str(path),
+        "--execution-id", "execution-cli-1",
+    )
+    assert code == 0
+    assert errors == ""
+    assert payload["available"] is True
+    assert payload["executions"][0]["state"]["execution_id"] == "execution-cli-1"
+    assert payload["events"][0]["kind"] == "started"
+    assert payload["authorization"] == "metadata_read_only; no_provider_or_credential_access"
+    assert "implementation plan" not in json.dumps(payload)
+
+
+def test_execution_status_missing_store_does_not_create_it(tmp_path) -> None:
+    path = tmp_path / "missing-executions.jsonl"
+    code, payload, errors = _invoke("execution-status", "--execution-store", str(path))
+    assert code == 0
+    assert errors == ""
+    assert payload["available"] is False
+    assert not path.exists()
+
+
 def _write_cli_learning_episode(path, *, episode_id: str = "cli-episode-1", evidence_digest=None) -> None:
     evaluation_input = {
         "schema": "bioprism-brain-evaluator-input/0.1",
@@ -336,6 +408,7 @@ def test_run_wires_opt_in_health_and_learning_ledgers_without_exposing_state_or_
     errors = io.StringIO()
     health_path = tmp_path / "health.jsonl"
     learning_path = tmp_path / "learning.sqlite"
+    execution_path = tmp_path / "executions.jsonl"
     with patch("prism_sdk.cli.AutonomousAgent", FakeAgent):
         code = main(
             (
@@ -350,6 +423,8 @@ def test_run_wires_opt_in_health_and_learning_ledgers_without_exposing_state_or_
                 "--credential-env", "AURORA_TEST_KEY",
                 "--health-store", str(health_path),
                 "--learning-store", str(learning_path),
+                "--execution-store", str(execution_path),
+                "--execution-id", "cli-execution-1",
                 "--learning-mode", "online",
                 "--approve-provider-call",
             ),
@@ -363,11 +438,15 @@ def test_run_wires_opt_in_health_and_learning_ledgers_without_exposing_state_or_
     assert errors.getvalue() == ""
     assert captured["ledger"].path == learning_path
     assert captured["health_ledger"].path == health_path
+    assert captured["execution_journal"].path == execution_path
     assert captured["run"]["learn"] is True
     assert payload["state_persistence"] == {
         "health_store_configured": True,
         "learning_store_configured": True,
         "learning_mode": "online",
+        "execution_store_configured": True,
+        "execution_id": "cli-execution-1",
+        "resume_execution": False,
     }
     assert secret not in output.getvalue()
     status_code, state_payload, state_errors = _invoke(

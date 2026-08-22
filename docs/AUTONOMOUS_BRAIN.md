@@ -275,12 +275,47 @@ python -m prism_sdk state-status \
 python -m prism_sdk learning-status \
   --learning-store .aurora/brain-learning.sqlite \
   --limit 64
+
+python -m prism_sdk execution-status \
+  --execution-store .aurora/executions.jsonl
 ```
 
 `learning-status` is the restart boundary for delayed evaluator workers. It returns pending
 episode identities, selected-arm metadata, context/selection/prompt/plan/outcome digests, bounded
 replay metadata, and all-domain learning snapshots; it never returns the retained evaluator input
 envelope. A missing store is reported as unavailable without creating a new database.
+
+Runs can persist the long-horizon execution controller through the same operator boundary:
+
+```bash
+python -m prism_sdk run \
+  --mcp-command "python path/to/mcp_server.py" \
+  --provider local \
+  --model local-model \
+  --domain coding \
+  --task "review the bounded implementation plan" \
+  --execution-store .aurora/executions.jsonl \
+  --execution-id coding-review-001 \
+  --approve-provider-call
+
+# Resume requires the exact same journal and explicit identity.
+python -m prism_sdk run \
+  --mcp-command "python path/to/mcp_server.py" \
+  --provider local \
+  --model local-model \
+  --domain coding \
+  --task "review the bounded implementation plan" \
+  --execution-store .aurora/executions.jsonl \
+  --execution-id coding-review-001 \
+  --resume-execution \
+  --approve-provider-call
+```
+
+`execution-status` verifies and projects hash-chained transitions without returning task text,
+prompts, provider responses, credentials, tool arguments, or tool outputs. Resume is explicit and
+policy-bound: the journal refuses changed policy, terminal executions, and unknown identities. The
+journal is a checkpoint/accounting boundary, not a provider-conversation archive; callers must
+rehydrate transient task/result material and decide whether a resumed operation is safe.
 
 The command accepts no API-key or token argument. By default it uses a no-echo prompt; deployment
 automation can select `--credential-source environment --credential-env OPENAI_API_KEY`. The value
@@ -344,6 +379,32 @@ explicitly registered, `ProviderOnboarding.status("offline")` is ready without a
 remote providers continue to require the normal BYOK lifecycle. This makes it suitable for offline
 CI, replay fixtures, local model bridges, and all-domain contract tests, but production deployments
 should register a real authenticated transport or a caller-owned adapter instead.
+
+The operator boundary now exposes the same explicit path without collecting a key. `local` and
+`in_memory` are opt-in provider names; the CLI still requires a caller-owned MCP workspace for
+brain-kernel/tool operations, but the model invocation itself stays local and credentialless:
+
+```bash
+python -m prism_sdk provider-status --provider local
+python -m prism_sdk onboard --provider local
+python -m prism_sdk discover-models \
+  --provider local \
+  --approve-provider-call
+python -m prism_sdk run \
+  --mcp-command "python path/to/mcp_server.py" \
+  --provider local \
+  --model local-model \
+  --domain coding \
+  --task "review the bounded implementation plan" \
+  --approve-provider-call
+```
+
+`onboard --provider local` completes without reading the prompt or environment. The default local
+response is a bounded text fixture; `--local-response-json` supplies an explicit bounded JSON
+fixture for structured-output tests. Local model discovery is still approval-gated so the same
+operator can exercise discovery, catalogue selection, health observation, and durable learning
+paths offline. It is a deterministic transport fixture, not an implicit substitute for a real
+provider and not a claim that the fixture has domain expertise.
 
 The TypeScript SDK exposes the same boundary with `registerInMemoryProvider`. The callback sees
 the provider-neutral request, while the runtime owns bounded projection, health, retries, stream
