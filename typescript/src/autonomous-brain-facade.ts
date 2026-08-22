@@ -50,6 +50,8 @@ import type { JsonObject, JsonValue } from "./types.js";
  */
 export const AUTONOMOUS_BRAIN_FACADE_SCHEMA = "bioprism-typescript-autonomous-brain-facade/0.1" as const;
 export const AUTONOMOUS_BRAIN_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-batch/0.1" as const;
+export const AUTONOMOUS_BRAIN_CYCLE_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-cycle-batch/0.1" as const;
+export const AUTONOMOUS_BRAIN_ADAPTIVE_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-adaptive-batch/0.1" as const;
 export const AUTONOMOUS_BRAIN_SUMMARY_SCHEMA = "bioprism-typescript-autonomous-brain-plan-summary/0.1" as const;
 export const MAX_AUTONOMOUS_BRAIN_BATCH = 64;
 export const MAX_AUTONOMOUS_BRAIN_PARALLELISM = 8;
@@ -216,6 +218,68 @@ export interface AutonomousBrainAdaptiveCycleExecution {
   secret_material: "never_returned";
 }
 
+export type AutonomousBrainBatchOptionFactory<T> = T | ((input: AutonomousBrainRequest, index: number) => T);
+
+export interface AutonomousBrainCycleBatchOptions {
+  maxParallelism?: number;
+  stopOnError?: boolean;
+  /** One cycle policy for every item, or a caller-owned per-item policy factory. */
+  cycle?: AutonomousBrainBatchOptionFactory<AutonomousBrainCycleOptions>;
+}
+
+export interface AutonomousBrainCycleBatchItem {
+  index: number;
+  status: "succeeded" | "refused" | "failed" | "omitted";
+  task_digest: string | null;
+  execution?: AutonomousBrainCycleExecution;
+  error_class?: string;
+  failure_code?: string;
+}
+
+export interface AutonomousBrainCycleBatchResult {
+  schema: typeof AUTONOMOUS_BRAIN_CYCLE_BATCH_SCHEMA;
+  status: "completed" | "partial" | "failed";
+  items: AutonomousBrainCycleBatchItem[];
+  completed_count: number;
+  failed_count: number;
+  omitted_count: number;
+  max_parallelism: number;
+  stop_on_error: boolean;
+  batch_digest: string;
+  retention: "metadata_only_tasks_and_cycle_connector_values_transient";
+  secret_material: "never_returned";
+}
+
+export interface AutonomousBrainAdaptiveBatchOptions {
+  maxParallelism?: number;
+  stopOnError?: boolean;
+  /** Required evaluator/replan policy, shared or selected independently for each item. */
+  adaptive: AutonomousBrainBatchOptionFactory<AutonomousBrainAdaptiveCycleOptions>;
+}
+
+export interface AutonomousBrainAdaptiveBatchItem {
+  index: number;
+  status: "succeeded" | "refused" | "failed" | "omitted";
+  task_digest: string | null;
+  execution?: AutonomousBrainAdaptiveCycleExecution;
+  error_class?: string;
+  failure_code?: string;
+}
+
+export interface AutonomousBrainAdaptiveBatchResult {
+  schema: typeof AUTONOMOUS_BRAIN_ADAPTIVE_BATCH_SCHEMA;
+  status: "completed" | "partial" | "failed";
+  items: AutonomousBrainAdaptiveBatchItem[];
+  completed_count: number;
+  failed_count: number;
+  omitted_count: number;
+  max_parallelism: number;
+  stop_on_error: boolean;
+  batch_digest: string;
+  retention: "metadata_only_tasks_and_adaptive_connector_values_transient";
+  secret_material: "never_returned";
+}
+
 export interface AutonomousBrainBatchItem {
   index: number;
   status: "succeeded" | "refused" | "failed" | "omitted";
@@ -282,6 +346,43 @@ function errorProjection(error: unknown): { error_class: string; failure_code: s
 
 function connectorSucceeded(status: AutonomousConnectorOperationExecution["status"]): boolean {
   return status === "observed" || status === "partial";
+}
+
+function batchOption<T>(value: AutonomousBrainBatchOptionFactory<T> | undefined, input: AutonomousBrainRequest, index: number): T | undefined {
+  return typeof value === "function" ? (value as (request: AutonomousBrainRequest, itemIndex: number) => T)(input, index) : value;
+}
+
+function boundedBatchControls(options: { maxParallelism?: number; stopOnError?: boolean }): { maxParallelism: number; stopOnError: boolean } {
+  const maxParallelism = options.maxParallelism ?? 4;
+  if (!Number.isSafeInteger(maxParallelism) || maxParallelism < 1 || maxParallelism > MAX_AUTONOMOUS_BRAIN_PARALLELISM) throw new ArgumentError("autonomous brain batch maxParallelism is outside its bound");
+  const stopOnError = options.stopOnError ?? false;
+  if (typeof stopOnError !== "boolean") throw new ArgumentError("autonomous brain batch stopOnError must be boolean");
+  return { maxParallelism, stopOnError };
+}
+
+function cycleBatchSucceeded(status: AutonomousBrainCycleStatus): boolean {
+  return status === "completed" || status === "children_completed";
+}
+
+function adaptiveBatchSucceeded(status: AutonomousBrainAdaptiveCycleStatus): boolean {
+  return status === "completed";
+}
+
+function batchRefused(status: string): boolean {
+  return status === "approval_required"
+    || status === "route_review_required"
+    || status === "plan_review_required"
+    || status === "connector_blocked"
+    || status === "provider_invalid"
+    || status === "provider_disagreement";
+}
+
+function batchStatus(completed: number, failed: number, omitted: number): "completed" | "partial" | "failed" {
+  return failed === 0 && omitted === 0 ? "completed" : completed > 0 ? "partial" : "failed";
+}
+
+function batchDigest(items: readonly { index: number; status: string; task_digest: string | null; error_class?: string; failure_code?: string; execution?: { plan: { plan_digest: string }; status: string } }[]): string {
+  return digestJsonSync(items.map((item) => ({ index: item.index, status: item.status, task_digest: item.task_digest, error_class: item.error_class ?? null, failure_code: item.failure_code ?? null, plan_digest: item.execution?.plan.plan_digest ?? null, execution_status: item.execution?.status ?? null })));
 }
 
 function projectTaskBlueprint(blueprint: AutonomousTaskBlueprint, routeDigest: string): AutonomousBrainDomainPlanSummary {
@@ -572,6 +673,107 @@ export class AutonomousBrainFacade {
       stop_on_error: stopOnError,
       batch_digest: digestJsonSync(normalized.map((item) => ({ index: item.index, status: item.status, task_digest: item.task_digest, error_class: item.error_class ?? null, failure_code: item.failure_code ?? null, plan_digest: item.execution?.plan.plan_digest ?? null, run_status: item.execution?.status ?? null }))),
       retention: "metadata_only_tasks_and_provider_connector_values_transient",
+      secret_material: "never_returned",
+    };
+  }
+
+  /** Execute ordinary closed-loop cycles with bounded concurrency and deterministic result order. */
+  async executeCycleBatch(inputs: readonly AutonomousBrainRequest[], options: AutonomousBrainCycleBatchOptions = {}): Promise<AutonomousBrainCycleBatchResult> {
+    if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_BRAIN_BATCH) throw new ArgumentError(`autonomous brain cycle batch must contain 1..=${MAX_AUTONOMOUS_BRAIN_BATCH} entries`);
+    const { maxParallelism, stopOnError } = boundedBatchControls(options);
+    const items: Array<AutonomousBrainCycleBatchItem | undefined> = new Array(inputs.length);
+    let nextIndex = 0;
+    let halted = false;
+    const worker = async (): Promise<void> => {
+      while (true) {
+        const index = nextIndex;
+        nextIndex += 1;
+        if (index >= inputs.length) return;
+        if (halted) {
+          items[index] = { index, status: "omitted", task_digest: null };
+          continue;
+        }
+        try {
+          const execution = await this.executeCycle(inputs[index]!, batchOption(options.cycle, inputs[index]!, index) ?? {});
+          const succeeded = cycleBatchSucceeded(execution.status);
+          const refused = batchRefused(execution.status);
+          items[index] = { index, status: succeeded ? "succeeded" : refused ? "refused" : "failed", task_digest: execution.plan.task_digest, execution };
+          if (stopOnError && !succeeded) halted = true;
+        } catch (error) {
+          const projection = errorProjection(error);
+          items[index] = { index, status: stopOnError ? "failed" : "refused", task_digest: null, ...projection };
+          if (stopOnError) halted = true;
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(maxParallelism, inputs.length) }, () => worker()));
+    const normalized = items.map((item, index) => item ?? { index, status: "failed" as const, task_digest: null, error_class: "AutonomousBrainError", failure_code: "missing_batch_result" });
+    const completed = normalized.filter((item) => item.status === "succeeded").length;
+    const failed = normalized.filter((item) => item.status === "failed" || item.status === "refused").length;
+    const omitted = normalized.filter((item) => item.status === "omitted").length;
+    return {
+      schema: AUTONOMOUS_BRAIN_CYCLE_BATCH_SCHEMA,
+      status: batchStatus(completed, failed, omitted),
+      items: normalized,
+      completed_count: completed,
+      failed_count: failed,
+      omitted_count: omitted,
+      max_parallelism: maxParallelism,
+      stop_on_error: stopOnError,
+      batch_digest: batchDigest(normalized),
+      retention: "metadata_only_tasks_and_cycle_connector_values_transient",
+      secret_material: "never_returned",
+    };
+  }
+
+  /** Execute evaluator-guided replanning loops with bounded concurrency and deterministic result order. */
+  async executeAdaptiveCycleBatch(inputs: readonly AutonomousBrainRequest[], options: AutonomousBrainAdaptiveBatchOptions): Promise<AutonomousBrainAdaptiveBatchResult> {
+    if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_BRAIN_BATCH) throw new ArgumentError(`autonomous brain adaptive batch must contain 1..=${MAX_AUTONOMOUS_BRAIN_BATCH} entries`);
+    if (!options || options.adaptive === undefined) throw new ArgumentError("autonomous brain adaptive batch requires an adaptive evaluator policy");
+    const { maxParallelism, stopOnError } = boundedBatchControls(options);
+    const items: Array<AutonomousBrainAdaptiveBatchItem | undefined> = new Array(inputs.length);
+    let nextIndex = 0;
+    let halted = false;
+    const worker = async (): Promise<void> => {
+      while (true) {
+        const index = nextIndex;
+        nextIndex += 1;
+        if (index >= inputs.length) return;
+        if (halted) {
+          items[index] = { index, status: "omitted", task_digest: null };
+          continue;
+        }
+        try {
+          const adaptive = batchOption(options.adaptive, inputs[index]!, index);
+          if (adaptive === undefined) throw new ArgumentError("adaptive batch policy factory returned no policy");
+          const execution = await this.executeAdaptiveCycle(inputs[index]!, adaptive);
+          const succeeded = adaptiveBatchSucceeded(execution.status);
+          const refused = batchRefused(execution.status);
+          items[index] = { index, status: succeeded ? "succeeded" : refused ? "refused" : "failed", task_digest: execution.plan.task_digest, execution };
+          if (stopOnError && !succeeded) halted = true;
+        } catch (error) {
+          const projection = errorProjection(error);
+          items[index] = { index, status: stopOnError ? "failed" : "refused", task_digest: null, ...projection };
+          if (stopOnError) halted = true;
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(maxParallelism, inputs.length) }, () => worker()));
+    const normalized = items.map((item, index) => item ?? { index, status: "failed" as const, task_digest: null, error_class: "AutonomousBrainError", failure_code: "missing_batch_result" });
+    const completed = normalized.filter((item) => item.status === "succeeded").length;
+    const failed = normalized.filter((item) => item.status === "failed" || item.status === "refused").length;
+    const omitted = normalized.filter((item) => item.status === "omitted").length;
+    return {
+      schema: AUTONOMOUS_BRAIN_ADAPTIVE_BATCH_SCHEMA,
+      status: batchStatus(completed, failed, omitted),
+      items: normalized,
+      completed_count: completed,
+      failed_count: failed,
+      omitted_count: omitted,
+      max_parallelism: maxParallelism,
+      stop_on_error: stopOnError,
+      batch_digest: batchDigest(normalized),
+      retention: "metadata_only_tasks_and_adaptive_connector_values_transient",
       secret_material: "never_returned",
     };
   }

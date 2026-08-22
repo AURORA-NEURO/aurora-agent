@@ -167,6 +167,78 @@ test("brain facade keeps adaptive replanning bounded and routes cross-domain fan
   assert.equal(cross.adaptive.final.run.child_runs.length, 2);
 });
 
+test("brain facade batches closed-loop work across every domain with deterministic accounting", async () => {
+  const runtime = localRuntime();
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+  const batch = await brain.executeCycleBatch(
+    AUTONOMOUS_DOMAIN_NAMES.map((domain) => ({ task: tasks[domain], domain })),
+    { maxParallelism: 3, cycle: { approveProviderCall: true } },
+  );
+  assert.equal(batch.schema, "bioprism-typescript-autonomous-brain-cycle-batch/0.1");
+  assert.equal(batch.status, "completed");
+  assert.equal(batch.completed_count, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(batch.failed_count, 0);
+  assert.equal(batch.omitted_count, 0);
+  assert.deepEqual(batch.items.map((item) => item.index), [...Array(AUTONOMOUS_DOMAIN_NAMES.length).keys()]);
+  assert.ok(batch.items.every((item) => item.status === "succeeded" && item.execution?.cycle !== null));
+  assert.equal(batch.batch_digest.length, 64);
+
+  const refused = await brain.executeCycleBatch(
+    [
+      { task: "prepare a science review", domain: "science" },
+      { task: "prepare a biomedical review", domain: "biomedical" },
+      { task: "prepare an operations review", domain: "operations" },
+    ],
+    { maxParallelism: 1, stopOnError: true, cycle: {} },
+  );
+  assert.equal(refused.status, "failed");
+  assert.equal(refused.items[0].status, "refused");
+  assert.deepEqual(refused.items.slice(1).map((item) => item.status), ["omitted", "omitted"]);
+});
+
+test("brain facade batches adaptive single and cross-domain loops through per-item policies", async () => {
+  const runtime = localRuntime();
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+  const inputs = [
+    { task: "design a reproducible science experiment", domain: "science" },
+    { task: "review biomedical evidence", domain: "biomedical" },
+    { task: "research a biomedical neuroscience experiment with patient EEG evidence", allow_cross_domain: true },
+  ];
+  const batch = await brain.executeAdaptiveCycleBatch(inputs, {
+    maxParallelism: 2,
+    adaptive: (input) => input.allow_cross_domain
+      ? {
+        approveProviderCall: true,
+        adaptive: {
+          maxReplans: 0,
+          synthesize: false,
+          maxParallelChildren: 2,
+          subtasks: [
+            { id: "bio", domain: "biomedical", task: "review biomedical evidence" },
+            { id: "neuro", domain: "neuroscience", task: "analyze EEG limitations" },
+          ],
+          evaluate: () => ({ evaluator_id: "batch-cross-reviewer", evaluator_version: "1", reward: 0.8, passed: true, replan_requested: false, rewards: {} }),
+        },
+      }
+      : {
+        approveProviderCall: true,
+        adaptive: {
+          maxReplans: 0,
+          evaluate: () => ({ evaluator_id: "batch-reviewer", evaluator_version: "1", reward: 0.8, passed: true, replan_requested: false }),
+        },
+      },
+  });
+  assert.equal(batch.schema, "bioprism-typescript-autonomous-brain-adaptive-batch/0.1");
+  assert.equal(batch.status, "completed");
+  assert.equal(batch.completed_count, 3);
+  assert.ok(batch.items.every((item) => item.status === "succeeded" && item.execution?.adaptive !== null));
+  assert.equal(batch.items[2].execution.adaptive.final.run.child_runs.length, 2);
+});
+
 test("brain facade runs a connector observation before provider invocation and supports plan replay", async () => {
   const seen = [];
   const runtime = localRuntime((request) => seen.push(request));

@@ -344,6 +344,8 @@ export type {
 export {
   AUTONOMOUS_BRAIN_FACADE_SCHEMA,
   AUTONOMOUS_BRAIN_BATCH_SCHEMA,
+  AUTONOMOUS_BRAIN_CYCLE_BATCH_SCHEMA,
+  AUTONOMOUS_BRAIN_ADAPTIVE_BATCH_SCHEMA,
   AUTONOMOUS_BRAIN_SUMMARY_SCHEMA,
   MAX_AUTONOMOUS_BRAIN_BATCH,
   MAX_AUTONOMOUS_BRAIN_PARALLELISM,
@@ -374,6 +376,13 @@ export type {
   AutonomousBrainAdaptiveCycleResult,
   AutonomousBrainAdaptiveCycleStatus,
   AutonomousBrainAdaptiveCycleExecution,
+  AutonomousBrainBatchOptionFactory,
+  AutonomousBrainCycleBatchOptions,
+  AutonomousBrainCycleBatchItem,
+  AutonomousBrainCycleBatchResult,
+  AutonomousBrainAdaptiveBatchOptions,
+  AutonomousBrainAdaptiveBatchItem,
+  AutonomousBrainAdaptiveBatchResult,
   AutonomousBrainBatchItem,
   AutonomousBrainBatchResult,
 } from "./autonomous-brain-facade.js";

@@ -3396,6 +3396,41 @@ evaluation without a requested retry terminates with `completed_without_replan`,
 explicit retry after the ceiling terminates with `replan_limit_reached`. Connector review,
 route review, and provider approval remain independent gates before the first attempt.
 
+For queue workers and domain-wide evaluation sweeps, `executeCycleBatch()` and
+`executeAdaptiveCycleBatch()` apply the same contracts with bounded parallelism. Results always
+return in input order, `maxParallelism` is capped at eight, and a per-item policy factory can
+derive evaluator, learning, persistence, or cross-domain fan-out controls from the request and
+its index. `stopOnError` turns the first refusal/failure into explicit `omitted` items rather
+than silently dispatching work that the caller no longer intended to run. Batch digests include
+only item indexes, statuses, task/plan digests, and typed error projections.
+
+```typescript
+const batch = await brain.executeAdaptiveCycleBatch(requests, {
+  maxParallelism: 4,
+  stopOnError: false,
+  adaptive: (request, index) => ({
+    approveProviderCall: true,
+    adaptive: {
+      cycleId: `worker-cycle-${index}`,
+      maxReplans: 2,
+      evaluate: (run) => callerOwnedEvaluation(request, run),
+    },
+  }),
+});
+
+for (const item of batch.items) {
+  // item.execution?.adaptive is transient; item.task_digest and batch.batch_digest are safe
+  // metadata projections for a durable queue or audit record.
+  console.log(item.index, item.status, item.task_digest);
+}
+```
+
+The batch APIs do not merge independent tasks into one prompt, share provider responses, or
+convert transport success into reward. Cross-domain items still fan out only through their own
+reviewed route, and each adaptive item retains its own evaluator/replan ceiling and learning
+identity. This makes high-throughput use auditable without weakening per-task approval or
+retention boundaries.
+
 The façade is intentionally an orchestration boundary, not a claim of general intelligence.
 Routing is vocabulary/catalogue evidence, workflow stages are strategy metadata, connector
 observations are untrusted inputs, provider output still requires evaluation, and learning
