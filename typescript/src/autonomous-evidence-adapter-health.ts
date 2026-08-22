@@ -16,7 +16,7 @@ import {
   AutonomousEvidenceAdapterSelector,
   type AutonomousEvidenceAdapterSelectionRow,
 } from "./autonomous-evidence-adapter-selection.js";
-import { digestJson, digestJsonSync } from "./tooling.js";
+import { canonicalJson, digestJson, digestJsonSync } from "./tooling.js";
 import type { JsonObject, JsonValue } from "./types.js";
 
 /** Restart-safe, value-free adapter health ledger schemas. */
@@ -28,6 +28,7 @@ export const AUTONOMOUS_EVIDENCE_ADAPTER_HEALTH_SNAPSHOT_SCHEMA = "bioprism-type
 export const MAX_AUTONOMOUS_EVIDENCE_ADAPTER_HEALTH_EVENTS = 16_384;
 export const MAX_AUTONOMOUS_EVIDENCE_ADAPTER_HEALTH_QUERY_LIMIT = 512;
 export const MAX_AUTONOMOUS_EVIDENCE_ADAPTER_HEALTH_ADAPTERS = 256;
+export const MAX_AUTONOMOUS_EVIDENCE_ADAPTER_HEALTH_SNAPSHOT_BYTES = 512_000;
 
 const RETENTION = "metadata_only;raw_evidence_credentials_prompts_and_evaluator_payloads_never_persisted" as const;
 const OUTCOMES = ["success", "failure", "unknown"] as const;
@@ -152,6 +153,16 @@ export interface AutonomousEvidenceAdapterHealthSelectionOptions {
 export interface AutonomousEvidenceAdapterHealthPersistence {
   read(): Promise<AutonomousEvidenceAdapterHealthSnapshot | null> | AutonomousEvidenceAdapterHealthSnapshot | null;
   write(snapshot: AutonomousEvidenceAdapterHealthSnapshot): Promise<void> | void;
+  writeIfUnchanged?(expectedSnapshotDigest: string | null, snapshot: AutonomousEvidenceAdapterHealthSnapshot): Promise<boolean> | boolean;
+}
+
+export interface AutonomousEvidenceAdapterHealthSnapshotTextStore {
+  read(): Promise<string | null> | string | null;
+  write(value: string): Promise<void> | void;
+}
+
+export interface AutonomousEvidenceAdapterHealthTransactionalSnapshotTextStore extends AutonomousEvidenceAdapterHealthSnapshotTextStore {
+  writeIfUnchanged(expectedSnapshotDigest: string | null, value: string): Promise<boolean> | boolean;
 }
 
 export interface AutonomousEvidenceAdapterHealthStore {
@@ -485,22 +496,174 @@ export class InMemoryAutonomousEvidenceAdapterHealthStore implements AutonomousE
   }
 }
 
+function snapshotBytes(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
+}
+
+/** Validate a health snapshot before it reaches a caller-owned persistence adapter. */
+export function validateAutonomousEvidenceAdapterHealthSnapshot(raw: unknown, maxEvents = MAX_AUTONOMOUS_EVIDENCE_ADAPTER_HEALTH_EVENTS): AutonomousEvidenceAdapterHealthSnapshot {
+  if (!isObject(raw) || raw.schema !== AUTONOMOUS_EVIDENCE_ADAPTER_HEALTH_SNAPSHOT_SCHEMA || !Array.isArray(raw.events)) throw new ArgumentError("adapter health snapshot is malformed");
+  const snapshot = raw as unknown as AutonomousEvidenceAdapterHealthSnapshot;
+  if (snapshot.retention !== RETENTION || snapshot.secret_material !== "never_returned") throw new ArgumentError("adapter health snapshot retention is invalid");
+  if (!Number.isSafeInteger(snapshot.sequence) || snapshot.sequence < 0 || snapshot.events.length !== snapshot.sequence) throw new ArgumentError("adapter health snapshot sequence is inconsistent");
+  if (!Number.isSafeInteger(maxEvents) || maxEvents < 1 || maxEvents > MAX_AUTONOMOUS_EVIDENCE_ADAPTER_HEALTH_EVENTS || snapshot.events.length > maxEvents) throw new ArgumentError("adapter health snapshot exceeds its bound");
+  digest("adapter health snapshot head_digest", snapshot.head_digest);
+  digest("adapter health snapshot snapshot_digest", snapshot.snapshot_digest);
+  const { snapshot_digest: supplied, ...descriptor } = snapshot;
+  const encoded = canonicalJson(descriptor);
+  if (snapshotBytes(encoded) > MAX_AUTONOMOUS_EVIDENCE_ADAPTER_HEALTH_SNAPSHOT_BYTES || digestJsonSync(descriptor) !== supplied) throw new ArgumentError("adapter health snapshot digest or byte bound is invalid");
+  let previous = "";
+  for (let index = 0; index < snapshot.events.length; index += 1) {
+    const event = snapshot.events[index];
+    if (!isObject(event) || event.schema !== AUTONOMOUS_EVIDENCE_ADAPTER_HEALTH_EVENT_SCHEMA || event.sequence !== index + 1 || event.previous_digest !== previous || event.retention !== RETENTION || event.secret_material !== "never_returned") throw new ArgumentError(`adapter health event chain is invalid at sequence ${index + 1}`);
+    const { event_digest: suppliedEventDigest, ...eventBody } = event;
+    digest(`adapter health event ${index + 1} digest`, suppliedEventDigest);
+    if (digestJsonSync(eventBody) !== suppliedEventDigest) throw new ArgumentError(`adapter health event digest is invalid at sequence ${index + 1}`);
+    normalizeObservation(event.observation as unknown as AutonomousEvidenceAdapterHealthObservationInput);
+    finite(`adapter health event ${index + 1} created_at`, event.created_at, 0, Number.MAX_SAFE_INTEGER);
+    previous = suppliedEventDigest;
+  }
+  if (previous !== snapshot.head_digest) throw new ArgumentError("adapter health snapshot head digest is inconsistent");
+  return clone(snapshot);
+}
+
+/** Portable JSON persistence for Node, browser, SQLite bridges, and embedded text stores. */
+export class JsonAutonomousEvidenceAdapterHealthPersistence implements AutonomousEvidenceAdapterHealthPersistence {
+  protected readonly store: AutonomousEvidenceAdapterHealthSnapshotTextStore;
+  readonly maxEvents: number;
+  readonly maxBytes: number;
+
+  constructor(
+    store: AutonomousEvidenceAdapterHealthSnapshotTextStore,
+    maxEvents = MAX_AUTONOMOUS_EVIDENCE_ADAPTER_HEALTH_EVENTS,
+    maxBytes = MAX_AUTONOMOUS_EVIDENCE_ADAPTER_HEALTH_SNAPSHOT_BYTES,
+  ) {
+    if (!store || typeof store.read !== "function" || typeof store.write !== "function") throw new ArgumentError("adapter health JSON persistence requires a text store");
+    if (!Number.isSafeInteger(maxEvents) || maxEvents < 1 || maxEvents > MAX_AUTONOMOUS_EVIDENCE_ADAPTER_HEALTH_EVENTS) throw new ArgumentError("adapter health JSON persistence maxEvents is outside its bound");
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_AUTONOMOUS_EVIDENCE_ADAPTER_HEALTH_SNAPSHOT_BYTES) throw new ArgumentError("adapter health JSON persistence maxBytes is outside its bound");
+    this.store = store;
+    this.maxEvents = maxEvents;
+    this.maxBytes = maxBytes;
+  }
+
+  async read(): Promise<AutonomousEvidenceAdapterHealthSnapshot | null> {
+    const encoded = await this.store.read();
+    if (encoded === null) return null;
+    if (typeof encoded !== "string" || snapshotBytes(encoded) > this.maxBytes) throw new ArgumentError("adapter health JSON persistence text exceeds its bound");
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(encoded);
+    } catch {
+      throw new ArgumentError("adapter health JSON persistence text is invalid JSON");
+    }
+    const snapshot = validateAutonomousEvidenceAdapterHealthSnapshot(parsed, this.maxEvents);
+    if (snapshotBytes(canonicalJson(snapshot)) > this.maxBytes) throw new ArgumentError("adapter health JSON persistence snapshot exceeds its bound");
+    return snapshot;
+  }
+
+  async write(snapshot: AutonomousEvidenceAdapterHealthSnapshot): Promise<void> {
+    await this.store.write(this.encode(snapshot));
+  }
+
+  protected encode(snapshot: AutonomousEvidenceAdapterHealthSnapshot): string {
+    const validated = validateAutonomousEvidenceAdapterHealthSnapshot(snapshot, this.maxEvents);
+    const encoded = canonicalJson(validated);
+    if (snapshotBytes(encoded) > this.maxBytes) throw new ArgumentError("adapter health JSON persistence snapshot exceeds its bound");
+    return encoded;
+  }
+}
+
+/** JSON persistence variant with an atomic digest fence for multi-host health writers. */
+export class TransactionalJsonAutonomousEvidenceAdapterHealthPersistence extends JsonAutonomousEvidenceAdapterHealthPersistence {
+  private readonly transactionalStore: AutonomousEvidenceAdapterHealthTransactionalSnapshotTextStore;
+
+  constructor(
+    store: AutonomousEvidenceAdapterHealthTransactionalSnapshotTextStore,
+    maxEvents = MAX_AUTONOMOUS_EVIDENCE_ADAPTER_HEALTH_EVENTS,
+    maxBytes = MAX_AUTONOMOUS_EVIDENCE_ADAPTER_HEALTH_SNAPSHOT_BYTES,
+  ) {
+    super(store, maxEvents, maxBytes);
+    if (typeof store.writeIfUnchanged !== "function") throw new ArgumentError("transactional adapter health JSON persistence requires writeIfUnchanged");
+    this.transactionalStore = store;
+  }
+
+  async writeIfUnchanged(expectedSnapshotDigest: string | null, snapshot: AutonomousEvidenceAdapterHealthSnapshot): Promise<boolean> {
+    if (expectedSnapshotDigest !== null) digest("adapter health expected snapshot digest", expectedSnapshotDigest);
+    const committed = await this.transactionalStore.writeIfUnchanged(expectedSnapshotDigest, this.encode(snapshot));
+    if (typeof committed !== "boolean") throw new ArgumentError("transactional adapter health persistence returned a non-boolean commit result");
+    return committed;
+  }
+}
+
+/** Browser-compatible single-writer text store for localStorage/sessionStorage-like objects. */
+export class WebStorageAutonomousEvidenceAdapterHealthSnapshotTextStore implements AutonomousEvidenceAdapterHealthSnapshotTextStore {
+  readonly storage: Pick<Storage, "getItem" | "setItem">;
+  readonly key: string;
+
+  constructor(storage: Pick<Storage, "getItem" | "setItem">, key = "aurora.autonomous.evidence.adapter.health") {
+    if (!storage || typeof storage.getItem !== "function" || typeof storage.setItem !== "function") throw new ArgumentError("adapter health web storage requires getItem and setItem");
+    if (typeof key !== "string" || !key.trim() || key.length > 256 || key.includes("\u0000")) throw new ArgumentError("adapter health web storage key is outside its bound");
+    this.storage = storage;
+    this.key = key;
+  }
+
+  read(): string | null {
+    return this.storage.getItem(this.key);
+  }
+
+  write(value: string): void {
+    if (typeof value !== "string" || snapshotBytes(value) > MAX_AUTONOMOUS_EVIDENCE_ADAPTER_HEALTH_SNAPSHOT_BYTES) throw new ArgumentError("adapter health web storage value exceeds its bound");
+    this.storage.setItem(this.key, value);
+  }
+}
+
 export class AutonomousEvidenceAdapterHealthPersistenceCoordinator {
+  private expectedSnapshotDigest: string | null = null;
+  private pending: Promise<void> = Promise.resolve();
+
   constructor(readonly store: AutonomousEvidenceAdapterHealthStore, readonly persistence: AutonomousEvidenceAdapterHealthPersistence) {
     if (!store || typeof store.snapshot !== "function" || typeof store.restore !== "function") throw new ArgumentError("adapter health store is malformed");
     if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new ArgumentError("adapter health persistence adapter is malformed");
   }
 
   async restore(): Promise<AutonomousEvidenceAdapterHealthSnapshot | null> {
-    const snapshot = await this.persistence.read();
-    if (snapshot) await this.store.restore(snapshot);
-    return snapshot;
+    return this.serialized(async () => {
+      const snapshot = await this.persistence.read();
+      if (snapshot) {
+        await this.store.restore(snapshot);
+        this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      } else {
+        this.expectedSnapshotDigest = null;
+      }
+      return snapshot;
+    });
   }
 
   async flush(): Promise<AutonomousEvidenceAdapterHealthSnapshot> {
-    const snapshot = await this.store.snapshot();
-    await this.persistence.write(snapshot);
-    return snapshot;
+    return this.serialized(async () => {
+      const snapshot = await this.store.snapshot();
+      if (typeof this.persistence.writeIfUnchanged === "function") {
+        const committed = await this.persistence.writeIfUnchanged(this.expectedSnapshotDigest, snapshot);
+        if (!committed) throw new ArgumentError("adapter health persistence rejected a stale writer");
+      } else {
+        await this.persistence.write(snapshot);
+      }
+      this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      return snapshot;
+    });
+  }
+
+  private async serialized<T>(work: () => Promise<T>): Promise<T> {
+    let release!: () => void;
+    const next = new Promise<void>((resolve) => { release = resolve; });
+    const previous = this.pending;
+    this.pending = next;
+    await previous;
+    try {
+      return await work();
+    } finally {
+      release();
+    }
   }
 }
 

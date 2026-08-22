@@ -4305,8 +4305,13 @@ const next = await healthController.selectAdaptiveForDomains(AUTONOMOUS_DOMAIN_N
 Adaptive selection is run independently for each domain, so a failing coding source does not
 poison science or operations. An open failure circuit makes that adapter ineligible; if no
 current-manifest adapter clears the score/margin gates, the plan abstains. Use
-`AutonomousEvidenceAdapterHealthPersistenceCoordinator` with an application-owned atomic store for
-restart, and retain the existing approval boundary before turning an adaptive plan into dispatch.
+`JsonAutonomousEvidenceAdapterHealthPersistence` for a bounded text-backed snapshot,
+`WebStorageAutonomousEvidenceAdapterHealthSnapshotTextStore` for browser storage, or
+`TransactionalJsonAutonomousEvidenceAdapterHealthPersistence` with an implementation of
+`writeIfUnchanged(expectedSnapshotDigest, value)` for multi-host fencing. The
+`AutonomousEvidenceAdapterHealthPersistenceCoordinator` serializes local flushes and turns a false
+CAS result into an explicit stale-writer refusal; it never merges conflicting histories silently.
+Production callers still own the atomic backing store, approval UX, and external authorization.
 
 ## Durable evidence acquisition workers
 

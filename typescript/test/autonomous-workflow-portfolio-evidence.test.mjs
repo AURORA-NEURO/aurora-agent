@@ -6,6 +6,7 @@ import {
   AutonomousAgent,
   AutonomousEvidenceAdapterRegistry,
   AutonomousEvidenceAdapterHealthController,
+  JsonAutonomousEvidenceAdapterHealthPersistence,
   AutonomousEvidenceAdapterHealthPersistenceCoordinator,
   AutonomousEvidenceAdapterSelectionPlan,
   AutonomousEvidenceAdapterSelector,
@@ -22,6 +23,8 @@ import {
   JsonAutonomousWorkflowPortfolioEvidenceWorkQueuePersistence,
   InMemoryAutonomousEvidenceRuntimeJournal,
   InMemoryAutonomousEvidenceAdapterHealthStore,
+  TransactionalJsonAutonomousEvidenceAdapterHealthPersistence,
+  WebStorageAutonomousEvidenceAdapterHealthSnapshotTextStore,
   InMemoryAutonomousWorkflowPortfolioEvidenceCheckpointStore,
   JsonAutonomousWorkflowPortfolioEvidenceCheckpointStore,
   LLMRuntime,
@@ -826,4 +829,55 @@ test("adapter health persists runtime outcomes and drives per-domain failover wi
   const tampered = structuredClone(snapshot);
   tampered.events[0].observation.adapter_id = "health.tampered";
   await assert.rejects(() => restored.restore(tampered), /snapshot digest mismatch/);
+});
+
+test("adapter health JSON persistence is bounded, browser-portable, and CAS-fenced", async () => {
+  const source = new InMemoryAutonomousEvidenceAdapterHealthStore({ clock: () => 2_000 });
+  for (const [index, domain] of AUTONOMOUS_DOMAIN_NAMES.entries()) {
+    await source.recordAcquisition({ adapter_id: `persist.${domain}`, manifest_digest: `${String(index + 1).padStart(2, "0")}${"a".repeat(62)}`, domain, outcome: "success", status: "success", latency_ms: index + 1 });
+  }
+  const original = await source.snapshot();
+  let text = null;
+  const textStore = { read: () => text, write: (value) => { text = value; } };
+  const jsonPersistence = new JsonAutonomousEvidenceAdapterHealthPersistence(textStore, 32);
+  await jsonPersistence.write(original);
+  const roundTrip = await jsonPersistence.read();
+  assert.equal(roundTrip?.snapshot_digest, original.snapshot_digest);
+  assert.equal(roundTrip?.events.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  text = "{malformed";
+  await assert.rejects(() => jsonPersistence.read(), /invalid JSON/);
+  text = JSON.stringify({ ...original, snapshot_digest: "f".repeat(64) });
+  await assert.rejects(() => jsonPersistence.read(), /digest/);
+
+  let storageValue = null;
+  const webStorage = new WebStorageAutonomousEvidenceAdapterHealthSnapshotTextStore({
+    getItem: () => storageValue,
+    setItem: (_key, value) => { storageValue = value; },
+  });
+  webStorage.write(JSON.stringify(original));
+  assert.equal(webStorage.read(), JSON.stringify(original));
+
+  let transactionalText = null;
+  const transactionalStore = {
+    read: () => transactionalText,
+    write: (value) => { transactionalText = value; },
+    writeIfUnchanged: (expectedDigest, value) => {
+      const currentDigest = transactionalText === null ? null : JSON.parse(transactionalText).snapshot_digest;
+      if (currentDigest !== expectedDigest) return false;
+      transactionalText = value;
+      return true;
+    },
+  };
+  const transactionalPersistence = new TransactionalJsonAutonomousEvidenceAdapterHealthPersistence(transactionalStore, 32);
+  const writerStore = new InMemoryAutonomousEvidenceAdapterHealthStore({ clock: () => 3_000 });
+  await writerStore.restore(original);
+  const writer = new AutonomousEvidenceAdapterHealthPersistenceCoordinator(writerStore, transactionalPersistence);
+  await writer.flush();
+  const staleStore = new InMemoryAutonomousEvidenceAdapterHealthStore({ clock: () => 4_000 });
+  const stale = new AutonomousEvidenceAdapterHealthPersistenceCoordinator(staleStore, transactionalPersistence);
+  await stale.restore();
+  await writerStore.recordAcquisition({ adapter_id: "persist.coding", manifest_digest: `01${"a".repeat(62)}`, domain: "coding", outcome: "failure", status: "timeout", latency_ms: 9, failure_class: "timeout" });
+  await writer.flush();
+  await staleStore.recordAcquisition({ adapter_id: "persist.science", manifest_digest: `04${"a".repeat(62)}`, domain: "science", outcome: "failure", status: "transport_error", latency_ms: 9, failure_class: "transport_error" });
+  await assert.rejects(() => stale.flush(), /stale writer/);
 });
