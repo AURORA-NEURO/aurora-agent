@@ -82,6 +82,9 @@ def test_inventory_refreshes_models_and_reports_all_domain_coverage(tmp_path):
     restored = store.load()
     assert restored is not None
     assert restored.digest == snapshot["snapshot_digest"]
+    restored_catalogue = store.load_catalogue()
+    assert restored_catalogue is not None
+    assert restored_catalogue.candidates()[0]["model"] == "offline-model"
     assert "offline response" not in json.dumps(snapshot)
 
 
@@ -209,3 +212,22 @@ def test_inventory_store_rejects_tampered_snapshot(tmp_path):
     with pytest.raises(AutonomousModelInventoryError):
         store.load()
     assert snapshot["snapshot_digest"] != "0" * 64
+
+
+def test_inventory_store_rejects_tampered_rehydrated_catalogue(tmp_path):
+    runtime = _runtime([{"id": "offline-model", "context_length": 16_000, "max_output_tokens": 1_000, "capabilities": ["reasoning"]}])
+    agent = AutonomousAgent(object(), runtime, model_catalogue=ModelCatalogue())
+    store = AutonomousModelInventoryStore(tmp_path / "inventory.json")
+    agent.refresh_model_inventory(
+        providers=("offline",),
+        priors=_prior("offline/offline-model"),
+        domain_requirements={"coding": ("reasoning",)},
+        snapshot_store=store,
+        refresh_id="inventory-catalogue-tamper",
+    )
+    payload = json.loads(store.path.read_text(encoding="utf-8"))
+    payload["catalogue"]["candidates"][0]["quality"] = 0.01
+    store.path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(AutonomousModelInventoryError):
+        store.load_catalogue()

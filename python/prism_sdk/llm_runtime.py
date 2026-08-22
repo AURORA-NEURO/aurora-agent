@@ -1039,6 +1039,39 @@ class ModelCatalogue:
         for candidate in candidates:
             self.register(candidate)
 
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "ModelCatalogue":
+        """Restore a caller-owned catalogue from its bounded, secret-free projection."""
+
+        if not isinstance(value, Mapping):
+            raise ProviderError("model catalogue must be an object")
+        allowed = {
+            "schema",
+            "candidate_count",
+            "candidates",
+            "credential_posture",
+            "secret_material",
+        }
+        if set(value).difference(allowed):
+            raise ProviderError("model catalogue contains unsupported fields")
+        if value.get("schema") != MODEL_CATALOGUE_SCHEMA:
+            raise ProviderError("model catalogue schema is invalid")
+        if value.get("credential_posture") != "caller_supplied_opaque_handles":
+            raise ProviderError("model catalogue credential posture is invalid")
+        if value.get("secret_material") != "never_returned":
+            raise ProviderError("model catalogue secret marker is invalid")
+        candidates = value.get("candidates")
+        if not isinstance(candidates, Sequence) or isinstance(candidates, (str, bytes)):
+            raise ProviderError("model catalogue candidates must be a sequence")
+        candidate_count = value.get("candidate_count")
+        if (
+            not isinstance(candidate_count, int)
+            or isinstance(candidate_count, bool)
+            or candidate_count != len(candidates)
+        ):
+            raise ProviderError("model catalogue candidate count is invalid")
+        return cls(tuple(ModelCandidate.from_mapping(candidate) for candidate in candidates))
+
     def register(
         self,
         candidate: ModelCandidate | Mapping[str, Any],

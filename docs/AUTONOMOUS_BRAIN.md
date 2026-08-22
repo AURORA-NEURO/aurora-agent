@@ -208,7 +208,7 @@ explicit caller-owned routing priors from the typed descriptors, atomically reco
 provider arms, and computes capability coverage for every reviewed autonomous domain. Repeat
 `--model-capability` for capabilities the caller has actually assessed; provider inventory alone
 does not prove semantic suitability. The optional store contains only the bounded digest-bound
-coverage snapshot:
+coverage snapshot and the matching secret-free candidate catalogue:
 
 ```bash
 python -m prism_sdk refresh-models \
@@ -228,6 +228,23 @@ python -m prism_sdk inventory-status \
 healthy arms from another provider, and an authoritative successful empty inventory is the only
 state allowed to retire all arms for that provider. `--raise-on-error` changes a refresh failure
 from a redacted status snapshot into a fail-closed command error for automation.
+
+After a successful refresh, a run can rehydrate that exact digest-bound catalogue without calling
+the provider's inventory endpoint again. The live provider credential and invocation approval are
+still required; persistence never implies provider readiness or execution authority:
+
+```bash
+python -m prism_sdk run \
+  --mcp-command "python path/to/mcp_server.py" \
+  --provider openai \
+  --task "compare the retained evidence" \
+  --domain science \
+  --use-inventory \
+  --inventory-store .aurora/model-inventory.json \
+  --credential-source environment \
+  --credential-env OPENAI_API_KEY \
+  --approve-provider-call
+```
 
 The command accepts no API-key or token argument. By default it uses a no-echo prompt; deployment
 automation can select `--credential-source environment --credential-env OPENAI_API_KEY`. The value

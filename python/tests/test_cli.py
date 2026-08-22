@@ -4,7 +4,7 @@ import io
 import json
 from unittest.mock import patch
 
-from prism_sdk import AUTONOMOUS_DOMAINS, ProviderModelDescriptor
+from prism_sdk import AUTONOMOUS_DOMAINS, ModelCandidate, ModelCatalogue, ProviderModelDescriptor
 from prism_sdk.cli import main
 
 
@@ -370,4 +370,75 @@ def test_run_can_build_candidates_from_discovery_and_filter_archived_models() ->
     assert payload["model_inventory"]["mode"] == "provider_discovery"
     assert payload["model_inventory"]["model_count"] == 2
     assert payload["authorization"]["model_discovery_approved"] is True
+    assert secret not in output.getvalue()
+
+
+def test_run_can_rehydrate_persisted_catalogue_without_provider_rediscovery(tmp_path) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    class FakeAgent:
+        def __init__(self, _workspace: object, _runtime: object, *, model_catalogue: object) -> None:
+            captured["catalogue"] = model_catalogue
+
+        def run(self, **kwargs: object) -> dict[str, object]:
+            captured.update(kwargs)
+            return {"status": "completed", "model": kwargs["model_candidates"][0].model}
+
+    persisted = ModelCatalogue(
+        (
+            ModelCandidate(
+                provider="openai",
+                model="persisted-model",
+                context_window_tokens=16_384,
+                max_output_tokens=2_048,
+                quality=0.81,
+                latency_ms=180,
+                cost_per_million_tokens=4,
+                reliability=0.93,
+                capabilities=("reasoning", "science"),
+            ),
+        )
+    )
+    secret = "persisted-run-secret-that-must-not-appear"
+    output = io.StringIO()
+    errors = io.StringIO()
+    with (
+        patch("prism_sdk.cli.AutonomousModelInventoryStore.load_catalogue", return_value=persisted),
+        patch("prism_sdk.cli.AutonomousAgent", FakeAgent),
+        patch("prism_sdk.cli.LLMRuntime.discover_models", side_effect=AssertionError("rediscovery")),
+    ):
+        code = main(
+            (
+                "run",
+                "--mcp-command", "python server.py",
+                "--domain", "science",
+                "--task", "compare independent research sources",
+                "--use-inventory",
+                "--inventory-store", str(tmp_path / "inventory.json"),
+                "--provider", "openai",
+                "--base-url", "https://provider.example",
+                "--credential-source", "environment",
+                "--credential-env", "AURORA_TEST_KEY",
+                "--approve-provider-call",
+            ),
+            environ={"AURORA_TEST_KEY": secret},
+            writer=output,
+            error_writer=errors,
+            client_factory=lambda *_args, **_kwargs: FakeClient(),
+        )
+    payload = json.loads(output.getvalue())
+    assert code == 0
+    assert errors.getvalue() == ""
+    candidates = captured["model_candidates"]
+    assert [candidate.model for candidate in candidates] == ["persisted-model"]
+    assert candidates[0].quality == 0.81
+    assert payload["model_inventory"]["mode"] == "persisted_catalogue"
+    assert payload["model_inventory"]["candidates"][0]["model"] == "persisted-model"
     assert secret not in output.getvalue()

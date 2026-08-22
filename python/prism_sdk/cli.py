@@ -6,7 +6,8 @@ the brain or into MCP:
 
 * ``catalogue`` and ``evidence-plan`` are provider-free inspection commands;
 * ``route`` exposes deterministic routing evidence without invoking a model;
-* ``provider-status`` and ``onboard`` implement the redacted BYOK lifecycle; and
+* ``provider-status``, ``onboard``, and the inventory commands implement the redacted BYOK and
+  model-lifecycle boundaries; and
 * ``run`` connects to a caller-owned MCP workspace, collects one short-lived credential, lets the
   existing autonomous planner select a model, and requires explicit provider/mission approval.
 
@@ -200,6 +201,29 @@ def _candidate_args(
         for model in models
     )
     return candidates
+
+
+def _persisted_candidate_args(args: argparse.Namespace) -> tuple[ModelCandidate, ...]:
+    if not args.use_inventory:
+        raise ValueError("persisted model catalogue was not requested")
+    if args.discover_models:
+        raise ValueError("--use-inventory and --discover-models cannot be combined")
+    if args.inventory_store is None:
+        raise ValueError("--inventory-store is required with --use-inventory")
+    catalogue = AutonomousModelInventoryStore(args.inventory_store).load_catalogue()
+    if catalogue is None:
+        raise ValueError("inventory store has no rehydratable model catalogue")
+    rows = catalogue.candidates(providers=(args.provider,), enabled_only=True)
+    requested = tuple(args.model or ())
+    if requested:
+        available = {row["model"] for row in rows}
+        missing = tuple(model for model in requested if model not in available)
+        if missing:
+            raise ValueError("requested model was not found in the persisted catalogue")
+        rows = [row for row in rows if row["model"] in requested]
+    if not rows:
+        raise ValueError("persisted catalogue has no enabled models for the selected provider")
+    return tuple(ModelCandidate.from_mapping(row) for row in rows)
 
 
 def _discover_descriptors(
@@ -399,10 +423,12 @@ def _refresh_models(
 def _inventory_status(args: argparse.Namespace) -> dict[str, Any]:
     store = AutonomousModelInventoryStore(args.inventory_store)
     snapshot = store.load()
+    catalogue = None if snapshot is None else store.load_catalogue()
     return {
         "schema": CLI_SCHEMA,
         "command": "inventory-status",
         "snapshot": None if snapshot is None else snapshot.to_dict(),
+        "catalogue": None if catalogue is None else catalogue.to_dict(),
         "available": snapshot is not None,
         "authorization": "metadata_read_only; no_provider_or_credential_access",
         "secret_material": "never_returned",
@@ -449,6 +475,11 @@ def _run(
     command = _parse_mcp_command(args.mcp_command)
     if args.discover_models and not args.approve_provider_call:
         raise ValueError("model discovery requires --approve-provider-call")
+    if args.use_inventory and args.discover_models:
+        raise ValueError("--use-inventory and --discover-models cannot be combined")
+    if args.use_inventory and args.inventory_store is None:
+        raise ValueError("--inventory-store is required with --use-inventory")
+    persisted_candidates = _persisted_candidate_args(args) if args.use_inventory else ()
     runtime, onboarding = _runtime_with_provider(args)
     session = onboarding.start_session(ttl_seconds=args.ttl_seconds)
     try:
@@ -461,7 +492,13 @@ def _run(
         descriptors = _discover_descriptors(runtime, args, session) if args.discover_models else ()
         if args.discover_models and not descriptors:
             raise ValueError("provider discovery returned no selectable models")
-        candidates = _candidate_args(args, descriptors)
+        candidates = (
+            _candidate_args(args, descriptors)
+            if args.discover_models
+            else persisted_candidates
+            if args.use_inventory
+            else _candidate_args(args)
+        )
         catalogue = ModelCatalogue(candidates)
         client = client_factory(
             command,
@@ -506,9 +543,18 @@ def _run(
             "command": "run",
             "routing_mode": "automatic" if args.automatic else "explicit_domain",
             "model_inventory": {
-                "mode": "provider_discovery" if args.discover_models else "caller_declared",
+                "mode": (
+                    "provider_discovery"
+                    if args.discover_models
+                    else "persisted_catalogue"
+                    if args.use_inventory
+                    else "caller_declared"
+                ),
                 "models": [descriptor.to_dict() for descriptor in descriptors],
                 "model_count": len(descriptors),
+                "candidates": [candidate.to_dict() for candidate in candidates]
+                if args.use_inventory
+                else [],
             },
             "result": result,
             "provider_status": runtime.provider_status(args.provider),
@@ -609,6 +655,8 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--planning-max-output-tokens", type=int, default=1_024)
     run.add_argument("--model", action="append", default=[], help="candidate model; repeat to enable model selection or filter discovery")
     run.add_argument("--discover-models", action="store_true", help="discover selectable models through the approved provider inventory endpoint")
+    run.add_argument("--use-inventory", action="store_true", help="rehydrate selectable candidates from --inventory-store without rediscovery")
+    run.add_argument("--inventory-store", default=None, help="digest-bound metadata-only inventory store for --use-inventory")
     run.add_argument("--model-limit", type=int, default=64, help="maximum provider inventory rows to inspect when discovering")
     run.add_argument("--model-capability", action="append", default=[], help="declared capability for every model candidate")
     run.add_argument("--required-model-capability", action="append", default=[], help="capability required by this run")

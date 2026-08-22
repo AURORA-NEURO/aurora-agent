@@ -459,9 +459,16 @@ class AutonomousModelInventoryStore:
         self.max_bytes = max_bytes
         self._lock = threading.RLock()
 
-    def save(self, snapshot: AutonomousModelInventorySnapshot) -> dict[str, Any]:
+    def save(
+        self,
+        snapshot: AutonomousModelInventorySnapshot,
+        *,
+        catalogue: ModelCatalogue | None = None,
+    ) -> dict[str, Any]:
         if not isinstance(snapshot, AutonomousModelInventorySnapshot):
             raise AutonomousModelInventoryError("inventory store accepts only snapshots")
+        if catalogue is not None and not isinstance(catalogue, ModelCatalogue):
+            raise AutonomousModelInventoryError("inventory store catalogue is invalid")
         envelope = {
             "schema": AUTONOMOUS_MODEL_INVENTORY_STORE_SCHEMA,
             "snapshot": snapshot.to_dict(),
@@ -469,6 +476,11 @@ class AutonomousModelInventoryStore:
             "retention": "metadata_only_no_credentials_or_provider_payloads",
             "secret_material": "never_returned",
         }
+        if catalogue is not None:
+            catalogue_projection = catalogue.to_dict()
+            if content_digest(catalogue_projection) != snapshot.catalogue_digest:
+                raise AutonomousModelInventoryError("inventory store catalogue digest does not match snapshot")
+            envelope["catalogue"] = catalogue_projection
         encoded = canonical_bytes(envelope)
         if len(encoded) > self.max_bytes:
             raise AutonomousModelInventoryError("inventory snapshot exceeds its storage bound")
@@ -489,7 +501,7 @@ class AutonomousModelInventoryStore:
                 raise
         return {"schema": AUTONOMOUS_MODEL_INVENTORY_STORE_SCHEMA, "snapshot_digest": snapshot.digest, "bytes": len(encoded)}
 
-    def load(self) -> AutonomousModelInventorySnapshot | None:
+    def _read_envelope(self) -> Mapping[str, Any] | None:
         with self._lock:
             if not self.path.exists():
                 return None
@@ -501,12 +513,59 @@ class AutonomousModelInventoryStore:
                 raise AutonomousModelInventoryError("inventory store contains invalid JSON") from error
         if not isinstance(envelope, Mapping) or envelope.get("schema") != AUTONOMOUS_MODEL_INVENTORY_STORE_SCHEMA:
             raise AutonomousModelInventoryError("inventory store schema is invalid")
+        allowed = {
+            "schema",
+            "snapshot",
+            "snapshot_digest",
+            "catalogue",
+            "retention",
+            "secret_material",
+        }
+        if set(envelope).difference(allowed):
+            raise AutonomousModelInventoryError("inventory store contains unsupported fields")
         if envelope.get("retention") != "metadata_only_no_credentials_or_provider_payloads" or envelope.get("secret_material") != "never_returned":
             raise AutonomousModelInventoryError("inventory store markers are invalid")
+        return envelope
+
+    @staticmethod
+    def _snapshot_from_envelope(envelope: Mapping[str, Any]) -> AutonomousModelInventorySnapshot:
         snapshot = AutonomousModelInventorySnapshot.from_mapping(envelope.get("snapshot"))
         if envelope.get("snapshot_digest") != snapshot.digest:
             raise AutonomousModelInventoryError("inventory store snapshot digest is invalid")
         return snapshot
+
+    def load(self) -> AutonomousModelInventorySnapshot | None:
+        envelope = self._read_envelope()
+        if envelope is None:
+            return None
+        snapshot = self._snapshot_from_envelope(envelope)
+        if "catalogue" in envelope:
+            self._catalogue_from_envelope(envelope, snapshot)
+        return snapshot
+
+    @staticmethod
+    def _catalogue_from_envelope(
+        envelope: Mapping[str, Any],
+        snapshot: AutonomousModelInventorySnapshot,
+    ) -> ModelCatalogue:
+        try:
+            catalogue = ModelCatalogue.from_mapping(envelope.get("catalogue"))
+        except ProviderError as error:
+            raise AutonomousModelInventoryError("inventory store catalogue is invalid") from error
+        if content_digest(catalogue.to_dict()) != snapshot.catalogue_digest:
+            raise AutonomousModelInventoryError("inventory store catalogue digest is invalid")
+        return catalogue
+
+    def load_catalogue(self) -> ModelCatalogue | None:
+        """Restore the catalogue only when the persisted snapshot binds it by digest."""
+
+        envelope = self._read_envelope()
+        if envelope is None:
+            return None
+        snapshot = self._snapshot_from_envelope(envelope)
+        if "catalogue" not in envelope:
+            return None
+        return self._catalogue_from_envelope(envelope, snapshot)
 
 
 class AutonomousModelInventoryCoordinator:
@@ -638,7 +697,7 @@ class AutonomousModelInventoryCoordinator:
             catalogue_digest=content_digest(self.catalogue.to_dict()),
         )
         if snapshot_store is not None:
-            snapshot_store.save(snapshot)
+            snapshot_store.save(snapshot, catalogue=self.catalogue)
         return snapshot
 
     @staticmethod
