@@ -240,6 +240,45 @@ class AutonomousEvidencePlan:
             "secret_material": "never_returned",
         }
 
+    def with_available_evidence(self, available_evidence: Sequence[str]) -> "AutonomousEvidencePlan":
+        """Recompute coverage after a caller-owned adapter produces new evidence identifiers."""
+
+        available = _bounded_list(
+            "evidence plan available_evidence",
+            available_evidence,
+            maximum=MAX_AUTONOMOUS_EVIDENCE_REQUIREMENTS,
+        )
+        by_label: dict[str, list[str]] = {}
+        for item in self.requirements:
+            by_label.setdefault(item.label, []).append(item.requirement_id)
+        covered = tuple(
+            item.requirement_id
+            for item in self.requirements
+            if item.requirement_id in available
+            or (item.label in available and len(by_label.get(item.label, ())) == 1)
+        )
+        missing = tuple(item.requirement_id for item in self.requirements if item.requirement_id not in covered)
+        status = (
+            "not_evaluated"
+            if not available
+            else "complete"
+            if not missing
+            else "partial"
+            if covered
+            else "missing"
+        )
+        return AutonomousEvidencePlan(
+            domains=self.domains,
+            workflow_ids=self.workflow_ids,
+            workflow_digests=self.workflow_digests,
+            requirements=self.requirements,
+            available_evidence=available,
+            covered_requirement_ids=covered,
+            missing_requirement_ids=missing,
+            next_stage_ids=self.next_stage_ids,
+            coverage_status=status,
+        )
+
 
 def build_autonomous_evidence_plan(
     workflows: Sequence[Any],

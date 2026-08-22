@@ -471,6 +471,49 @@ must produce and evaluate it separately. The same contract is generated for all 
 domains and for each specialist in a cross-domain fan-out, so integrations can use one evidence
 UI, acquisition scheduler, or evaluator adapter without domain-specific special cases.
 
+### Evidence acquisition, projection, evaluation, and replay
+
+The SDK now provides the reusable boundary between that plan and an application-owned source. It
+does not guess how to fetch evidence: the caller supplies an `acquirer` that may read a file, call
+a connector, inspect a browser result, or wait for human review. The runtime binds each request to
+an exact fully qualified requirement ID, applies bounded metadata checks, and treats the returned
+value as transient. A caller-owned `projector` converts that value into bounded labels, statuses,
+confidence, and value/source digests; a caller-owned `evaluator` may then issue an explicit,
+versioned `accepted`, `rejected`, or `indeterminate` verdict.
+
+```python
+runtime = agent.evidence_runtime(
+    domains=("coding", "science", "evaluation"),
+    journal=journal,
+)
+result = runtime.execute(
+    requests,
+    acquirer=source_adapter,
+    projector=observation_projector,
+    evaluator=independent_evaluator,
+    parent_evidence_digests=(prior_result_digest,),
+)
+```
+
+```typescript
+const result = await agent.acquireEvidence(
+  ["coding", "science", "evaluation"],
+  requests,
+  { acquirer: sourceAdapter, projector, evaluator, journal },
+);
+```
+
+The durable result contains only receipt and assessment metadata: request/plan/source/workflow
+digests, bounded observations, evaluator identity, verdicts, limitations, and hash-chain links.
+`result.values` is deliberately transient and is absent from `to_dict()`/`toJSON()`. A result is
+`completed` only when every planned requirement is covered and explicitly accepted; missing
+observations, absent evaluators, rejected evidence, acquisition failures, and evaluator failures
+remain distinguishable. Rehydrating a journal never restores raw values. If a replay needs one,
+the caller must provide `rehydrate_value`/`rehydrateValue` whose value matches the prior digest;
+otherwise the runtime returns `reconciliation_required` without reacquiring or silently treating a
+transport success as evidence quality. The same runtime is available through the Python and
+TypeScript facades and applies the identical contract across all twelve built-in domains.
+
 ### Non-interactive deployment bootstrap
 
 When no person enters a key, the deployment should register a source resolver during service

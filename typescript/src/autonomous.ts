@@ -41,6 +41,13 @@ import { AutonomousEffectBoundary, AutonomousEffectReconciliationRequiredError, 
 import type { AutonomousLearningController } from "./autonomous-learning.js";
 import { taskFacetDigests } from "./autonomous-memory.js";
 import { buildAutonomousEvidencePlan, type AutonomousEvidencePlan, type AutonomousEvidencePlanJSON } from "./autonomous-evidence.js";
+import {
+  AutonomousEvidenceRuntime,
+  type AutonomousEvidenceAcquisitionRequest,
+  type AutonomousEvidenceRuntimeExecuteOptions,
+  type AutonomousEvidenceRuntimeJournal,
+  type AutonomousEvidenceRuntimeResult,
+} from "./autonomous-evidence-runtime.js";
 import type {
   AutonomousEpisodicMemoryStore,
   AutonomousMemoryEpisode,
@@ -3430,6 +3437,26 @@ export class AutonomousAgent {
     if (new Set(domains).size !== domains.length || domains.some((domain) => !AUTONOMOUS_DOMAIN_NAMES.includes(domain))) throw new ArgumentError("evidencePlan domains must be unique built-in domains");
     const profiles = await Promise.all(domains.map((domain) => profileFor(domain)));
     return buildAutonomousEvidencePlan(profiles.map((profile) => profile.workflow), options);
+  }
+
+  /** Create the caller-owned acquisition/evaluation runtime for an evidence plan. */
+  async evidenceRuntime(
+    domains: readonly AutonomousDomainName[] = AUTONOMOUS_DOMAIN_NAMES,
+    options: { availableEvidence?: readonly string[]; completedStages?: Readonly<Record<string, readonly string[]>>; journal?: AutonomousEvidenceRuntimeJournal } = {},
+  ): Promise<AutonomousEvidenceRuntime> {
+    const plan = await this.evidencePlan(domains, options);
+    return new AutonomousEvidenceRuntime({ plan, journal: options.journal });
+  }
+
+  /** Acquire and optionally evaluate evidence through the explicit application adapter boundary. */
+  async acquireEvidence(
+    domains: readonly AutonomousDomainName[],
+    requests: readonly AutonomousEvidenceAcquisitionRequest[],
+    options: AutonomousEvidenceRuntimeExecuteOptions & { availableEvidence?: readonly string[]; completedStages?: Readonly<Record<string, readonly string[]>>; journal?: AutonomousEvidenceRuntimeJournal },
+  ): Promise<AutonomousEvidenceRuntimeResult> {
+    const { availableEvidence, completedStages, journal, ...executeOptions } = options;
+    const runtime = await this.evidenceRuntime(domains, { availableEvidence, completedStages, journal });
+    return runtime.execute(requests, executeOptions);
   }
 
   async blueprint(task: string, options: { domain?: AutonomousDomainName; routeOverride?: AutonomousRouteProposal; capability?: string; context?: readonly AutonomousPromptChunk[]; hints?: readonly string[]; maxInputTokens?: number; tools?: readonly string[]; subtasks?: readonly AutonomousCrossDomainSubtask[] } = {}): Promise<AutonomousAutoBlueprint> {

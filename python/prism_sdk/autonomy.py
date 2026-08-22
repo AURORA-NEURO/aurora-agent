@@ -36,6 +36,11 @@ from .autonomous_evidence import (
     AutonomousEvidencePlan,
     build_autonomous_evidence_plan,
 )
+from .autonomous_evidence_runtime import (
+    AutonomousEvidenceRuntime,
+    AutonomousEvidenceRuntimeJournal,
+    AutonomousEvidenceRuntimeResult,
+)
 from .brain import (
     AutonomousBrain,
     BRAIN_CONTEXT_LEARNING_STATE_SCHEMA,
@@ -6703,6 +6708,62 @@ class AutonomousTaskOrchestrator:
             completed_stages=completed_stages,
         )
 
+    def evidence_runtime(
+        self,
+        domains: Sequence[str] = AUTONOMOUS_DOMAINS,
+        *,
+        available_evidence: Sequence[str] = (),
+        completed_stages: Mapping[str, Sequence[str]] | None = None,
+        journal: AutonomousEvidenceRuntimeJournal | None = None,
+    ) -> AutonomousEvidenceRuntime:
+        """Create the caller-owned acquisition/evaluation runtime for an evidence plan."""
+
+        return AutonomousEvidenceRuntime(
+            self.evidence_plan(
+                domains,
+                available_evidence=available_evidence,
+                completed_stages=completed_stages,
+            ),
+            journal=journal,
+        )
+
+    def acquire_evidence(
+        self,
+        domains: Sequence[str],
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        acquirer: Any,
+        projector: Any | None = None,
+        evaluator: Any | None = None,
+        rehydrate_value: Callable[[Mapping[str, Any]], Any] | None = None,
+        parent_evidence_digests: Sequence[str] = (),
+        stop_on_failure: bool = False,
+        available_evidence: Sequence[str] = (),
+        completed_stages: Mapping[str, Sequence[str]] | None = None,
+        journal: AutonomousEvidenceRuntimeJournal | None = None,
+    ) -> AutonomousEvidenceRuntimeResult:
+        """Acquire and optionally evaluate evidence through application-owned adapters.
+
+        Raw values remain transient in the runtime result.  Durable journals receive only
+        metadata, digests, bounded observations, and explicit evaluator verdicts.
+        """
+
+        runtime = self.evidence_runtime(
+            domains,
+            available_evidence=available_evidence,
+            completed_stages=completed_stages,
+            journal=journal,
+        )
+        return runtime.execute(
+            requests,
+            acquirer=acquirer,
+            projector=projector,
+            evaluator=evaluator,
+            rehydrate_value=rehydrate_value,
+            parent_evidence_digests=parent_evidence_digests,
+            stop_on_failure=stop_on_failure,
+        )
+
     @staticmethod
     def _route_review_proposal(
         route: AutonomousRouteProposal,
@@ -11651,6 +11712,69 @@ class AutonomousAgent:
         """Return the redacted domain strategy catalogue used by automatic intake."""
 
         return self.orchestrator.registry.catalogue()
+
+    def evidence_plan(
+        self,
+        domains: Sequence[str] = AUTONOMOUS_DOMAINS,
+        *,
+        available_evidence: Sequence[str] = (),
+        completed_stages: Mapping[str, Sequence[str]] | None = None,
+    ) -> AutonomousEvidencePlan:
+        """Compile the reviewed evidence contract without dispatching providers or tools."""
+
+        return self.orchestrator.evidence_plan(
+            domains,
+            available_evidence=available_evidence,
+            completed_stages=completed_stages,
+        )
+
+    def evidence_runtime(
+        self,
+        domains: Sequence[str] = AUTONOMOUS_DOMAINS,
+        *,
+        available_evidence: Sequence[str] = (),
+        completed_stages: Mapping[str, Sequence[str]] | None = None,
+        journal: AutonomousEvidenceRuntimeJournal | None = None,
+    ) -> AutonomousEvidenceRuntime:
+        """Create a bounded runtime for caller-owned evidence acquisition and evaluation."""
+
+        return self.orchestrator.evidence_runtime(
+            domains,
+            available_evidence=available_evidence,
+            completed_stages=completed_stages,
+            journal=journal,
+        )
+
+    def acquire_evidence(
+        self,
+        domains: Sequence[str],
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        acquirer: Any,
+        projector: Any | None = None,
+        evaluator: Any | None = None,
+        rehydrate_value: Callable[[Mapping[str, Any]], Any] | None = None,
+        parent_evidence_digests: Sequence[str] = (),
+        stop_on_failure: bool = False,
+        available_evidence: Sequence[str] = (),
+        completed_stages: Mapping[str, Sequence[str]] | None = None,
+        journal: AutonomousEvidenceRuntimeJournal | None = None,
+    ) -> AutonomousEvidenceRuntimeResult:
+        """Run evidence acquisition through explicit caller-owned adapters."""
+
+        return self.orchestrator.acquire_evidence(
+            domains,
+            requests,
+            acquirer=acquirer,
+            projector=projector,
+            evaluator=evaluator,
+            rehydrate_value=rehydrate_value,
+            parent_evidence_digests=parent_evidence_digests,
+            stop_on_failure=stop_on_failure,
+            available_evidence=available_evidence,
+            completed_stages=completed_stages,
+            journal=journal,
+        )
 
     def workflows(self) -> list[dict[str, Any]]:
         """Return the deterministic workflow contracts available to automatic intake."""

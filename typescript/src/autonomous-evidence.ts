@@ -215,6 +215,29 @@ export class AutonomousEvidencePlan {
       secret_material: "never_returned",
     };
   }
+
+  /** Recompute coverage for newly acquired, caller-owned evidence identifiers. */
+  async withAvailableEvidence(availableEvidence: readonly string[]): Promise<AutonomousEvidencePlan> {
+    const available = list(availableEvidence, "evidence plan availableEvidence", MAX_AUTONOMOUS_EVIDENCE_REQUIREMENTS);
+    const byLabel = new Map<string, string[]>();
+    for (const item of this.requirements) byLabel.set(item.label, [...(byLabel.get(item.label) ?? []), item.requirement_id]);
+    const covered = this.requirements
+      .filter((item) => available.includes(item.requirement_id) || (available.includes(item.label) && (byLabel.get(item.label)?.length ?? 0) === 1))
+      .map((item) => item.requirement_id);
+    const missing = this.requirements.map((item) => item.requirement_id).filter((id) => !covered.includes(id));
+    const coverageStatus: AutonomousEvidenceCoverageStatus = available.length === 0 ? "not_evaluated" : missing.length === 0 ? "complete" : covered.length ? "partial" : "missing";
+    return new AutonomousEvidencePlan({
+      domains: this.domains,
+      workflow_ids: this.workflow_ids,
+      workflow_digests: this.workflow_digests,
+      requirements: this.requirements,
+      available_evidence: available,
+      covered_requirement_ids: covered,
+      missing_requirement_ids: missing,
+      next_stage_ids: this.next_stage_ids,
+      coverage_status: coverageStatus,
+    }).finalize();
+  }
 }
 
 /** Compile reviewed workflow stages into a deterministic evidence plan. */

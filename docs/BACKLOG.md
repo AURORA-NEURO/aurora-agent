@@ -13,10 +13,12 @@ uses. This file tracks *attention*, not completeness.
 The autonomous façade now compiles every built-in workflow into a digest-bound evidence plan.
 Python `AutonomousTaskOrchestrator.evidence_plan()` and TypeScript `AutonomousAgent.evidencePlan()`
 report qualified requirements, ambiguous-label handling, coverage, and dependency-safe next
-stages; blueprints and prompts carry the same contract. This is an evidence-planning layer only:
-it does not retrieve sources, interpret raw media, authorize connectors, or establish truth. The
-remaining integration work is to connect caller-owned acquisition adapters and evaluators to that
-contract in application-specific deployments.
+stages; blueprints and prompts carry the same contract. The Python and TypeScript facades now also
+expose a bounded evidence runtime that binds exact requirements to caller-owned acquisition,
+projection, and versioned evaluation adapters, while retaining only digest-bound receipts and
+replay/reconciliation metadata. It does not retrieve sources, interpret raw media, authorize
+connectors, or establish truth on its own; external source adapters, domain evaluators, UI, and
+durable production persistence remain application-specific deployment work.
 
 The MCP transport now executes additional in-tree contracts for tabular ingestion and conformance,
 observed-world declaration, provenance-bounded claim checking, federated resolution, dependency
