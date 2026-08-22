@@ -1405,6 +1405,26 @@ circuit, economics, and semantic quality remain live selection gates.
 bounded metadata. It rejects tampered snapshots and never stores prompts, response bodies,
 authorization headers, keys, or opaque credential handles.
 
+The TypeScript façade now exposes the same inventory boundary through
+`AutonomousModelInventoryCoordinator`. It wraps the bounded multi-provider refresh, then emits
+one coverage row for every built-in domain with required capabilities, compatible model arms,
+eligible arms, provider credential/circuit posture, catalogue and coverage digests, and a
+`ready`/`partial`/`missing` summary:
+
+```typescript
+const inventory = new AutonomousModelInventoryCoordinator(agent, inventoryStore);
+const snapshot = await inventory.refresh([
+  { provider: "openai", defaults: callerReviewedPriors },
+  { provider: "anthropic", defaults: callerReviewedPriors },
+], { credentialFor: provider => session.handle(provider), refreshId: "inventory-2026-08-22" });
+```
+
+`refresh()` is the only operation that performs provider model discovery. Persistence and
+`restore()` are provider-free, digest-bound catalogue rehydration. Discovery can establish that
+an arm exists and declares a capability, but it never supplies quality, cost, reliability, task
+correctness, or evaluator credit; the final selector and explicit evaluator settlement still
+govern invocation and online learning.
+
 If `learn=True` is supplied, the same
 facade runs the explicit evaluator and caller-owned bandit state through the existing online
 learning path; it does not turn a provider response into a reward automatically. An application

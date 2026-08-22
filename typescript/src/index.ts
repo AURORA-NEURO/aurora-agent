@@ -216,6 +216,22 @@ export {
   autonomousWorkflowStageContractDigest,
   validateAutonomousModelCatalogueSnapshot,
 } from "./autonomous.js";
+export {
+  AUTONOMOUS_MODEL_INVENTORY_SCHEMA,
+  AUTONOMOUS_MODEL_INVENTORY_MAX_PROVIDERS,
+  AUTONOMOUS_MODEL_INVENTORY_MAX_DOMAINS,
+  AUTONOMOUS_MODEL_INVENTORY_MAX_SNAPSHOT_BYTES,
+  AutonomousModelInventoryCoordinator,
+  validateAutonomousModelInventorySnapshot,
+} from "./autonomous-model-inventory.js";
+export type {
+  AutonomousModelInventoryStatus,
+  AutonomousModelInventoryCoverageState,
+  AutonomousModelInventoryCoverage,
+  AutonomousModelInventorySnapshot,
+  AutonomousModelInventoryPersistence,
+  AutonomousModelInventoryRefreshOptions,
+} from "./autonomous-model-inventory.js";
 export type {
   AutonomousAcceptedCrossDomainPlan,
   AutonomousAcceptedPlan,
