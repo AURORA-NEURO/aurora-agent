@@ -15,6 +15,11 @@ import {
   type AutonomousWorkflowPortfolioPlan,
   type AutonomousWorkflowPortfolioPlanOptions,
 } from "./autonomous-workflow-portfolio.js";
+import type {
+  AutonomousEvaluatorRewardInput,
+  AutonomousLearningController,
+  AutonomousLearningOutboxSettlementOptions,
+} from "./autonomous-learning.js";
 import { digestJson } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
@@ -37,6 +42,16 @@ export type AutonomousWorkflowPortfolioExecutionItemStatus =
 
 export type AutonomousWorkflowPortfolioExecutionStatus = "completed" | "partial" | "failed" | "approval_required" | "blocked";
 
+/** Explicit state of the optional evaluator-to-bandit handoff for one portfolio item. */
+export type AutonomousWorkflowPortfolioLearningStatus =
+  | "disabled"
+  | "not_eligible"
+  | "pending_evaluation"
+  | "preparation_failed"
+  | "evaluation_failed"
+  | "settled"
+  | "settlement_failed";
+
 /** Shared provider/learning controls for each item; portfolio identity controls are not caller-overridable. */
 export type AutonomousWorkflowPortfolioRunOptions = Omit<
   AutonomousRunOptions,
@@ -51,6 +66,14 @@ export interface AutonomousWorkflowPortfolioExecutionOptions {
   verifyPlan?: boolean;
   /** Controls shared by every item, including candidates, credentialFor, memory, learning, tools, and budgets. */
   run?: AutonomousWorkflowPortfolioRunOptions;
+  /** Optional controller used to settle explicit evaluator rewards for completed portfolio items. */
+  learning?: AutonomousLearningController;
+  /** Digest of the caller-owned evaluator policy; binds resumable feedback to one evaluator contract. */
+  learningPolicyDigest?: string;
+  /** Build one explicit evaluator reward packet from a completed item; null defers settlement. */
+  evaluateItem?: (context: AutonomousWorkflowPortfolioLearningEvaluationContext) => AutonomousEvaluatorRewardInput | null | Promise<AutonomousEvaluatorRewardInput | null>;
+  /** Direct, remote, and restart-safe outbox controls for item settlement. */
+  learningSettlement?: AutonomousWorkflowPortfolioLearningSettlementOptions;
   /** Explicit approval for every provider invocation; defaults to false. */
   approveProviderCall?: boolean;
   /** Maximum number of same-wave item runs in flight. */
@@ -61,6 +84,21 @@ export interface AutonomousWorkflowPortfolioExecutionOptions {
   includeDependencyOutputs?: boolean;
   /** Aggregate byte budget for direct predecessor prompt handoffs. */
   maxDependencyHandoffBytes?: number;
+}
+
+export interface AutonomousWorkflowPortfolioLearningEvaluationContext {
+  itemId: string;
+  domain: AutonomousDomainName;
+  request: AutonomousWorkflowPortfolioItemRequest;
+  planItem: AutonomousWorkflowPortfolioPlan["items"][number];
+  run: AutonomousRunResult;
+  outputText: string;
+  outputDigest: string | null;
+}
+
+export interface AutonomousWorkflowPortfolioLearningSettlementOptions {
+  remote?: boolean;
+  outbox?: AutonomousLearningOutboxSettlementOptions;
 }
 
 /** Internal resume hook used by the metadata-only durable portfolio controller. */
@@ -87,6 +125,11 @@ export interface AutonomousWorkflowPortfolioExecutionItemJSON extends JsonObject
   output_bytes: number;
   error_class: string | null;
   failure_code: string | null;
+  learning_status: AutonomousWorkflowPortfolioLearningStatus;
+  learning_episode_id: string | null;
+  evaluation_digest: string | null;
+  settlement_digest: string | null;
+  learning_error_class: string | null;
   retention: "metadata_only_task_and_provider_output_not_retained";
   secret_material: "never_returned";
 }
@@ -102,6 +145,10 @@ export interface AutonomousWorkflowPortfolioExecutionJSON extends JsonObject {
   blocked_count: number;
   approval_required_count: number;
   omitted_count: number;
+  learning_settled_count: number;
+  learning_pending_count: number;
+  learning_not_eligible_count: number;
+  learning_failed_count: number;
   items: AutonomousWorkflowPortfolioExecutionItemJSON[];
   execution: "provider_and_tool_calls_are_per_item_approved;outputs_transient_to_caller";
   authorization: "portfolio_plan_verification_does_not_authorize_provider_or_effects";
@@ -152,6 +199,11 @@ export async function digestAutonomousWorkflowPortfolioExecutionItem(item: Auton
     output_bytes: item.outputBytes,
     error_class: item.errorClass,
     failure_code: item.failureCode,
+    learning_status: item.learningStatus,
+    learning_episode_id: item.learningEpisodeId,
+    evaluation_digest: item.evaluationDigest,
+    settlement_digest: item.settlementDigest,
+    learning_error_class: item.learningErrorClass,
   });
 }
 
@@ -193,6 +245,10 @@ function executionCounts(items: readonly AutonomousWorkflowPortfolioItemExecutio
   blocked: number;
   approvalRequired: number;
   omitted: number;
+  learningSettled: number;
+  learningPending: number;
+  learningNotEligible: number;
+  learningFailed: number;
 } {
   return {
     completed: items.filter((item) => item.status === "succeeded").length,
@@ -200,7 +256,25 @@ function executionCounts(items: readonly AutonomousWorkflowPortfolioItemExecutio
     blocked: items.filter((item) => item.status === "blocked").length,
     approvalRequired: items.filter((item) => item.status === "approval_required").length,
     omitted: items.filter((item) => item.status === "omitted").length,
+    learningSettled: items.filter((item) => item.learningStatus === "settled").length,
+    learningPending: items.filter((item) => item.learningStatus === "pending_evaluation").length,
+    learningNotEligible: items.filter((item) => item.learningStatus === "not_eligible").length,
+    learningFailed: items.filter((item) => item.learningStatus === "preparation_failed" || item.learningStatus === "evaluation_failed" || item.learningStatus === "settlement_failed").length,
   };
+}
+
+function learningControllerFor(options: AutonomousWorkflowPortfolioExecutionOptions): AutonomousLearningController | undefined {
+  return options.learning ?? options.run?.learning;
+}
+
+function learningPolicyDigestFor(options: AutonomousWorkflowPortfolioExecutionOptions): string | null {
+  if (options.learningPolicyDigest === undefined) return null;
+  if (typeof options.learningPolicyDigest !== "string" || !/^[0-9a-f]{64}$/.test(options.learningPolicyDigest)) throw new ArgumentError("workflow portfolio learningPolicyDigest must be a lowercase SHA-256 digest");
+  return options.learningPolicyDigest;
+}
+
+function learningIncomplete(status: AutonomousWorkflowPortfolioLearningStatus): boolean {
+  return status === "pending_evaluation" || status === "preparation_failed" || status === "evaluation_failed" || status === "settlement_failed";
 }
 
 function dependencyStatuses(item: AutonomousWorkflowPortfolioItemExecutionResult, results: ReadonlyMap<string, AutonomousWorkflowPortfolioItemExecutionResult>): Record<string, AutonomousWorkflowPortfolioExecutionItemStatus> {
@@ -210,11 +284,18 @@ function dependencyStatuses(item: AutonomousWorkflowPortfolioItemExecutionResult
 function runOptionsFor(
   request: AutonomousWorkflowPortfolioItemRequest,
   itemId: string,
+  planDigest: string,
   options: AutonomousWorkflowPortfolioExecutionOptions,
   context: readonly AutonomousPromptChunk[],
 ): AutonomousRunOptions {
   const base = options.run ?? {};
   const approval = options.approveProviderCall ?? base.approveProviderCall ?? false;
+  const learning = options.learning ?? base.learning;
+  const learningEpisodeId = base.learningEpisodeId
+    ? `${base.learningEpisodeId}:${itemId}`
+    : learning
+      ? `portfolio:${planDigest.slice(0, 24)}:${itemId}`
+      : undefined;
   return {
     ...base,
     domain: request.domain,
@@ -223,8 +304,9 @@ function runOptionsFor(
     hints: request.hints ?? [],
     allowCrossDomain: false,
     approveProviderCall: approval,
+    ...(learning ? { learning } : {}),
     ...(base.memoryRunId ? { memoryRunId: `${base.memoryRunId}:${itemId}` } : {}),
-    ...(base.learningEpisodeId ? { learningEpisodeId: `${base.learningEpisodeId}:${itemId}` } : {}),
+    ...(learningEpisodeId ? { learningEpisodeId } : {}),
   };
 }
 
@@ -250,6 +332,98 @@ function dependencyHandoffs(
   });
 }
 
+type AutonomousWorkflowPortfolioLearningProjection = {
+  status: AutonomousWorkflowPortfolioLearningStatus;
+  episodeId: string | null;
+  evaluationDigest: string | null;
+  settlementDigest: string | null;
+  errorClass: string | null;
+};
+
+function noLearningProjection(status: AutonomousWorkflowPortfolioLearningStatus = "disabled"): AutonomousWorkflowPortfolioLearningProjection {
+  return { status, episodeId: null, evaluationDigest: null, settlementDigest: null, errorClass: null };
+}
+
+function learningSettlementKey(planDigest: string, itemId: string): string {
+  return `portfolio:${planDigest.slice(0, 24)}:${itemId}`;
+}
+
+async function settlePortfolioItemLearning(
+  options: AutonomousWorkflowPortfolioExecutionOptions,
+  planDigest: string,
+  request: AutonomousWorkflowPortfolioItemRequest,
+  planItem: AutonomousWorkflowPortfolioPlan["items"][number],
+  itemId: string,
+  run: AutonomousRunResult,
+  outputText: string,
+  outputDigest: string | null,
+): Promise<AutonomousWorkflowPortfolioLearningProjection> {
+  const learning = learningControllerFor(options);
+  if (!learning) return noLearningProjection();
+  const episodeId = run.learning_episode_id ?? null;
+  if (run.learning_episode_status === "failed") {
+    return { ...noLearningProjection("preparation_failed"), errorClass: run.learning_error_class ?? "learning_episode_preparation_failed" };
+  }
+  if (run.status !== "completed" || run.learning_episode_status !== "prepared" || !episodeId) return noLearningProjection("not_eligible");
+  if (!options.evaluateItem) return { ...noLearningProjection("pending_evaluation"), episodeId };
+
+  let reward: AutonomousEvaluatorRewardInput | null;
+  try {
+    reward = await options.evaluateItem({ itemId, domain: planItem.domain, request, planItem, run, outputText, outputDigest });
+    if (reward === null) return { ...noLearningProjection("pending_evaluation"), episodeId };
+    if (!isObject(reward)) throw new ArgumentError("portfolio evaluator returned a malformed reward packet");
+  } catch (error) {
+    return { ...noLearningProjection("evaluation_failed"), episodeId, errorClass: errorMetadata(error).errorClass };
+  }
+
+  try {
+    const settlement = await learning.settleRun(episodeId, reward, {
+      idempotencyKey: learningSettlementKey(planDigest, itemId),
+      remote: options.learningSettlement?.remote,
+      outbox: options.learningSettlement?.outbox,
+    });
+    return {
+      status: "settled",
+      episodeId,
+      evaluationDigest: await digestJson(settlement.assessment),
+      settlementDigest: settlement.episode.settlement?.settlement_digest ?? null,
+      errorClass: null,
+    };
+  } catch (error) {
+    return { ...noLearningProjection("settlement_failed"), episodeId, errorClass: errorMetadata(error).errorClass };
+  }
+}
+
+async function applyRehydratedLearningSettlement(
+  item: AutonomousWorkflowPortfolioItemExecutionResult,
+  options: AutonomousWorkflowPortfolioExecutionOptions,
+  planDigest: string,
+  request: AutonomousWorkflowPortfolioItemRequest | undefined,
+  planItem: AutonomousWorkflowPortfolioPlan["items"][number],
+): Promise<AutonomousWorkflowPortfolioItemExecutionResult> {
+  if (!request || !item.run || !["pending_evaluation", "evaluation_failed", "settlement_failed"].includes(item.learningStatus)) return item;
+  const projection = await settlePortfolioItemLearning(options, planDigest, request, planItem, item.itemId, item.run, item.transientOutputText, item.outputDigest);
+  if (projection.status === item.learningStatus && projection.episodeId === item.learningEpisodeId && projection.evaluationDigest === item.evaluationDigest && projection.settlementDigest === item.settlementDigest && projection.errorClass === item.learningErrorClass) return item;
+  return new AutonomousWorkflowPortfolioItemExecutionResult(
+    item.itemId,
+    item.domain,
+    [...item.dependsOn],
+    item.status,
+    item.run,
+    item.outputDigest,
+    item.outputBytes,
+    item.errorClass,
+    item.failureCode,
+    item.includeDependencyOutputs,
+    item.transientOutputText,
+    projection.status,
+    projection.episodeId,
+    projection.evaluationDigest,
+    projection.settlementDigest,
+    projection.errorClass,
+  );
+}
+
 /** Transient execution record. Its JSON projection intentionally excludes the run and output. */
 export class AutonomousWorkflowPortfolioItemExecutionResult {
   readonly schema = AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_SCHEMA;
@@ -266,6 +440,11 @@ export class AutonomousWorkflowPortfolioItemExecutionResult {
     readonly failureCode: string | null,
     readonly includeDependencyOutputs = false,
     readonly transientOutputText: string = "",
+    readonly learningStatus: AutonomousWorkflowPortfolioLearningStatus = "disabled",
+    readonly learningEpisodeId: string | null = null,
+    readonly evaluationDigest: string | null = null,
+    readonly settlementDigest: string | null = null,
+    readonly learningErrorClass: string | null = null,
   ) {}
 
   toJSON(results?: ReadonlyMap<string, AutonomousWorkflowPortfolioItemExecutionResult>): AutonomousWorkflowPortfolioExecutionItemJSON {
@@ -282,6 +461,11 @@ export class AutonomousWorkflowPortfolioItemExecutionResult {
       output_bytes: this.outputBytes,
       error_class: this.errorClass,
       failure_code: this.failureCode,
+      learning_status: this.learningStatus,
+      learning_episode_id: this.learningEpisodeId,
+      evaluation_digest: this.evaluationDigest,
+      settlement_digest: this.settlementDigest,
+      learning_error_class: this.learningErrorClass,
       retention: "metadata_only_task_and_provider_output_not_retained",
       secret_material: "never_returned",
     };
@@ -311,7 +495,11 @@ export class AutonomousWorkflowPortfolioExecutionResult {
       failed_count: counts.failed,
       blocked_count: counts.blocked,
       approval_required_count: counts.approvalRequired,
-      omitted_count: counts.omitted,
+    omitted_count: counts.omitted,
+      learning_settled_count: counts.learningSettled,
+      learning_pending_count: counts.learningPending,
+      learning_not_eligible_count: counts.learningNotEligible,
+      learning_failed_count: counts.learningFailed,
       items: itemJson,
       execution: "provider_and_tool_calls_are_per_item_approved;outputs_transient_to_caller",
       authorization: "portfolio_plan_verification_does_not_authorize_provider_or_effects",
@@ -355,7 +543,9 @@ function requestMap(values: readonly AutonomousWorkflowPortfolioItemRequest[]): 
 
 function overallStatus(plan: AutonomousWorkflowPortfolioPlan, items: readonly AutonomousWorkflowPortfolioItemExecutionResult[]): AutonomousWorkflowPortfolioExecutionStatus {
   if (plan.status === "blocked") return "blocked";
-  if (items.length > 0 && items.every((item) => item.status === "succeeded")) return "completed";
+  if (items.length > 0 && items.every((item) => item.status === "succeeded")) {
+    return items.some((item) => learningIncomplete(item.learningStatus)) ? "partial" : "completed";
+  }
   if (items.some((item) => item.status === "approval_required") && !items.some((item) => hardFailure(item.status) || item.status === "succeeded")) return "approval_required";
   if (items.some((item) => hardFailure(item.status)) && !items.some((item) => item.status === "succeeded")) return "failed";
   return "partial";
@@ -384,6 +574,9 @@ export async function executeAutonomousWorkflowPortfolioWithInitialItems(
 ): Promise<AutonomousWorkflowPortfolioExecutionResult> {
   if (!agent || typeof agent.run !== "function" || typeof agent.blueprint !== "function") throw new ArgumentError("workflow portfolio execution requires an AutonomousAgent");
   if (options.verifyPlan !== undefined && typeof options.verifyPlan !== "boolean") throw new ArgumentError("workflow portfolio verifyPlan must be boolean");
+  learningPolicyDigestFor(options);
+  if (options.learningSettlement?.remote !== undefined && typeof options.learningSettlement.remote !== "boolean") throw new ArgumentError("workflow portfolio learningSettlement.remote must be boolean");
+  if (options.evaluateItem !== undefined && typeof options.evaluateItem !== "function") throw new ArgumentError("workflow portfolio evaluateItem must be callable");
   const maxParallelism = boundedInteger("workflow portfolio maxParallelism", options.maxParallelism, 1, MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_PARALLELISM, 4);
   const maxHandoffBytes = boundedInteger("workflow portfolio maxDependencyHandoffBytes", options.maxDependencyHandoffBytes, 512, MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_HANDOFF_BYTES, DEFAULT_AUTONOMOUS_WORKFLOW_PORTFOLIO_HANDOFF_BYTES);
   const requestById = requestMap(requests);
@@ -402,7 +595,8 @@ export async function executeAutonomousWorkflowPortfolioWithInitialItems(
     if (!planItem || planItem.status !== "ready" || executions.has(initial.itemId) || initial.domain !== planItem.domain || JSON.stringify(initial.dependsOn) !== JSON.stringify(planItem.depends_on)) {
       throw new ProviderRuntimeError(`rehydrated workflow portfolio item ${initial.itemId} does not match the reviewed plan`, { code: "protocol", retryable: false, operation: "workflow_portfolio_rehydrate" });
     }
-    executions.set(initial.itemId, initial);
+    const rehydrated = await applyRehydratedLearningSettlement(initial, options, plan.portfolio_digest, requestById.get(initial.itemId), planItem);
+    executions.set(initial.itemId, rehydrated);
   }
   for (const item of plan.items) {
     if (item.status !== "ready") executions.set(item.item_id, new AutonomousWorkflowPortfolioItemExecutionResult(item.item_id, item.domain, [...item.depends_on], statusForPlanItem(item), null, null, 0, item.error_class, item.error_class));
@@ -448,11 +642,13 @@ export async function executeAutonomousWorkflowPortfolioWithInitialItems(
           ...dependencyHandoffs(new AutonomousWorkflowPortfolioItemExecutionResult(itemId, planItem.domain, [...planItem.depends_on], "succeeded", null, null, 0, null, null, includeDependencyOutputs), executions, maxHandoffBytes),
         ];
         try {
-          const run = await agent.run(request.task, runOptionsFor({ ...request, domain: planItem.domain }, itemId, options, context));
+          const run = await agent.run(request.task, runOptionsFor({ ...request, domain: planItem.domain }, itemId, plan.portfolio_digest, options, context));
           const status = executionStatusForRun(run);
           const outputProjection = autonomousWorkflowPortfolioTransientOutput(run);
           const output = outputProjection.text;
-          return new AutonomousWorkflowPortfolioItemExecutionResult(itemId, planItem.domain, [...planItem.depends_on], status, run, output ? await digestJson({ item_id: itemId, output }) : null, outputProjection.bytes, null, status === "succeeded" ? null : status, includeDependencyOutputs, output);
+          const outputDigest = output ? await digestJson({ item_id: itemId, output }) : null;
+          const learning = await settlePortfolioItemLearning(options, plan.portfolio_digest, request, planItem, itemId, run, output, outputDigest);
+          return new AutonomousWorkflowPortfolioItemExecutionResult(itemId, planItem.domain, [...planItem.depends_on], status, run, outputDigest, outputProjection.bytes, null, status === "succeeded" ? null : status, includeDependencyOutputs, output, learning.status, learning.episodeId, learning.evaluationDigest, learning.settlementDigest, learning.errorClass);
         } catch (error) {
           const metadata = errorMetadata(error);
           return new AutonomousWorkflowPortfolioItemExecutionResult(itemId, planItem.domain, [...planItem.depends_on], "failed", null, null, 0, metadata.errorClass, metadata.failureCode, includeDependencyOutputs);
@@ -477,7 +673,11 @@ export async function executeAutonomousWorkflowPortfolioWithInitialItems(
     failed_count: counts.failed,
     blocked_count: counts.blocked,
     approval_required_count: counts.approvalRequired,
-    omitted_count: counts.omitted,
+      omitted_count: counts.omitted,
+    learning_settled_count: counts.learningSettled,
+    learning_pending_count: counts.learningPending,
+    learning_not_eligible_count: counts.learningNotEligible,
+    learning_failed_count: counts.learningFailed,
     items: items.map((item) => item.toJSON(new Map(items.map((candidate) => [candidate.itemId, candidate])))),
     execution: "provider_and_tool_calls_are_per_item_approved;outputs_transient_to_caller" as const,
     authorization: "portfolio_plan_verification_does_not_authorize_provider_or_effects" as const,

@@ -25,7 +25,7 @@ import { digestJson } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
 /** Metadata-only restart checkpoint for a verified workflow portfolio. */
-export const AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_CHECKPOINT_SCHEMA = "bioprism-typescript-autonomous-workflow-portfolio-execution-checkpoint/0.1" as const;
+export const AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_CHECKPOINT_SCHEMA = "bioprism-typescript-autonomous-workflow-portfolio-execution-checkpoint/0.2" as const;
 export const MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_CHECKPOINT_BYTES = 256_000;
 
 export type AutonomousWorkflowPortfolioCheckpointStatus = "running" | "partial" | "completed" | "blocked";
@@ -45,6 +45,7 @@ export interface AutonomousWorkflowPortfolioExecutionCheckpointJSON extends Json
   stop_on_error: boolean;
   include_dependency_outputs: boolean;
   max_dependency_handoff_bytes: number;
+  learning_policy_digest: string | null;
   status: AutonomousWorkflowPortfolioCheckpointStatus;
   checkpoint_digest: string;
   retention: "request_and_result_digests_only;tasks_prompts_credentials_and_provider_payloads_never_persisted";
@@ -115,7 +116,7 @@ function digest(value: unknown, name: string): string {
   return value;
 }
 
-function boundedControls(options: AutonomousWorkflowPortfolioResumableExecutionOptions): { maxParallelism: number; stopOnError: boolean; includeDependencyOutputs: boolean; maxDependencyHandoffBytes: number } {
+function boundedControls(options: AutonomousWorkflowPortfolioResumableExecutionOptions): { maxParallelism: number; stopOnError: boolean; includeDependencyOutputs: boolean; maxDependencyHandoffBytes: number; learningPolicyDigest: string | null } {
   const maxParallelism = options.maxParallelism ?? 4;
   if (!Number.isSafeInteger(maxParallelism) || maxParallelism < 1 || maxParallelism > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_PARALLELISM) throw new ArgumentError("workflow portfolio resumable maxParallelism is outside its bound");
   const stopOnError = options.stopOnError ?? false;
@@ -123,7 +124,9 @@ function boundedControls(options: AutonomousWorkflowPortfolioResumableExecutionO
   const includeDependencyOutputs = options.includeDependencyOutputs !== false;
   const maxDependencyHandoffBytes = options.maxDependencyHandoffBytes ?? DEFAULT_AUTONOMOUS_WORKFLOW_PORTFOLIO_HANDOFF_BYTES;
   if (!Number.isSafeInteger(maxDependencyHandoffBytes) || maxDependencyHandoffBytes < 512 || maxDependencyHandoffBytes > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_HANDOFF_BYTES) throw new ArgumentError("workflow portfolio resumable maxDependencyHandoffBytes is outside its bound");
-  return { maxParallelism, stopOnError, includeDependencyOutputs, maxDependencyHandoffBytes };
+  const learningPolicyDigest = options.learningPolicyDigest === undefined ? null : options.learningPolicyDigest;
+  if (learningPolicyDigest !== null && (typeof learningPolicyDigest !== "string" || !/^[0-9a-f]{64}$/.test(learningPolicyDigest))) throw new ArgumentError("workflow portfolio resumable learningPolicyDigest must be a lowercase SHA-256 digest");
+  return { maxParallelism, stopOnError, includeDependencyOutputs, maxDependencyHandoffBytes, learningPolicyDigest };
 }
 
 function checkpointable(status: AutonomousWorkflowPortfolioExecutionItemStatus): boolean {
@@ -159,6 +162,7 @@ async function makeCheckpoint(input: {
   stopOnError: boolean;
   includeDependencyOutputs: boolean;
   maxDependencyHandoffBytes: number;
+  learningPolicyDigest: string | null;
 }): Promise<AutonomousWorkflowPortfolioExecutionCheckpointJSON> {
   const ready = new Set(input.plan.items.filter((item) => item.status === "ready").map((item) => item.item_id));
   const byId = new Map(input.progress.items.map((item) => [item.itemId, item]));
@@ -181,6 +185,7 @@ async function makeCheckpoint(input: {
     stop_on_error: input.stopOnError,
     include_dependency_outputs: input.includeDependencyOutputs,
     max_dependency_handoff_bytes: input.maxDependencyHandoffBytes,
+    learning_policy_digest: input.learningPolicyDigest,
     status: checkpointStatusFor(input.progress.status),
   };
   const encoded = JSON.stringify(payload);
@@ -191,7 +196,7 @@ async function makeCheckpoint(input: {
 /** Validate checkpoint structure, identity, digest, and retention markers before reuse. */
 export async function validateAutonomousWorkflowPortfolioExecutionCheckpoint(value: unknown): Promise<AutonomousWorkflowPortfolioExecutionCheckpointJSON> {
   if (!isObject(value) || value.schema !== AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_CHECKPOINT_SCHEMA) throw new ArgumentError("workflow portfolio execution checkpoint schema is invalid");
-  const allowed = new Set(["schema", "job_id", "plan_digest", "portfolio_input_digest", "item_ids", "request_digests", "task_digests", "settled_item_ids", "settled_item_statuses", "settled_result_digests", "max_parallelism", "stop_on_error", "include_dependency_outputs", "max_dependency_handoff_bytes", "status", "checkpoint_digest", "retention", "secret_material"]);
+  const allowed = new Set(["schema", "job_id", "plan_digest", "portfolio_input_digest", "item_ids", "request_digests", "task_digests", "settled_item_ids", "settled_item_statuses", "settled_result_digests", "max_parallelism", "stop_on_error", "include_dependency_outputs", "max_dependency_handoff_bytes", "learning_policy_digest", "status", "checkpoint_digest", "retention", "secret_material"]);
   if (Object.keys(value).some((key) => !allowed.has(key))) throw new ArgumentError("workflow portfolio execution checkpoint contains unsupported fields");
   const jobId = boundedIdentifier("workflow portfolio execution checkpoint job_id", value.job_id);
   const planDigest = digest(value.plan_digest, "workflow portfolio execution checkpoint plan_digest");
@@ -214,6 +219,7 @@ export async function validateAutonomousWorkflowPortfolioExecutionCheckpoint(val
   if (normalizedSettledStatuses.some((status) => !checkpointable(status))) throw new ArgumentError("workflow portfolio execution checkpoint settled statuses are invalid");
   if (settledDigests.some((item) => typeof item !== "string" || !/^[0-9a-f]{64}$/.test(item))) throw new ArgumentError("workflow portfolio execution checkpoint settled result digests are invalid");
   if (!Number.isSafeInteger(value.max_parallelism) || (value.max_parallelism as number) < 1 || (value.max_parallelism as number) > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_PARALLELISM || typeof value.stop_on_error !== "boolean" || typeof value.include_dependency_outputs !== "boolean" || !Number.isSafeInteger(value.max_dependency_handoff_bytes) || (value.max_dependency_handoff_bytes as number) < 512 || (value.max_dependency_handoff_bytes as number) > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_HANDOFF_BYTES) throw new ArgumentError("workflow portfolio execution checkpoint controls are invalid");
+  const learningPolicyDigest = value.learning_policy_digest === null ? null : digest(value.learning_policy_digest, "workflow portfolio execution checkpoint learning_policy_digest");
   if (!["running", "partial", "completed", "blocked"].includes(value.status as string)) throw new ArgumentError("workflow portfolio execution checkpoint status is invalid");
   if (value.retention !== CHECKPOINT_RETENTION || value.secret_material !== CHECKPOINT_SECRET_MATERIAL) throw new ArgumentError("workflow portfolio execution checkpoint retention contract is invalid");
   const payload = {
@@ -231,6 +237,7 @@ export async function validateAutonomousWorkflowPortfolioExecutionCheckpoint(val
     stop_on_error: value.stop_on_error as boolean,
     include_dependency_outputs: value.include_dependency_outputs as boolean,
     max_dependency_handoff_bytes: value.max_dependency_handoff_bytes as number,
+    learning_policy_digest: learningPolicyDigest,
     status: value.status as AutonomousWorkflowPortfolioCheckpointStatus,
   };
   if (await digestJson(payload) !== value.checkpoint_digest) throw new ArgumentError("workflow portfolio execution checkpoint digest is invalid");
@@ -240,7 +247,7 @@ export async function validateAutonomousWorkflowPortfolioExecutionCheckpoint(val
 async function validatePlanBinding(plan: AutonomousWorkflowPortfolioPlan, checkpoint: AutonomousWorkflowPortfolioExecutionCheckpointJSON, controls: ReturnType<typeof boundedControls>): Promise<void> {
   const inputDigest = await portfolioInputDigest(plan);
   if (checkpoint.plan_digest !== plan.portfolio_digest || checkpoint.portfolio_input_digest !== inputDigest || JSON.stringify(checkpoint.item_ids) !== JSON.stringify(plan.items.map((item) => item.item_id)) || JSON.stringify(checkpoint.request_digests) !== JSON.stringify(plan.items.map((item) => item.request_digest)) || JSON.stringify(checkpoint.task_digests) !== JSON.stringify(plan.items.map((item) => item.task_digest))) throw new ArgumentError("workflow portfolio execution checkpoint does not match the current reviewed plan");
-  if (checkpoint.max_parallelism !== controls.maxParallelism || checkpoint.stop_on_error !== controls.stopOnError || checkpoint.include_dependency_outputs !== controls.includeDependencyOutputs || checkpoint.max_dependency_handoff_bytes !== controls.maxDependencyHandoffBytes) throw new ArgumentError("workflow portfolio execution checkpoint controls do not match");
+  if (checkpoint.max_parallelism !== controls.maxParallelism || checkpoint.stop_on_error !== controls.stopOnError || checkpoint.include_dependency_outputs !== controls.includeDependencyOutputs || checkpoint.max_dependency_handoff_bytes !== controls.maxDependencyHandoffBytes || checkpoint.learning_policy_digest !== controls.learningPolicyDigest) throw new ArgumentError("workflow portfolio execution checkpoint controls do not match");
   const readyItemIds = plan.items.filter((item) => item.status === "ready").map((item) => item.item_id);
   if (checkpoint.settled_item_ids.some((itemId) => !readyItemIds.includes(itemId))) throw new ArgumentError("workflow portfolio execution checkpoint settles an item that was not executable in the reviewed plan");
   if (checkpoint.status === "completed" && (plan.status === "blocked" || JSON.stringify(checkpoint.settled_item_ids) !== JSON.stringify(readyItemIds) || checkpoint.settled_item_statuses.some((status) => status !== "succeeded"))) throw new ArgumentError("completed workflow portfolio execution checkpoint is not complete");

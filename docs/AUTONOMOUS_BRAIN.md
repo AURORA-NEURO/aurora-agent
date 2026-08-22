@@ -1738,6 +1738,33 @@ const execution = await agent.executeWorkflowPortfolio(requests, {
 // prompts, credentials, provider responses, tool payloads, or predecessor output.
 ```
 
+Portfolio execution can also close the evaluator-to-bandit loop for every item, but reward is
+never inferred from a provider response or from `status: "completed"`. The caller supplies the
+learning controller and an `evaluateItem` callback that returns one explicit bounded reward
+packet. The controller settles through its existing idempotency receipt and optional feedback
+outbox; the portfolio retains only `learning_status`, episode/evaluation/settlement digests, and
+bounded failure classes:
+
+```typescript
+const execution = await agent.executeWorkflowPortfolio(requests, {
+  plan: portfolio,
+  approveProviderCall: true,
+  learning,
+  learningPolicyDigest: evaluatorPolicyDigest,
+  learningSettlement: { outbox: { workerId: "portfolio-feedback-worker" } },
+  evaluateItem: ({ domain, run, outputDigest }) => domainEvaluators[domain].reward({
+    run, outputDigest, // raw output is transient and remains caller-owned
+  }),
+});
+// settled | pending_evaluation | evaluation_failed | settlement_failed are explicit.
+// A portfolio with successful provider runs but incomplete feedback is `partial`, not `completed`.
+```
+
+If `evaluateItem` is omitted while learning is enabled, completed items remain
+`pending_evaluation`; this allows a restart to rehydrate the run and settle it later without
+replaying the provider. `learningPolicyDigest` binds a resumable checkpoint to the caller's
+evaluator contract, while reward/evidence bodies and task/output values remain transient.
+
 Approval is fail-closed: with `approveProviderCall` absent or false, the first ready item returns
 `approval_required`, descendants become `blocked`, and no provider call starts. Hard failures,
 route review, uncertain effects, turn limits, and child failures are never converted into success;
@@ -1755,6 +1782,11 @@ before admitting the item. Settled work is then excluded from dependency waves, 
 silently replayed. `InMemoryAutonomousWorkflowPortfolioExecutionCheckpointStore` and
 `AutonomousWorkflowPortfolioExecutionController` provide a small local adapter; production
 applications can implement the same read/write interface with an atomic durable store.
+Checkpoint schema `0.2` also binds the optional evaluator-policy digest. Rehydrated items with
+pending, evaluation-failed, or settlement-failed learning states are admitted for feedback retry
+before later dependency waves are considered; provider work is not replayed. A settlement failure
+does not erase a valid provider result, but it keeps the aggregate result partial until the caller
+supplies or replays the missing feedback boundary.
 
 Packs do not contain task text, prompts, keys, provider payloads, tool arguments, or outputs. They
 are reviewed planning and evidence metadata, not a source of truth. A production application can

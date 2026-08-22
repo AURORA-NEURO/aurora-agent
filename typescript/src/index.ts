@@ -314,6 +314,9 @@ export type {
   AutonomousWorkflowPortfolioExecutionOptions,
   AutonomousWorkflowPortfolioExecutionItemJSON,
   AutonomousWorkflowPortfolioExecutionJSON,
+  AutonomousWorkflowPortfolioLearningStatus,
+  AutonomousWorkflowPortfolioLearningEvaluationContext,
+  AutonomousWorkflowPortfolioLearningSettlementOptions,
 } from "./autonomous-workflow-portfolio-execution.js";
 export {
   AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_CHECKPOINT_SCHEMA,

@@ -21,7 +21,11 @@ The portfolio now also has a restart-safe checkpoint/controller boundary. Settle
 digests can be rehydrated by a caller-owned private store and are validated before pending waves
 resume, preventing completed provider work from being replayed. The checkpoint is metadata-only;
 durable multi-host leases, external effect reconciliation, and provider-specific evidence adapters
-remain separate integration work.
+remain separate integration work. Portfolio items now also bind the existing explicit evaluator,
+idempotent learner settlement, and optional feedback outbox into the same twelve-domain surface.
+Evaluator policy digests, learning episode identity, pending feedback, and settlement failure are
+checkpoint-visible without persisting task text, evidence bodies, provider responses, or keys;
+provider completion alone still never produces reward.
 
 The autonomous façade now compiles every built-in workflow into a digest-bound evidence plan.
 Python `AutonomousTaskOrchestrator.evidence_plan()` and TypeScript `AutonomousAgent.evidencePlan()`
