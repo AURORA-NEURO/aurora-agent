@@ -39,6 +39,7 @@ import {
 } from "./autonomous-connectors.js";
 import { AutonomousEffectBoundary, AutonomousEffectReconciliationRequiredError, type AutonomousEffectExecutionContext } from "./autonomous-effects.js";
 import type { AutonomousLearningController } from "./autonomous-learning.js";
+import type { AutonomousModelInventoryRefreshOptions, AutonomousModelInventorySnapshot } from "./autonomous-model-inventory.js";
 import { taskFacetDigests } from "./autonomous-memory.js";
 import { buildAutonomousEvidencePlan, type AutonomousEvidencePlan, type AutonomousEvidencePlanJSON } from "./autonomous-evidence.js";
 import {
@@ -3361,6 +3362,19 @@ export class AutonomousAgent {
       retention: "model_metadata_only;credentials_and_raw_catalogue_not_retained",
       secret_material: "never_returned",
     };
+  }
+
+  /**
+   * Refresh provider inventory and calculate all-domain model readiness through the same agent.
+   * The dynamic import keeps the inventory coordinator optional for lightweight embeddings while
+   * preserving a single public entry point for protected-session onboarding flows.
+   */
+  async refreshModelInventory(
+    specs: readonly AutonomousModelRefreshSpec[],
+    options: AutonomousModelInventoryRefreshOptions = {},
+  ): Promise<AutonomousModelInventorySnapshot> {
+    const { AutonomousModelInventoryCoordinator } = await import("./autonomous-model-inventory.js");
+    return new AutonomousModelInventoryCoordinator(this).refresh(specs, options);
   }
 
   async profiles(): Promise<AutonomousDomainProfile[]> {

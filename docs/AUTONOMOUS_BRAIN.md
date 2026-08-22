@@ -1416,8 +1416,13 @@ const inventory = new AutonomousModelInventoryCoordinator(agent, inventoryStore)
 const snapshot = await inventory.refresh([
   { provider: "openai", defaults: callerReviewedPriors },
   { provider: "anthropic", defaults: callerReviewedPriors },
-], { credentialFor: provider => session.handle(provider), refreshId: "inventory-2026-08-22" });
+], { credentialSession: session, refreshId: "inventory-2026-08-22" });
 ```
+
+`ProviderSetup.refreshModelInventory(agent, session, specs)` is the convenience bridge for this
+flow. It verifies that the short-lived session belongs to the setup instance and passes only
+opaque provider-scoped handles to discovery; credentialless in-memory providers are handled
+without requiring a synthetic key.
 
 `refresh()` is the only operation that performs provider model discovery. Persistence and
 `restore()` are provider-free, digest-bound catalogue rehydration. Discovery can establish that

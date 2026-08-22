@@ -6,6 +6,7 @@ import {
   AutonomousAgent,
   AutonomousModelInventoryCoordinator,
   LLMRuntime,
+  ProviderSetup,
 } from "../dist/index.js";
 
 const capabilities = [
@@ -66,4 +67,25 @@ test("model inventory reports partial provider discovery and rejects tampered sn
   const tampered = structuredClone(snapshot);
   tampered.models[0].quality = 1;
   await assert.rejects(() => new AutonomousModelInventoryCoordinator(agent).restore({ read: () => tampered, write: () => {} }), /digest mismatch/);
+});
+
+test("provider setup bridges an opaque session into agent inventory refresh", async () => {
+  const llm = new LLMRuntime({ fetch: async () => { throw new Error("HTTP must not be reached"); } });
+  const setup = new ProviderSetup(llm);
+  setup.registerProvider("groq", {
+    transport: {
+      invoke: () => ({ output_text: "transient" }),
+      discoverModels: async () => ({ data: [{ id: "session-model", context_window: 32_000, max_output_tokens: 2_000, capabilities }] }),
+    },
+  });
+  const session = setup.startSession({ sessionId: "inventory-session" });
+  const agent = new AutonomousAgent(llm);
+  const snapshot = await setup.refreshModelInventory(agent, session, [{
+    provider: "groq",
+    defaults: { context_window_tokens: 16_000, max_output_tokens: 1_000, quality: 0.75, latency_ms: 30, cost_per_million_tokens: 1, reliability: 0.9 },
+  }], { refreshId: "session-inventory-1" });
+  assert.equal(snapshot.readiness, "ready");
+  assert.equal(snapshot.models[0].model, "session-model");
+  assert.doesNotMatch(JSON.stringify(snapshot), /transient|inventory-session/);
+  session.close();
 });

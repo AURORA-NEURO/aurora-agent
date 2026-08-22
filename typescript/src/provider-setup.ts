@@ -22,6 +22,12 @@ import {
   xaiProvider,
 } from "./llm.js";
 import type { JsonObject } from "./types.js";
+import type { AutonomousAgent } from "./autonomous.js";
+import type {
+  AutonomousModelInventoryRefreshOptions,
+  AutonomousModelInventorySnapshot,
+} from "./autonomous-model-inventory.js";
+import type { AutonomousModelRefreshSpec } from "./autonomous.js";
 
 /** Redacted provider catalog and setup-flow contract for embedding applications. */
 export const PROVIDER_SETUP_SCHEMA = "bioprism-typescript-provider-setup/0.1" as const;
@@ -320,6 +326,22 @@ export class ProviderSetup {
   async provision(session: CredentialSession, options: { providers?: readonly string[]; environment?: Record<string, string | undefined> } = {}): Promise<CredentialProvisioningResult> {
     this.assertSession(session);
     return this.provisioner.provision(session, options);
+  }
+
+  /**
+   * Bridge the protected onboarding session into the agent's model inventory lifecycle.
+   * Provider-specific credentials are resolved only at invocation time from the opaque session;
+   * this method never accepts, returns, or persists a raw key.
+   */
+  async refreshModelInventory(
+    agent: AutonomousAgent,
+    session: CredentialSession,
+    specs: readonly AutonomousModelRefreshSpec[],
+    options: Omit<AutonomousModelInventoryRefreshOptions, "credentialFor" | "credentialSession"> = {},
+  ): Promise<AutonomousModelInventorySnapshot> {
+    this.assertSession(session);
+    if (!agent || typeof agent.refreshModelInventory !== "function") throw new CredentialError("provider setup model inventory requires an AutonomousAgent");
+    return agent.refreshModelInventory(specs, { ...options, credentialSession: session });
   }
 
   /** Discover live model ids through a short-lived session without returning raw provider data. */

@@ -1,5 +1,9 @@
 import { ArgumentError, isObject } from "./errors.js";
 import {
+  CredentialSession,
+  type CredentialHandle,
+} from "./llm.js";
+import {
   AUTONOMOUS_DOMAIN_NAMES,
   AUTONOMOUS_MODEL_CATALOGUE_REFRESH_SCHEMA,
   AUTONOMOUS_MODEL_CATALOGUE_REFRESH_MAX_PROVIDERS,
@@ -67,7 +71,9 @@ export interface AutonomousModelInventoryPersistence {
 }
 
 export interface AutonomousModelInventoryRefreshOptions {
-  credentialFor?: (provider: string) => import("./llm.js").CredentialHandle | undefined;
+  /** Optional active protected onboarding session; raw credential values never enter this API. */
+  credentialSession?: CredentialSession;
+  credentialFor?: (provider: string) => CredentialHandle | undefined;
   replaceExisting?: boolean;
   maxParallel?: number;
   stopOnError?: boolean;
@@ -228,11 +234,17 @@ export class AutonomousModelInventoryCoordinator {
 
   async refresh(specs: readonly AutonomousModelRefreshSpec[], options: AutonomousModelInventoryRefreshOptions = {}): Promise<AutonomousModelInventorySnapshot> {
     if (!Array.isArray(specs) || specs.length < 1 || specs.length > AUTONOMOUS_MODEL_INVENTORY_MAX_PROVIDERS) throw new ArgumentError(`model inventory refresh must contain 1..=${AUTONOMOUS_MODEL_INVENTORY_MAX_PROVIDERS} providers`);
+    if (options.credentialSession !== undefined && !(options.credentialSession instanceof CredentialSession)) throw new ArgumentError("model inventory credentialSession is malformed");
     const estimatedInputTokens = boundedPositiveInteger("model inventory estimatedInputTokens", options.estimatedInputTokens ?? 4_096, 10_000_000);
     const requestedOutputTokens = boundedPositiveInteger("model inventory requestedOutputTokens", options.requestedOutputTokens ?? 1_024, 10_000_000);
     const refreshId = boundedIdentifier("model inventory refreshId", options.refreshId ?? `inventory-${Date.now().toString(36)}`);
     const refresh = await this.agent.refreshModelCatalogue(specs, {
-      credentialFor: options.credentialFor,
+      credentialFor: options.credentialFor ?? (options.credentialSession
+        ? (provider) => {
+          const metadata = this.agent.llm.providerMetadata().find((row) => row.provider === provider);
+          return metadata?.requires_credential === false ? undefined : options.credentialSession!.handle(provider);
+        }
+        : undefined),
       replaceExisting: options.replaceExisting,
       maxParallel: options.maxParallel,
       stopOnError: options.stopOnError,
