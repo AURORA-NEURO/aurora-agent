@@ -196,6 +196,36 @@ can feed `BrainModelHealthStore` into future model selection. `BrainReplayEngine
 caller-rehydrated evidence across every built-in domain and optionally advances a caller-owned
 bandit updater without replaying provider calls.
 
+### One-call deployment-managed execution
+
+When an application has already registered an environment source or secret-manager resolver,
+`AutonomousAgent.run_with_provisioned_credentials()` and
+`run_auto_with_provisioned_credentials()` compose the complete request boundary. Each call
+creates a fresh `CredentialSession`, provisions only opaque handles, optionally refreshes the
+authenticated model inventory, runs the normal explicit or automatic/cross-domain path, and
+closes the session in `finally` on success, refusal, discovery failure, or provider failure.
+The application never passes a raw key to the brain:
+
+```python
+agent.register_environment_credential_source("openai", variable="OPENAI_API_KEY")
+run = agent.run_auto_with_provisioned_credentials(
+    task="review the bounded implementation plan",
+    credential_providers=("openai",),
+    provision_environ=deployment_environment,
+    approve_provider_call=True,
+)
+answer = run.result                 # transient caller-owned provider result
+safe_event = run.to_dict()          # no result text, keys, or handles
+```
+
+Set `refresh_inventory=True` with explicit `inventory_priors` or an
+`inventory_prior_factory` when deployments should discover and reconcile model arms before the
+task. Inventory failure is raised instead of silently executing against a stale catalogue.
+`run_auto_with_provisioned_credentials()` preserves route abstention, provider planning review,
+workflow/cross-domain learning, evaluator, and checkpoint options through the same `run_auto`
+surface. `AutonomousProvisionedRun.to_dict()` is metadata-only; `.result` is deliberately not a
+durable payload.
+
 `RemoteBrainJobWorker` is the Python high-level queue adapter when the durable job authority is
 remote (HTTP, MCP, or `DurableBrainControlPlaneAdapter`) rather than a local `BrainJobStore`.
 `submit()` sends only a bounded idempotency key, composite request/mode/policy digest, domain,

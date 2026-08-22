@@ -196,6 +196,7 @@ AUTONOMOUS_CROSS_DOMAIN_REPLAN_CONTEXT_SCHEMA = "bioprism-python-autonomous-cros
 AUTONOMOUS_CROSS_DOMAIN_REPLAN_CHECKPOINT_SCHEMA = "bioprism-python-autonomous-cross-domain-replan-checkpoint/0.1"
 AUTONOMOUS_CROSS_DOMAIN_TRAJECTORY_LEARNING_SCHEMA = "bioprism-python-autonomous-cross-domain-trajectory-learning/0.1"
 AUTONOMOUS_CROSS_DOMAIN_PLAN_REFINEMENT_SCHEMA = "bioprism-python-autonomous-cross-domain-plan-refinement/0.1"
+AUTONOMOUS_PROVISIONED_RUN_SCHEMA = "bioprism-python-autonomous-provisioned-run/0.1"
 AUTONOMOUS_WORKFLOW_LEARNING_SCHEMA = "bioprism-python-autonomous-workflow-learning/0.1"
 AUTONOMOUS_WORKFLOW_TRAJECTORY_LEARNING_SCHEMA = "bioprism-python-autonomous-workflow-trajectory-learning/0.1"
 AUTONOMOUS_ROUTE_SCHEMA = "bioprism-python-autonomous-route/0.1"
@@ -3040,6 +3041,64 @@ class AutonomousAutoResult:
             "planning_mode": self.planning_mode,
             "planning": None if self.planning is None else self.planning.to_dict(),
             "retention": "route_metadata_only; provider_result_caller_owned",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousProvisionedRun:
+    """One request-scoped execution completed through the deployment credential boundary.
+
+    ``result`` is intentionally caller-transient.  The wrapper exposes it for the application
+    that initiated the request, while :meth:`to_dict` emits only value-only provisioning and
+    inventory metadata.  This makes the wrapper safe to attach to logs, job events, or a UI
+    response without serializing provider output, credential handles, or secret-manager values.
+    """
+
+    result: Any
+    provisioning: CredentialProvisioningResult
+    inventory: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.provisioning, CredentialProvisioningResult):
+            raise BrainRunError("provisioned run requires a CredentialProvisioningResult")
+        if self.inventory is not None and not isinstance(self.inventory, Mapping):
+            raise BrainRunError("provisioned run inventory must be a mapping or None")
+
+    @property
+    def status(self) -> str:
+        """Return the underlying execution status without coercing review into success."""
+
+        status = getattr(self.result, "status", None)
+        return status if isinstance(status, str) and status else "completed"
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return metadata only; the caller-owned execution result is never serialized."""
+
+        inventory_metadata: dict[str, Any] | None = None
+        if self.inventory is not None:
+            coverage = self.inventory.get("coverage")
+            inventory_metadata = {
+                "status": self.inventory.get("status"),
+                "snapshot_digest": self.inventory.get("snapshot_digest"),
+                "refresh_id": self.inventory.get("refresh_id"),
+                "provider_count": self.inventory.get("provider_count"),
+                "coverage_count": len(coverage)
+                if isinstance(coverage, Sequence) and not isinstance(coverage, (str, bytes))
+                else None,
+                "retention": "inventory_metadata_only",
+            }
+        return {
+            "schema": AUTONOMOUS_PROVISIONED_RUN_SCHEMA,
+            "status": self.status,
+            "result_metadata": {
+                "status": self.status,
+                "retention": "result_transient_caller_owned",
+                "serialized": False,
+            },
+            "provisioning": self.provisioning.to_dict(),
+            "inventory": inventory_metadata,
+            "credential_posture": "opaque_handles_only; session_closed_after_execution",
+            "secret_material": "never_returned",
         }
 
 
@@ -11483,6 +11542,156 @@ class AutonomousAgent:
             session.close()
             raise
 
+    def _run_with_provisioned_credentials(
+        self,
+        *,
+        credential_providers: Sequence[str] | None,
+        credential_ttl_seconds: float | None,
+        provision_environ: Mapping[str, str] | None,
+        require_ready: bool,
+        refresh_inventory: bool,
+        inventory_priors: Mapping[str, Mapping[str, Any]] | None,
+        inventory_prior_factory: Callable[[ProviderModelDescriptor], Mapping[str, Any]] | None,
+        inventory_domain_requirements: Mapping[str, Sequence[str]] | None,
+        inventory_limit: int,
+        inventory_snapshot_store: AutonomousModelInventoryStore | None,
+        inventory_refresh_id: str | None,
+        runner: Callable[[CredentialSession], Any],
+    ) -> AutonomousProvisionedRun:
+        """Compose request-scoped provisioning, optional discovery, execution, and revocation."""
+
+        if not isinstance(require_ready, bool):
+            raise BrainRunError("require_ready must be a boolean")
+        if not isinstance(refresh_inventory, bool):
+            raise BrainRunError("refresh_inventory must be a boolean")
+        if not callable(runner):
+            raise BrainRunError("provisioned execution runner must be callable")
+        session, provisioning = self.start_provisioned_credential_session(
+            providers=credential_providers,
+            ttl_seconds=credential_ttl_seconds,
+            environ=provision_environ,
+            require_ready=require_ready,
+        )
+        try:
+            inventory: Mapping[str, Any] | None = None
+            if refresh_inventory:
+                # Discovery is deliberately strict here. A caller that opts into inventory
+                # refresh must not execute against a stale catalogue after discovery failed.
+                inventory = self.refresh_model_inventory(
+                    credentials=session,
+                    providers=credential_providers,
+                    priors=inventory_priors,
+                    prior_factory=inventory_prior_factory,
+                    domain_requirements=inventory_domain_requirements,
+                    limit=inventory_limit,
+                    snapshot_store=inventory_snapshot_store,
+                    refresh_id=inventory_refresh_id,
+                    raise_on_error=True,
+                )
+            result = runner(session)
+            return AutonomousProvisionedRun(
+                result=result,
+                provisioning=provisioning,
+                inventory=inventory,
+            )
+        finally:
+            # Handles are valid only for this request. This runs for provider refusal, route
+            # abstention, inventory failure, and ordinary success alike.
+            session.close()
+
+    def run_with_provisioned_credentials(
+        self,
+        *,
+        task: str,
+        domain: str,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        credential_providers: Sequence[str] | None = None,
+        credential_ttl_seconds: float | None = None,
+        provision_environ: Mapping[str, str] | None = None,
+        require_ready: bool = True,
+        refresh_inventory: bool = False,
+        inventory_priors: Mapping[str, Mapping[str, Any]] | None = None,
+        inventory_prior_factory: Callable[[ProviderModelDescriptor], Mapping[str, Any]] | None = None,
+        inventory_domain_requirements: Mapping[str, Sequence[str]] | None = None,
+        inventory_limit: int = MAX_PROVIDER_DISCOVERED_MODELS,
+        inventory_snapshot_store: AutonomousModelInventoryStore | None = None,
+        inventory_refresh_id: str | None = None,
+        **kwargs: Any,
+    ) -> AutonomousProvisionedRun:
+        """Execute one explicit-domain task from deployment-managed credentials.
+
+        The application registers environment or secret-manager wiring once, then this method
+        creates a fresh opaque-handle session, optionally refreshes authenticated model
+        inventory, invokes the existing explicit ``run`` path, and revokes every handle in a
+        ``finally`` block. ``result`` remains available to the initiating caller; ``to_dict``
+        is safe for persistence and never includes that provider result.
+        """
+
+        if "credentials" in kwargs:
+            raise BrainRunError("provisioned execution owns credentials; do not pass credentials")
+        return self._run_with_provisioned_credentials(
+            credential_providers=credential_providers,
+            credential_ttl_seconds=credential_ttl_seconds,
+            provision_environ=provision_environ,
+            require_ready=require_ready,
+            refresh_inventory=refresh_inventory,
+            inventory_priors=inventory_priors,
+            inventory_prior_factory=inventory_prior_factory,
+            inventory_domain_requirements=inventory_domain_requirements,
+            inventory_limit=inventory_limit,
+            inventory_snapshot_store=inventory_snapshot_store,
+            inventory_refresh_id=inventory_refresh_id,
+            runner=lambda session: self.run(
+                task=task,
+                domain=domain,
+                credentials=session,
+                model_candidates=model_candidates,
+                **kwargs,
+            ),
+        )
+
+    def run_auto_with_provisioned_credentials(
+        self,
+        *,
+        task: str,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        credential_providers: Sequence[str] | None = None,
+        credential_ttl_seconds: float | None = None,
+        provision_environ: Mapping[str, str] | None = None,
+        require_ready: bool = True,
+        refresh_inventory: bool = False,
+        inventory_priors: Mapping[str, Mapping[str, Any]] | None = None,
+        inventory_prior_factory: Callable[[ProviderModelDescriptor], Mapping[str, Any]] | None = None,
+        inventory_domain_requirements: Mapping[str, Sequence[str]] | None = None,
+        inventory_limit: int = MAX_PROVIDER_DISCOVERED_MODELS,
+        inventory_snapshot_store: AutonomousModelInventoryStore | None = None,
+        inventory_refresh_id: str | None = None,
+        **kwargs: Any,
+    ) -> AutonomousProvisionedRun:
+        """Provision, optionally discover, and execute automatic single/cross-domain routing."""
+
+        if "credentials" in kwargs:
+            raise BrainRunError("provisioned execution owns credentials; do not pass credentials")
+        return self._run_with_provisioned_credentials(
+            credential_providers=credential_providers,
+            credential_ttl_seconds=credential_ttl_seconds,
+            provision_environ=provision_environ,
+            require_ready=require_ready,
+            refresh_inventory=refresh_inventory,
+            inventory_priors=inventory_priors,
+            inventory_prior_factory=inventory_prior_factory,
+            inventory_domain_requirements=inventory_domain_requirements,
+            inventory_limit=inventory_limit,
+            inventory_snapshot_store=inventory_snapshot_store,
+            inventory_refresh_id=inventory_refresh_id,
+            runner=lambda session: self.run_auto(
+                task=task,
+                credentials=session,
+                model_candidates=model_candidates,
+                **kwargs,
+            ),
+        )
+
     def unregister_credential_source(self, provider: str, source_id: str) -> bool:
         """Remove deployment wiring; active sessions remain caller-owned and independently revocable."""
 
@@ -16014,6 +16223,7 @@ __all__ = [
     "AUTONOMOUS_CROSS_DOMAIN_REPLAN_CONTEXT_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_REPLAN_CHECKPOINT_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_PLAN_REFINEMENT_SCHEMA",
+    "AUTONOMOUS_PROVISIONED_RUN_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_STEP_SCHEMA",
     "AUTONOMOUS_ROUTE_SCHEMA",
@@ -16074,6 +16284,7 @@ __all__ = [
     "AutonomousCrossDomainReplanCheckpoint",
     "AutonomousAutoBlueprint",
     "AutonomousAutoResult",
+    "AutonomousProvisionedRun",
     "AutonomousBatchItem",
     "AutonomousBatchResult",
     "AutonomousBatchRehydrationContext",

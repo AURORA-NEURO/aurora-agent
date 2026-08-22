@@ -1215,6 +1215,39 @@ variable value. They accept model metadata and opaque outcome references only. D
 or a key into a plan's arbitrary `arguments` object; pass the handle to `LLMRuntime.invoke` at the
 runtime boundary.
 
+### Request-scoped deployment execution
+
+Deployments that do not collect a key through a human-facing form can register environment or
+secret-manager wiring once and use the high-level provisioning facade. It keeps the source
+resolver in the application process, creates a fresh short-lived session for each request, and
+passes only opaque handles to the existing orchestration path:
+
+```python
+agent.register_secret_manager_credential_source(
+    "openai",
+    "prod/aurora/openai",
+    secret_manager.resolve,
+)
+run = agent.run_auto_with_provisioned_credentials(
+    task="review the next bounded implementation step",
+    credential_providers=("openai",),
+    approve_provider_call=True,
+)
+transient_result = run.result
+metadata_event = run.to_dict()
+```
+
+`run_with_provisioned_credentials()` is the explicit-domain variant. Both variants can set
+`refresh_inventory=True` and provide `inventory_priors` or an `inventory_prior_factory`; the
+fresh session is used for model discovery, and a requested discovery failure raises before task
+execution instead of allowing a stale catalogue to masquerade as current. All normal `run()` and
+`run_auto()` options remain available, including provider planning, workflow/cross-domain
+execution, evaluator evidence, online or trajectory learning, and decision-cycle persistence.
+The session closes in a `finally` block for success, route abstention, review, inventory failure,
+or provider failure. The returned `.result` is caller-transient; `.to_dict()` emits only the
+execution status, redacted provisioning receipts, and inventory metadata, never provider text,
+raw credentials, or credential handles.
+
 ## Application composition and model inventory
 
 The lower-level APIs intentionally make every decision input visible. An embedding application can
