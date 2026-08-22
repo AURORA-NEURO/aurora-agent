@@ -7,7 +7,10 @@ import {
   AutonomousWorkflowPortfolioEvidenceController,
   InMemoryAutonomousEvidenceRuntimeJournal,
   InMemoryAutonomousWorkflowPortfolioEvidenceCheckpointStore,
+  JsonAutonomousWorkflowPortfolioEvidenceCheckpointStore,
   LLMRuntime,
+  TransactionalJsonAutonomousWorkflowPortfolioEvidenceCheckpointStore,
+  digestJson,
   validateAutonomousWorkflowPortfolioEvidenceCheckpoint,
 } from "../dist/index.js";
 
@@ -258,6 +261,47 @@ test("portfolio evidence controller checkpoints every wave and replays completed
   assert.equal(checkpoint.settled_item_ids.length, AUTONOMOUS_DOMAIN_NAMES.length);
   assert.ok(progressSnapshots.length >= AUTONOMOUS_DOMAIN_NAMES.length, "checkpoint progress is flushed after dependency waves");
   assert.equal(checkpoint.retention, "request_and_result_digests_only;raw_evidence_values_and_sources_never_persisted");
+
+  const casStore = new InMemoryAutonomousWorkflowPortfolioEvidenceCheckpointStore();
+  assert.equal(await casStore.writeIfUnchanged(null, checkpoint), true);
+  assert.equal(await casStore.writeIfUnchanged(null, checkpoint), false, "a second writer cannot reuse the empty-store fence");
+  let checkpointText = null;
+  const textStore = {
+    read: () => checkpointText,
+    write: (value) => { checkpointText = value; },
+    writeIfUnchanged: (expected, value) => {
+      const current = checkpointText === null ? null : JSON.parse(checkpointText).checkpoint_digest;
+      if (current !== expected) return false;
+      checkpointText = value;
+      return true;
+    },
+  };
+  const jsonStore = new JsonAutonomousWorkflowPortfolioEvidenceCheckpointStore(textStore);
+  await jsonStore.write(checkpoint);
+  assert.deepEqual((await jsonStore.read()).checkpoint_digest, checkpoint.checkpoint_digest);
+  const transactionalJsonStore = new TransactionalJsonAutonomousWorkflowPortfolioEvidenceCheckpointStore(textStore);
+  assert.equal(await transactionalJsonStore.writeIfUnchanged("0".repeat(64), checkpoint), false);
+  assert.equal(await transactionalJsonStore.writeIfUnchanged(checkpoint.checkpoint_digest, checkpoint), true);
+
+  const staleController = new AutonomousWorkflowPortfolioEvidenceController(agent, "portfolio-evidence-restart", casStore);
+  assert.equal((await staleController.restore()).status, "restored");
+  const { checkpoint_digest: _checkpointDigest, retention: _retention, secret_material: _secretMaterial, ...checkpointPayload } = checkpoint;
+  const externallyAdvancedPayload = { ...checkpointPayload, status: "partial" };
+  const externallyAdvanced = { ...externallyAdvancedPayload, checkpoint_digest: await digestJson(externallyAdvancedPayload), retention: _retention, secret_material: _secretMaterial };
+  assert.equal(await casStore.writeIfUnchanged(checkpoint.checkpoint_digest, externallyAdvanced), true);
+  await assert.rejects(
+    () => staleController.run(providerExecution, {
+      evidencePlan,
+      items,
+      runtimePolicyDigest: "5".repeat(64),
+      journalFor: ({ itemId }) => journals.get(itemId),
+      runtime: {
+        ...evidenceRuntime(),
+        rehydrateValue: (receipt) => valuesByRequest.get(receipt.request_digest) ?? null,
+      },
+    }),
+    /compare-and-swap conflict/,
+  );
 
   const secondCalls = [];
   const secondController = new AutonomousWorkflowPortfolioEvidenceController(agent, "portfolio-evidence-restart", checkpointStore);

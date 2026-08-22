@@ -60,6 +60,17 @@ export interface AutonomousWorkflowPortfolioEvidenceCheckpointJSON extends JsonO
 export interface AutonomousWorkflowPortfolioEvidenceCheckpointStore {
   read(): Promise<AutonomousWorkflowPortfolioEvidenceCheckpointJSON | null> | AutonomousWorkflowPortfolioEvidenceCheckpointJSON | null;
   write(checkpoint: AutonomousWorkflowPortfolioEvidenceCheckpointJSON): Promise<void> | void;
+  /** Optional atomic fence; false means another worker committed after this coordinator restored. */
+  writeIfUnchanged?(expectedCheckpointDigest: string | null, checkpoint: AutonomousWorkflowPortfolioEvidenceCheckpointJSON): Promise<boolean> | boolean;
+}
+
+export interface AutonomousWorkflowPortfolioEvidenceCheckpointTextStore {
+  read(): Promise<string | null> | string | null;
+  write(value: string): Promise<void> | void;
+}
+
+export interface AutonomousWorkflowPortfolioEvidenceTransactionalCheckpointTextStore extends AutonomousWorkflowPortfolioEvidenceCheckpointTextStore {
+  writeIfUnchanged(expectedCheckpointDigest: string | null, value: string): Promise<boolean> | boolean;
 }
 
 export interface AutonomousWorkflowPortfolioEvidenceResumableExecutionOptions extends AutonomousWorkflowPortfolioEvidenceSupervisorOptions {
@@ -95,6 +106,10 @@ export type AutonomousWorkflowPortfolioEvidenceControllerRunOptions = Omit<
 const CHECKPOINT_RETENTION = "request_and_result_digests_only;raw_evidence_values_and_sources_never_persisted" as const;
 const CHECKPOINT_SECRET_MATERIAL = "never_returned" as const;
 const MAX_ITEMS = 64;
+
+function bytes(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
+}
 
 function boundedIdentifier(name: string, value: unknown): string {
   if (typeof value !== "string" || !value.trim() || value.length > 256 || value.includes("\u0000") || !/^[A-Za-z0-9_.:+-]+$/.test(value)) throw new ArgumentError(`${name} is outside its bounded identifier contract`);
@@ -356,11 +371,70 @@ export class InMemoryAutonomousWorkflowPortfolioEvidenceCheckpointStore implemen
   async write(checkpoint: AutonomousWorkflowPortfolioEvidenceCheckpointJSON): Promise<void> {
     this.checkpoint = structuredClone(await validateAutonomousWorkflowPortfolioEvidenceCheckpoint(checkpoint));
   }
+
+  async writeIfUnchanged(expectedCheckpointDigest: string | null, checkpoint: AutonomousWorkflowPortfolioEvidenceCheckpointJSON): Promise<boolean> {
+    const current = this.checkpoint?.checkpoint_digest ?? null;
+    if (current !== expectedCheckpointDigest) return false;
+    await this.write(checkpoint);
+    return true;
+  }
+}
+
+/** JSON adapter for browser, Node, or embedded text stores. */
+export class JsonAutonomousWorkflowPortfolioEvidenceCheckpointStore implements AutonomousWorkflowPortfolioEvidenceCheckpointStore {
+  protected readonly store: AutonomousWorkflowPortfolioEvidenceCheckpointTextStore;
+
+  constructor(store: AutonomousWorkflowPortfolioEvidenceCheckpointTextStore) {
+    if (!store || typeof store.read !== "function" || typeof store.write !== "function") throw new ArgumentError("portfolio evidence JSON checkpoint store is malformed");
+    this.store = store;
+  }
+
+  async read(): Promise<AutonomousWorkflowPortfolioEvidenceCheckpointJSON | null> {
+    const encoded = await this.store.read();
+    if (encoded === null) return null;
+    if (typeof encoded !== "string" || bytes(encoded) > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_CHECKPOINT_BYTES) throw new ArgumentError("portfolio evidence JSON checkpoint text exceeds its bound");
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(encoded);
+    } catch {
+      throw new ArgumentError("portfolio evidence JSON checkpoint text is invalid JSON");
+    }
+    return validateAutonomousWorkflowPortfolioEvidenceCheckpoint(parsed);
+  }
+
+  async write(checkpoint: AutonomousWorkflowPortfolioEvidenceCheckpointJSON): Promise<void> {
+    await this.store.write(this.encode(await validateAutonomousWorkflowPortfolioEvidenceCheckpoint(checkpoint)));
+  }
+
+  protected encode(checkpoint: AutonomousWorkflowPortfolioEvidenceCheckpointJSON): string {
+    const encoded = JSON.stringify(checkpoint);
+    if (typeof encoded !== "string" || bytes(encoded) > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_CHECKPOINT_BYTES) throw new ArgumentError("portfolio evidence JSON checkpoint exceeds its bound");
+    return encoded;
+  }
+}
+
+/** JSON checkpoint adapter that refuses to operate without an atomic compare-and-swap fence. */
+export class TransactionalJsonAutonomousWorkflowPortfolioEvidenceCheckpointStore extends JsonAutonomousWorkflowPortfolioEvidenceCheckpointStore {
+  private readonly transactionalStore: AutonomousWorkflowPortfolioEvidenceTransactionalCheckpointTextStore;
+
+  constructor(store: AutonomousWorkflowPortfolioEvidenceTransactionalCheckpointTextStore) {
+    super(store);
+    if (typeof store.writeIfUnchanged !== "function") throw new ArgumentError("transactional portfolio evidence JSON checkpoint store requires writeIfUnchanged");
+    this.transactionalStore = store;
+  }
+
+  async writeIfUnchanged(expectedCheckpointDigest: string | null, checkpoint: AutonomousWorkflowPortfolioEvidenceCheckpointJSON): Promise<boolean> {
+    const committed = await this.transactionalStore.writeIfUnchanged(expectedCheckpointDigest, this.encode(await validateAutonomousWorkflowPortfolioEvidenceCheckpoint(checkpoint)));
+    if (typeof committed !== "boolean") throw new ArgumentError("transactional portfolio evidence JSON checkpoint store returned a non-boolean commit result");
+    return committed;
+  }
 }
 
 /** Restart-aware evidence controller; the caller owns journals, values, and durable storage. */
 export class AutonomousWorkflowPortfolioEvidenceController {
   private checkpoint: AutonomousWorkflowPortfolioEvidenceCheckpointJSON | null = null;
+  private expectedCheckpointDigest: string | null = null;
+  private operationTail: Promise<void> = Promise.resolve();
   private controllerStatus: AutonomousWorkflowPortfolioEvidenceControllerProjection["status"] = "empty";
   private totalItems: number | null = null;
 
@@ -373,33 +447,45 @@ export class AutonomousWorkflowPortfolioEvidenceController {
   }
 
   async restore(): Promise<AutonomousWorkflowPortfolioEvidenceControllerProjection> {
-    const stored = await this.persistence.read();
-    this.checkpoint = stored === null ? null : await validateAutonomousWorkflowPortfolioEvidenceCheckpoint(stored);
-    this.controllerStatus = this.checkpoint === null ? "empty" : "restored";
-    this.totalItems = this.checkpoint?.item_ids.length ?? null;
-    return this.projection();
+    return this.enqueue(async () => {
+      const stored = await this.persistence.read();
+      this.checkpoint = stored === null ? null : await validateAutonomousWorkflowPortfolioEvidenceCheckpoint(stored);
+      this.expectedCheckpointDigest = this.checkpoint?.checkpoint_digest ?? null;
+      this.controllerStatus = this.checkpoint === null ? "empty" : "restored";
+      this.totalItems = this.checkpoint?.item_ids.length ?? null;
+      return this.projection();
+    });
   }
 
   async run(
     execution: AutonomousWorkflowPortfolioExecutionResult,
     options: AutonomousWorkflowPortfolioEvidenceControllerRunOptions,
   ): Promise<AutonomousWorkflowPortfolioEvidenceControllerRun> {
-    const restored = this.checkpoint ?? await this.persistence.read();
-    this.checkpoint = restored === null ? null : await validateAutonomousWorkflowPortfolioEvidenceCheckpoint(restored);
-    const evidence = await executeAutonomousWorkflowPortfolioEvidenceResumable(this.agent, execution, {
-      ...options,
-      jobId: this.jobId,
-      checkpoint: this.checkpoint ?? undefined,
-      checkpointSink: async (checkpoint) => {
-        this.checkpoint = checkpoint;
-        this.controllerStatus = "flushed";
-        this.totalItems = checkpoint.item_ids.length;
-        await this.persistence.write(checkpoint);
-      },
+    return this.enqueue(async () => {
+      const restored = this.checkpoint ?? await this.persistence.read();
+      this.checkpoint = restored === null ? null : await validateAutonomousWorkflowPortfolioEvidenceCheckpoint(restored);
+      this.expectedCheckpointDigest = this.checkpoint?.checkpoint_digest ?? null;
+      const evidence = await executeAutonomousWorkflowPortfolioEvidenceResumable(this.agent, execution, {
+        ...options,
+        jobId: this.jobId,
+        checkpoint: this.checkpoint ?? undefined,
+        checkpointSink: async (checkpoint) => {
+          if (typeof this.persistence.writeIfUnchanged === "function") {
+            const committed = await this.persistence.writeIfUnchanged(this.expectedCheckpointDigest, checkpoint);
+            if (!committed) throw new ArgumentError("portfolio evidence checkpoint compare-and-swap conflict; reload before continuing");
+          } else {
+            await this.persistence.write(checkpoint);
+          }
+          this.checkpoint = checkpoint;
+          this.expectedCheckpointDigest = checkpoint.checkpoint_digest;
+          this.controllerStatus = "flushed";
+          this.totalItems = checkpoint.item_ids.length;
+        },
+      });
+      this.controllerStatus = evidence.status === "completed" ? "completed" : evidence.status === "failed" ? "failed" : evidence.status === "awaiting_evaluation" ? "awaiting_evaluation" : evidence.status === "reconciliation_required" ? "reconciliation_required" : "partial";
+      this.totalItems = evidence.items.length;
+      return { controller: this.projection(), evidence };
     });
-    this.controllerStatus = evidence.status === "completed" ? "completed" : evidence.status === "failed" ? "failed" : evidence.status === "awaiting_evaluation" ? "awaiting_evaluation" : evidence.status === "reconciliation_required" ? "reconciliation_required" : "partial";
-    this.totalItems = evidence.items.length;
-    return { controller: this.projection(), evidence };
   }
 
   projection(): AutonomousWorkflowPortfolioEvidenceControllerProjection {
@@ -414,5 +500,11 @@ export class AutonomousWorkflowPortfolioEvidenceController {
       retention: "metadata_only_request_and_result_digests;raw_evidence_values_never_persisted",
       secret_material: "never_returned",
     };
+  }
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const queued = this.operationTail.then(() => operation());
+    this.operationTail = queued.then(() => undefined, () => undefined);
+    return queued;
   }
 }

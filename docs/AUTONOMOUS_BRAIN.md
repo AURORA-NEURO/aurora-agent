@@ -1885,6 +1885,13 @@ are rejected before the evidence adapter can run. The in-memory store is a refer
 tests and desktop processes; a deployment can implement the same atomic read/write interface with
 SQLite, Postgres, IndexedDB, or object storage.
 
+For shared workers, use `TransactionalJsonAutonomousWorkflowPortfolioEvidenceCheckpointStore`
+with a text store whose `writeIfUnchanged(expectedCheckpointDigest, text)` operation is atomic.
+The controller serializes its own local flushes and passes the restored checkpoint digest to the
+external compare-and-swap. A stale worker receives an explicit conflict and must reload the
+checkpoint rather than overwriting another worker's evidence progress. Plain JSON stores remain
+supported for single-writer deployments, but do not claim multi-host safety.
+
 Approval is fail-closed: with `approveProviderCall` absent or false, the first ready item returns
 `approval_required`, descendants become `blocked`, and no provider call starts. Hard failures,
 route review, uncertain effects, turn limits, and child failures are never converted into success;

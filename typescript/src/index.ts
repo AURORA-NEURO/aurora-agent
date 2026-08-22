@@ -383,12 +383,16 @@ export {
   validateAutonomousWorkflowPortfolioEvidenceCheckpoint,
   executeAutonomousWorkflowPortfolioEvidenceResumable,
   InMemoryAutonomousWorkflowPortfolioEvidenceCheckpointStore,
+  JsonAutonomousWorkflowPortfolioEvidenceCheckpointStore,
+  TransactionalJsonAutonomousWorkflowPortfolioEvidenceCheckpointStore,
   AutonomousWorkflowPortfolioEvidenceController,
 } from "./autonomous-workflow-portfolio-evidence-resumable.js";
 export type {
   AutonomousWorkflowPortfolioEvidenceCheckpointStatus,
   AutonomousWorkflowPortfolioEvidenceCheckpointJSON,
   AutonomousWorkflowPortfolioEvidenceCheckpointStore,
+  AutonomousWorkflowPortfolioEvidenceCheckpointTextStore,
+  AutonomousWorkflowPortfolioEvidenceTransactionalCheckpointTextStore,
   AutonomousWorkflowPortfolioEvidenceResumableExecutionOptions,
   AutonomousWorkflowPortfolioEvidenceControllerProjection,
   AutonomousWorkflowPortfolioEvidenceControllerRun,

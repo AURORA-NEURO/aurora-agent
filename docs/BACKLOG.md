@@ -48,6 +48,11 @@ and value rehydration, so a restart cannot silently reacquire evidence. Tampered
 policy drift fails before adapter dispatch. The checkpoint store remains an application-owned
 atomic adapter, and multi-host consensus/lease coordination is still deployment work.
 
+The checkpoint seam now includes an optional atomic compare-and-swap contract plus bounded JSON
+and transactional-JSON adapters. The controller serializes local operations, fences every flush
+against the restored digest, and surfaces stale-writer conflicts instead of overwriting progress;
+non-transactional stores are explicitly single-writer only.
+
 The autonomous façade now compiles every built-in workflow into a digest-bound evidence plan.
 Python `AutonomousTaskOrchestrator.evidence_plan()` and TypeScript `AutonomousAgent.evidencePlan()`
 report qualified requirements, ambiguous-label handling, coverage, and dependency-safe next
