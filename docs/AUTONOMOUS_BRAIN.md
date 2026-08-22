@@ -2696,6 +2696,14 @@ control-plane contract. The MCP server exposes:
 The same tools are reachable through the existing /v1/tools/{name} HTTP route and stdio
 tools/call. The typed Python bridge keeps the wire shape consistent:
 
+The TypeScript `AutonomousBrainControlPlaneMonitor` provides the matching caller-side boundary
+over an `ApiClient`-compatible object. It validates job identity, domain, attempt ceilings,
+digest-bound event cursors, and secret-shaped projection fields; it can fan out bounded status
+checks across all twelve domains, request/approve/deny caller authorization, and wait for a
+terminal or explicitly selected state. A wait timeout returns `timed_out` metadata rather than
+inventing completion, and the monitor never claims that admission or transport completion is
+domain truth.
+
 `python
 from prism_sdk import (
     BrainControlClient,

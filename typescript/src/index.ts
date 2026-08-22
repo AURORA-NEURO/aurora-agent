@@ -697,6 +697,24 @@ export type {
   AutonomousBrainJobWorkerBatch,
 } from "./autonomous-brain-worker.js";
 export {
+  AUTONOMOUS_BRAIN_CONTROL_PLANE_MONITOR_SCHEMA,
+  MAX_AUTONOMOUS_BRAIN_CONTROL_PLANE_POLL_MS,
+  MAX_AUTONOMOUS_BRAIN_CONTROL_PLANE_TIMEOUT_MS,
+  MAX_AUTONOMOUS_BRAIN_CONTROL_PLANE_POLLS,
+  MAX_AUTONOMOUS_BRAIN_CONTROL_PLANE_EVENTS,
+  AutonomousBrainControlPlaneMonitor,
+} from "./autonomous-brain-control-plane.js";
+export type {
+  AutonomousBrainControlPlaneClient,
+  AutonomousBrainControlPlaneMonitorOptions,
+  AutonomousBrainControlPlaneStatus,
+  AutonomousBrainControlPlaneEvents,
+  AutonomousBrainControlPlaneApproval,
+  AutonomousBrainControlPlaneWaitOptions,
+  AutonomousBrainControlPlaneWaitResult,
+  AutonomousBrainControlPlaneAllStatusResult,
+} from "./autonomous-brain-control-plane.js";
+export {
   AUTONOMOUS_CONNECTOR_OPERATION_REGISTRY_SCHEMA,
   AUTONOMOUS_CONNECTOR_OPERATION_SCHEMA,
   AUTONOMOUS_CONNECTOR_WORK_ITEM_SCHEMA,
