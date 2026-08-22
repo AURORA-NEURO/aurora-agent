@@ -566,8 +566,9 @@ function validateWorkflowStageOutput(stage: AutonomousWorkflowStage, value: unkn
   const empty: ValidatedWorkflowStageOutput = { declaredStatus: null, evidence: [], uncertainty: [], notes: null, nextActions: [], errors: [] };
   if (!isObject(value)) return { ...empty, errors: ["provider returned no structured workflow stage object"] };
   const errors: string[] = [];
-  const allowed = new Set(["stage_id", "status", "evidence", "uncertainty", "notes", "next_actions"]);
+  const allowed = new Set(["stage_id", "status", "evidence", "uncertainty", "notes", "next_actions", "evidence_runtime"]);
   if (Object.keys(value).some((key) => !allowed.has(key))) errors.push("structured workflow stage output contains unsupported fields");
+  if (value.evidence_runtime !== undefined && !isObject(value.evidence_runtime)) errors.push("evidence_runtime must be an object");
   if (value.stage_id !== stage.id) errors.push(`stage_id must equal ${stage.id}`);
   const declaredStatus = AUTONOMOUS_WORKFLOW_STAGE_STATUSES.includes(value.status as AutonomousWorkflowStageStatus)
     ? value.status as AutonomousWorkflowStageStatus
@@ -1024,6 +1025,12 @@ export class AutonomousWorkflowExecutor {
         await this.store.save(checkpoint);
         await this.appendEvent(checkpoint.job_id, "approval_required", stage.id, checkpoint);
         return this.result("approval_required", checkpoint, blueprint, stageResults, route, semanticStatus);
+      }
+      if (run.status === "reconciliation_required") {
+        checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "failed", run_status: run.status, selection_digest: selectionDigest, response_digest: outputDigest, output_bytes: outputBytes, error_class: "evidence_reconciliation_required", error_code: null, retryable: true, status_code: null, learning_episode_id: null }], "paused", contractDigest, checkpoint, stageOrder, planRefinementDigest);
+        await this.store.save(checkpoint);
+        await this.appendEvent(checkpoint.job_id, "checkpointed", stage.id, checkpoint);
+        return this.result("paused", checkpoint, blueprint, stageResults, route, semanticStatus);
       }
       if (run.status !== "completed") {
         checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "failed", run_status: run.status, selection_digest: selectionDigest, response_digest: outputDigest, output_bytes: outputBytes, error_class: null, learning_episode_id: null }], "failed", contractDigest, checkpoint, stageOrder, planRefinementDigest);

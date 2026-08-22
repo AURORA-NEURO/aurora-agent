@@ -28,6 +28,7 @@ from .autonomous_connectors import (
     AutonomousConnectorRuntime,
     AutonomousConnectorSelectionPlan,
 )
+from .autonomous_evidence_runtime import AutonomousEvidenceRuntime
 from .domain_tools import _json_safe, _reject_secret_fields
 from .errors import ArgumentError
 from .autonomy import (
@@ -188,6 +189,11 @@ class AutonomousConnectorWorkflowAdapter:
         approved: bool = False,
         selection_signals: Mapping[str, Mapping[str, Any]] | None = None,
         rehydrate_payload: Callable[[Any], Any] | None = None,
+        evidence_runtime: AutonomousEvidenceRuntime | None = None,
+        evidence_projector: Any | None = None,
+        evidence_evaluator: Any | None = None,
+        require_evidence_acceptance: bool | None = None,
+        parent_evidence_digests: Sequence[str] = (),
     ) -> None:
         if not isinstance(runtime, AutonomousConnectorRuntime):
             raise ArgumentError("connector workflow adapter requires an AutonomousConnectorRuntime")
@@ -201,12 +207,31 @@ class AutonomousConnectorWorkflowAdapter:
             raise ArgumentError("connector workflow selection_signals must be an object")
         if rehydrate_payload is not None and not callable(rehydrate_payload):
             raise ArgumentError("connector workflow rehydrate_payload must be callable")
+        if evidence_runtime is not None and not isinstance(evidence_runtime, AutonomousEvidenceRuntime):
+            raise ArgumentError("connector workflow evidence_runtime is invalid")
+        if evidence_projector is not None and not callable(getattr(evidence_projector, "project", None)) and not callable(evidence_projector):
+            raise ArgumentError("connector workflow evidence_projector is malformed")
+        if evidence_evaluator is not None and not callable(getattr(evidence_evaluator, "evaluate", None)) and not callable(evidence_evaluator):
+            raise ArgumentError("connector workflow evidence_evaluator is malformed")
+        if require_evidence_acceptance is not None and not isinstance(require_evidence_acceptance, bool):
+            raise ArgumentError("connector workflow require_evidence_acceptance must be boolean")
+        if evidence_runtime is not None and require_evidence_acceptance is not False and (evidence_projector is None or evidence_evaluator is None):
+            raise ArgumentError("strict connector workflow evidence requires both a projector and evaluator")
+        if not isinstance(parent_evidence_digests, Sequence) or isinstance(parent_evidence_digests, (str, bytes, bytearray)):
+            raise ArgumentError("connector workflow parent_evidence_digests must be a sequence")
+        for digest in parent_evidence_digests:
+            _digest("connector workflow parent evidence digest", digest)
         self.runtime = runtime
         self.registry = runtime.registry
         self.operation_registry = operation_registry or AutonomousConnectorOperationRegistry()
         self.approved = approved
         self.selection_signals = selection_signals
         self.rehydrate_payload = rehydrate_payload
+        self.evidence_runtime = evidence_runtime
+        self.evidence_projector = evidence_projector
+        self.evidence_evaluator = evidence_evaluator
+        self.require_evidence_acceptance = evidence_runtime is not None if require_evidence_acceptance is None else require_evidence_acceptance
+        self.parent_evidence_digests = tuple(parent_evidence_digests)
 
     def _select_plan(
         self,
@@ -243,11 +268,25 @@ class AutonomousConnectorWorkflowAdapter:
         return plan, contract
 
     @staticmethod
+    def _subject_digest(context: AutonomousConnectorWorkflowStageContext, attempt: int) -> str:
+        return content_digest(
+            {
+                "schema": AUTONOMOUS_CONNECTOR_WORKFLOW_ADAPTER_SCHEMA,
+                "task_digest": context.task_digest,
+                "workflow_digest": context.workflow_digest,
+                "stage_digest": context.stage_digest,
+                "stage_attempt": attempt,
+            }
+        )
+
+    @staticmethod
     def _request(
         context: AutonomousConnectorWorkflowStageContext,
         contract: Any,
         plan: AutonomousConnectorSelectionPlan,
         request_payload: Mapping[str, Any] | None,
+        *,
+        stable_attempt: int | None = None,
     ) -> Mapping[str, Any]:
         if request_payload is None:
             raw: Mapping[str, Any] = {}
@@ -264,14 +303,18 @@ class AutonomousConnectorWorkflowAdapter:
         expected_operation = contract.operation_id
         if safe.get("operation_id") not in (None, expected_operation):
             raise ArgumentError("connector workflow request operation_id does not match the domain operation")
-        supplied_subject = safe.get("subject_digest", context.subject_digest)
+        attempt = context.stage_attempt if stable_attempt is None else stable_attempt
+        expected_subject = AutonomousConnectorWorkflowAdapter._subject_digest(context, attempt)
+        supplied_subject = safe.get("subject_digest", expected_subject)
         subject_digest = _digest("connector workflow subject_digest", supplied_subject)
         safe["operation_id"] = expected_operation
         safe["subject_digest"] = subject_digest
         safe.setdefault("stage_id", context.stage.id)
         safe.setdefault("stage_digest", context.stage_digest)
         safe.setdefault("workflow_digest", context.workflow_digest)
-        safe.setdefault("stage_attempt", context.stage_attempt)
+        if stable_attempt is not None and safe.get("stage_attempt", stable_attempt) != stable_attempt:
+            raise ArgumentError("connector workflow evidence binding requires a stable stage_attempt of 1")
+        safe.setdefault("stage_attempt", attempt)
         safe.setdefault("selection_plan_digest", plan.plan_digest)
         return safe
 
@@ -280,13 +323,16 @@ class AutonomousConnectorWorkflowAdapter:
         context: AutonomousConnectorWorkflowStageContext,
         request: Mapping[str, Any],
         plan: AutonomousConnectorSelectionPlan,
+        *,
+        stable_attempt: int | None = None,
     ) -> tuple[str, str, str]:
+        attempt = context.stage_attempt if stable_attempt is None else stable_attempt
         identity = content_digest(
             {
                 "schema": AUTONOMOUS_CONNECTOR_WORKFLOW_ADAPTER_SCHEMA,
                 "run_id": context.run_id,
                 "stage_id": context.stage.id,
-                "stage_attempt": context.stage_attempt,
+                "stage_attempt": attempt,
                 "subject_digest": request["subject_digest"],
                 "selection_plan_digest": plan.plan_digest,
             }
@@ -318,6 +364,90 @@ class AutonomousConnectorWorkflowAdapter:
             return safe, False
         except Exception:
             return None, True
+
+    def _evidence_requirements(
+        self,
+        context: AutonomousConnectorWorkflowStageContext,
+    ) -> tuple[Any, ...]:
+        if self.evidence_runtime is None:
+            return ()
+        requirements = tuple(
+            requirement
+            for requirement in self.evidence_runtime.plan.requirements
+            if requirement.domain == context.blueprint.spec.domain
+            and requirement.workflow_id == context.blueprint.workflow.workflow_id
+            and requirement.workflow_digest == context.blueprint.workflow.workflow_digest
+            and requirement.stage_id == context.stage.id
+        )
+        expected = tuple(context.stage.evidence_outputs)
+        if len(requirements) != len(expected) or any(requirement.label not in expected for requirement in requirements):
+            raise ArgumentError(f"evidence plan does not exactly cover workflow stage {context.stage.id}")
+        return tuple(sorted(requirements, key=lambda item: item.requirement_id))
+
+    def _execute_evidence(
+        self,
+        context: AutonomousConnectorWorkflowStageContext,
+        result: AutonomousConnectorDispatchResult,
+        payload: Any,
+    ) -> tuple[Any, bool] | None:
+        if self.evidence_runtime is None:
+            return None
+        requirements = self._evidence_requirements(context)
+        source_digest = result.receipt.payload_digest or result.receipt.request_digest
+        requests = [
+            {
+                "requirement_id": requirement.requirement_id,
+                "source_id": result.receipt.connector_id,
+                "source_digest": source_digest,
+                "request_id": f"workflow-evidence-{result.receipt.dispatch_id}-{index}",
+                "metadata": {
+                    "schema": "bioprism-python-autonomous-connector-evidence-request/0.1",
+                    "workflow_id": context.blueprint.workflow.workflow_id,
+                    "workflow_digest": context.blueprint.workflow.workflow_digest,
+                    "stage_id": context.stage.id,
+                    "connector_id": result.receipt.connector_id,
+                    "connector_request_digest": result.receipt.request_digest,
+                    "connector_status": result.receipt.status,
+                    "retention": "metadata_only;connector_value_caller_owned",
+                    "secret_material": "never_returned",
+                },
+            }
+            for index, requirement in enumerate(requirements)
+        ]
+        evidence = self.evidence_runtime.execute(
+            requests,
+            acquirer=lambda _context: payload,
+            projector=self.evidence_projector,
+            evaluator=self.evidence_evaluator,
+            rehydrate_value=lambda _receipt: payload,
+            parent_evidence_digests=tuple(
+                self.parent_evidence_digests
+                + (result.receipt.request_digest,)
+                + ((result.receipt.payload_digest,) if result.receipt.payload_digest else ())
+            ),
+        )
+        accepted = bool(evidence.receipts) and all(
+            receipt.status == "observed"
+            and receipt.evaluator_status == "accepted"
+            and receipt.requirement_id in receipt.observed_requirement_ids
+            for receipt in evidence.receipts
+        )
+        return evidence, accepted
+
+    @staticmethod
+    def _evidence_metadata(result: Any) -> dict[str, Any]:
+        return {
+            "schema": "bioprism-python-autonomous-connector-evidence-binding/0.1",
+            "status": result.status,
+            "result_digest": result.result_digest,
+            "receipt_digests": [receipt.receipt_digest for receipt in result.receipts],
+            "assessment_digests": [assessment.assessment_digest for assessment in result.assessments],
+            "completed_requirement_ids": list(result.completed_requirement_ids),
+            "pending_evaluation_requirement_ids": list(result.pending_evaluation_requirement_ids),
+            "missing_requirement_ids": list(result.missing_requirement_ids),
+            "retention": "metadata_only;connector_value_and_evaluator_payloads_caller_owned",
+            "secret_material": "never_returned",
+        }
 
     @staticmethod
     def _stage_plan(
@@ -401,8 +531,9 @@ class AutonomousConnectorWorkflowAdapter:
                 stage_execution_plan=stage_plan,
             )
             return AutonomousConnectorWorkflowStageExecution(stage_result, None, selection_plan)
-        request = self._request(context, contract, selection_plan, request_payload)
-        dispatch_id, execution_id, call_id = self._identities(context, request, selection_plan)
+        stable_attempt = 1 if self.evidence_runtime is not None else None
+        request = self._request(context, contract, selection_plan, request_payload, stable_attempt=stable_attempt)
+        dispatch_id, execution_id, call_id = self._identities(context, request, selection_plan, stable_attempt=stable_attempt)
         parent_digests = (
             context.task_digest,
             context.workflow_digest,
@@ -421,7 +552,7 @@ class AutonomousConnectorWorkflowAdapter:
             capability=context.stage.required_capabilities[0],
             request=request,
             parent_digests=parent_digests,
-            attempt_id=_bounded_id("connector workflow attempt_id", f"a{context.stage_attempt}"),
+            attempt_id=_bounded_id("connector workflow attempt_id", f"a{stable_attempt or context.stage_attempt}"),
             selection_plan_digest=selection_plan.plan_digest,
             approved=self.approved,
         )
@@ -449,15 +580,30 @@ class AutonomousConnectorWorkflowAdapter:
                 selection_plan,
                 replay_recovery_required=True,
             )
+        evidence_result = self._execute_evidence(context, dispatch_result, payload) if dispatch_result.receipt.status in {"observed", "partial"} else None
         del payload  # The value remains transient; the structured stage projection is persisted.
         structured, declared, evidence, uncertainty = self._structured(
             context,
             dispatch_result,
             recovery_required=False,
         )
+        if structured is not None and evidence_result is not None:
+            result, accepted = evidence_result
+            structured = {
+                **structured,
+                "status": "completed" if accepted else "proposed",
+                "evidence_runtime": self._evidence_metadata(result),
+                "uncertainty": list(structured["uncertainty"]) + ([] if accepted else ["evidence requires explicit evaluator acceptance before stage completion"]),
+                "next_actions": list(structured["next_actions"]) if accepted else ["rehydrate the evidence runtime and provide an explicit evaluator verdict"],
+            }
+            declared = "completed" if accepted else "proposed"
+            evidence = tuple(structured["evidence"])
+            uncertainty = tuple(structured["uncertainty"])
         receipt = dispatch_result.receipt
         if receipt.failure_class == "approval_required":
             execution_status = "approval_required"
+        elif evidence_result is not None and self.require_evidence_acceptance and not evidence_result[1]:
+            execution_status = "paused"
         elif receipt.status in {"observed", "partial"}:
             execution_status = "completed"
         else:
@@ -519,6 +665,11 @@ def run_autonomous_connector_workflow(
     rehydrate_payload: Callable[[Any], Any] | None = None,
     operation_registry: AutonomousConnectorOperationRegistry | None = None,
     selection_signals: Mapping[str, Mapping[str, Any]] | None = None,
+    evidence_runtime: AutonomousEvidenceRuntime | None = None,
+    evidence_projector: Any | None = None,
+    evidence_evaluator: Any | None = None,
+    require_evidence_acceptance: bool | None = None,
+    parent_evidence_digests: Sequence[str] = (),
 ) -> AutonomousWorkflowRun:
     """Execute every ready workflow stage through the connector adapter and checkpoint it."""
 
@@ -593,6 +744,11 @@ def run_autonomous_connector_workflow(
         approved=approved,
         selection_signals=selection_signals,
         rehydrate_payload=rehydrate_payload,
+        evidence_runtime=evidence_runtime,
+        evidence_projector=evidence_projector,
+        evidence_evaluator=evidence_evaluator,
+        require_evidence_acceptance=require_evidence_acceptance,
+        parent_evidence_digests=parent_evidence_digests,
     )
     stage_results: list[AutonomousWorkflowStageResult] = []
     calls = 0

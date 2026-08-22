@@ -845,6 +845,7 @@ export {
 export type {
   AutonomousConnectorMissionExecutorOptions,
   AutonomousConnectorPayloadRehydrator,
+  AutonomousWorkflowEvidenceBinding,
   AutonomousMissionConnectorAdapterOptions,
   AutonomousWorkflowConnectorAdapterOptions,
 } from "./autonomous-connector-adapters.js";

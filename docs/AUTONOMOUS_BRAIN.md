@@ -514,6 +514,59 @@ otherwise the runtime returns `reconciliation_required` without reacquiring or s
 transport success as evidence quality. The same runtime is available through the Python and
 TypeScript facades and applies the identical contract across all twelve built-in domains.
 
+### Connector-backed evidence gates and reconciliation
+
+The connector workflow adapter can bind each connector-backed stage directly to the evidence
+runtime. This closes the loop between a transport observation, the stage's exact
+`evidence_outputs`, and an independent evaluator without storing the connector value. The
+binding is opt-in for compatibility; once supplied, strict acceptance is the default. A stage is
+completed only when every requirement for that stage has an observed receipt and an explicit
+`accepted` evaluator verdict. Connector `observed` or HTTP-success status alone is never enough.
+
+```python
+evidence_runtime = agent.evidence_runtime(
+    domains=("data",),
+    journal=evidence_journal,
+)
+run = agent.run_connector_workflow(
+    blueprint=blueprint,
+    approved=True,
+    evidence_runtime=evidence_runtime,
+    evidence_projector=projector,
+    evidence_evaluator=evaluator,
+    require_evidence_acceptance=True,
+)
+```
+
+```typescript
+const evidenceRuntime = await agent.evidenceRuntime(["data"], { journal: evidenceJournal });
+const stageExecutor = autonomousConnectorWorkflowStageExecutor({
+  runtime: connectorRuntime,
+  approved: true,
+  evidence: { runtime: evidenceRuntime, projector, evaluator, requireAcceptance: true },
+});
+const run = await new AutonomousWorkflowExecutor(agent, checkpointStore, {
+  stageExecutor,
+}).start(task, { domain: "data", approveProviderCall: true });
+```
+
+The adapter projects only a bounded `evidence_runtime` metadata object into the structured stage
+output: runtime/receipt/assessment digests, requirement IDs, status, and explicit pending or
+missing IDs. Connector payloads, evaluator inputs, credentials, and task text stay caller-owned.
+An indeterminate, rejected, missing, or failed evaluation returns
+`reconciliation_required`; the durable workflow checkpoint remains paused at the same stage and
+does not unlock dependent stages. The TypeScript executor records this as a paused checkpoint,
+and the Python connector runner preserves the same status contract.
+
+Reconciliation is idempotent at the connector boundary. Evidence-bound stage identities use a
+stable attempt identity, so a resumed stage replays its digest-bound connector receipt and does
+not issue a second external call. The caller must rehydrate the connector payload by its exact
+receipt digest. If the evaluator decision is being replaced after a pause, the caller can create
+a fresh evidence runtime with the same reviewed plan and journal the new evaluator attempt while
+reusing the connector receipt; this keeps evaluation changes explicit and prevents a stale
+indeterminate verdict from being mistaken for acceptance. A restarted runtime should call its
+`rehydrate()` method before executing against an existing evidence journal.
+
 ### Non-interactive deployment bootstrap
 
 When no person enters a key, the deployment should register a source resolver during service

@@ -29,6 +29,14 @@ import type {
   AutonomousMissionStepExecutor,
 } from "./mission-execution.js";
 import { AutonomousMissionExecutor } from "./mission-execution.js";
+import {
+  AutonomousEvidenceRuntime,
+  type AutonomousEvidenceAcquisitionRequest,
+  type AutonomousEvidenceEvaluator,
+  type AutonomousEvidenceProjector,
+  type AutonomousEvidenceRuntimeResult,
+} from "./autonomous-evidence-runtime.js";
+import type { AutonomousEvidenceRequirement } from "./autonomous-evidence.js";
 import { ToolCatalogue, digestJson, digestJsonSync } from "./tooling.js";
 import type { JsonObject, JsonValue } from "./types.js";
 
@@ -36,6 +44,21 @@ const CONNECTOR_ADAPTER_ID_BYTES = 96;
 
 export interface AutonomousConnectorPayloadRehydrator {
   (receipt: AutonomousConnectorDispatchResult["receipt"]): JsonValue | null | Promise<JsonValue | null>;
+}
+
+/**
+ * Optional evidence gate for a connector-backed workflow stage.
+ *
+ * The connector remains the acquisition transport; the evidence runtime owns the
+ * requirement/evaluator boundary. Raw connector payloads never enter the journal.
+ */
+export interface AutonomousWorkflowEvidenceBinding {
+  runtime: AutonomousEvidenceRuntime;
+  projector?: AutonomousEvidenceProjector;
+  evaluator?: AutonomousEvidenceEvaluator;
+  /** Defaults to true when an evidence binding is supplied. */
+  requireAcceptance?: boolean;
+  parentEvidenceDigests?: readonly string[];
 }
 
 export interface AutonomousWorkflowConnectorAdapterOptions {
@@ -52,6 +75,7 @@ export interface AutonomousWorkflowConnectorAdapterOptions {
   requestForStage?: (context: AutonomousWorkflowStageExecutionContext) => JsonObject | Promise<JsonObject>;
   rehydratePayload?: AutonomousConnectorPayloadRehydrator;
   onDispatch?: (result: AutonomousConnectorDispatchResult, context: AutonomousWorkflowStageExecutionContext) => void | Promise<void>;
+  evidence?: AutonomousWorkflowEvidenceBinding;
 }
 
 export interface AutonomousMissionConnectorAdapterOptions {
@@ -148,6 +172,93 @@ async function connectorValue(
   return { value: restored, replayRecoveryRequired: false };
 }
 
+function evidenceRequirementsForStage(
+  runtime: AutonomousEvidenceRuntime,
+  context: AutonomousWorkflowStageExecutionContext,
+): AutonomousEvidenceRequirement[] {
+  const requirements = runtime.plan.requirements.filter((requirement) =>
+    requirement.domain === context.workflow.domain
+    && requirement.workflow_id === context.workflow.workflow_id
+    && requirement.workflow_digest === context.workflow.workflow_digest
+    && requirement.stage_id === context.stage.id,
+  );
+  const expected = [...context.stage.evidence_outputs];
+  if (requirements.length !== expected.length || requirements.some((requirement) => !expected.includes(requirement.label))) {
+    throw new ArgumentError(`evidence plan does not exactly cover workflow stage ${context.stage.id}`);
+  }
+  return requirements.sort((left, right) => left.requirement_id.localeCompare(right.requirement_id));
+}
+
+function evidenceRequestsForStage(
+  requirements: readonly AutonomousEvidenceRequirement[],
+  context: AutonomousWorkflowStageExecutionContext,
+  result: AutonomousConnectorDispatchResult,
+): AutonomousEvidenceAcquisitionRequest[] {
+  const sourceDigest = result.receipt.payload_digest ?? result.receipt.request_digest;
+  return requirements.map((requirement, index) => ({
+    requirement_id: requirement.requirement_id,
+    source_id: result.receipt.connector_id,
+    source_digest: sourceDigest,
+    request_id: `workflow-evidence-${result.receipt.dispatch_id}-${index}`,
+    metadata: {
+      schema: "bioprism-typescript-autonomous-connector-evidence-request/0.1",
+      workflow_id: context.workflow.workflow_id,
+      workflow_digest: context.workflow.workflow_digest,
+      stage_id: context.stage.id,
+      connector_id: result.receipt.connector_id,
+      connector_request_digest: result.receipt.request_digest,
+      connector_status: result.receipt.status,
+      retention: "metadata_only;connector_value_caller_owned",
+      secret_material: "never_returned",
+    },
+  }));
+}
+
+function evidenceAccepted(result: AutonomousEvidenceRuntimeResult): boolean {
+  return result.json.receipts.length > 0 && result.json.receipts.every((receipt) =>
+    receipt.status === "observed"
+    && receipt.evaluator_status === "accepted"
+    && receipt.observed_requirement_ids.includes(receipt.requirement_id),
+  );
+}
+
+function evidenceMetadata(result: AutonomousEvidenceRuntimeResult): JsonObject {
+  return {
+    schema: "bioprism-typescript-autonomous-connector-evidence-binding/0.1",
+    status: result.json.status,
+    result_digest: result.json.result_digest,
+    receipt_digests: result.json.receipts.map((receipt) => receipt.receipt_digest),
+    assessment_digests: result.json.assessments.map((assessment) => assessment.assessment_digest),
+    completed_requirement_ids: result.json.completed_requirement_ids,
+    pending_evaluation_requirement_ids: result.json.pending_evaluation_requirement_ids,
+    missing_requirement_ids: result.json.missing_requirement_ids,
+    retention: "metadata_only;connector_value_and_evaluator_payloads_caller_owned",
+    secret_material: "never_returned",
+  };
+}
+
+async function executeStageEvidence(
+  binding: AutonomousWorkflowEvidenceBinding,
+  context: AutonomousWorkflowStageExecutionContext,
+  result: AutonomousConnectorDispatchResult,
+  value: JsonValue | null,
+): Promise<{ result: AutonomousEvidenceRuntimeResult; accepted: boolean }> {
+  const requirements = evidenceRequirementsForStage(binding.runtime, context);
+  const requests = evidenceRequestsForStage(requirements, context, result);
+  const evidenceResult = await binding.runtime.execute(requests, {
+    projector: binding.projector,
+    evaluator: binding.evaluator,
+    parentEvidenceDigests: [
+      ...(binding.parentEvidenceDigests ?? []),
+      result.receipt.request_digest,
+      ...(result.receipt.payload_digest ? [result.receipt.payload_digest] : []),
+    ],
+    acquirer: { acquire: () => value },
+    rehydrateValue: () => value,
+  });
+  return { result: evidenceResult, accepted: evidenceAccepted(evidenceResult) };
+}
+
 function connectorSelection(result: AutonomousConnectorDispatchResult): AutonomousSelectionDecision {
   return {
     selected_model: { provider: result.receipt.provider, model: result.receipt.connector_version },
@@ -185,28 +296,37 @@ function connectorRun(
   result: AutonomousConnectorDispatchResult,
   value: JsonValue | null,
   replayRecoveryRequired: boolean,
+  evidence: { result: AutonomousEvidenceRuntimeResult; accepted: boolean } | null = null,
+  requireEvidenceAcceptance = false,
 ): AutonomousRunResult {
   const observed = result.receipt.status === "observed";
   const partial = result.receipt.status === "partial";
   const approvalRequired = result.receipt.failure_class === "approval_required";
+  const evidenceBlocked = evidence !== null && requireEvidenceAcceptance && !evidence.accepted;
   const status: AutonomousRunResult["status"] = replayRecoveryRequired
     ? "reconciliation_required"
     : approvalRequired
       ? "approval_required"
+      : evidenceBlocked
+        ? "reconciliation_required"
       : observed || partial
         ? "completed"
         : "abstained";
-  const structured: JsonObject | null = status === "completed"
+  const structured: JsonObject | null = !replayRecoveryRequired && (observed || partial)
     ? {
         stage_id: context.stage.id,
-        status: observed ? "completed" : "proposed",
+        status: observed && !evidenceBlocked ? "completed" : "proposed",
         evidence: [`connector:${result.receipt.connector_id}`, `payload:${result.receipt.payload_digest ?? "none"}`],
         uncertainty: [
           ...(partial ? ["connector returned a partial observation"] : []),
           ...(result.replay === "replayed" ? ["connector payload was caller-rehydrated from its digest"] : []),
+          ...(evidenceBlocked ? ["evidence requires explicit evaluator acceptance before stage completion"] : []),
         ],
         notes: `connector receipt ${result.receipt.request_digest}`,
-        next_actions: partial ? ["review partial connector evidence before treating the stage as complete"] : [],
+        next_actions: evidenceBlocked
+          ? ["rehydrate the evidence runtime and provide an explicit evaluator verdict"]
+          : partial ? ["review partial connector evidence before treating the stage as complete"] : [],
+        ...(evidence === null ? {} : { evidence_runtime: evidenceMetadata(evidence.result) }),
       }
     : null;
   return {
@@ -257,6 +377,13 @@ export function autonomousConnectorWorkflowStageExecutor(options: AutonomousWork
   if (registry !== options.runtime.registry) throw new ArgumentError("workflow connector adapter registry must match its runtime");
   if (options.requestForStage !== undefined && typeof options.requestForStage !== "function") throw new ArgumentError("workflow connector requestForStage must be callable");
   if (options.onDispatch !== undefined && typeof options.onDispatch !== "function") throw new ArgumentError("workflow connector onDispatch must be callable");
+  if (options.evidence !== undefined) {
+    if (!(options.evidence.runtime instanceof AutonomousEvidenceRuntime)) throw new ArgumentError("workflow connector evidence runtime is invalid");
+    if (options.evidence.projector !== undefined && typeof options.evidence.projector.project !== "function") throw new ArgumentError("workflow connector evidence projector is malformed");
+    if (options.evidence.evaluator !== undefined && typeof options.evidence.evaluator.evaluate !== "function") throw new ArgumentError("workflow connector evidence evaluator is malformed");
+    if (options.evidence.requireAcceptance !== undefined && typeof options.evidence.requireAcceptance !== "boolean") throw new ArgumentError("workflow connector evidence requireAcceptance must be boolean");
+    if (options.evidence.requireAcceptance !== false && (!options.evidence.projector || !options.evidence.evaluator)) throw new ArgumentError("strict workflow connector evidence requires both a projector and evaluator");
+  }
   return async (context) => {
     const domain = connectorDomain(context.workflow.domain, "workflow connector domain");
     const capability = context.stage.required_capabilities[0];
@@ -264,8 +391,9 @@ export function autonomousConnectorWorkflowStageExecutor(options: AutonomousWork
     const operation = operationFor(options.operationRegistry, domain, capability, "workflow connector");
     const plan = connectorPlan(await workflowPlan(context, options, registry), domain, capability);
     const stageDigest = await digestJson(context.stage);
-    const identityDigest = await digestJson({ job_id: context.job_id, stage_id: context.stage.id, stage_attempt: context.stage_attempt, execution_contract_digest: context.execution_contract_digest });
-    const subjectDigest = await digestJson({ schema: "bioprism-typescript-autonomous-connector-subject/0.1", workflow_id: context.workflow.workflow_id, stage_id: context.stage.id, stage_digest: stageDigest, task_digest: context.task_digest, attempt: context.stage_attempt });
+    const stableAttempt = options.evidence === undefined ? context.stage_attempt : 1;
+    const identityDigest = await digestJson({ job_id: context.job_id, stage_id: context.stage.id, stage_attempt: stableAttempt, execution_contract_digest: context.execution_contract_digest, evidence_plan_digest: options.evidence?.runtime.plan.plan_digest ?? null });
+    const subjectDigest = await digestJson({ schema: "bioprism-typescript-autonomous-connector-subject/0.1", workflow_id: context.workflow.workflow_id, stage_id: context.stage.id, stage_digest: stageDigest, task_digest: context.task_digest, attempt: stableAttempt });
     const request = new AutonomousConnectorDispatchRequest({
       dispatch_id: boundedAdapterId(`workflow-dispatch-${identityDigest.slice(0, 48)}`, "workflow connector dispatch_id"),
       execution_id: boundedAdapterId(`workflow-execution-${identityDigest.slice(0, 48)}`, "workflow connector execution_id"),
@@ -275,15 +403,27 @@ export function autonomousConnectorWorkflowStageExecutor(options: AutonomousWork
       capability,
       request: attachOperation(await (options.requestForStage?.(context) ?? defaultWorkflowRequest(context, operation, subjectDigest)), operation, "workflow connector", subjectDigest),
       parent_digests: [context.route.route_digest, context.workflow.workflow_digest, context.execution_contract_digest, stageDigest],
-      attempt_id: boundedAdapterId(`a${context.stage_attempt}`, "workflow connector attempt_id"),
+      attempt_id: boundedAdapterId(`a${stableAttempt}`, "workflow connector attempt_id"),
       selection_plan_digest: plan.plan.plan_digest,
       approved: options.approved === true,
     });
+    if (options.evidence !== undefined && request.request.stage_attempt !== undefined && request.request.stage_attempt !== 1) throw new ArgumentError("workflow connector evidence binding requires a stable stage_attempt of 1");
     if (operation) operation.assertRequest(request);
     const result = await options.runtime.dispatchFromPlan(plan.plan, request);
     await options.onDispatch?.(result, context);
     const resolved = await connectorValue(result, options.rehydratePayload);
-    return connectorRun(context, result, resolved.value, resolved.replayRecoveryRequired);
+    if (resolved.replayRecoveryRequired) return connectorRun(context, result, resolved.value, true);
+    const evidence = options.evidence === undefined || (result.receipt.status !== "observed" && result.receipt.status !== "partial")
+      ? null
+      : await executeStageEvidence(options.evidence, context, result, resolved.value);
+    return connectorRun(
+      context,
+      result,
+      resolved.value,
+      false,
+      evidence,
+      options.evidence?.requireAcceptance !== false,
+    );
   };
 }
 

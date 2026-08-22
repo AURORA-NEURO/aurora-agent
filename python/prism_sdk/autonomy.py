@@ -11943,6 +11943,11 @@ class AutonomousAgent:
         rehydrate_payload: Callable[[Any], Any] | None = None,
         operation_registry: Any | None = None,
         selection_signals: Mapping[str, Mapping[str, Any]] | None = None,
+        evidence_runtime: Any | None = None,
+        evidence_projector: Any | None = None,
+        evidence_evaluator: Any | None = None,
+        require_evidence_acceptance: bool | None = None,
+        parent_evidence_digests: Sequence[str] = (),
     ) -> Any:
         """Run a blueprint's workflow DAG through reviewed connectors without provider credentials.
 
@@ -11969,6 +11974,11 @@ class AutonomousAgent:
                 rehydrate_payload=rehydrate_payload,
                 operation_registry=operation_registry,
                 selection_signals=selection_signals,
+                evidence_runtime=evidence_runtime,
+                evidence_projector=evidence_projector,
+                evidence_evaluator=evidence_evaluator,
+                require_evidence_acceptance=require_evidence_acceptance,
+                parent_evidence_digests=parent_evidence_digests,
             )
         except (ArgumentError, BrainRunError):
             raise

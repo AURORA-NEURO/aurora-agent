@@ -6,11 +6,36 @@ from prism_sdk import (
     AutonomousConnectorOperationRegistry,
     AutonomousConnectorReceiptJournal,
     AutonomousConnectorRegistration,
+    InMemoryAutonomousEvidenceRuntimeJournal,
     AutonomousWorkflowCheckpoint,
     LLMRuntime,
     content_digest,
 )
 from prism_sdk.autonomous_builtin_connectors import _RECOMMENDED_FIELDS
+
+
+class _EvidenceProjector:
+    def project(self, value, context):
+        return [{
+            "label": context["requirement"].label,
+            "kind": "fact",
+            "status": "observed",
+            "confidence": 1,
+        }]
+
+
+class _AcceptingEvaluator:
+    evaluator_id = "local-stage-evaluator"
+    evaluator_version = "1"
+
+    def evaluate(self, input_value):
+        return {
+            "evaluator_id": self.evaluator_id,
+            "evaluator_version": self.evaluator_version,
+            "verdict": "accepted",
+            "score": 1,
+            "evidence_digest": content_digest(input_value["value"]),
+        }
 
 
 def _agent(tmp_path):
@@ -96,6 +121,29 @@ def test_connector_workflow_requires_approval_and_preserves_partial_evidence(tmp
     assert retried.stage_results[0].declared_status == "completed"
     assert retried.stage_results[0].attempt == 2
     assert journal.verify_integrity()["entries"] == 3
+
+
+def test_connector_workflow_evidence_binding_requires_explicit_acceptance_across_domains(tmp_path) -> None:
+    agent, _registrations, journal = _agent(tmp_path)
+    total_stages = 0
+    for domain in AUTONOMOUS_DOMAINS:
+        blueprint = agent.prepare(task=f"evaluated offline fixture for {domain}", domain=domain)
+        evidence_journal = InMemoryAutonomousEvidenceRuntimeJournal()
+        evidence_runtime = agent.evidence_runtime((domain,), journal=evidence_journal)
+        result = agent.run_connector_workflow(
+            blueprint=blueprint,
+            approved=True,
+            request_for_stage=_request_for_stage,
+            evidence_runtime=evidence_runtime,
+            evidence_projector=_EvidenceProjector(),
+            evidence_evaluator=_AcceptingEvaluator(),
+        )
+        total_stages += len(blueprint.workflow.stages)
+        assert result.status == "completed", domain
+        assert all(stage.execution_status == "completed" and stage.declared_status == "completed" for stage in result.stage_results), domain
+        assert all("evidence_runtime" in stage.structured for stage in result.stage_results), domain
+        assert len(evidence_journal.records()) == sum(len(stage.evidence_outputs) for stage in blueprint.workflow.stages), domain
+    assert journal.verify_integrity()["entries"] == total_stages
 
 
 def test_connector_workflow_replay_requires_digest_verified_rehydration(tmp_path) -> None:

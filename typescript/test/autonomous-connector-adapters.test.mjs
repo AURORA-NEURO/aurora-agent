@@ -13,6 +13,7 @@ import {
   AutonomousWorkflowExecutor,
   CredentialStore,
   InMemoryAutonomousConnectorReceiptJournal,
+  InMemoryAutonomousEvidenceRuntimeJournal,
   InMemoryAutonomousConnectorFeedbackLedger,
   InMemoryAutonomousMissionCheckpointStore,
   InMemoryAutonomousWorkflowCheckpointStore,
@@ -90,6 +91,122 @@ test("connector-backed workflow stages execute every autonomous domain through d
   }
   assert.equal(fixture.calls(), totalStages);
   assert.equal((await fixture.journal.verifyIntegrity()).entries, totalStages);
+});
+
+test("connector-backed workflow stages require explicit evidence acceptance across every domain", async () => {
+  const fixture = await connectorFixture();
+  const agent = new AutonomousAgent(new LLMRuntime({ credentials: new CredentialStore() }));
+  let totalEvidenceEntries = 0;
+  for (const profile of fixture.profiles) {
+    const evidenceJournal = new InMemoryAutonomousEvidenceRuntimeJournal();
+    const evidenceRuntime = await agent.evidenceRuntime([profile.domain], { journal: evidenceJournal });
+    const adapter = autonomousConnectorWorkflowStageExecutor({
+      runtime: fixture.runtime,
+      approved: true,
+      evidence: {
+        runtime: evidenceRuntime,
+        projector: {
+          project: (_value, context) => [{
+            label: context.requirement.label,
+            kind: "fact",
+            status: "observed",
+            confidence: 1,
+          }],
+        },
+        evaluator: {
+          evaluator_id: "local-stage-evaluator",
+          evaluator_version: "1",
+          evaluate: async () => ({
+            evaluator_id: "local-stage-evaluator",
+            evaluator_version: "1",
+            verdict: "accepted",
+            score: 1,
+            evidence_digest: "b".repeat(64),
+          }),
+        },
+      },
+    });
+    const result = await new AutonomousWorkflowExecutor(
+      agent,
+      new InMemoryAutonomousWorkflowCheckpointStore(),
+      { stageExecutor: adapter },
+    ).start(`Run an evaluated connector-backed ${profile.domain} workflow`, {
+      domain: profile.domain,
+      jobId: `evaluated-connector-workflow-${profile.domain}`,
+      approveProviderCall: true,
+      maxStages: 32,
+    });
+    totalEvidenceEntries += profile.workflow.stages.reduce((total, stage) => total + stage.evidence_outputs.length, 0);
+    assert.equal(result.status, "completed", profile.domain);
+    assert.equal(result.completed_stage_count, profile.workflow.stages.length, profile.domain);
+    assert.ok(result.stage_results.every((stage) => stage.declared_status === "completed" && stage.validation_errors.length === 0), profile.domain);
+    assert.ok(result.stage_results.every((stage) => stage.run?.response?.structured?.evidence_runtime?.completed_requirement_ids?.length === stage.stage.evidence_outputs.length), profile.domain);
+    assert.equal(evidenceJournal.records().length, profile.workflow.stages.reduce((total, stage) => total + stage.evidence_outputs.length, 0), profile.domain);
+  }
+  assert.equal(fixture.calls(), fixture.profiles.reduce((total, profile) => total + profile.workflow.stages.length, 0));
+  assert.equal(totalEvidenceEntries, fixture.profiles.reduce((total, profile) => total + profile.workflow.stages.reduce((stageTotal, stage) => stageTotal + stage.evidence_outputs.length, 0), 0));
+});
+
+test("strict connector evidence pauses and resumes by replaying the connector receipt", async () => {
+  const fixture = await connectorFixture();
+  const agent = new AutonomousAgent(new LLMRuntime({ credentials: new CredentialStore() }));
+  const profile = fixture.profiles.find((candidate) => candidate.domain === "coding");
+  assert.ok(profile);
+  let connectorPayload = null;
+  const firstRuntime = await agent.evidenceRuntime([profile.domain]);
+  const firstAdapter = autonomousConnectorWorkflowStageExecutor({
+    runtime: fixture.runtime,
+    approved: true,
+    onDispatch: (result) => { connectorPayload = result.value; },
+    evidence: {
+      runtime: firstRuntime,
+      projector: { project: (_value, context) => [{ label: context.requirement.label, status: "observed" }] },
+      evaluator: {
+        evaluator_id: "delayed-stage-evaluator",
+        evaluator_version: "1",
+        evaluate: async () => ({ evaluator_id: "delayed-stage-evaluator", evaluator_version: "1", verdict: "indeterminate", score: 0.5 }),
+      },
+    },
+  });
+  const store = new InMemoryAutonomousWorkflowCheckpointStore();
+  const task = "Pause a coding workflow until its evaluator can review the receipt";
+  const first = await new AutonomousWorkflowExecutor(agent, store, { stageExecutor: firstAdapter }).start(task, {
+    domain: "coding",
+    jobId: "connector-evidence-reconciliation",
+    approveProviderCall: true,
+    maxStages: 1,
+  });
+  assert.equal(first.status, "paused");
+  assert.equal(first.stage_results[0].run?.status, "reconciliation_required");
+  assert.equal(fixture.calls(), 1);
+  assert.ok(connectorPayload);
+
+  const secondRuntime = await agent.evidenceRuntime([profile.domain]);
+  let replayedDispatches = 0;
+  const secondAdapter = autonomousConnectorWorkflowStageExecutor({
+    runtime: fixture.runtime,
+    approved: true,
+    rehydratePayload: () => connectorPayload,
+    onDispatch: (result) => { if (result.replay === "replayed") replayedDispatches += 1; },
+    evidence: {
+      runtime: secondRuntime,
+      projector: { project: (_value, context) => [{ label: context.requirement.label, status: "observed" }] },
+      evaluator: {
+        evaluator_id: "delayed-stage-evaluator",
+        evaluator_version: "2",
+        evaluate: async () => ({ evaluator_id: "delayed-stage-evaluator", evaluator_version: "2", verdict: "accepted", score: 1 }),
+      },
+    },
+  });
+  const resumed = await new AutonomousWorkflowExecutor(agent, store, { stageExecutor: secondAdapter }).resume("connector-evidence-reconciliation", task, {
+    domain: "coding",
+    approveProviderCall: true,
+    maxStages: 32,
+  });
+  assert.equal(resumed.status, "completed");
+  assert.equal(resumed.completed_stage_count, profile.workflow.stages.length);
+  assert.equal(fixture.calls(), profile.workflow.stages.length, "evidence reconciliation must replay the connector receipt");
+  assert.ok(replayedDispatches >= 1, "resume must observe a replayed connector receipt");
 });
 
 test("connector-backed mission steps bind capability, approval, and caller-owned replay rehydration", async () => {
