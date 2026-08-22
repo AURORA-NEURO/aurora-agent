@@ -4,11 +4,18 @@ import io
 import json
 from unittest.mock import patch
 
-from prism_sdk import AUTONOMOUS_DOMAINS, ModelCandidate, ModelCatalogue, ProviderModelDescriptor
+from prism_sdk import (
+    AUTONOMOUS_DOMAINS,
+    BRAIN_LEARNING_EPISODE_SCHEMA,
+    ModelCandidate,
+    ModelCatalogue,
+    ProviderModelDescriptor,
+    SQLiteBrainLearningLedger,
+)
 from prism_sdk.cli import main
 
 
-def _invoke(*args: str, environ: dict[str, str] | None = None, reader=None):
+def _invoke(*args: str, environ: dict[str, str] | None = None, reader=None, client_factory=None):
     output = io.StringIO()
     errors = io.StringIO()
     code = main(
@@ -17,6 +24,7 @@ def _invoke(*args: str, environ: dict[str, str] | None = None, reader=None):
         reader=reader,
         writer=output,
         error_writer=errors,
+        **({} if client_factory is None else {"client_factory": client_factory}),
     )
     return code, json.loads(output.getvalue()) if output.getvalue() else None, errors.getvalue()
 
@@ -202,6 +210,107 @@ def test_state_status_is_provider_free_and_does_not_create_missing_ledgers(tmp_p
     assert payload["authorization"] == "metadata_read_only; no_provider_or_credential_access"
     assert not health_path.exists()
     assert not learning_path.exists()
+
+
+def _write_cli_learning_episode(path, *, episode_id: str = "cli-episode-1", evidence_digest=None) -> None:
+    evaluation_input = {
+        "schema": "bioprism-brain-evaluator-input/0.1",
+        "run_id": "cli-run-1",
+        "result_kind": "run",
+        "selected_model": {"provider": "offline", "model": "test-model"},
+        "selection_digest": "a" * 64,
+        "prompt_digest": "b" * 64,
+        "plan_digest": "c" * 64,
+        "outcome_digest": "d" * 64,
+        "evidence_digest": evidence_digest,
+    }
+    episode = {
+        "schema": BRAIN_LEARNING_EPISODE_SCHEMA,
+        "episode_id": episode_id,
+        "evaluation_input": evaluation_input,
+        "arm_id": "offline/test-model",
+        "evidence_digest": evidence_digest,
+        "status": "pending",
+    }
+    with SQLiteBrainLearningLedger(path) as ledger:
+        ledger.begin_episode(episode)
+
+
+def test_learning_status_is_provider_free_and_projects_only_episode_digests(tmp_path) -> None:
+    path = tmp_path / "learning.sqlite3"
+    _write_cli_learning_episode(path)
+    code, payload, errors = _invoke(
+        "learning-status",
+        "--learning-store", str(path),
+        "--episode-id", "cli-episode-1",
+    )
+    assert code == 0
+    assert errors == ""
+    assert payload["available"] is True
+    assert payload["pending_episode_count"] == 1
+    assert payload["selected_episode"]["episode_id"] == "cli-episode-1"
+    assert "evaluation_input" not in json.dumps(payload)
+    assert payload["authorization"] == "metadata_read_only; no_provider_or_credential_access"
+
+
+def test_learning_status_missing_store_does_not_create_it(tmp_path) -> None:
+    path = tmp_path / "missing-learning.sqlite3"
+    code, payload, errors = _invoke("learning-status", "--learning-store", str(path))
+    assert code == 0
+    assert errors == ""
+    assert payload["available"] is False
+    assert not path.exists()
+
+
+def test_settle_learning_accepts_only_a_value_only_decision_and_never_collects_credentials(tmp_path) -> None:
+    path = tmp_path / "settle-learning.sqlite3"
+    _write_cli_learning_episode(path)
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    class Result:
+        def require_ok(self):
+            return {
+                "ok": True,
+                "status": "recorded_evaluator_reward",
+                "learning_evidence": {"evidence_digest": "e" * 64},
+                "next_state": {
+                    "schema": "bioprism-brain-bandit/0.1",
+                    "generation": 1,
+                    "arms": [{"arm_id": "offline/test-model", "pulls": 1, "reward_sum": 0.8}],
+                },
+            }
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def call_tool(self, name: str, arguments=None):
+            calls.append((name, dict(arguments or {})))
+            return Result()
+
+    code, payload, errors = _invoke(
+        "settle-learning",
+        "--learning-store", str(path),
+        "--episode-id", "cli-episode-1",
+        "--evaluator-id", "offline-evaluator",
+        "--evaluator-version", "1",
+        "--reward", "0.8",
+        "--outcome", "passed",
+        "--mcp-command", "python brain_server.py",
+        client_factory=lambda *_args, **_kwargs: FakeClient(),
+    )
+    assert code == 0
+    assert errors == ""
+    assert payload["decision"]["reward"] == 0.8
+    assert payload["pending_episode_count_after"] == 0
+    assert payload["authorization"]["provider_call"] is False
+    assert calls[0][0] == "brain_outcome_record"
+    encoded = json.dumps(payload)
+    assert "api_key" not in encoded
+    assert "evaluation_input" not in encoded
 
 
 def test_run_wires_opt_in_health_and_learning_ledgers_without_exposing_state_or_keys(tmp_path) -> None:

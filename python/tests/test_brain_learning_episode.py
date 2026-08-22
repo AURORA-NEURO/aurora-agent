@@ -144,6 +144,62 @@ def test_delayed_episode_rejects_changed_evidence() -> None:
         )
 
 
+def test_prevalidated_value_only_decision_settles_without_reinvoking_evaluator(tmp_path) -> None:
+    workspace = _Workspace()
+    brain = AutonomousBrain(workspace, LLMRuntime())
+    ledger = BrainLearningLedger(tmp_path / "prevalidated.jsonl")
+    episode = brain.prepare_learning_episode(_result(), ledger=ledger)
+    evaluator_calls: list[object] = []
+    evaluator = BrainOutcomeEvaluator(
+        lambda value: evaluator_calls.append(value) or {"reward": 0.0, "passed": False},
+        evaluator_id="worker-evaluator",
+        evaluator_version="2",
+    )
+    decision = evaluator.assess_value_only_input(episode.evaluation_input)
+    decision = replace(decision, reward=0.7, passed=True, failed=False)
+    evaluator_calls.clear()
+
+    settled, report = evaluator.settle_episode(
+        brain,
+        episode,
+        decision=decision,
+        bandit_state=_empty_state(),
+        ledger=ledger,
+    )
+
+    assert settled.reward == 0.7
+    assert report["status"] == "recorded_evaluator_reward"
+    assert evaluator_calls == []
+    assert ledger.pending_episodes() == []
+    assert workspace.calls[-1][1]["idempotency_key"] == f"episode:{episode.episode_id}"
+
+
+def test_prevalidated_value_only_decision_requires_the_episode_evidence_digest(tmp_path) -> None:
+    brain = AutonomousBrain(_Workspace(), LLMRuntime())
+    ledger = BrainLearningLedger(tmp_path / "prevalidated-evidence.jsonl")
+    episode = brain.prepare_learning_episode(_result(), evidence={"quality": 1.0}, ledger=ledger)
+    evaluator = BrainOutcomeEvaluator(
+        lambda _: {"reward": 0.5, "passed": True},
+        evaluator_id="worker-evaluator",
+        evaluator_version="2",
+    )
+    decision = replace(
+        evaluator.assess_value_only_input(episode.evaluation_input),
+        reward=0.5,
+        passed=True,
+        failed=False,
+        evidence_digest=None,
+    )
+    with pytest.raises(BrainRunError, match="evidence_digest"):
+        evaluator.settle_episode(
+            brain,
+            episode,
+            decision=decision,
+            bandit_state=_empty_state(),
+            ledger=ledger,
+        )
+
+
 def test_immediate_learning_bootstraps_selected_arm_from_empty_state() -> None:
     workspace = _Workspace()
     brain = AutonomousBrain(workspace, LLMRuntime())

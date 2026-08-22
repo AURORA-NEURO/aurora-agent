@@ -271,7 +271,16 @@ python -m prism_sdk run \
 python -m prism_sdk state-status \
   --health-store .aurora/provider-health.jsonl \
   --learning-store .aurora/brain-learning.sqlite
+
+python -m prism_sdk learning-status \
+  --learning-store .aurora/brain-learning.sqlite \
+  --limit 64
 ```
+
+`learning-status` is the restart boundary for delayed evaluator workers. It returns pending
+episode identities, selected-arm metadata, context/selection/prompt/plan/outcome digests, bounded
+replay metadata, and all-domain learning snapshots; it never returns the retained evaluator input
+envelope. A missing store is reported as unavailable without creating a new database.
 
 The command accepts no API-key or token argument. By default it uses a no-echo prompt; deployment
 automation can select `--credential-source environment --credential-env OPENAI_API_KEY`. The value
@@ -1274,6 +1283,29 @@ decision, report = agent.settle_learning_episode(
     evidence=caller_owned_evidence,
 )
 ```
+
+When an evaluator has already processed its private evidence in another process, it can hand off
+only a `BrainEvaluatorDecision` and settle without reloading evidence or invoking a provider:
+
+```bash
+python -m prism_sdk settle-learning \
+  --learning-store .aurora/brain-learning.sqlite \
+  --episode-id job-123-attempt-0 \
+  --evaluator-id autonomous-coding-quality \
+  --evaluator-version 1 \
+  --reward 0.85 \
+  --outcome passed \
+  --evidence-digest <caller-retained-evidence-sha256> \
+  --mcp-command "python path/to/mcp_server.py"
+```
+
+This command accepts only bounded evaluator fields: identity, version, reward, pass/fail status,
+optional feedback/failure labels, and an optional evidence digest. It has no credential arguments,
+does not open a provider session, and never accepts raw evidence, prompts, responses, task text, or
+tool payloads. The MCP process is used only for the caller-owned `brain_outcome_record` kernel
+operation. The stored episode must still be pending, the evidence digest must match the original
+episode, the evaluator identity is bound into replay metadata, and a second settlement of the same
+episode is refused.
 
 For delayed multi-step credit, `agent.prepare_learning_trajectory(...)` and
 `agent.restore_learning_trajectory(...)` provide the same restart-safe boundary, while

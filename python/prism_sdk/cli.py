@@ -8,6 +8,8 @@ the brain or into MCP:
 * ``route`` exposes deterministic routing evidence without invoking a model;
 * ``provider-status``, ``onboard``, and the inventory commands implement the redacted BYOK and
   model-lifecycle boundaries; and
+* ``state-status`` and ``learning-status`` inspect persisted health/learning metadata, while
+  ``settle-learning`` accepts only a bounded evaluator decision for a restart-safe settlement; and
 * ``run`` connects to a caller-owned MCP workspace, collects one short-lived credential, lets the
   existing autonomous planner select a model, and requires explicit provider/mission approval.
 
@@ -29,6 +31,7 @@ from typing import Any, Callable, Mapping, Sequence, TextIO
 
 from .autonomy import AUTONOMOUS_DOMAINS, AutonomousAgent
 from .autonomous_model_inventory import AutonomousModelInventoryStore
+from .brain import BrainEvaluatorDecision, BrainLearningEpisode, BrainOutcomeEvaluator
 from .brain_learning_store import SQLiteBrainLearningLedger
 from .client import Client
 from .errors import SdkError
@@ -491,6 +494,203 @@ def _state_status(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def _learning_episode_projection(
+    episode: BrainLearningEpisode,
+    *,
+    status: str | None = None,
+) -> dict[str, Any]:
+    """Project a pending episode without returning its evaluator input envelope."""
+
+    evaluation_input = episode.evaluation_input
+    selected_model = evaluation_input.get("selected_model")
+    selected = (
+        {
+            "provider": selected_model.get("provider"),
+            "model": selected_model.get("model"),
+        }
+        if isinstance(selected_model, Mapping)
+        else None
+    )
+    return {
+        "schema": "aurora-learning-episode-status/0.1",
+        "episode_id": episode.episode_id,
+        "status": episode.status if status is None else status,
+        "run_id": episode.run_id,
+        "result_kind": episode.result_kind,
+        "arm_id": episode.arm_id,
+        "selected_model": selected,
+        "context_digest": evaluation_input.get("context_digest"),
+        "selection_digest": evaluation_input.get("selection_digest"),
+        "prompt_digest": evaluation_input.get("prompt_digest"),
+        "plan_digest": evaluation_input.get("plan_digest"),
+        "outcome_digest": evaluation_input.get(
+            "learning_outcome_digest", evaluation_input.get("outcome_digest")
+        ),
+        "evidence_digest": episode.evidence_digest,
+        "retention": "identity_and_digests_only; evaluator_input_not_returned",
+    }
+
+
+def _learning_replay_projection(replay: Mapping[str, Any]) -> dict[str, Any]:
+    """Return only the stable metadata needed to audit a settlement replay."""
+
+    allowed = (
+        "schema",
+        "episode_id",
+        "trajectory_id",
+        "trajectory_step",
+        "trajectory_length",
+        "result_kind",
+        "run_id",
+        "outcome_digest",
+        "evaluation_input_digest",
+        "evidence_digest",
+        "evaluator_id",
+        "evaluator_version",
+        "decision_digest",
+        "raw_reward",
+        "credited_reward",
+        "discount",
+        "terminal_reward",
+        "retention",
+    )
+    return {key: replay[key] for key in allowed if key in replay}
+
+
+def _learning_report_projection(report: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep the CLI settlement response value-only even if a workspace adds fields later."""
+
+    projected: dict[str, Any] = {
+        "status": report.get("status"),
+        "next_state": report.get("next_state"),
+        "learning_evidence": report.get("learning_evidence"),
+    }
+    if "idempotent" in report:
+        projected["idempotent"] = report.get("idempotent")
+    projected["retention"] = "value_only_learning_report; provider_payload_not_returned"
+    return projected
+
+
+def _learning_status(args: argparse.Namespace) -> dict[str, Any]:
+    """Inspect pending and settled learning metadata without opening a provider session."""
+
+    if not os.path.exists(args.learning_store):
+        return {
+            "schema": CLI_SCHEMA,
+            "command": "learning-status",
+            "available": False,
+            "learning_store": args.learning_store,
+            "pending_episodes": [],
+            "replays": [],
+            "authorization": "metadata_read_only; no_provider_or_credential_access",
+            "retention": "value_only_learning_metadata",
+            "secret_material": "never_returned",
+        }
+    ledger = SQLiteBrainLearningLedger(args.learning_store)
+    try:
+        pending = ledger.pending_episodes(limit=args.limit)
+        replays = ledger.replays(limit=args.limit)
+        all_replays = ledger.replays(limit=ledger.max_records)
+        settled_ids = {
+            replay.get("episode_id")
+            for replay in all_replays
+            if isinstance(replay.get("episode_id"), str)
+        }
+        selected = None
+        if args.episode_id is not None:
+            episode = ledger.episode(args.episode_id)
+            selected = None if episode is None else _learning_episode_projection(
+                episode,
+                status="settled" if episode.episode_id in settled_ids else "pending",
+            )
+        agent = AutonomousAgent(_OfflineWorkspace(), LLMRuntime(), ledger=ledger)
+        return {
+            "schema": CLI_SCHEMA,
+            "command": "learning-status",
+            "available": True,
+            "learning_store": args.learning_store,
+            "record_count": len(ledger.records()),
+            "pending_episode_count": len(pending),
+            "pending_episodes": [_learning_episode_projection(episode) for episode in pending],
+            "settled_episode_count": len(settled_ids),
+            "selected_episode": selected,
+            "replays": [_learning_replay_projection(replay) for replay in replays],
+            "latest_state": ledger.latest_state(),
+            "domain_learning": {
+                domain: agent.domain_learning_state(domain)
+                for domain in AUTONOMOUS_DOMAINS
+            },
+            "authorization": "metadata_read_only; no_provider_or_credential_access",
+            "retention": "value_only_learning_metadata",
+            "secret_material": "never_returned",
+        }
+    finally:
+        ledger.close()
+
+
+def _settle_learning(
+    args: argparse.Namespace,
+    *,
+    client_factory: Callable[..., Client],
+) -> dict[str, Any]:
+    """Apply a prevalidated evaluator projection through the caller-owned brain kernel."""
+
+    if not os.path.exists(args.learning_store):
+        raise ValueError("learning settlement requires an existing --learning-store")
+    ledger = SQLiteBrainLearningLedger(args.learning_store)
+    try:
+        episode = ledger.episode(args.episode_id)
+        if episode is None:
+            raise ValueError("learning settlement episode was not found")
+        decision = BrainEvaluatorDecision(
+            evaluator_id=args.evaluator_id,
+            evaluator_version=args.evaluator_version,
+            reward=args.reward,
+            passed=args.outcome == "passed",
+            failed=args.outcome == "failed",
+            feedback_digest=args.feedback_digest,
+            failure_class=args.failure_class,
+            evidence_digest=args.evidence_digest,
+        )
+        evaluator = BrainOutcomeEvaluator(
+            lambda _value: decision.to_dict(),
+            evaluator_id=decision.evaluator_id,
+            evaluator_version=decision.evaluator_version,
+        )
+        command = _parse_mcp_command(args.mcp_command)
+        runtime = LLMRuntime()
+        client = client_factory(
+            command,
+            cwd=args.mcp_cwd,
+            timeout=args.mcp_timeout,
+        )
+        with client:
+            agent = AutonomousAgent(_McpWorkspace(client), runtime, ledger=ledger)
+            settled_decision, report = agent.settle_learning_decision(
+                episode,
+                decision=decision,
+                evaluator=evaluator,
+            )
+        return {
+            "schema": CLI_SCHEMA,
+            "command": "settle-learning",
+            "episode": _learning_episode_projection(episode),
+            "decision": settled_decision.to_dict(),
+            "report": _learning_report_projection(report),
+            "pending_episode_count_after": len(ledger.pending_episodes(limit=ledger.max_records)),
+            "authorization": {
+                "evaluator_projection": "caller_or_evaluator_worker_supplied_value_only_decision",
+                "brain_kernel": "caller_workspace_brain_outcome_record_only",
+                "provider_call": False,
+                "credential_access": False,
+            },
+            "retention": "episode_identity_evaluator_decision_and_bandit_digests_only",
+            "secret_material": "never_returned",
+        }
+    finally:
+        ledger.close()
+
+
 def _onboard(
     args: argparse.Namespace,
     *,
@@ -721,6 +921,31 @@ def _parser() -> argparse.ArgumentParser:
     state_status.add_argument("--health-store", default=None, help="provider health JSONL path")
     state_status.add_argument("--learning-store", default=None, help="SQLite value-only learning ledger path")
 
+    learning_status = subparsers.add_parser(
+        "learning-status",
+        help="inspect pending learning episodes and replay metadata without contacting a provider",
+    )
+    learning_status.add_argument("--learning-store", required=True, help="SQLite value-only learning ledger path")
+    learning_status.add_argument("--episode-id", default=None, help="optionally project one episode identity")
+    learning_status.add_argument("--limit", type=int, default=128, help="maximum pending/replay rows to return")
+
+    settle_learning = subparsers.add_parser(
+        "settle-learning",
+        help="settle one prevalidated value-only evaluator decision without a provider call",
+    )
+    settle_learning.add_argument("--learning-store", required=True, help="existing SQLite value-only learning ledger path")
+    settle_learning.add_argument("--episode-id", required=True, help="pending episode identity")
+    settle_learning.add_argument("--evaluator-id", required=True, help="bounded evaluator contract identity")
+    settle_learning.add_argument("--evaluator-version", required=True, help="bounded evaluator contract version")
+    settle_learning.add_argument("--reward", required=True, type=float, help="explicit evaluator reward in [-1, 1]")
+    settle_learning.add_argument("--outcome", required=True, choices=("passed", "failed"))
+    settle_learning.add_argument("--feedback-digest", default=None, help="optional SHA-256 evaluator feedback digest")
+    settle_learning.add_argument("--failure-class", default=None, help="optional bounded failure class")
+    settle_learning.add_argument("--evidence-digest", default=None, help="digest of separately retained evaluator evidence")
+    settle_learning.add_argument("--mcp-command", required=True, help="MCP executable and arguments for the brain kernel; no shell is invoked")
+    settle_learning.add_argument("--mcp-cwd", default=None, help="working directory for the MCP process")
+    settle_learning.add_argument("--mcp-timeout", type=float, default=_DEFAULT_TIMEOUT)
+
     run = subparsers.add_parser("run", parents=[provider_parent], help="run one autonomous task through a caller-owned MCP workspace")
     run.add_argument("--mcp-command", required=True, help="MCP executable and arguments; no shell is invoked")
     run.add_argument("--mcp-cwd", default=None, help="working directory for the MCP process")
@@ -812,6 +1037,10 @@ def main(
             payload = _inventory_status(args)
         elif args.command == "state-status":
             payload = _state_status(args)
+        elif args.command == "learning-status":
+            payload = _learning_status(args)
+        elif args.command == "settle-learning":
+            payload = _settle_learning(args, client_factory=client_factory)
         elif args.command == "run":
             payload = _run(args, environ=env, reader=reader, client_factory=client_factory)
         else:  # pragma: no cover - argparse enforces the command set

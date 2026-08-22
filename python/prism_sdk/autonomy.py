@@ -13492,6 +13492,34 @@ class AutonomousAgent:
             ledger=self.ledger if ledger is None else ledger,
         )
 
+    def settle_learning_decision(
+        self,
+        episode: BrainLearningEpisode | Mapping[str, Any],
+        *,
+        decision: BrainEvaluatorDecision,
+        evaluator: BrainOutcomeEvaluator,
+        bandit_state: Mapping[str, Any] | None = None,
+        ledger: BrainLearningLedger | None = None,
+    ) -> tuple[BrainEvaluatorDecision, dict[str, Any]]:
+        """Apply a restart-safe, already-evaluated decision without re-running a provider.
+
+        Evaluator workers use this method when their private evidence processing completed in a
+        different process. Only :class:`BrainEvaluatorDecision` crosses this seam; the episode
+        ledger retains its original digests and the Rust kernel still validates the reward update.
+        """
+
+        if not isinstance(decision, BrainEvaluatorDecision):
+            raise BrainRunError("decision must be a BrainEvaluatorDecision")
+        if not isinstance(evaluator, BrainOutcomeEvaluator):
+            raise BrainRunError("evaluator must be a BrainOutcomeEvaluator")
+        return evaluator.settle_episode(
+            self.brain,
+            episode,
+            decision=decision,
+            bandit_state=self.learning_state() if bandit_state is None else bandit_state,
+            ledger=self.ledger if ledger is None else ledger,
+        )
+
     def prepare_learning_trajectory(
         self,
         results: Sequence[BrainRunResult | BrainToolLoopResult | BrainMissionResult],

@@ -6713,6 +6713,78 @@ class BrainOutcomeEvaluator:
         )
         return decision, report
 
+    def settle_episode(
+        self,
+        brain: AutonomousBrain,
+        episode: BrainLearningEpisode | Mapping[str, Any],
+        *,
+        decision: BrainEvaluatorDecision,
+        bandit_state: Mapping[str, Any],
+        ledger: BrainLearningLedger | None = None,
+    ) -> tuple[BrainEvaluatorDecision, dict[str, Any]]:
+        """Settle one already-validated value-only decision after a process restart.
+
+        This seam is for evaluator workers that have already inspected their caller-owned
+        evidence and retained only the bounded decision projection. It deliberately does not
+        accept an evidence packet or invoke an evaluator callback. The episode identity,
+        evaluator identity, evidence digest, and replay envelope remain bound before the Rust
+        kernel receives the reward.
+        """
+
+        if not isinstance(brain, AutonomousBrain):
+            raise BrainRunError("brain must be an AutonomousBrain")
+        normalized_episode = episode if isinstance(episode, BrainLearningEpisode) else BrainLearningEpisode.from_mapping(episode)
+        if normalized_episode.status != "pending":
+            raise BrainRunError("learning episode is already settled")
+        if not isinstance(decision, BrainEvaluatorDecision):
+            raise BrainRunError("learning decision must be a BrainEvaluatorDecision")
+        if (
+            decision.evaluator_id != self.evaluator_id
+            or decision.evaluator_version != self.evaluator_version
+        ):
+            raise BrainRunError("learning decision identity does not match the adapter")
+        if not -1.0 <= float(decision.reward) <= 1.0:
+            raise BrainRunError("learning decision reward must be within [-1, 1]")
+        if ledger is not None and normalized_episode.episode_id not in {
+            item.episode_id for item in ledger.pending_episodes(limit=ledger.max_records)
+        }:
+            raise BrainRunError("learning episode is already settled or was not registered")
+        evaluation_input = build_brain_evaluation_input_from_metadata(normalized_episode.evaluation_input)
+        expected_evidence_digest = evaluation_input.get("evidence_digest")
+        if decision.evidence_digest != expected_evidence_digest and not (
+            decision.evidence_digest is None and expected_evidence_digest is None
+        ):
+            raise BrainRunError("learning decision evidence_digest does not match the episode")
+        replay = {
+            "schema": BRAIN_EVALUATOR_REPLAY_SCHEMA,
+            "episode_id": normalized_episode.episode_id,
+            "result_kind": evaluation_input.get("result_kind"),
+            "run_id": evaluation_input.get("run_id"),
+            "outcome_digest": evaluation_input.get(
+                "learning_outcome_digest", evaluation_input.get("outcome_digest")
+            ),
+            "evaluation_input_digest": _json_digest(evaluation_input),
+            "evidence_digest": expected_evidence_digest,
+            "evaluator_id": decision.evaluator_id,
+            "evaluator_version": decision.evaluator_version,
+            "decision_digest": _json_digest(decision.to_dict()),
+            "retention": "metadata_and_digests_only",
+        }
+        report = brain.record_value_only_evaluator_outcome(
+            normalized_episode,
+            bandit_state=bandit_state,
+            evaluator_id=decision.evaluator_id,
+            evaluator_version=decision.evaluator_version,
+            reward=decision.reward,
+            passed=decision.passed,
+            failed=decision.failed,
+            feedback_digest=decision.feedback_digest,
+            failure_class=decision.failure_class,
+            ledger=ledger,
+            replay_metadata=replay,
+        )
+        return decision, report
+
     def evaluate_trajectory(
         self,
         brain: AutonomousBrain,
