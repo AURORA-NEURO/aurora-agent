@@ -1,0 +1,142 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+import {
+  AUTONOMOUS_DOMAIN_NAMES,
+  AUTONOMOUS_PROVISIONED_RUN_SCHEMA,
+  AutonomousAgent,
+  CredentialError,
+  LLMRuntime,
+  ProviderSetup,
+  builtinAutonomousDomainProfiles,
+} from "../dist/index.js";
+
+async function broadCapabilities() {
+  const profiles = await builtinAutonomousDomainProfiles();
+  return [...new Set(profiles.flatMap((profile) => profile.required_model_capabilities))].sort();
+}
+
+function localRuntime(provider, onRequest = () => {}, discoverModels) {
+  const runtime = new LLMRuntime({ fetch: async () => { throw new Error("HTTP must not be reached"); } });
+  runtime.registerInMemoryProvider(provider, (request) => {
+    onRequest(request);
+    return { output_text: `offline:${request.model}` };
+  }, discoverModels ? { discoverModels } : {});
+  return runtime;
+}
+
+function candidate(provider, capabilities, model = "offline-model") {
+  return {
+    provider,
+    model,
+    capabilities,
+    context_window_tokens: 32_000,
+    max_output_tokens: 2_000,
+    quality: 0.9,
+    latency_ms: 10,
+    cost_per_million_tokens: 0,
+    reliability: 0.99,
+    requires_credential: provider !== "offline",
+  };
+}
+
+test("provisioned TypeScript execution closes sessions and serializes metadata only", async () => {
+  const calls = [];
+  const runtime = new LLMRuntime({ fetch: async () => { throw new Error("HTTP must not be reached"); } });
+  const setup = new ProviderSetup(runtime);
+  setup.registerProvider("groq", {
+    transport: {
+      invoke: (request) => {
+        calls.push(request.model);
+        return { output_text: "credentialed transient answer" };
+      },
+    },
+  });
+  await setup.provisioner.registerResolver("groq", "test-only-secret-reference", async () => "test-only-secret");
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(candidate("groq", ["reasoning", "code"]));
+
+  const run = await setup.runWithProvisionedCredentials(agent, "review a bounded implementation", {
+    domain: "coding",
+    credentialProviders: ["groq"],
+    approveProviderCall: true,
+  });
+
+  assert.equal(run.schema, AUTONOMOUS_PROVISIONED_RUN_SCHEMA);
+  assert.equal(run.status, "completed");
+  assert.equal(run.result.response.text, "credentialed transient answer");
+  assert.deepEqual(calls, ["offline-model"]);
+  assert.equal(runtime.credentials.status("groq").active_handles, 0, "request session must be revoked");
+  const projected = run.toJSON();
+  assert.equal(projected.secret_material, "never_returned");
+  assert.equal(projected.result_metadata.serialized, false);
+  assert.equal("result" in projected, false);
+  assert.doesNotMatch(JSON.stringify(run), /credentialed transient answer|test-only-secret/);
+});
+
+test("automatic provisioned execution preserves routing and supports strict inventory refresh", async () => {
+  const capabilities = await broadCapabilities();
+  const runtime = localRuntime("offline", undefined, async () => ({
+    data: [{ id: "discovered-model", active: true, context_window: 32_000, max_output_tokens: 2_000, capabilities }],
+  }));
+  const setup = new ProviderSetup(runtime);
+  const agent = new AutonomousAgent(runtime);
+  const run = await setup.runAutoWithProvisionedCredentials(agent, "produce a bounded coding implementation review", {
+    credentialProviders: ["offline"],
+    refreshInventory: true,
+    inventorySpecs: [{
+      provider: "offline",
+      defaults: { context_window_tokens: 16_000, max_output_tokens: 1_000, quality: 0.8, latency_ms: 20, cost_per_million_tokens: 0, reliability: 0.95 },
+    }],
+    approveProviderCall: true,
+    allowCrossDomain: false,
+  });
+
+  assert.equal(run.status, "completed");
+  assert.equal(run.result.route.primary_domain, "coding");
+  assert.equal(run.result.response.text, "offline:discovered-model");
+  assert.equal(run.inventory.status, "completed");
+  assert.equal(run.inventory.domains.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(run.toJSON().inventory.domain_count, AUTONOMOUS_DOMAIN_NAMES.length);
+});
+
+test("strict provisioned inventory refuses partial discovery before provider execution", async () => {
+  let invoked = 0;
+  const runtime = localRuntime("offline", () => { invoked += 1; }, async () => ({
+    data: [{ id: "offline-model", context_window: 32_000, max_output_tokens: 2_000, capabilities: ["reasoning", "code"] }],
+  }));
+  const setup = new ProviderSetup(runtime);
+  const agent = new AutonomousAgent(runtime);
+  await assert.rejects(
+    () => setup.runWithProvisionedCredentials(agent, "this must not execute", {
+      domain: "coding",
+      credentialProviders: ["offline"],
+      refreshInventory: true,
+      inventorySpecs: [
+        { provider: "offline", defaults: { context_window_tokens: 16_000, max_output_tokens: 1_000, quality: 0.8, latency_ms: 20, cost_per_million_tokens: 0, reliability: 0.95 } },
+        { provider: "missing-provider", defaults: { context_window_tokens: 16_000, max_output_tokens: 1_000, quality: 0.8, latency_ms: 20, cost_per_million_tokens: 0, reliability: 0.95 } },
+      ],
+      approveProviderCall: true,
+    }),
+    (error) => error instanceof CredentialError && /inventory refresh did not complete/.test(error.message),
+  );
+  assert.equal(invoked, 0);
+});
+
+test("the request-scoped facade executes every configured domain with one credentialless local arm", async () => {
+  const capabilities = await broadCapabilities();
+  const runtime = localRuntime("offline");
+  const setup = new ProviderSetup(runtime);
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(candidate("offline", capabilities));
+
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const run = await setup.runWithProvisionedCredentials(agent, `produce a bounded ${domain} review`, {
+      domain,
+      credentialProviders: ["offline"],
+      approveProviderCall: true,
+    });
+    assert.equal(run.status, "completed", domain);
+    assert.equal(run.result.response.provider, "offline", domain);
+  }
+});

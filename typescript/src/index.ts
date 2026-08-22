@@ -125,6 +125,7 @@ export {
   PROVIDER_CATALOG_SCHEMA,
   PROVIDER_SETUP_INPUT_METHODS,
   PROVIDER_SETUP_SCHEMA,
+  AUTONOMOUS_PROVISIONED_RUN_SCHEMA,
   SUPPORTED_PROVIDER_NAMES,
   ProviderSetup,
   providerConfig,
@@ -135,6 +136,10 @@ export type {
   ProviderPreset,
   ProviderSetupPlan,
   ProviderSetupStatus,
+  AutonomousProvisionedRun,
+  AutonomousProvisionedExecutionOptions,
+  AutonomousExplicitProvisionedExecutionOptions,
+  AutonomousAutomaticProvisionedExecutionOptions,
   SupportedProviderName,
 } from "./provider-setup.js";
 export {

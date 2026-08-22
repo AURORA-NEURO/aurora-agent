@@ -22,16 +22,22 @@ import {
   xaiProvider,
 } from "./llm.js";
 import type { JsonObject } from "./types.js";
-import type { AutonomousAgent } from "./autonomous.js";
+import type {
+  AutonomousAgent,
+  AutonomousDomainName,
+  AutonomousRunOptions,
+  AutonomousRunResult,
+  AutonomousModelRefreshSpec,
+} from "./autonomous.js";
 import type {
   AutonomousModelInventoryRefreshOptions,
   AutonomousModelInventorySnapshot,
 } from "./autonomous-model-inventory.js";
-import type { AutonomousModelRefreshSpec } from "./autonomous.js";
 
 /** Redacted provider catalog and setup-flow contract for embedding applications. */
 export const PROVIDER_SETUP_SCHEMA = "bioprism-typescript-provider-setup/0.1" as const;
 export const PROVIDER_CATALOG_SCHEMA = "bioprism-typescript-provider-catalog/0.1" as const;
+export const AUTONOMOUS_PROVISIONED_RUN_SCHEMA = "bioprism-typescript-autonomous-provisioned-run/0.1" as const;
 export const PROVIDER_SETUP_INPUT_METHODS = [
   "protected_ui",
   "no_echo_prompt",
@@ -93,6 +99,35 @@ export interface ProviderSetupPlan extends JsonObject {
   credential_posture: "caller_input_only; opaque_handles_at_runtime";
   secret_material: "never_returned";
 }
+
+/** A caller-transient execution plus the safe provisioning/inventory projection. */
+export interface AutonomousProvisionedRun<T> {
+  schema: typeof AUTONOMOUS_PROVISIONED_RUN_SCHEMA;
+  status: string;
+  /** Provider output remains available only to the initiating application. */
+  result: T;
+  provisioning: CredentialProvisioningResult;
+  inventory: AutonomousModelInventorySnapshot | null;
+  /** Metadata-only projection safe for logs, events, and durable state. */
+  toJSON(): JsonObject;
+}
+
+/** Request-scoped deployment provisioning controls; raw credentials are intentionally absent. */
+export type AutonomousProvisionedExecutionOptions = Omit<AutonomousRunOptions, "credential" | "credentialFor"> & {
+  credentialProviders?: readonly string[];
+  credentialTtlMs?: number;
+  environment?: Record<string, string | undefined>;
+  requireReady?: boolean;
+  refreshInventory?: boolean;
+  inventorySpecs?: readonly AutonomousModelRefreshSpec[];
+  inventoryOptions?: Omit<AutonomousModelInventoryRefreshOptions, "credentialFor" | "credentialSession">;
+};
+
+export type AutonomousExplicitProvisionedExecutionOptions = Omit<AutonomousProvisionedExecutionOptions, "domain"> & {
+  domain: AutonomousDomainName;
+};
+
+export type AutonomousAutomaticProvisionedExecutionOptions = Omit<AutonomousProvisionedExecutionOptions, "domain">;
 
 interface ProviderPresetRecord {
   readonly provider: SupportedProviderName;
@@ -326,6 +361,127 @@ export class ProviderSetup {
   async provision(session: CredentialSession, options: { providers?: readonly string[]; environment?: Record<string, string | undefined> } = {}): Promise<CredentialProvisioningResult> {
     this.assertSession(session);
     return this.provisioner.provision(session, options);
+  }
+
+  /**
+   * Provision, optionally refresh inventory, execute one task, and revoke the session in a
+   * finally block. The callback receives no credential object; the runtime resolves the selected
+   * provider through a transient opaque-handle lookup at invocation time.
+   */
+  private async runProvisioned<T>(
+    agent: AutonomousAgent,
+    task: string,
+    options: AutonomousProvisionedExecutionOptions,
+    execute: (runOptions: Omit<AutonomousProvisionedExecutionOptions, "credentialProviders" | "credentialTtlMs" | "environment" | "requireReady" | "refreshInventory" | "inventorySpecs" | "inventoryOptions">, session: CredentialSession) => Promise<T>,
+  ): Promise<AutonomousProvisionedRun<T>> {
+    if (!agent || typeof agent.run !== "function" || typeof agent.refreshModelInventory !== "function") throw new CredentialError("provisioned autonomous execution requires an AutonomousAgent");
+    if (!options || typeof options !== "object") throw new CredentialError("provisioned autonomous execution options are malformed");
+    const rawOptions = options as Record<string, unknown>;
+    if (Object.prototype.hasOwnProperty.call(rawOptions, "credential") || Object.prototype.hasOwnProperty.call(rawOptions, "credentialFor")) {
+      throw new CredentialError("provisioned autonomous execution owns credentials; pass deployment sources instead");
+    }
+    if (options.requireReady !== undefined && typeof options.requireReady !== "boolean") throw new CredentialError("provisioned autonomous requireReady must be a boolean");
+    if (options.refreshInventory !== undefined && typeof options.refreshInventory !== "boolean") throw new CredentialError("provisioned autonomous refreshInventory must be a boolean");
+    const refreshInventory = options.refreshInventory ?? false;
+    if (!refreshInventory && (options.inventorySpecs !== undefined || options.inventoryOptions !== undefined)) throw new CredentialError("inventory options require refreshInventory=true");
+    if (refreshInventory && (!options.inventorySpecs || options.inventorySpecs.length === 0)) throw new CredentialError("refreshInventory=true requires inventorySpecs");
+
+    const {
+      credentialProviders,
+      credentialTtlMs,
+      environment,
+      requireReady,
+      refreshInventory: _refreshInventory,
+      inventorySpecs,
+      inventoryOptions,
+      ...runOptions
+    } = options;
+    const session = this.startSession({ ttlMs: credentialTtlMs });
+    try {
+      const provisioning = await this.provision(session, { providers: credentialProviders, environment });
+      if ((requireReady ?? true) && !provisioning.ready) {
+        throw new CredentialError(`credential provisioning is incomplete for providers: ${provisioning.required_failures.join(", ")}`);
+      }
+      let inventory: AutonomousModelInventorySnapshot | null = null;
+      if (refreshInventory) {
+        inventory = await this.refreshModelInventory(agent, session, inventorySpecs!, inventoryOptions);
+        if (inventory.status !== "completed") {
+          throw new CredentialError("requested model inventory refresh did not complete; execution was refused");
+        }
+      }
+      const result = await execute(runOptions, session);
+      const resultStatus = typeof result === "object" && result !== null
+        ? (result as { status?: unknown }).status
+        : undefined;
+      const statusValue = typeof resultStatus === "string" && resultStatus.length > 0
+        ? resultStatus
+        : "completed";
+      return {
+        schema: AUTONOMOUS_PROVISIONED_RUN_SCHEMA,
+        status: statusValue,
+        result,
+        provisioning,
+        inventory,
+        toJSON(): JsonObject {
+          return {
+            schema: AUTONOMOUS_PROVISIONED_RUN_SCHEMA,
+            status: statusValue,
+            result_metadata: {
+              status: statusValue,
+              retention: "result_transient_caller_owned",
+              serialized: false,
+            },
+            provisioning,
+            inventory: inventory === null ? null : {
+              status: inventory.status,
+              refresh_id: inventory.refresh_id,
+              inventory_digest: inventory.inventory_digest,
+              readiness: inventory.readiness,
+              model_count: inventory.models.length,
+              domain_count: inventory.domains.length,
+              retention: "inventory_metadata_only",
+            },
+            credential_posture: "opaque_handles_only; session_closed_after_execution",
+            secret_material: "never_returned",
+          };
+        },
+      };
+    } finally {
+      session.close();
+    }
+  }
+
+  /** Execute one explicit-domain task through a fresh deployment-managed credential session. */
+  async runWithProvisionedCredentials(
+    agent: AutonomousAgent,
+    task: string,
+    options: AutonomousExplicitProvisionedExecutionOptions,
+  ): Promise<AutonomousProvisionedRun<AutonomousRunResult>> {
+    if (!options || typeof options.domain !== "string") throw new CredentialError("explicit provisioned execution requires a domain");
+    return this.runProvisioned(agent, task, options, async (runOptions, session) => agent.run(task, {
+      ...runOptions,
+      credentialFor: (provider) => {
+        const metadata = agent.llm.providerMetadata().find((row) => row.provider === provider);
+        return metadata?.requires_credential === false ? undefined : session.handle(provider);
+      },
+    }));
+  }
+
+  /** Execute automatic single- or cross-domain routing through a fresh credential session. */
+  async runAutoWithProvisionedCredentials(
+    agent: AutonomousAgent,
+    task: string,
+    options: AutonomousAutomaticProvisionedExecutionOptions = {},
+  ): Promise<AutonomousProvisionedRun<AutonomousRunResult>> {
+    const rawOptions = options as unknown as Record<string, unknown>;
+    if (Object.prototype.hasOwnProperty.call(rawOptions, "domain") && rawOptions.domain !== undefined) throw new CredentialError("automatic provisioned execution chooses its route; omit domain");
+    return this.runProvisioned(agent, task, options, async (runOptions, session) => agent.run(task, {
+      ...runOptions,
+      credentialFor: (provider) => {
+        const metadata = agent.llm.providerMetadata().find((row) => row.provider === provider);
+        return metadata?.requires_credential === false ? undefined : session.handle(provider);
+      },
+    }));
   }
 
   /**

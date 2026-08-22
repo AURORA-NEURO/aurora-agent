@@ -1248,6 +1248,14 @@ or provider failure. The returned `.result` is caller-transient; `.to_dict()` em
 execution status, redacted provisioning receipts, and inventory metadata, never provider text,
 raw credentials, or credential handles.
 
+The TypeScript SDK now exposes the equivalent composition through `ProviderSetup`:
+`setup.runWithProvisionedCredentials(agent, task, { domain, ... })` and
+`setup.runAutoWithProvisionedCredentials(agent, task, { ... })`. It resolves sources into a
+transient `credentialFor` callback, uses `credentialSession` for authenticated inventory refresh,
+rejects partial/failed requested discovery before dispatch, and returns an
+`AutonomousProvisionedRun` whose `toJSON()` is metadata-only. This keeps the Python and
+TypeScript embedding surfaces aligned without making either runtime persist or serialize a key.
+
 ## Application composition and model inventory
 
 The lower-level APIs intentionally make every decision input visible. An embedding application can

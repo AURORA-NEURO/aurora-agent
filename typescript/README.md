@@ -75,6 +75,29 @@ const answer = await runtime.invoke("openai", {
 session.close();
 ```
 
+For the complete autonomous request lifecycle, `ProviderSetup` also exposes
+`runWithProvisionedCredentials()` and `runAutoWithProvisionedCredentials()`. These helpers create
+one fresh session, resolve deployment sources, optionally discover and reconcile model inventory,
+invoke `AutonomousAgent` through a transient `credentialFor` callback, and close every handle in a
+`finally` block:
+
+```typescript
+const agent = new AutonomousAgent(runtime);
+const run = await setup.runAutoWithProvisionedCredentials(agent, "review a bounded implementation plan", {
+  credentialProviders: ["openai"],
+  environment: process.env,
+  approveProviderCall: true,
+});
+const answer = run.result;       // caller-transient provider result
+const event = run.toJSON();      // metadata only; no result text, key, or handle
+```
+
+Use `runWithProvisionedCredentials()` with a required `domain` for explicit execution. Set
+`refreshInventory: true` and provide `inventorySpecs` when discovery must complete before dispatch;
+partial or failed discovery throws before the task executes, so stale inventory cannot be silently
+treated as current. The wrapper preserves the normal routing, approval, workflow, cross-domain,
+learning, evaluator, budget, and checkpoint options of `AutonomousAgent.run()`.
+
 `providerPresets()` and `setup.plan()` are safe to send to a setup screen or readiness endpoint:
 they contain provider metadata and the next action, never key values, handles, prompt text, or
 resolver references. The protected UI should use a password input, disable echo/history and
