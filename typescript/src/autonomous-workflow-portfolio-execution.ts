@@ -63,6 +63,17 @@ export interface AutonomousWorkflowPortfolioExecutionOptions {
   maxDependencyHandoffBytes?: number;
 }
 
+/** Internal resume hook used by the metadata-only durable portfolio controller. */
+export interface AutonomousWorkflowPortfolioExecutionProgress {
+  plan: AutonomousWorkflowPortfolioPlan;
+  items: readonly AutonomousWorkflowPortfolioItemExecutionResult[];
+  status: AutonomousWorkflowPortfolioExecutionStatus;
+}
+
+export type AutonomousWorkflowPortfolioExecutionProgressSink = (
+  progress: AutonomousWorkflowPortfolioExecutionProgress,
+) => Promise<void> | void;
+
 export interface AutonomousWorkflowPortfolioExecutionItemJSON extends JsonObject {
   schema: typeof AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_SCHEMA;
   item_id: string;
@@ -116,14 +127,32 @@ function truncateBytes(value: string, maximum: number): string {
   return `${truncated}\n[handoff truncated]`;
 }
 
-function safeOutputText(run: AutonomousRunResult): string {
-  if (run.response?.text) return run.response.text;
-  if (run.response?.structured === null || run.response?.structured === undefined) return "";
+export function autonomousWorkflowPortfolioTransientOutput(run: AutonomousRunResult): { text: string; bytes: number } {
+  let text = "";
+  if (run.response?.text) return { text: run.response.text, bytes: bytes(run.response.text) };
+  if (run.response?.structured === null || run.response?.structured === undefined) return { text, bytes: 0 };
   try {
-    return JSON.stringify(run.response.structured) ?? "";
+    text = JSON.stringify(run.response.structured) ?? "";
   } catch {
-    return "";
+    text = "";
   }
+  return { text, bytes: bytes(text) };
+}
+
+export async function digestAutonomousWorkflowPortfolioExecutionItem(item: AutonomousWorkflowPortfolioItemExecutionResult): Promise<string> {
+  return digestJson({
+    schema: AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_SCHEMA,
+    item_id: item.itemId,
+    domain: item.domain,
+    depends_on: [...item.dependsOn],
+    status: item.status,
+    run_status: item.run?.status ?? null,
+    provider_call: item.run ? providerCallStatus(item.run) : "not_started",
+    output_digest: item.outputDigest,
+    output_bytes: item.outputBytes,
+    error_class: item.errorClass,
+    failure_code: item.failureCode,
+  });
 }
 
 function errorMetadata(error: unknown): { errorClass: string; failureCode: string } {
@@ -152,9 +181,11 @@ function providerCallStatus(run: AutonomousRunResult): AutonomousWorkflowPortfol
   return run.response || run.selection ? "may_have_started" : "not_started";
 }
 
-function hardFailure(status: AutonomousWorkflowPortfolioExecutionItemStatus): boolean {
+export function isAutonomousWorkflowPortfolioHardFailure(status: AutonomousWorkflowPortfolioExecutionItemStatus): boolean {
   return status === "failed" || status === "route_review_required" || status === "reconciliation_required" || status === "turn_limit_reached" || status === "child_failed";
 }
+
+const hardFailure = isAutonomousWorkflowPortfolioHardFailure;
 
 function executionCounts(items: readonly AutonomousWorkflowPortfolioItemExecutionResult[]): {
   completed: number;
@@ -336,6 +367,21 @@ export async function executeAutonomousWorkflowPortfolio(
   requests: readonly AutonomousWorkflowPortfolioItemRequest[],
   options: AutonomousWorkflowPortfolioExecutionOptions = {},
 ): Promise<AutonomousWorkflowPortfolioExecutionResult> {
+  return executeAutonomousWorkflowPortfolioWithInitialItems(agent, requests, options);
+}
+
+/**
+ * Execute a portfolio while reusing caller-rehydrated terminal item results. This is the narrow
+ * restart seam used by the durable controller; callers should use its resumable wrapper so that
+ * checkpoint identity and result digests are validated before this function is reached.
+ */
+export async function executeAutonomousWorkflowPortfolioWithInitialItems(
+  agent: AutonomousAgent,
+  requests: readonly AutonomousWorkflowPortfolioItemRequest[],
+  options: AutonomousWorkflowPortfolioExecutionOptions = {},
+  initialItems: readonly AutonomousWorkflowPortfolioItemExecutionResult[] = [],
+  progressSink?: AutonomousWorkflowPortfolioExecutionProgressSink,
+): Promise<AutonomousWorkflowPortfolioExecutionResult> {
   if (!agent || typeof agent.run !== "function" || typeof agent.blueprint !== "function") throw new ArgumentError("workflow portfolio execution requires an AutonomousAgent");
   if (options.verifyPlan !== undefined && typeof options.verifyPlan !== "boolean") throw new ArgumentError("workflow portfolio verifyPlan must be boolean");
   const maxParallelism = boundedInteger("workflow portfolio maxParallelism", options.maxParallelism, 1, MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_PARALLELISM, 4);
@@ -350,18 +396,33 @@ export async function executeAutonomousWorkflowPortfolio(
   }
 
   const executions = new Map<string, AutonomousWorkflowPortfolioItemExecutionResult>();
+  const planItemsById = new Map(plan.items.map((item) => [item.item_id, item]));
+  for (const initial of initialItems) {
+    const planItem = planItemsById.get(initial.itemId);
+    if (!planItem || planItem.status !== "ready" || executions.has(initial.itemId) || initial.domain !== planItem.domain || JSON.stringify(initial.dependsOn) !== JSON.stringify(planItem.depends_on)) {
+      throw new ProviderRuntimeError(`rehydrated workflow portfolio item ${initial.itemId} does not match the reviewed plan`, { code: "protocol", retryable: false, operation: "workflow_portfolio_rehydrate" });
+    }
+    executions.set(initial.itemId, initial);
+  }
   for (const item of plan.items) {
     if (item.status !== "ready") executions.set(item.item_id, new AutonomousWorkflowPortfolioItemExecutionResult(item.item_id, item.domain, [...item.depends_on], statusForPlanItem(item), null, null, 0, item.error_class, item.error_class));
   }
+  const snapshotItems = (): AutonomousWorkflowPortfolioItemExecutionResult[] => plan.items.map((item) => executions.get(item.item_id) ?? new AutonomousWorkflowPortfolioItemExecutionResult(item.item_id, item.domain, [...item.depends_on], "blocked", null, null, 0, "portfolio_item_pending", "portfolio_item_pending"));
+  const reportProgress = async (): Promise<void> => {
+    if (!progressSink) return;
+    const snapshot = snapshotItems();
+    await progressSink({ plan, items: snapshot, status: overallStatus(plan, snapshot) });
+  };
+  await reportProgress();
   if (plan.status === "blocked") {
     for (const item of plan.items) {
       if (!executions.has(item.item_id)) executions.set(item.item_id, new AutonomousWorkflowPortfolioItemExecutionResult(item.item_id, item.domain, [...item.depends_on], "blocked", null, null, 0, "portfolio_plan_blocked", "portfolio_plan_blocked"));
     }
   } else {
     const includeDependencyOutputs = options.includeDependencyOutputs !== false;
-    let stopped = false;
+    let stopped = initialItems.some((item) => options.stopOnError === true && hardFailure(item.status));
     for (const wave of plan.dependency_graph.waves) {
-      const waveIds = wave.filter((itemId) => plan.items.find((item) => item.item_id === itemId)?.status === "ready").sort();
+      const waveIds = wave.filter((itemId) => planItemsById.get(itemId)?.status === "ready" && !executions.has(itemId)).sort();
       if (stopped) {
         for (const itemId of waveIds) {
           const item = plan.items.find((candidate) => candidate.item_id === itemId)!;
@@ -389,20 +450,23 @@ export async function executeAutonomousWorkflowPortfolio(
         try {
           const run = await agent.run(request.task, runOptionsFor({ ...request, domain: planItem.domain }, itemId, options, context));
           const status = executionStatusForRun(run);
-          const output = safeOutputText(run);
-          return new AutonomousWorkflowPortfolioItemExecutionResult(itemId, planItem.domain, [...planItem.depends_on], status, run, output ? await digestJson({ item_id: itemId, output }) : null, bytes(output), null, status === "succeeded" ? null : status, includeDependencyOutputs, output);
+          const outputProjection = autonomousWorkflowPortfolioTransientOutput(run);
+          const output = outputProjection.text;
+          return new AutonomousWorkflowPortfolioItemExecutionResult(itemId, planItem.domain, [...planItem.depends_on], status, run, output ? await digestJson({ item_id: itemId, output }) : null, outputProjection.bytes, null, status === "succeeded" ? null : status, includeDependencyOutputs, output);
         } catch (error) {
           const metadata = errorMetadata(error);
           return new AutonomousWorkflowPortfolioItemExecutionResult(itemId, planItem.domain, [...planItem.depends_on], "failed", null, null, 0, metadata.errorClass, metadata.failureCode, includeDependencyOutputs);
         }
       });
       for (const result of waveResults) executions.set(result.itemId, result);
+      await reportProgress();
       if (options.stopOnError === true && waveResults.some((item) => hardFailure(item.status))) stopped = true;
     }
   }
 
   const items = plan.items.map((item) => executions.get(item.item_id) ?? new AutonomousWorkflowPortfolioItemExecutionResult(item.item_id, item.domain, [...item.depends_on], "blocked", null, null, 0, "portfolio_item_not_scheduled", "portfolio_item_not_scheduled"));
   const status = overallStatus(plan, items);
+  await progressSink?.({ plan, items, status });
   const counts = executionCounts(items);
   const metadata = {
     schema: AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_SCHEMA,

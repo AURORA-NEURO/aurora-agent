@@ -315,6 +315,25 @@ export type {
   AutonomousWorkflowPortfolioExecutionItemJSON,
   AutonomousWorkflowPortfolioExecutionJSON,
 } from "./autonomous-workflow-portfolio-execution.js";
+export {
+  AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_CHECKPOINT_SCHEMA,
+  MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_CHECKPOINT_BYTES,
+  validateAutonomousWorkflowPortfolioExecutionCheckpoint,
+  executeAutonomousWorkflowPortfolioResumable,
+  InMemoryAutonomousWorkflowPortfolioExecutionCheckpointStore,
+  AutonomousWorkflowPortfolioExecutionController,
+} from "./autonomous-workflow-portfolio-resumable.js";
+export type {
+  AutonomousWorkflowPortfolioCheckpointStatus,
+  AutonomousWorkflowPortfolioExecutionCheckpointJSON,
+  AutonomousWorkflowPortfolioExecutionRehydrationContext,
+  AutonomousWorkflowPortfolioExecutionCheckpointStore,
+  AutonomousWorkflowPortfolioResumableExecutionOptions,
+  AutonomousWorkflowPortfolioExecutionControllerStatus,
+  AutonomousWorkflowPortfolioExecutionControllerProjection,
+  AutonomousWorkflowPortfolioExecutionControllerRun,
+  AutonomousWorkflowPortfolioExecutionControllerRunOptions,
+} from "./autonomous-workflow-portfolio-resumable.js";
 export type {
   AutonomousAcceptedCrossDomainPlan,
   AutonomousAcceptedPlan,

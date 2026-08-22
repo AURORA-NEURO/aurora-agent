@@ -1745,6 +1745,17 @@ they produce explicit item states and can stop later waves. A blocked all-domain
 nothing. This makes the portfolio useful as both a twelve-domain execution surface and a
 restart-safe preflight/review boundary.
 
+For process restarts, `executeWorkflowPortfolioResumable()` adds a checkpoint boundary without
+turning the SDK into a task store. The checkpoint binds the job id, reviewed portfolio identity,
+ordered request/task digests, execution controls, and settled item/result digests. It never stores
+the task, prompt, credential, provider response, tool payload, or predecessor output. On resume,
+the caller supplies `rehydrateItem(context)` from its private transient store; the SDK checks the
+item domain/dependencies, run status, output byte count, output digest, and settled result digest
+before admitting the item. Settled work is then excluded from dependency waves, so it cannot be
+silently replayed. `InMemoryAutonomousWorkflowPortfolioExecutionCheckpointStore` and
+`AutonomousWorkflowPortfolioExecutionController` provide a small local adapter; production
+applications can implement the same read/write interface with an atomic durable store.
+
 Packs do not contain task text, prompts, keys, provider payloads, tool arguments, or outputs. They
 are reviewed planning and evidence metadata, not a source of truth. A production application can
 replace a pack registry, but the orchestrator refuses to run when a pack is missing or its workflow

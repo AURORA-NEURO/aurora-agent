@@ -17,6 +17,11 @@ dispatches verified ready items in deterministic waves through the ordinary mode
 learning boundary. It still does not claim provider-specific source interpretation, external
 validation, durable multi-host scheduling, or authorization; credentials and effect approval
 remain caller-owned, and execution JSON retains only metadata while raw runs stay transient.
+The portfolio now also has a restart-safe checkpoint/controller boundary. Settled item/result
+digests can be rehydrated by a caller-owned private store and are validated before pending waves
+resume, preventing completed provider work from being replayed. The checkpoint is metadata-only;
+durable multi-host leases, external effect reconciliation, and provider-specific evidence adapters
+remain separate integration work.
 
 The autonomous façade now compiles every built-in workflow into a digest-bound evidence plan.
 Python `AutonomousTaskOrchestrator.evidence_plan()` and TypeScript `AutonomousAgent.evidencePlan()`
