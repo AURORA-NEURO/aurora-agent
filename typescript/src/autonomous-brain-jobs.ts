@@ -134,6 +134,97 @@ export interface AutonomousBrainJobSchedulerPersistence {
   writeIfUnchanged?(expectedSnapshotDigest: string | null, snapshot: AutonomousBrainJobSnapshot): Promise<boolean> | boolean;
 }
 
+/** Minimal text store used by the concrete JSON persistence adapters. */
+export interface AutonomousBrainJobSnapshotTextStore {
+  read(): Promise<string | null> | string | null;
+  write(value: string): Promise<void> | void;
+}
+
+/** Text store contract with an atomic digest fence for shared workers. */
+export interface AutonomousBrainJobTransactionalSnapshotTextStore extends AutonomousBrainJobSnapshotTextStore {
+  writeIfUnchanged(expectedSnapshotDigest: string | null, value: string): Promise<boolean> | boolean;
+}
+
+/**
+ * Concrete metadata-only JSON persistence for browser, Node, or embedded text stores.
+ * The store owns durability; this adapter owns bounded serialization and fail-closed parsing.
+ */
+export class JsonAutonomousBrainJobSchedulerPersistence implements AutonomousBrainJobSchedulerPersistence {
+  protected readonly store: AutonomousBrainJobSnapshotTextStore;
+
+  constructor(store: AutonomousBrainJobSnapshotTextStore) {
+    if (!store || typeof store.read !== "function" || typeof store.write !== "function") throw new ArgumentError("brain job JSON persistence requires a text store");
+    this.store = store;
+  }
+
+  async read(): Promise<AutonomousBrainJobSnapshot | null> {
+    return this.decode(await this.store.read());
+  }
+
+  async write(snapshot: AutonomousBrainJobSnapshot): Promise<void> {
+    await this.store.write(this.encode(snapshot));
+  }
+
+  protected encode(snapshot: AutonomousBrainJobSnapshot): string {
+    if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) throw new ArgumentError("brain job JSON persistence snapshot is malformed");
+    const encoded = JSON.stringify(snapshot);
+    if (typeof encoded !== "string" || bytes(encoded) > MAX_AUTONOMOUS_BRAIN_JOB_SNAPSHOT_BYTES) throw new ArgumentError("brain job JSON persistence snapshot exceeds its bound");
+    return encoded;
+  }
+
+  protected decode(encoded: string | null): AutonomousBrainJobSnapshot | null {
+    if (encoded === null) return null;
+    if (typeof encoded !== "string" || bytes(encoded) > MAX_AUTONOMOUS_BRAIN_JOB_SNAPSHOT_BYTES) throw new ArgumentError("brain job JSON persistence text exceeds its bound");
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(encoded);
+    } catch {
+      throw new ArgumentError("brain job JSON persistence text is invalid JSON");
+    }
+    if (!isObject(parsed) || Array.isArray(parsed)) throw new ArgumentError("brain job JSON persistence value is malformed");
+    return parsed as unknown as AutonomousBrainJobSnapshot;
+  }
+}
+
+/** JSON persistence variant that refuses to operate without an atomic snapshot fence. */
+export class TransactionalJsonAutonomousBrainJobSchedulerPersistence extends JsonAutonomousBrainJobSchedulerPersistence {
+  private readonly transactionalStore: AutonomousBrainJobTransactionalSnapshotTextStore;
+
+  constructor(store: AutonomousBrainJobTransactionalSnapshotTextStore) {
+    super(store);
+    if (typeof store.writeIfUnchanged !== "function") throw new ArgumentError("transactional brain job JSON persistence requires writeIfUnchanged");
+    this.transactionalStore = store;
+  }
+
+  async writeIfUnchanged(expectedSnapshotDigest: string | null, snapshot: AutonomousBrainJobSnapshot): Promise<boolean> {
+    const committed = await this.transactionalStore.writeIfUnchanged(expectedSnapshotDigest, this.encode(snapshot));
+    if (typeof committed !== "boolean") throw new ArgumentError("transactional brain job JSON persistence returned a non-boolean commit result");
+    return committed;
+  }
+}
+
+/** Browser-compatible single-writer text store for localStorage/sessionStorage-like objects. */
+export class WebStorageAutonomousBrainJobSnapshotTextStore implements AutonomousBrainJobSnapshotTextStore {
+  readonly storage: Pick<Storage, "getItem" | "setItem">;
+  readonly key: string;
+
+  constructor(storage: Pick<Storage, "getItem" | "setItem">, key = "aurora.autonomous.brain.jobs") {
+    if (!storage || typeof storage.getItem !== "function" || typeof storage.setItem !== "function") throw new ArgumentError("brain job web storage adapter requires getItem and setItem");
+    if (typeof key !== "string" || !key.trim() || key.length > 256 || key.includes("\u0000")) throw new ArgumentError("brain job web storage key is outside its bounds");
+    this.storage = storage;
+    this.key = key;
+  }
+
+  read(): string | null {
+    return this.storage.getItem(this.key);
+  }
+
+  write(value: string): void {
+    if (typeof value !== "string" || bytes(value) > MAX_AUTONOMOUS_BRAIN_JOB_SNAPSHOT_BYTES) throw new ArgumentError("brain job web storage value exceeds its bound");
+    this.storage.setItem(this.key, value);
+  }
+}
+
 export interface AutonomousBrainJobSchedulerOptions {
   maxJobs?: number;
   clock?: () => number;

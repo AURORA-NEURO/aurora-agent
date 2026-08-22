@@ -656,6 +656,9 @@ export {
   InMemoryAutonomousBrainJobScheduler,
   AutonomousBrainJobSchedulerPersistenceCoordinator,
   InMemoryAutonomousBrainJobSchedulerPersistence,
+  JsonAutonomousBrainJobSchedulerPersistence,
+  TransactionalJsonAutonomousBrainJobSchedulerPersistence,
+  WebStorageAutonomousBrainJobSnapshotTextStore,
 } from "./autonomous-brain-jobs.js";
 export type {
   AutonomousBrainJobState,
@@ -667,6 +670,8 @@ export type {
   AutonomousBrainJobSubmissionResult,
   AutonomousBrainJobSnapshot,
   AutonomousBrainJobSchedulerPersistence,
+  AutonomousBrainJobSnapshotTextStore,
+  AutonomousBrainJobTransactionalSnapshotTextStore,
   AutonomousBrainJobSchedulerOptions,
   AutonomousBrainJobCheckpointOptions,
   AutonomousBrainJobFailureOptions,

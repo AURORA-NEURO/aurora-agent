@@ -5,6 +5,9 @@ import {
   InMemoryAutonomousBrainJobScheduler,
   InMemoryAutonomousBrainJobSchedulerPersistence,
   AutonomousBrainJobSchedulerPersistenceCoordinator,
+  JsonAutonomousBrainJobSchedulerPersistence,
+  TransactionalJsonAutonomousBrainJobSchedulerPersistence,
+  WebStorageAutonomousBrainJobSnapshotTextStore,
 } from "../dist/index.js";
 
 const digest = (letter) => letter.repeat(64);
@@ -157,6 +160,67 @@ test("one coordinator serializes overlapping snapshot flushes", async () => {
   assert.equal(snapshots.length, 3);
   assert.equal(new Set(snapshots.map((snapshot) => snapshot.snapshot_digest)).size, 1);
   assert.equal(persistence.read().snapshot_digest, snapshots.at(-1).snapshot_digest);
+});
+
+test("JSON persistence round-trips metadata for every domain and fails closed on malformed text", async () => {
+  let text = null;
+  const store = {
+    read: () => text,
+    write: (next) => { text = next; },
+  };
+  const persistence = new JsonAutonomousBrainJobSchedulerPersistence(store);
+  const scheduler = new InMemoryAutonomousBrainJobScheduler({ maxJobs: 32, clock: () => 3_000 });
+  const controller = new AutonomousBrainJobSchedulerPersistenceCoordinator(scheduler, persistence);
+  for (let index = 0; index < AUTONOMOUS_DOMAIN_NAMES.length; index += 1) scheduler.submit(submission(20 + index), 3_000);
+  const written = await controller.flush();
+  assert.equal(typeof text, "string");
+  assert.equal(written.jobs.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(text.includes("secret-task-never-retained"), false);
+  const restoredScheduler = new InMemoryAutonomousBrainJobScheduler({ maxJobs: 32, clock: () => 3_001 });
+  const restored = await new AutonomousBrainJobSchedulerPersistenceCoordinator(restoredScheduler, persistence).restore();
+  assert.equal(restored.jobs.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.deepEqual(new Set(restored.jobs.map((job) => job.domain)), new Set(AUTONOMOUS_DOMAIN_NAMES));
+  text = "not-json";
+  await assert.rejects(persistence.read(), /invalid JSON/);
+});
+
+test("transactional JSON persistence carries stale-writer fencing and browser storage stays bounded", async () => {
+  let text = null;
+  const store = {
+    read: () => text,
+    write: (next) => { text = next; },
+    writeIfUnchanged: (expected, next) => {
+      const current = text === null ? null : JSON.parse(text).snapshot_digest;
+      if (current !== expected) return false;
+      text = next;
+      return true;
+    },
+  };
+  const persistence = new TransactionalJsonAutonomousBrainJobSchedulerPersistence(store);
+  const seed = new InMemoryAutonomousBrainJobScheduler({ clock: () => 3_100 });
+  const seedController = new AutonomousBrainJobSchedulerPersistenceCoordinator(seed, persistence);
+  seed.submit(submission(30), 3_100);
+  await seedController.flush();
+  const left = new InMemoryAutonomousBrainJobScheduler({ clock: () => 3_100 });
+  const right = new InMemoryAutonomousBrainJobScheduler({ clock: () => 3_100 });
+  const leftController = new AutonomousBrainJobSchedulerPersistenceCoordinator(left, persistence);
+  const rightController = new AutonomousBrainJobSchedulerPersistenceCoordinator(right, persistence);
+  await leftController.restore();
+  await rightController.restore();
+  left.claim("job-30", "json-left", 10_000, 3_101);
+  await leftController.flush();
+  right.claim("job-30", "json-right", 10_000, 3_101);
+  await assert.rejects(rightController.flush(), /compare-and-swap conflict/);
+
+  const values = new Map();
+  const webStore = new WebStorageAutonomousBrainJobSnapshotTextStore({
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => { values.set(key, value); },
+  }, "brain-jobs-test");
+  const browserPersistence = new JsonAutonomousBrainJobSchedulerPersistence(webStore);
+  await browserPersistence.write(seed.snapshot());
+  assert.equal((await browserPersistence.read()).snapshot_digest, seed.snapshot().snapshot_digest);
+  assert.equal(values.has("brain-jobs-test"), true);
 });
 
 test("capacity, cancellation, and checkpoint bounds fail closed", () => {

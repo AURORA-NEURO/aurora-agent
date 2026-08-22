@@ -278,6 +278,11 @@ and private policy digest to the durable job spec; the worker enforces durable a
 lease renewal, planned execution, direct/cycle/adaptive tracing, all-domain route checks, and
 post-dispatch reconciliation. It closes the local worker handoff without claiming multi-host
 consensus, provider idempotency, or secret-manager ownership.
+The TypeScript scheduler persistence seam now also includes bounded JSON adapters for text-backed
+stores, a browser Web Storage single-writer adapter, and an optional atomic compare-and-swap fence.
+The coordinator serializes local flushes and refuses stale restored workers before provider
+dispatch. A deployment still owns the actual IndexedDB, OPFS, SQLite, Postgres, or service-backed
+transaction and must provide the CAS primitive before claiming multi-host lease safety.
 The same adapters now expose bounded provider-neutral pagination: strict array/items-page parsing,
 transient cursor continuation, cursor-cycle detection, page/item/aggregate-byte ceilings, and
 metadata-only partial progress when a later page fails. Provider-specific envelope parsing remains

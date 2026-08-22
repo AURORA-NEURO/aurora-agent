@@ -4056,6 +4056,22 @@ restored/committed snapshot digest as a compare-and-swap fence; a stale worker r
 conflict before it can invoke the facade. Adapters that implement only `write()` remain suitable
 for single-writer persistence, but do not claim distributed lease safety.
 
+For stores whose native value is text, `JsonAutonomousBrainJobSchedulerPersistence` provides the
+concrete bounded encoder/decoder, while `TransactionalJsonAutonomousBrainJobSchedulerPersistence`
+requires an atomic text-store CAS and exposes it to the coordinator. This keeps the integration
+small for IndexedDB, OPFS, SQLite bindings, or an application-owned service:
+
+```typescript
+const persistence = new TransactionalJsonAutonomousBrainJobSchedulerPersistence(textStore);
+const lifecycle = new AutonomousBrainJobSchedulerPersistenceCoordinator(scheduler, persistence);
+await lifecycle.restore();
+```
+
+`WebStorageAutonomousBrainJobSnapshotTextStore` is provided for a browser single-writer
+`localStorage`/`sessionStorage`-compatible object. It deliberately implements only `read()` and
+`write()`; multiple tabs must use a transactional store with CAS instead of treating Web Storage
+as a distributed lease authority.
+
 ## Provider-neutral boundary
 
 The current Python runtime supports:
