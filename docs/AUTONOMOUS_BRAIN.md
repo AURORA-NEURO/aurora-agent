@@ -3961,6 +3961,60 @@ the job to `queued`. This is a bounded local scheduler, not multi-host consensus
 delivery guarantee; deployments that need cross-process durability should use Python
 `BrainJobStore.claim_next()` or a transactional adapter with equivalent fencing.
 
+For a pure TypeScript deployment, `AutonomousBrainJobWorker` closes the remaining handoff. The
+resolver receives only the public job metadata and rehydrates the transient request, provider
+candidate policy, evaluator, connector options, and any protected session in its own process.
+`autonomousBrainJobSpecDigest()` binds that rehydrated request, execution mode, and caller-owned
+policy digest to the submitted `specDigest`; drift fails before dispatch. The worker requires a
+durable approval release before invoking the facade, renews its lease while asynchronous work is
+running, uses the planned facade methods so the route is not silently recomputed, and returns a
+metadata-only trace alongside the transient result. Direct, ordinary cycle, evaluator-guided, and
+cross-domain adaptive jobs share the same boundary:
+
+```typescript
+import {
+  AutonomousBrainJobWorker,
+  InMemoryAutonomousRunTraceStore,
+  autonomousBrainJobSpecDigest,
+} from "@aurora-neuro/prism-sdk";
+
+const request = { task: "review a bounded experiment", domain: "science", capability: "bounded_task" };
+const policyDigest = callerOwnedPolicyDigest;
+const specDigest = autonomousBrainJobSpecDigest({ request, mode: "adaptive", policyDigest });
+scheduler.submit({
+  jobId: "science-job-1",
+  idempotencyKey: callerIdempotencyKey,
+  specDigest,
+  domain: "science",
+  capability: "bounded_task",
+  riskClass: "review",
+});
+
+const worker = new AutonomousBrainJobWorker({
+  brain,
+  scheduler,
+  workerId: "worker-science-1",
+  traceStore: new InMemoryAutonomousRunTraceStore(),
+  resolve: ({ job }) => ({
+    specDigest: job.spec_digest,
+    policyDigest,
+    request,
+    mode: "adaptive",
+    adaptive: { adaptive: evaluatorAndReplanPolicy },
+  }),
+});
+const waiting = await worker.runOnce("science-job-1");
+// Authenticate and authorize the operator in the application, then:
+scheduler.resumeApproval("science-job-1", "operator-42", "reviewed scope");
+const result = await worker.runOnce("science-job-1");
+```
+
+The worker never writes the resolver's task or policy values to the scheduler. A provider error
+after dispatch is conservatively quarantined for reconciliation; a spec mismatch, missing
+evaluator, or route/domain mismatch fails before the external boundary. The worker is still a
+single-process scheduler adapter: multi-host transactions, provider-side idempotency, and secret
+manager/session ownership remain deployment responsibilities.
+
 ## Provider-neutral boundary
 
 The current Python runtime supports:
@@ -5062,6 +5116,11 @@ cross-domain route. `runCrossDomainWithTrace()` makes that propagation explicit 
 fan-out and synthesis: the same trace contains every provider turn while its summary exposes
 only counts and digests. A terminal trace state cannot accept later events; snapshot restore
 verifies the complete chain and leaves the live store unchanged when tampering is detected.
+The facade extends the same lifecycle to `executeCycleWithTrace()` and
+`executeAdaptiveCycleWithTrace()`: evaluator settlement and value-only learning preparation are
+recorded as bounded phases, while provider turns from every evaluator-guided attempt use the same
+observer. A trace status of `completed` still means only that the reviewed runtime boundary
+completed; evaluator truth and domain correctness remain separate.
 Trace status is intentionally weaker than task truth: `completed` means the reviewed runtime
 boundary completed, not that an evaluator, source, clinical, scientific, or operational claim is
 correct. Independent evaluation and learning remain separate gates.

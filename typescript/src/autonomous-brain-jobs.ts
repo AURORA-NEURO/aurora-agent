@@ -342,6 +342,13 @@ export class InMemoryAutonomousBrainJobScheduler {
     return this.jobs.get(identifier("jobId", jobId)) ?? null;
   }
 
+  /** Return the hash-chained lifecycle for one job without exposing private task or provider values. */
+  eventsFor(jobId: string): readonly AutonomousBrainJobEvent[] {
+    const id = identifier("jobId", jobId);
+    if (!this.jobs.has(id)) throw new ArgumentError("unknown brain job");
+    return this.events.filter((event) => event.job_id === id).map((event) => ({ ...event, metadata: { ...event.metadata } }));
+  }
+
   inventory(options: { limit?: number; state?: AutonomousBrainJobState; now?: number } = {}): readonly AutonomousBrainJob[] {
     const limit = boundedInteger("job inventory limit", options.limit ?? 100, 1, Math.min(this.maxJobs, MAX_AUTONOMOUS_BRAIN_JOBS));
     const current = nowMs(this.clock, options.now);

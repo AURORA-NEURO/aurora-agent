@@ -168,6 +168,28 @@ export interface AutonomousBrainTracedExecution {
   trace: AutonomousRunTraceSummary;
 }
 
+/** Closed-loop cycle options plus the same caller-owned metadata trace boundary. */
+export interface AutonomousBrainCycleTraceOptions extends AutonomousBrainCycleOptions {
+  traceStore: AutonomousRunTraceStore;
+  runId: string;
+}
+
+export interface AutonomousBrainTracedCycleExecution {
+  execution: AutonomousBrainCycleExecution;
+  trace: AutonomousRunTraceSummary;
+}
+
+/** Evaluator-guided cycle options plus the same caller-owned metadata trace boundary. */
+export interface AutonomousBrainAdaptiveCycleTraceOptions extends AutonomousBrainAdaptiveCycleOptions {
+  traceStore: AutonomousRunTraceStore;
+  runId: string;
+}
+
+export interface AutonomousBrainTracedAdaptiveCycleExecution {
+  execution: AutonomousBrainAdaptiveCycleExecution;
+  trace: AutonomousRunTraceSummary;
+}
+
 export interface AutonomousBrainExecuteOptions {
   /** Explicit provider approval; defaults to false even when a model is registered. */
   approveProviderCall?: boolean;
@@ -805,6 +827,23 @@ export class AutonomousBrainFacade {
     return this.executeCyclePrepared(prepared, options);
   }
 
+  /** Execute a closed-loop cycle while tracing planning, connectors, provider turns, evaluation, and learning. */
+  async executeCycleWithTrace(input: AutonomousBrainRequest, options: AutonomousBrainCycleTraceOptions): Promise<AutonomousBrainTracedCycleExecution> {
+    const request = validateRequest(input);
+    if (!options || typeof options !== "object") throw new ArgumentError("autonomous brain executeCycleWithTrace options must be an object");
+    const prepared = await this.prepare(request);
+    return this.executeCyclePreparedWithTrace(prepared, options);
+  }
+
+  /** Rehydrate a reviewed plan, then execute its closed-loop cycle through the trace boundary. */
+  async executePlannedCycleWithTrace(plan: AutonomousBrainPlan, input: AutonomousBrainRequest, options: AutonomousBrainCycleTraceOptions): Promise<AutonomousBrainTracedCycleExecution> {
+    if (!(plan instanceof AutonomousBrainPlan)) throw new ArgumentError("autonomous brain executePlannedCycleWithTrace requires a typed plan");
+    const request = validateRequest(input);
+    const prepared = await this.prepare(request);
+    if (prepared.plan.plan_digest !== plan.plan_digest) throw new ArgumentError("autonomous brain traced cycle plan does not match the transient request");
+    return this.executeCyclePreparedWithTrace(prepared, options);
+  }
+
   /**
    * Execute the bounded evaluator -> learn -> optional replan loop behind the same route,
    * connector, approval, and metadata-only plan boundary. Replanning is always delegated to
@@ -821,6 +860,23 @@ export class AutonomousBrainFacade {
     const prepared = await this.prepare(input);
     if (prepared.plan.plan_digest !== plan.plan_digest) throw new ArgumentError("autonomous brain adaptive cycle plan does not match the transient request");
     return this.executeAdaptiveCyclePrepared(prepared, options);
+  }
+
+  /** Execute an evaluator-guided loop while tracing every bounded attempt and learning transition. */
+  async executeAdaptiveCycleWithTrace(input: AutonomousBrainRequest, options: AutonomousBrainAdaptiveCycleTraceOptions): Promise<AutonomousBrainTracedAdaptiveCycleExecution> {
+    const request = validateRequest(input);
+    if (!options || typeof options !== "object") throw new ArgumentError("autonomous brain executeAdaptiveCycleWithTrace options must be an object");
+    const prepared = await this.prepare(request);
+    return this.executeAdaptiveCyclePreparedWithTrace(prepared, options);
+  }
+
+  /** Rehydrate a reviewed plan, then execute its evaluator-guided loop through the trace boundary. */
+  async executePlannedAdaptiveCycleWithTrace(plan: AutonomousBrainPlan, input: AutonomousBrainRequest, options: AutonomousBrainAdaptiveCycleTraceOptions): Promise<AutonomousBrainTracedAdaptiveCycleExecution> {
+    if (!(plan instanceof AutonomousBrainPlan)) throw new ArgumentError("autonomous brain executePlannedAdaptiveCycleWithTrace requires a typed plan");
+    const request = validateRequest(input);
+    const prepared = await this.prepare(request);
+    if (prepared.plan.plan_digest !== plan.plan_digest) throw new ArgumentError("autonomous brain traced adaptive cycle plan does not match the transient request");
+    return this.executeAdaptiveCyclePreparedWithTrace(prepared, options);
   }
 
   /** Return the redacted provider/model/tool posture needed to render onboarding UI. */
@@ -1182,16 +1238,33 @@ export class AutonomousBrainFacade {
     return { request, route, plan, connectorPlan };
   }
 
-  private async executePreparedWithTrace(prepared: PreparedBrainRequest, options: AutonomousBrainTraceOptions): Promise<AutonomousBrainTracedExecution> {
-    if (!options.traceStore || typeof options.traceStore.append !== "function" || typeof options.traceStore.events !== "function") throw new ArgumentError("autonomous brain traced execution requires a trace store");
-    const initialDomains = prepared.plan.selected_domains.length
+  private traceDomains(prepared: PreparedBrainRequest): AutonomousDomainName[] {
+    const domains = prepared.plan.selected_domains.length
       ? [...prepared.plan.selected_domains, ...(prepared.route.cross_domain ? ["cross_domain" as const] : [])]
       : [prepared.request.domain ?? "cross_domain"];
-    const trace = new AutonomousRunTraceSession(options.traceStore, {
-      run_id: options.runId,
-      task_digest: prepared.plan.task_digest,
-      domains: [...new Set(initialDomains)] as AutonomousDomainName[],
-    });
+    return [...new Set(domains)] as AutonomousDomainName[];
+  }
+
+  private createTrace(prepared: PreparedBrainRequest, store: AutonomousRunTraceStore, runId: string): AutonomousRunTraceSession {
+    if (!store || typeof store.append !== "function" || typeof store.events !== "function") throw new ArgumentError("autonomous brain traced execution requires a trace store");
+    return new AutonomousRunTraceSession(store, { run_id: runId, task_digest: prepared.plan.task_digest, domains: this.traceDomains(prepared) });
+  }
+
+  private async recordCycleTraceStages(trace: AutonomousRunTraceSession, cycle: AutonomousBrainCycleResult | AutonomousBrainAdaptiveCycleResult): Promise<void> {
+    const value = cycle as unknown as Record<string, unknown>;
+    const evaluations = Array.isArray(value.evaluations) ? value.evaluations : value.evaluation === null || value.evaluation === undefined ? [] : [value.evaluation];
+    if (evaluations.length > 0) {
+      await trace.record({ phase: "evaluation_settled", status: "running", detail_digest: digestJsonSync({ count: evaluations.length, last: evaluations.at(-1) ?? null }) });
+    }
+    const learningEpisodeIds = Array.isArray(value.learning_episode_ids) ? value.learning_episode_ids : value.learning_episode_id ? [value.learning_episode_id] : [];
+    if (learningEpisodeIds.length > 0) {
+      await trace.record({ phase: "learning_prepared", status: "running", detail_digest: digestJsonSync({ count: learningEpisodeIds.length, episode_digests: learningEpisodeIds.map((entry) => digestJsonSync(entry)) }) });
+    }
+  }
+
+  private async executePreparedWithTrace(prepared: PreparedBrainRequest, options: AutonomousBrainTraceOptions): Promise<AutonomousBrainTracedExecution> {
+    const initialDomains = this.traceDomains(prepared);
+    const trace = this.createTrace(prepared, options.traceStore, options.runId);
     await trace.started();
     try {
       await trace.record({
@@ -1215,6 +1288,47 @@ export class AutonomousBrainFacade {
         plan_digest: prepared.plan.plan_digest,
         selection_digest: selection === null ? null : digestJsonSync(selection as JsonObject),
       });
+      return { execution, trace: await trace.summary() };
+    } catch (error) {
+      const projection = errorProjection(error);
+      await trace.fail({ failure_class: projection.error_class, failure_code: projection.failure_code, detail_digest: digestJsonSync(projection) }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  private async executeCyclePreparedWithTrace(prepared: PreparedBrainRequest, options: AutonomousBrainCycleTraceOptions): Promise<AutonomousBrainTracedCycleExecution> {
+    const initialDomains = this.traceDomains(prepared);
+    const trace = this.createTrace(prepared, options.traceStore, options.runId);
+    await trace.started();
+    try {
+      await trace.record({ phase: "plan_compiled", status: "running", domains: initialDomains, route_digest: prepared.route.route_digest, plan_digest: prepared.plan.plan_digest });
+      const execution = await this.executeCyclePrepared(prepared, options, trace);
+      if (execution.cycle) await this.recordCycleTraceStages(trace, execution.cycle);
+      const cycleValue = execution.cycle as unknown as Record<string, unknown> | null;
+      const run = cycleValue && isObject(cycleValue.run) ? cycleValue.run : cycleValue && isObject(cycleValue.final) && isObject(cycleValue.final.run) ? cycleValue.final.run : null;
+      const selection = run && isObject(run.selection) ? run.selection : run && isObject(run.synthesis) && isObject(run.synthesis.selection) ? run.synthesis.selection : null;
+      await trace.complete({ status: autonomousRunTraceStatus(execution.status), domains: initialDomains, route_digest: prepared.route.route_digest, plan_digest: prepared.plan.plan_digest, selection_digest: selection === null ? null : digestJsonSync(selection as JsonObject) });
+      return { execution, trace: await trace.summary() };
+    } catch (error) {
+      const projection = errorProjection(error);
+      await trace.fail({ failure_class: projection.error_class, failure_code: projection.failure_code, detail_digest: digestJsonSync(projection) }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  private async executeAdaptiveCyclePreparedWithTrace(prepared: PreparedBrainRequest, options: AutonomousBrainAdaptiveCycleTraceOptions): Promise<AutonomousBrainTracedAdaptiveCycleExecution> {
+    const initialDomains = this.traceDomains(prepared);
+    const trace = this.createTrace(prepared, options.traceStore, options.runId);
+    await trace.started();
+    try {
+      await trace.record({ phase: "plan_compiled", status: "running", domains: initialDomains, route_digest: prepared.route.route_digest, plan_digest: prepared.plan.plan_digest });
+      const execution = await this.executeAdaptiveCyclePrepared(prepared, options, trace);
+      if (execution.adaptive) await this.recordCycleTraceStages(trace, execution.adaptive);
+      const adaptiveValue = execution.adaptive as unknown as Record<string, unknown> | null;
+      const final = adaptiveValue && isObject(adaptiveValue.final) ? adaptiveValue.final : null;
+      const run = final && isObject(final.run) ? final.run : null;
+      const selection = run && isObject(run.selection) ? run.selection : run && isObject(run.synthesis) && isObject(run.synthesis.selection) ? run.synthesis.selection : null;
+      await trace.complete({ status: autonomousRunTraceStatus(execution.status), domains: initialDomains, route_digest: prepared.route.route_digest, plan_digest: prepared.plan.plan_digest, selection_digest: selection === null ? null : digestJsonSync(selection as JsonObject) });
       return { execution, trace: await trace.summary() };
     } catch (error) {
       const projection = errorProjection(error);
@@ -1247,7 +1361,7 @@ export class AutonomousBrainFacade {
     return { schema: AUTONOMOUS_BRAIN_FACADE_SCHEMA, status: run.status, plan: plan.toJSON(), run, connector, error: null, retention: "plan_metadata_only;run_and_connector_values_transient_to_caller", secret_material: "never_returned" };
   }
 
-  private async executeCyclePrepared(prepared: PreparedBrainRequest, options: AutonomousBrainCycleOptions): Promise<AutonomousBrainCycleExecution> {
+  private async executeCyclePrepared(prepared: PreparedBrainRequest, options: AutonomousBrainCycleOptions, trace?: AutonomousRunTraceSession): Promise<AutonomousBrainCycleExecution> {
     const { request, route, plan } = prepared;
     const base = (status: AutonomousBrainCycleStatus, cycle: AutonomousBrainCycleResult | null, connector: AutonomousConnectorOperationExecution | null, error: { error_class: string; failure_code: string } | null): AutonomousBrainCycleExecution => ({
       schema: AUTONOMOUS_BRAIN_FACADE_SCHEMA,
@@ -1267,7 +1381,9 @@ export class AutonomousBrainFacade {
     let connector: AutonomousConnectorOperationExecution | null = null;
     if (request.connector !== undefined && options.connectorFirst !== false) {
       if (!this.connectorOperations || !prepared.connectorPlan) throw new ArgumentError("autonomous brain connector plan is unavailable");
+      await trace?.record({ phase: "connector_started", status: "running", domains: this.traceDomains(prepared), route_digest: route.route_digest, plan_digest: plan.plan_digest });
       connector = await this.connectorOperations.executePlanned(prepared.connectorPlan, request.connector);
+      await trace?.record({ phase: "connector_finished", status: "running", domains: this.traceDomains(prepared), route_digest: route.route_digest, plan_digest: plan.plan_digest, detail_digest: digestJsonSync({ status: connector.status, replay: connector.replay, connector_plan_digest: connector.operation_plan.plan_digest }) });
       if (!connectorSucceeded(connector.status)) return base("connector_blocked", null, connector, { error_class: "ConnectorOperationError", failure_code: connector.status });
     }
     const context = [
@@ -1283,6 +1399,7 @@ export class AutonomousBrainFacade {
       hints: request.hints,
       allowCrossDomain: request.allow_cross_domain,
       approveProviderCall: options.approveProviderCall ?? options.cycle?.approveProviderCall ?? false,
+      observer: composeBrainObservers(options.cycle?.observer, trace?.providerObserver()),
     };
     const cycle = route.cross_domain
       ? await runAutonomousCrossDomainDecisionCycle(this.agent, request.task, cycleOptions as AutonomousCrossDomainDecisionCycleOptions)
@@ -1290,7 +1407,7 @@ export class AutonomousBrainFacade {
     return base(cycle.status, cycle, connector, null);
   }
 
-  private async executeAdaptiveCyclePrepared(prepared: PreparedBrainRequest, options: AutonomousBrainAdaptiveCycleOptions): Promise<AutonomousBrainAdaptiveCycleExecution> {
+  private async executeAdaptiveCyclePrepared(prepared: PreparedBrainRequest, options: AutonomousBrainAdaptiveCycleOptions, trace?: AutonomousRunTraceSession): Promise<AutonomousBrainAdaptiveCycleExecution> {
     if (!options || !isObject(options.adaptive) || typeof options.adaptive.evaluate !== "function") throw new ArgumentError("autonomous brain adaptive cycle requires an evaluator callback");
     const { request, route, plan } = prepared;
     const base = (status: AutonomousBrainAdaptiveCycleStatus, adaptive: AutonomousBrainAdaptiveCycleResult | null, connector: AutonomousConnectorOperationExecution | null, error: { error_class: string; failure_code: string } | null): AutonomousBrainAdaptiveCycleExecution => ({
@@ -1311,7 +1428,9 @@ export class AutonomousBrainFacade {
     let connector: AutonomousConnectorOperationExecution | null = null;
     if (request.connector !== undefined && options.connectorFirst !== false) {
       if (!this.connectorOperations || !prepared.connectorPlan) throw new ArgumentError("autonomous brain connector plan is unavailable");
+      await trace?.record({ phase: "connector_started", status: "running", domains: this.traceDomains(prepared), route_digest: route.route_digest, plan_digest: plan.plan_digest });
       connector = await this.connectorOperations.executePlanned(prepared.connectorPlan, request.connector);
+      await trace?.record({ phase: "connector_finished", status: "running", domains: this.traceDomains(prepared), route_digest: route.route_digest, plan_digest: plan.plan_digest, detail_digest: digestJsonSync({ status: connector.status, replay: connector.replay, connector_plan_digest: connector.operation_plan.plan_digest }) });
       if (!connectorSucceeded(connector.status)) return base("connector_blocked", null, connector, { error_class: "ConnectorOperationError", failure_code: connector.status });
     }
     const context = [
@@ -1327,6 +1446,7 @@ export class AutonomousBrainFacade {
       hints: request.hints,
       allowCrossDomain: request.allow_cross_domain,
       approveProviderCall: options.approveProviderCall ?? options.adaptive.approveProviderCall ?? false,
+      observer: composeBrainObservers(options.adaptive.observer, trace?.providerObserver()),
     };
     const adaptive = route.cross_domain
       ? await runAutonomousCrossDomainReplanCycle(this.agent, request.task, adaptiveOptions as AutonomousCrossDomainReplanCycleOptions)

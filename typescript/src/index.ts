@@ -601,6 +601,10 @@ export type {
   AutonomousBrainExecuteOptions,
   AutonomousBrainTraceOptions,
   AutonomousBrainTracedExecution,
+  AutonomousBrainCycleTraceOptions,
+  AutonomousBrainTracedCycleExecution,
+  AutonomousBrainAdaptiveCycleTraceOptions,
+  AutonomousBrainTracedAdaptiveCycleExecution,
   AutonomousBrainApprovedSelectionOptions,
   AutonomousBrainSingleCycleOptions,
   AutonomousBrainCrossDomainCycleOptions,
@@ -668,6 +672,25 @@ export type {
   AutonomousBrainJobFailureOptions,
   AutonomousBrainJobReconciliationOptions,
 } from "./autonomous-brain-jobs.js";
+export {
+  AUTONOMOUS_BRAIN_JOB_WORKER_SCHEMA,
+  AUTONOMOUS_BRAIN_JOB_SPEC_SCHEMA,
+  MAX_AUTONOMOUS_BRAIN_WORKER_HEARTBEAT_MS,
+  MAX_AUTONOMOUS_BRAIN_WORKER_BATCH,
+  autonomousBrainJobSpecDigest,
+  AutonomousBrainJobWorker,
+} from "./autonomous-brain-worker.js";
+export type {
+  AutonomousBrainJobExecutionMode,
+  AutonomousBrainJobWorkerStatus,
+  AutonomousBrainJobSpecDigestInput,
+  AutonomousBrainJobResolution,
+  AutonomousBrainJobResolverContext,
+  AutonomousBrainJobResolver,
+  AutonomousBrainJobWorkerOptions,
+  AutonomousBrainJobWorkerRun,
+  AutonomousBrainJobWorkerBatch,
+} from "./autonomous-brain-worker.js";
 export {
   AUTONOMOUS_CONNECTOR_OPERATION_REGISTRY_SCHEMA,
   AUTONOMOUS_CONNECTOR_OPERATION_SCHEMA,

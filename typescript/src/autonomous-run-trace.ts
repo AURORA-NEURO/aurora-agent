@@ -537,9 +537,9 @@ export class AutonomousRunTraceSession {
 /** Map a provider/run status into the explicit trace state without inventing success. */
 export function autonomousRunTraceStatus(status: string): AutonomousRunTraceStatus {
   if (status === "completed") return "completed";
-  if (status === "cross_domain_partial" || status === "children_partial" || status === "children_completed") return "partial";
+  if (status === "cross_domain_partial" || status === "children_partial" || status === "children_completed" || status === "completed_without_replan" || status === "replan_limit_reached") return "partial";
   if (status === "route_review_required" || status === "approval_required" || status === "reconciliation_required" || status === "turn_limit_reached" || status === "plan_review_required" || status === "connector_blocked") return "paused";
-  if (status === "abstained") return "refused";
-  if (status === "child_failed") return "failed";
+  if (status === "abstained" || status === "provider_abstained" || status === "provider_invalid" || status === "provider_disagreement") return "refused";
+  if (status === "child_failed" || status === "execution_failed") return "failed";
   return "unknown";
 }

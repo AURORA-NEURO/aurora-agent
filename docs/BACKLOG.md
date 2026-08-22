@@ -272,6 +272,12 @@ The application-facing `AutonomousBrainFacade` now carries that same boundary th
 provider turns, approval pauses, terminal outcomes, and plan/request identity checks are recorded
 in one bounded trace. This closes the high-level observability seam without weakening approval
 gates or claiming that transport completion is domain truth.
+The TypeScript surface now also connects the metadata-only brain job scheduler to the facade via
+`AutonomousBrainJobWorker`. A caller-owned resolver binds a rehydrated request, execution mode,
+and private policy digest to the durable job spec; the worker enforces durable approval release,
+lease renewal, planned execution, direct/cycle/adaptive tracing, all-domain route checks, and
+post-dispatch reconciliation. It closes the local worker handoff without claiming multi-host
+consensus, provider idempotency, or secret-manager ownership.
 The same adapters now expose bounded provider-neutral pagination: strict array/items-page parsing,
 transient cursor continuation, cursor-cycle detection, page/item/aggregate-byte ceilings, and
 metadata-only partial progress when a later page fails. Provider-specific envelope parsing remains
