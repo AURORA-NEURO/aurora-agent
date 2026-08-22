@@ -257,6 +257,12 @@ The adaptive selector now accepts only bounded caller/evaluator signals for heal
 latency, cost, evaluator reward, and eligibility. It records normalized scores and a signal digest,
 uses fixed weights with deterministic tie-breaking, and is exposed through `AutonomousAgent` so
 the façade can plan and dispatch the same reviewed route without introducing a second policy.
+Python now also includes a credentialless `local-offline` built-in connector adapter covering all
+twelve operation contracts. It projects caller-supplied fixture metadata into digests, shapes,
+counts, and explicit `observed`/`partial` outcomes so routing, approval, worker recovery, replay,
+and evaluator tests are executable without a provider key or network. It does not replace the
+remaining external provider-specific adapters, source retrieval, authentication, or domain-truth
+validation, which remain caller-owned by design.
 The domain-workflow handoff now also has a retained verification boundary: callers can validate
 catalogue/contract/binding identity, rerun mission preflight, and optionally replay the original
 instantiation request before re-review. The verifier is intentionally structural and non-executing;

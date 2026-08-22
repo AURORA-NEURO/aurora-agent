@@ -92,6 +92,9 @@ from .autonomous_model_inventory import (
     AutonomousModelInventorySnapshot,
     AutonomousModelInventoryStore,
 )
+from .autonomous_builtin_connectors import (
+    register_builtin_autonomous_connectors,
+)
 from .evaluators import (
     CompositeDomainEvaluator,
     DomainEvaluatorRegistry,
@@ -11244,6 +11247,52 @@ class AutonomousAgent:
                 "secret_material": "never_returned",
             }
         return self.connector_registry.to_dict()
+
+    def register_builtin_connectors(
+        self,
+        *,
+        operation_registry: Any | None = None,
+        connector_id: str = "builtin.offline-evidence",
+        version: str = "1.0.0",
+        approval_required: bool = True,
+        replace: bool = False,
+        receipt_sink: Callable[[Any], Any] | None = None,
+        receipt_store: Any | None = None,
+    ) -> Any:
+        """Install the credentialless all-domain connector adapter.
+
+        The adapter is intentionally local and deterministic. It normalizes caller-supplied
+        metadata into transient observations; it does not discover sources, invoke a provider,
+        or turn a registration into authorization. If the agent has no connector runtime yet,
+        this method creates one so the returned registration is immediately usable through the
+        same selection, approval, receipt, and replay gates as an external connector.
+        """
+
+        if self.connector_registry is None:
+            self.connector_registry = AutonomousConnectorRegistry()
+        if self.connector_runtime is None:
+            self.connector_runtime = AutonomousConnectorRuntime(
+                self.connector_registry,
+                receipt_sink=receipt_sink,
+                receipt_store=receipt_store,
+            )
+        elif receipt_sink is not None or receipt_store is not None:
+            raise BrainRunError(
+                "receipt_sink and receipt_store must be supplied when creating the connector runtime"
+            )
+        try:
+            return register_builtin_autonomous_connectors(
+                self.connector_registry,
+                operation_registry,
+                connector_id=connector_id,
+                version=version,
+                approval_required=approval_required,
+                replace=replace,
+            )
+        except (ArgumentError, BrainRunError):
+            raise
+        except Exception as error:
+            raise BrainRunError("built-in connector registration failed") from error
 
     def connector_selection_plan(
         self,

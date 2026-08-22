@@ -2909,6 +2909,58 @@ call requires an explicit new `attempt_id`. This protects against silent duplica
 claiming distributed exactly-once delivery; cross-process fencing and provider idempotency remain
 caller-owned.
 
+For credentialless development and air-gapped evaluation, Python also ships a concrete built-in
+adapter: `builtin_autonomous_connector_registration()` or
+`register_builtin_autonomous_connectors(registry)`. It covers every operation in
+`AutonomousConnectorOperationRegistry`, projects caller-supplied JSON into field names, shapes,
+counts, and digests, and returns `observed` or `partial` metadata without retaining the input.
+The adapter is deliberately named `local-offline` in its manifest and declares that it contacted
+no external provider. It is useful for testing routing, approval, durable worker recovery,
+replay, evaluator feedback, and domain-specific fixture shape; it is not a substitute for a
+literature, FHIR, browser, object-store, or other authenticated source connector. A sparse input
+is `partial`, not a fabricated success, and the same request still passes through the live
+selection plan, approval gate, receipt journal, and metadata-only replay barrier:
+
+```python
+from prism_sdk import (
+    AutonomousConnectorDispatchRequest,
+    AutonomousConnectorRegistry,
+    AutonomousConnectorRuntime,
+    content_digest,
+    register_builtin_autonomous_connectors,
+)
+
+registry = AutonomousConnectorRegistry()
+registration = register_builtin_autonomous_connectors(registry)
+runtime = AutonomousConnectorRuntime(registry)
+plan = registry.select_for_domains(("science",), capability="hypothesis")
+request = AutonomousConnectorDispatchRequest(
+    dispatch_id="offline-science-dispatch",
+    execution_id="offline-science-run",
+    call_id="offline-science-call",
+    connector_id=registration.connector_id,
+    domains=("science",),
+    capability="hypothesis",
+    request={
+        "operation_id": "science.reproducible_evidence_acquisition",
+        "subject_digest": content_digest({"fixture": "science"}),
+        "hypothesis": "fixture hypothesis",
+        "evidence_digests": [content_digest({"evidence": 1})],
+        "analysis_digest": content_digest({"analysis": "offline"}),
+    },
+    selection_plan_digest=plan.plan_digest,
+    approved=True,
+)
+result = runtime.dispatch_from_plan(plan, request)
+assert result.receipt.status == "observed"
+```
+
+The built-in manifest advertises each operation's primary capability plus a bounded subset of
+secondary aliases because provider-manifest capability arrays are capped. The operation registry
+remains authoritative for the complete vocabulary. Applications that need a composite capability
+not present in that bounded projection should register a narrower caller-owned adapter with the
+exact manifest they reviewed, rather than widening the built-in manifest implicitly.
+
 The TypeScript SDK now exposes the same connector seam with a browser-safe in-memory receipt
 journal and digest snapshot. Applications can persist `journal.snapshot()` through their own
 IndexedDB, SQLite, Postgres, or object-storage adapter and restore it only after snapshot and hash
