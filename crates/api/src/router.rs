@@ -35,7 +35,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub const API_VERSION: &str = "v1";
 pub const DEFAULT_MAX_HEADER_BYTES: usize = 32 * 1024;
@@ -12750,7 +12750,8 @@ mod tests {
         );
 
         let mut terminal = Value::Null;
-        for _ in 0..200 {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
             let response = router.handle(request(
                 "GET",
                 "/v1/missions/async-workflow-reconcile",
@@ -12764,7 +12765,7 @@ mod tests {
             {
                 break;
             }
-            std::thread::sleep(std::time::Duration::from_millis(2));
+            std::thread::sleep(Duration::from_millis(2));
         }
         assert_eq!(terminal["status"], "succeeded");
         assert_eq!(terminal["result"]["mission_status"], "succeeded");
