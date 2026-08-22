@@ -7,14 +7,14 @@ The Python SDK includes a secret-safe operator entry point for the autonomous br
 ```bash
 cd python
 python -m prism_sdk catalogue
-python -m prism_sdk evidence-plan --domain research
+python -m prism_sdk evidence-plan --domain science
 python -m prism_sdk provider-status --provider openai
 ```
 
 Use `run` with a caller-owned MCP server when you are ready to invoke a provider. Keys are accepted
 only through a hidden prompt or an explicitly named environment variable; they are never command
 line arguments, MCP arguments, plans, or persisted state. See [the autonomous brain guide](docs/AUTONOMOUS_BRAIN.md#operator-process-boundary)
-for model-selection, approval, and credential-lifecycle details.
+for model discovery, model-selection, approval, and credential-lifecycle details.
 
 **Query-compiled inference for executable biology.**
 

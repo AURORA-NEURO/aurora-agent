@@ -34,6 +34,7 @@ from .llm_runtime import (
     LLMRuntime,
     ModelCandidate,
     ModelCatalogue,
+    ProviderModelDescriptor,
     ProviderOnboarding,
     anthropic_provider,
     openai_compatible_provider,
@@ -141,11 +142,48 @@ def _runtime_with_provider(args: argparse.Namespace) -> tuple[LLMRuntime, Provid
     return runtime, onboarding
 
 
-def _candidate_args(args: argparse.Namespace) -> tuple[ModelCandidate, ...]:
+def _candidate_args(
+    args: argparse.Namespace,
+    descriptors: Sequence[ProviderModelDescriptor] = (),
+) -> tuple[ModelCandidate, ...]:
     models = tuple(args.model or ())
-    if not models:
-        raise ValueError("at least one --model is required")
     capabilities = tuple(args.model_capability or ())
+    if descriptors:
+        selected = tuple(
+            descriptor
+            for descriptor in descriptors
+            if not models or descriptor.model in models
+        )
+        if models:
+            discovered_names = {descriptor.model for descriptor in descriptors}
+            missing = tuple(model for model in models if model not in discovered_names)
+            if missing:
+                raise ValueError("requested model was not returned by provider discovery")
+        candidates: list[ModelCandidate] = []
+        for descriptor in selected:
+            if descriptor.metadata.get("archived") is True:
+                continue
+            context_window_tokens = descriptor.context_window_tokens or args.context_window_tokens
+            max_output_tokens = descriptor.max_output_tokens or min(
+                args.model_max_output_tokens,
+                context_window_tokens,
+            )
+            candidates.append(
+                descriptor.to_candidate(
+                    context_window_tokens=context_window_tokens,
+                    max_output_tokens=min(max_output_tokens, context_window_tokens),
+                    quality=args.quality,
+                    latency_ms=args.latency_ms,
+                    cost_per_million_tokens=args.cost_per_million_tokens,
+                    reliability=args.reliability,
+                    capabilities=capabilities,
+                )
+            )
+        if not candidates:
+            raise ValueError("provider discovery returned no selectable models")
+        return tuple(candidates)
+    if not models:
+        raise ValueError("at least one --model is required unless --discover-models is enabled")
     candidates = tuple(
         ModelCandidate(
             provider=args.provider,
@@ -161,6 +199,21 @@ def _candidate_args(args: argparse.Namespace) -> tuple[ModelCandidate, ...]:
         for model in models
     )
     return candidates
+
+
+def _discover_descriptors(
+    runtime: LLMRuntime,
+    args: argparse.Namespace,
+    session: Any,
+) -> tuple[ProviderModelDescriptor, ...]:
+    if not args.approve_provider_call:
+        raise ValueError("model discovery requires --approve-provider-call")
+    return runtime.discover_models(
+        args.provider,
+        credential=session.handle(args.provider),
+        path=args.models_path,
+        limit=args.model_limit,
+    )
 
 
 def _credential_reader(reader: Callable[[str], str] | None) -> Callable[[str], str]:
@@ -248,6 +301,32 @@ def _provider_status(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def _discover_models(
+    args: argparse.Namespace,
+    *,
+    environ: Mapping[str, str],
+    reader: Callable[[str], str] | None,
+) -> dict[str, Any]:
+    if not args.approve_provider_call:
+        raise ValueError("model discovery requires --approve-provider-call")
+    runtime, onboarding = _runtime_with_provider(args)
+    with onboarding.start_session(ttl_seconds=args.ttl_seconds) as session:
+        _collect_credentials(args, session, environ=environ, reader=reader)
+        descriptors = _discover_descriptors(runtime, args, session)
+        provider_status = runtime.provider_status(args.provider)
+    return {
+        "schema": CLI_SCHEMA,
+        "command": "discover-models",
+        "provider": args.provider,
+        "models": [descriptor.to_dict() for descriptor in descriptors],
+        "model_count": len(descriptors),
+        "provider_status": provider_status,
+        "credential_session": session.status().to_dict(),
+        "authorization": {"model_discovery_approved": args.approve_provider_call},
+        "secret_material": "never_returned",
+    }
+
+
 def _onboard(
     args: argparse.Namespace,
     *,
@@ -286,9 +365,9 @@ def _run(
     ):
         raise ValueError("choose exactly one of --automatic or --domain")
     command = _parse_mcp_command(args.mcp_command)
-    candidates = _candidate_args(args)
+    if args.discover_models and not args.approve_provider_call:
+        raise ValueError("model discovery requires --approve-provider-call")
     runtime, onboarding = _runtime_with_provider(args)
-    catalogue = ModelCatalogue(candidates)
     session = onboarding.start_session(ttl_seconds=args.ttl_seconds)
     try:
         _collect_credentials(
@@ -297,6 +376,11 @@ def _run(
             environ=environ,
             reader=reader,
         )
+        descriptors = _discover_descriptors(runtime, args, session) if args.discover_models else ()
+        if args.discover_models and not descriptors:
+            raise ValueError("provider discovery returned no selectable models")
+        candidates = _candidate_args(args, descriptors)
+        catalogue = ModelCatalogue(candidates)
         client = client_factory(
             command,
             cwd=args.mcp_cwd,
@@ -339,11 +423,17 @@ def _run(
             "schema": CLI_SCHEMA,
             "command": "run",
             "routing_mode": "automatic" if args.automatic else "explicit_domain",
+            "model_inventory": {
+                "mode": "provider_discovery" if args.discover_models else "caller_declared",
+                "models": [descriptor.to_dict() for descriptor in descriptors],
+                "model_count": len(descriptors),
+            },
             "result": result,
             "provider_status": runtime.provider_status(args.provider),
             "credential_session": session.status().to_dict(),
             "authorization": {
                 "provider_call_approved": args.approve_provider_call,
+                "model_discovery_approved": args.approve_provider_call if args.discover_models else False,
                 "mission_dispatch_approved": args.approve_mission_dispatch,
             },
             "secret_material": "never_returned",
@@ -387,6 +477,15 @@ def _parser() -> argparse.ArgumentParser:
     onboarding = subparsers.add_parser("onboard", parents=[provider_parent], help="collect one short-lived key and show redacted status")
     _add_credential_arguments(onboarding)
 
+    discovery = subparsers.add_parser(
+        "discover-models",
+        parents=[provider_parent],
+        help="discover a bounded, metadata-only provider model inventory",
+    )
+    discovery.add_argument("--model-limit", type=int, default=64, help="maximum inventory rows to inspect")
+    discovery.add_argument("--approve-provider-call", action="store_true", help="authorize provider inventory discovery")
+    _add_credential_arguments(discovery)
+
     run = subparsers.add_parser("run", parents=[provider_parent], help="run one autonomous task through a caller-owned MCP workspace")
     run.add_argument("--mcp-command", required=True, help="MCP executable and arguments; no shell is invoked")
     run.add_argument("--mcp-cwd", default=None, help="working directory for the MCP process")
@@ -401,7 +500,9 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--planning-mode", choices=("deterministic", "provider"), default="deterministic")
     run.add_argument("--planning-run-id", default=None)
     run.add_argument("--planning-max-output-tokens", type=int, default=1_024)
-    run.add_argument("--model", action="append", required=True, help="candidate model; repeat to enable model selection")
+    run.add_argument("--model", action="append", default=[], help="candidate model; repeat to enable model selection or filter discovery")
+    run.add_argument("--discover-models", action="store_true", help="discover selectable models through the approved provider inventory endpoint")
+    run.add_argument("--model-limit", type=int, default=64, help="maximum provider inventory rows to inspect when discovering")
     run.add_argument("--model-capability", action="append", default=[], help="declared capability for every model candidate")
     run.add_argument("--required-model-capability", action="append", default=[], help="capability required by this run")
     run.add_argument("--context-window-tokens", type=int, default=_DEFAULT_CONTEXT_WINDOW)
@@ -463,6 +564,8 @@ def main(
             payload = _provider_status(args)
         elif args.command == "onboard":
             payload = _onboard(args, environ=env, reader=reader)
+        elif args.command == "discover-models":
+            payload = _discover_models(args, environ=env, reader=reader)
         elif args.command == "run":
             payload = _run(args, environ=env, reader=reader, client_factory=client_factory)
         else:  # pragma: no cover - argparse enforces the command set

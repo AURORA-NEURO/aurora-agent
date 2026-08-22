@@ -4,7 +4,7 @@ import io
 import json
 from unittest.mock import patch
 
-from prism_sdk import AUTONOMOUS_DOMAINS
+from prism_sdk import AUTONOMOUS_DOMAINS, ProviderModelDescriptor
 from prism_sdk.cli import main
 
 
@@ -99,6 +99,54 @@ def test_environment_onboarding_reports_only_the_variable_name() -> None:
     assert secret not in json.dumps(payload)
 
 
+def test_discover_models_requires_explicit_provider_approval() -> None:
+    code, payload, errors = _invoke(
+        "discover-models",
+        "--provider", "openai",
+        "--base-url", "https://provider.example",
+        "--credential-source", "environment",
+        "--credential-env", "AURORA_TEST_KEY",
+        environ={"AURORA_TEST_KEY": "discovery-gate-secret"},
+    )
+    assert code == 2
+    assert payload is None
+    assert "command failed" in errors
+    assert "discovery-gate-secret" not in errors
+
+
+def test_discover_models_projects_only_typed_metadata_and_closes_credentials() -> None:
+    secret = "discovery-test-secret-that-must-not-appear"
+    descriptors = (
+        ProviderModelDescriptor(
+            provider="openai",
+            model="model-a",
+            capabilities=("tool_calling",),
+            context_window_tokens=16_384,
+            max_output_tokens=2_048,
+            metadata={"owned_by": "test-provider", "created": 123},
+        ),
+    )
+    with patch("prism_sdk.cli.LLMRuntime.discover_models", return_value=descriptors):
+        code, payload, errors = _invoke(
+            "discover-models",
+            "--provider", "openai",
+            "--base-url", "https://provider.example",
+            "--credential-source", "environment",
+            "--credential-env", "AURORA_TEST_KEY",
+            "--approve-provider-call",
+            environ={"AURORA_TEST_KEY": secret},
+        )
+    assert code == 0
+    assert errors == ""
+    assert payload["model_count"] == 1
+    assert payload["models"][0]["model"] == "model-a"
+    assert payload["models"][0]["context_window_tokens"] == 16_384
+    assert payload["models"][0]["credential_posture"] == "caller_supplied_opaque_handle_not_returned"
+    assert payload["credential_session"]["active"] is False
+    assert payload["authorization"]["model_discovery_approved"] is True
+    assert secret not in json.dumps(payload)
+
+
 def test_cli_rejects_invalid_commands_without_echoing_argument_text() -> None:
     secret = "unknown-argument-secret"
     code, payload, errors = _invoke("provider-status", "--api-key", secret)
@@ -175,4 +223,78 @@ def test_run_automatic_mode_forwards_routing_and_planning_controls_without_provi
     assert captured["allow_cross_domain"] is True
     assert len(captured["model_candidates"]) == 2
     assert payload["routing_mode"] == "automatic"
+    assert secret not in output.getvalue()
+
+
+def test_run_can_build_candidates_from_discovery_and_filter_archived_models() -> None:
+    captured: dict[str, object] = {}
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    class FakeAgent:
+        def __init__(self, _workspace: object, _runtime: object, *, model_catalogue: object) -> None:
+            captured["catalogue"] = model_catalogue
+
+        def run(self, **kwargs: object) -> dict[str, object]:
+            captured.update(kwargs)
+            return {"status": "completed", "model": kwargs["model_candidates"][0].model}
+
+    descriptors = (
+        ProviderModelDescriptor(
+            provider="openai",
+            model="model-a",
+            capabilities=("tool_calling",),
+            context_window_tokens=8_192,
+            max_output_tokens=1_024,
+            metadata={"owned_by": "test-provider"},
+        ),
+        ProviderModelDescriptor(
+            provider="openai",
+            model="model-archived",
+            context_window_tokens=8_192,
+            max_output_tokens=1_024,
+            metadata={"archived": True},
+        ),
+    )
+    secret = "discovery-run-secret-that-must-not-appear"
+    output = io.StringIO()
+    errors = io.StringIO()
+    with (
+        patch("prism_sdk.cli.LLMRuntime.discover_models", return_value=descriptors),
+        patch("prism_sdk.cli.AutonomousAgent", FakeAgent),
+    ):
+        code = main(
+            (
+                "run",
+                "--mcp-command", "python server.py",
+                "--domain", "science",
+                "--task", "compare independent research sources",
+                "--discover-models",
+                "--provider", "openai",
+                "--base-url", "https://provider.example",
+                "--credential-source", "environment",
+                "--credential-env", "AURORA_TEST_KEY",
+                "--approve-provider-call",
+            ),
+            environ={"AURORA_TEST_KEY": secret},
+            writer=output,
+            error_writer=errors,
+            client_factory=lambda *_args, **_kwargs: FakeClient(),
+        )
+    payload = json.loads(output.getvalue())
+    assert code == 0
+    assert errors.getvalue() == ""
+    candidates = captured["model_candidates"]
+    assert [candidate.model for candidate in candidates] == ["model-a"]
+    assert candidates[0].context_window_tokens == 8_192
+    assert candidates[0].max_output_tokens == 1_024
+    assert candidates[0].capabilities == ("tool_calling",)
+    assert payload["model_inventory"]["mode"] == "provider_discovery"
+    assert payload["model_inventory"]["model_count"] == 2
+    assert payload["authorization"]["model_discovery_approved"] is True
     assert secret not in output.getvalue()

@@ -126,7 +126,7 @@ the Python workspace:
 
 ```bash
 python -m prism_sdk catalogue
-python -m prism_sdk evidence-plan --domain research --domain science
+python -m prism_sdk evidence-plan --domain browser --domain science
 python -m prism_sdk route --task "compare two research hypotheses"
 python -m prism_sdk provider-status --provider openai
 ```
@@ -144,7 +144,7 @@ python -m prism_sdk run \
   --mcp-command "python path/to/mcp_server.py" \
   --provider openai \
   --task "prepare a bounded research plan" \
-  --domain research \
+  --domain science \
   --model gpt-5 \
   --model-capability reasoning \
   --approve-provider-call
@@ -158,7 +158,7 @@ python -m prism_sdk run \
   --mcp-command "python path/to/mcp_server.py" \
   --automatic \
   --task "compare the implementation, dataset, and evaluation evidence" \
-  --hint research \
+  --hint science \
   --model gpt-5 \
   --model-capability reasoning \
   --approve-provider-call
@@ -170,6 +170,38 @@ insufficient. `--single-domain` disables fan-out. `--semantic-routing` asks the 
 for a bounded routing proposal, while `--planning-mode provider` asks it to prioritize only the
 already-reviewed workflow stages; both remain separate provider approval boundaries and neither
 can create a new domain, capability, connector, credential, or effect.
+
+Model inventory can also be discovered from a registered provider. Discovery is bounded and
+approval-gated because it is a provider call; the runtime immediately projects each row into a
+`ProviderModelDescriptor` and discards the provider response. The CLI returns only model ids,
+capabilities, bounded context/output limits, and an allowlisted metadata projection:
+
+```bash
+python -m prism_sdk discover-models \
+  --provider openai \
+  --approve-provider-call \
+  --credential-source environment \
+  --credential-env OPENAI_API_KEY
+```
+
+The run boundary can use the same inventory to construct candidates without manually copying
+model names. `--model` is optional in this mode and acts as an allow-list filter when supplied;
+`--model-limit` bounds discovery. Quality, latency, cost, and reliability are never invented from
+provider marketing metadata: the caller's explicit CLI priors are applied to every discovered
+candidate, while archived inventory rows are excluded from selection. Discovery approval is
+separate from mission dispatch approval, and no key or raw provider payload is included in the
+returned inventory or run result:
+
+```bash
+python -m prism_sdk run \
+  --mcp-command "python path/to/mcp_server.py" \
+  --provider openai \
+  --task "prepare a bounded research plan" \
+  --domain science \
+  --discover-models \
+  --model-capability reasoning \
+  --approve-provider-call
+```
 
 The command accepts no API-key or token argument. By default it uses a no-echo prompt; deployment
 automation can select `--credential-source environment --credential-env OPENAI_API_KEY`. The value
