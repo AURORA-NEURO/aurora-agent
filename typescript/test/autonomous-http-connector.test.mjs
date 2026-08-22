@@ -4,9 +4,11 @@ import { test } from "node:test";
 import {
   AUTONOMOUS_DOMAIN_NAMES,
   ArgumentError,
+  AutonomousHttpConnectorPage,
   AutonomousHttpConnectorPolicy,
   AutonomousHttpConnectorRequest,
   createAutonomousHttpConnectorExecutor,
+  createAutonomousHttpPaginatedConnectorExecutor,
 } from "../dist/index.js";
 
 function manifest() {
@@ -140,4 +142,126 @@ test("credential-shaped JSON responses fail closed instead of becoming evidence"
   );
 
   await assert.rejects(() => executor(manifest(), {}), ArgumentError);
+});
+
+test("bounded pagination follows opaque cursors for every autonomous domain without retaining them", async () => {
+  const calls = [];
+  const executor = createAutonomousHttpPaginatedConnectorExecutor(
+    (_manifest, request) => {
+      const cursor = request.__autonomous_http_page_cursor;
+      const domain = request.domain;
+      return new AutonomousHttpConnectorRequest({
+        method: "GET",
+        url: `http://example.test/page?domain=${domain}${cursor ? `&cursor=${cursor}` : ""}`,
+      });
+    },
+    {
+      policy: policy(),
+      headerResolver: () => ({ Authorization: "Bearer transient-test-only" }),
+      fetch: async (url, init) => {
+        calls.push({ url, init });
+        const parsed = new URL(url);
+        const domain = parsed.searchParams.get("domain");
+        const cursor = parsed.searchParams.get("cursor");
+        return response(JSON.stringify({
+          items: [{ domain, page: cursor ? 2 : 1 }],
+          next_cursor: cursor ? null : `opaque-${domain}`,
+        }));
+      },
+    },
+  );
+
+  const results = await Promise.all(AUTONOMOUS_DOMAIN_NAMES.map((domain) => executor(manifest(), { domain })));
+
+  assert.ok(results.every((result) => result.status === "observed"));
+  assert.ok(results.every((result) => result.value.complete === true));
+  assert.ok(results.every((result) => result.value.item_count === 2 && result.value.page_count === 2));
+  assert.ok(results.every((result) => result.value.next_cursor_digest === null));
+  assert.equal(calls.length, AUTONOMOUS_DOMAIN_NAMES.length * 2);
+  assert.ok(calls.every(({ init }) => init.headers.Authorization === "Bearer transient-test-only"));
+  assert.ok(results.every((result) => !JSON.stringify(result).includes("opaque-")));
+});
+
+test("bounded pagination detects shape errors, cursor cycles, item caps, and page caps", async () => {
+  const makeExecutor = (payload, options = {}) => createAutonomousHttpPaginatedConnectorExecutor(
+    () => new AutonomousHttpConnectorRequest({ method: "GET", url: "http://example.test/page" }),
+    { policy: policy(), fetch: async () => response(JSON.stringify(payload)), ...options },
+  );
+  const shape = await makeExecutor({ values: [1] })(manifest(), {});
+  const itemLimit = await makeExecutor({ items: [{ id: 1 }, { id: 2 }], next_cursor: "secret-cursor" }, { maxItems: 1 })(manifest(), {});
+  const pageLimit = await makeExecutor({ items: [{ id: 1 }], next_cursor: "next" }, { maxPages: 1 })(manifest(), {});
+  let cycleCalls = 0;
+  const cycle = createAutonomousHttpPaginatedConnectorExecutor(
+    () => new AutonomousHttpConnectorRequest({ method: "GET", url: "http://example.test/page" }),
+    { policy: policy(), fetch: async () => { cycleCalls += 1; return response(JSON.stringify({ items: [{ cycleCalls }], next_cursor: "same" })); } },
+  );
+  const cycleResult = await cycle(manifest(), {});
+
+  assert.equal(shape.status, "partial");
+  assert.equal(shape.failure_class, "page_shape");
+  assert.equal(itemLimit.failure_class, "item_limit");
+  assert.equal(itemLimit.value.complete, false);
+  assert.equal(itemLimit.value.next_cursor_digest.length, 64);
+  assert.ok(!JSON.stringify(itemLimit).includes("secret-cursor"));
+  assert.equal(pageLimit.failure_class, "page_limit");
+  assert.equal(pageLimit.value.page_count, 1);
+  assert.equal(cycleResult.failure_class, "cursor_cycle");
+  assert.equal(cycleCalls, 2);
+  assert.ok(cycleResult.value.next_cursor_digest.length === 64);
+});
+
+test("pagination preserves useful items when a later page transport fails", async () => {
+  let calls = 0;
+  const executor = createAutonomousHttpPaginatedConnectorExecutor(
+    (_manifest, request) => new AutonomousHttpConnectorRequest({
+      method: "GET",
+      url: `http://example.test/page${request.__autonomous_http_page_cursor ? "?cursor=next" : ""}`,
+    }),
+    {
+      policy: policy(),
+      fetch: async () => {
+        calls += 1;
+        if (calls === 1) return response(JSON.stringify({ items: [{ retained: true }], next_cursor: "next" }));
+        throw new Error("offline");
+      },
+    },
+  );
+
+  const result = await executor(manifest(), {});
+
+  assert.equal(result.status, "partial");
+  assert.equal(result.failure_class, "transport_error");
+  assert.deepEqual(result.value.items, [{ retained: true }]);
+  assert.equal(result.value.item_count, 1);
+  assert.equal(result.value.complete, false);
+});
+
+test("pagination enforces aggregate item bytes even when item count is small", async () => {
+  const executor = createAutonomousHttpPaginatedConnectorExecutor(
+    () => new AutonomousHttpConnectorRequest({ method: "GET", url: "http://example.test/page" }),
+    { policy: policy(), fetch: async () => response(JSON.stringify({ items: [{ payload: "x".repeat(1_500_000) }] })) },
+  );
+
+  const result = await executor(manifest(), {});
+
+  assert.equal(result.status, "partial");
+  assert.equal(result.failure_class, "item_bytes_limit");
+  assert.deepEqual(result.value.items, []);
+});
+
+test("provider-specific pagination parsers can normalize a nonstandard envelope without leaking it", async () => {
+  const executor = createAutonomousHttpPaginatedConnectorExecutor(
+    () => new AutonomousHttpConnectorRequest({ method: "GET", url: "http://example.test/custom" }),
+    {
+      policy: policy(),
+      pageParser: (value) => new AutonomousHttpConnectorPage({ items: value.records, nextCursor: value.cursor }),
+      fetch: async () => response(JSON.stringify({ records: [{ normalized: true }], cursor: null })),
+    },
+  );
+
+  const result = await executor(manifest(), {});
+
+  assert.equal(result.status, "observed");
+  assert.deepEqual(result.value.items, [{ normalized: true }]);
+  assert.equal(JSON.stringify(result).includes("records"), false);
 });

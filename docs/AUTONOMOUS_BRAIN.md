@@ -329,6 +329,34 @@ deployment should resolve a short-lived credential session inside `header_resolv
 put a raw key in the connector request, URL, task, prompt, or durable state. Local tests can inject
 an in-process opener/fetch and explicitly enable loopback without contacting an external service.
 
+For sources that paginate, compose `create_autonomous_http_paginated_connector_executor()` with
+the same policy and header resolvers. The default parser accepts either a top-level JSON array or
+`{"items": [...], "next_cursor": "..."}`. Provider-specific envelopes must provide an explicit
+parser; the transport does not guess whether `data`, `results`, `hits`, or a nested clinical/FHIR
+field is the authoritative record list.
+
+```python
+from prism_sdk import create_autonomous_http_paginated_connector_executor
+
+transport = create_autonomous_http_paginated_connector_executor(
+    endpoint_resolver,
+    policy=policy,
+    header_resolver=short_lived_headers,
+    max_pages=8,
+    max_items=512,
+    # page_parser=provider_page_parser,  # required for a non-standard envelope
+)
+```
+
+The resolver receives the private transient `__autonomous_http_page_cursor` only after the first
+page. It is never returned or persisted: the final value contains item/page counts, a completion
+flag, and at most a SHA-256 digest of an unconsumed cursor. Repeated cursors are stopped as
+`cursor_cycle`; page and item ceilings are `page_limit`/`item_limit`; malformed envelopes are
+`page_shape`, and aggregate item bytes are capped independently of item count. If a later page fails after useful items were collected, the executor returns a
+metadata-bounded `partial` observation containing those items and the failure class. All twelve
+autonomous domains use the same pagination, cycle, cap, and partial-progress contract, while the
+caller still owns provider-specific record interpretation and claim validation.
+
 ### Non-interactive deployment bootstrap
 
 When no person enters a key, the deployment should register a source resolver during service

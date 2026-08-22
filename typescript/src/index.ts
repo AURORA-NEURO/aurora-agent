@@ -315,17 +315,27 @@ export {
   MAX_AUTONOMOUS_HTTP_HEADER_BYTES,
   MAX_AUTONOMOUS_HTTP_URL_BYTES,
   MAX_AUTONOMOUS_HTTP_TIMEOUT_MS,
+  MAX_AUTONOMOUS_HTTP_PAGES,
+  MAX_AUTONOMOUS_HTTP_ITEMS,
+  MAX_AUTONOMOUS_HTTP_PAGINATED_ITEM_BYTES,
   AUTONOMOUS_HTTP_METHODS,
   AUTONOMOUS_HTTP_FAILURE_CLASSES,
+  AUTONOMOUS_HTTP_PAGINATION_FAILURE_CLASSES,
   AutonomousHttpConnectorPolicy,
   AutonomousHttpConnectorRequest,
+  AutonomousHttpConnectorPage,
+  defaultAutonomousHttpConnectorPageParser,
   createAutonomousHttpConnectorExecutor,
+  createAutonomousHttpPaginatedConnectorExecutor,
 } from "./autonomous-http-connector.js";
 export type {
   AutonomousHttpConnectorEndpointResolver,
   AutonomousHttpConnectorHeaderResolver,
   AutonomousHttpConnectorFetch,
+  AutonomousHttpConnectorPageParser,
+  AutonomousHttpConnectorExecutorOptions,
   AutonomousHttpConnectorFailureClass,
+  AutonomousHttpConnectorPaginationFailureClass,
 } from "./autonomous-http-connector.js";
 export {
   AUTONOMOUS_BUILTIN_CONNECTOR_SCHEMA,

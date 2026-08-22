@@ -6,9 +6,11 @@ import pytest
 
 from prism_sdk import (
     AUTONOMOUS_DOMAINS,
+    AutonomousHttpConnectorPage,
     AutonomousHttpConnectorPolicy,
     AutonomousHttpConnectorRequest,
     DomainEvidenceProviderConnectorManifest,
+    create_autonomous_http_paginated_connector_executor,
     create_autonomous_http_connector_executor,
 )
 from prism_sdk.errors import ArgumentError
@@ -179,3 +181,151 @@ def test_http_connector_allows_loopback_only_when_explicitly_enabled() -> None:
 
     assert result.status == "observed"
     assert result.value == {"ok": True}
+
+
+def test_bounded_pagination_follows_opaque_cursors_for_every_autonomous_domain_without_retaining_them() -> None:
+    calls: list[tuple[str, str | None]] = []
+
+    def opener(request, _timeout):
+        from urllib.parse import parse_qs, urlsplit
+
+        query = parse_qs(urlsplit(request.full_url).query)
+        domain = query["domain"][0]
+        cursor = query.get("cursor", [None])[0]
+        calls.append((domain, request.headers.get("Authorization")))
+        return _Response(
+            json.dumps({
+                "items": [{"domain": domain, "page": 2 if cursor else 1}],
+                "next_cursor": None if cursor else f"opaque-{domain}",
+            }).encode("utf-8")
+        )
+
+    executor = create_autonomous_http_paginated_connector_executor(
+        lambda _manifest, request: AutonomousHttpConnectorRequest(
+            method="GET",
+            url=f"http://example.test/page?domain={request['domain']}"
+            + (f"&cursor={request['__autonomous_http_page_cursor']}" if request.get("__autonomous_http_page_cursor") else ""),
+        ),
+        policy=_policy(),
+        header_resolver=lambda _manifest, _request: {"Authorization": "Bearer transient-test-only"},
+        opener=opener,
+    )
+
+    results = [executor(_manifest(), {"domain": domain}) for domain in AUTONOMOUS_DOMAINS]
+
+    assert [result.status for result in results] == ["observed"] * len(AUTONOMOUS_DOMAINS)
+    assert all(result.value["complete"] is True for result in results)
+    assert all(result.value["item_count"] == 2 and result.value["page_count"] == 2 for result in results)
+    assert all(result.value["next_cursor_digest"] is None for result in results)
+    assert len(calls) == len(AUTONOMOUS_DOMAINS) * 2
+    assert all(auth == "Bearer transient-test-only" for _domain, auth in calls)
+    assert all("opaque-" not in repr(result) for result in results)
+
+
+def test_bounded_pagination_detects_shape_cycles_item_caps_and_page_caps() -> None:
+    def make_executor(payload, **options):
+        return create_autonomous_http_paginated_connector_executor(
+            lambda _manifest, _request: AutonomousHttpConnectorRequest(method="GET", url="http://example.test/page"),
+            policy=_policy(),
+            opener=lambda _request, _timeout: _Response(json.dumps(payload).encode("utf-8")),
+            **options,
+        )
+
+    shape = make_executor({"values": [1]})(_manifest(), {})
+    item_limit = make_executor(
+        {"items": [{"id": 1}, {"id": 2}], "next_cursor": "secret-cursor"},
+        max_items=1,
+    )(_manifest(), {})
+    page_limit = make_executor({"items": [{"id": 1}], "next_cursor": "next"}, max_pages=1)(_manifest(), {})
+    cycle_calls = 0
+
+    def cycle_opener(_request, _timeout):
+        nonlocal cycle_calls
+        cycle_calls += 1
+        return _Response(json.dumps({"items": [{"cycle_calls": cycle_calls}], "next_cursor": "same"}).encode("utf-8"))
+
+    cycle = create_autonomous_http_paginated_connector_executor(
+        lambda _manifest, _request: AutonomousHttpConnectorRequest(method="GET", url="http://example.test/page"),
+        policy=_policy(),
+        opener=cycle_opener,
+    )(_manifest(), {})
+
+    assert shape.status == "partial" and shape.failure_class == "page_shape"
+    assert item_limit.failure_class == "item_limit"
+    assert item_limit.value["complete"] is False
+    assert len(item_limit.value["next_cursor_digest"]) == 64
+    assert "secret-cursor" not in repr(item_limit)
+    assert page_limit.failure_class == "page_limit"
+    assert page_limit.value["page_count"] == 1
+    assert cycle.failure_class == "cursor_cycle"
+    assert cycle_calls == 2
+    assert len(cycle.value["next_cursor_digest"]) == 64
+
+
+def test_pagination_preserves_useful_items_when_a_later_page_transport_fails() -> None:
+    calls = 0
+
+    def opener(_request, _timeout):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return _Response(json.dumps({"items": [{"retained": True}], "next_cursor": "next"}).encode("utf-8"))
+        raise OSError("offline")
+
+    executor = create_autonomous_http_paginated_connector_executor(
+        lambda _manifest, request: AutonomousHttpConnectorRequest(
+            method="GET",
+            url="http://example.test/page" + ("?cursor=next" if request.get("__autonomous_http_page_cursor") else ""),
+        ),
+        policy=_policy(),
+        opener=opener,
+    )
+
+    result = executor(_manifest(), {})
+
+    assert result.status == "partial"
+    assert result.failure_class == "transport_error"
+    assert result.value["items"] == [{"retained": True}]
+    assert result.value["item_count"] == 1
+    assert result.value["complete"] is False
+
+
+def test_http_connector_page_rejects_secret_shaped_items() -> None:
+    with pytest.raises(ArgumentError, match="credential-shaped"):
+        AutonomousHttpConnectorPage(items=({"access_token": "never"},))
+
+
+def test_pagination_enforces_aggregate_item_bytes_even_when_item_count_is_small() -> None:
+    executor = create_autonomous_http_paginated_connector_executor(
+        lambda _manifest, _request: AutonomousHttpConnectorRequest(method="GET", url="http://example.test/page"),
+        policy=_policy(),
+        opener=lambda _request, _timeout: _Response(
+            json.dumps({"items": [{"payload": "x" * 1_500_000}]}).encode("utf-8")
+        ),
+    )
+
+    result = executor(_manifest(), {})
+
+    assert result.status == "partial"
+    assert result.failure_class == "item_bytes_limit"
+    assert result.value["items"] == []
+
+
+def test_provider_specific_pagination_parser_can_normalize_a_nonstandard_envelope() -> None:
+    executor = create_autonomous_http_paginated_connector_executor(
+        lambda _manifest, _request: AutonomousHttpConnectorRequest(method="GET", url="http://example.test/custom"),
+        policy=_policy(),
+        page_parser=lambda value, _page_number: AutonomousHttpConnectorPage(
+            items=value["records"],
+            next_cursor=value["cursor"],
+        ),
+        opener=lambda _request, _timeout: _Response(
+            json.dumps({"records": [{"normalized": True}], "cursor": None}).encode("utf-8")
+        ),
+    )
+
+    result = executor(_manifest(), {})
+
+    assert result.status == "observed"
+    assert result.value["items"] == [{"normalized": True}]
+    assert "records" not in repr(result)

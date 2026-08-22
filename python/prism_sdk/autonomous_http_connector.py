@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 import hashlib
 import ipaddress
 import json
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -33,6 +33,9 @@ MAX_AUTONOMOUS_HTTP_HEADERS = 64
 MAX_AUTONOMOUS_HTTP_HEADER_BYTES = 8_192
 MAX_AUTONOMOUS_HTTP_URL_BYTES = 8_192
 MAX_AUTONOMOUS_HTTP_TIMEOUT_SECONDS = 120.0
+MAX_AUTONOMOUS_HTTP_PAGES = 64
+MAX_AUTONOMOUS_HTTP_ITEMS = 4_096
+MAX_AUTONOMOUS_HTTP_PAGINATED_ITEM_BYTES = 1_500_000
 AUTONOMOUS_HTTP_METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")
 AUTONOMOUS_HTTP_FAILURE_CLASSES = (
     "auth_refused",
@@ -44,6 +47,14 @@ AUTONOMOUS_HTTP_FAILURE_CLASSES = (
     "http_5xx",
     "invalid_json",
     "response_too_large",
+)
+AUTONOMOUS_HTTP_PAGINATION_FAILURE_CLASSES = (
+    "page_shape",
+    "page_limit",
+    "item_limit",
+    "item_bytes_limit",
+    "cursor_cycle",
+    "page_transport",
 )
 _SECRET_MARKERS = frozenset(
     {
@@ -222,9 +233,37 @@ class AutonomousHttpConnectorRequest:
         object.__setattr__(self, "body", body)
 
 
+@dataclass(frozen=True, slots=True)
+class AutonomousHttpConnectorPage:
+    """A parser-owned, transient page projection.
+
+    ``next_cursor`` is intentionally present only while the pagination loop is running. It is
+    replaced by ``next_cursor_digest`` in the returned observation and never reaches a receipt.
+    """
+
+    items: Sequence[Any]
+    next_cursor: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.items, Sequence) or isinstance(self.items, (str, bytes)) or len(self.items) > MAX_AUTONOMOUS_HTTP_ITEMS:
+            raise ArgumentError("HTTP connector page items are outside their bound")
+        normalized = tuple(
+            _safe_json(item, name="HTTP connector page item", maximum=MAX_AUTONOMOUS_HTTP_RESPONSE_BYTES)
+            for item in self.items
+        )
+        if self.next_cursor is not None:
+            _bounded_text("HTTP connector next cursor", self.next_cursor, MAX_AUTONOMOUS_HTTP_URL_BYTES)
+        object.__setattr__(self, "items", normalized)
+
+
+class _PageShapeError(ValueError):
+    pass
+
+
 EndpointResolver = Callable[[Any, Mapping[str, Any]], AutonomousHttpConnectorRequest]
 HeaderResolver = Callable[[Any, Mapping[str, Any]], Mapping[str, str]]
 OpenRequest = Callable[[Request, float], Any]
+PageParser = Callable[[Any, int], AutonomousHttpConnectorPage]
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -367,6 +406,142 @@ def create_autonomous_http_connector_executor(
     return execute
 
 
+def default_autonomous_http_connector_page_parser(value: Any, _page_number: int) -> AutonomousHttpConnectorPage:
+    """Parse the strict provider-neutral page shape ``[items]`` or ``{"items": [...]}``.
+
+    Object pages may include a string/null ``next_cursor``. Provider-specific fields are ignored
+    by this projection; a provider with a different shape must supply an explicit ``page_parser``.
+    """
+
+    if isinstance(value, list):
+        return AutonomousHttpConnectorPage(items=tuple(value))
+    if not isinstance(value, Mapping):
+        raise _PageShapeError("HTTP connector page must be an array or object")
+    raw_items = value.get("items")
+    if not isinstance(raw_items, list):
+        raise _PageShapeError("HTTP connector page object must contain an items array")
+    cursor = value.get("next_cursor")
+    if cursor is not None and not isinstance(cursor, str):
+        raise _PageShapeError("HTTP connector page next_cursor must be a string or null")
+    return AutonomousHttpConnectorPage(items=tuple(raw_items), next_cursor=cursor)
+
+
+def create_autonomous_http_paginated_connector_executor(
+    endpoint_resolver: EndpointResolver,
+    *,
+    policy: AutonomousHttpConnectorPolicy | None = None,
+    header_resolver: HeaderResolver | None = None,
+    opener: OpenRequest | None = None,
+    page_parser: PageParser | None = None,
+    max_pages: int = 8,
+    max_items: int = 512,
+) -> Callable[[Any, Mapping[str, Any]], AutonomousConnectorObservation]:
+    """Create a bounded multi-page executor over the single-page HTTP transport.
+
+    The endpoint resolver receives a private ``__autonomous_http_page_cursor`` field after the
+    first page. It is an in-process continuation value only; returned observations expose its
+    digest, not its contents. A page transport/parser failure after useful items have already
+    been collected becomes a metadata-only ``partial`` result instead of discarding progress.
+    """
+
+    if page_parser is not None and not callable(page_parser):
+        raise ArgumentError("HTTP connector page_parser must be callable")
+    if isinstance(max_pages, bool) or not isinstance(max_pages, int) or not 1 <= max_pages <= MAX_AUTONOMOUS_HTTP_PAGES:
+        raise ArgumentError("HTTP connector max_pages is outside its bound")
+    if isinstance(max_items, bool) or not isinstance(max_items, int) or not 1 <= max_items <= MAX_AUTONOMOUS_HTTP_ITEMS:
+        raise ArgumentError("HTTP connector max_items is outside its bound")
+    single_page = create_autonomous_http_connector_executor(
+        endpoint_resolver,
+        policy=policy,
+        header_resolver=header_resolver,
+        opener=opener,
+    )
+    parse_page = page_parser or default_autonomous_http_connector_page_parser
+    cursor_field = "__autonomous_http_page_cursor"
+
+    def summary(items: list[Any], page_count: int, cursor: str | None, *, complete: bool) -> dict[str, Any]:
+        return {
+            "items": list(items),
+            "item_count": len(items),
+            "page_count": page_count,
+            "complete": complete,
+            "next_cursor_digest": None if cursor is None else _body_digest(cursor.encode("utf-8")),
+        }
+
+    def item_bytes(items: list[Any]) -> int:
+        return len(json.dumps(items, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8"))
+
+    def execute(manifest: Any, request: Mapping[str, Any]) -> AutonomousConnectorObservation:
+        if cursor_field in request:
+            raise ArgumentError("HTTP connector request uses a reserved pagination field")
+        items: list[Any] = []
+        cursor: str | None = None
+        seen_cursors: set[str] = set()
+        for page_number in range(max_pages):
+            page_request = dict(request)
+            if cursor is not None:
+                page_request[cursor_field] = cursor
+            observation = single_page(manifest, page_request)
+            if observation.status != "observed":
+                if not items:
+                    return observation
+                return AutonomousConnectorObservation(
+                    value=summary(items, page_number + 1, cursor, complete=False),
+                    status="partial",
+                    failure_class=observation.failure_class or "page_transport",
+                )
+            try:
+                page = parse_page(observation.value, page_number)
+            except _PageShapeError:
+                return AutonomousConnectorObservation(
+                    value=summary(items, page_number + 1, cursor, complete=False),
+                    status="partial",
+                    failure_class="page_shape",
+                )
+            if not isinstance(page, AutonomousHttpConnectorPage):
+                raise ArgumentError("HTTP connector page_parser returned an invalid page")
+            remaining = max_items - len(items)
+            if len(page.items) > remaining:
+                limited = items + list(page.items[:remaining])
+                if item_bytes(limited) > MAX_AUTONOMOUS_HTTP_PAGINATED_ITEM_BYTES:
+                    return AutonomousConnectorObservation(
+                        value=summary(items, page_number + 1, page.next_cursor, complete=False),
+                        status="partial",
+                        failure_class="item_bytes_limit",
+                    )
+                items.extend(page.items[:remaining])
+                return AutonomousConnectorObservation(
+                    value=summary(items, page_number + 1, page.next_cursor, complete=False),
+                    status="partial",
+                    failure_class="item_limit",
+                )
+            candidate = items + list(page.items)
+            if item_bytes(candidate) > MAX_AUTONOMOUS_HTTP_PAGINATED_ITEM_BYTES:
+                return AutonomousConnectorObservation(
+                    value=summary(items, page_number + 1, page.next_cursor, complete=False),
+                    status="partial",
+                    failure_class="item_bytes_limit",
+                )
+            items.extend(page.items)
+            cursor = page.next_cursor
+            if cursor is None:
+                return AutonomousConnectorObservation(value=summary(items, page_number + 1, None, complete=True), status="observed")
+            if cursor in seen_cursors:
+                return AutonomousConnectorObservation(
+                    value=summary(items, page_number + 1, cursor, complete=False),
+                    status="partial",
+                    failure_class="cursor_cycle",
+                )
+            seen_cursors.add(cursor)
+        return AutonomousConnectorObservation(
+            value=summary(items, max_pages, cursor, complete=False),
+            status="partial",
+            failure_class="page_limit",
+        )
+
+    return execute
+
+
 __all__ = [
     "AUTONOMOUS_HTTP_CONNECTOR_ADAPTER_SCHEMA",
     "MAX_AUTONOMOUS_HTTP_REQUEST_BYTES",
@@ -375,9 +550,16 @@ __all__ = [
     "MAX_AUTONOMOUS_HTTP_HEADER_BYTES",
     "MAX_AUTONOMOUS_HTTP_URL_BYTES",
     "MAX_AUTONOMOUS_HTTP_TIMEOUT_SECONDS",
+    "MAX_AUTONOMOUS_HTTP_PAGES",
+    "MAX_AUTONOMOUS_HTTP_ITEMS",
+    "MAX_AUTONOMOUS_HTTP_PAGINATED_ITEM_BYTES",
     "AUTONOMOUS_HTTP_METHODS",
     "AUTONOMOUS_HTTP_FAILURE_CLASSES",
+    "AUTONOMOUS_HTTP_PAGINATION_FAILURE_CLASSES",
     "AutonomousHttpConnectorPolicy",
     "AutonomousHttpConnectorRequest",
+    "AutonomousHttpConnectorPage",
+    "default_autonomous_http_connector_page_parser",
     "create_autonomous_http_connector_executor",
+    "create_autonomous_http_paginated_connector_executor",
 ]

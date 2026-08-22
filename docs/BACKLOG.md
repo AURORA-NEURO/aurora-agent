@@ -244,6 +244,11 @@ host/scheme/method admission, transient header resolution, no redirects, bounded
 bytes, timeout classification, and digest-only non-JSON/oversized projections. It closes the
 generic transport seam without claiming provider-specific auth, pagination, source validation, or
 multi-host delivery.
+The same adapters now expose bounded provider-neutral pagination: strict array/items-page parsing,
+transient cursor continuation, cursor-cycle detection, page/item/aggregate-byte ceilings, and
+metadata-only partial progress when a later page fails. Provider-specific envelope parsing remains
+an explicit callback, and the transport still does not claim source interpretation, domain truth,
+or distributed delivery.
 The connector layer now also has a typed API source-plan/source-execute bridge that binds the
 returned plan digest before retrieval and keeps connector scope separate from provider payloads.
 This makes the existing gateway usable from the autonomous runtime without turning it into a

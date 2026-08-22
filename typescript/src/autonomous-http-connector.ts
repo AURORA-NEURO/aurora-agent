@@ -22,6 +22,9 @@ export const MAX_AUTONOMOUS_HTTP_HEADERS = 64;
 export const MAX_AUTONOMOUS_HTTP_HEADER_BYTES = 8_192;
 export const MAX_AUTONOMOUS_HTTP_URL_BYTES = 8_192;
 export const MAX_AUTONOMOUS_HTTP_TIMEOUT_MS = 120_000;
+export const MAX_AUTONOMOUS_HTTP_PAGES = 64;
+export const MAX_AUTONOMOUS_HTTP_ITEMS = 4_096;
+export const MAX_AUTONOMOUS_HTTP_PAGINATED_ITEM_BYTES = 1_500_000;
 export const AUTONOMOUS_HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
 export const AUTONOMOUS_HTTP_FAILURE_CLASSES = [
   "auth_refused",
@@ -34,6 +37,7 @@ export const AUTONOMOUS_HTTP_FAILURE_CLASSES = [
   "invalid_json",
   "response_too_large",
 ] as const;
+export const AUTONOMOUS_HTTP_PAGINATION_FAILURE_CLASSES = ["page_shape", "page_limit", "item_limit", "item_bytes_limit", "cursor_cycle", "page_transport"] as const;
 
 const SECRET_MARKERS = new Set([
   "apikey", "authorization", "bearer", "credential", "credentials", "password", "secret",
@@ -180,6 +184,19 @@ export class AutonomousHttpConnectorRequest {
   }
 }
 
+export class AutonomousHttpConnectorPage {
+  readonly items: readonly JsonValue[];
+  readonly nextCursor: string | null;
+
+  constructor(input: { items: readonly unknown[]; nextCursor?: string | null }) {
+    if (!Array.isArray(input.items) || input.items.length > MAX_AUTONOMOUS_HTTP_ITEMS) throw new ArgumentError("HTTP connector page items are outside their bound");
+    this.items = input.items.map((item) => safeJson(item, "HTTP connector page item", MAX_AUTONOMOUS_HTTP_RESPONSE_BYTES));
+    this.nextCursor = input.nextCursor === undefined || input.nextCursor === null ? null : boundedText("HTTP connector next cursor", input.nextCursor, MAX_AUTONOMOUS_HTTP_URL_BYTES);
+  }
+}
+
+class PageShapeError extends Error {}
+
 export type AutonomousHttpConnectorEndpointResolver = (
   manifest: DomainEvidenceProviderConnectorManifest,
   request: JsonObject,
@@ -189,6 +206,15 @@ export type AutonomousHttpConnectorHeaderResolver = (
   request: JsonObject,
 ) => Readonly<Record<string, string>> | Promise<Readonly<Record<string, string>>>;
 export type AutonomousHttpConnectorFetch = (input: string, init: RequestInit) => Promise<Response>;
+export type AutonomousHttpConnectorPageParser = (
+  value: JsonValue | null,
+  pageNumber: number,
+) => AutonomousHttpConnectorPage | Promise<AutonomousHttpConnectorPage>;
+export interface AutonomousHttpConnectorExecutorOptions {
+  policy?: AutonomousHttpConnectorPolicy;
+  headerResolver?: AutonomousHttpConnectorHeaderResolver;
+  fetch?: AutonomousHttpConnectorFetch;
+}
 
 function failureForStatus(status: number): { status: "refused" | "error"; failure: string } {
   if (status === 401 || status === 403) return { status: "refused", failure: "auth_refused" };
@@ -250,11 +276,7 @@ async function readResponseBounded(response: Response, maximum: number): Promise
 
 export function createAutonomousHttpConnectorExecutor(
   endpointResolver: AutonomousHttpConnectorEndpointResolver,
-  options: {
-    policy?: AutonomousHttpConnectorPolicy;
-    headerResolver?: AutonomousHttpConnectorHeaderResolver;
-    fetch?: AutonomousHttpConnectorFetch;
-  } = {},
+  options: AutonomousHttpConnectorExecutorOptions = {},
 ): AutonomousConnectorExecutor {
   if (typeof endpointResolver !== "function") throw new ArgumentError("HTTP connector endpointResolver must be callable");
   if (options.headerResolver !== undefined && typeof options.headerResolver !== "function") throw new ArgumentError("HTTP connector headerResolver must be callable");
@@ -327,4 +349,85 @@ export function createAutonomousHttpConnectorExecutor(
   };
 }
 
+export function defaultAutonomousHttpConnectorPageParser(value: JsonValue | null, _pageNumber: number): AutonomousHttpConnectorPage {
+  if (Array.isArray(value)) return new AutonomousHttpConnectorPage({ items: value });
+  if (!isObject(value) || !Array.isArray(value.items)) throw new PageShapeError("HTTP connector page must contain an items array");
+  const cursor = value.next_cursor;
+  if (cursor !== undefined && cursor !== null && typeof cursor !== "string") throw new PageShapeError("HTTP connector page next_cursor must be a string or null");
+  return new AutonomousHttpConnectorPage({ items: value.items, nextCursor: cursor as string | null | undefined });
+}
+
+export function createAutonomousHttpPaginatedConnectorExecutor(
+  endpointResolver: AutonomousHttpConnectorEndpointResolver,
+  options: AutonomousHttpConnectorExecutorOptions & {
+    pageParser?: AutonomousHttpConnectorPageParser;
+    maxPages?: number;
+    maxItems?: number;
+  } = {},
+): AutonomousConnectorExecutor {
+  const maxPages = options.maxPages ?? 8;
+  const maxItems = options.maxItems ?? 512;
+  if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > MAX_AUTONOMOUS_HTTP_PAGES) throw new ArgumentError("HTTP connector maxPages is outside its bound");
+  if (!Number.isInteger(maxItems) || maxItems < 1 || maxItems > MAX_AUTONOMOUS_HTTP_ITEMS) throw new ArgumentError("HTTP connector maxItems is outside its bound");
+  if (options.pageParser !== undefined && typeof options.pageParser !== "function") throw new ArgumentError("HTTP connector pageParser must be callable");
+  const singlePage = createAutonomousHttpConnectorExecutor(endpointResolver, options);
+  const parsePage = options.pageParser ?? defaultAutonomousHttpConnectorPageParser;
+  const cursorField = "__autonomous_http_page_cursor";
+
+  const summary = (items: readonly JsonValue[], pageCount: number, cursor: string | null, complete: boolean): JsonObject => ({
+    items: [...items],
+    item_count: items.length,
+    page_count: pageCount,
+    complete,
+    next_cursor_digest: cursor === null ? null : digestBytesSync(new TextEncoder().encode(cursor)),
+  });
+  const itemBytes = (items: readonly JsonValue[]): number => new TextEncoder().encode(canonicalJson(items)).byteLength;
+
+  return async (manifest, request) => {
+    if (Object.prototype.hasOwnProperty.call(request, cursorField)) throw new ArgumentError("HTTP connector request uses a reserved pagination field");
+    const items: JsonValue[] = [];
+    let cursor: string | null = null;
+    const seenCursors = new Set<string>();
+    for (let pageNumber = 0; pageNumber < maxPages; pageNumber += 1) {
+      const pageRequest: JsonObject = { ...request };
+      if (cursor !== null) pageRequest[cursorField] = cursor;
+      const rawObservation = await singlePage(manifest, pageRequest);
+      const observation = rawObservation instanceof AutonomousConnectorObservation
+        ? rawObservation
+        : new AutonomousConnectorObservation(rawObservation);
+      if (observation.status !== "observed") {
+        if (items.length === 0) return observation;
+        return new AutonomousConnectorObservation(summary(items, pageNumber + 1, cursor, false), "partial", observation.failure_class ?? "page_transport");
+      }
+      let page: AutonomousHttpConnectorPage;
+      try {
+        page = await parsePage(observation.value, pageNumber);
+      } catch (error) {
+        if (!(error instanceof PageShapeError)) throw error;
+        return new AutonomousConnectorObservation(summary(items, pageNumber + 1, cursor, false), "partial", "page_shape");
+      }
+      if (!(page instanceof AutonomousHttpConnectorPage)) throw new ArgumentError("HTTP connector pageParser returned an invalid page");
+      const remaining = maxItems - items.length;
+      if (page.items.length > remaining) {
+        const limited = [...items, ...page.items.slice(0, remaining)];
+        if (itemBytes(limited) > MAX_AUTONOMOUS_HTTP_PAGINATED_ITEM_BYTES) {
+          return new AutonomousConnectorObservation(summary(items, pageNumber + 1, page.nextCursor, false), "partial", "item_bytes_limit");
+        }
+        items.push(...page.items.slice(0, remaining));
+        return new AutonomousConnectorObservation(summary(items, pageNumber + 1, page.nextCursor, false), "partial", "item_limit");
+      }
+      if (itemBytes([...items, ...page.items]) > MAX_AUTONOMOUS_HTTP_PAGINATED_ITEM_BYTES) {
+        return new AutonomousConnectorObservation(summary(items, pageNumber + 1, page.nextCursor, false), "partial", "item_bytes_limit");
+      }
+      items.push(...page.items);
+      cursor = page.nextCursor;
+      if (cursor === null) return new AutonomousConnectorObservation(summary(items, pageNumber + 1, null, true), "observed");
+      if (seenCursors.has(cursor)) return new AutonomousConnectorObservation(summary(items, pageNumber + 1, cursor, false), "partial", "cursor_cycle");
+      seenCursors.add(cursor);
+    }
+    return new AutonomousConnectorObservation(summary(items, maxPages, cursor, false), "partial", "page_limit");
+  };
+}
+
 export type AutonomousHttpConnectorFailureClass = typeof AUTONOMOUS_HTTP_FAILURE_CLASSES[number];
+export type AutonomousHttpConnectorPaginationFailureClass = typeof AUTONOMOUS_HTTP_PAGINATION_FAILURE_CLASSES[number];
