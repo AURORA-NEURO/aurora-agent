@@ -342,6 +342,30 @@ export type {
   AutonomousConnectorOperationBatchResult,
 } from "./autonomous-connector-facade.js";
 export {
+  AUTONOMOUS_BRAIN_FACADE_SCHEMA,
+  AUTONOMOUS_BRAIN_BATCH_SCHEMA,
+  AUTONOMOUS_BRAIN_SUMMARY_SCHEMA,
+  MAX_AUTONOMOUS_BRAIN_BATCH,
+  MAX_AUTONOMOUS_BRAIN_PARALLELISM,
+  MAX_AUTONOMOUS_BRAIN_CONTEXT_CHUNKS,
+  MAX_AUTONOMOUS_BRAIN_OBSERVATION_BYTES,
+  AutonomousBrainPlan,
+  AutonomousBrainFacade,
+  createAutonomousBrainFacade,
+} from "./autonomous-brain-facade.js";
+export type {
+  AutonomousBrainPlanStatus,
+  AutonomousBrainExecutionStatus,
+  AutonomousBrainRequest,
+  AutonomousBrainDomainPlanSummary,
+  AutonomousBrainCrossDomainPlanSummary,
+  AutonomousBrainPlanJSON,
+  AutonomousBrainExecution,
+  AutonomousBrainExecuteOptions,
+  AutonomousBrainBatchItem,
+  AutonomousBrainBatchResult,
+} from "./autonomous-brain-facade.js";
+export {
   AUTONOMOUS_CONNECTOR_OPERATION_REGISTRY_SCHEMA,
   AUTONOMOUS_CONNECTOR_OPERATION_SCHEMA,
   AUTONOMOUS_CONNECTOR_WORK_ITEM_SCHEMA,

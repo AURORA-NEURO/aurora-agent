@@ -3172,6 +3172,132 @@ approval refusal cannot poison a later explicitly approved attempt. A connector 
 `observed` or `partial` is still transport/evidence posture, never evaluator reward or proof that
 the underlying domain task is correct.
 
+#### The provider-neutral autonomous brain façade
+
+`AutonomousBrainFacade` is the application-facing composition boundary for the full request
+lifecycle. It connects the existing deterministic route catalogue, domain workflow blueprint,
+optional connector operation, provider invocation, cross-domain fan-out, and transient evidence
+context without requiring an application to manually stitch those surfaces together. The façade
+does not replace the lower-level APIs; it gives an application one reviewable boundary with the
+same fail-closed rules:
+
+```text
+request text (caller-owned)
+        |
+        v
+route + domain workflow metadata       -- no provider or connector call
+        |
+        +--> optional connector operation plan -- review/approval boundary
+        |          |
+        |          +--> bounded observation context (caller-transient, untrusted)
+        v
+provider or cross-domain invocation    -- separate provider approval boundary
+        |
+        v
+transient run result + metadata-only plan digest
+```
+
+The façade's `plan()` method is safe to persist, review, queue, or send across a service
+boundary. Its `AutonomousBrainPlan.toJSON()` contains route scores, selected domains, workflow
+and prompt digests, stage metadata, capability requirements, tool names, connector selection
+metadata, and retention/secret-material declarations. It intentionally does not contain the
+task text, assembled prompt, caller context, connector request values, connector dispatch value,
+provider response, or credential. The task is represented by a SHA-256 digest so a later caller
+can prove that the transient request being reintroduced is the one that was reviewed.
+
+```typescript
+const brain = new AutonomousBrainFacade({
+  agent,
+  connectorOperations: offline.operationFacade, // optional
+});
+
+// No network call, provider call, or connector dispatch occurs here.
+const plan = await brain.plan({
+  task: "compare evidence and produce a reproducible analysis plan",
+  domain: "science",
+  capability: "literature",
+  connector: {
+    domain: "science",
+    capability: "literature",
+    operation_id: "science.reproducible_evidence_acquisition",
+    subject_digest: callerSubjectDigest,
+    request: { evidence_digests: callerEvidenceDigests },
+    approved: true,
+  },
+});
+
+const persistedMetadata = plan.toJSON();
+const restored = AutonomousBrainPlan.fromJSON(persistedMetadata);
+
+// The task and request are supplied only at execution time. The plan digest must match.
+const result = await brain.executePlanned(restored, originalRequest, {
+  approveProviderCall: true,
+});
+```
+
+`execute()` is the convenience path for callers that do not persist a plan. It still performs
+the same plan construction and identity checks. `executePlanned()` is the restart/review path:
+it recompiles the transient input, compares the complete plan digest, refuses changed task,
+domain, capability, hint, context, or connector metadata, then proceeds only if the reviewed
+plan is identical. A route abstention returns `route_review_required`; a missing or unapproved
+connector returns `connector_blocked`; neither path invokes the provider.
+
+When a connector is present, execution is connector-first by default. The operation facade
+enforces its own domain/capability contract and replay journal, then the brain projects only a
+bounded observation envelope into the provider context. That envelope includes the operation
+and receipt metadata, a replay marker, a digest of the transient connector value, and explicit
+warnings that the observation may be incomplete and is not evaluator reward or external-world
+truth. The raw connector value remains caller-transient and is never added to the persisted brain
+plan. Set `includeConnectorObservation: false` when a caller needs the connector dispatch for
+its own workflow but does not want to place the observation into the model context; set
+`connectorFirst: false` only for a reviewed workflow where provider-first ordering is intentional.
+
+Provider authorization is independent from connector authorization. A connector may be approved
+while the provider call remains refused, or the provider may be approved while a connector plan
+is held for review. `approveProviderCall` defaults to `false`, and provider credentials stay in
+the caller-owned runtime/provider handle. The façade never reads an environment key, creates a
+credential, or contacts a live provider by itself; deterministic in-memory providers and the
+built-in offline connectors are sufficient for tests and local integration development.
+
+The same surface supports explicit cross-domain work. If routing selects a reviewed multi-domain
+route, the façade calls `runCrossDomain()` and preserves the route's selected-domain order and
+digest. A single-domain route calls `run()` with the exact route override, preventing an
+invocation-time re-route from silently changing the reviewed workflow. The resulting run and
+connector dispatch are returned to the caller as transient values; only `result.plan` is the
+durable metadata projection.
+
+For ingestion queues and evaluation harnesses, `executeBatch()` accepts at most 64 independent
+requests and at most 8 concurrent workers. It preserves input order, reports `succeeded`,
+`refused`, `failed`, and `omitted` item states, and computes a batch digest from status and plan
+identities rather than raw task/provider/connector values. `stopOnError` can halt new work while
+allowing already-running items to settle. This gives every built-in domain the same orchestration
+contract—coding, browser research, data, science, biomedical, neuroscience, operations,
+enterprise, multi-agent coordination, multimodal analysis, cross-domain synthesis, and
+evaluation—without making domain-specific provider assumptions:
+
+```typescript
+const batch = await brain.executeBatch(
+  requestsAcrossAllDomains,
+  {
+    maxParallelism: 4,
+    stopOnError: false,
+    execution: { approveProviderCall: true },
+  },
+);
+
+for (const item of batch.items) {
+  // item.execution?.plan is metadata-only; run and connector values are transient.
+  console.log(item.index, item.status, item.task_digest, item.execution?.status);
+}
+```
+
+The façade is intentionally an orchestration boundary, not a claim of general intelligence.
+Routing is vocabulary/catalogue evidence, workflow stages are strategy metadata, connector
+observations are untrusted inputs, provider output still requires evaluation, and learning
+signals must be recorded through the explicit feedback/evaluator APIs. Applications should keep
+their task text, context, provider response, connector value, and credential in a caller-owned
+transient or encrypted store with a separate retention policy.
+
 #### Binding connectors to durable workflow and mission execution
 
 The connector runtime is not a parallel orchestration system. TypeScript can bind it directly to
