@@ -267,6 +267,11 @@ observation, and `runWithTrace()`/`runCrossDomainWithTrace()` across all twelve 
 route, provider-turn, refusal, pause, and terminal state legible without retaining prompts,
 responses, credentials, tool arguments, connector values, or raw evidence; durable persistence,
 external telemetry export, and evaluator truth remain caller-owned deployment work.
+The application-facing `AutonomousBrainFacade` now carries that same boundary through
+`executeWithTrace()` and `executePlannedWithTrace()`: plan compilation, connector start/finish,
+provider turns, approval pauses, terminal outcomes, and plan/request identity checks are recorded
+in one bounded trace. This closes the high-level observability seam without weakening approval
+gates or claiming that transport completion is domain truth.
 The same adapters now expose bounded provider-neutral pagination: strict array/items-page parsing,
 transient cursor continuation, cursor-cycle detection, page/item/aggregate-byte ceilings, and
 metadata-only partial progress when a later page fails. Provider-specific envelope parsing remains

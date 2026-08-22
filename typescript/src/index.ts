@@ -599,6 +599,8 @@ export type {
   AutonomousBrainPlanJSON,
   AutonomousBrainExecution,
   AutonomousBrainExecuteOptions,
+  AutonomousBrainTraceOptions,
+  AutonomousBrainTracedExecution,
   AutonomousBrainApprovedSelectionOptions,
   AutonomousBrainSingleCycleOptions,
   AutonomousBrainCrossDomainCycleOptions,

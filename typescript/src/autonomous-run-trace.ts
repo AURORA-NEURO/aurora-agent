@@ -10,8 +10,13 @@ export const AUTONOMOUS_RUN_TRACE_EVENT_SCHEMA = "bioprism-typescript-autonomous
 export const AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-run-trace-snapshot/0.1" as const;
 export const AUTONOMOUS_RUN_TRACE_PHASES = [
   "started",
+  "plan_compiled",
+  "connector_started",
+  "connector_finished",
   "provider_invocation_started",
   "provider_invocation_finished",
+  "evaluation_settled",
+  "learning_prepared",
   "completed",
   "paused",
   "refused",
@@ -533,7 +538,7 @@ export class AutonomousRunTraceSession {
 export function autonomousRunTraceStatus(status: string): AutonomousRunTraceStatus {
   if (status === "completed") return "completed";
   if (status === "cross_domain_partial" || status === "children_partial" || status === "children_completed") return "partial";
-  if (status === "route_review_required" || status === "approval_required" || status === "reconciliation_required" || status === "turn_limit_reached" || status === "plan_review_required") return "paused";
+  if (status === "route_review_required" || status === "approval_required" || status === "reconciliation_required" || status === "turn_limit_reached" || status === "plan_review_required" || status === "connector_blocked") return "paused";
   if (status === "abstained") return "refused";
   if (status === "child_failed") return "failed";
   return "unknown";

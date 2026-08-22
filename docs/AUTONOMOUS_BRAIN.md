@@ -5040,6 +5040,23 @@ const snapshot = traceStore.snapshot();
 traceStore.verifyIntegrity();
 ```
 
+Application-facing orchestration can keep the same trace boundary while retaining the facade's
+route, plan, connector, and provider gates. `AutonomousBrainFacade.executeWithTrace()` compiles a
+transient request and records `plan_compiled` before any provider or connector work;
+`executePlannedWithTrace()` additionally revalidates the supplied plan digest against the request
+before opening the trace. Connector dispatch is represented by `connector_started` and
+`connector_finished`, while approval-required or connector-blocked outcomes close as `paused`.
+This lets a UI, worker, or API layer explain one high-level run without reaching around the brain
+facade or putting task text into the journal:
+
+```typescript
+const traced = await facade.executeWithTrace(
+  { task: "coordinate a bounded evidence review" },
+  { traceStore, runId: "facade-review-01", approveProviderCall: true },
+);
+console.log(traced.execution.status, traced.trace.phases, traced.trace.trace_digest);
+```
+
 `runWithTrace()` composes with an existing provider observer and propagates through a
 cross-domain route. `runCrossDomainWithTrace()` makes that propagation explicit for specialist
 fan-out and synthesis: the same trace contains every provider turn while its summary exposes
