@@ -595,6 +595,24 @@ export type {
   AutonomousHttpEvidenceAdapterOptions,
 } from "./autonomous-evidence-http-adapter.js";
 export {
+  AUTONOMOUS_EVIDENCE_ADAPTER_SELECTION_SCHEMA,
+  AUTONOMOUS_EVIDENCE_ADAPTER_SELECTION_ROW_SCHEMA,
+  AUTONOMOUS_EVIDENCE_ADAPTER_SELECTION_STRATEGIES,
+  MAX_AUTONOMOUS_EVIDENCE_ADAPTER_SELECTION_DOMAINS,
+  MAX_AUTONOMOUS_EVIDENCE_ADAPTER_SELECTION_CANDIDATES,
+  MAX_AUTONOMOUS_EVIDENCE_ADAPTER_SELECTION_SIGNAL_BYTES,
+  AutonomousEvidenceAdapterSelectionRow,
+  AutonomousEvidenceAdapterSelectionPlan,
+  AutonomousEvidenceAdapterSelector,
+} from "./autonomous-evidence-adapter-selection.js";
+export type {
+  AutonomousEvidenceAdapterSelectionStrategy,
+  AutonomousEvidenceAdapterSelectionSignal,
+  AutonomousEvidenceAdapterSelectionRowJSON,
+  AutonomousEvidenceAdapterSelectionPlanJSON,
+  AutonomousEvidenceAdapterSelectionOptions,
+} from "./autonomous-evidence-adapter-selection.js";
+export {
   AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA,
   AUTONOMOUS_EVIDENCE_WORK_QUEUE_SCHEMA,
   AUTONOMOUS_EVIDENCE_WORKER_SCHEMA,

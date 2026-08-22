@@ -33,6 +33,12 @@ operations remain deployment work. A bounded feedback worker now drains the same
 outbox with conditional leases, receipt-backed crash recovery, retry/terminal-failure reporting,
 and no provider replay; multi-host persistence and operational scheduling remain deployment work.
 
+Domain evidence adapters now also have a digest-bound selector. It supports deterministic
+lexicographic routing, caller-supplied health/success/reward/latency/cost scoring, conservative
+abstention, candidate/registry drift detection, and an explicit acquirer handoff without putting
+source authorization or credentials into the selection plan. Provider-specific signal production,
+approval UX, and durable operational health aggregation remain integration work.
+
 The portfolio now also has a bounded evidence supervisor. It verifies successful provider items,
 rejects cross-domain requests, scopes each evidence runtime to its item's domain, preserves direct
 predecessor evidence digests, and executes acquisition/projection/evaluation in the portfolio's

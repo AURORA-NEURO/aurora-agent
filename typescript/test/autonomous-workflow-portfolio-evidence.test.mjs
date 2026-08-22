@@ -5,6 +5,8 @@ import {
   AUTONOMOUS_DOMAIN_NAMES,
   AutonomousAgent,
   AutonomousEvidenceAdapterRegistry,
+  AutonomousEvidenceAdapterSelectionPlan,
+  AutonomousEvidenceAdapterSelector,
   AutonomousEvidenceRuntime,
   AutonomousHttpConnectorPolicy,
   AutonomousHttpConnectorRequest,
@@ -704,4 +706,59 @@ test("HTTP evidence adapters execute bounded source calls for every domain and p
   const failed = await new AutonomousEvidenceRuntime({ plan: failurePlan }).execute(failurePlan.requirements.map((requirement, index) => ({ requirement_id: requirement.requirement_id, source_id: `failure-source-${index}` })), { acquirer: failureRegistry.createAcquirer() });
   assert.equal(failed.json.status, "failed");
   assert.equal(failed.json.receipts.every((receipt) => receipt.status === "failed"), true);
+});
+
+test("evidence adapter selection ranks explicit signals, abstains conservatively, and rejects registry drift", async () => {
+  const registry = new AutonomousEvidenceAdapterRegistry();
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    for (const tier of ["fast", "slow"]) {
+      registry.register({
+        adapterId: `selection.${tier}.${domain}`,
+        version: "1.0.0",
+        domains: [domain],
+        capabilities: ["bounded_evidence"],
+        sourceKinds: ["caller_fixture"],
+        acquire: () => ({ transient_selection_value: `${tier}-${domain}` }),
+        project: (_value, context) => [{ label: context.requirement.label, kind: "fact", status: "observed", value_digest: null }],
+      });
+    }
+  }
+  const signals = Object.fromEntries(registry.manifests().map((manifest) => [manifest.adapter_id, manifest.adapter_id.startsWith("selection.fast.")
+    ? { eligible: true, health: 0.98, success_rate: 0.96, evaluator_reward: 0.9, latency_ms: 10, cost_units: 1 }
+    : { eligible: true, health: 0.42, success_rate: 0.4, evaluator_reward: 0.1, latency_ms: 2_000, cost_units: 200 }]));
+  const selector = new AutonomousEvidenceAdapterSelector(registry);
+  const plan = selector.selectAdaptiveForDomains(AUTONOMOUS_DOMAIN_NAMES, signals, { capability: "bounded_evidence", minScore: 0.7, minMargin: 0.05 });
+  assert.equal(plan.complete, true);
+  assert.ok(plan.rows.every((row) => row.adapter_id?.startsWith("selection.fast.")));
+  assert.doesNotMatch(JSON.stringify(plan.toJSON()), /transient_selection_value|api_key|access_token/);
+
+  const rehydrated = AutonomousEvidenceAdapterSelectionPlan.fromJSON(plan.toJSON());
+  assert.doesNotThrow(() => rehydrated.verify(registry));
+  const acquirer = selector.createAcquirerFromSelection(rehydrated);
+  const evidencePlan = await agentFor().evidencePlan(["coding"]);
+  const requirement = evidencePlan.requirements[0];
+  const acquired = await acquirer.acquire({
+    plan_digest: evidencePlan.plan_digest,
+    requirement,
+    request: { requirement_id: requirement.requirement_id, source_id: "selection-source", request_id: "selection-request" },
+    attempt: 1,
+    parent_evidence_digests: [],
+    execution: "caller_owned_adapter;raw_value_transient",
+  });
+  assert.equal(acquired.transient_selection_value, "fast-coding");
+
+  const abstained = selector.selectAdaptiveForDomains(["coding"], signals, { capability: "bounded_evidence", minMargin: 1 });
+  assert.equal(abstained.complete, false);
+  assert.equal(abstained.rows[0].reason, "insufficient_selection_margin");
+  assert.throws(() => selector.createAcquirerFromSelection(abstained), /incomplete/);
+
+  registry.register({
+    adapterId: "selection.drift.coding",
+    version: "1.0.0",
+    domains: ["coding"],
+    capabilities: ["bounded_evidence"],
+    sourceKinds: ["caller_fixture"],
+    acquire: () => ({ drift: true }),
+  });
+  assert.throws(() => rehydrated.verify(registry), /stale or tampered/);
 });

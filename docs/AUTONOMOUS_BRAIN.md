@@ -4258,6 +4258,16 @@ redirect refusal, request/response byte ceilings, JSON validation, and timeout c
 then shared with evidence execution. HTTP refusals become failed evidence receipts, while successful
 source values remain transient and are available to the caller's projector/evaluator only.
 
+When multiple adapters cover a domain, `AutonomousEvidenceAdapterSelector` provides a separate,
+metadata-only decision boundary. Lexicographic selection is deterministic for static deployments;
+`selectAdaptiveForDomains()` accepts caller-produced health, success-rate, evaluator-reward, latency,
+and cost signals, applying bounded weights and explicit minimum-score/minimum-margin abstention.
+Missing signals are ineligible by default. The resulting plan records candidate manifest digests,
+the registry digest, selection strategy, and signal digest, and `verify()` refuses registry or
+candidate drift before `createAcquirerFromSelection()` constructs an explicit domain-to-adapter
+route. A selection plan never authorizes source dispatch and never contains credentials, source
+requests, raw values, or prompts; the caller must still perform approval and invoke the acquirer.
+
 ## Durable evidence acquisition workers
 
 The evidence runtime is intentionally caller-owned: it owns the transient acquirer input, projected
