@@ -378,9 +378,15 @@ class DurableBrainControlPlaneAdapter:
             request_digest = _sha256_text(
                 _canonical({"job_id": job_id, "reason_digest": None if reason is None else _sha256_text(reason)})
             )
+            # A leased worker may discover the approval boundary during execution.  The
+            # adapter principal authorizes the control-plane mutation, but the active lease
+            # owner must be recorded as the requester so the approval router can attach the
+            # request to the running job without weakening lease ownership checks.  Queued
+            # operator-initiated requests continue to use the adapter principal.
+            requester = before.lease_owner or self.principal
             self.control.approvals.request(
                 job_id,
-                self.principal,
+                requester,
                 approval_scope="caller approval boundary",
                 request_digest=request_digest,
             )

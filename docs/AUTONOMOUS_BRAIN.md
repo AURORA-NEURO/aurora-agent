@@ -3734,6 +3734,98 @@ workflow identity, checkpoint digest, stage-level outcome updates, approval hist
 recovery posture. If a lease expires after a possible external dispatch, the existing
 `reconciliation_required` quarantine still wins over replay.
 
+### Python remote high-level brain worker
+
+`RemoteBrainJobWorker` closes the equivalent queue-to-full-brain boundary for Python deployments
+whose queue is exposed through the value-only `BrainControlClient` contract. It is distinct from
+the SQLite-backed `BrainWorker`: the remote service owns only job identity, lease state, approval
+events, checkpoint digests, result digests, and reconciliation metadata, while the worker process
+owns the actual request, plan, evaluator, model candidates, provider handles, and execution
+kwargs. This makes the same worker usable over HTTP, MCP, or the local
+`DurableBrainControlPlaneAdapter` test/deployment bridge.
+
+Admission binds the private request to a deterministic composite digest over the request, execution
+mode, and optional policy digest. Supported modes cover the complete Python brain façade:
+
+- `autonomous` — one autonomous selection/planning/invocation run;
+- `workflow`, `workflow_learning`, and `workflow_cycle` — staged workflow execution and bounded
+  evaluator/replan variants; and
+- `cross_domain`, `cross_domain_learning`, and `cross_domain_replan` — specialist fan-out and
+  synthesis variants.
+
+The resolver receives only the validated remote job projection plus approval/attempt metadata and
+returns the matching private request and runner kwargs. The worker recomputes the composite digest,
+checks task and blueprint identity, validates domain coverage, and refuses dispatch on any mismatch.
+Remote projections are recursively checked for task, prompt, credential, secret, token, provider
+response, and tool-output shaped fields. `RemoteBrainJobRun.result` is transient for the caller;
+`to_dict()` emits only status and bounded result metadata.
+
+```python
+from prism_sdk import RemoteBrainJobWorker
+
+request = {"task": private_task, "domain": "research"}
+policy_digest = approved_policy_digest
+
+def resolve_private_job(context):
+    job = context["job"]
+    return {
+        "spec_digest": job["spec_digest"],
+        "policy_digest": policy_digest,
+        "mode": "cross_domain_learning",
+        "request": request,
+        "kwargs": {
+            "task": private_task,
+            "domain": "research",
+            "blueprint": private_cross_domain_blueprint,
+            "model_candidates": private_model_catalogue,
+            "credentials": fresh_opaque_handles,
+            "cross_domain_options": private_learning_options,
+        },
+    }
+
+worker = RemoteBrainJobWorker(
+    brain,
+    control,
+    worker_id="brain-worker-1",
+    resolver=resolve_private_job,
+)
+submitted = worker.submit(
+    idempotency_key="research-run-42",
+    request=request,
+    mode="cross_domain_learning",
+    domain="cross_domain",
+    capability="research_synthesis",
+    risk_class="review",
+    policy_digest=policy_digest,
+)
+run = worker.run_once(submitted.job["job_id"])
+if run is not None and run.status == "waiting_approval":
+    # Authenticate and authorize this decision in the embedding application first.
+    worker.approval(
+        submitted.job["job_id"],
+        "approve",
+        authorization_digest=operator_decision_digest,
+    )
+    run = worker.run_once(submitted.job["job_id"])
+if run is not None and run.status == "reconciliation_required":
+    worker.reconcile(
+        submitted.job["job_id"],
+        outcome="succeeded",
+        evidence_digest=provider_receipt_digest,
+        evidence_kind="provider_receipt",
+        operator="research-operator",
+    )
+```
+
+Approval is recorded while a leased worker still owns the job, then the control plane atomically
+parks it in `waiting_approval`; approval release returns it to `queued` and the next attempt
+rehydrates the private context. The worker preserves the monotonic side-effect boundary across
+that re-entry, renews the lease during provider work, and never retries an uncertain post-dispatch
+effect automatically. Typed resolver/transport failures before dispatch can be requeued within
+`max_attempts`; spec drift and malformed remote metadata fail closed. The same digest and
+redaction tests cover all seven modes and the built-in domain catalogue, so cross-domain execution
+does not create a second security or lifecycle path.
+
 ## Reusable domain evaluators
 
 `DomainEvaluatorRegistry.with_builtin_profiles()` supplies one evidence-only contract for five

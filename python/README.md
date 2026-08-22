@@ -195,6 +195,25 @@ events and explicit approval routing; `BrainWorker` renews leases across process
 can feed `BrainModelHealthStore` into future model selection. `BrainReplayEngine` re-evaluates
 caller-rehydrated evidence across every built-in domain and optionally advances a caller-owned
 bandit updater without replaying provider calls.
+
+`RemoteBrainJobWorker` is the Python high-level queue adapter when the durable job authority is
+remote (HTTP, MCP, or `DurableBrainControlPlaneAdapter`) rather than a local `BrainJobStore`.
+`submit()` sends only a bounded idempotency key, composite request/mode/policy digest, domain,
+capability, risk class, priority, and attempt ceiling. `run_once()` and `run()` claim the job,
+renew its lease, rehydrate the private request through a caller-owned resolver, and dispatch every
+supported brain path: `autonomous`, `workflow`, `workflow_learning`, `workflow_cycle`,
+`cross_domain`, `cross_domain_learning`, and `cross_domain_replan`. The resolver is never passed
+to the control plane, and the worker rejects spec drift, malformed projections, unsupported modes,
+private fields in remote responses, and domain mismatches before dispatch.
+
+The remote worker uses the same approval, retry, and uncertainty contract as the local worker. It
+parks provider or route approval before dispatch, forces the provider approval bit on the
+rehydrated retry, renews leases during long calls, retries only typed preflight failures when
+configured, and quarantines post-dispatch uncertainty for explicit `reconcile()` evidence. Raw
+tasks, prompts, credentials, provider responses, tool arguments, evaluator payloads, and exception
+messages remain caller-owned and are never serialized in `RemoteBrainJobSubmission`,
+`RemoteBrainJobRun.to_dict()`, or the remote job journal. `autonomous_remote_brain_job_spec_digest()`
+is the shared identity helper for admission and resolver verification.
 Contextual model adaptation is shared with the Rust and TypeScript contracts: the canonical
 domain/capability/risk/task-family digest selects a nested contextual arm ledger, while global arms
 remain only a cold-start prior. Evaluator settlement sends the digest and bounded context identity
