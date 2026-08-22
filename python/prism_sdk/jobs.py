@@ -433,6 +433,60 @@ class BrainJobStore:
                 self._connection.execute("ROLLBACK")
                 raise
 
+    def claim_next(self, worker_id: str, *, lease_seconds: float = 60.0) -> BrainJobRecord | None:
+        """Atomically select and lease the next runnable job.
+
+        ``inventory()`` followed by ``claim()`` is safe but creates a race between a scheduler
+        and its workers: another process can take the displayed row before the scheduler claims
+        it.  This primitive performs recovery, priority ordering, dead-letter admission, and the
+        lease transition in one SQLite transaction.  It is deliberately metadata-only; the
+        caller still owns task/prompt/provider rehydration.
+        """
+
+        worker_id = _job_text("worker_id", worker_id, MAX_JOB_ID_BYTES)
+        lease_ns = self._lease_ns(lease_seconds)
+        with self._lock:
+            self._begin_locked()
+            try:
+                self._recover_expired_locked(self._now_ns())
+                while True:
+                    row = self._connection.execute(
+                        "SELECT * FROM brain_jobs WHERE state = 'queued' ORDER BY priority DESC, created_ns ASC, job_id ASC LIMIT 1"
+                    ).fetchone()
+                    if row is None:
+                        self._connection.execute("COMMIT")
+                        return None
+                    record = self._row_to_record(row)
+                    if record.attempts >= record.max_attempts:
+                        self._transition_locked(
+                            record,
+                            event_type="job_dead_lettered",
+                            state="dead_lettered",
+                            reason="maximum attempts exhausted",
+                            lease_owner=None,
+                            lease_expires_ns=None,
+                        )
+                        continue
+                    self._transition_locked(
+                        record,
+                        event_type="job_claimed",
+                        state="leased",
+                        reason=None,
+                        lease_owner=worker_id,
+                        lease_expires_ns=self._now_ns() + lease_ns,
+                        attempts=record.attempts + 1,
+                    )
+                    self._connection.execute("COMMIT")
+                    current = self._connection.execute(
+                        "SELECT * FROM brain_jobs WHERE job_id = ?", (record.job_id,)
+                    ).fetchone()
+                    if current is None:
+                        raise BrainJobError("claimed brain job was not readable after commit")
+                    return self._row_to_record(current)
+            except Exception:
+                self._connection.execute("ROLLBACK")
+                raise
+
     def renew(self, job_id: str, worker_id: str, *, lease_seconds: float = 60.0) -> BrainJobRecord:
         record = self._require_owned(job_id, worker_id)
         expires = self._now_ns() + self._lease_ns(lease_seconds)

@@ -1140,12 +1140,14 @@ class BrainWorker:
         self.workflow_checkpoint_sink = workflow_checkpoint_sink
 
     def run_once(self, job_id: str | None = None) -> BrainJobRunResult | None:
+        claimed: BrainJobRecord | None = None
         if job_id is None:
-            queued = self.store.inventory(limit=1, state="queued")
-            if not queued:
+            claimed = self.store.claim_next(self.worker_id, lease_seconds=self.lease_seconds)
+            if claimed is None:
                 return None
-            job_id = queued[0].job_id
-        claimed = self.store.claim(job_id, self.worker_id, lease_seconds=self.lease_seconds)
+            job_id = claimed.job_id
+        else:
+            claimed = self.store.claim(job_id, self.worker_id, lease_seconds=self.lease_seconds)
         if claimed.terminal:
             return BrainJobRunResult(status="already_terminal", job=claimed.to_dict(), cycle=None, workflow=None)
         stop = threading.Event()

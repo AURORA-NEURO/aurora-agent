@@ -257,6 +257,12 @@ The adaptive selector now accepts only bounded caller/evaluator signals for heal
 latency, cost, evaluator reward, and eligibility. It records normalized scores and a signal digest,
 uses fixed weights with deterministic tie-breaking, and is exposed through `AutonomousAgent` so
 the façade can plan and dispatch the same reviewed route without introducing a second policy.
+The durable brain-job boundary now also has an atomic Python `BrainJobStore.claim_next()` scheduler
+primitive and a dependency-free TypeScript-local `InMemoryAutonomousBrainJobScheduler`. Both keep
+task/prompt/credential/provider values caller-owned, bind idempotency to digests, fence leases,
+bound retries, quarantine uncertain post-dispatch work, and expose restart-checked metadata
+snapshots. These close local scheduling and SDK portability gaps; multi-host consensus, tenant
+fairness, external delivery guarantees, and provider-specific execution remain absent.
 Python now also includes a credentialless `local-offline` built-in connector adapter covering all
 twelve operation contracts. It projects caller-supplied fixture metadata into digests, shapes,
 counts, and explicit `observed`/`partial` outcomes so routing, approval, worker recovery, replay,

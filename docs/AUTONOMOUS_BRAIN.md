@@ -2721,6 +2721,61 @@ replay = BrainReplayEngine().replay(
 print(replay.to_dict()["by_domain"])
 ```
 
+## TypeScript-local brain scheduling and restart recovery
+
+Node and browser-worker embeddings that cannot open the Python SQLite journal can use
+`InMemoryAutonomousBrainJobScheduler` as the same explicit handoff boundary. The scheduler accepts
+only a job identity, spec digest, autonomous domain, capability, risk class, priority, attempt
+ceiling, and an optional checkpoint digest. It never stores the task, prompt, credential, model
+response, connector value, or raw idempotency key. `claimNext()` performs deterministic priority
+ordering with bounded aging, while the worker lease and owner fence prevent a different worker
+from renewing or completing the job.
+
+```typescript
+import {
+  InMemoryAutonomousBrainJobScheduler,
+  InMemoryAutonomousBrainJobSchedulerPersistence,
+  AutonomousBrainJobSchedulerPersistenceCoordinator,
+} from "@aurora-neuro/prism-sdk";
+
+const scheduler = new InMemoryAutonomousBrainJobScheduler();
+const persistence = new InMemoryAutonomousBrainJobSchedulerPersistence();
+const lifecycle = new AutonomousBrainJobSchedulerPersistenceCoordinator(scheduler, persistence);
+
+scheduler.submit({
+  jobId: "science-job-1",
+  idempotencyKey: callerIdempotencyKey, // hashed immediately; never retained by the scheduler
+  specDigest: callerSpecDigest,
+  domain: "science",
+  capability: "bounded_task",
+  riskClass: "review",
+  priority: 20,
+});
+
+const job = scheduler.claimNext("worker-browser-1");
+if (job) {
+  const request = callerRehydrateBrainRequest(job); // task, prompt, and credentials stay here
+  const execution = await brain.execute(request, { approveProviderCall: true });
+  if (execution.status === "completed_provider_call") {
+    scheduler.complete(job.job_id, "worker-browser-1", callerResultDigest(execution));
+  } else {
+    scheduler.fail(job.job_id, "worker-browser-1", {
+      reason: "caller classified the bounded execution outcome",
+      retryable: false,
+    });
+  }
+}
+await lifecycle.flush();
+```
+
+Snapshots are hash-checked and include the append-only metadata event chain. Restoring an active
+lease marks it as recovered; an expired preflight lease is safely requeued, while an expired lease
+after dispatch is quarantined as `reconciliation_required`. External uncertainty cannot be retried
+by accident: only an explicit `not_executed` reconciliation with caller-supplied evidence returns
+the job to `queued`. This is a bounded local scheduler, not multi-host consensus or a provider
+delivery guarantee; deployments that need cross-process durability should use Python
+`BrainJobStore.claim_next()` or a transactional adapter with equivalent fencing.
+
 ## Provider-neutral boundary
 
 The current Python runtime supports:

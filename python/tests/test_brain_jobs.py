@@ -70,6 +70,22 @@ class _OutcomeWorkspace:
 
 
 class BrainJobStoreTests(unittest.TestCase):
+    def test_claim_next_is_atomic_and_priority_ordered(self) -> None:
+        clock = _Clock()
+        with TemporaryDirectory() as directory:
+            with BrainJobStore(f"{directory}/jobs.sqlite3", clock=clock) as store:
+                store.submit(_job_packet("job-low"))
+                store.submit({**_job_packet("job-high"), "priority": 25})
+                first = store.claim_next("worker-a", lease_seconds=10)
+                self.assertIsNotNone(first)
+                self.assertEqual(first.job_id, "job-high")  # type: ignore[union-attr]
+                self.assertEqual(first.state, "leased")  # type: ignore[union-attr]
+                second = store.claim_next("worker-b", lease_seconds=10)
+                self.assertIsNotNone(second)
+                self.assertEqual(second.job_id, "job-low")  # type: ignore[union-attr]
+                self.assertIsNone(store.claim_next("worker-c", lease_seconds=10))
+                self.assertTrue(store.verify_integrity()["ok"])
+
     def test_idempotency_persistence_and_safe_preflight_lease_recovery(self) -> None:
         clock = _Clock()
         with TemporaryDirectory() as directory:

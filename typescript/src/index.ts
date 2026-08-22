@@ -422,6 +422,38 @@ export type {
   AutonomousBrainBatchControllerRunOptions,
 } from "./autonomous-brain-facade.js";
 export {
+  AUTONOMOUS_BRAIN_JOB_SCHEMA,
+  AUTONOMOUS_BRAIN_JOB_EVENT_SCHEMA,
+  AUTONOMOUS_BRAIN_JOB_SNAPSHOT_SCHEMA,
+  MAX_AUTONOMOUS_BRAIN_JOBS,
+  MAX_AUTONOMOUS_BRAIN_JOB_ATTEMPTS,
+  MAX_AUTONOMOUS_BRAIN_JOB_PRIORITY,
+  MAX_AUTONOMOUS_BRAIN_JOB_LEASE_MS,
+  MAX_AUTONOMOUS_BRAIN_JOB_CHECKPOINT_BYTES,
+  MAX_AUTONOMOUS_BRAIN_JOB_SNAPSHOT_BYTES,
+  MAX_AUTONOMOUS_BRAIN_JOB_EVENTS,
+  AUTONOMOUS_BRAIN_JOB_AGING_INTERVAL_MS,
+  AUTONOMOUS_BRAIN_JOB_MAX_AGING_BONUS,
+  InMemoryAutonomousBrainJobScheduler,
+  AutonomousBrainJobSchedulerPersistenceCoordinator,
+  InMemoryAutonomousBrainJobSchedulerPersistence,
+} from "./autonomous-brain-jobs.js";
+export type {
+  AutonomousBrainJobState,
+  AutonomousBrainJobBoundary,
+  AutonomousBrainJobReconciliationOutcome,
+  AutonomousBrainJobSubmission,
+  AutonomousBrainJob,
+  AutonomousBrainJobEvent,
+  AutonomousBrainJobSubmissionResult,
+  AutonomousBrainJobSnapshot,
+  AutonomousBrainJobSchedulerPersistence,
+  AutonomousBrainJobSchedulerOptions,
+  AutonomousBrainJobCheckpointOptions,
+  AutonomousBrainJobFailureOptions,
+  AutonomousBrainJobReconciliationOptions,
+} from "./autonomous-brain-jobs.js";
+export {
   AUTONOMOUS_CONNECTOR_OPERATION_REGISTRY_SCHEMA,
   AUTONOMOUS_CONNECTOR_OPERATION_SCHEMA,
   AUTONOMOUS_CONNECTOR_WORK_ITEM_SCHEMA,
