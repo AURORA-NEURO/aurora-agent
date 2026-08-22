@@ -3571,6 +3571,119 @@ the controller rehydrates the receipt rather than recomputing evaluator credit. 
 outbox a shared orchestration contract across all built-in domains and execution surfaces, rather
 than a direct-run-only utility.
 
+### Durable connector execution and operation contracts
+
+The connector runtime is intentionally transient: it validates a caller-owned dispatch request,
+invokes a registered executor, and produces a typed receipt. Deployments that need a queue worker
+or process-restart boundary should compose it with the durable connector worker layer. The layer is
+available in both SDKs as `AutonomousConnectorWorker`,
+`InMemoryAutonomousConnectorWorkQueue`, and a caller-owned persistence coordinator. The in-memory
+names describe the reference implementation, not a requirement that production state remain in
+memory; the persistence adapter is where an application supplies its transactional database or
+object-store implementation.
+
+The operation registry is a reviewed vocabulary rather than a free-form model tool list. Its
+default catalogue contains one operation for each of the twelve built-in domains:
+
+| Domain | Operation | Representative composite capabilities |
+| --- | --- | --- |
+| coding | `coding.repository_change_analysis` | `review+debugging`, `review+implementation` |
+| browser | `browser.web_evidence_retrieval` | `web_research+navigation`, `web_research+source_comparison` |
+| data | `data.dataset_quality_profile` | `quality_control+data_analysis`, `data_analysis+schema_validation` |
+| science | `science.reproducible_evidence_acquisition` | `hypothesis+statistics`, `experiment+statistics` |
+| biomedical | `biomedical.clinical_data_review` | `biomedical_review+safety_boundary` |
+| neuroscience | `neuroscience.signal_study_analysis` | `neuroscience_analysis+signal_interpretation`, `study_design+reproducibility` |
+| operations | `operations.incident_runbook_observation` | `observability+incident_response` |
+| enterprise | `enterprise.workflow_record_governance` | `workflow+coordination`, `governance+compliance` |
+| multi-agent | `multi_agent.delegated_consensus_handoff` | `delegation+coordination`, `handoff+coordination` |
+| multimodal | `multimodal.asset_alignment` | `document+cross_modal_alignment`, `image+audio+video+document` |
+| cross-domain | `cross_domain.evidence_fanout_synthesis` | `routing+synthesis` |
+| evaluation | `evaluation.benchmark_replay_analysis` | rubric, replay, failure analysis |
+
+Each operation has a content digest, request-field contract, risk class, and evaluator-signal
+vocabulary. Composite capability names use `+` because they describe a reviewed stage combination;
+they are still bounded identifiers and cannot contain arbitrary prompt text. A registry refuses to
+start unless every built-in domain is represented, so a deployment cannot accidentally expose a
+partial autonomous brain while claiming all-domain coverage. Connector selection still checks the
+manifest's declared domain/capability intersection, the selection-plan digest, and caller approval.
+
+The queue stores only a work identity and the minimum metadata needed to retry or reconcile it:
+
+```python
+from prism_sdk import (
+    AutonomousConnectorOperationRegistry,
+    AutonomousConnectorWorkQueuePersistenceCoordinator,
+    InMemoryAutonomousConnectorWorkQueue,
+)
+
+operations = AutonomousConnectorOperationRegistry()
+queue = InMemoryAutonomousConnectorWorkQueue(operations)
+
+class QueueSnapshotStore:
+    def read(self):
+        return database.read_json("connector-work-queue")
+
+    def write(self, snapshot):
+        database.write_json_atomically("connector-work-queue", snapshot)
+
+durable_queue = AutonomousConnectorWorkQueuePersistenceCoordinator(queue, QueueSnapshotStore())
+durable_queue.restore()
+queue.enqueue(
+    work_id="coding-work-42",
+    operation_id="coding.repository_change_analysis",
+    request=typed_dispatch_request,
+    max_attempts=4,
+)
+durable_queue.flush()
+```
+
+The persisted row contains the operation, connector, dispatch, execution, call, attempt, parent,
+selection-plan, and request digests; it does not contain the request mapping, plan rows, prompt,
+provider response, connector observation, tool arguments, credential, or secret-manager reference.
+Every row and snapshot is SHA-256 addressed. Restore validates exact keys, retention markers,
+operation-registry digest, leases, bounded attempts, operation capability membership, item digests,
+duplicate identities, and snapshot digest before replacing the live queue. A production adapter
+should make `read`/`write` atomic with its job transaction and should serialize the returned
+snapshot without adding application fields to the signed image.
+
+Leases are fencing tokens, not advisory locks. `claim` increments the bounded attempt counter and
+sets an owner and expiry. `renew`, `complete`, `fail`, and `reconcile` reject a missing, foreign,
+or expired owner. Retryable failures use bounded exponential backoff; exhausted work becomes
+`failed`, while a missing or identity-conflicting plan/request becomes
+`reconciliation_required` and must be repaired by caller-owned state. An expired lease is eligible
+for a new worker, and an idempotent enqueue with the same work identity returns the existing row;
+a conflicting request or operation digest fails closed.
+
+The worker rehydrates state by work identity and then verifies all joins before invocation:
+
+```python
+worker = AutonomousConnectorWorker(
+    runtime,
+    queue,
+    lambda item: state_store.rehydrate_plan_and_request(item.work_id),
+)
+report = worker.run(worker_id="connector-worker-a", lease_ms=30_000)
+```
+
+The rehydrator may return a typed plan/request pair or a plan mapping plus typed request. The
+worker rechecks request digest, selection-plan digest, dispatch/execution/call identity, connector,
+domain, capability, approval, operation contract, and the live registry digest before invoking.
+After invocation the connector receipt journal remains the replay barrier: an identical request
+returns the prior receipt without calling the executor again. Worker reports contain only status,
+attempts, receipt projections, failure classes, and payload digests; `value_retained` is always
+false. This makes a process restart safe without turning a queue worker into a transcript store.
+
+Transport success is not evaluator reward. `InMemoryAutonomousConnectorFeedbackLedger` (and the
+equivalent TypeScript class) accepts only a caller-supplied `source="caller_evaluator"`, evaluator
+identity/version, bounded reward, pass/fail value, and optional evidence digest tied to a receipt.
+It rejects implicit feedback, secret-shaped fields, unsupported values, conflicting feedback IDs,
+and tampered entry/snapshot digests. `signals()` projects per-connector evaluator reward and pass
+rate with `latency_ms` and cost left unset unless the caller supplies an independent measurement.
+Those signals can be translated into the existing bandit/contextual learner by the application;
+the worker never infers reward from HTTP status, connector health, model self-report, or retry
+count. This preserves the separation between execution, evaluation, and adaptation across every
+autonomous domain.
+
 ### Evidence integrity and independent evaluator mesh
 
 The TypeScript workflow evaluator derives its evidence identity from a canonical packet: stage

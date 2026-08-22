@@ -68,6 +68,14 @@ def _digest(name: str, value: Any, *, allow_none: bool = False) -> str | None:
     return value
 
 
+def _capability_identifier(name: str, value: Any) -> str:
+    if not isinstance(value, str) or not value.strip() or "\x00" in value or len(value.encode("utf-8")) > 256:
+        raise ArgumentError(f"{name} must be a bounded capability identifier")
+    if any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:+-" for character in value):
+        raise ArgumentError(f"{name} must be a bounded capability identifier")
+    return value
+
+
 def _manifest_digest(manifest: DomainEvidenceProviderConnectorManifest) -> str:
     return content_digest(manifest.to_dict())
 
@@ -372,7 +380,7 @@ class AutonomousConnectorSelectionPlan:
         if any(domain not in AUTONOMOUS_DOMAIN_NAMES for domain in domains):
             raise ArgumentError("autonomous connector selection plan contains an unsupported domain")
         if self.capability is not None:
-            _identifier("autonomous connector selection plan capability", self.capability)
+            _capability_identifier("autonomous connector selection plan capability", self.capability)
         _digest("autonomous connector selection plan registry_digest", self.registry_digest)
         if self.strategy not in AUTONOMOUS_CONNECTOR_SELECTION_STRATEGIES:
             raise ArgumentError("autonomous connector selection plan strategy is invalid")
@@ -523,7 +531,7 @@ class AutonomousConnectorRegistry:
         if any(domain not in AUTONOMOUS_DOMAIN_NAMES for domain in requested):
             raise ArgumentError("autonomous connector plan contains an unsupported domain")
         if capability is not None:
-            capability = _identifier("autonomous connector plan capability", capability)
+            capability = _capability_identifier("autonomous connector plan capability", capability)
         coverage: dict[str, dict[str, Any]] = {}
         for domain in requested:
             candidates = [
@@ -567,7 +575,7 @@ class AutonomousConnectorRegistry:
         if any(domain not in AUTONOMOUS_DOMAIN_NAMES for domain in requested):
             raise ArgumentError("autonomous connector selection contains an unsupported domain")
         if capability is not None:
-            capability = _identifier("autonomous connector selection capability", capability)
+            capability = _capability_identifier("autonomous connector selection capability", capability)
         if strategy not in AUTONOMOUS_CONNECTOR_SELECTION_STRATEGIES:
             raise ArgumentError("autonomous connector selection strategy is invalid")
         if strategy == "lexicographic_connector_id" and selection_signals is not None:
@@ -700,9 +708,9 @@ class AutonomousConnectorDispatchRequest:
             ("execution_id", self.execution_id),
             ("call_id", self.call_id),
             ("connector_id", self.connector_id),
-            ("capability", self.capability),
         ):
             _identifier(f"autonomous connector dispatch {name}", value)
+        _capability_identifier("autonomous connector dispatch capability", self.capability)
         domains = _sequence(
             "autonomous connector dispatch domains",
             self.domains,
@@ -820,9 +828,9 @@ class AutonomousConnectorDispatchReceipt:
             ("connector_version", self.connector_version),
             ("provider", self.provider),
             ("connector_kind", self.connector_kind),
-            ("capability", self.capability),
         ):
             _identifier(f"autonomous connector receipt {name}", value)
+        _capability_identifier("autonomous connector receipt capability", self.capability)
         _digest("autonomous connector receipt manifest_digest", self.manifest_digest)
         _digest("autonomous connector receipt request_digest", self.request_digest)
         _digest("autonomous connector receipt payload_digest", self.payload_digest, allow_none=True)
