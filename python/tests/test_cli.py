@@ -992,6 +992,7 @@ def test_run_wires_opt_in_health_and_learning_ledgers_without_exposing_state_or_
     assert payload["state_persistence"] == {
         "health_store_configured": True,
         "learning_store_configured": True,
+        "memory_store_configured": True,
         "learning_mode": "online",
         "execution_store_configured": True,
         "execution_id": "cli-execution-1",
@@ -1074,6 +1075,67 @@ def test_run_rejects_capability_for_automatic_routing() -> None:
     assert "command failed" in errors
 
 
+def test_keyless_explicit_capability_online_learning_persists_digest_only_memory(tmp_path) -> None:
+    fixture = Path(__file__).parent / "autonomous_brain_mcp_server.py"
+    command = f'"{sys.executable.replace(chr(92), "/")}" -u "{fixture.as_posix()}"'
+    learning_path = tmp_path / "capability-learning.sqlite"
+    memory_path = tmp_path / "capability-memory.sqlite"
+    evidence_path = tmp_path / "capability-evidence.json"
+    evidence_path.write_text(
+        json.dumps(
+            {
+                "domain": "science",
+                "capability": "hypothesis",
+                "risk_class": "scientific_inference",
+                "signals": {
+                    "evidence_traceable": 1.0,
+                    "uncertainty_reported": 1.0,
+                    "claim_scope_respected": 1.0,
+                    "reproducible": 1.0,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    task = "compare bounded evidence for the scientific hypothesis capability"
+    code, payload, errors = _invoke(
+        "run",
+        "--mcp-command", command,
+        "--domain", "science",
+        "--capability", "hypothesis",
+        "--approve-capability",
+        "--task", task,
+        "--provider", "local",
+        "--model", "local-model",
+        "--model-capability", "reasoning",
+        "--model-capability", "science",
+        "--learning-mode", "online",
+        "--learning-store", str(learning_path),
+        "--memory-store", str(memory_path),
+        "--evidence-file", str(evidence_path),
+        "--local-response", "bounded scientific capability response",
+        "--approve-provider-call",
+    )
+    assert code == 0, errors
+    assert errors == ""
+    assert payload["result"]["status"] == "completed"
+    assert payload["state_persistence"]["memory_store_configured"] is True
+    assert payload["result"]["evaluations"]
+    assert learning_path.exists()
+    assert memory_path.exists()
+    raw_memory = memory_path.read_bytes()
+    assert task.encode("utf-8") not in raw_memory
+    assert b"bounded scientific capability response" not in raw_memory
+    status_code, status_payload, status_errors = _invoke(
+        "state-status",
+        "--learning-store", str(learning_path),
+    )
+    assert status_code == 0
+    assert status_errors == ""
+    assert status_payload["learning"]["available"] is True
+    assert status_payload["learning"]["record_count"] == 1
+
+
 def test_batch_domain_options_dispatch_focused_capability_with_operator_approval(tmp_path) -> None:
     fixture = Path(__file__).parent / "autonomous_brain_mcp_server.py"
     command = f'"{sys.executable.replace(chr(92), "/")}" -u "{fixture.as_posix()}"'
@@ -1117,6 +1179,94 @@ def test_batch_domain_options_dispatch_focused_capability_with_operator_approval
     assert payload["batch"]["status"] == "completed"
     assert payload["batch"]["items"][0]["status"] == "succeeded"
     assert payload["authorization"]["capability_approved"] is True
+
+
+def test_cli_rejects_colliding_learning_and_memory_store_paths(tmp_path) -> None:
+    store = tmp_path / "same.sqlite"
+    code, payload, errors = _invoke(
+        "run",
+        "--mcp-command", "python server.py",
+        "--domain", "coding",
+        "--task", "inspect bounded evidence",
+        "--provider", "local",
+        "--model", "local-model",
+        "--learning-mode", "online",
+        "--learning-store", str(store),
+        "--memory-store", str(store),
+    )
+    assert code == 2
+    assert payload is None
+    assert "command failed" in errors
+
+
+def test_keyless_batch_online_learning_uses_shared_memory_and_contextual_bandit(tmp_path) -> None:
+    fixture = Path(__file__).parent / "autonomous_brain_mcp_server.py"
+    command = f'"{sys.executable.replace(chr(92), "/")}" -u "{fixture.as_posix()}"'
+    requests_path = tmp_path / "online-batch.json"
+    learning_path = tmp_path / "online-batch-learning.sqlite"
+    memory_path = tmp_path / "online-batch-memory.sqlite"
+    evidence_path = tmp_path / "online-batch-evidence.json"
+    task = "verify bounded repository evidence through the debugging capability"
+    requests_path.write_text(
+        json.dumps(
+            {
+                "schema": "aurora-autonomous-batch-requests/0.1",
+                "mode": "domain",
+                "job_id": "online-batch-001",
+                "requests": [
+                    {
+                        "task": task,
+                        "domain": "coding",
+                        "options": {"capability": "debugging"},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    evidence_path.write_text(
+        json.dumps(
+            {
+                "domain": "coding",
+                "capability": "debugging",
+                "risk_class": "engineering_change",
+                "signals": {
+                    "schema_valid": 1.0,
+                    "tests_passed": 1.0,
+                    "evidence_complete": 1.0,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    code, payload, errors = _invoke(
+        "batch-run",
+        "--mcp-command", command,
+        "--requests-file", str(requests_path),
+        "--job-id", "online-batch-001",
+        "--provider", "local",
+        "--model", "local-model",
+        "--model-capability", "reasoning",
+        "--model-capability", "code",
+        "--learning-mode", "online",
+        "--learning-store", str(learning_path),
+        "--memory-store", str(memory_path),
+        "--evidence-file", str(evidence_path),
+        "--local-response", "bounded batch capability response",
+        "--max-parallelism", "1",
+        "--approve-provider-call",
+        "--approve-capability",
+    )
+    assert code == 0, errors
+    assert errors == ""
+    assert payload["batch"]["status"] == "completed"
+    assert payload["batch"]["items"][0]["status"] == "succeeded"
+    assert payload["learning"]["memory_store_configured"] is True
+    assert learning_path.exists()
+    assert memory_path.exists()
+    raw_memory = memory_path.read_bytes()
+    assert task.encode("utf-8") not in raw_memory
+    assert b"bounded batch capability response" not in raw_memory
 
 
 def test_discover_models_projects_only_typed_metadata_and_closes_credentials() -> None:

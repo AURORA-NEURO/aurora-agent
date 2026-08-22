@@ -250,8 +250,12 @@ Selection evidence can persist independently from the model catalogue. Supply `-
 to retain bounded provider/model outcome observations and restore historical health overrides on
 the next run. Supply `--learning-store` to use the transactional SQLite value-only ledger for
 bandit state, and choose `--learning-mode online` or `--learning-mode trajectory` for automatic
-routing. Rewards still require the existing evaluator contracts; provider success is never
-treated as a reward. `state-status` reads these stores without contacting a provider:
+routing. Supply `--memory-store` when episodic recall or restart-safe evaluator history should
+survive the process; this SQLite store retains only digest-bound episode metadata, selected-model
+identity, bounded lessons, and evaluator projections. If a learning mode is selected without a
+memory store, the CLI creates a process-local memory store so the online loop remains executable.
+Rewards still require the existing evaluator contracts; provider success is never treated as a
+reward. `state-status` reads the health and bandit stores without contacting a provider:
 
 ```bash
 python -m prism_sdk run \
@@ -263,6 +267,7 @@ python -m prism_sdk run \
   --inventory-store .aurora/model-inventory.json \
   --health-store .aurora/provider-health.jsonl \
   --learning-store .aurora/brain-learning.sqlite \
+  --memory-store .aurora/brain-memory.sqlite \
   --learning-mode online \
   --credential-source environment \
   --credential-env OPENAI_API_KEY \
@@ -284,6 +289,35 @@ python -m prism_sdk execution-status \
 episode identities, selected-arm metadata, context/selection/prompt/plan/outcome digests, bounded
 replay metadata, and all-domain learning snapshots; it never returns the retained evaluator input
 envelope. A missing store is reported as unavailable without creating a new database.
+
+The same online loop is available for a known domain or focused reviewed capability; it supplies
+the contextual bandit state and ephemeral memory automatically rather than requiring callers to
+construct those internal objects at the CLI boundary:
+
+```bash
+python -m prism_sdk run \
+  --mcp-command "python path/to/mcp_server.py" \
+  --provider local \
+  --model local-model \
+  --model-capability reasoning \
+  --model-capability code \
+  --domain coding \
+  --capability debugging \
+  --approve-capability \
+  --learning-mode online \
+  --learning-store .aurora/brain-learning.sqlite \
+  --memory-store .aurora/brain-memory.sqlite \
+  --task "inspect the failing implementation and report bounded evidence" \
+  --approve-provider-call
+```
+
+`run` and `batch-run` report `memory_store_configured` separately from the bandit ledger. Memory
+is a retrieval and evaluator substrate, not an authority channel: it cannot grant tools, alter a
+reviewed contract, supply credentials, or convert provider transport success into reward.
+For immediate online settlement, `--evidence-file` accepts one bounded caller-owned evaluator
+object (or a shared object for eligible batch items); it is validated before provider execution
+and only its normalized digest/signals cross the evaluator and learning boundaries. Delayed
+reviewers can continue to use `settle-learning` when evidence is held outside the CLI process.
 
 Runs can persist the long-horizon execution controller through the same operator boundary:
 

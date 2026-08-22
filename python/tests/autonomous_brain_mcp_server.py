@@ -131,7 +131,7 @@ for raw in sys.stdin:
                         {"role": "system", "content": "Use only bounded fixture evidence."},
                         {"role": "user", "content": str(task)},
                     ],
-                    "prompt_digest": "p" * 64,
+                    "prompt_digest": "a" * 64,
                 },
             )
         elif name == "brain_plan":
@@ -143,6 +143,30 @@ for raw in sys.stdin:
                         "requires_approval": True,
                         "steps": [{"effect": "provider_call"}],
                         "plan_digest": "b" * 64,
+                    },
+                },
+            )
+        elif name == "brain_outcome_record":
+            bandit_state = arguments.get("bandit_state", {}) if isinstance(arguments, dict) else {}
+            tool_result(
+                request_id,
+                {
+                    "ok": True,
+                    "status": "recorded_evaluator_reward",
+                    "next_state": bandit_state,
+                    "learning_evidence": {
+                        "evaluator_id": (
+                            arguments.get("assessment", {}).get("evaluator_id")
+                            if isinstance(arguments, dict) and isinstance(arguments.get("assessment"), dict)
+                            else "fixture-evaluator"
+                        ),
+                        "evaluator_version": "fixture-1",
+                        "reward": (
+                            arguments.get("assessment", {}).get("reward", 0.0)
+                            if isinstance(arguments, dict) and isinstance(arguments.get("assessment"), dict)
+                            else 0.0
+                        ),
+                        "evidence_digest": "e" * 64,
                     },
                 },
             )

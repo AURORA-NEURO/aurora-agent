@@ -74,6 +74,7 @@ from .llm_runtime import (
     openai_compatible_provider,
     openai_provider,
 )
+from .memory import BrainEpisodicMemory
 from .tooling import ToolCatalogue
 
 
@@ -92,6 +93,7 @@ _MAX_BATCH_RESULT_MANIFEST_BYTES = 1_000_000
 _MAX_LOCAL_RESPONSE_SEQUENCE = 32
 _MAX_MCP_PROVIDER_TOOLS = 128
 _MAX_DOMAIN_TOOL_BINDING_FILE_BYTES = 512_000
+_MAX_EVIDENCE_FILE_BYTES = 128_000
 CLI_DOMAIN_TOOL_BINDINGS_SCHEMA = "aurora-cli-domain-tool-bindings/0.1"
 
 
@@ -1786,6 +1788,24 @@ def _batch_request_json_safe(value: Any, *, depth: int = 0) -> None:
         raise ValueError("batch request file contains a non-JSON value")
 
 
+def _load_evidence_file(path_value: str | None) -> dict[str, Any] | None:
+    """Load bounded caller/evaluator evidence without treating it as provider output."""
+
+    if path_value is None:
+        return None
+    path = Path(path_value)
+    if not path.exists() or not path.is_file() or path.stat().st_size > _MAX_EVIDENCE_FILE_BYTES:
+        raise ValueError("evidence file is missing or outside its bounded size")
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError("evidence file is unreadable") from error
+    _batch_request_json_safe(raw)
+    if not isinstance(raw, Mapping):
+        raise ValueError("evidence file must contain a JSON object")
+    return dict(raw)
+
+
 def _load_batch_requests(args: argparse.Namespace) -> tuple[str, str, list[dict[str, Any]]]:
     path = Path(args.requests_file)
     if not path.exists() or not path.is_file() or path.stat().st_size > _MAX_BATCH_REQUEST_FILE_BYTES:
@@ -1851,6 +1871,58 @@ def _load_batch_requests(args: argparse.Namespace) -> tuple[str, str, list[dict[
     return mode, job_id, normalized_requests
 
 
+def _open_cli_memory(
+    args: argparse.Namespace,
+    *,
+    learning_requested: bool,
+) -> BrainEpisodicMemory | None:
+    """Open caller-owned metadata memory for recall and evaluator-gated learning.
+
+    Learning requires an episodic store even when the caller only wants value-only bandit
+    persistence.  A process-local SQLite database keeps that requirement explicit for ordinary
+    runs, while ``--memory-store`` makes the same digest-only memory restart-safe.  The learning
+    ledger and episodic memory must remain separate SQLite files so their schemas cannot collide.
+    """
+
+    path = getattr(args, "memory_store", None)
+    learning_store = getattr(args, "learning_store", None)
+    if path is not None and learning_store is not None:
+        try:
+            same_path = Path(path).resolve() == Path(learning_store).resolve()
+        except OSError as error:
+            raise ValueError("memory and learning store paths are invalid") from error
+        if same_path:
+            raise ValueError("--memory-store must be different from --learning-store")
+    if path is None and not learning_requested:
+        return None
+    return BrainEpisodicMemory(":memory:" if path is None else path)
+
+
+def _cli_learning_state(
+    agent: Any,
+    *,
+    domain: str,
+    capability: str | None,
+) -> Mapping[str, Any]:
+    """Resolve a contextual first-run bandit projection without exposing learned values."""
+
+    contextual = getattr(agent, "domain_learning_state", None)
+    if callable(contextual):
+        snapshot = contextual(domain, capability=capability)
+        if isinstance(snapshot, Mapping) and isinstance(snapshot.get("bandit_state"), Mapping):
+            return dict(snapshot["bandit_state"])
+    generic = getattr(agent, "learning_state", None)
+    if callable(generic):
+        state = generic()
+        if isinstance(state, Mapping):
+            return dict(state)
+    return {
+        "schema": "bioprism-brain-bandit/0.1",
+        "generation": 0,
+        "arms": [],
+    }
+
+
 def _batch_run(
     args: argparse.Namespace,
     *,
@@ -1901,11 +1973,20 @@ def _batch_run(
         raise ValueError("batch workflow controls require --workflow-execution")
     if args.learning_mode is not None and mode == "cross_domain":
         raise ValueError("cross-domain batch learning must be declared per request in options")
+    evidence = _load_evidence_file(args.evidence_file)
+    if evidence is not None and mode == "cross_domain":
+        raise ValueError("--evidence-file requires domain or automatic batch mode; use per-request evidence for cross-domain work")
+    request_learning = any(
+        isinstance(request.get("options"), Mapping)
+        and request.get("options", {}).get("learn") is True
+        for request in requests
+    )
     persisted_candidates = _persisted_candidate_args(args) if args.use_inventory else ()
     runtime, onboarding = _runtime_with_provider(args)
     session = onboarding.start_session(ttl_seconds=args.ttl_seconds)
     health_ledger = None
     learning_ledger = None
+    learning_memory = None
     execution_journal = None
     activation_state_after: Mapping[str, Any] | None = None
     activation_persisted = False
@@ -1923,6 +2004,10 @@ def _batch_run(
             health_ledger = ProviderHealthLedger(args.health_store)
         if args.learning_store is not None:
             learning_ledger = SQLiteBrainLearningLedger(args.learning_store)
+        learning_memory = _open_cli_memory(
+            args,
+            learning_requested=(args.learning_mode in {"online", "trajectory"} or request_learning),
+        )
         if args.execution_store is not None:
             execution_journal = AutonomousExecutionJournal(args.execution_store)
         _collect_credentials(args, session, environ=environ, reader=reader)
@@ -2044,6 +2129,10 @@ def _batch_run(
                 # Approval is an operator-level gate and cannot be smuggled in through the file.
                 options["approve_provider_call"] = args.approve_provider_call
                 options["approve_mission_dispatch"] = args.approve_mission_dispatch
+                if learning_memory is not None:
+                    options["memory"] = learning_memory
+                if evidence is not None:
+                    options["evidence"] = evidence
                 if args.execution_mode is not None:
                     options["execution_mode"] = args.execution_mode
                 if args.max_steps is not None:
@@ -2059,6 +2148,12 @@ def _batch_run(
                 options.pop("approve_capability", None)
                 if options.get("capability") is not None:
                     options["approve_capability"] = args.approve_capability
+                if mode == "domain" and options.get("learn") is True:
+                    options["bandit_state"] = _cli_learning_state(
+                        agent,
+                        domain=raw["domain"],
+                        capability=options.get("capability"),
+                    )
                 if args.workflow_execution:
                     options["workflow_execution"] = True
                     options["allow_cross_domain"] = False
@@ -2143,10 +2238,18 @@ def _batch_run(
                 "capability_approved": args.approve_capability,
                 "mission_dispatch_approved": args.approve_mission_dispatch,
             },
+            "learning": {
+                "learning_mode": args.learning_mode,
+                "learning_store_configured": learning_ledger is not None,
+                "memory_store_configured": learning_memory is not None,
+                "memory_retention": "digest_only_episodic_metadata",
+            },
             "secret_material": "never_returned",
         }
     finally:
         session.close()
+        if learning_memory is not None:
+            learning_memory.close()
         if learning_ledger is not None:
             learning_ledger.close()
 
@@ -2302,11 +2405,13 @@ def _run(
         if args.resume_workflow and args.workflow_checkpoint_store is not None
         else None
     )
+    evidence = _load_evidence_file(args.evidence_file)
     persisted_candidates = _persisted_candidate_args(args) if args.use_inventory else ()
     runtime, onboarding = _runtime_with_provider(args)
     session = onboarding.start_session(ttl_seconds=args.ttl_seconds)
     health_ledger = None
     learning_ledger = None
+    learning_memory = None
     execution_journal = None
     activation_state_after: Mapping[str, Any] | None = None
     activation_persisted = False
@@ -2324,6 +2429,10 @@ def _run(
             health_ledger = ProviderHealthLedger(args.health_store)
         if args.learning_store is not None:
             learning_ledger = SQLiteBrainLearningLedger(args.learning_store)
+        learning_memory = _open_cli_memory(
+            args,
+            learning_requested=args.learning_mode != "off",
+        )
         if args.execution_store is not None:
             execution_journal = AutonomousExecutionJournal(args.execution_store)
         _collect_credentials(
@@ -2439,6 +2548,10 @@ def _run(
                 "execution_id": args.execution_id,
                 "resume_execution": args.resume_execution,
             }
+            if learning_memory is not None:
+                common["memory"] = learning_memory
+            if evidence is not None:
+                common["evidence"] = evidence
             if provider_tools and not domain_registry_requested:
                 common["provider_tools"] = provider_tools
                 common["tool_loop_options"] = {
@@ -2481,6 +2594,11 @@ def _run(
             else:
                 if args.learning_mode == "online":
                     common["learn"] = True
+                    common["bandit_state"] = _cli_learning_state(
+                        agent,
+                        domain=args.domain,
+                        capability=args.capability,
+                    )
                 if args.capability is not None:
                     capability_options = dict(common)
                     capability_options.pop("capability", None)
@@ -2569,6 +2687,7 @@ def _run(
             "state_persistence": {
                 "health_store_configured": health_ledger is not None,
                 "learning_store_configured": learning_ledger is not None,
+                "memory_store_configured": learning_memory is not None,
                 "learning_mode": args.learning_mode,
                 "execution_store_configured": execution_journal is not None,
                 "execution_id": execution_id,
@@ -2588,6 +2707,8 @@ def _run(
         }
     finally:
         session.close()
+        if learning_memory is not None:
+            learning_memory.close()
         if learning_ledger is not None:
             learning_ledger.close()
 
@@ -2782,6 +2903,11 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--inventory-store", default=None, help="digest-bound metadata-only inventory store for --use-inventory")
     run.add_argument("--health-store", default=None, help="persist provider/model health observations across runs")
     run.add_argument("--learning-store", default=None, help="persist value-only online-learning state in SQLite")
+    run.add_argument(
+        "--memory-store",
+        default=None,
+        help="persist digest-only episodic memory for recall and evaluator-gated learning",
+    )
     run.add_argument("--execution-store", default=None, help="persist hash-chained metadata-only execution checkpoints")
     run.add_argument("--execution-id", default=None, help="stable execution identity for persistence/resume")
     run.add_argument("--resume-execution", action="store_true", help="explicitly resume the named non-terminal execution")
@@ -2812,6 +2938,11 @@ def _parser() -> argparse.ArgumentParser:
         help="load and explicitly resume the checkpoint at --workflow-checkpoint-store",
     )
     run.add_argument("--learning-mode", choices=("off", "online", "trajectory"), default="off", help="automatic route learning mode; rewards remain evaluator-gated")
+    run.add_argument(
+        "--evidence-file",
+        default=None,
+        help="bounded caller/evaluator evidence JSON object for an online learning decision",
+    )
     run.add_argument("--model-limit", type=int, default=64, help="maximum provider inventory rows to inspect when discovering")
     run.add_argument("--model-capability", action="append", default=[], help="declared capability for every model candidate")
     run.add_argument("--required-model-capability", action="append", default=[], help="capability required by this run")
@@ -2887,6 +3018,11 @@ def _parser() -> argparse.ArgumentParser:
     batch_run.add_argument("--inventory-store", default=None, help="digest-bound metadata-only inventory store")
     batch_run.add_argument("--health-store", default=None, help="persist provider/model health observations")
     batch_run.add_argument("--learning-store", default=None, help="persist value-only online-learning state")
+    batch_run.add_argument(
+        "--memory-store",
+        default=None,
+        help="persist digest-only episodic memory for recall and evaluator-gated learning",
+    )
     batch_run.add_argument("--execution-store", default=None, help="persist hash-chained metadata-only execution checkpoints")
     batch_run.add_argument("--execution-mode", choices=("provider", "tool_loop", "mission"), default=None)
     batch_run.add_argument("--max-steps", type=int, default=None)
@@ -2925,6 +3061,11 @@ def _parser() -> argparse.ArgumentParser:
         help="strict JSON file declaring caller-owned domains, capabilities, and risk posture for live MCP tools",
     )
     batch_run.add_argument("--learning-mode", choices=("off", "online", "trajectory"), default=None, help="automatic route learning mode")
+    batch_run.add_argument(
+        "--evidence-file",
+        default=None,
+        help="bounded caller/evaluator evidence JSON object shared by eligible batch items",
+    )
     batch_run.add_argument("--workflow-execution", action="store_true", help="enable checkpointable workflow execution for automatic requests")
     batch_run.add_argument("--workflow-max-stage-calls", type=int, default=None)
     batch_run.add_argument("--workflow-retry-blocked", action="store_true")
