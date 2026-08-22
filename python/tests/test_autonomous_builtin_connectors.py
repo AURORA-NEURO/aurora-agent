@@ -12,6 +12,9 @@ from prism_sdk import (
     AutonomousConnectorRegistry,
     AutonomousConnectorRuntime,
     AutonomousConnectorOperationRegistry,
+    AutonomousConnectorOperationFacade,
+    AutonomousConnectorOperationInput,
+    AutonomousConnectorIntentPlan,
     LLMRuntime,
     builtin_autonomous_connector_registration,
     content_digest,
@@ -171,3 +174,151 @@ def test_builtin_adapter_reports_sparse_fixtures_as_partial() -> None:
     assert observation.failure_class == "incomplete_local_fixture"
     assert observation.value["available_fields"] == ["source_digests"]
     assert "source-only" not in json.dumps(observation.value)
+
+
+def test_operation_facade_covers_every_domain_and_replays_without_request_values(tmp_path) -> None:
+    operation_registry = AutonomousConnectorOperationRegistry()
+    registration = builtin_autonomous_connector_registration(
+        operation_registry,
+        approval_required=True,
+    )
+    registry = AutonomousConnectorRegistry([registration])
+    journal = AutonomousConnectorReceiptJournal(tmp_path / "operation-facade.jsonl")
+    runtime = AutonomousConnectorRuntime(registry, receipt_store=journal)
+    facade = AutonomousConnectorOperationFacade(registry, runtime, operation_registry)
+
+    inputs = tuple(
+        AutonomousConnectorOperationInput(
+            domain=operation.domain,
+            capability=operation.capabilities[0],
+            operation_id=operation.operation_id,
+            request={"fixture_digest": "a" * 64, "raw_note": "must remain transient"},
+            approved=True,
+        )
+        for operation in operation_registry.operations()
+    )
+    plans = tuple(facade.plan(value) for value in inputs)
+    assert len(plans) == len(AUTONOMOUS_DOMAINS)
+    assert all(plan.status == "ready" for plan in plans)
+    assert all("raw_note" not in json.dumps(plan.to_dict()) for plan in plans)
+
+    executions = tuple(facade.execute_planned(plan, value) for plan, value in zip(plans, inputs))
+    assert {execution.operation_plan.domain for execution in executions} == set(AUTONOMOUS_DOMAINS)
+    assert all(execution.status == "partial" for execution in executions)
+    assert all(execution.replay == "fresh" for execution in executions)
+
+    replay = facade.execute(inputs[0])
+    assert replay.replay == "replayed"
+    assert replay.dispatch.value is None
+    assert len(journal.receipts()) == len(AUTONOMOUS_DOMAINS)
+
+    tampered = AutonomousConnectorOperationInput(
+        domain=inputs[0].domain,
+        capability=inputs[0].capability,
+        operation_id=inputs[0].operation_id,
+        request={"fixture_digest": "b" * 64, "raw_note": "tampered"},
+        approved=True,
+    )
+    with pytest.raises(ArgumentError, match="does not match"):
+        facade.execute_planned(plans[0], tampered)
+
+
+def test_operation_facade_batch_preserves_order_and_omits_after_stop(tmp_path) -> None:
+    operation_registry = AutonomousConnectorOperationRegistry()
+    registration = builtin_autonomous_connector_registration(
+        operation_registry,
+        approval_required=True,
+    )
+    registry = AutonomousConnectorRegistry([registration])
+    runtime = AutonomousConnectorRuntime(
+        registry,
+        receipt_store=AutonomousConnectorReceiptJournal(tmp_path / "operation-batch.jsonl"),
+    )
+    facade = AutonomousConnectorOperationFacade(registry, runtime, operation_registry)
+    coding = operation_registry.resolve("coding.repository_change_analysis")
+    values = [
+        AutonomousConnectorOperationInput(
+            domain="coding",
+            capability=coding.capabilities[0],
+            operation_id=coding.operation_id,
+            request={"fixture": "first"},
+            approved=False,
+        ),
+        AutonomousConnectorOperationInput(
+            domain="coding",
+            capability=coding.capabilities[0],
+            operation_id=coding.operation_id,
+            request={"fixture": "second"},
+            approved=True,
+        ),
+        AutonomousConnectorOperationInput(
+            domain="coding",
+            capability=coding.capabilities[0],
+            operation_id=coding.operation_id,
+            request={"fixture": "third"},
+            approved=True,
+        ),
+    ]
+    result = facade.execute_batch(values, max_parallelism=1, stop_on_error=True)
+    assert result.status == "failed"
+    assert [item["index"] for item in result.items] == [0, 1, 2]
+    assert [item["status"] for item in result.items] == ["refused", "omitted", "omitted"]
+    assert result.completed_count == 0
+    assert result.failed_count == 1
+    assert result.omitted_count == 2
+    assert "second" not in json.dumps(result.to_dict())
+
+
+def test_intent_facade_routes_and_executes_single_and_cross_domain_tasks_without_raw_task_retention() -> None:
+    agent = AutonomousAgent(object(), LLMRuntime())
+    agent.register_builtin_connectors(approval_required=True)
+    intent = agent.connector_intent_facade()
+
+    coding_plan = intent.plan(
+        task="Review changed files and verify testing results.",
+        hints=("coding",),
+        allow_cross_domain=False,
+        request_by_domain={"coding": {"repository_digest": "a" * 64}},
+        approved=True,
+    )
+    assert coding_plan.status == "ready"
+    assert coding_plan.selected_domains == ("coding",)
+    assert coding_plan.selections[0].operation_id == "coding.repository_change_analysis"
+    assert "Review changed files" not in json.dumps(coding_plan.to_dict())
+    coding_result = intent.execute(
+        coding_plan,
+        task="Review changed files and verify testing results.",
+        hints=("coding",),
+        allow_cross_domain=False,
+        request_by_domain={"coding": {"repository_digest": "a" * 64}},
+        approved=True,
+    )
+    assert coding_result.status == "completed"
+    assert coding_result.executions[0].status == "partial"
+    restored_coding_plan = AutonomousConnectorIntentPlan.from_mapping(coding_plan.to_dict())
+    assert restored_coding_plan.plan_digest == coding_plan.plan_digest
+
+    cross_domain_plan = intent.plan(
+        task="Profile a dataset schema and reproduce the scientific evidence.",
+        hints=("data", "science"),
+        max_domains=2,
+        allow_cross_domain=True,
+        request_by_domain={
+            "data": {"schema": {"columns": ["id"]}},
+            "science": {"hypothesis": "fixture"},
+        },
+        approved=True,
+    )
+    assert cross_domain_plan.cross_domain is True
+    assert set(cross_domain_plan.selected_domains) == {"data", "science"}
+    assert all(selection.operation_plan.status == "ready" for selection in cross_domain_plan.selections)
+
+    refused_route = intent.plan(
+        task="unclassifiable fixture",
+        hints=(),
+        min_confidence=1.0,
+        allow_cross_domain=False,
+        approved=True,
+    )
+    assert refused_route.status == "route_review_required"
+    assert refused_route.selections == ()

@@ -3259,6 +3259,51 @@ approval refusal cannot poison a later explicitly approved attempt. A connector 
 `observed` or `partial` is still transport/evidence posture, never evaluator reward or proof that
 the underlying domain task is correct.
 
+#### Intent-driven all-domain connector execution
+
+Applications can let the reviewed autonomous route choose the connector operation as well as
+the domain. Python exposes `agent.connector_intent_facade()`; TypeScript exposes
+`AutonomousConnectorIntentFacade` directly and as `brain.connectorIntent` when an operation
+facade is supplied. Both use exact terms from the operation catalogue, never
+fuzzy or model-invented operation names. A task with an unambiguous route produces one operation
+selection for a single domain, or one selection per selected domain for a cross-domain route:
+
+```python
+intent = agent.connector_intent_facade()
+plan = intent.plan(
+    task="profile a dataset schema and reproduce the scientific evidence",
+    hints=("data", "science"),
+    max_domains=2,
+    request_by_domain={
+        "data": {"schema": caller_schema_metadata},
+        "science": {"hypothesis": caller_hypothesis_metadata},
+    },
+    approved=True,
+)
+if plan.status == "ready":
+    result = intent.execute(
+        plan,
+        task="profile a dataset schema and reproduce the scientific evidence",
+        hints=("data", "science"),
+        max_domains=2,
+        request_by_domain={
+            "data": {"schema": caller_schema_metadata},
+            "science": {"hypothesis": caller_hypothesis_metadata},
+        },
+        approved=True,
+    )
+```
+
+The plan retains the task digest, route digest, selected domain/operation/capability identities,
+exact matched catalogue terms, and nested operation-plan digests. It never retains task text,
+request metadata, prompts, provider values, credentials, or connector observations. An
+abstaining route becomes `route_review_required`; a missing reviewed connector becomes
+`connector_review_required`; neither state dispatches. Re-execution rebuilds the route and exact
+operation plans and refuses changed transient metadata before any connector executor runs.
+The operation runtime still owns approval, replay, bounded concurrency, receipt integrity, and
+credential-shaped input rejection. Lexical intent selection is a routing aid, not semantic
+understanding, authorization, evaluator reward, or domain truth.
+
 #### The provider-neutral autonomous brain façade
 
 `AutonomousBrainFacade` is the application-facing composition boundary for the full request

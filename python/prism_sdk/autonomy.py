@@ -98,6 +98,10 @@ from .autonomous_builtin_connectors import (
     register_builtin_autonomous_domain_connectors,
     register_builtin_autonomous_connectors,
 )
+from .autonomous_connector_facade import (
+    AutonomousConnectorOperationFacade,
+    AutonomousConnectorIntentFacade,
+)
 from .evaluators import (
     CompositeDomainEvaluator,
     DomainEvaluatorRegistry,
@@ -11822,6 +11826,49 @@ class AutonomousAgent:
             raise
         except Exception as error:
             raise BrainRunError("connector selection planning failed") from error
+
+    def connector_operation_facade(
+        self,
+        *,
+        operation_registry: Any | None = None,
+    ) -> AutonomousConnectorOperationFacade:
+        """Return the high-level operation facade for the configured connector runtime.
+
+        This keeps the lower-level dispatch API available for infrastructure callers while
+        giving application code one typed entrypoint for operation validation, exact connector
+        selection, approval binding, and replay.  The returned facade still performs no network
+        I/O itself; all external behavior remains inside the caller-owned connector executor.
+        """
+
+        if self.connector_registry is None or self.connector_runtime is None:
+            raise BrainRunError("connector runtime is not configured")
+        if operation_registry is not None and not isinstance(
+            operation_registry, AutonomousConnectorOperationRegistry
+        ):
+            raise BrainRunError("operation_registry must be an AutonomousConnectorOperationRegistry")
+        return AutonomousConnectorOperationFacade(
+            self.connector_registry,
+            self.connector_runtime,
+            operation_registry,
+        )
+
+    def connector_intent_facade(
+        self,
+        *,
+        operation_registry: Any | None = None,
+    ) -> AutonomousConnectorIntentFacade:
+        """Return a task-to-operation facade spanning the built-in autonomous domains.
+
+        Planning uses the same reviewed domain router as provider-backed autonomous runs, then
+        resolves exact operation/capability labels from the connector catalogue.  It never
+        turns task text into an authorization decision; connector approval, effects, and replay
+        remain enforced by the operation facade.
+        """
+
+        return AutonomousConnectorIntentFacade(
+            self.connector_operation_facade(operation_registry=operation_registry),
+            self.route,
+        )
 
     def dispatch_connector(
         self,

@@ -330,8 +330,13 @@ export {
   MAX_AUTONOMOUS_CONNECTOR_FACADE_BATCH,
   MAX_AUTONOMOUS_CONNECTOR_FACADE_PARALLELISM,
   MAX_AUTONOMOUS_CONNECTOR_FACADE_PARENT_DIGESTS,
+  AUTONOMOUS_CONNECTOR_INTENT_SCHEMA,
+  MAX_AUTONOMOUS_CONNECTOR_INTENT_TASK_BYTES,
+  MAX_AUTONOMOUS_CONNECTOR_INTENT_HINTS,
   AutonomousConnectorOperationPlan,
   AutonomousConnectorOperationFacade,
+  AutonomousConnectorIntentFacade,
+  createAutonomousConnectorIntentFacade,
   createAutonomousConnectorOperationFacade,
 } from "./autonomous-connector-facade.js";
 export type {
@@ -340,6 +345,11 @@ export type {
   AutonomousConnectorOperationExecution,
   AutonomousConnectorOperationBatchItem,
   AutonomousConnectorOperationBatchResult,
+  AutonomousConnectorIntentRouteOptions,
+  AutonomousConnectorIntentInput,
+  AutonomousConnectorIntentSelectionJSON,
+  AutonomousConnectorIntentPlanJSON,
+  AutonomousConnectorIntentExecution,
 } from "./autonomous-connector-facade.js";
 export {
   AUTONOMOUS_BRAIN_FACADE_SCHEMA,

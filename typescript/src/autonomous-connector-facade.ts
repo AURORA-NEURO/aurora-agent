@@ -1,5 +1,5 @@
 import { ArgumentError, ProviderRuntimeError } from "./errors.js";
-import { AUTONOMOUS_DOMAIN_NAMES, type AutonomousDomainName } from "./autonomous.js";
+import { AUTONOMOUS_DOMAIN_NAMES, routeAutonomousTask, type AutonomousDomainName, type AutonomousRouteProposal } from "./autonomous.js";
 import {
   AutonomousConnectorDispatchRequest,
   AutonomousConnectorRegistry,
@@ -31,6 +31,9 @@ export const AUTONOMOUS_CONNECTOR_OPERATION_BATCH_SCHEMA = "bioprism-typescript-
 export const MAX_AUTONOMOUS_CONNECTOR_FACADE_BATCH = 64;
 export const MAX_AUTONOMOUS_CONNECTOR_FACADE_PARALLELISM = 8;
 export const MAX_AUTONOMOUS_CONNECTOR_FACADE_PARENT_DIGESTS = 128;
+export const AUTONOMOUS_CONNECTOR_INTENT_SCHEMA = "bioprism-typescript-autonomous-connector-intent/0.1" as const;
+export const MAX_AUTONOMOUS_CONNECTOR_INTENT_TASK_BYTES = 128_000;
+export const MAX_AUTONOMOUS_CONNECTOR_INTENT_HINTS = 32;
 
 const SECRET_FIELD_MARKERS = new Set([
   "apikey", "authorization", "bearer", "credential", "credentials", "password", "secret", "secretkey",
@@ -63,6 +66,30 @@ function digest(name: string, value: unknown): string {
 function domain(name: string, value: unknown): AutonomousDomainName {
   if (typeof value !== "string" || !AUTONOMOUS_DOMAIN_NAMES.includes(value as AutonomousDomainName)) throw new ArgumentError(`${name} is not a supported autonomous domain`);
   return value as AutonomousDomainName;
+}
+
+function intentTokens(value: string): Set<string> {
+  return new Set(value.toLowerCase().replace(/[^a-z0-9]+/g, " ").split(/\s+/).filter((token) => token.length >= 2));
+}
+
+function selectIntentCapability(
+  operation: AutonomousConnectorOperationContract,
+  text: string,
+  requested: string | undefined,
+): { capability: string; score: number; matchedTerms: string[]; reason: string } {
+  if (requested !== undefined) {
+    if (!operation.supports(requested)) throw new ArgumentError(`connector intent capability ${requested} is outside ${operation.operation_id}`);
+    return { capability: requested, score: 1, matchedTerms: [requested], reason: "caller_capability" };
+  }
+  const task = intentTokens(text);
+  const rows = operation.capabilities.map((candidate) => {
+    const matchedTerms = [...intentTokens(candidate.replace(/\+/g, " "))].filter((term) => task.has(term)).sort();
+    const exact = text.toLowerCase().includes(candidate.toLowerCase()) ? 1 : 0;
+    const score = Math.min(1, matchedTerms.length * 0.25 + exact * 0.65);
+    return { capability: candidate, score, matchedTerms, reason: score > 0 ? "exact_catalogue_terms" : "domain_default_capability" };
+  });
+  rows.sort((left, right) => right.score - left.score || left.capability.localeCompare(right.capability));
+  return rows[0]!;
 }
 
 function rejectsSecretField(name: string): boolean {
@@ -204,6 +231,31 @@ export class AutonomousConnectorOperationPlan {
     this.plan_digest = digestJsonSync(this.descriptor());
   }
 
+  static fromJSON(value: unknown): AutonomousConnectorOperationPlan {
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new ArgumentError("connector operation plan projection is malformed");
+    const raw = value as Partial<AutonomousConnectorOperationPlanJSON>;
+    if (raw.schema !== AUTONOMOUS_CONNECTOR_OPERATION_FACADE_SCHEMA || raw.retention !== "metadata_only_no_request_values" || raw.secret_material !== "never_returned") throw new ArgumentError("connector operation plan projection metadata is invalid");
+    if (!Array.isArray(raw.parent_digests)) throw new ArgumentError("connector operation plan parent_digests are invalid");
+    const plan = new AutonomousConnectorOperationPlan({
+      domain: raw.domain as AutonomousDomainName,
+      capability: raw.capability as string,
+      operation_id: raw.operation_id as string,
+      operation_digest: raw.operation_digest as string,
+      subject_digest: raw.subject_digest as string,
+      execution_id: raw.execution_id as string,
+      call_id: raw.call_id as string,
+      attempt_id: raw.attempt_id ?? null,
+      parent_digests: raw.parent_digests,
+      request_digest: raw.request_digest as string,
+      selection_plan: AutonomousConnectorSelectionPlan.fromJSON(raw.selection_plan),
+      selected_connector_id: raw.selected_connector_id ?? null,
+      status: raw.status as "ready" | "connector_missing",
+      approved: raw.approved as boolean,
+    });
+    if (raw.plan_digest !== plan.plan_digest) throw new ArgumentError("connector operation plan projection digest is invalid");
+    return plan;
+  }
+
   private descriptor(): Omit<AutonomousConnectorOperationPlanJSON, "plan_digest"> {
     return {
       schema: AUTONOMOUS_CONNECTOR_OPERATION_FACADE_SCHEMA,
@@ -262,6 +314,67 @@ export interface AutonomousConnectorOperationBatchResult {
   retention: "operation_plans_metadata_only;dispatch_values_transient";
   secret_material: "never_returned";
   batch_digest: string;
+}
+
+export interface AutonomousConnectorIntentRouteOptions {
+  hints?: readonly string[];
+  minConfidence?: number;
+  minMargin?: number;
+  maxDomains?: number;
+  allowCrossDomain?: boolean;
+}
+
+export interface AutonomousConnectorIntentInput extends AutonomousConnectorIntentRouteOptions {
+  task: string;
+  requestByDomain?: Readonly<Record<string, JsonObject>>;
+  capability?: string;
+  approved?: boolean;
+  selectionStrategy?: AutonomousConnectorSelectionStrategy;
+  selectionSignals?: Readonly<Record<string, JsonObject>>;
+}
+
+export interface AutonomousConnectorIntentSelectionJSON {
+  domain: AutonomousDomainName;
+  operation_id: string;
+  operation_digest: string;
+  capability: string;
+  score: number;
+  matched_terms: string[];
+  selection_reason: "caller_capability" | "exact_catalogue_terms" | "domain_default_capability";
+  operation_plan: AutonomousConnectorOperationPlanJSON;
+  retention: "metadata_only_task_and_request_values_not_retained";
+  secret_material: "never_returned";
+}
+
+export interface AutonomousConnectorIntentPlanJSON {
+  schema: typeof AUTONOMOUS_CONNECTOR_INTENT_SCHEMA;
+  task_digest: string;
+  route: AutonomousRouteProposal;
+  selected_domains: AutonomousDomainName[];
+  cross_domain: boolean;
+  status: "ready" | "route_review_required" | "connector_review_required";
+  selections: AutonomousConnectorIntentSelectionJSON[];
+  plan_digest: string;
+  retention: "metadata_only_task_and_request_values_not_retained";
+  secret_material: "never_returned";
+}
+
+export interface AutonomousConnectorIntentExecution {
+  schema: typeof AUTONOMOUS_CONNECTOR_INTENT_SCHEMA;
+  status: "completed" | "partial" | "failed" | "route_review_required" | "connector_review_required";
+  plan: AutonomousConnectorIntentPlanJSON;
+  items: Array<{
+    index: number;
+    domain?: AutonomousDomainName;
+    status: "succeeded" | "refused" | "failed" | "omitted";
+    plan_digest: string | null;
+    execution?: AutonomousConnectorOperationExecution;
+    error_class?: string;
+    failure_code?: string;
+  }>;
+  executions: AutonomousConnectorOperationExecution[];
+  retention: "metadata_only_task_and_request_values;dispatch_values_transient";
+  secret_material: "never_returned";
 }
 
 interface PreparedOperation {
@@ -417,6 +530,192 @@ export class AutonomousConnectorOperationFacade {
       secret_material: "never_returned",
     };
   }
+}
+
+/**
+ * Task-to-operation composition for ordinary autonomous applications.
+ *
+ * Routing is evidence-only: exact catalogue terms may select a reviewed operation and
+ * capability, but they never authorize a connector. Approval, replay, and executor boundaries
+ * remain inside AutonomousConnectorOperationFacade.
+ */
+export class AutonomousConnectorIntentFacade {
+  readonly operationFacade: AutonomousConnectorOperationFacade;
+  readonly route: (task: string, options: AutonomousConnectorIntentRouteOptions) => Promise<AutonomousRouteProposal>;
+
+  constructor(options: {
+    operationFacade: AutonomousConnectorOperationFacade;
+    route?: (task: string, options: AutonomousConnectorIntentRouteOptions) => Promise<AutonomousRouteProposal>;
+  }) {
+    if (!options || !(options.operationFacade instanceof AutonomousConnectorOperationFacade)) throw new ArgumentError("connector intent facade requires an operation facade");
+    this.operationFacade = options.operationFacade;
+    this.route = options.route ?? routeAutonomousTask;
+  }
+
+  async plan(input: AutonomousConnectorIntentInput): Promise<AutonomousConnectorIntentPlanJSON> {
+    if (!input || typeof input !== "object" || Array.isArray(input)) throw new ArgumentError("connector intent input must be an object");
+    if (typeof input.task !== "string" || !input.task.trim() || bytes(input.task) > MAX_AUTONOMOUS_CONNECTOR_INTENT_TASK_BYTES) throw new ArgumentError("connector intent task is outside its bound");
+    const hints = input.hints ?? [];
+    if (!Array.isArray(hints) || hints.length > MAX_AUTONOMOUS_CONNECTOR_INTENT_HINTS || hints.some((hint) => typeof hint !== "string" || !hint.trim() || bytes(hint) > 256)) throw new ArgumentError("connector intent hints are outside their bound");
+    if (input.requestByDomain !== undefined) {
+      if (!input.requestByDomain || typeof input.requestByDomain !== "object" || Array.isArray(input.requestByDomain)) throw new ArgumentError("connector intent requestByDomain must be an object");
+      for (const [key, value] of Object.entries(input.requestByDomain)) {
+        domain("connector intent request domain", key);
+        if (!value || typeof value !== "object" || Array.isArray(value)) throw new ArgumentError("connector intent request metadata must be an object");
+        assertSafeMetadata(value);
+      }
+    }
+    const route = await this.route(input.task, {
+      hints,
+      minConfidence: input.minConfidence,
+      minMargin: input.minMargin,
+      maxDomains: input.maxDomains,
+      allowCrossDomain: input.allowCrossDomain,
+    });
+    if (!route || typeof route !== "object") throw new ArgumentError("connector intent route is invalid");
+    if (route.abstained || route.selected_domains.length === 0) {
+      const descriptor = {
+        schema: AUTONOMOUS_CONNECTOR_INTENT_SCHEMA,
+        task_digest: route.task_digest,
+        route: structuredClone(route),
+        selected_domains: [],
+        cross_domain: false,
+        status: "route_review_required" as const,
+        selections: [],
+        retention: "metadata_only_task_and_request_values_not_retained" as const,
+        secret_material: "never_returned" as const,
+      };
+      return { ...descriptor, plan_digest: digestJsonSync(descriptor) };
+    }
+    const text = `${input.task} ${hints.join(" ")}`;
+    const selections: AutonomousConnectorIntentSelectionJSON[] = [];
+    for (const selectedDomain of route.selected_domains) {
+      const operations = this.operationFacade.operationRegistry.forDomain(selectedDomain);
+      if (!operations.length) throw new ArgumentError(`no connector operation contract is registered for ${selectedDomain}`);
+      const scored = operations.map((operation) => ({ operation, intent: selectIntentCapability(operation, text, input.capability) }));
+      scored.sort((left, right) => right.intent.score - left.intent.score || left.operation.operation_id.localeCompare(right.operation.operation_id));
+      const selected = scored[0]!;
+      const operationPlan = this.operationFacade.plan({
+        domain: selectedDomain,
+        capability: selected.intent.capability,
+        operation_id: selected.operation.operation_id,
+        request: input.requestByDomain?.[selectedDomain] ?? {},
+        approved: input.approved ?? false,
+        selection_strategy: input.selectionStrategy,
+        selection_signals: input.selectionSignals,
+      });
+      selections.push({
+        domain: selectedDomain,
+        operation_id: selected.operation.operation_id,
+        operation_digest: selected.operation.operation_digest,
+        capability: selected.intent.capability,
+        score: selected.intent.score,
+        matched_terms: selected.intent.matchedTerms,
+        selection_reason: selected.intent.reason as AutonomousConnectorIntentSelectionJSON["selection_reason"],
+        operation_plan: operationPlan.toJSON(),
+        retention: "metadata_only_task_and_request_values_not_retained",
+        secret_material: "never_returned",
+      });
+    }
+    const status = selections.some((selection) => selection.operation_plan.status !== "ready")
+      ? "connector_review_required" as const
+      : "ready" as const;
+    const descriptor = {
+      schema: AUTONOMOUS_CONNECTOR_INTENT_SCHEMA,
+      task_digest: route.task_digest,
+      route: structuredClone(route),
+      selected_domains: [...route.selected_domains],
+      cross_domain: route.selected_domains.length > 1,
+      status,
+      selections,
+      retention: "metadata_only_task_and_request_values_not_retained" as const,
+      secret_material: "never_returned" as const,
+    };
+    return { ...descriptor, plan_digest: digestJsonSync(descriptor) };
+  }
+
+  async execute(
+    plan: AutonomousConnectorIntentPlanJSON,
+    input: AutonomousConnectorIntentInput,
+    options: { maxParallelism?: number; stopOnError?: boolean } = {},
+  ): Promise<AutonomousConnectorIntentExecution> {
+    if (!plan || typeof plan !== "object" || typeof plan.plan_digest !== "string") throw new ArgumentError("connector intent execute requires a typed plan projection");
+    const current = await this.plan(input);
+    if (current.plan_digest !== plan.plan_digest) throw new ArgumentError("connector intent plan does not match the supplied transient task metadata");
+    if (current.status !== "ready") {
+      return {
+        schema: AUTONOMOUS_CONNECTOR_INTENT_SCHEMA,
+        status: current.status,
+        plan: current,
+        items: current.selections.map((selection, index) => ({ index, domain: selection.domain, status: "omitted" as const, plan_digest: selection.operation_plan.plan_digest })),
+        executions: [],
+        retention: "metadata_only_task_and_request_values;dispatch_values_transient",
+        secret_material: "never_returned",
+      };
+    }
+    const maxParallelism = options.maxParallelism ?? Math.min(4, current.selections.length);
+    if (!Number.isSafeInteger(maxParallelism) || maxParallelism < 1 || maxParallelism > MAX_AUTONOMOUS_CONNECTOR_FACADE_PARALLELISM) throw new ArgumentError("connector intent maxParallelism is outside its bound");
+    const stopOnError = options.stopOnError ?? true;
+    if (typeof stopOnError !== "boolean") throw new ArgumentError("connector intent stopOnError must be boolean");
+    const items: Array<AutonomousConnectorIntentExecution["items"][number] | undefined> = new Array(current.selections.length);
+    const executions: AutonomousConnectorOperationExecution[] = [];
+    let nextIndex = 0;
+    let halted = false;
+    const worker = async (): Promise<void> => {
+      while (true) {
+        const index = nextIndex++;
+        if (index >= current.selections.length) return;
+        const selection = current.selections[index]!;
+        if (halted) {
+          items[index] = { index, domain: selection.domain, status: "omitted", plan_digest: selection.operation_plan.plan_digest };
+          continue;
+        }
+        try {
+          const execution = await this.operationFacade.executePlanned(
+            AutonomousConnectorOperationPlan.fromJSON(selection.operation_plan),
+            {
+              domain: selection.domain,
+              capability: selection.capability,
+              operation_id: selection.operation_id,
+              request: input.requestByDomain?.[selection.domain] ?? {},
+              approved: input.approved ?? false,
+              selection_strategy: input.selectionStrategy,
+              selection_signals: input.selectionSignals,
+            },
+          );
+          const succeeded = execution.status === "observed" || execution.status === "partial";
+          items[index] = { index, domain: selection.domain, status: succeeded ? "succeeded" : "refused", plan_digest: selection.operation_plan.plan_digest, execution };
+          executions.push(execution);
+          if (stopOnError && !succeeded) halted = true;
+        } catch (error) {
+          const projection = errorProjection(error);
+          items[index] = { index, domain: selection.domain, status: "failed", plan_digest: selection.operation_plan.plan_digest, ...projection };
+          if (stopOnError) halted = true;
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(maxParallelism, current.selections.length) }, () => worker()));
+    const normalized = items.map((item, index) => item ?? { index, status: "failed" as const, plan_digest: null, error_class: "ConnectorOperationError", failure_code: "missing_result" });
+    const failures = normalized.filter((item) => item.status === "refused" || item.status === "failed").length;
+    const omitted = normalized.filter((item) => item.status === "omitted").length;
+    const status = failures === 0 && omitted === 0 ? "completed" as const : executions.length > 0 ? "partial" as const : "failed" as const;
+    return {
+      schema: AUTONOMOUS_CONNECTOR_INTENT_SCHEMA,
+      status,
+      plan: current,
+      items: normalized,
+      executions,
+      retention: "metadata_only_task_and_request_values;dispatch_values_transient",
+      secret_material: "never_returned",
+    };
+  }
+}
+
+export function createAutonomousConnectorIntentFacade(options: {
+  operationFacade: AutonomousConnectorOperationFacade;
+  route?: (task: string, options: AutonomousConnectorIntentRouteOptions) => Promise<AutonomousRouteProposal>;
+}): AutonomousConnectorIntentFacade {
+  return new AutonomousConnectorIntentFacade(options);
 }
 
 /** Convenience constructor for the runtime returned by createBuiltinAutonomousConnectorRuntime. */

@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   AUTONOMOUS_DOMAIN_NAMES,
   ArgumentError,
+  AutonomousConnectorIntentFacade,
   AutonomousConnectorOperationFacade,
   AutonomousConnectorOperationRegistry,
   AutonomousConnectorRegistry,
@@ -128,4 +129,50 @@ test("planned connector execution rejects changed transient metadata before disp
     facade.executePlanned(plan, { ...original, request: { fixture_label: "changed", source_digest: "b".repeat(64) } }),
     /does not match the supplied transient request/,
   );
+});
+
+test("intent facade routes single and cross-domain tasks to exact reviewed operations", async () => {
+  const fixture = createBuiltinAutonomousConnectorRuntime({ domainScoped: true, approvalRequired: false });
+  const operationFacade = new AutonomousConnectorOperationFacade({
+    registry: fixture.registry,
+    runtime: fixture.runtime,
+    operationRegistry: fixture.operationRegistry,
+  });
+  const intent = new AutonomousConnectorIntentFacade({ operationFacade });
+
+  const codingInput = {
+    task: "Review changed files and verify testing results.",
+    hints: ["coding"],
+    allowCrossDomain: false,
+    requestByDomain: { coding: { repository_digest: "a".repeat(64) } },
+    approved: true,
+  };
+  const codingPlan = await intent.plan(codingInput);
+  assert.equal(codingPlan.status, "ready");
+  assert.deepEqual(codingPlan.selected_domains, ["coding"]);
+  assert.equal(codingPlan.selections[0].operation_id, "coding.repository_change_analysis");
+  assert.equal(JSON.stringify(codingPlan).includes("Review changed files"), false);
+  const codingExecution = await intent.execute(codingPlan, codingInput);
+  assert.equal(codingExecution.status, "completed");
+  assert.equal(codingExecution.executions[0].status, "partial");
+
+  const crossInput = {
+    task: "Profile a dataset schema and reproduce the scientific evidence.",
+    hints: ["data", "science"],
+    maxDomains: 2,
+    allowCrossDomain: true,
+    requestByDomain: {
+      data: { schema: { columns: ["id"] } },
+      science: { hypothesis: "transient" },
+    },
+    approved: true,
+  };
+  const crossPlan = await intent.plan(crossInput);
+  assert.equal(crossPlan.cross_domain, true);
+  assert.deepEqual(new Set(crossPlan.selected_domains), new Set(["data", "science"]));
+  assert.ok(crossPlan.selections.every((selection) => selection.operation_plan.status === "ready"));
+
+  const reviewPlan = await intent.plan({ task: "unclassifiable fixture", allowCrossDomain: false, minConfidence: 1 });
+  assert.equal(reviewPlan.status, "route_review_required");
+  assert.deepEqual(reviewPlan.selections, []);
 });

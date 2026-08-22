@@ -18,6 +18,7 @@ import {
 import {
   AutonomousConnectorOperationFacade,
   AutonomousConnectorOperationPlan,
+  AutonomousConnectorIntentFacade,
   type AutonomousConnectorOperationExecution,
   type AutonomousConnectorOperationInput,
 } from "./autonomous-connector-facade.js";
@@ -643,12 +644,19 @@ export class AutonomousBrainPlan {
 export class AutonomousBrainFacade {
   readonly agent: AutonomousAgent;
   readonly connectorOperations?: AutonomousConnectorOperationFacade;
+  readonly connectorIntent?: AutonomousConnectorIntentFacade;
 
   constructor(options: { agent: AutonomousAgent; connectorOperations?: AutonomousConnectorOperationFacade }) {
     if (!options || !options.agent || typeof options.agent.route !== "function" || typeof options.agent.blueprint !== "function" || typeof options.agent.run !== "function" || typeof options.agent.runCrossDomain !== "function" || typeof options.agent.readiness !== "function" || typeof options.agent.refreshActivation !== "function") throw new ArgumentError("autonomous brain facade requires an AutonomousAgent");
     if (options.connectorOperations !== undefined && !(options.connectorOperations instanceof AutonomousConnectorOperationFacade)) throw new ArgumentError("autonomous brain connectorOperations is invalid");
     this.agent = options.agent;
     this.connectorOperations = options.connectorOperations;
+    this.connectorIntent = options.connectorOperations === undefined
+      ? undefined
+      : new AutonomousConnectorIntentFacade({
+        operationFacade: options.connectorOperations,
+        route: (task, routeOptions) => this.agent.route(task, routeOptions),
+      });
   }
 
   /** Compile routing and workflow metadata without contacting a provider or connector. */
