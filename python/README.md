@@ -202,7 +202,8 @@ remote (HTTP, MCP, or `DurableBrainControlPlaneAdapter`) rather than a local `Br
 capability, risk class, priority, and attempt ceiling. `run_once()` and `run()` claim the job,
 renew its lease, rehydrate the private request through a caller-owned resolver, and dispatch every
 supported brain path: `autonomous`, `workflow`, `workflow_learning`, `workflow_cycle`,
-`cross_domain`, `cross_domain_learning`, and `cross_domain_replan`. The resolver is never passed
+`workflow_trajectory_learning`, `cross_domain`, `cross_domain_learning`,
+`cross_domain_trajectory_learning`, and `cross_domain_replan`. The resolver is never passed
 to the control plane, and the worker rejects spec drift, malformed projections, unsupported modes,
 private fields in remote responses, and domain mismatches before dispatch.
 
@@ -214,6 +215,10 @@ tasks, prompts, credentials, provider responses, tool arguments, evaluator paylo
 messages remain caller-owned and are never serialized in `RemoteBrainJobSubmission`,
 `RemoteBrainJobRun.to_dict()`, or the remote job journal. `autonomous_remote_brain_job_spec_digest()`
 is the shared identity helper for admission and resolver verification.
+`AsyncRemoteBrainJobWorker` exposes the identical contract over `AsyncBrainControlClient`; it
+offloads a synchronous `AutonomousBrain` runner to a worker thread (or awaits a native async
+runner), so async HTTP/MCP hosts retain responsive event loops without creating a second lifecycle
+implementation.
 Contextual model adaptation is shared with the Rust and TypeScript contracts: the canonical
 domain/capability/risk/task-family digest selects a nested contextual arm ledger, while global arms
 remain only a cold-start prior. Evaluator settlement sends the digest and bounded context identity

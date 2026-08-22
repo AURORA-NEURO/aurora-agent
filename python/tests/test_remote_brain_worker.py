@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
 
 from prism_sdk import (
     AUTONOMOUS_DOMAIN_NAMES,
+    AsyncBrainControlClient,
+    AsyncDurableBrainControlPlaneAdapter,
+    AsyncRemoteBrainJobWorker,
     BrainControlClient,
     BrainJobStore,
     DurableBrainControlPlaneAdapter,
@@ -42,11 +46,17 @@ class _Brain:
     def run_workflow_cycle(self, **kwargs: object) -> _Result:
         return self._run("run_workflow_cycle", **kwargs)
 
+    def run_workflow_trajectory_learning(self, **kwargs: object) -> _Result:
+        return self._run("run_workflow_trajectory_learning", **kwargs)
+
     def run_cross_domain(self, **kwargs: object) -> _Result:
         return self._run("run_cross_domain", **kwargs)
 
     def run_cross_domain_learning(self, **kwargs: object) -> _Result:
         return self._run("run_cross_domain_learning", **kwargs)
+
+    def run_cross_domain_trajectory_learning(self, **kwargs: object) -> _Result:
+        return self._run("run_cross_domain_trajectory_learning", **kwargs)
 
     def run_cross_domain_replan_learning(self, **kwargs: object) -> _Result:
         return self._run("run_cross_domain_replan_learning", **kwargs)
@@ -58,6 +68,18 @@ class _ReconcileBrain(_Brain):
         return _Result("reconciliation_required")
 
 
+class _BlockingAsyncBrain(_Brain):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = asyncio.Event()
+
+    async def run_autonomous(self, **kwargs: object) -> _Result:
+        self.calls.append(("run_autonomous", dict(kwargs)))
+        self.started.set()
+        await asyncio.Event().wait()
+        return _Result()
+
+
 def _control(tmp_path, seen: list[tuple[str, dict[str, object]]]) -> tuple[BrainControlClient, BrainJobStore]:
     store = BrainJobStore(tmp_path / "remote-brain.sqlite3")
 
@@ -67,6 +89,20 @@ def _control(tmp_path, seen: list[tuple[str, dict[str, object]]]) -> tuple[Brain
 
     adapter = DurableBrainControlPlaneAdapter(store, authorizer=lambda _operation, _metadata: True)
     return BrainControlClient.from_durable(type("RecordingAdapter", (), {"call_tool": staticmethod(call_tool)})()), store
+
+
+async def _async_control(tmp_path, seen: list[tuple[str, dict[str, object]]]) -> tuple[AsyncBrainControlClient, BrainJobStore]:
+    store = BrainJobStore(tmp_path / "async-remote-brain.sqlite3")
+    adapter = AsyncDurableBrainControlPlaneAdapter(
+        DurableBrainControlPlaneAdapter(store, authorizer=lambda _operation, _metadata: True)
+    )
+
+    class RecordingAdapter:
+        async def call_tool(self, name: str, arguments: dict[str, object]) -> dict[str, object]:
+            seen.append((name, dict(arguments)))
+            return await adapter.call_tool(name, arguments)
+
+    return AsyncBrainControlClient.from_durable(RecordingAdapter()), store
 
 
 def _policy(letter: str) -> str:
@@ -82,8 +118,10 @@ def test_remote_worker_approval_gates_all_modes_and_all_domains_without_remote_p
         "workflow",
         "workflow_learning",
         "workflow_cycle",
+        "workflow_trajectory_learning",
         "cross_domain",
         "cross_domain_learning",
+        "cross_domain_trajectory_learning",
         "cross_domain_replan",
     )
     jobs: dict[str, tuple[str, dict[str, object], str]] = {}
@@ -177,6 +215,125 @@ def test_remote_worker_rejects_spec_drift_before_dispatch_and_requeues_typed_pre
     assert scheduled is not None
     assert scheduled.status == "retry_scheduled"
     assert store.get(retry_submission.job["job_id"]).state == "queued"
+    store.close()
+
+
+def test_async_remote_worker_preserves_all_domains_modes_and_metadata_boundary(tmp_path):
+    asyncio.run(_run_async_remote_worker(tmp_path))
+
+
+async def _run_async_remote_worker(tmp_path):
+    seen: list[tuple[str, dict[str, object]]] = []
+    control, store = await _async_control(tmp_path, seen)
+    brain = _Brain()
+    modes = (
+        "autonomous",
+        "workflow",
+        "workflow_learning",
+        "workflow_cycle",
+        "workflow_trajectory_learning",
+        "cross_domain",
+        "cross_domain_learning",
+        "cross_domain_trajectory_learning",
+        "cross_domain_replan",
+    )
+    jobs: dict[str, tuple[str, dict[str, object], str]] = {}
+    for index, domain in enumerate(AUTONOMOUS_DOMAIN_NAMES):
+        mode = modes[index % len(modes)]
+        request = {"task": f"private async {domain} task", "domain": domain}
+        policy = _policy("abcdef"[index % 6])
+        submission = await AsyncRemoteBrainJobWorker(
+            brain,
+            control,
+            worker_id=f"async-submitter-{index}",
+            resolver=lambda _context: {},
+        ).submit(
+            idempotency_key=f"async-remote-{mode}-{index}",
+            request=request,
+            mode=mode,
+            domain="cross_domain" if mode.startswith("cross_domain") else domain,
+            capability="bounded_capability",
+            risk_class="review",
+            policy_digest=policy,
+        )
+        assert submission.job is not None
+        jobs[submission.job["job_id"]] = (mode, request, policy)
+
+    worker = AsyncRemoteBrainJobWorker(
+        brain,
+        control,
+        worker_id="async-remote-worker",
+        resolver=lambda context: {
+            "spec_digest": context["job"]["spec_digest"],
+            "policy_digest": jobs[context["job"]["job_id"]][2],
+            "mode": jobs[context["job"]["job_id"]][0],
+            "request": jobs[context["job"]["job_id"]][1],
+            "kwargs": {
+                "task": jobs[context["job"]["job_id"]][1]["task"],
+                "domain": jobs[context["job"]["job_id"]][1]["domain"],
+            },
+        },
+    )
+    for job_id, (mode, _request, _policy_value) in jobs.items():
+        waiting = await worker.run_once(job_id)
+        assert waiting is not None
+        assert waiting.status == "waiting_approval"
+        await worker.approval(job_id, "approve", authorization_digest="c" * 64)
+        completed = await worker.run_once(job_id)
+        assert completed is not None
+        assert completed.status == "succeeded", mode
+        assert brain.calls[-1][0] == worker._RUNNERS[mode]
+
+    empty = await worker.run(limit=1)
+    assert empty.status == "empty"
+    assert len(brain.calls) == len(jobs)
+    assert all("task" not in arguments and "prompt" not in arguments for _name, arguments in seen)
+    serialized = json.dumps([record.to_dict() for record in store.inventory(limit=64)], sort_keys=True)
+    assert "private async" not in serialized
+    store.close()
+
+
+def test_async_remote_worker_quarantines_cancelled_active_dispatch(tmp_path):
+    asyncio.run(_run_async_cancellation(tmp_path))
+
+
+async def _run_async_cancellation(tmp_path):
+    seen: list[tuple[str, dict[str, object]]] = []
+    control, store = await _async_control(tmp_path, seen)
+    brain = _BlockingAsyncBrain()
+    request = {"task": "private cancellable task", "domain": "operations"}
+    policy = _policy("f")
+    worker = AsyncRemoteBrainJobWorker(
+        brain,
+        control,
+        worker_id="async-cancellation-worker",
+        resolver=lambda context: {
+            "spec_digest": context["job"]["spec_digest"],
+            "policy_digest": policy,
+            "mode": "autonomous",
+            "request": request,
+            "kwargs": {"task": request["task"], "domain": request["domain"]},
+        },
+    )
+    submitted = await worker.submit(
+        idempotency_key="async-cancellation",
+        request=request,
+        mode="autonomous",
+        domain="operations",
+        capability="bounded",
+        risk_class="review",
+        policy_digest=policy,
+    )
+    assert submitted.job is not None
+    await worker.run_once(submitted.job["job_id"])
+    await worker.approval(submitted.job["job_id"], "approve", authorization_digest="1" * 64)
+    active = asyncio.create_task(worker.run_once(submitted.job["job_id"]))
+    await brain.started.wait()
+    active.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await active
+    assert store.get(submitted.job["job_id"]).state == "reconciliation_required"
+    assert len(brain.calls) == 1
     store.close()
 
 

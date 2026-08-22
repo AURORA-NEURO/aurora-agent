@@ -3748,10 +3748,10 @@ Admission binds the private request to a deterministic composite digest over the
 mode, and optional policy digest. Supported modes cover the complete Python brain façade:
 
 - `autonomous` — one autonomous selection/planning/invocation run;
-- `workflow`, `workflow_learning`, and `workflow_cycle` — staged workflow execution and bounded
-  evaluator/replan variants; and
-- `cross_domain`, `cross_domain_learning`, and `cross_domain_replan` — specialist fan-out and
-  synthesis variants.
+- `workflow`, `workflow_learning`, `workflow_cycle`, and `workflow_trajectory_learning` — staged
+  workflow execution, bounded evaluator/replan, and delayed-credit variants; and
+- `cross_domain`, `cross_domain_learning`, `cross_domain_trajectory_learning`, and
+  `cross_domain_replan` — specialist fan-out, synthesis, delayed-credit, and replan variants.
 
 The resolver receives only the validated remote job projection plus approval/attempt metadata and
 returns the matching private request and runner kwargs. The worker recomputes the composite digest,
@@ -3823,8 +3823,16 @@ rehydrates the private context. The worker preserves the monotonic side-effect b
 that re-entry, renews the lease during provider work, and never retries an uncertain post-dispatch
 effect automatically. Typed resolver/transport failures before dispatch can be requeued within
 `max_attempts`; spec drift and malformed remote metadata fail closed. The same digest and
-redaction tests cover all seven modes and the built-in domain catalogue, so cross-domain execution
+redaction tests cover all nine modes and the built-in domain catalogue, so cross-domain execution
 does not create a second security or lifecycle path.
+
+Async Python hosts should use `AsyncRemoteBrainJobWorker` with `AsyncBrainControlClient` and
+`AsyncDurableBrainControlPlaneAdapter`. It exposes the same submission, approval, lease, retry,
+reconciliation, and metadata-only result types. Synchronous `AutonomousBrain` methods are run in
+an executor thread so provider work does not block an event loop; a deployment may instead supply
+native async runner methods. Resolver execution is also isolated from the loop, and cancellation
+records the current preflight boundary or conservatively settles an active dispatch as uncertain
+before propagating cancellation to the host.
 
 ## Reusable domain evaluators
 

@@ -143,8 +143,10 @@ from .remote_brain_worker import (
     RemoteBrainJobBatch,
     RemoteBrainJobResolution,
     RemoteBrainJobResolver,
+    AsyncRemoteBrainJobResolver,
     autonomous_remote_brain_job_spec_digest,
     RemoteBrainJobWorker,
+    AsyncRemoteBrainJobWorker,
 )
 from .durable_brain_transport import (
     AsyncDurableBrainControlPlaneAdapter,
@@ -2997,8 +2999,10 @@ __all__ = [
     "RemoteBrainJobBatch",
     "RemoteBrainJobResolution",
     "RemoteBrainJobResolver",
+    "AsyncRemoteBrainJobResolver",
     "autonomous_remote_brain_job_spec_digest",
     "RemoteBrainJobWorker",
+    "AsyncRemoteBrainJobWorker",
     "JOB_RECONCILIATION_OUTCOMES",
     "JOB_RECONCILIATION_SCHEMA",
     "RECONCILIATION_SCHEMA",
