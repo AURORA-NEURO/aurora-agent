@@ -50,6 +50,10 @@ from .autonomy import (
     InMemoryAutonomousBatchCheckpointStore,
 )
 from .autonomous_model_inventory import AutonomousModelInventoryStore
+from .autonomy_onboarding import (
+    AutonomousCapabilityActivation,
+    AutonomousCapabilityActivationStore,
+)
 from .autonomy_persistence import AutonomousExecutionJournal
 from .brain import BrainEvaluatorDecision, BrainLearningEpisode, BrainOutcomeEvaluator
 from .brain_learning_store import SQLiteBrainLearningLedger
@@ -476,6 +480,116 @@ def _activate_domain_tools(
     }
 
 
+def _load_activation_store(
+    args: argparse.Namespace,
+) -> tuple[AutonomousCapabilityActivationStore | None, Any | None, bool]:
+    """Load an explicitly requested redacted activation snapshot, never credentials."""
+
+    path = getattr(args, "activation_store", None)
+    resume = bool(getattr(args, "resume_activation", False))
+    if resume and not path:
+        raise ValueError("--resume-activation requires --activation-store")
+    if path is None:
+        return None, None, False
+    store = AutonomousCapabilityActivationStore(path)
+    if not resume:
+        return store, None, False
+    state = store.load()
+    if state is None:
+        raise ValueError("--resume-activation requires an existing activation snapshot")
+    return store, state, True
+
+
+def _activation_domains(state: Mapping[str, Any]) -> tuple[str, ...]:
+    """Recover the exact reviewed domain scope from a redacted activation snapshot."""
+
+    rows = state.get("domain_statuses", ())
+    if isinstance(rows, Sequence) and not isinstance(rows, (str, bytes)):
+        domains = tuple(
+            row.get("domain")
+            for row in rows
+            if isinstance(row, Mapping) and isinstance(row.get("domain"), str)
+        )
+        if domains:
+            return _domains(domains)
+    return _domains(None)
+
+
+def _rehydrate_domain_tools(
+    agent: AutonomousAgent,
+    catalogue: ToolCatalogue,
+    *,
+    previous_state: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Revalidate and re-register approved bindings after a process restart.
+
+    The activation file contains only approved names and digests, never the original schemas.
+    Rehydration therefore requires a fresh live catalogue and recomputes the reviewed plan. A
+    catalogue/profile change clears approvals in the SDK activation state before this helper can
+    register anything, making drift fail closed without replaying a stale schema.
+    """
+
+    domains = _activation_domains(previous_state)
+    plan = agent.plan_workspace_tool_bindings(catalogue, domains=domains)
+    activation = agent.activation_state()
+    approved = tuple(activation.get("approved_tools", ()))
+    proposed = plan.get("proposed_bindings")
+    if not isinstance(proposed, Mapping):
+        raise ValueError("activation rehydration received malformed proposed_bindings")
+    missing = sorted(set(approved).difference(proposed))
+    if missing:
+        raise ValueError("activation approvals could not be revalidated")
+    registered: list[dict[str, Any]] = []
+    if approved:
+        registered = agent.register_workspace_bindings_from_plan(
+            plan,
+            approved,
+            catalogue=catalogue,
+        )
+    final_state = agent.activation_state()
+    registry = agent.tool_registry
+    return {
+        "requested": True,
+        "mode": "resumed",
+        "domains": list(domains),
+        "plan_digest": final_state.get("plan_digest"),
+        "catalogue_digest": final_state.get("catalogue_digest"),
+        "profile_digest": final_state.get("profile_digest"),
+        "approved_tools": sorted(approved),
+        "registered_tools": sorted(
+            row["name"]
+            for row in registered
+            if isinstance(row, Mapping) and isinstance(row.get("name"), str)
+        ),
+        "registry_digest": None if registry is None else registry.digest,
+        "activation_status": final_state.get("status"),
+        "activation_revision": final_state.get("revision"),
+        "activation_authority": "activation_approved_tools_only",
+        "effect_authority": "separate_operator_mission_dispatch_required",
+        "retention": "revalidated_digests; approved names and status only",
+    }
+
+
+def _activation_persistence_projection(
+    store: AutonomousCapabilityActivationStore | None,
+    *,
+    resumed: bool,
+    persisted: bool,
+    state: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Project activation persistence without exposing state beyond its redacted digest."""
+
+    return {
+        "configured": store is not None,
+        "store": None if store is None else str(store.path),
+        "resumed": resumed,
+        "persisted": persisted,
+        "state_digest": None if state is None else state.get("state_digest"),
+        "status": None if state is None else state.get("status"),
+        "retention": "activation_digests_and_status_only; credentials_and_handles_never_persisted",
+    }
+
+
 def _candidate_args(
     args: argparse.Namespace,
     descriptors: Sequence[ProviderModelDescriptor] = (),
@@ -770,6 +884,23 @@ def _inventory_status(args: argparse.Namespace) -> dict[str, Any]:
         "catalogue": None if catalogue is None else catalogue.to_dict(),
         "available": snapshot is not None,
         "authorization": "metadata_read_only; no_provider_or_credential_access",
+        "secret_material": "never_returned",
+    }
+
+
+def _activation_status(args: argparse.Namespace) -> dict[str, Any]:
+    """Inspect a persisted activation snapshot without contacting providers or MCP."""
+
+    store = AutonomousCapabilityActivationStore(args.activation_store)
+    state = store.load()
+    return {
+        "schema": CLI_SCHEMA,
+        "command": "activation-status",
+        "available": state is not None,
+        "activation_store": args.activation_store,
+        "state": None if state is None else state.to_dict(),
+        "authorization": "metadata_read_only; no_provider_or_credential_access",
+        "retention": "redacted_activation_state_only; no_keys_handles_prompts_or_payloads",
         "secret_material": "never_returned",
     }
 
@@ -1594,6 +1725,7 @@ def _batch_run(
     mode, job_id, requests = _load_batch_requests(args)
     if args.domain_tool_domain and not (args.activate_domain_tools or args.approve_domain_tool):
         raise ValueError("--domain-tool-domain requires --activate-domain-tools or --approve-domain-tool")
+    activation_store, loaded_activation_state, activation_resumed = _load_activation_store(args)
     if args.resume_batch and args.batch_checkpoint_store is None:
         raise ValueError("--resume-batch requires --batch-checkpoint-store")
     if args.batch_result_manifest is not None and args.batch_checkpoint_store is None:
@@ -1633,6 +1765,8 @@ def _batch_run(
     health_ledger = None
     learning_ledger = None
     execution_journal = None
+    activation_state_after: Mapping[str, Any] | None = None
+    activation_persisted = False
     tool_surface: dict[str, Any] = {
         "mode": "not_requested",
         "exposed_count": 0,
@@ -1668,6 +1802,10 @@ def _batch_run(
                 agent_kwargs["health_ledger"] = health_ledger
             if execution_journal is not None:
                 agent_kwargs["execution_journal"] = execution_journal
+            if loaded_activation_state is not None:
+                agent_kwargs["activation"] = AutonomousCapabilityActivation(
+                    state=loaded_activation_state
+                )
             agent = AutonomousAgent(_McpWorkspace(client), runtime, **agent_kwargs)
             needs_provider_tools = args.execution_mode in {"tool_loop", "mission"} or any(
                 isinstance(request.get("options"), Mapping)
@@ -1677,13 +1815,14 @@ def _batch_run(
             domain_activation_requested = bool(
                 args.activate_domain_tools or args.approve_domain_tool
             )
+            domain_registry_requested = domain_activation_requested or activation_resumed
             provider_tools, tool_catalogue = (
                 _mcp_provider_tools(
                     client,
                     allow_tools=tuple(args.allow_mcp_tool or ()),
                     deny_tools=tuple(args.deny_mcp_tool or ()),
                 )
-                if needs_provider_tools or domain_activation_requested
+                if needs_provider_tools or domain_registry_requested
                 else ((), None)
             )
             domain_binding = None
@@ -1697,6 +1836,13 @@ def _batch_run(
                     approved_tools=tuple(args.approve_domain_tool or ()),
                 )
                 assert domain_binding is not None
+            elif activation_resumed:
+                assert tool_catalogue is not None
+                domain_binding = _rehydrate_domain_tools(
+                    agent,
+                    tool_catalogue,
+                    previous_state=loaded_activation_state.to_dict(),
+                )
             tool_authorizer = (
                 _cli_tool_authorizer(
                     client,
@@ -1763,7 +1909,7 @@ def _batch_run(
                         options["workflow_retry_blocked"] = True
                 if (
                     provider_tools
-                    and not domain_activation_requested
+                    and not domain_registry_requested
                     and options.get("execution_mode", "provider") in {"tool_loop", "mission"}
                 ):
                     options["provider_tools"] = provider_tools
@@ -1771,7 +1917,7 @@ def _batch_run(
                         "authorize_and_execute": tool_authorizer,
                     }
                 elif (
-                    domain_activation_requested
+                    domain_registry_requested
                     and options.get("execution_mode", "provider") in {"tool_loop", "mission"}
                 ):
                     options["tool_loop_options"] = {
@@ -1790,6 +1936,10 @@ def _batch_run(
                 stop_on_error=args.stop_on_error,
                 rehydrate_result=rehydrate_result,
             )
+            if activation_store is not None:
+                agent.save_activation(activation_store)
+                activation_state_after = agent.activation_state()
+                activation_persisted = True
         batch = run_payload.get("batch") if isinstance(run_payload, Mapping) else None
         if not isinstance(batch, AutonomousBatchResult):
             raise ValueError("batch engine returned an invalid result")
@@ -1822,6 +1972,12 @@ def _batch_run(
             },
             "provider_status": runtime.provider_status(args.provider),
             "tool_surface": tool_surface,
+            "activation_persistence": _activation_persistence_projection(
+                activation_store,
+                resumed=activation_resumed,
+                persisted=activation_persisted,
+                state=activation_state_after,
+            ),
             "credential_session": session.status().to_dict(),
             "authorization": {
                 "provider_call_approved": args.approve_provider_call,
@@ -1942,6 +2098,7 @@ def _run(
         raise ValueError("choose exactly one of --automatic or --domain")
     if args.domain_tool_domain and not (args.activate_domain_tools or args.approve_domain_tool):
         raise ValueError("--domain-tool-domain requires --activate-domain-tools or --approve-domain-tool")
+    activation_store, loaded_activation_state, activation_resumed = _load_activation_store(args)
     command = _parse_mcp_command(args.mcp_command)
     if args.discover_models and not args.approve_provider_call:
         raise ValueError("model discovery requires --approve-provider-call")
@@ -1981,6 +2138,8 @@ def _run(
     health_ledger = None
     learning_ledger = None
     execution_journal = None
+    activation_state_after: Mapping[str, Any] | None = None
+    activation_persisted = False
     tool_surface: dict[str, Any] = {
         "mode": "not_requested",
         "exposed_count": 0,
@@ -2027,20 +2186,25 @@ def _run(
                 agent_kwargs["health_ledger"] = health_ledger
             if execution_journal is not None:
                 agent_kwargs["execution_journal"] = execution_journal
+            if loaded_activation_state is not None:
+                agent_kwargs["activation"] = AutonomousCapabilityActivation(
+                    state=loaded_activation_state
+                )
             agent = AutonomousAgent(_McpWorkspace(client), runtime, **agent_kwargs)
             domain_activation_requested = bool(
                 args.activate_domain_tools or args.approve_domain_tool
             )
+            domain_registry_requested = domain_activation_requested or activation_resumed
             provider_tools, tool_catalogue = (
                 _mcp_provider_tools(
                     client,
                     allow_tools=tuple(args.allow_mcp_tool or ()),
                     deny_tools=tuple(args.deny_mcp_tool or ()),
                 )
-                if args.execution_mode in {"tool_loop", "mission"} or domain_activation_requested
+                if args.execution_mode in {"tool_loop", "mission"} or domain_registry_requested
                 else ((), None)
             )
-            if args.execution_mode in {"tool_loop", "mission"} or domain_activation_requested:
+            if args.execution_mode in {"tool_loop", "mission"} or domain_registry_requested:
                 assert tool_catalogue is not None
                 tool_surface = {
                     "mode": "live_mcp",
@@ -2067,6 +2231,15 @@ def _run(
                 assert domain_binding is not None
                 tool_surface["domain_binding"] = domain_binding
                 tool_surface["mode"] = "domain_registry"
+            elif activation_resumed:
+                assert tool_catalogue is not None
+                domain_binding = _rehydrate_domain_tools(
+                    agent,
+                    tool_catalogue,
+                    previous_state=loaded_activation_state.to_dict(),
+                )
+                tool_surface["domain_binding"] = domain_binding
+                tool_surface["mode"] = "domain_registry"
             common = {
                 "task": args.task,
                 "credentials": session,
@@ -2083,7 +2256,7 @@ def _run(
                 "execution_id": args.execution_id,
                 "resume_execution": args.resume_execution,
             }
-            if provider_tools and not domain_activation_requested:
+            if provider_tools and not domain_registry_requested:
                 common["provider_tools"] = provider_tools
                 common["tool_loop_options"] = {
                     "authorize_and_execute": _cli_tool_authorizer(
@@ -2092,7 +2265,7 @@ def _run(
                         approve_mission_dispatch=args.approve_mission_dispatch,
                     ),
                 }
-            elif domain_activation_requested and args.execution_mode in {"tool_loop", "mission"}:
+            elif domain_registry_requested and args.execution_mode in {"tool_loop", "mission"}:
                 registered_names = () if domain_binding is None else tuple(
                     domain_binding.get("registered_tools", ())
                 )
@@ -2124,6 +2297,10 @@ def _run(
                 if args.learning_mode == "online":
                     common["learn"] = True
                 result = agent.run(**common, domain=args.domain)
+            if activation_store is not None:
+                agent.save_activation(activation_store)
+                activation_state_after = agent.activation_state()
+                activation_persisted = True
         workflow_result_checkpoint = _workflow_checkpoint_from_result(result)
         workflow_persistence = {
             "configured": args.workflow_checkpoint_store is not None,
@@ -2181,6 +2358,12 @@ def _run(
             "result": result,
             "provider_status": runtime.provider_status(args.provider),
             "tool_surface": tool_surface,
+            "activation_persistence": _activation_persistence_projection(
+                activation_store,
+                resumed=activation_resumed,
+                persisted=activation_persisted,
+                state=activation_state_after,
+            ),
             "credential_session": session.status().to_dict(),
             "authorization": {
                 "provider_call_approved": args.approve_provider_call,
@@ -2316,6 +2499,12 @@ def _parser() -> argparse.ArgumentParser:
         help="read a persisted model inventory snapshot without contacting a provider",
     )
     inventory_status.add_argument("--inventory-store", required=True, help="metadata-only snapshot path")
+
+    activation_status = subparsers.add_parser(
+        "activation-status",
+        help="read a persisted domain activation snapshot without contacting a provider or MCP",
+    )
+    activation_status.add_argument("--activation-store", required=True, help="redacted activation snapshot path")
 
     state_status = subparsers.add_parser(
         "state-status",
@@ -2458,6 +2647,16 @@ def _parser() -> argparse.ArgumentParser:
         default=[],
         help="domain scope for curated MCP binding activation; repeatable (default: task scope/all)",
     )
+    run.add_argument(
+        "--activation-store",
+        default=None,
+        help="optional atomic redacted activation snapshot path",
+    )
+    run.add_argument(
+        "--resume-activation",
+        action="store_true",
+        help="rehydrate approved domain bindings from --activation-store after live catalogue validation",
+    )
     run.add_argument("--run-id", default=None)
     run.add_argument("--approve-provider-call", action="store_true", help="authorize provider invocation")
     run.add_argument("--approve-mission-dispatch", action="store_true", help="authorize mission effects")
@@ -2507,6 +2706,16 @@ def _parser() -> argparse.ArgumentParser:
         choices=AUTONOMOUS_DOMAINS,
         default=[],
         help="domain scope for curated MCP binding activation; repeatable (default: all)",
+    )
+    batch_run.add_argument(
+        "--activation-store",
+        default=None,
+        help="optional atomic redacted activation snapshot path",
+    )
+    batch_run.add_argument(
+        "--resume-activation",
+        action="store_true",
+        help="rehydrate approved domain bindings from --activation-store after live catalogue validation",
     )
     batch_run.add_argument("--learning-mode", choices=("off", "online", "trajectory"), default=None, help="automatic route learning mode")
     batch_run.add_argument("--workflow-execution", action="store_true", help="enable checkpointable workflow execution for automatic requests")
@@ -2574,6 +2783,8 @@ def main(
             payload = _refresh_models(args, environ=env, reader=reader)
         elif args.command == "inventory-status":
             payload = _inventory_status(args)
+        elif args.command == "activation-status":
+            payload = _activation_status(args)
         elif args.command == "state-status":
             payload = _state_status(args)
         elif args.command == "learning-status":

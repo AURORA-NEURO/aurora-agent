@@ -1200,6 +1200,89 @@ def test_keyless_tool_loop_can_activate_curated_domain_registry_bindings() -> No
     assert payload["result"]["provider_loop"]["tool_calls"] == 1
 
 
+def test_cli_persists_and_rehydrates_redacted_domain_activation(tmp_path) -> None:
+    fixture = Path(__file__).parent / "autonomous_brain_mcp_server.py"
+    command = f'"{sys.executable.replace(chr(92), "/")}" -u "{fixture.as_posix()}"'
+    activation_store = tmp_path / "activation.json"
+
+    def run_with(*extra: str):
+        response_sequence = json.dumps(
+            [
+                {
+                    "tool_calls": [
+                        {
+                            "id": "call-repository-catalog",
+                            "name": "repository_catalog",
+                            "arguments": {"scope": "restart-safe"},
+                        }
+                    ]
+                },
+                {"output_text": "persistent repository evidence complete"},
+            ],
+            separators=(",", ":"),
+        )
+        return _invoke(
+            "run",
+            "--mcp-command", command,
+            "--task", "inspect repository evidence after restart",
+            "--domain", "coding",
+            "--provider", "local",
+            "--model", "local-model",
+            "--model-capability", "reasoning",
+            "--model-capability", "code",
+            "--local-response-sequence-json", response_sequence,
+            "--execution-mode", "tool_loop",
+            "--allow-mcp-tool", "repository_catalog",
+            "--approve-provider-call",
+            "--approve-mission-dispatch",
+            *extra,
+        )
+
+    first_code, first, first_errors = run_with(
+        "--activate-domain-tools",
+        "--activation-store", str(activation_store),
+    )
+    assert first_code == 0
+    assert first_errors == ""
+    assert first["activation_persistence"]["persisted"] is True
+    assert first["activation_persistence"]["resumed"] is False
+    assert first["tool_surface"]["domain_binding"]["activation_status"] == "ready"
+    assert activation_store.exists()
+
+    second_code, second, second_errors = run_with(
+        "--resume-activation",
+        "--activation-store", str(activation_store),
+    )
+    assert second_code == 0
+    assert second_errors == ""
+    assert second["activation_persistence"]["resumed"] is True
+    assert second["tool_surface"]["domain_binding"]["mode"] == "resumed"
+    assert second["tool_surface"]["domain_binding"]["registered_tools"] == ["repository_catalog"]
+    assert second["result"]["provider_loop"]["tool_calls"] == 1
+
+    stale_code, stale, stale_errors = run_with(
+        "--resume-activation",
+        "--activation-store", str(activation_store),
+        "--deny-mcp-tool", "repository_catalog",
+    )
+    assert stale_code == 0
+    assert stale_errors == ""
+    assert stale["tool_surface"]["domain_binding"]["registered_tools"] == []
+    assert stale["tool_surface"]["domain_binding"]["activation_status"] == "stale"
+
+    status_code, status, status_errors = _invoke(
+        "activation-status",
+        "--activation-store", str(activation_store),
+    )
+    assert status_code == 0
+    assert status_errors == ""
+    assert status["available"] is True
+    assert status["state"]["status"] == "stale"
+    assert status["state"]["approved_tools"] == []
+    assert status["state"]["secret_material"] == "never_returned"
+    assert "persistent repository evidence" not in json.dumps(status)
+
+
 def test_keyless_tool_loop_rejects_unknown_mcp_allowlist_before_provider_dispatch() -> None:
     fixture = Path(__file__).parent / "autonomous_brain_mcp_server.py"
     command = f'"{sys.executable.replace(chr(92), "/")}" -u "{fixture.as_posix()}"'
@@ -1242,6 +1325,7 @@ def test_keyless_subprocess_batch_routes_every_builtin_domain(tmp_path) -> None:
         [{"output_text": f"completed {domain}"} for domain in AUTONOMOUS_DOMAINS],
         separators=(",", ":"),
     )
+    activation_store = tmp_path / "all-domain-activation.json"
     capabilities = (
         "reasoning", "code", "web", "data", "science", "biomedical", "operations",
         "enterprise", "coordination", "multimodal", "evaluation",
@@ -1256,6 +1340,7 @@ def test_keyless_subprocess_batch_routes_every_builtin_domain(tmp_path) -> None:
         "--local-response-sequence-json", response_sequence,
         "--max-parallelism", "1",
         "--activate-domain-tools",
+        "--activation-store", str(activation_store),
         "--approve-provider-call",
     ]
     for capability in capabilities:
@@ -1275,6 +1360,8 @@ def test_keyless_subprocess_batch_routes_every_builtin_domain(tmp_path) -> None:
     assert binding["registered_tools"] == ["repository_catalog"]
     assert binding["proposed_count"] == 1
     assert binding["activation_status"] == "partially_activated"
+    assert payload["activation_persistence"]["persisted"] is True
+    assert activation_store.exists()
     assert payload["credential_session"]["providers"] == []
 
 

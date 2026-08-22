@@ -544,6 +544,23 @@ status. It never returns a schema, argument, result, credential, or provider pay
 path is available to `batch-run`; its activation scope defaults to all twelve domains so a single
 bounded job can reuse the registry across domain, automatic, and cross-domain items.
 
+Activation can survive a process restart without persisting a provider key or credential handle.
+Pass `--activation-store` when activating, then use `--resume-activation --activation-store` on a
+later run. Rehydration always requests a fresh live `tools/list`, reconstructs the exact curated
+plan, and re-registers only names that remain approved and read-only. A changed catalogue,
+allowlist, or profile digest clears the approved set and reports `stale`; it never reuses the old
+schema. Inspect the snapshot without starting an MCP process or collecting a credential:
+
+```bash
+python -m prism_sdk activation-status \
+  --activation-store .aurora/activation.json
+```
+
+The persisted file contains provider readiness projections, domain coverage, exact tool names,
+and integrity digests only. `activation-status` and the execution result both label this as
+metadata-only state; activation does not authorize provider invocation, tool effects, or human
+decisions.
+
 The local provider also supports a bounded response sequence for offline integration tests. The
 array contains at most 32 JSON objects; each call consumes one object in order, and `text` or
 `output_text` can provide the response text while `tool_calls` provides provider-neutral tool
