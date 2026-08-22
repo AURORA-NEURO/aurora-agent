@@ -122,6 +122,88 @@ test("multimodal content refuses insecure URLs, malformed base64, secret-shaped 
   );
 });
 
+test("autonomous facade carries transient multimodal evidence through every domain and cross-domain synthesis", async () => {
+  const calls = [];
+  const runtime = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      calls.push(requestRecord(_url, init));
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: "bounded answer" }, finish_reason: "stop" }] });
+    },
+  });
+  runtime.registerProvider(openaiCompatibleProvider("facade-vision", "https://facade-vision.test", { requiresCredential: false }));
+  const model = {
+    provider: "facade-vision",
+    model: "vision-model",
+    capabilities: ["reasoning", "code", "science", "data", "web", "biomedical", "operations", "enterprise", "coordination", "multimodal", "evaluation"],
+    context_window_tokens: 32_000,
+    max_output_tokens: 2_000,
+    quality: 0.9,
+    latency_ms: 100,
+    cost_per_million_tokens: 10,
+    reliability: 0.95,
+  };
+  const agent = new AutonomousAgent(runtime);
+  const domains = {
+    coding: "debug this Rust repository",
+    browser: "navigate the browser and compare sources",
+    data: "validate this parquet dataset lineage",
+    science: "design a hypothesis experiment",
+    biomedical: "review patient treatment evidence",
+    neuroscience: "analyze EEG preprocessing",
+    operations: "plan a rollback after an outage",
+    enterprise: "review governance compliance ownership",
+    multi_agent: "delegate this subtask to a specialist agent",
+    multimodal: "inspect this image and transcript",
+    cross_domain: "perform an interdisciplinary synthesis",
+    evaluation: "run a benchmark holdout replay",
+  };
+  for (const [domain, task] of Object.entries(domains)) {
+    const url = `https://evidence.example/${domain}.png`;
+    const result = await agent.run(task, {
+      domain,
+      candidates: [model],
+      approveProviderCall: true,
+      contentParts: [providerTextPart(`Evidence for ${domain}`), providerImageUrlPart(url)],
+    });
+    assert.equal(result.status, "completed", domain);
+    const body = calls.at(-1).body;
+    const message = body.messages.find((item) => Array.isArray(item.content));
+    assert.ok(message, `${domain} should send a content array`);
+    assert.equal(message.content.some((part) => part.type === "image_url" && part.image_url.url === url), true, domain);
+    assert.equal(JSON.stringify(result).includes(url), false, `${domain} must not retain transient evidence`);
+  }
+
+  const beforeCross = calls.length;
+  const crossUrl = "https://evidence.example/cross-domain.png";
+  const cross = await agent.runCrossDomain("research a biomedical neuroscience experiment with EEG patient evidence", {
+    allowCrossDomain: true,
+    candidates: [model],
+    approveProviderCall: true,
+    contentParts: [providerImageUrlPart(crossUrl)],
+  });
+  assert.ok(["completed", "children_partial"].includes(cross.status));
+  const crossCalls = calls.slice(beforeCross);
+  assert.ok(crossCalls.length >= 3, "cross-domain fan-out should include specialists and synthesis");
+  for (const call of crossCalls) {
+    const message = call.body.messages.find((item) => Array.isArray(item.content));
+    assert.ok(message, "cross-domain provider call should carry task content parts");
+    assert.equal(message.content.some((part) => part.type === "image_url" && part.image_url.url === crossUrl), true);
+  }
+  assert.equal(JSON.stringify(cross).includes(crossUrl), false);
+  const rejectedCalls = calls.length;
+  await assert.rejects(
+    agent.run("Reject malformed image evidence before planning.", {
+      domain: "multimodal",
+      candidates: [model],
+      approveProviderCall: true,
+      contentParts: [{ type: "image_url", url: "http://insecure.example/image.png", apiKey: "must-refuse" }],
+    }),
+    ProviderRuntimeError,
+  );
+  assert.equal(calls.length, rejectedCalls, "invalid façade content must not dispatch");
+});
+
 test("BYOK credentials are opaque, provider-scoped, and revocable", async () => {
   const calls = [];
   const credentials = new CredentialStore();

@@ -249,12 +249,16 @@ transient cursor continuation, cursor-cycle detection, page/item/aggregate-byte 
 metadata-only partial progress when a later page fails. Provider-specific envelope parsing remains
 an explicit callback, and the transport still does not claim source interpretation, domain truth,
 or distributed delivery.
-The provider runtime now also exposes a bounded provider-neutral multimodal content contract:
+The provider runtime and autonomous façades now expose a bounded provider-neutral multimodal
+content contract:
 text/image URL/inline-image parts are translated into OpenAI Responses, OpenAI-compatible Chat,
 and Anthropic wire shapes, HTTPS/base64 validation is fail-closed, policy messages remain text-only,
 and unknown provider-native fields are rejected. Image payloads stay request-local and are absent
-from health, learning, and public projections. This closes typed multimodal invocation without
-claiming image understanding, file acquisition, source interpretation, or domain-truth validation.
+from health, learning, and public projections. The TypeScript `contentParts` and Python
+`content_parts` options propagate through direct runs, tool loops, missions, every-domain
+cross-domain fan-out/synthesis, workflows, learning, and restart-safe child execution. This
+closes typed multimodal invocation without claiming image understanding, file acquisition, source
+interpretation, or domain-truth validation; callers must resupply transient parts after restart.
 The connector layer now also has a typed API source-plan/source-execute bridge that binds the
 returned plan digest before retrieval and keeps connector scope separate from provider payloads.
 This makes the existing gateway usable from the autonomous runtime without turning it into a

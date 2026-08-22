@@ -1180,6 +1180,13 @@ function normalizedProviderContent(value: unknown, role: ProviderMessage["role"]
   return parts;
 }
 
+/** Normalize transient user evidence before it is attached to an autonomous provider request. */
+export function normalizeProviderContentParts(value: unknown): ProviderContentPart[] {
+  const normalized = normalizedProviderContent(value, "user");
+  if (typeof normalized === "string") throw new ProviderRuntimeError("provider content parts must be an array");
+  return normalized;
+}
+
 function providerContentBytes(value: ProviderMessage["content"], role: ProviderMessage["role"]): number {
   const normalized = normalizedProviderContent(value, role);
   return bytes(typeof normalized === "string" ? normalized : jsonText(normalized));

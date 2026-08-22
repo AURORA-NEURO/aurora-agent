@@ -62,6 +62,7 @@ from prism_sdk import (
     builtin_autonomous_domain_evaluator_profiles,
     builtin_autonomous_workflow_strategies,
     openai_provider,
+    provider_image_url_part,
     content_digest,
     task_facet_digests,
 )
@@ -71,6 +72,7 @@ class _ProviderHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 - stdlib handler protocol
         length = int(self.headers.get("Content-Length", "0"))
         self.server.request_body = self.rfile.read(length)  # type: ignore[attr-defined]
+        self.server.request_count = getattr(self.server, "request_count", 0) + 1  # type: ignore[attr-defined]
         request = json.loads(self.server.request_body.decode("utf-8"))  # type: ignore[attr-defined]
         request_text = json.dumps(request)
         if "Propose a bounded cross-domain planning refinement" in request_text:
@@ -4017,6 +4019,71 @@ def test_run_auto_binds_a_restart_safe_decision_cycle_without_reinvoking_on_rehy
                 decision_cycle_rehydrate_result=lambda _context: result,
             )
             assert resumed.to_dict() == result.to_dict()
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_autonomous_facade_carries_transient_multimodal_evidence_through_every_domain_and_cross_domain():
+    runtime, store, server, thread = _runtime()
+    agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+    handle = store.register("openai", "facade-vision-secret")
+    domains = {
+        "coding": "debug this Rust repository",
+        "browser": "navigate the browser and compare sources",
+        "data": "validate this parquet dataset lineage",
+        "science": "design a hypothesis experiment",
+        "biomedical": "review patient treatment evidence",
+        "neuroscience": "analyze EEG preprocessing",
+        "operations": "plan a rollback after an outage",
+        "enterprise": "review governance compliance ownership",
+        "multi_agent": "delegate this subtask to a specialist agent",
+        "multimodal": "inspect this image and transcript",
+        "cross_domain": "perform an interdisciplinary synthesis",
+        "evaluation": "run a benchmark holdout replay",
+    }
+
+    def request_parts() -> list[dict[str, object]]:
+        request = json.loads(server.request_body.decode("utf-8"))  # type: ignore[attr-defined]
+        return [
+            part
+            for item in request.get("input", [])
+            if isinstance(item, dict)
+            for part in item.get("content", [])
+            if isinstance(part, dict)
+        ]
+
+    try:
+        for domain, task in domains.items():
+            url = f"https://evidence.example/{domain}.png"
+            result = agent.run(
+                task=task,
+                domain=domain,
+                credentials={"openai": handle},
+                approve_provider_call=True,
+                content_parts=[provider_image_url_part(url)],
+            )
+            assert result.status.startswith("completed"), domain
+            assert any(part.get("type") == "input_image" and part.get("image_url") == url for part in request_parts()), domain
+            assert url not in json.dumps(result.to_dict()), domain
+
+        before_cross = int(getattr(server, "request_count", 0))
+        cross_url = "https://evidence.example/cross-domain.png"
+        cross = agent.run_cross_domain(
+            task="reconcile a biomedical and neuroscience evidence review",
+            subtasks=[
+                {"id": "biomedical-review", "task": "review treatment evidence", "domain": "biomedical"},
+                {"id": "neuroscience-review", "task": "review EEG evidence", "domain": "neuroscience"},
+            ],
+            credentials={"openai": handle},
+            approve_provider_call=True,
+            content_parts=[provider_image_url_part(cross_url)],
+        )
+        assert cross.status == "completed"
+        assert int(getattr(server, "request_count", 0)) >= before_cross + 3
+        assert any(part.get("type") == "input_image" and part.get("image_url") == cross_url for part in request_parts())
+        assert cross_url not in json.dumps(cross.to_dict())
     finally:
         server.shutdown()
         thread.join(timeout=2)

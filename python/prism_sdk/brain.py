@@ -24,6 +24,7 @@ from .llm_runtime import (
     CredentialError,
     CredentialHandle,
     LLMRuntime,
+    ProviderContentPart,
     ProviderRequest,
     ProviderResponse,
     ProviderError,
@@ -32,6 +33,7 @@ from .llm_runtime import (
     ProviderToolCall,
     ProviderToolLoopResult,
     ProviderToolResult,
+    normalize_provider_content_parts,
 )
 from .errors import ArgumentError
 from .mission import MissionPolicy, MissionRequest
@@ -202,6 +204,37 @@ def _route_provider_tool_surface(
     if provider_tools and not narrowed:
         raise BrainRunError("route has no overlap with the caller provider tool surface")
     return narrowed
+
+
+def _provider_messages_with_content_parts(
+    messages: Sequence[Mapping[str, Any]],
+    content_parts: Sequence[Mapping[str, Any]],
+) -> tuple[dict[str, Any], ...]:
+    """Project a text-only prompt into one transient multimodal provider request."""
+
+    rows: list[dict[str, Any]] = []
+    task_index = -1
+    for index, message in enumerate(messages):
+        if (
+            not isinstance(message, Mapping)
+            or not isinstance(message.get("role"), str)
+            or not isinstance(message.get("content"), str)
+        ):
+            raise BrainRunError("prompt assembly returned malformed provider messages")
+        rows.append({"role": message["role"], "content": message["content"]})
+        if message.get("role") == "user":
+            task_index = index
+        if message.get("source_id") == "task" and message.get("role") == "user":
+            task_index = index
+    if content_parts:
+        if task_index < 0:
+            raise BrainRunError("prompt assembly has no user task message for content parts")
+        text = rows[task_index]["content"]
+        rows[task_index] = {
+            **rows[task_index],
+            "content": tuple(({"type": "text", "text": text}, *(dict(part) for part in content_parts))),
+        }
+    return tuple(rows)
 
 
 def _adaptive_route_context(
@@ -2941,6 +2974,7 @@ class AutonomousBrain:
         ledger: BrainLearningLedger | None = None,
         bandit_state: Mapping[str, Any] | None = None,
         context: Mapping[str, Any] | None = None,
+        content_parts: Sequence[ProviderContentPart | Mapping[str, Any]] | None = None,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         required_capabilities: Sequence[str] = (),
         input_tokens: int = 4_096,
@@ -3049,6 +3083,7 @@ class AutonomousBrain:
                     response_schema=response_schema,
                     idempotency_key=idempotency_key,
                     context=context,
+                    content_parts=content_parts,
                     contextual_observations=effective_contextual_observations,
                     tools=tools,
                     tool_choice=tool_choice,
@@ -3118,6 +3153,7 @@ class AutonomousBrain:
         ledger: BrainLearningLedger | None = None,
         bandit_state: Mapping[str, Any] | None = None,
         context: Mapping[str, Any] | None = None,
+        content_parts: Sequence[ProviderContentPart | Mapping[str, Any]] | None = None,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         required_capabilities: Sequence[str] = (),
         input_tokens: int = 4_096,
@@ -3261,6 +3297,7 @@ class AutonomousBrain:
                     plan=plan,
                     credentials=credentials,
                     context=effective_context,
+                    content_parts=content_parts,
                     contextual_observations=effective_contextual_observations,
                     invocation_observer=invocation_observer,
                     **attempt_options,
@@ -3341,6 +3378,7 @@ class AutonomousBrain:
         ledger: BrainLearningLedger | None = None,
         bandit_state: Mapping[str, Any] | None = None,
         context: Mapping[str, Any] | None = None,
+        content_parts: Sequence[ProviderContentPart | Mapping[str, Any]] | None = None,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         required_capabilities: Sequence[str] = (),
         input_tokens: int = 4_096,
@@ -3480,6 +3518,7 @@ class AutonomousBrain:
                     idempotency_key=idempotency_key,
                     claim_requests=claim_requests,
                     context=effective_context,
+                    content_parts=content_parts,
                     contextual_observations=effective_contextual_observations,
                     evaluator_review=evaluator_review,
                     workflow_binding=workflow_binding,
@@ -3676,6 +3715,7 @@ class AutonomousBrain:
             options["selection_overrides"] = overrides
         allowed_options = {
             "context",
+            "content_parts",
             "contextual_observations",
             "required_capabilities",
             "input_tokens",
@@ -4359,7 +4399,7 @@ class AutonomousBrain:
             options = dict(options)
             allowed_options = {
                 "retry_blocked", "stage_execution_mode", "memory_query", "memory_limit",
-                "contextual_observations", "input_tokens", "requested_output_tokens", "max_cost_per_million_tokens",
+                "contextual_observations", "content_parts", "input_tokens", "requested_output_tokens", "max_cost_per_million_tokens",
                 "max_latency_ms", "min_quality", "selection_overrides", "approve_provider_call",
                 "approve_mission_dispatch", "run_id", "max_output_tokens", "temperature", "idempotency_key",
                 "mission_policy", "mission_options", "route_request", "auto_route", "enforce_route_tools",
@@ -4739,7 +4779,7 @@ class AutonomousBrain:
                 raise BrainRunError("cross_domain_options must be a mapping")
             options = dict(options)
             allowed_options = {
-                "ledger", "memory", "memory_query", "memory_limit", "contextual_observations",
+                "ledger", "memory", "memory_query", "memory_limit", "contextual_observations", "content_parts",
                 "input_tokens", "requested_output_tokens", "max_cost_per_million_tokens",
                 "max_latency_ms", "min_quality", "selection_overrides", "approve_provider_call",
                 "approve_mission_dispatch", "run_id", "max_output_tokens", "temperature",
@@ -5028,6 +5068,7 @@ class AutonomousBrain:
         response_schema: Mapping[str, Any] | None = None,
         idempotency_key: str | None = None,
         context: Mapping[str, Any] | None = None,
+        content_parts: Sequence[ProviderContentPart | Mapping[str, Any]] | None = None,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         tools: Sequence[ProviderTool] = (),
         tool_choice: str | None = None,
@@ -5039,6 +5080,9 @@ class AutonomousBrain:
             raise BrainRunError("tools must be a sequence")
         if any(not isinstance(tool, ProviderTool) for tool in tools):
             raise BrainRunError("tools must contain ProviderTool values")
+        normalized_content_parts = (
+            () if content_parts is None else normalize_provider_content_parts(content_parts)
+        )
         resolved_run_id = run_id or f"brain-{uuid.uuid4().hex}"
         if not isinstance(resolved_run_id, str) or not resolved_run_id.strip() or len(resolved_run_id) > 256:
             raise BrainRunError("run_id must be a bounded non-empty string")
@@ -5126,15 +5170,7 @@ class AutonomousBrain:
             raise BrainRunError(f"no user credential handle was supplied for provider {provider!r}")
         if handle is not None and handle.provider != provider:
             raise BrainRunError(f"credential handle does not belong to provider {provider!r}")
-        provider_messages = tuple(
-            {"role": message["role"], "content": message["content"]}
-            for message in messages
-            if isinstance(message, Mapping)
-            and isinstance(message.get("role"), str)
-            and isinstance(message.get("content"), str)
-        )
-        if len(provider_messages) != len(messages):
-            raise BrainRunError("prompt assembly returned malformed provider messages")
+        provider_messages = _provider_messages_with_content_parts(messages, normalized_content_parts)
         request = ProviderRequest(
             model=model,
             messages=provider_messages,
@@ -5183,6 +5219,7 @@ class AutonomousBrain:
         response_schema: Mapping[str, Any] | None = None,
         idempotency_key: str | None = None,
         context: Mapping[str, Any] | None = None,
+        content_parts: Sequence[ProviderContentPart | Mapping[str, Any]] | None = None,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         provider_tools: Sequence[ProviderTool] = (),
         tool_choice: str | None = None,
@@ -5217,6 +5254,9 @@ class AutonomousBrain:
             raise BrainRunError("attempt_state must be a mutable mapping")
         if attempt_state is not None:
             attempt_state["tool_authorization_started"] = False
+        normalized_content_parts = (
+            () if content_parts is None else normalize_provider_content_parts(content_parts)
+        )
         if not isinstance(provider_tools, Sequence) or isinstance(provider_tools, (str, bytes)):
             raise BrainRunError("provider_tools must be a sequence")
         if any(not isinstance(tool, ProviderTool) for tool in provider_tools):
@@ -5375,6 +5415,7 @@ class AutonomousBrain:
             response_schema=response_schema,
             idempotency_key=idempotency_key,
             context=context,
+            content_parts=None if content_parts is None else normalized_content_parts,
             contextual_observations=contextual_observations,
             tools=provider_tools,
             tool_choice=tool_choice,
@@ -5392,15 +5433,7 @@ class AutonomousBrain:
         prompt_messages = first.prompt.get("messages")
         if not isinstance(prompt_messages, list) or not prompt_messages:
             raise BrainRunError("brain prompt did not retain bounded provider messages")
-        provider_messages = tuple(
-            {"role": message["role"], "content": message["content"]}
-            for message in prompt_messages
-            if isinstance(message, Mapping)
-            and isinstance(message.get("role"), str)
-            and isinstance(message.get("content"), str)
-        )
-        if len(provider_messages) != len(prompt_messages):
-            raise BrainRunError("brain prompt returned malformed continuation messages")
+        provider_messages = _provider_messages_with_content_parts(prompt_messages, normalized_content_parts)
         handle = credentials.get(provider)
         if self.runtime.provider_requires_credential(provider) and handle is None:
             raise BrainRunError(f"no user credential handle was supplied for provider {provider!r}")
@@ -5842,6 +5875,7 @@ class AutonomousBrain:
         idempotency_key: str | None = None,
         claim_requests: Sequence[Mapping[str, Any]] = (),
         context: Mapping[str, Any] | None = None,
+        content_parts: Sequence[ProviderContentPart | Mapping[str, Any]] | None = None,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         evaluator_review: Mapping[str, Any] | None = None,
         workflow_binding: Mapping[str, Any] | None = None,
@@ -6015,6 +6049,7 @@ class AutonomousBrain:
             response_schema=response_schema or DEFAULT_MISSION_RESPONSE_SCHEMA,
             idempotency_key=idempotency_key,
             context=context,
+            content_parts=content_parts,
             contextual_observations=contextual_observations,
             tools=provider_tools,
             tool_choice=tool_choice,

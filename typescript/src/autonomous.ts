@@ -76,6 +76,7 @@ import {
   type AutonomousExecutionPlan,
   type CredentialHandle,
   type ProviderInvocationObserver,
+  type ProviderContentPart,
   type ProviderMessage,
   type ProviderRequest,
   type ProviderResponse,
@@ -83,6 +84,8 @@ import {
   type ProviderToolCall,
   type ProviderToolResult,
   LLMRuntime,
+  normalizeProviderContentParts,
+  providerTextPart,
   providerModelsToCandidates,
   rankAutonomousModels,
   autonomousSelectionConfidence,
@@ -870,6 +873,8 @@ export interface AutonomousRunOptions {
   credential?: CredentialHandle;
   credentialFor?: (provider: string) => CredentialHandle | undefined;
   context?: readonly AutonomousPromptChunk[];
+  /** Transient multimodal evidence appended to the task message only; never retained in autonomy state. */
+  contentParts?: readonly ProviderContentPart[];
   /** Override the agent memory store for this run. */
   memoryStore?: AutonomousEpisodicMemoryStore;
   /** Additional bounded filters for value-only episodic retrieval. */
@@ -4113,11 +4118,14 @@ export class AutonomousAgent {
   async run(task: string, options: AutonomousRunOptions = {}): Promise<AutonomousRunResult> {
     const taskText = boundedText("autonomous task", task, 32_000);
     validateAutonomousStructuredOutputOptions(options);
+    const contentParts = options.contentParts === undefined
+      ? undefined
+      : normalizeProviderContentParts(options.contentParts);
     const costBudget = resolveAutonomousCostBudget(options);
     const route = options.routeOverride ? await validateAutonomousRouteOverride(taskText, options.routeOverride) : await this.route(taskText, { domain: options.domain, hints: options.hints, allowCrossDomain: options.allowCrossDomain });
     if (route.cross_domain && options.domain === undefined) {
       if (options.acceptedSingleDomainPlanRefinement !== undefined) throw new ArgumentError("single-domain plan refinement cannot be applied to a cross-domain route");
-      const cross = await this.runCrossDomain(taskText, { ...options, maxTotalCostUnits: undefined, costBudget });
+      const cross = await this.runCrossDomain(taskText, { ...options, contentParts, maxTotalCostUnits: undefined, costBudget });
       return {
         schema: "bioprism-typescript-autonomous-run/0.1",
         status: cross.status === "completed" ? "completed" : cross.status === "approval_required" ? "approval_required" : cross.status === "reconciliation_required" ? "reconciliation_required" : cross.status === "turn_limit_reached" ? "turn_limit_reached" : cross.status === "child_failed" ? "child_failed" : cross.status === "children_partial" ? "cross_domain_partial" : "route_review_required",
@@ -4154,6 +4162,19 @@ export class AutonomousAgent {
     const defaultToolNames = blueprint.plan.allowed_tools.filter((name) => name !== "provider.invoke");
     const tools = options.tools === undefined ? await this.liveToolsForNames(selectedDomains, defaultToolNames) : this.filterActivatedTools(options.tools);
     const messages: ProviderMessage[] = blueprint.prompt.messages.map((message) => ({ role: message.role, content: message.content }));
+    if (contentParts) {
+      let taskMessageIndex = -1;
+      for (let index = messages.length - 1; index >= 0; index -= 1) {
+        if (messages[index]?.role === "user") {
+          taskMessageIndex = index;
+          break;
+        }
+      }
+      if (taskMessageIndex < 0) throw new ProviderRuntimeError("autonomous prompt has no user task message for content parts");
+      const taskMessage = messages[taskMessageIndex];
+      if (!taskMessage || typeof taskMessage.content !== "string") throw new ProviderRuntimeError("autonomous task message must be text before content parts are attached");
+      messages[taskMessageIndex] = { ...taskMessage, content: [providerTextPart(taskMessage.content), ...contentParts] };
+    }
     if (acceptedPlan) messages.push({ role: "user", content: `Accepted provider plan refinement (digest ${acceptedPlan.refinement_digest}). Follow this existing workflow order and focus only; do not add tools, effects, permissions, credentials, or claims. Priority stages: ${acceptedPlan.priority_stage_ids.join(", ")}. Focus stages: ${acceptedPlan.focus_stage_ids.join(", ")}.` });
     const requiredCapabilities = [...blueprint.required_capabilities];
     if (options.requireJson === true && !requiredCapabilities.includes("structured_output")) requiredCapabilities.push("structured_output");
@@ -4191,6 +4212,9 @@ export class AutonomousAgent {
   async runCrossDomain(task: string, options: AutonomousCrossDomainRunOptions = {}): Promise<AutonomousCrossDomainRunResult> {
     const taskText = boundedText("cross-domain task", task, 32_000);
     validateAutonomousStructuredOutputOptions(options);
+    const contentParts = options.contentParts === undefined
+      ? undefined
+      : normalizeProviderContentParts(options.contentParts);
     const costBudget = resolveAutonomousCostBudget(options);
     const route = options.routeOverride ? await validateAutonomousRouteOverride(taskText, options.routeOverride) : await this.route(taskText, { hints: options.hints, allowCrossDomain: options.allowCrossDomain });
     const learning = this.learner ? "online_bandit_feedback_available" as const : "provider_health_feedback_only" as const;
@@ -4247,6 +4271,7 @@ export class AutonomousAgent {
           { id: "cross-domain-parent", content: `Parent route digest: ${route.route_digest}; child id: ${childId}`, required: true, priority: 100 },
           ...(acceptedPlan ? [{ id: "accepted-cross-domain-plan", content: JSON.stringify({ refinement_digest: acceptedPlan.refinement_digest, child_id: childId, priority_rank: acceptedPlan.priority_child_ids.indexOf(childId), focus: acceptedPlan.focus_child_ids.includes(childId) }), required: true, priority: 95 }] : []),
         ],
+        contentParts,
         retrieveMemory: false,
         recordMemory: false,
         hints: [],
@@ -4346,6 +4371,7 @@ export class AutonomousAgent {
       credential: options.credential,
       credentialFor: options.credentialFor,
       context: synthesisContext,
+      contentParts,
       retrieveMemory: false,
       recordMemory: false,
       hints: [],

@@ -590,6 +590,7 @@ from .llm_runtime import (
     provider_text_part,
     provider_image_url_part,
     provider_image_base64_part,
+    normalize_provider_content_parts,
 )
 from .anndata import AnnDataAdapter, AnnDataAuditResult, AnnDataFinding, audit_anndata
 from .alignment import AlignmentAdapter, AlignmentAuditResult, AlignmentFinding, audit_alignments
@@ -5326,4 +5327,5 @@ __all__ = [
     "provider_text_part",
     "provider_image_url_part",
     "provider_image_base64_part",
+    "normalize_provider_content_parts",
 ]

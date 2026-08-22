@@ -125,7 +125,9 @@ from .llm_runtime import (
     ProviderHealthLedger,
     ProviderOnboarding,
     ProviderConfig,
+    ProviderContentPart,
     ProviderTool,
+    normalize_provider_content_parts,
 )
 from .memory import BrainEpisodicMemory, BrainMemoryError, MemoryQuery, task_facet_digests
 from .goals import (
@@ -7101,6 +7103,7 @@ class AutonomousTaskOrchestrator:
         options: Mapping[str, Any] | None,
         *,
         context: Mapping[str, Any],
+        content_parts: Sequence[Mapping[str, Any]] | None,
         required_capabilities: Sequence[str],
         contextual_observations: Sequence[Mapping[str, Any]],
         input_tokens: int,
@@ -7132,6 +7135,7 @@ class AutonomousTaskOrchestrator:
             raise BrainRunError("mission_options cannot override generated fields: " + ", ".join(unknown))
         generated = {
             "context": dict(context),
+            "content_parts": None if content_parts is None else tuple(dict(part) for part in content_parts),
             "contextual_observations": [dict(item) for item in contextual_observations],
             "required_capabilities": list(required_capabilities),
             "input_tokens": input_tokens,
@@ -7168,6 +7172,7 @@ class AutonomousTaskOrchestrator:
         credentials: Mapping[str, CredentialHandle],
         ledger: BrainLearningLedger | None,
         bandit_state: Mapping[str, Any] | None,
+        content_parts: Sequence[Mapping[str, Any]] | None,
         contextual_observations: Sequence[Mapping[str, Any]],
         input_tokens: int,
         requested_output_tokens: int,
@@ -7208,6 +7213,7 @@ class AutonomousTaskOrchestrator:
                 credentials=credentials,
                 ledger=ledger,
                 bandit_state=bandit_state,
+                content_parts=content_parts,
                 context=blueprint.selection_context,
                 contextual_observations=contextual_observations,
                 required_capabilities=blueprint.required_capabilities,
@@ -7272,6 +7278,7 @@ class AutonomousTaskOrchestrator:
                 credentials=credentials,
                 ledger=ledger,
                 bandit_state=bandit_state,
+                content_parts=content_parts,
                 context=blueprint.selection_context,
                 contextual_observations=contextual_observations,
                 required_capabilities=blueprint.required_capabilities,
@@ -7292,6 +7299,7 @@ class AutonomousTaskOrchestrator:
         options = self._merge_options(
             mission_options,
             context=blueprint.selection_context,
+            content_parts=content_parts,
             required_capabilities=blueprint.required_capabilities,
             contextual_observations=contextual_observations,
             input_tokens=input_tokens,
@@ -7426,7 +7434,7 @@ class AutonomousTaskOrchestrator:
 
     def _run_prepared(self, blueprint: AutonomousTaskBlueprint, **kwargs: Any) -> BrainRunResult | BrainToolLoopResult | BrainMissionResult:
         allowed = {
-            "model_candidates", "credentials", "ledger", "contextual_observations", "input_tokens",
+            "model_candidates", "credentials", "ledger", "content_parts", "contextual_observations", "input_tokens",
             "requested_output_tokens", "max_cost_per_million_tokens", "max_latency_ms", "min_quality",
             "selection_overrides", "approve_provider_call", "approve_mission_dispatch", "run_id",
             "max_output_tokens", "temperature", "response_schema", "idempotency_key", "mission_policy",
@@ -8041,6 +8049,7 @@ class AutonomousTaskOrchestrator:
         constraints: Sequence[str] = (),
         desired_outputs: Sequence[str] = (),
         context: Mapping[str, Any] | None = None,
+        content_parts: Sequence[ProviderContentPart | Mapping[str, Any]] | None = None,
         max_steps: int = 8,
         require_json: bool = False,
         response_schema: Mapping[str, Any] | None = None,
@@ -8089,6 +8098,10 @@ class AutonomousTaskOrchestrator:
         learning loop. Pass ``mission_policy`` to promote the provider proposal into the existing
         route/mission executor; dispatch still requires ``approve_mission_dispatch=True``.
         """
+
+        normalized_content_parts = (
+            None if content_parts is None else normalize_provider_content_parts(content_parts)
+        )
 
         store, recalled = self._memory(
             self.brain,
@@ -8161,6 +8174,7 @@ class AutonomousTaskOrchestrator:
                 options.update(
                     {
                         "context": dict(blueprint.selection_context),
+                        "content_parts": normalized_content_parts,
                         "contextual_observations": [dict(item) for item in contextual_observations],
                         "required_capabilities": list(blueprint.required_capabilities),
                         "input_tokens": input_tokens,
@@ -8219,6 +8233,7 @@ class AutonomousTaskOrchestrator:
                 memory_tags=memory_tags,
                 execution_kwargs={
                     "contextual_observations": contextual_observations,
+                    "content_parts": normalized_content_parts,
                     "input_tokens": input_tokens,
                     "requested_output_tokens": requested_output_tokens,
                     "max_cost_per_million_tokens": max_cost_per_million_tokens,
@@ -8251,6 +8266,7 @@ class AutonomousTaskOrchestrator:
             model_candidates=model_candidates,
             credentials=credentials,
             ledger=ledger,
+            content_parts=normalized_content_parts,
             contextual_observations=contextual_observations,
             input_tokens=input_tokens,
             requested_output_tokens=requested_output_tokens,
@@ -8461,6 +8477,7 @@ class AutonomousTaskOrchestrator:
         memory_query: MemoryQuery | Mapping[str, Any] | None = None,
         memory_limit: int = 8,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
+        content_parts: Sequence[ProviderContentPart | Mapping[str, Any]] | None = None,
         input_tokens: int = 4_096,
         requested_output_tokens: int = 2_048,
         max_cost_per_million_tokens: int | None = None,
@@ -8559,6 +8576,7 @@ class AutonomousTaskOrchestrator:
                 memory_query=memory_query,
                 memory_limit=memory_limit,
                 contextual_observations=contextual_observations,
+                content_parts=content_parts,
                 input_tokens=input_tokens,
                 requested_output_tokens=requested_output_tokens,
                 max_cost_per_million_tokens=max_cost_per_million_tokens,
@@ -8701,6 +8719,7 @@ class AutonomousTaskOrchestrator:
         max_provider_failovers: int = 2,
         tool_loop_options: Mapping[str, Any] | None = None,
         context: Mapping[str, Any] | None = None,
+        content_parts: Sequence[ProviderContentPart | Mapping[str, Any]] | None = None,
         execution_plan_context: Mapping[str, Any] | None = None,
         execution_controller: AutonomousExecutionController | None = None,
     ) -> AutonomousWorkflowRun:
@@ -8916,6 +8935,7 @@ class AutonomousTaskOrchestrator:
                 memory_query=memory_query,
                 memory_limit=memory_limit,
                 contextual_observations=contextual_observations,
+                content_parts=content_parts,
                 input_tokens=input_tokens,
                 requested_output_tokens=requested_output_tokens,
                 max_cost_per_million_tokens=max_cost_per_million_tokens,
@@ -9558,6 +9578,7 @@ class AutonomousTaskOrchestrator:
         model_candidates: Sequence[Mapping[str, Any]],
         credentials: Mapping[str, CredentialHandle],
         context: Mapping[str, Any] | None = None,
+        content_parts: Sequence[ProviderContentPart | Mapping[str, Any]] | None = None,
         execution_plan_context: Mapping[str, Any] | None = None,
         desired_outputs: Sequence[str] = (
             "domain-attributed findings",
@@ -9611,6 +9632,9 @@ class AutonomousTaskOrchestrator:
         silently persists provider output into learning memory.
         """
 
+        normalized_content_parts = (
+            None if content_parts is None else normalize_provider_content_parts(content_parts)
+        )
         if not isinstance(synthesize, bool) or not isinstance(allow_partial, bool):
             raise BrainRunError("synthesize and allow_partial must be booleans")
         if execution_plan_context is not None:
@@ -9663,6 +9687,7 @@ class AutonomousTaskOrchestrator:
                 constraints=child.spec.constraints,
                 desired_outputs=child.spec.desired_outputs,
                 context=child_context,
+                content_parts=normalized_content_parts,
                 max_steps=child.spec.max_steps,
                 require_json=child.spec.require_json,
                 response_schema=child.spec.response_schema,
@@ -9764,6 +9789,7 @@ class AutonomousTaskOrchestrator:
             constraints=synthesis.spec.constraints,
             desired_outputs=synthesis.spec.desired_outputs,
             context=synthesis_context,
+            content_parts=normalized_content_parts,
             max_steps=synthesis.spec.max_steps,
             require_json=synthesis.spec.require_json,
             response_schema=synthesis.spec.response_schema,
@@ -9862,6 +9888,10 @@ class AutonomousTaskOrchestrator:
             return kwargs.pop(name, default)
 
         context = take("context", None)
+        content_parts = take("content_parts", None)
+        normalized_content_parts = (
+            None if content_parts is None else normalize_provider_content_parts(content_parts)
+        )
         desired_outputs = take(
             "desired_outputs",
             ("domain-attributed findings", "cross-domain conflicts and uncertainty", "safe next actions"),
@@ -10036,6 +10066,7 @@ class AutonomousTaskOrchestrator:
                 constraints=child.spec.constraints,
                 desired_outputs=child.spec.desired_outputs,
                 context=child_context,
+                content_parts=normalized_content_parts,
                 max_steps=child.spec.max_steps,
                 require_json=child.spec.require_json,
                 response_schema=child.spec.response_schema,
@@ -10149,6 +10180,7 @@ class AutonomousTaskOrchestrator:
             constraints=synthesis.spec.constraints,
             desired_outputs=synthesis.spec.desired_outputs,
             context=synthesis_context,
+            content_parts=normalized_content_parts,
             max_steps=synthesis.spec.max_steps,
             require_json=synthesis.spec.require_json,
             response_schema=synthesis.spec.response_schema,

@@ -392,6 +392,46 @@ This is a transport/input capability, not an image classifier or clinical truth 
 workflows still own modality inventory, provenance, uncertainty, human review, and evaluator
 evidence before any model output becomes a claim.
 
+#### Multimodal input through the autonomous façade
+
+The high-level autonomous APIs expose the same contract without putting image bytes or URLs into
+the planner. TypeScript uses `contentParts`; Python uses `content_parts`:
+
+```typescript
+const result = await agent.run("Inspect the attached experiment image.", {
+  domain: "science",
+  candidates,
+  approveProviderCall: true,
+  contentParts: [
+    providerTextPart("Focus on visible control-versus-treatment differences."),
+    providerImageUrlPart("https://evidence.example/experiment.png", "high"),
+  ],
+});
+```
+
+```python
+result = agent.run(
+    task="Inspect the attached experiment image.",
+    domain="science",
+    credentials={"openai": handle},
+    approve_provider_call=True,
+    content_parts=[
+        provider_text_part("Focus on visible control-versus-treatment differences."),
+        provider_image_url_part("https://evidence.example/experiment.png", detail="high"),
+    ],
+)
+```
+
+The task text remains the only routing, planning, model-selection, and learning input. The
+validated parts are attached to the final user task message immediately before provider dispatch.
+For `runCrossDomain`/`run_cross_domain`, the same bounded evidence is sent to each specialist and
+the synthesis call; tool-loop continuation and mission proposal requests retain it in the
+in-memory provider request as well. It is never copied into a blueprint, checkpoint, memory
+episode, evaluator packet, health record, learning state, or public result. A restart or a new
+retry must therefore receive the caller-owned parts again. The façade does not acquire files,
+download URLs, interpret pixels, or establish domain truth; those remain explicit connector and
+domain-evaluator responsibilities.
+
 ### Non-interactive deployment bootstrap
 
 When no person enters a key, the deployment should register a source resolver during service

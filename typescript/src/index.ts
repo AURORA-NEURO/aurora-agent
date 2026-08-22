@@ -64,6 +64,7 @@ export {
   providerTextPart,
   providerImageUrlPart,
   providerImageBase64Part,
+  normalizeProviderContentParts,
 } from "./llm.js";
 export type {
   AutonomousExecutionPlan,

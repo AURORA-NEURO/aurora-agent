@@ -1776,6 +1776,17 @@ def provider_image_base64_part(data: str, media_type: str, *, detail: str = "aut
     return ProviderContentPart.image_base64_part(data, media_type, detail=detail)
 
 
+def normalize_provider_content_parts(
+    value: Sequence[ProviderContentPart | Mapping[str, Any]],
+) -> tuple[dict[str, Any], ...]:
+    """Return a canonical, provider-neutral tuple for transient user evidence."""
+
+    normalized = _normalize_provider_content(value, "user")
+    if isinstance(normalized, str):
+        raise ProviderError("provider content parts must be a sequence")
+    return tuple(normalized)
+
+
 @dataclass(frozen=True, slots=True)
 class ProviderTool:
     """Provider-neutral function schema; it describes a tool but never grants execution."""
