@@ -1201,6 +1201,8 @@ def _load_batch_rehydrator(
         raise ValueError("batch result manifest does not cover every completed item")
 
     def rehydrate(context: Any) -> Any:
+        if context.job_id != checkpoint.job_id or context.mode != checkpoint.mode:
+            raise ValueError("batch result manifest context does not match the checkpoint")
         entry = entries.get(context.index)
         if entry is None:
             raise ValueError("batch result manifest is missing the requested item")
@@ -1340,8 +1342,6 @@ def _batch_run(
     else:
         checkpoint_store = InMemoryAutonomousBatchCheckpointStore()
         existing_checkpoint = None
-    if args.resume_batch and mode == "cross_domain":
-        raise ValueError("CLI batch result rehydration currently supports domain and automatic batches only")
     command = _parse_mcp_command(args.mcp_command)
     if args.discover_models and not args.approve_provider_call:
         raise ValueError("model discovery requires --approve-provider-call")

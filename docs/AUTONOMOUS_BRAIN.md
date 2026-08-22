@@ -402,10 +402,10 @@ The request boundary accepts at most 64 items, rejects credential-shaped fields 
 access, and never echoes task text, request options, or provider values in its batch projection.
 `--stop-on-error` turns the remaining items into explicit omissions after the first failure. A
 status-only result manifest records only successful result statuses and item digests, allowing
-independent domain/automatic items to be rehydrated on an explicit `--resume-batch`; it cannot
-reconstruct provider payloads. Cross-domain resume remains a caller-library concern because its
-fan-out and synthesis values require an application-owned rehydrator rather than a CLI-generated
-placeholder.
+independent domain, automatic, or cross-domain items to be rehydrated on an explicit
+`--resume-batch`; it cannot reconstruct provider payloads. For a cross-domain item, the manifest
+rehydrates only the successful batch identity/status needed to skip that independent item; the
+fan-out child and synthesis values remain caller-owned and are never fabricated into the manifest.
 
 The command accepts no API-key or token argument. By default it uses a no-echo prompt; deployment
 automation can select `--credential-source environment --credential-env OPENAI_API_KEY`. The value

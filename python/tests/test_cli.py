@@ -462,10 +462,15 @@ def test_run_automatic_workflow_persists_and_explicitly_rehydrates_checkpoint(tm
     assert json.loads(output.getvalue())["workflow"]["checkpoint_loaded"] is True
 
 
-def _cli_batch_checkpoint(*, result_digest: str, status: str = "completed") -> AutonomousBatchCheckpoint:
+def _cli_batch_checkpoint(
+    *,
+    result_digest: str,
+    status: str = "completed",
+    mode: str = "domain",
+) -> AutonomousBatchCheckpoint:
     return AutonomousBatchCheckpoint(
         job_id="cli-batch-job-1",
-        mode="domain",
+        mode=mode,
         batch_input_digest="a" * 64,
         request_digests=("b" * 64,),
         completed_indices=(0,),
@@ -681,7 +686,10 @@ def test_batch_resume_requires_and_validates_status_only_manifest(tmp_path) -> N
         stop_on_error=False,
         batch_digest=_batch_digest((item,)),
     )
-    checkpoint = _cli_batch_checkpoint(result_digest=content_digest(item.to_dict()))
+    checkpoint = _cli_batch_checkpoint(
+        result_digest=content_digest(item.to_dict()),
+        mode="cross_domain",
+    )
     checkpoint_path = tmp_path / "checkpoint.json"
     manifest_path = tmp_path / "manifest.json"
     _BatchCheckpointFileStore(str(checkpoint_path)).write(checkpoint)
@@ -691,7 +699,7 @@ def test_batch_resume_requires_and_validates_status_only_manifest(tmp_path) -> N
         AutonomousBatchRehydrationContext(
             job_id=checkpoint.job_id,
             index=0,
-            mode="domain",
+            mode="cross_domain",
             request_digest=checkpoint.request_digests[0],
             task_digest=task_digest,
             expected_result_digest=checkpoint.completed_result_digests[0],
@@ -705,6 +713,122 @@ def test_batch_resume_requires_and_validates_status_only_manifest(tmp_path) -> N
         pass
     else:
         raise AssertionError("tampered batch manifest must be rejected")
+
+
+def test_batch_run_rehydrates_cross_domain_items_without_reconstructing_provider_payloads(tmp_path) -> None:
+    captured: dict[str, object] = {}
+    task = "combine the coding and science reviews"
+    requests = tmp_path / "cross-requests.json"
+    requests.write_text(
+        json.dumps(
+            {
+                "schema": "aurora-autonomous-batch-requests/0.1",
+                "mode": "cross_domain",
+                "job_id": "cli-batch-job-1",
+                "requests": [
+                    {
+                        "task": task,
+                        "subtasks": [
+                            {"id": "coding", "task": "review implementation", "domain": "coding"},
+                            {"id": "science", "task": "review evidence", "domain": "science"},
+                        ],
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    class Result:
+        status = "completed"
+
+    task_digest = content_digest({"task": task})
+    item = AutonomousBatchItem(index=0, status="succeeded", task_digest=task_digest, result=Result())
+    batch = AutonomousBatchResult(
+        status="completed",
+        items=(item,),
+        completed_count=1,
+        failed_count=0,
+        omitted_count=0,
+        max_parallelism=1,
+        stop_on_error=False,
+        batch_digest=_batch_digest((item,)),
+    )
+    checkpoint = _cli_batch_checkpoint(
+        result_digest=content_digest(item.to_dict()),
+        mode="cross_domain",
+    )
+    checkpoint_path = tmp_path / "cross-checkpoint.json"
+    manifest_path = tmp_path / "cross-manifest.json"
+    from prism_sdk.cli import _BatchCheckpointFileStore, _write_batch_result_manifest
+
+    _BatchCheckpointFileStore(str(checkpoint_path)).write(checkpoint)
+    _write_batch_result_manifest(str(manifest_path), checkpoint, batch)
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    class FakeAgent:
+        def __init__(self, _workspace: object, _runtime: object, **_kwargs: object) -> None:
+            return None
+
+    class FakeController:
+        def __init__(self, _agent: object, persistence: object) -> None:
+            captured["persistence"] = persistence
+
+        def restore(self):
+            captured["restored"] = True
+            return {"status": "restored"}
+
+        def run(self, requests_value, **kwargs: object):
+            captured["requests"] = requests_value
+            rehydrate = kwargs["rehydrate_result"]
+            restored = rehydrate(
+                AutonomousBatchRehydrationContext(
+                    job_id="cli-batch-job-1",
+                    index=0,
+                    mode="cross_domain",
+                    request_digest=checkpoint.request_digests[0],
+                    task_digest=task_digest,
+                    expected_result_digest=checkpoint.completed_result_digests[0],
+                )
+            )
+            captured["rehydrated_status"] = restored.status
+            captured["persistence"].write(checkpoint)
+            return {"controller": {"status": "completed"}, "batch": batch}
+
+    with (
+        patch("prism_sdk.cli.AutonomousAgent", FakeAgent),
+        patch("prism_sdk.cli.AutonomousBrainBatchJobController", FakeController),
+    ):
+        output = io.StringIO()
+        errors = io.StringIO()
+        code = main(
+            (
+                "batch-run",
+                "--mcp-command", "python server.py",
+                "--requests-file", str(requests),
+                "--job-id", "cli-batch-job-1",
+                "--provider", "local",
+                "--model", "local-model",
+                "--batch-checkpoint-store", str(checkpoint_path),
+                "--batch-result-manifest", str(manifest_path),
+                "--resume-batch",
+            ),
+            environ={},
+            writer=output,
+            error_writer=errors,
+            client_factory=lambda *_args, **_kwargs: FakeClient(),
+        )
+    assert code == 0
+    assert errors.getvalue() == ""
+    assert captured["restored"] is True
+    assert captured["rehydrated_status"] == "completed"
+    assert captured["requests"][0]["subtasks"][1]["domain"] == "science"
+    assert "combine the coding and science reviews" not in output.getvalue()
 
 
 def _write_cli_learning_episode(path, *, episode_id: str = "cli-episode-1", evidence_digest=None) -> None:
