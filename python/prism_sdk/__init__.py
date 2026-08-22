@@ -132,6 +132,8 @@ from .brain_api import (
 from .remote_brain_worker import (
     AUTONOMOUS_REMOTE_BRAIN_WORKER_SCHEMA,
     AUTONOMOUS_REMOTE_BRAIN_JOB_SPEC_SCHEMA,
+    AUTONOMOUS_REMOTE_BRAIN_PLAN_SCHEMA,
+    AUTONOMOUS_REMOTE_BRAIN_ROUTE_SCHEMA,
     MAX_AUTONOMOUS_REMOTE_BRAIN_WORKER_LEASE_MS,
     MAX_AUTONOMOUS_REMOTE_BRAIN_WORKER_HEARTBEAT_MS,
     MAX_AUTONOMOUS_REMOTE_BRAIN_WORKER_BATCH,
@@ -145,6 +147,8 @@ from .remote_brain_worker import (
     RemoteBrainJobResolver,
     AsyncRemoteBrainJobResolver,
     autonomous_remote_brain_job_spec_digest,
+    autonomous_remote_brain_plan_digest,
+    autonomous_remote_brain_route_digest,
     RemoteBrainJobWorker,
     AsyncRemoteBrainJobWorker,
 )

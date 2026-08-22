@@ -16,6 +16,8 @@ from prism_sdk import (
     RemoteBrainJobWorker,
     RemoteBrainWorkerError,
     autonomous_remote_brain_job_spec_digest,
+    autonomous_remote_brain_plan_digest,
+    autonomous_remote_brain_route_digest,
 )
 
 
@@ -218,8 +220,124 @@ def test_remote_worker_rejects_spec_drift_before_dispatch_and_requeues_typed_pre
     store.close()
 
 
+def test_remote_worker_binds_reviewed_plan_and_route_identity_without_remote_private_values(tmp_path):
+    seen: list[tuple[str, dict[str, object]]] = []
+    control, store = _control(tmp_path, seen)
+    brain = _Brain()
+    request = {"task": "private reviewed plan task", "domain": "engineering"}
+    blueprint = {"spec": {"task": request["task"]}, "plan": {"steps": ["review", "execute"]}}
+    route = {"status": "ready", "selected_domains": ["engineering"]}
+    plan_digest = autonomous_remote_brain_plan_digest(blueprint)
+    route_digest = autonomous_remote_brain_route_digest(route)
+    resolved = lambda _context: {
+        "spec_digest": submission.spec_digest,
+        "mode": "autonomous",
+        "request": request,
+        "kwargs": {"task": request["task"], "domain": request["domain"], "blueprint": blueprint, "route": route},
+        "plan_digest": plan_digest,
+        "route_digest": route_digest,
+    }
+    worker = RemoteBrainJobWorker(brain, control, worker_id="reviewed-plan-worker", resolver=resolved)
+    submission = worker.submit(
+        idempotency_key="reviewed-plan",
+        request=request,
+        mode="autonomous",
+        domain="engineering",
+        capability="bounded",
+        risk_class="review",
+        plan_digest=plan_digest,
+        route_digest=route_digest,
+    )
+    assert submission.plan_digest == plan_digest
+    assert submission.route_digest == route_digest
+    assert submission.to_dict()["private_spec"].startswith("caller_owned")
+    waiting = worker.run_once(submission.job["job_id"])
+    assert waiting is not None and waiting.status == "waiting_approval"
+    worker.approval(submission.job["job_id"], "approve", authorization_digest="a" * 64)
+    completed = worker.run_once(submission.job["job_id"])
+    assert completed is not None and completed.status == "succeeded"
+    assert all("private reviewed plan task" not in json.dumps(arguments) for _name, arguments in seen)
+    assert "private reviewed plan task" not in json.dumps([record.to_dict() for record in store.inventory(limit=64)])
+
+    tampered_blueprint = {"spec": {"task": request["task"]}, "plan": {"steps": ["tampered"]}}
+    tampered_worker = RemoteBrainJobWorker(
+        brain,
+        control,
+        worker_id="tampered-plan-worker",
+        resolver=lambda context: {
+            "spec_digest": context["job"]["spec_digest"],
+            "mode": "autonomous",
+            "request": request,
+            "kwargs": {"task": request["task"], "domain": request["domain"], "blueprint": tampered_blueprint, "route": route},
+            "plan_digest": plan_digest,
+            "route_digest": route_digest,
+        },
+    )
+    tampered = tampered_worker.submit(
+        idempotency_key="tampered-reviewed-plan",
+        request=request,
+        mode="autonomous",
+        domain="engineering",
+        capability="bounded",
+        risk_class="review",
+        plan_digest=plan_digest,
+        route_digest=route_digest,
+    )
+    rejected = tampered_worker.run_once(tampered.job["job_id"])
+    assert rejected is not None and rejected.status == "failed"
+    assert len(brain.calls) == 1
+    store.close()
+
+
 def test_async_remote_worker_preserves_all_domains_modes_and_metadata_boundary(tmp_path):
     asyncio.run(_run_async_remote_worker(tmp_path))
+
+
+def test_async_remote_worker_binds_reviewed_identities(tmp_path):
+    asyncio.run(_run_async_reviewed_identities(tmp_path))
+
+
+async def _run_async_reviewed_identities(tmp_path):
+    seen: list[tuple[str, dict[str, object]]] = []
+    control, store = await _async_control(tmp_path, seen)
+    brain = _Brain()
+    request = {"task": "private async reviewed task", "domain": "research"}
+    blueprint = {"spec": {"task": request["task"]}, "plan": {"steps": ["research"]}}
+    route = {"status": "ready", "selected_domains": ["research"]}
+    plan_digest = autonomous_remote_brain_plan_digest(blueprint)
+    route_digest = autonomous_remote_brain_route_digest(route)
+    worker = AsyncRemoteBrainJobWorker(
+        brain,
+        control,
+        worker_id="async-reviewed-worker",
+        resolver=lambda _context: {
+            "spec_digest": submission.spec_digest,
+            "mode": "autonomous",
+            "request": request,
+            "kwargs": {"task": request["task"], "domain": request["domain"], "blueprint": blueprint, "route": route},
+            "plan_digest": plan_digest,
+            "route_digest": route_digest,
+        },
+    )
+    submission = await worker.submit(
+        idempotency_key="async-reviewed-identities",
+        request=request,
+        mode="autonomous",
+        domain="research",
+        capability="bounded",
+        risk_class="review",
+        plan_digest=plan_digest,
+        route_digest=route_digest,
+    )
+    assert submission.plan_digest == plan_digest
+    assert submission.route_digest == route_digest
+    waiting = await worker.run_once(submission.job["job_id"])
+    assert waiting is not None and waiting.status == "waiting_approval"
+    await worker.approval(submission.job["job_id"], "approve", authorization_digest="b" * 64)
+    completed = await worker.run_once(submission.job["job_id"])
+    assert completed is not None and completed.status == "succeeded"
+    assert all("private async reviewed task" not in json.dumps(arguments) for _name, arguments in seen)
+    store.close()
 
 
 async def _run_async_remote_worker(tmp_path):
@@ -388,5 +506,27 @@ def test_remote_spec_digest_is_stable_and_rejects_non_json_private_policy():
     first = autonomous_remote_brain_job_spec_digest(request=request, mode="autonomous", policy_digest="e" * 64)
     second = autonomous_remote_brain_job_spec_digest(request=dict(request), mode="autonomous", policy_digest="e" * 64)
     assert first == second
+    with_identities = autonomous_remote_brain_job_spec_digest(
+        request=request,
+        mode="autonomous",
+        policy_digest="e" * 64,
+        plan_digest="a" * 64,
+        route_digest="b" * 64,
+    )
+    assert with_identities != first
+    assert with_identities == autonomous_remote_brain_job_spec_digest(
+        request=dict(request),
+        mode="autonomous",
+        policy_digest="e" * 64,
+        plan_digest="a" * 64,
+        route_digest="b" * 64,
+    )
+    assert with_identities != autonomous_remote_brain_job_spec_digest(
+        request=request,
+        mode="autonomous",
+        policy_digest="e" * 64,
+        plan_digest="c" * 64,
+        route_digest="b" * 64,
+    )
     with pytest.raises(RemoteBrainWorkerError):
         autonomous_remote_brain_job_spec_digest(request={"task": object()}, mode="autonomous")

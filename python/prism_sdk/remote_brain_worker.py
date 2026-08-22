@@ -23,6 +23,8 @@ from .brain_api import AsyncBrainControlClient, BrainControlClient
 
 AUTONOMOUS_REMOTE_BRAIN_WORKER_SCHEMA = "bioprism-python-autonomous-remote-brain-worker/0.1"
 AUTONOMOUS_REMOTE_BRAIN_JOB_SPEC_SCHEMA = "bioprism-python-autonomous-remote-brain-job-spec/0.1"
+AUTONOMOUS_REMOTE_BRAIN_PLAN_SCHEMA = "bioprism-python-autonomous-remote-brain-plan/0.1"
+AUTONOMOUS_REMOTE_BRAIN_ROUTE_SCHEMA = "bioprism-python-autonomous-remote-brain-route/0.1"
 MAX_AUTONOMOUS_REMOTE_BRAIN_WORKER_LEASE_MS = 86_400_000
 MAX_AUTONOMOUS_REMOTE_BRAIN_WORKER_HEARTBEAT_MS = 300_000
 MAX_AUTONOMOUS_REMOTE_BRAIN_WORKER_BATCH = 64
@@ -82,6 +84,8 @@ class RemoteBrainJobSubmission:
     job: Mapping[str, Any] | None
     spec_digest: str
     mode: str
+    plan_digest: str | None = None
+    route_digest: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -90,6 +94,8 @@ class RemoteBrainJobSubmission:
             "job": None if self.job is None else dict(self.job),
             "spec_digest": self.spec_digest,
             "mode": self.mode,
+            "plan_digest": self.plan_digest,
+            "route_digest": self.route_digest,
             "private_spec": "caller_owned;request_and_execution_kwargs_not_sent_to_control_plane",
             "secret_material": "never_returned",
         }
@@ -173,6 +179,8 @@ class RemoteBrainJobResolution:
     request: Mapping[str, Any]
     kwargs: Mapping[str, Any]
     policy_digest: str | None = None
+    plan_digest: str | None = None
+    route_digest: str | None = None
 
 
 RemoteBrainJobResolver = Callable[[Mapping[str, Any]], RemoteBrainJobResolution | Mapping[str, Any]]
@@ -187,20 +195,65 @@ def _digest_json(value: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def autonomous_remote_brain_job_spec_digest(*, request: Mapping[str, Any], mode: str, policy_digest: str | None = None) -> str:
-    """Bind a caller-owned request/mode/policy contract without retaining its task or prompt."""
+def _reviewed_value_digest(value: Any, *, name: str, schema: str) -> str:
+    """Digest a caller-owned reviewed value without putting that value on the remote queue."""
+
+    if hasattr(value, "to_dict") and callable(value.to_dict):
+        value = value.to_dict()
+    elif isinstance(value, Mapping):
+        value = dict(value)
+    else:
+        raise RemoteBrainWorkerError(f"{name} must be a mapping or expose to_dict()")
+    if not isinstance(value, Mapping):
+        raise RemoteBrainWorkerError(f"{name}.to_dict() must return a mapping")
+    safe_value = _bounded_json(name, value, MAX_AUTONOMOUS_REMOTE_BRAIN_REQUEST_BYTES)
+    return _digest_json({"schema": schema, name: safe_value})
+
+
+def autonomous_remote_brain_plan_digest(blueprint: Any) -> str:
+    """Return the stable identity of a caller-owned reviewed plan/blueprint."""
+
+    return _reviewed_value_digest(blueprint, name="blueprint", schema=AUTONOMOUS_REMOTE_BRAIN_PLAN_SCHEMA)
+
+
+def autonomous_remote_brain_route_digest(route: Any) -> str:
+    """Return the stable identity of a caller-owned reviewed routing proposal."""
+
+    return _reviewed_value_digest(route, name="route", schema=AUTONOMOUS_REMOTE_BRAIN_ROUTE_SCHEMA)
+
+
+def autonomous_remote_brain_job_spec_digest(
+    *,
+    request: Mapping[str, Any],
+    mode: str,
+    policy_digest: str | None = None,
+    plan_digest: str | None = None,
+    route_digest: str | None = None,
+) -> str:
+    """Bind request/mode/policy and optional reviewed identities without retaining private values.
+
+    The optional fields are omitted, rather than serialized as ``null``, so jobs created by
+    older callers retain their exact pre-extension digest.
+    """
 
     _validate_mode(mode)
     if not isinstance(request, Mapping):
         raise RemoteBrainWorkerError("remote brain job request must be a mapping")
     _bounded_json("remote brain job request", request, MAX_AUTONOMOUS_REMOTE_BRAIN_REQUEST_BYTES)
-    _validate_optional_digest("policy_digest", policy_digest)
-    return _digest_json({
+    policy_digest = _validate_optional_digest("policy_digest", policy_digest)
+    plan_digest = _validate_optional_digest("plan_digest", plan_digest)
+    route_digest = _validate_optional_digest("route_digest", route_digest)
+    payload: dict[str, Any] = {
         "schema": AUTONOMOUS_REMOTE_BRAIN_JOB_SPEC_SCHEMA,
         "mode": mode,
         "request": dict(request),
         "policy_digest": policy_digest,
-    })
+    }
+    if plan_digest is not None:
+        payload["plan_digest"] = plan_digest
+    if route_digest is not None:
+        payload["route_digest"] = route_digest
+    return _digest_json(payload)
 
 
 def _bounded_json(name: str, value: Any, maximum: int) -> Any:
@@ -368,6 +421,8 @@ class RemoteBrainJobWorker:
         capability: str,
         risk_class: str,
         policy_digest: str | None = None,
+        plan_digest: str | None = None,
+        route_digest: str | None = None,
         priority: int = 0,
         max_attempts: int = 3,
         checkpoint_digest: str | None = None,
@@ -381,8 +436,17 @@ class RemoteBrainJobWorker:
             raise RemoteBrainWorkerError("remote brain priority is outside its bounds")
         if not isinstance(max_attempts, int) or isinstance(max_attempts, bool) or not 1 <= max_attempts <= 8:
             raise RemoteBrainWorkerError("remote brain max_attempts is outside its bounds")
+        policy_digest = _validate_optional_digest("policy_digest", policy_digest)
+        plan_digest = _validate_optional_digest("plan_digest", plan_digest)
+        route_digest = _validate_optional_digest("route_digest", route_digest)
         checkpoint_digest = _validate_optional_digest("checkpoint_digest", checkpoint_digest)
-        spec_digest = autonomous_remote_brain_job_spec_digest(request=request, mode=mode, policy_digest=policy_digest)
+        spec_digest = autonomous_remote_brain_job_spec_digest(
+            request=request,
+            mode=mode,
+            policy_digest=policy_digest,
+            plan_digest=plan_digest,
+            route_digest=route_digest,
+        )
         payload = self.control.submit_job({
             "idempotency_key": idempotency_key,
             "spec_digest": spec_digest,
@@ -398,6 +462,8 @@ class RemoteBrainJobWorker:
             job=_job_projection(payload),
             spec_digest=spec_digest,
             mode=mode,
+            plan_digest=plan_digest,
+            route_digest=route_digest,
         )
 
     def status(self, job_id: str) -> Mapping[str, Any]:
@@ -555,7 +621,7 @@ class RemoteBrainJobWorker:
             return raw
         if not isinstance(raw, Mapping):
             raise RemoteBrainWorkerError("remote brain resolver must return a mapping")
-        allowed = {"spec_digest", "policy_digest", "mode", "request", "kwargs"}
+        allowed = {"spec_digest", "policy_digest", "plan_digest", "route_digest", "mode", "request", "kwargs"}
         unknown = sorted(set(raw).difference(allowed))
         if unknown:
             raise RemoteBrainWorkerError("remote brain resolver returned unsupported fields")
@@ -565,6 +631,8 @@ class RemoteBrainJobWorker:
             mode=raw.get("mode"),
             request=raw.get("request"),
             kwargs=raw.get("kwargs"),
+            plan_digest=raw.get("plan_digest"),
+            route_digest=raw.get("route_digest"),
         )
 
     @staticmethod
@@ -572,13 +640,21 @@ class RemoteBrainJobWorker:
         mode = _validate_mode(resolution.mode)
         spec_digest = _validate_digest("resolver spec_digest", resolution.spec_digest)
         policy_digest = _validate_optional_digest("resolver policy_digest", resolution.policy_digest)
+        plan_digest = _validate_optional_digest("resolver plan_digest", resolution.plan_digest)
+        route_digest = _validate_optional_digest("resolver route_digest", resolution.route_digest)
         if spec_digest != job["spec_digest"]:
             raise RemoteBrainWorkerError("remote brain resolver spec_digest does not match the durable job")
         if not isinstance(resolution.request, Mapping) or not isinstance(resolution.kwargs, Mapping):
             raise RemoteBrainWorkerError("remote brain resolver request and kwargs must be mappings")
-        expected = autonomous_remote_brain_job_spec_digest(request=resolution.request, mode=mode, policy_digest=policy_digest)
+        expected = autonomous_remote_brain_job_spec_digest(
+            request=resolution.request,
+            mode=mode,
+            policy_digest=policy_digest,
+            plan_digest=plan_digest,
+            route_digest=route_digest,
+        )
         if expected != job["spec_digest"]:
-            raise RemoteBrainWorkerError("remote brain request, mode, and policy digest do not match the durable job")
+            raise RemoteBrainWorkerError("remote brain request, mode, policy, and reviewed identities do not match the durable job")
         task = resolution.request.get("task")
         if not isinstance(task, str) or not task.strip():
             raise RemoteBrainWorkerError("remote brain resolver request must contain a bounded task")
@@ -589,6 +665,13 @@ class RemoteBrainJobWorker:
         blueprint_task = _mapping_value(blueprint_spec, "task")
         if blueprint_task is not None and blueprint_task != task:
             raise RemoteBrainWorkerError("remote brain workflow blueprint does not match the durable request")
+        if plan_digest is not None and blueprint is not None:
+            if autonomous_remote_brain_plan_digest(blueprint) != plan_digest:
+                raise RemoteBrainWorkerError("remote brain workflow blueprint does not match the durable plan digest")
+        route = resolution.kwargs.get("route")
+        if route_digest is not None and route is not None:
+            if autonomous_remote_brain_route_digest(route) != route_digest:
+                raise RemoteBrainWorkerError("remote brain route does not match the durable route digest")
         request_domain = resolution.request.get("domain")
         if request_domain is not None and request_domain != job["domain"] and job["domain"] != "cross_domain":
             raise RemoteBrainWorkerError("remote brain request domain does not match the durable job")
@@ -691,6 +774,8 @@ class AsyncRemoteBrainJobWorker:
         capability: str,
         risk_class: str,
         policy_digest: str | None = None,
+        plan_digest: str | None = None,
+        route_digest: str | None = None,
         priority: int = 0,
         max_attempts: int = 3,
         checkpoint_digest: str | None = None,
@@ -704,8 +789,17 @@ class AsyncRemoteBrainJobWorker:
             raise RemoteBrainWorkerError("async remote brain priority is outside its bounds")
         if not isinstance(max_attempts, int) or isinstance(max_attempts, bool) or not 1 <= max_attempts <= 8:
             raise RemoteBrainWorkerError("async remote brain max_attempts is outside its bounds")
+        policy_digest = _validate_optional_digest("policy_digest", policy_digest)
+        plan_digest = _validate_optional_digest("plan_digest", plan_digest)
+        route_digest = _validate_optional_digest("route_digest", route_digest)
         checkpoint_digest = _validate_optional_digest("checkpoint_digest", checkpoint_digest)
-        spec_digest = autonomous_remote_brain_job_spec_digest(request=request, mode=mode, policy_digest=policy_digest)
+        spec_digest = autonomous_remote_brain_job_spec_digest(
+            request=request,
+            mode=mode,
+            policy_digest=policy_digest,
+            plan_digest=plan_digest,
+            route_digest=route_digest,
+        )
         payload = await self.control.submit_job({
             "idempotency_key": idempotency_key,
             "spec_digest": spec_digest,
@@ -716,7 +810,14 @@ class AsyncRemoteBrainJobWorker:
             "max_attempts": max_attempts,
             **({"checkpoint_digest": checkpoint_digest} if checkpoint_digest is not None else {}),
         })
-        return RemoteBrainJobSubmission(status="submitted", job=_job_projection(payload), spec_digest=spec_digest, mode=mode)
+        return RemoteBrainJobSubmission(
+            status="submitted",
+            job=_job_projection(payload),
+            spec_digest=spec_digest,
+            mode=mode,
+            plan_digest=plan_digest,
+            route_digest=route_digest,
+        )
 
     async def status(self, job_id: str) -> Mapping[str, Any]:
         return _job_projection(await self.control.job_status(_validate_identifier("async remote brain job_id", job_id)))
@@ -909,7 +1010,7 @@ class AsyncRemoteBrainJobWorker:
             return raw
         if not isinstance(raw, Mapping):
             raise RemoteBrainWorkerError("async remote brain resolver must return a mapping")
-        allowed = {"spec_digest", "policy_digest", "mode", "request", "kwargs"}
+        allowed = {"spec_digest", "policy_digest", "plan_digest", "route_digest", "mode", "request", "kwargs"}
         unknown = sorted(set(raw).difference(allowed))
         if unknown:
             raise RemoteBrainWorkerError("async remote brain resolver returned unsupported fields")
@@ -919,6 +1020,8 @@ class AsyncRemoteBrainJobWorker:
             mode=raw.get("mode"),
             request=raw.get("request"),
             kwargs=raw.get("kwargs"),
+            plan_digest=raw.get("plan_digest"),
+            route_digest=raw.get("route_digest"),
         )
 
     @staticmethod
@@ -1024,6 +1127,8 @@ def _is_success_status(status: str) -> bool:
 __all__ = [
     "AUTONOMOUS_REMOTE_BRAIN_WORKER_SCHEMA",
     "AUTONOMOUS_REMOTE_BRAIN_JOB_SPEC_SCHEMA",
+    "AUTONOMOUS_REMOTE_BRAIN_PLAN_SCHEMA",
+    "AUTONOMOUS_REMOTE_BRAIN_ROUTE_SCHEMA",
     "MAX_AUTONOMOUS_REMOTE_BRAIN_WORKER_LEASE_MS",
     "MAX_AUTONOMOUS_REMOTE_BRAIN_WORKER_HEARTBEAT_MS",
     "MAX_AUTONOMOUS_REMOTE_BRAIN_WORKER_BATCH",
@@ -1037,6 +1142,8 @@ __all__ = [
     "RemoteBrainJobResolver",
     "AsyncRemoteBrainJobResolver",
     "autonomous_remote_brain_job_spec_digest",
+    "autonomous_remote_brain_plan_digest",
+    "autonomous_remote_brain_route_digest",
     "RemoteBrainJobWorker",
     "AsyncRemoteBrainJobWorker",
 ]

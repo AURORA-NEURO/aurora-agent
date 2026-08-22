@@ -207,6 +207,14 @@ supported brain path: `autonomous`, `workflow`, `workflow_learning`, `workflow_c
 to the control plane, and the worker rejects spec drift, malformed projections, unsupported modes,
 private fields in remote responses, and domain mismatches before dispatch.
 
+Callers may additionally pass `plan_digest` and `route_digest` to `submit()` to bind approval to a
+reviewed private blueprint and routing proposal. The helpers
+`autonomous_remote_brain_plan_digest()` and `autonomous_remote_brain_route_digest()` hash the
+caller-owned value representation; the plan, route, prompt, and credentials still never cross the
+remote boundary. If a resolver returns the corresponding private `blueprint` or `route`, the worker
+rehashes it before dispatch and refuses a changed plan or route. Both bindings are optional, and
+omitting them preserves the pre-extension job digest for existing callers.
+
 The remote worker uses the same approval, retry, and uncertainty contract as the local worker. It
 parks provider or route approval before dispatch, forces the provider approval bit on the
 rehydrated retry, renews leases during long calls, retries only typed preflight failures when
@@ -214,7 +222,8 @@ configured, and quarantines post-dispatch uncertainty for explicit `reconcile()`
 tasks, prompts, credentials, provider responses, tool arguments, evaluator payloads, and exception
 messages remain caller-owned and are never serialized in `RemoteBrainJobSubmission`,
 `RemoteBrainJobRun.to_dict()`, or the remote job journal. `autonomous_remote_brain_job_spec_digest()`
-is the shared identity helper for admission and resolver verification.
+is the shared identity helper for admission and resolver verification. The plan and route digest
+helpers provide the optional reviewed-identity bindings without serializing those private values.
 `AsyncRemoteBrainJobWorker` exposes the identical contract over `AsyncBrainControlClient`; it
 offloads a synchronous `AutonomousBrain` runner to a worker thread (or awaits a native async
 runner), so async HTTP/MCP hosts retain responsive event loops without creating a second lifecycle

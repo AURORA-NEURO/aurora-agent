@@ -3745,7 +3745,13 @@ kwargs. This makes the same worker usable over HTTP, MCP, or the local
 `DurableBrainControlPlaneAdapter` test/deployment bridge.
 
 Admission binds the private request to a deterministic composite digest over the request, execution
-mode, and optional policy digest. Supported modes cover the complete Python brain façade:
+mode, and optional policy digest. Deployments can also include optional `plan_digest` and
+`route_digest` bindings for an operator-reviewed private blueprint and routing proposal. The
+bindings are digest-only: the remote control plane receives no plan, route, prompt, task text,
+credentials, provider values, or execution kwargs. When the resolver rehydrates a `blueprint` or
+`route`, the worker recomputes the matching identity before any runner invocation. Omitting these
+optional bindings preserves the digest contract for existing jobs. Supported modes cover the
+complete Python brain façade:
 
 - `autonomous` — one autonomous selection/planning/invocation run;
 - `workflow`, `workflow_learning`, `workflow_cycle`, and `workflow_trajectory_learning` — staged
@@ -3755,22 +3761,32 @@ mode, and optional policy digest. Supported modes cover the complete Python brai
 
 The resolver receives only the validated remote job projection plus approval/attempt metadata and
 returns the matching private request and runner kwargs. The worker recomputes the composite digest,
-checks task and blueprint identity, validates domain coverage, and refuses dispatch on any mismatch.
+checks task, reviewed plan, and route identity, validates domain coverage, and refuses dispatch on
+any mismatch. Use `autonomous_remote_brain_plan_digest()` and
+`autonomous_remote_brain_route_digest()` when producing the optional bindings.
 Remote projections are recursively checked for task, prompt, credential, secret, token, provider
 response, and tool-output shaped fields. `RemoteBrainJobRun.result` is transient for the caller;
 `to_dict()` emits only status and bounded result metadata.
 
 ```python
-from prism_sdk import RemoteBrainJobWorker
+from prism_sdk import (
+    RemoteBrainJobWorker,
+    autonomous_remote_brain_plan_digest,
+    autonomous_remote_brain_route_digest,
+)
 
 request = {"task": private_task, "domain": "research"}
 policy_digest = approved_policy_digest
+plan_digest = autonomous_remote_brain_plan_digest(private_cross_domain_blueprint)
+route_digest = autonomous_remote_brain_route_digest(private_route_proposal)
 
 def resolve_private_job(context):
     job = context["job"]
     return {
         "spec_digest": job["spec_digest"],
         "policy_digest": policy_digest,
+        "plan_digest": plan_digest,
+        "route_digest": route_digest,
         "mode": "cross_domain_learning",
         "request": request,
         "kwargs": {
@@ -3797,6 +3813,8 @@ submitted = worker.submit(
     capability="research_synthesis",
     risk_class="review",
     policy_digest=policy_digest,
+    plan_digest=plan_digest,
+    route_digest=route_digest,
 )
 run = worker.run_once(submitted.job["job_id"])
 if run is not None and run.status == "waiting_approval":
