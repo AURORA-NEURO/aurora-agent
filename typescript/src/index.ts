@@ -697,6 +697,26 @@ export type {
   AutonomousBrainJobWorkerBatch,
 } from "./autonomous-brain-worker.js";
 export {
+  AUTONOMOUS_DURABLE_BRAIN_JOB_WORKER_SCHEMA,
+  MAX_AUTONOMOUS_DURABLE_BRAIN_WORKER_LEASE_MS,
+  MAX_AUTONOMOUS_DURABLE_BRAIN_WORKER_HEARTBEAT_MS,
+  MAX_AUTONOMOUS_DURABLE_BRAIN_WORKER_BATCH,
+  MAX_AUTONOMOUS_DURABLE_BRAIN_WORKER_EVENT_PAGES,
+  AutonomousDurableBrainJobWorker,
+} from "./autonomous-durable-brain-worker.js";
+export type {
+  AutonomousDurableBrainJobApi,
+  AutonomousDurableBrainJobSubmitOptions,
+  AutonomousDurableBrainJobSubmission,
+  AutonomousDurableBrainJobResolverContext,
+  AutonomousDurableBrainJobResolution,
+  AutonomousDurableBrainJobResolver,
+  AutonomousDurableBrainJobWorkerStatus,
+  AutonomousDurableBrainJobWorkerOptions,
+  AutonomousDurableBrainJobWorkerRun,
+  AutonomousDurableBrainJobWorkerBatch,
+} from "./autonomous-durable-brain-worker.js";
+export {
   AUTONOMOUS_BRAIN_CONTROL_PLANE_MONITOR_SCHEMA,
   MAX_AUTONOMOUS_BRAIN_CONTROL_PLANE_POLL_MS,
   MAX_AUTONOMOUS_BRAIN_CONTROL_PLANE_TIMEOUT_MS,

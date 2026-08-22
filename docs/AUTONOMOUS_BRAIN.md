@@ -4093,6 +4093,34 @@ boundary is settled conservatively through the existing reconciliation lifecycle
 controller maps every built-in single-domain workflow profile through the shared domain catalogue;
 cross-domain routing remains an explicit review outcome rather than an implicit remote dispatch.
 
+For the complete high-level facade rather than only staged workflow execution, use
+`AutonomousDurableBrainJobWorker`. Its `submit()` method compiles the request-free
+`AutonomousBrainPlan`, derives the remote domain/capability/risk metadata, and binds the caller's
+request, execution mode (`execute`, `cycle`, or `adaptive`), and optional private policy digest to
+one composite job specification digest. `runOnce()`/`run()` then atomically claim the remote job,
+rehydrate the request through the caller resolver, verify that digest and domain coverage, enforce
+the remote approval event, renew the lease during long provider work, and settle completion,
+retry, failure, or reconciliation. Cross-domain jobs use the same path for specialist fan-out
+and synthesis; they are represented by the metadata domain `cross_domain` and require the
+cross-domain plan to be present. The worker's returned brain/cycle values remain transient to the
+caller; only job metadata and result/trace digests cross the control plane.
+
+```typescript
+const submission = await brainWorker.submit({
+  idempotencyKey: "private-research-42",
+  request: { task: privateTask, allow_cross_domain: true },
+  mode: "adaptive",
+  policyDigest: approvedPolicyDigest,
+});
+const result = await brainWorker.run({ limit: 4 });
+```
+
+The resolver must return the same private request, mode, and policy digest that were used at
+submission. A mismatch is a non-dispatch failure; a typed retryable resolver/transport failure
+can return the job to `queued`; any error after the worker records `unknown` is quarantined for
+caller reconciliation. This closes the remote queue-to-full-brain boundary without turning the
+durable job store into a prompt, credential, evaluator, or provider-response archive.
+
 When a worker is paired with `AutonomousBrainJobSchedulerPersistenceCoordinator`, persistence is an
 explicit startup gate rather than an implicit best effort. Call `await worker.restore()` before the
 first claim; execution fails closed until restore succeeds. The worker flushes the metadata-only

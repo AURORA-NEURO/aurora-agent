@@ -1331,6 +1331,28 @@ const worker = new AutonomousDurableJobWorker(controller, ({ job }) => {
 const run = await worker.run({ limit: 8 });
 ```
 
+For the complete high-level brain queue, `AutonomousDurableBrainJobWorker` uses the same remote
+job lifecycle but invokes the facade's `execute`, evaluator/learning `cycle`, or adaptive replan
+mode. `submit()` compiles a metadata-only plan and binds the full caller-owned request and policy
+to a composite spec digest. The worker handles explicit approval, bounded lease heartbeats,
+single-domain jobs for every built-in profile, and cross-domain fan-out/synthesis:
+
+```typescript
+const submission = await brainWorker.submit({
+  idempotencyKey: "research-request-42",
+  request: { task: privateTask, allow_cross_domain: true },
+  mode: "adaptive",
+  policyDigest: approvedPolicyDigest,
+});
+const batch = await brainWorker.run({ limit: 4 });
+```
+
+The resolver must reproduce the exact digest-bound request, mode, and policy from caller-owned
+storage. Drift fails before facade/provider dispatch; a typed retryable resolver failure is
+requeued, while failures after the `unknown` dispatch boundary become reconciliation quarantine.
+No task, prompt, credentials, evaluator callback, provider result, or exception body enters the
+remote job projection.
+
 ## Evaluator feedback and delayed-credit learning
 
 `AutonomousWorkflowEvaluator` is the explicit reward boundary for the TypeScript brain. It derives
