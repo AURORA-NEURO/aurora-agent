@@ -6,6 +6,8 @@ import {
   AutonomousAgent,
   AutonomousBrainFacade,
   AutonomousBrainPlan,
+  AutonomousCapabilityActivation,
+  AutonomousCapabilityActivationStore,
   AutonomousLearningController,
   AutonomousOnlineLearner,
   InMemoryAutonomousDecisionCycleStateStore,
@@ -237,6 +239,33 @@ test("brain facade batches adaptive single and cross-domain loops through per-it
   assert.equal(batch.completed_count, 3);
   assert.ok(batch.items.every((item) => item.status === "succeeded" && item.execution?.adaptive !== null));
   assert.equal(batch.items[2].execution.adaptive.final.run.child_runs.length, 2);
+});
+
+test("brain facade exposes a keyless readiness and activation lifecycle for onboarding", async () => {
+  const runtime = localRuntime();
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+  const report = await brain.readiness();
+  assert.equal(report.domains.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(report.execution, "not_started; no_provider_or_tool_calls");
+  assert.equal(report.secret_material, "never_returned");
+  assert.doesNotMatch(JSON.stringify(report), /gsk_[A-Za-z0-9]|sk-[A-Za-z0-9]/i);
+
+  const refreshed = await brain.refreshActivation();
+  assert.equal(refreshed.secret_material, "never_returned");
+  assert.equal(brain.activationState().state_digest, refreshed.state_digest);
+  const store = new AutonomousCapabilityActivationStore();
+  await brain.saveActivation(store);
+  const savedState = brain.activationState();
+  brain.revokeActivation("onboarding-review-reset");
+  assert.equal(brain.activationState().status, "revoked");
+  const restoredAgent = new AutonomousAgent(runtime, { activation: new AutonomousCapabilityActivation({ activationId: "onboarding-restore" }) });
+  restoredAgent.registerModel(model);
+  const restoredBrain = new AutonomousBrainFacade({ agent: restoredAgent });
+  const restored = await restoredBrain.restoreActivation(store);
+  assert.equal(restored.state_digest, savedState.state_digest);
+  assert.equal(restoredBrain.activationState().status, savedState.status);
 });
 
 test("brain facade runs a connector observation before provider invocation and supports plan replay", async () => {

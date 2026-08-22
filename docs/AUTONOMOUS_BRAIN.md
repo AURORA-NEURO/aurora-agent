@@ -3692,6 +3692,15 @@ catalogue/profile/plan digest change clears approvals and produces `stale`; `rev
 closes every tool admission path. Restoring a snapshot restores metadata only—provider keys must
 be collected again through the normal BYOK flow.
 
+Applications using `AutonomousBrainFacade` can call the same lifecycle through
+`brain.readiness()`, `brain.refreshActivation()`, `brain.activationState()`,
+`brain.approveActivationBindings()`, `brain.saveActivation()`, `brain.restoreActivation()`, and
+`brain.revokeActivation()`. These wrappers are intentionally keyless: user-entered credentials
+are collected by the protected provider onboarding/session boundary, while the brain facade only
+projects readiness and stores digest-bound activation metadata. A revoked activation cannot be
+reanimated in place; restart recovery restores the saved metadata into a newly constructed agent
+after the caller has re-established its provider session.
+
 ### Domain execution plans: the runtime handoff
 
 Activation state is compiled into an explicit, non-executing domain execution plan. This is the

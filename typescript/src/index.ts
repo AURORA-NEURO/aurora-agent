@@ -383,6 +383,10 @@ export type {
   AutonomousBrainAdaptiveBatchOptions,
   AutonomousBrainAdaptiveBatchItem,
   AutonomousBrainAdaptiveBatchResult,
+  AutonomousBrainReadinessOptions,
+  AutonomousBrainReadinessReport,
+  AutonomousBrainActivationState,
+  AutonomousBrainActivationSnapshotStore,
   AutonomousBrainBatchItem,
   AutonomousBrainBatchResult,
 } from "./autonomous-brain-facade.js";

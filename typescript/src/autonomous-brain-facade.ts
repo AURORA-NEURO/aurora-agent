@@ -3,6 +3,7 @@ import {
   AUTONOMOUS_DOMAIN_NAMES,
   type AutonomousAgent,
   type AutonomousAutoBlueprint,
+  type AutonomousDomainToolPlan,
   type AutonomousCrossDomainBlueprint,
   type AutonomousCrossDomainRunOptions,
   type AutonomousCrossDomainRunResult,
@@ -34,6 +35,7 @@ import {
   type AutonomousReplanCycleOptions,
   type AutonomousReplanCycleResult,
 } from "./autonomous-cycle.js";
+import type { AutonomousCapabilityActivationSnapshotStore } from "./autonomous-activation.js";
 import { canonicalJson, digestJsonSync } from "./tooling.js";
 import type { JsonObject, JsonValue } from "./types.js";
 
@@ -279,6 +281,12 @@ export interface AutonomousBrainAdaptiveBatchResult {
   retention: "metadata_only_tasks_and_adaptive_connector_values_transient";
   secret_material: "never_returned";
 }
+
+/** Options for the keyless readiness audit exposed at the application boundary. */
+export type AutonomousBrainReadinessOptions = Parameters<AutonomousAgent["readiness"]>[0];
+export type AutonomousBrainReadinessReport = Awaited<ReturnType<AutonomousAgent["readiness"]>>;
+export type AutonomousBrainActivationState = ReturnType<AutonomousAgent["activationState"]>;
+export type AutonomousBrainActivationSnapshotStore = AutonomousCapabilityActivationSnapshotStore;
 
 export interface AutonomousBrainBatchItem {
   index: number;
@@ -542,7 +550,7 @@ export class AutonomousBrainFacade {
   readonly connectorOperations?: AutonomousConnectorOperationFacade;
 
   constructor(options: { agent: AutonomousAgent; connectorOperations?: AutonomousConnectorOperationFacade }) {
-    if (!options || !options.agent || typeof options.agent.route !== "function" || typeof options.agent.blueprint !== "function" || typeof options.agent.run !== "function" || typeof options.agent.runCrossDomain !== "function") throw new ArgumentError("autonomous brain facade requires an AutonomousAgent");
+    if (!options || !options.agent || typeof options.agent.route !== "function" || typeof options.agent.blueprint !== "function" || typeof options.agent.run !== "function" || typeof options.agent.runCrossDomain !== "function" || typeof options.agent.readiness !== "function" || typeof options.agent.refreshActivation !== "function") throw new ArgumentError("autonomous brain facade requires an AutonomousAgent");
     if (options.connectorOperations !== undefined && !(options.connectorOperations instanceof AutonomousConnectorOperationFacade)) throw new ArgumentError("autonomous brain connectorOperations is invalid");
     this.agent = options.agent;
     this.connectorOperations = options.connectorOperations;
@@ -623,6 +631,41 @@ export class AutonomousBrainFacade {
     const prepared = await this.prepare(input);
     if (prepared.plan.plan_digest !== plan.plan_digest) throw new ArgumentError("autonomous brain adaptive cycle plan does not match the transient request");
     return this.executeAdaptiveCyclePrepared(prepared, options);
+  }
+
+  /** Return the redacted provider/model/tool posture needed to render onboarding UI. */
+  async readiness(options: AutonomousBrainReadinessOptions = {}): Promise<AutonomousBrainReadinessReport> {
+    return this.agent.readiness(options);
+  }
+
+  /** Recompute keyless readiness and activation metadata without dispatching a provider or tool. */
+  async refreshActivation(options: AutonomousBrainReadinessOptions = {}): Promise<AutonomousBrainActivationState> {
+    return this.agent.refreshActivation(options);
+  }
+
+  /** Return the current redacted activation state; this does not itself grant authority. */
+  activationState(): AutonomousBrainActivationState {
+    return this.agent.activationState();
+  }
+
+  /** Approve only the caller-selected read-only bindings from a digest-bound domain tool plan. */
+  approveActivationBindings(plan: AutonomousDomainToolPlan, approvedTools: readonly string[], registeredToolCount?: number): AutonomousBrainActivationState {
+    return this.agent.approveActivationBindings(plan, approvedTools, registeredToolCount);
+  }
+
+  /** Persist activation metadata through a caller-owned store; credentials remain outside it. */
+  async saveActivation(store: AutonomousBrainActivationSnapshotStore): Promise<void> {
+    return this.agent.saveActivation(store);
+  }
+
+  /** Restore activation metadata through a caller-owned store; null means no prior state. */
+  async restoreActivation(store: AutonomousBrainActivationSnapshotStore): Promise<AutonomousBrainActivationState | null> {
+    return this.agent.restoreActivation(store);
+  }
+
+  /** Revoke activation and close the tool admission path until a new review is completed. */
+  revokeActivation(reason?: string): AutonomousBrainActivationState {
+    return this.agent.revokeActivation(reason);
   }
 
   /** Execute independent brain requests with bounded concurrency and deterministic result order. */
