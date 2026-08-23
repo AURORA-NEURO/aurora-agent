@@ -16028,6 +16028,39 @@ class AutonomousAgent:
         self._finish_execution(execution_controller, result=result)
         return result
 
+    def run_learning(
+        self,
+        *,
+        task: str,
+        domain: str,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> Any:
+        """Run one application task through explicit evaluator-backed online learning.
+
+        This is the façade-level counterpart to ``AutonomousBrain.run_learning``. It preserves
+        the ordinary agent admission, provider, prompt, planning, tool, effect, and execution
+        controller boundaries, while forcing the orchestrator's explicit learning mode. The
+        caller still supplies the evaluator and evidence; provider transport success never earns
+        reward. Cross-domain callers should use ``run_cross_domain_learning`` so delayed credit
+        remains trajectory-scoped.
+        """
+
+        options = dict(kwargs)
+        options["learn"] = True
+        return self.run(
+            task=task,
+            domain=domain,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            execution_id=execution_id,
+            resume_execution=resume_execution,
+            **options,
+        )
+
     @staticmethod
     def _trace_brain_results(result: Any) -> tuple[BrainRunResult, ...]:
         """Extract only brain envelopes needed to project provider metadata."""

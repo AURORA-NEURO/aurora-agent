@@ -4025,6 +4025,38 @@ then deterministic recency. `memoryRecall` selects another ranking policy. Recal
 metadata-only context with an explicit non-authority warning; ranking cannot widen a route,
 candidate set, tool portfolio, budget, permission, effect boundary, or evidence claim.
 
+### One-call evaluated runs and cross-domain credit
+
+TypeScript now exposes the complete execution-to-learning loop through
+`AutonomousLearningController.runLearning()`. The helper runs one single-domain route, prepares
+the pending episode, invokes a caller-owned `AutonomousEvaluatorMesh` (or an explicit evaluator
+callback), and settles the selected provider/model arm through the normal local or remote bandit
+boundary. `evaluateRun()` and `evaluateAndSettleRun()` cover callers that already executed a run.
+The helper refuses a caller-provided cross-domain route rather than creating orphaned child
+episodes; use `runCrossDomainLearning()` for fan-out/fan-in work.
+
+```ts
+const learning = new AutonomousLearningController(agent, { runEvaluator: evaluatorMesh });
+const evaluated = await learning.runLearning("Review this data pipeline", {
+  episodeId: "review-data-001",
+  run: { domain: "data", approveProviderCall: true },
+});
+// evaluated.run is transient caller-owned output;
+// evaluated.settlement is the replay-safe value-only learner receipt.
+```
+
+`runCrossDomainLearning()` evaluates every completed specialist and synthesis result in the
+prepared episode order, then applies one bounded discounted trajectory settlement. Its returned
+`settlement` is intentionally only the value-only trajectory projection; the transient
+cross-domain result remains separately available as `run`. Replaying either helper through the
+same episode/trajectory identity returns the prior receipt without another provider call or a
+second bandit credit. Evaluator disagreement, missing episode coverage, calibration holds, remote
+CAS conflicts, and outbox failures remain explicit typed failures. The evaluator sees transient
+run values, while episode records, receipts, outbox commands, trajectory state, and bandit state
+retain only identities, scores, bounded failure classes, and digests. Python already provides the
+equivalent synchronous `run_learning`, `run_cross_domain_learning`, and trajectory APIs through
+the application façade.
+
 ## Domain-aware autonomous task intake
 
 Applications that do not want to hand-assemble every prompt and plan can use the high-level

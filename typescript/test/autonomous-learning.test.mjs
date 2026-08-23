@@ -242,6 +242,85 @@ test("learning episodes rehydrate by digest and settle through the local bandit"
   await assert.rejects(() => controller.settleRun("episode-local-1", { evaluator_id: "coding-reviewer", evaluator_version: "1", reward: 0.8, passed: true }), /already been settled/);
 });
 
+test("high-level runLearning evaluates and settles every built-in domain with replay-safe model credit", async () => {
+  const agent = await learningAgent();
+  const runEvaluator = new AutonomousEvaluatorMesh({
+    members: [{
+      evaluator_id: "all-domain-quality-reviewer",
+      evaluator_version: "1",
+      evaluate: async (result) => ({
+        evaluator_id: "all-domain-quality-reviewer",
+        evaluator_version: "1",
+        reward: result.status === "completed" ? 0.75 : 0,
+        passed: result.status === "completed",
+        failed: result.status !== "completed",
+        evidence_digest: "e".repeat(64),
+      }),
+    }, {
+      evaluator_id: "all-domain-quality-reviewer-2",
+      evaluator_version: "1",
+      evaluate: async (result) => ({ evaluator_id: "all-domain-quality-reviewer-2", evaluator_version: "1", reward: result.status === "completed" ? 0.75 : 0, passed: result.status === "completed", failed: result.status !== "completed", evidence_digest: "e".repeat(64) }),
+    }],
+  });
+  const controller = new AutonomousLearningController(agent, { runEvaluator });
+  const profiles = await builtinAutonomousDomainProfiles();
+  const settled = [];
+  for (const profile of profiles) {
+    const result = await controller.runLearning(`Produce and verify a ${profile.domain} result.`, {
+      episodeId: `high-level-${profile.domain}`,
+      run: { domain: profile.domain, approveProviderCall: true },
+    });
+    assert.equal(result.status, "settled", profile.domain);
+    assert.equal(result.evaluation.reward, 0.75, profile.domain);
+    assert.equal(result.settlement.episode.status, "settled", profile.domain);
+    assert.equal(JSON.stringify(result.settlement).includes("verified"), false, profile.domain);
+    settled.push(result);
+  }
+  assert.equal(agent.learner.snapshot().generation, profiles.length);
+  const contextualPulls = (agent.learner.snapshot().contextual_states ?? []).flatMap((state) => state.arms).reduce((sum, arm) => sum + arm.pulls, 0);
+  assert.equal(contextualPulls, profiles.length);
+
+  const beforeReplay = agent.learner.snapshot();
+  const replay = await controller.evaluateAndSettleRun(settled[0].run);
+  assert.equal(replay.status, "settled");
+  assert.deepEqual(agent.learner.snapshot(), beforeReplay);
+  assert.equal(replay.settlement.episode.settlement.settlement_digest, settled[0].settlement.episode.settlement.settlement_digest);
+});
+
+test("high-level cross-domain learning evaluates every specialist and synthesis episode as one trajectory", async () => {
+  const agent = await learningAgent();
+  const controller = new AutonomousLearningController(agent, {
+    runEvaluator: new AutonomousEvaluatorMesh({
+      members: [{
+        evaluator_id: "cross-domain-quality-reviewer",
+        evaluator_version: "1",
+        evaluate: async () => ({ evaluator_id: "cross-domain-quality-reviewer", evaluator_version: "1", reward: 0.8, passed: true, evidence_digest: "f".repeat(64) }),
+      }, {
+        evaluator_id: "cross-domain-quality-reviewer-2",
+        evaluator_version: "1",
+        evaluate: async () => ({ evaluator_id: "cross-domain-quality-reviewer-2", evaluator_version: "1", reward: 0.8, passed: true, evidence_digest: "f".repeat(64) }),
+      }],
+    }),
+  });
+  const result = await controller.runCrossDomainLearning("Integrate domains coding data synthesis findings.", {
+    trajectoryId: "high-level-cross-domain-trajectory",
+    run: {
+      allowCrossDomain: true,
+      approveProviderCall: true,
+      subtasks: [
+        { id: "coding-specialist", task: "Review the implementation and tests.", domain: "coding" },
+        { id: "data-specialist", task: "Review the data pipeline and schema.", domain: "data" },
+      ],
+    },
+  });
+  assert.equal(result.status, "settled");
+  assert.equal(result.settlement.trajectory.status, "settled");
+  assert.equal(Object.keys(result.rewards).length, result.run.learning_episode_ids.length);
+  assert.equal(result.settlement.trajectory.steps.length, result.run.learning_episode_ids.length);
+  assert.equal(agent.learner.snapshot().generation, result.run.learning_episode_ids.length);
+  assert.equal(JSON.stringify(result.settlement).includes("Integrate domains"), false);
+});
+
 test("the learning controller gates direct and outbox settlement on evaluator calibration", async () => {
   const agent = await learningAgent();
   const episodes = new InMemoryAutonomousLearningEpisodeStore();

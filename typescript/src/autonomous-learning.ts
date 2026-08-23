@@ -4,8 +4,10 @@ import {
   AUTONOMOUS_DOMAIN_NAMES,
   builtinAutonomousDomainProfiles,
   type AutonomousAgent,
+  type AutonomousCrossDomainRunOptions,
   type AutonomousCrossDomainRunResult,
   type AutonomousDomainName,
+  type AutonomousRunOptions,
   type AutonomousRunResult,
 } from "./autonomous.js";
 import type { AutonomousWorkflowExecutionResult } from "./workflow-execution.js";
@@ -37,6 +39,8 @@ export const AUTONOMOUS_LEARNING_SETTLEMENT_RECEIPT_SNAPSHOT_SCHEMA = "bioprism-
 export const AUTONOMOUS_LEARNING_FEEDBACK_OUTBOX_SCHEMA = "bioprism-typescript-autonomous-learning-feedback-outbox/0.1" as const;
 export const AUTONOMOUS_LEARNING_FEEDBACK_OUTBOX_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-learning-feedback-outbox-snapshot/0.1" as const;
 export const AUTONOMOUS_EVALUATOR_MESH_SCHEMA = "bioprism-typescript-autonomous-evaluator-mesh/0.1" as const;
+export const AUTONOMOUS_EVALUATED_RUN_SCHEMA = "bioprism-typescript-autonomous-evaluated-run/0.1" as const;
+export const AUTONOMOUS_EVALUATED_CROSS_DOMAIN_RUN_SCHEMA = "bioprism-typescript-autonomous-evaluated-cross-domain-run/0.1" as const;
 export const AUTONOMOUS_LEARNING_MAX_STAGES = 64;
 export const AUTONOMOUS_LEARNING_MAX_TRAJECTORY_STEPS = 32;
 export const AUTONOMOUS_LEARNING_MAX_FEEDBACK_OUTBOX = 8_192;
@@ -447,6 +451,58 @@ export interface AutonomousCrossDomainLearningSettlement {
   retention: typeof PRIVATE_RETENTION;
 }
 
+/**
+ * Transient run plus its value-only evaluator settlement. The run remains caller-owned and may
+ * contain a provider response; only `evaluation` and `settlement` are eligible for persistence.
+ */
+export interface AutonomousEvaluatedRunResult {
+  schema: typeof AUTONOMOUS_EVALUATED_RUN_SCHEMA;
+  status: "settled" | "not_eligible";
+  run: AutonomousRunResult;
+  evaluation: AutonomousEvaluatorRewardInput | null;
+  settlement: AutonomousLearningSettlement | null;
+  reason: "run_not_completed" | "learning_episode_not_prepared" | null;
+  retention: "run_caller_owned; evaluation_and_settlement_value_only";
+}
+
+/**
+ * Transient cross-domain run plus delayed trajectory credit. Child and synthesis responses stay
+ * caller-owned; `rewards` and `settlement` contain only bounded evaluator values and digests.
+ */
+export interface AutonomousEvaluatedCrossDomainRunResult {
+  schema: typeof AUTONOMOUS_EVALUATED_CROSS_DOMAIN_RUN_SCHEMA;
+  status: "settled" | "not_eligible";
+  run: AutonomousCrossDomainRunResult;
+  rewards: Record<string, AutonomousEvaluatorRewardInput>;
+  /** Value-only trajectory projection; the transient cross-domain result is available in `run`. */
+  settlement: AutonomousTrajectorySettlement | null;
+  reason: "run_not_completed" | "learning_episodes_not_prepared" | null;
+  retention: "run_caller_owned; rewards_and_settlement_value_only";
+}
+
+/** One high-level single-domain execution/evaluation/settlement transaction. */
+export interface AutonomousRunLearningOptions {
+  run?: Omit<AutonomousRunOptions, "learning" | "learningEpisodeId">;
+  episodeId?: string;
+  evaluator?: (result: AutonomousRunResult) => AutonomousEvaluatorRewardInput | Promise<AutonomousEvaluatorRewardInput>;
+  creditedReward?: number;
+  remote?: boolean;
+  idempotencyKey?: string;
+  memoryStore?: AutonomousEpisodicMemoryStore;
+  outbox?: AutonomousLearningOutboxSettlementOptions;
+}
+
+/** One high-level cross-domain execution/evaluation/trajectory-settlement transaction. */
+export interface AutonomousCrossDomainRunLearningOptions {
+  run?: Omit<AutonomousCrossDomainRunOptions, "learning" | "learningEpisodeId">;
+  trajectoryId: string;
+  discount?: number;
+  evaluator?: (result: AutonomousRunResult) => AutonomousEvaluatorRewardInput | Promise<AutonomousEvaluatorRewardInput>;
+  remote?: boolean;
+  idempotencyKey?: string;
+  outbox?: AutonomousLearningOutboxSettlementOptions;
+}
+
 export interface AutonomousLearningControllerOptions {
   store?: AutonomousLearningStateStore;
   episodes?: AutonomousLearningEpisodeStore;
@@ -454,6 +510,8 @@ export interface AutonomousLearningControllerOptions {
   settlementReceipts?: AutonomousLearningSettlementReceiptStore;
   feedbackOutbox?: AutonomousLearningFeedbackOutboxStore;
   evaluator?: AutonomousWorkflowEvaluator;
+  /** Optional evaluator mesh used by the high-level runLearning helpers. */
+  runEvaluator?: AutonomousEvaluatorMesh;
   apiClient?: ApiClient;
   memoryStore?: AutonomousEpisodicMemoryStore;
   /** Optional metadata-only evaluator calibration report used by the learning admission gate. */
@@ -1697,6 +1755,8 @@ export class AutonomousLearningController {
   /** Optional caller-owned memory sink used to attach explicit evaluator feedback to recallable episodes. */
   readonly memoryStore?: AutonomousEpisodicMemoryStore;
   readonly evaluator: AutonomousWorkflowEvaluator;
+  /** Optional evaluator mesh for the high-level runLearning and runCrossDomainLearning helpers. */
+  readonly runEvaluator?: AutonomousEvaluatorMesh;
   readonly apiClient?: ApiClient;
   readonly calibrationReport?: AutonomousEvaluatorCalibrationReport;
   readonly requireCalibratedLearning: boolean;
@@ -1730,6 +1790,8 @@ export class AutonomousLearningController {
     this.feedbackOutbox = options.feedbackOutbox ?? new InMemoryAutonomousLearningFeedbackOutboxStore();
     this.memoryStore = options.memoryStore ?? agent.memoryStore;
     this.evaluator = options.evaluator ?? new AutonomousWorkflowEvaluator();
+    if (options.runEvaluator !== undefined && typeof options.runEvaluator.evaluate !== "function") throw new ArgumentError("learning controller runEvaluator is malformed");
+    this.runEvaluator = options.runEvaluator;
     this.apiClient = options.apiClient;
     this.calibrationReport = options.calibrationReport === undefined ? undefined : validateAutonomousEvaluatorCalibrationReport(options.calibrationReport);
     this.requireCalibratedLearning = options.requireCalibratedLearning === true;
@@ -1791,6 +1853,102 @@ export class AutonomousLearningController {
 
   async evaluateWorkflow(execution: AutonomousWorkflowExecutionResult, input: AutonomousWorkflowEvaluationInput): Promise<AutonomousWorkflowEvaluation> {
     return this.evaluator.evaluate(execution, input);
+  }
+
+  /** Evaluate one completed run through the configured mesh or an explicit caller evaluator. */
+  async evaluateRun(
+    result: AutonomousRunResult,
+    evaluator?: (result: AutonomousRunResult) => AutonomousEvaluatorRewardInput | Promise<AutonomousEvaluatorRewardInput>,
+  ): Promise<AutonomousEvaluatorRewardInput> {
+    if (!result || typeof result !== "object") throw new ArgumentError("run evaluation requires an autonomous run result");
+    const evaluate = evaluator ?? (this.runEvaluator ? (candidate: AutonomousRunResult) => this.runEvaluator!.evaluate(candidate) : undefined);
+    if (!evaluate) throw new ArgumentError("run evaluation requires an evaluator callback or configured runEvaluator");
+    return normalizeRewardInput(await evaluate(result));
+  }
+
+  /**
+   * Settle a completed run whose learning episode was prepared by this controller. This is the
+   * public bridge for callers that already have a run result and want one evaluator-to-bandit
+   * operation without manually copying the episode identity.
+   */
+  async evaluateAndSettleRun(
+    result: AutonomousRunResult,
+    options: {
+      evaluator?: (result: AutonomousRunResult) => AutonomousEvaluatorRewardInput | Promise<AutonomousEvaluatorRewardInput>;
+      creditedReward?: number;
+      remote?: boolean;
+      idempotencyKey?: string;
+      memoryStore?: AutonomousEpisodicMemoryStore;
+      outbox?: AutonomousLearningOutboxSettlementOptions;
+    } = {},
+  ): Promise<AutonomousEvaluatedRunResult> {
+    if (result.status !== "completed") return { schema: AUTONOMOUS_EVALUATED_RUN_SCHEMA, status: "not_eligible", run: result, evaluation: null, settlement: null, reason: "run_not_completed", retention: "run_caller_owned; evaluation_and_settlement_value_only" };
+    if (!result.learning_episode_id) return { schema: AUTONOMOUS_EVALUATED_RUN_SCHEMA, status: "not_eligible", run: result, evaluation: null, settlement: null, reason: "learning_episode_not_prepared", retention: "run_caller_owned; evaluation_and_settlement_value_only" };
+    const evaluation = await this.evaluateRun(result, options.evaluator);
+    const settlement = await this.settleRun(result.learning_episode_id, evaluation, {
+      creditedReward: options.creditedReward,
+      remote: options.remote,
+      idempotencyKey: options.idempotencyKey,
+      memoryStore: options.memoryStore,
+      outbox: options.outbox,
+    });
+    return { schema: AUTONOMOUS_EVALUATED_RUN_SCHEMA, status: "settled", run: result, evaluation, settlement, reason: null, retention: "run_caller_owned; evaluation_and_settlement_value_only" };
+  }
+
+  /**
+   * Execute, evaluate, and settle one routed run. The helper forces a single-domain route so a
+   * cross-domain task cannot silently create orphaned child episodes; use
+   * `runCrossDomainLearning` for fan-out/fan-in trajectory credit.
+   */
+  async runLearning(task: string, options: AutonomousRunLearningOptions = {}): Promise<AutonomousEvaluatedRunResult> {
+    if (options === null || typeof options !== "object" || Array.isArray(options)) throw new ArgumentError("runLearning options must be an object");
+    const runOptions: Omit<AutonomousRunOptions, "learning" | "learningEpisodeId"> = options.run === undefined ? {} : { ...options.run };
+    if (runOptions.allowCrossDomain === true) throw new ArgumentError("runLearning is single-domain; use runCrossDomainLearning for cross-domain tasks");
+    if (!options.evaluator && !this.runEvaluator) throw new ArgumentError("runLearning requires an evaluator callback or configured runEvaluator");
+    const episodeId = boundedIdentifier(
+      "runLearning episodeId",
+      options.episodeId ?? `learning:${digestJsonSync({ task, domain: runOptions.domain ?? null, time: Date.now() }).slice(0, 48)}`,
+    );
+    const run = await this.agent.run(task, { ...runOptions, allowCrossDomain: false, learning: this, learningEpisodeId: episodeId });
+    return this.evaluateAndSettleRun(run, {
+      evaluator: options.evaluator,
+      creditedReward: options.creditedReward,
+      remote: options.remote,
+      idempotencyKey: options.idempotencyKey ?? `episode:${episodeId}`,
+      memoryStore: options.memoryStore,
+      outbox: options.outbox,
+    });
+  }
+
+  /**
+   * Execute every completed specialist/synthesis run, evaluate each model decision, and settle a
+   * discounted trajectory. The evaluator callback is invoked only with transient run values;
+   * the returned trajectory contains no prompts, responses, credentials, or tool payloads.
+   */
+  async runCrossDomainLearning(task: string, options: AutonomousCrossDomainRunLearningOptions): Promise<AutonomousEvaluatedCrossDomainRunResult> {
+    if (options === null || typeof options !== "object" || Array.isArray(options) || !options.trajectoryId) throw new ArgumentError("runCrossDomainLearning requires a trajectoryId");
+    const runOptions: Omit<AutonomousCrossDomainRunOptions, "learning" | "learningEpisodeId"> = options.run === undefined ? {} : { ...options.run };
+    if (!options.evaluator && !this.runEvaluator) throw new ArgumentError("runCrossDomainLearning requires an evaluator callback or configured runEvaluator");
+    const run = await this.agent.runCrossDomain(task, { ...runOptions, learning: this });
+    if (run.status !== "completed") return { schema: AUTONOMOUS_EVALUATED_CROSS_DOMAIN_RUN_SCHEMA, status: "not_eligible", run, rewards: {}, settlement: null, reason: "run_not_completed", retention: "run_caller_owned; rewards_and_settlement_value_only" };
+    if (!run.learning_episode_ids.length) return { schema: AUTONOMOUS_EVALUATED_CROSS_DOMAIN_RUN_SCHEMA, status: "not_eligible", run, rewards: {}, settlement: null, reason: "learning_episodes_not_prepared", retention: "run_caller_owned; rewards_and_settlement_value_only" };
+    const evaluate = options.evaluator ?? (this.runEvaluator ? (candidate: AutonomousRunResult) => this.runEvaluator!.evaluate(candidate) : undefined);
+    if (!evaluate) throw new ArgumentError("cross-domain learning requires an evaluator callback or configured runEvaluator");
+    const candidates = [...run.child_runs.map((child) => child.result), ...(run.synthesis ? [run.synthesis] : [])]
+      .filter((candidate) => candidate.status === "completed");
+    if (candidates.length !== run.learning_episode_ids.length) throw new ArgumentError("cross-domain learning episode order does not match completed specialist and synthesis results");
+    const rewards: Record<string, AutonomousEvaluatorRewardInput> = {};
+    for (const [index, candidate] of candidates.entries()) rewards[run.learning_episode_ids[index]!] = normalizeRewardInput(await evaluate(candidate));
+    const missing = run.learning_episode_ids.filter((episodeId) => !rewards[episodeId]);
+    if (missing.length) throw new ArgumentError(`cross-domain learning evaluator did not cover ${missing.length} prepared episode(s)`);
+    const settlement = await this.settleCrossDomain(run, rewards, {
+      trajectoryId: options.trajectoryId,
+      discount: options.discount,
+      remote: options.remote,
+      idempotencyKey: options.idempotencyKey,
+      outbox: options.outbox,
+    });
+    return { schema: AUTONOMOUS_EVALUATED_CROSS_DOMAIN_RUN_SCHEMA, status: "settled", run, rewards, settlement: settlement.trajectory, reason: null, retention: "run_caller_owned; rewards_and_settlement_value_only" };
   }
 
   async prepareRun(result: AutonomousRunResult, options: { episodeId: string; runId?: string; stageId?: string; parentJobId?: string; planRefinementDigest?: string | null; memoryEpisodeId?: string | null }): Promise<AutonomousLearningEpisode> {

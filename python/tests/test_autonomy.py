@@ -2425,6 +2425,39 @@ def test_run_autonomous_learning_records_explicit_reward_and_only_metadata_in_me
         server.server_close()
 
 
+def test_agent_run_learning_is_the_explicit_facade_for_evaluator_backed_online_learning(tmp_path: Path):
+    runtime, store, server, thread = _runtime()
+    workspace = _Workspace()
+    handle = store.register("openai", "facade-learning-secret")
+    memory = BrainEpisodicMemory(tmp_path / "facade-learning.sqlite3")
+    agent = AutonomousAgent(workspace, runtime, model_catalogue=ModelCatalogue(_model()), memory=memory)
+    evaluator = BrainOutcomeEvaluator(
+        lambda _input: {"reward": 0.7, "passed": True, "failed": False},
+        evaluator_id="facade-learning-evaluator",
+        evaluator_version="1",
+    )
+    try:
+        result = agent.run_learning(
+            task="run the explicit facade learning path",
+            domain="coding",
+            credentials={"openai": handle},
+            model_candidates=_model(),
+            approve_provider_call=True,
+            evaluator=evaluator,
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+        )
+        assert result.status == "completed"
+        assert len(result.evaluations) == 1
+        assert result.evaluations[0]["decision"]["reward"] == 0.7
+        assert result.bandit_state["generation"] == 1
+        assert "facade-learning-secret" not in json.dumps(result.to_dict())
+        assert "run the explicit facade learning path" not in json.dumps(result.evaluations)
+    finally:
+        memory.close()
+        server.shutdown()
+        thread.join(timeout=2)
+
+
 def test_automatic_memory_recall_uses_task_facets_instead_of_recent_unrelated_episodes(tmp_path: Path):
     memory = BrainEpisodicMemory(tmp_path / "facet-recall.sqlite3")
     related_task = "review the release evidence and validate the implementation contract"
