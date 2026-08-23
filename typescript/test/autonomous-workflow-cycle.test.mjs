@@ -10,6 +10,7 @@ import {
   InMemoryAutonomousLearningEpisodeStore,
   InMemoryAutonomousLearningFeedbackOutboxStore,
   InMemoryAutonomousLearningTrajectoryStore,
+  InMemoryAutonomousModelHealthStore,
   InMemoryAutonomousWorkflowCheckpointStore,
   InMemoryAutonomousWorkflowCycleStateStore,
   LLMRuntime,
@@ -17,6 +18,7 @@ import {
   builtinAutonomousDomainProfiles,
   openaiCompatibleProvider,
   runAutonomousWorkflowCycle,
+  digestJson,
 } from "../dist/index.js";
 
 function jsonResponse(payload, status = 200) {
@@ -55,15 +57,39 @@ function stagePayload(init) {
   };
 }
 
-async function makeAgent(withLearning = false) {
+async function makeAgent(withLearning = false, agentOptions = {}) {
   const llm = new LLMRuntime({
     credentials: new CredentialStore(),
     fetch: async (_url, init) => jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify(stagePayload(init)) }, finish_reason: "stop" }] }),
   });
   llm.registerProvider(openaiCompatibleProvider("cycle-provider", "https://cycle.test", { requiresCredential: false }));
-  const agent = new AutonomousAgent(llm, withLearning ? { learner: new AutonomousOnlineLearner() } : {});
+  const agent = new AutonomousAgent(llm, { ...(withLearning ? { learner: new AutonomousOnlineLearner() } : {}), ...agentOptions });
   agent.registerModel(model());
   return agent;
+}
+
+async function acceptedPlanFor(agent, task, domain) {
+  const preview = await agent.blueprint(task, { domain });
+  assert.ok(preview.blueprint, domain);
+  const blueprint = preview.blueprint;
+  return {
+    schema: "bioprism-python-autonomous-plan-refinement/0.1",
+    status: "completed",
+    task_digest: blueprint.task_digest,
+    base_plan_digest: await digestJson(blueprint.plan),
+    workflow_digest: blueprint.workflow.workflow_digest,
+    priority_stage_ids: blueprint.workflow.stages.map((stage) => stage.id),
+    focus_stage_ids: [blueprint.workflow.stages[0].id],
+    review_required: false,
+    confidence: 0.96,
+    selected_model: { provider: "cycle-provider", model: "cycle-model" },
+    selection_digest: "a".repeat(64),
+    planner_prompt_digest: "b".repeat(64),
+    planner_plan_digest: "c".repeat(64),
+    outcome_digest: await digestJson({ workflow_digest: blueprint.workflow.workflow_digest, task_digest: blueprint.task_digest }),
+    retention: "stage_ids_and_digests_only; planner_transcript_not_retained",
+    authorization: "plan_proposal_only; no_tools_or_effects_authorized",
+  };
 }
 
 function perfectEvidence(execution) {
@@ -92,6 +118,35 @@ test("workflow cycle supervises every built-in domain with explicit evidence", a
     assert.equal(cycle.evaluations[0].status, "passed", profile.domain);
     assert.equal(cycle.evaluations[0].reward, 1, profile.domain);
   }
+});
+
+test("workflow cycles settle accepted planner quality separately across every built-in workflow", async () => {
+  const health = new InMemoryAutonomousModelHealthStore();
+  const agent = await makeAgent(true, { modelHealthStore: health });
+  const learning = new AutonomousLearningController(agent);
+  const profiles = (await builtinAutonomousDomainProfiles()).filter((profile) => profile.domain !== "cross_domain");
+  for (const profile of profiles) {
+    const task = `Run a provider-ordered ${profile.domain} workflow and verify every stage.`;
+    const acceptedPlan = await acceptedPlanFor(agent, task, profile.domain);
+    const executor = new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore(), { learning });
+    const cycle = await runAutonomousWorkflowCycle(task, executor, {
+      domain: profile.domain,
+      candidates: agent.models(),
+      approveProviderCall: true,
+      acceptedPlanRefinement: acceptedPlan,
+      learning: { controller: learning, trajectoryIdPrefix: `planner-workflow-${profile.domain}` },
+      evaluate: async (execution) => ({ evidence: perfectEvidence(execution) }),
+      evaluatePlanning: () => ({ evaluator_id: "workflow-planner-reviewer", evaluator_version: "1", reward: 0.88, passed: true }),
+    });
+    assert.equal(cycle.status, "completed", profile.domain);
+    assert.equal(cycle.planner_evaluations.length, 1, profile.domain);
+    assert.equal(cycle.planner_evaluations[0].reward, 0.88, profile.domain);
+    assert.equal(cycle.planner_settlements.length, 1, profile.domain);
+    assert.equal(cycle.planner_settlements[0].status, "settled", profile.domain);
+    assert.equal(cycle.settlements.length, 1, profile.domain);
+  }
+  const plannerHealth = health.health({ model: "cycle-model", capability: "planning" });
+  assert.equal(plannerHealth[0]?.quality_observations, profiles.length);
 });
 
 test("automatic evaluator replanning recovers every built-in domain without granting new authority", async () => {
@@ -312,6 +367,61 @@ test("workflow cycle persists the evaluator boundary and rehydrates without repl
   assert.equal(replayed.final, null);
   assert.equal(replayed.status, "completed");
   assert.equal(providerCalls, 5);
+});
+
+test("workflow cycle rehydrates planner quality independently at a settlement boundary", async () => {
+  const health = new InMemoryAutonomousModelHealthStore();
+  const agent = await makeAgent(true, { modelHealthStore: health });
+  const learning = new AutonomousLearningController(agent);
+  const checkpointStore = new InMemoryAutonomousWorkflowCheckpointStore();
+  const cycleStore = new InMemoryAutonomousWorkflowCycleStateStore();
+  const executor = new AutonomousWorkflowExecutor(agent, checkpointStore, { learning });
+  const task = "Restart this accepted planner workflow without replaying provider stages.";
+  const acceptedPlan = await acceptedPlanFor(agent, task, "coding");
+  let capturedExecution;
+  const failingController = Object.create(learning);
+  failingController.settleWorkflow = async () => { throw new Error("simulated workflow settlement interruption"); };
+  failingController.settlePlanningQuality = learning.settlePlanningQuality.bind(learning);
+  await assert.rejects(
+    () => runAutonomousWorkflowCycle(task, executor, {
+      domain: "coding",
+      candidates: agent.models(),
+      approveProviderCall: true,
+      acceptedPlanRefinement: acceptedPlan,
+      cycleId: "workflow-planner-recovery-1",
+      jobId: "workflow-planner-recovery-job",
+      stateStore: cycleStore,
+      learning: { controller: failingController, trajectoryIdPrefix: "workflow-planner-recovery" },
+      evaluate: async (execution) => { capturedExecution = execution; return { evidence: perfectEvidence(execution) }; },
+      evaluatePlanning: () => ({ evaluator_id: "workflow-planner-reviewer", evaluator_version: "1", reward: 0.9, passed: true }),
+    }),
+    /simulated workflow settlement interruption/,
+  );
+  const pending = await cycleStore.load("workflow-planner-recovery-1");
+  assert.equal(pending.phase, "settlement_pending");
+  assert.match(pending.planning_evaluation_digest, /^[0-9a-f]{64}$/);
+  assert.equal(pending.planner_evaluations.length, 1);
+
+  const resumed = await runAutonomousWorkflowCycle(task, executor, {
+    domain: "coding",
+    candidates: agent.models(),
+    approveProviderCall: true,
+    acceptedPlanRefinement: acceptedPlan,
+    cycleId: "workflow-planner-recovery-1",
+    jobId: "workflow-planner-recovery-job",
+    stateStore: cycleStore,
+    learning: { controller: learning, trajectoryIdPrefix: "workflow-planner-recovery" },
+    rehydrateExecution: (context) => { assert.equal(context.planning_evaluation_digest, pending.planning_evaluation_digest); return capturedExecution; },
+    rehydrateEvaluation: () => ({ evidence: perfectEvidence(capturedExecution) }),
+    rehydratePlanningEvaluation: () => ({ evaluator_id: "workflow-planner-reviewer", evaluator_version: "1", reward: 0.9, passed: true }),
+    evaluate: async () => { throw new Error("restart must not replay the execution evaluator"); },
+    evaluatePlanning: async () => { throw new Error("restart must not replay the planner evaluator"); },
+  });
+  assert.equal(resumed.status, "completed");
+  assert.equal(resumed.planner_evaluations.length, 1);
+  assert.equal(resumed.planner_settlements.length, 1);
+  assert.equal(resumed.planner_settlements[0].status, "settled");
+  assert.equal(health.health({ model: "cycle-model", capability: "planning" })[0]?.quality_observations, 1);
 });
 
 test("workflow cycle state snapshots are digest-bound and metadata-only", async () => {

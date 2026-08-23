@@ -8336,6 +8336,17 @@ learning controller is present, an explicit cycle evaluator must be that control
 evaluator instance; evaluation and delayed-credit settlement therefore cannot silently use
 different rubrics.
 
+An accepted provider workflow ordering can also receive independent planner credit. Pass the
+completed `acceptedPlanRefinement` to `runAutonomousWorkflowCycle()` and supply
+`evaluatePlanning`; the cycle returns `planner_evaluations` and `planner_settlements` while keeping
+stage trajectory settlement separate. Planner credit uses the dedicated `planning` capability arm
+and the accepted proposal's selected model, so a successful stage response cannot masquerade as
+proof that the ordering was good. The workflow-cycle cursor stores a separate
+`planning_evaluation_digest`, planner projections, and planner settlement digests. If a worker
+restarts after either evaluator boundary, it must provide `rehydrateEvaluation` and, when a
+planner packet is pending, `rehydratePlanningEvaluation`; both value-only packets are digest
+checked before settlement. Older cycle snapshots without these planner fields remain readable.
+
 The Python façade exposes the same boundary as `AutonomousEvaluatorMesh`, a
 `BrainOutcomeEvaluator` adapter that can be passed directly to `evaluate_and_record`, workflow or
 mission learning, trajectory settlement, and value-only replay. Its members receive the same

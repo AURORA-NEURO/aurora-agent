@@ -2306,7 +2306,9 @@ export {
 export type {
   AutonomousWorkflowCycleStatus,
   AutonomousWorkflowCycleEvaluationInput,
+  AutonomousWorkflowCyclePlanningEvaluator,
   AutonomousWorkflowCycleEvaluationProjection,
+  AutonomousWorkflowCyclePlanningEvaluationProjection,
   AutonomousWorkflowCycleAttempt,
   AutonomousWorkflowCycleLearningOptions,
   AutonomousWorkflowCycleOptions,

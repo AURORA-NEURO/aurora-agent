@@ -4,6 +4,8 @@ import {
   AutonomousWorkflowEvaluator,
   type AutonomousLearningController,
   type AutonomousLearningOutboxSettlementOptions,
+  type AutonomousEvaluatorRewardInput,
+  type AutonomousPlanningQualitySettlement,
   type AutonomousWorkflowLearningSettlement,
   type AutonomousWorkflowEvaluation,
   type AutonomousWorkflowEvaluationInput,
@@ -14,7 +16,7 @@ import {
   type AutonomousWorkflowExecutor,
 } from "./workflow-execution.js";
 import { digestJson } from "./tooling.js";
-import type { JsonObject } from "./types.js";
+import type { AutonomousPlanRefinementResult, JsonObject } from "./types.js";
 import {
   type AutonomousWorkflowCyclePersistencePhase,
   type AutonomousWorkflowCycleRehydrationContext,
@@ -52,6 +54,11 @@ export interface AutonomousWorkflowCycleEvaluationInput extends JsonObject {
   failure_class?: string | null;
 }
 
+/** Explicit evaluator for the accepted provider workflow ordering. */
+export type AutonomousWorkflowCyclePlanningEvaluator = (
+  plan: AutonomousPlanRefinementResult,
+) => AutonomousEvaluatorRewardInput | Promise<AutonomousEvaluatorRewardInput>;
+
 export interface AutonomousWorkflowCycleEvaluationProjection extends JsonObject {
   evaluation_digest: string;
   evidence_digest: string;
@@ -70,6 +77,17 @@ export interface AutonomousWorkflowCycleEvaluationProjection extends JsonObject 
   secret_material: "never_returned";
 }
 
+export interface AutonomousWorkflowCyclePlanningEvaluationProjection extends JsonObject {
+  evaluator_id: string;
+  evaluator_version: string;
+  reward: number;
+  passed: boolean;
+  failed: boolean;
+  feedback_digest: string | null;
+  failure_class: string | null;
+  evidence_digest: string | null;
+}
+
 export interface AutonomousWorkflowCycleAttempt extends JsonObject {
   attempt: number;
   job_id: string;
@@ -79,6 +97,8 @@ export interface AutonomousWorkflowCycleAttempt extends JsonObject {
   evaluation_digest: string | null;
   evidence_digest: string | null;
   settlement_digest: string | null;
+  planning_evaluation_digest: string | null;
+  planner_settlement_digest: string | null;
   learning_episode_ids: string[];
   replan_instruction_digest: string | null;
 }
@@ -100,6 +120,8 @@ export interface AutonomousWorkflowCycleOptions extends Omit<AutonomousWorkflowE
   maxReplans?: number;
   context?: readonly AutonomousPromptChunk[];
   learning?: AutonomousWorkflowCycleLearningOptions;
+  /** Explicit quality evaluator for an accepted provider workflow plan. */
+  evaluatePlanning?: AutonomousWorkflowCyclePlanningEvaluator;
   /** Optional metadata-only restart ledger for evaluator and settlement boundaries. */
   stateStore?: AutonomousWorkflowCycleStateStore;
   /** Explicit evaluator used for this cycle when no learning controller supplies one. */
@@ -114,6 +136,8 @@ export interface AutonomousWorkflowCycleOptions extends Omit<AutonomousWorkflowE
   rehydrateExecution?: (context: AutonomousWorkflowCycleRehydrationContext) => AutonomousWorkflowExecutionResult | Promise<AutonomousWorkflowExecutionResult>;
   /** Rehydrate the exact evaluator packet after a settlement interruption. */
   rehydrateEvaluation?: (context: AutonomousWorkflowCycleRehydrationContext) => AutonomousWorkflowCycleEvaluationInput | Promise<AutonomousWorkflowCycleEvaluationInput>;
+  /** Rehydrate the value-only planner evaluator packet after a settlement interruption. */
+  rehydratePlanningEvaluation?: (context: AutonomousWorkflowCycleRehydrationContext) => AutonomousEvaluatorRewardInput | Promise<AutonomousEvaluatorRewardInput>;
   /** Rehydrate transient evaluator guidance after a process restart. */
   rehydrateReplanInstruction?: (context: AutonomousWorkflowCycleRehydrationContext) => string | Promise<string>;
   evaluate: (execution: AutonomousWorkflowExecutionResult) => AutonomousWorkflowCycleEvaluationInput | Promise<AutonomousWorkflowCycleEvaluationInput>;
@@ -125,7 +149,9 @@ export interface AutonomousWorkflowCycleResult {
   final: AutonomousWorkflowExecutionResult | null;
   attempts: AutonomousWorkflowCycleAttempt[];
   evaluations: AutonomousWorkflowCycleEvaluationProjection[];
+  planner_evaluations: AutonomousWorkflowCyclePlanningEvaluationProjection[];
   settlements: AutonomousWorkflowLearningSettlement[];
+  planner_settlements: AutonomousPlanningQualitySettlement[];
   learning_episode_ids: string[];
   replan_count: number;
   retention: "provider_responses_local;workflow_checkpoints_metadata_only;value_only_evaluation_and_learning_projection";
@@ -292,14 +318,42 @@ async function replanContext(attempt: number, execution: AutonomousWorkflowExecu
   return { id: `autonomous-workflow-replan-${attempt}`, content, required: true, priority: 95 };
 }
 
-function result(status: AutonomousWorkflowCycleStatus, final: AutonomousWorkflowExecutionResult | null, attempts: AutonomousWorkflowCycleAttempt[], evaluations: AutonomousWorkflowCycleEvaluationProjection[], settlements: AutonomousWorkflowLearningSettlement[], learningEpisodeIds: string[]): AutonomousWorkflowCycleResult {
+function projectPlannerReward(input: AutonomousEvaluatorRewardInput): AutonomousEvaluatorRewardInput {
+  return {
+    evaluator_id: input.evaluator_id,
+    evaluator_version: input.evaluator_version,
+    reward: boundedReward("workflow planner reward", input.reward),
+    passed: input.passed,
+    failed: input.failed ?? !input.passed,
+    feedback_digest: input.feedback_digest ?? null,
+    failure_class: input.failure_class ?? null,
+    evidence_digest: input.evidence_digest ?? null,
+  };
+}
+
+function toPlannerProjection(input: AutonomousEvaluatorRewardInput): AutonomousWorkflowCyclePlanningEvaluationProjection {
+  return {
+    evaluator_id: input.evaluator_id,
+    evaluator_version: input.evaluator_version,
+    reward: boundedReward("workflow planner reward", input.reward),
+    passed: input.passed,
+    failed: input.failed ?? !input.passed,
+    feedback_digest: input.feedback_digest ?? null,
+    failure_class: input.failure_class ?? null,
+    evidence_digest: input.evidence_digest ?? null,
+  };
+}
+
+function result(status: AutonomousWorkflowCycleStatus, final: AutonomousWorkflowExecutionResult | null, attempts: AutonomousWorkflowCycleAttempt[], evaluations: AutonomousWorkflowCycleEvaluationProjection[], plannerEvaluations: AutonomousWorkflowCyclePlanningEvaluationProjection[], settlements: AutonomousWorkflowLearningSettlement[], plannerSettlements: AutonomousPlanningQualitySettlement[], learningEpisodeIds: string[]): AutonomousWorkflowCycleResult {
   return {
     schema: AUTONOMOUS_WORKFLOW_CYCLE_SCHEMA,
     status,
     final,
     attempts,
     evaluations,
+    planner_evaluations: plannerEvaluations,
     settlements,
+    planner_settlements: plannerSettlements,
     learning_episode_ids: learningEpisodeIds,
     replan_count: Math.max(0, attempts.length - 1),
     retention: RETENTION,
@@ -328,6 +382,7 @@ function rehydrationContext(runtime: CyclePersistenceRuntime): AutonomousWorkflo
     workflow_digest: state.workflow_digest,
     outcome_digest: state.outcome_digest,
     evaluation_digest: state.evaluation_digest,
+    planning_evaluation_digest: state.planning_evaluation_digest ?? null,
     evidence_digest: state.evidence_digest,
     replan_instruction_digest: state.replan_instruction_digest,
   };
@@ -361,11 +416,13 @@ async function openCyclePersistence(options: AutonomousWorkflowCycleOptions, tas
     workflow_digest: null,
     outcome_digest: null,
     evaluation_digest: null,
+    planning_evaluation_digest: null,
     evidence_digest: null,
     replan_instruction_digest: null,
     terminal_status: null,
     attempts: [],
     evaluations: [],
+    planner_evaluations: [],
     learning_episode_ids: [],
     settlement_digests: [],
     trajectory_ids: [],
@@ -427,6 +484,8 @@ function persistedAttempt(value: AutonomousWorkflowCycleAttempt): AutonomousWork
     settlement_digest: value.settlement_digest,
     learning_episode_ids: [...value.learning_episode_ids],
     replan_instruction_digest: value.replan_instruction_digest,
+    planning_evaluation_digest: value.planning_evaluation_digest ?? null,
+    planner_settlement_digest: value.planner_settlement_digest ?? null,
   };
 }
 
@@ -440,6 +499,8 @@ function persistedAttempts(state: AutonomousWorkflowCycleState): AutonomousWorkf
     evidence_digest: attempt.evidence_digest,
     outcome_digest: attempt.outcome_digest,
     settlement_digest: attempt.settlement_digest,
+    planning_evaluation_digest: attempt.planning_evaluation_digest ?? null,
+    planner_settlement_digest: attempt.planner_settlement_digest ?? null,
     learning_episode_ids: [...attempt.learning_episode_ids],
     replan_instruction_digest: attempt.replan_instruction_digest,
   }));
@@ -453,7 +514,7 @@ function persistedResult(state: AutonomousWorkflowCycleState): AutonomousWorkflo
   const status = state.terminal_status && ["completed", "completed_without_replan", "replan_limit_reached", "approval_required", "paused", "stage_blocked", "stage_proposed", "stage_not_attempted", "failed", "route_review_required"].includes(state.terminal_status)
     ? state.terminal_status as AutonomousWorkflowCycleStatus
     : "failed";
-  return result(status, null, persistedAttempts(state), persistedEvaluations(state), [], [...state.learning_episode_ids]);
+  return result(status, null, persistedAttempts(state), persistedEvaluations(state), (state.planner_evaluations ?? []) as unknown as AutonomousWorkflowCyclePlanningEvaluationProjection[], [], [], [...state.learning_episode_ids]);
 }
 
 async function rehydrateInstruction(runtime: CyclePersistenceRuntime, options: AutonomousWorkflowCycleOptions): Promise<string> {
@@ -495,12 +556,16 @@ export async function runAutonomousWorkflowCycle(task: string, executor: Autonom
   if (maxReplans > 0 && rootJobId.length > 240) throw new ArgumentError("workflow cycle jobId is too long for bounded retry identities");
   const learning = options.learning?.controller ?? executor.learning;
   if (options.evaluator !== undefined && learning && options.evaluator !== learning.evaluator) throw new ArgumentError("workflow cycle evaluator override must match the learning controller evaluator");
+  if (options.evaluatePlanning && !learning) throw new ArgumentError("workflow cycle planner evaluation requires a learning controller");
+  if (options.evaluatePlanning && learning && typeof learning.settlePlanningQuality !== "function") throw new ArgumentError("workflow cycle planner learning controller is malformed");
   const trajectoryPrefix = boundedTrajectoryPrefix(options.learning?.trajectoryIdPrefix ?? `workflow-cycle:${rootJobId}`);
   const persistence = await openCyclePersistence(options, taskText, rootJobId, maxReplans);
   if (persistence?.state.phase === "terminal") return persistedResult(persistence.state);
   const attempts: AutonomousWorkflowCycleAttempt[] = persistence ? persistedAttempts(persistence.state) : [];
   const evaluations: AutonomousWorkflowCycleEvaluationProjection[] = persistence ? persistedEvaluations(persistence.state) : [];
+  const plannerEvaluations: AutonomousWorkflowCyclePlanningEvaluationProjection[] = persistence ? (persistence.state.planner_evaluations ?? []) as unknown as AutonomousWorkflowCyclePlanningEvaluationProjection[] : [];
   const settlements: AutonomousWorkflowLearningSettlement[] = [];
+  const plannerSettlements: AutonomousPlanningQualitySettlement[] = [];
   const learningEpisodeIds: string[] = persistence ? [...persistence.state.learning_episode_ids] : [];
   let context = [...(options.context ?? [])];
   let final: AutonomousWorkflowExecutionResult | null = null;
@@ -524,6 +589,7 @@ export async function runAutonomousWorkflowCycle(task: string, executor: Autonom
     }
     if (persistence.state.phase === "evaluation_pending" || persistence.state.phase === "settlement_pending") {
       if (!options.rehydrateExecution) throw new ArgumentError("workflow cycle restart requires rehydrateExecution for the persisted provider outcome");
+      if (persistence.state.planning_evaluation_digest !== null && persistence.state.planning_evaluation_digest !== undefined && !options.rehydratePlanningEvaluation) throw new ArgumentError("workflow cycle restart requires rehydratePlanningEvaluation after planner settlement interruption");
     }
   }
   const {
@@ -538,6 +604,7 @@ export async function runAutonomousWorkflowCycle(task: string, executor: Autonom
     automaticReplan: _automaticReplan,
     rehydrateExecution: _rehydrateExecution,
     rehydrateEvaluation: _rehydrateEvaluation,
+    rehydratePlanningEvaluation: _rehydratePlanningEvaluation,
     rehydrateReplanInstruction: _rehydrateReplanInstruction,
     ...workflowBaseOptions
   } = options;
@@ -554,6 +621,7 @@ export async function runAutonomousWorkflowCycle(task: string, executor: Autonom
         workflow_digest: null,
         outcome_digest: null,
         evaluation_digest: null,
+        planning_evaluation_digest: null,
         evidence_digest: null,
         terminal_status: null,
       });
@@ -594,6 +662,8 @@ export async function runAutonomousWorkflowCycle(task: string, executor: Autonom
       evaluation_digest: null,
       evidence_digest: null,
       settlement_digest: null,
+      planning_evaluation_digest: null,
+      planner_settlement_digest: null,
       learning_episode_ids: [...execution.learning_episode_ids],
       replan_instruction_digest: null,
     };
@@ -619,7 +689,7 @@ export async function runAutonomousWorkflowCycle(task: string, executor: Autonom
       const index = attempts.findIndex((attempt) => attempt.attempt === attemptNumber);
       if (index >= 0) attempts[index] = executionAttempt;
       else attempts.push(executionAttempt);
-      return result(executionStatus(execution.status), final, attempts, evaluations, settlements, learningEpisodeIds);
+      return result(executionStatus(execution.status), final, attempts, evaluations, plannerEvaluations, settlements, plannerSettlements, learningEpisodeIds);
     }
 
     const outcomeDigest = await workflowExecutionDigest(execution);
@@ -634,6 +704,7 @@ export async function runAutonomousWorkflowCycle(task: string, executor: Autonom
         workflow_digest: executionAttempt.workflow_digest,
         outcome_digest: outcomeDigest,
         evaluation_digest: null,
+        planning_evaluation_digest: null,
         evidence_digest: null,
         replan_instruction_digest: null,
         terminal_status: null,
@@ -646,6 +717,8 @@ export async function runAutonomousWorkflowCycle(task: string, executor: Autonom
     }
 
     const resumedSettlement = phaseAtEntry === "settlement_pending";
+    const plannerPlan = options.acceptedPlanRefinement ?? null;
+    const plannerEligible = Boolean(options.evaluatePlanning && plannerPlan?.status === "completed");
     let input = normalizeCycleInput(resumedSettlement
       ? await (options.rehydrateEvaluation ? options.rehydrateEvaluation(rehydrationContext(persistence!)) : Promise.reject(new ArgumentError("workflow cycle restart requires rehydrateEvaluation after settlement interruption")))
       : await options.evaluate(execution));
@@ -653,15 +726,27 @@ export async function runAutonomousWorkflowCycle(task: string, executor: Autonom
     const evaluation = await evaluator.evaluate(execution, input.evidence);
     if (options.automaticReplan === true) input = automaticReplanInput(execution, evaluation, input);
     const projection = await cycleProjection(evaluation, input);
+    const plannerEvaluation = plannerEligible
+      ? projectPlannerReward(resumedSettlement
+        ? await (options.rehydratePlanningEvaluation ? options.rehydratePlanningEvaluation(rehydrationContext(persistence!)) : Promise.reject(new ArgumentError("workflow cycle restart requires rehydratePlanningEvaluation after planner settlement interruption")))
+        : await options.evaluatePlanning!(plannerPlan!))
+      : null;
+    const plannerDigest = plannerEvaluation ? await digestJson(plannerEvaluation) : null;
+    const plannerProjection = plannerEvaluation ? toPlannerProjection(plannerEvaluation) : null;
     if (resumedSettlement && persistence) {
       const priorProjection = evaluations.at(-1);
-      if (persistence.state.evaluation_digest !== projection.evaluation_digest || persistence.state.evidence_digest !== projection.evidence_digest || persistence.state.replan_instruction_digest !== projection.replan_instruction_digest || (priorProjection && priorProjection.evaluation_digest !== projection.evaluation_digest)) throw new ArgumentError("rehydrated workflow evaluator packet does not match the persisted cycle evaluation");
+      const priorPlannerProjection = plannerEvaluations.at(-1);
+      if (persistence.state.evaluation_digest !== projection.evaluation_digest || persistence.state.evidence_digest !== projection.evidence_digest || persistence.state.replan_instruction_digest !== projection.replan_instruction_digest || (priorProjection && priorProjection.evaluation_digest !== projection.evaluation_digest) || persistence.state.planning_evaluation_digest !== plannerDigest || (priorPlannerProjection && plannerProjection && priorPlannerProjection.evaluator_id !== plannerProjection.evaluator_id)) throw new ArgumentError("rehydrated workflow evaluator packet does not match the persisted cycle evaluation");
     }
     executionAttempt.evaluation_digest = evaluation.evaluation_digest;
     executionAttempt.evidence_digest = evaluation.evidence_digest;
     executionAttempt.replan_instruction_digest = projection.replan_instruction_digest;
+    executionAttempt.planning_evaluation_digest = plannerDigest;
     const stateEvaluations = persistence
       ? [...persistence.state.evaluations.slice(0, Math.max(0, attemptNumber - 1)), projection]
+      : [];
+    const statePlannerEvaluations = persistence
+      ? [...(persistence.state.planner_evaluations ?? []).slice(0, Math.max(0, attemptNumber - 1)), ...(plannerProjection ? [plannerProjection] : [])]
       : [];
     const stateAttemptAfterEvaluation = persistedAttempt(executionAttempt);
     if (persistence && !resumedSettlement) {
@@ -671,10 +756,12 @@ export async function runAutonomousWorkflowCycle(task: string, executor: Autonom
         workflow_digest: executionAttempt.workflow_digest,
         outcome_digest: outcomeDigest,
         evaluation_digest: evaluation.evaluation_digest,
+        planning_evaluation_digest: plannerDigest,
         evidence_digest: evaluation.evidence_digest,
         replan_instruction_digest: projection.replan_instruction_digest,
         attempts: [...persistence.state.attempts.filter((attempt) => attempt.attempt !== attemptNumber), stateAttemptAfterEvaluation],
         evaluations: stateEvaluations,
+        planner_evaluations: statePlannerEvaluations,
       });
     }
     if (learning && execution.learning_episode_ids.length > 0) {
@@ -689,11 +776,27 @@ export async function runAutonomousWorkflowCycle(task: string, executor: Autonom
       executionAttempt.settlement_digest = await digestJson(settlement);
       settlements.push(settlement);
     }
+    if (plannerEvaluation && plannerPlan) {
+      const plannerSettlement = await learning!.settlePlanningQuality(plannerPlan, {
+        domain: execution.blueprint.domain_profile.domain,
+        capability: "planning",
+        riskClass: execution.blueprint.domain_profile.risk_class,
+        taskFamily: execution.blueprint.selection_context.task_family ?? null,
+        evaluator: plannerEvaluation,
+        remote: options.learning?.remote,
+      });
+      executionAttempt.planner_settlement_digest = plannerSettlement.status === "settled" ? await digestJson(plannerSettlement) : null;
+      plannerSettlements.push(plannerSettlement);
+    }
     const attemptIndex = attempts.findIndex((attempt) => attempt.attempt === attemptNumber);
     if (attemptIndex >= 0) attempts[attemptIndex] = executionAttempt;
     else attempts.push(executionAttempt);
     if (evaluations.length >= attemptNumber) evaluations[attemptNumber - 1] = projection;
     else evaluations.push(projection);
+    if (plannerProjection) {
+      if (plannerEvaluations.length >= attemptNumber) plannerEvaluations[attemptNumber - 1] = plannerProjection;
+      else plannerEvaluations.push(plannerProjection);
+    }
 
     const wantsReplan = input.replan_requested === true;
     const terminal = execution.status === "completed" ? (evaluation.passed ? "completed" : "completed_without_replan") : executionStatus(execution.status);
@@ -701,7 +804,8 @@ export async function runAutonomousWorkflowCycle(task: string, executor: Autonom
     if (persistence) {
       const stateLearningEpisodeIds = [...new Set([...persistence.state.learning_episode_ids, ...execution.learning_episode_ids])];
       const settlementDigest = executionAttempt.settlement_digest;
-      const stateSettlementDigests = settlementDigest && !persistence.state.settlement_digests.includes(settlementDigest) ? [...persistence.state.settlement_digests, settlementDigest] : [...persistence.state.settlement_digests];
+      const stateSettlementDigests = [...persistence.state.settlement_digests];
+      for (const digest of [settlementDigest, executionAttempt.planner_settlement_digest]) if (digest && !stateSettlementDigests.includes(digest)) stateSettlementDigests.push(digest);
       const trajectoryId = execution.learning_episode_ids.length > 0 ? boundedIdentifier("workflow cycle trajectory id", `${trajectoryPrefix}:attempt-${attemptNumber}`) : null;
       const stateTrajectoryIds = trajectoryId && !persistence.state.trajectory_ids.includes(trajectoryId) ? [...persistence.state.trajectory_ids, trajectoryId] : [...persistence.state.trajectory_ids];
       const stateAttempts = [...persistence.state.attempts.filter((attempt) => attempt.attempt !== attemptNumber), persistedAttempt(executionAttempt)];
@@ -716,11 +820,13 @@ export async function runAutonomousWorkflowCycle(task: string, executor: Autonom
           workflow_digest: executionAttempt.workflow_digest,
           outcome_digest: outcomeDigest,
           evaluation_digest: evaluation.evaluation_digest,
+          planning_evaluation_digest: plannerDigest,
           evidence_digest: evaluation.evidence_digest,
           replan_instruction_digest: projection.replan_instruction_digest,
           terminal_status: null,
           attempts: stateAttempts,
           evaluations: stateEvaluations.length ? stateEvaluations : [...persistence.state.evaluations, projection],
+          planner_evaluations: statePlannerEvaluations,
           learning_episode_ids: stateLearningEpisodeIds,
           settlement_digests: stateSettlementDigests,
           trajectory_ids: stateTrajectoryIds,
@@ -737,11 +843,13 @@ export async function runAutonomousWorkflowCycle(task: string, executor: Autonom
           workflow_digest: executionAttempt.workflow_digest,
           outcome_digest: outcomeDigest,
           evaluation_digest: evaluation.evaluation_digest,
+          planning_evaluation_digest: plannerDigest,
           evidence_digest: evaluation.evidence_digest,
           replan_instruction_digest: projection.replan_instruction_digest,
           terminal_status: wantsReplan ? "replan_limit_reached" : terminal,
           attempts: stateAttempts,
           evaluations: stateEvaluations.length ? stateEvaluations : [...persistence.state.evaluations, projection],
+          planner_evaluations: statePlannerEvaluations,
           learning_episode_ids: stateLearningEpisodeIds,
           settlement_digests: stateSettlementDigests,
           trajectory_ids: stateTrajectoryIds,
@@ -750,9 +858,9 @@ export async function runAutonomousWorkflowCycle(task: string, executor: Autonom
       }
     }
     if (!wantsReplan) {
-      return result(terminal, final, attempts, evaluations, settlements, learningEpisodeIds);
+      return result(terminal, final, attempts, evaluations, plannerEvaluations, settlements, plannerSettlements, learningEpisodeIds);
     }
-    if (attemptNumber > maxReplans) return result("replan_limit_reached", final, attempts, evaluations, settlements, learningEpisodeIds);
+    if (attemptNumber > maxReplans) return result("replan_limit_reached", final, attempts, evaluations, plannerEvaluations, settlements, plannerSettlements, learningEpisodeIds);
 
     if (domain === undefined && execution.blueprint.domain_profile.domain) domain = execution.blueprint.domain_profile.domain;
     if (!persistence) context = [...context, await replanContext(attemptNumber + 1, execution, evaluation, input)];

@@ -32,6 +32,10 @@ export interface AutonomousWorkflowCycleAttemptState extends JsonObject {
   settlement_digest: string | null;
   learning_episode_ids: string[];
   replan_instruction_digest: string | null;
+  /** Optional for compatibility with pre-planner-quality cycle snapshots. */
+  planning_evaluation_digest?: string | null;
+  /** Optional for compatibility with pre-planner-quality cycle snapshots. */
+  planner_settlement_digest?: string | null;
 }
 
 /** The persisted state deliberately contains no task text, prompts, outputs, evidence, or instructions. */
@@ -49,11 +53,15 @@ export interface AutonomousWorkflowCycleState extends JsonObject {
   workflow_digest: string | null;
   outcome_digest: string | null;
   evaluation_digest: string | null;
+  /** Optional for compatibility with pre-planner-quality cycle snapshots. */
+  planning_evaluation_digest?: string | null;
   evidence_digest: string | null;
   replan_instruction_digest: string | null;
   terminal_status: string | null;
   attempts: AutonomousWorkflowCycleAttemptState[];
   evaluations: JsonObject[];
+  /** Optional for compatibility with pre-planner-quality cycle snapshots. */
+  planner_evaluations?: JsonObject[];
   learning_episode_ids: string[];
   settlement_digests: string[];
   trajectory_ids: string[];
@@ -98,6 +106,7 @@ export interface AutonomousWorkflowCycleRehydrationContext {
   workflow_digest: string | null;
   outcome_digest: string | null;
   evaluation_digest: string | null;
+  planning_evaluation_digest: string | null;
   evidence_digest: string | null;
   replan_instruction_digest: string | null;
 }
@@ -166,16 +175,16 @@ function digestDescriptor(value: AutonomousWorkflowCycleState): JsonObject {
 }
 
 function nullableDigestFields(value: Record<string, unknown>, label: string): void {
-  for (const field of ["workflow_digest", "outcome_digest", "evaluation_digest", "evidence_digest", "settlement_digest", "replan_instruction_digest"] as const) {
+  for (const field of ["workflow_digest", "outcome_digest", "evaluation_digest", "planning_evaluation_digest", "evidence_digest", "settlement_digest", "planner_settlement_digest", "replan_instruction_digest"] as const) {
     boundedDigest(`${label}.${field}`, value[field], true);
   }
 }
 
 function validateAttempt(value: unknown, index: number): AutonomousWorkflowCycleAttemptState {
   if (!isObject(value)) throw new AutonomousWorkflowCyclePersistenceError(`workflow cycle attempt ${index} must be an object`);
-  const keys = ["attempt", "job_id", "execution_status", "workflow_digest", "outcome_digest", "evaluation_digest", "evidence_digest", "settlement_digest", "learning_episode_ids", "replan_instruction_digest"] as const;
+  const keys = ["attempt", "job_id", "execution_status", "workflow_digest", "outcome_digest", "evaluation_digest", "evidence_digest", "settlement_digest", "learning_episode_ids", "replan_instruction_digest", "planning_evaluation_digest", "planner_settlement_digest"] as const;
   assertKeys(`workflow cycle attempt ${index}`, value, keys);
-  assertRequired(`workflow cycle attempt ${index}`, value, keys);
+  assertRequired(`workflow cycle attempt ${index}`, value, keys.filter((key) => key !== "planning_evaluation_digest" && key !== "planner_settlement_digest"));
   const attempt = boundedCount(`workflow cycle attempt ${index}.attempt`, value.attempt, AUTONOMOUS_WORKFLOW_CYCLE_MAX_ATTEMPTS, 1);
   const jobId = boundedIdentifier(`workflow cycle attempt ${index}.job_id`, value.job_id);
   const executionStatus = boundedIdentifier(`workflow cycle attempt ${index}.execution_status`, value.execution_status);
@@ -193,6 +202,8 @@ function validateAttempt(value: unknown, index: number): AutonomousWorkflowCycle
     settlement_digest: value.settlement_digest as string | null,
     learning_episode_ids: learningEpisodeIds,
     replan_instruction_digest: value.replan_instruction_digest as string | null,
+    ...(Object.prototype.hasOwnProperty.call(value, "planning_evaluation_digest") ? { planning_evaluation_digest: value.planning_evaluation_digest as string | null } : {}),
+    ...(Object.prototype.hasOwnProperty.call(value, "planner_settlement_digest") ? { planner_settlement_digest: value.planner_settlement_digest as string | null } : {}),
   };
 }
 
@@ -224,17 +235,32 @@ function validateEvaluation(value: unknown, index: number): JsonObject {
   return clone(value) as JsonObject;
 }
 
+function validatePlannerEvaluation(value: unknown, index: number): JsonObject {
+  if (!isObject(value)) throw new AutonomousWorkflowCyclePersistenceError(`workflow cycle planner evaluation ${index} must be an object`);
+  const keys = ["evaluator_id", "evaluator_version", "reward", "passed", "failed", "feedback_digest", "failure_class", "evidence_digest"] as const;
+  assertKeys(`workflow cycle planner evaluation ${index}`, value, keys);
+  assertRequired(`workflow cycle planner evaluation ${index}`, value, keys);
+  boundedIdentifier(`workflow cycle planner evaluation ${index}.evaluator_id`, value.evaluator_id);
+  boundedIdentifier(`workflow cycle planner evaluation ${index}.evaluator_version`, value.evaluator_version);
+  if (typeof value.reward !== "number" || !Number.isFinite(value.reward) || value.reward < 0 || value.reward > 1) throw new AutonomousWorkflowCyclePersistenceError(`workflow cycle planner evaluation ${index}.reward is outside [0, 1]`);
+  if (typeof value.passed !== "boolean" || typeof value.failed !== "boolean") throw new AutonomousWorkflowCyclePersistenceError(`workflow cycle planner evaluation ${index}.boolean fields are malformed`);
+  boundedDigest(`workflow cycle planner evaluation ${index}.feedback_digest`, value.feedback_digest, true);
+  boundedDigest(`workflow cycle planner evaluation ${index}.evidence_digest`, value.evidence_digest, true);
+  if (value.failure_class !== null) boundedIdentifier(`workflow cycle planner evaluation ${index}.failure_class`, value.failure_class);
+  return clone(value) as JsonObject;
+}
+
 /** Validate a cycle state before storage or rehydration. */
 export async function validateAutonomousWorkflowCycleState(value: unknown): Promise<AutonomousWorkflowCycleState> {
   if (!isObject(value)) throw new AutonomousWorkflowCyclePersistenceError("workflow cycle state must be an object");
   const keys = [
     "schema", "cycle_id", "task_digest", "domain", "root_job_id", "current_job_id", "max_replans", "attempt", "phase", "execution_status",
-    "workflow_digest", "outcome_digest", "evaluation_digest", "evidence_digest", "replan_instruction_digest", "terminal_status", "attempts",
-    "evaluations", "learning_episode_ids", "settlement_digests", "trajectory_ids", "context_digests", "generation", "previous_state_digest",
+    "workflow_digest", "outcome_digest", "evaluation_digest", "planning_evaluation_digest", "evidence_digest", "replan_instruction_digest", "terminal_status", "attempts",
+    "evaluations", "planner_evaluations", "learning_episode_ids", "settlement_digests", "trajectory_ids", "context_digests", "generation", "previous_state_digest",
     "state_digest", "retention", "secret_material",
   ] as const;
   assertKeys("workflow cycle state", value, keys);
-  assertRequired("workflow cycle state", value, keys);
+  assertRequired("workflow cycle state", value, keys.filter((key) => key !== "planning_evaluation_digest" && key !== "planner_evaluations"));
   if (value.schema !== AUTONOMOUS_WORKFLOW_CYCLE_STATE_SCHEMA || value.retention !== "metadata_only_hash_chained_no_private_payloads" || value.secret_material !== "never_returned") throw new AutonomousWorkflowCyclePersistenceError("workflow cycle state retention markers are invalid");
   const cycleId = boundedIdentifier("workflow cycle state cycle_id", value.cycle_id);
   const taskDigest = boundedDigest("workflow cycle state task_digest", value.task_digest)!;
@@ -260,12 +286,18 @@ export async function validateAutonomousWorkflowCycleState(value: unknown): Prom
   if (!Array.isArray(value.evaluations) || value.evaluations.length > maxReplans + 1) throw new AutonomousWorkflowCyclePersistenceError("workflow cycle state evaluations exceed capacity");
   const evaluations = value.evaluations.map(validateEvaluation);
   if (evaluations.length > attempts.length) throw new AutonomousWorkflowCyclePersistenceError("workflow cycle state has more evaluations than attempts");
+  const plannerEvaluations = value.planner_evaluations === undefined
+    ? []
+    : (!Array.isArray(value.planner_evaluations) || value.planner_evaluations.length > maxReplans + 1
+      ? (() => { throw new AutonomousWorkflowCyclePersistenceError("workflow cycle state planner evaluations exceed capacity"); })()
+      : value.planner_evaluations.map(validatePlannerEvaluation));
+  if (plannerEvaluations.length > attempts.length) throw new AutonomousWorkflowCyclePersistenceError("workflow cycle state has more planner evaluations than attempts");
   const ids = (name: string, candidate: unknown, maximum: number): string[] => {
     if (!Array.isArray(candidate) || candidate.length > maximum) throw new AutonomousWorkflowCyclePersistenceError(`${name} is malformed`);
     return candidate.map((item, index) => boundedIdentifier(`${name}[${index}]`, item));
   };
   const learningEpisodeIds = ids("workflow cycle state learning_episode_ids", value.learning_episode_ids, (maxReplans + 1) * 256);
-  const settlementDigests = ids("workflow cycle state settlement_digests", value.settlement_digests, maxReplans + 1);
+  const settlementDigests = ids("workflow cycle state settlement_digests", value.settlement_digests, (maxReplans + 1) * 2);
   settlementDigests.forEach((digest) => boundedDigest("workflow cycle state settlement_digest", digest));
   const trajectoryIds = ids("workflow cycle state trajectory_ids", value.trajectory_ids, maxReplans + 1);
   const contextDigests = ids("workflow cycle state context_digests", value.context_digests, maxReplans);
@@ -274,12 +306,12 @@ export async function validateAutonomousWorkflowCycleState(value: unknown): Prom
   const previousStateDigest = boundedDigest("workflow cycle state previous_state_digest", value.previous_state_digest, true);
   const stateDigest = boundedDigest("workflow cycle state state_digest", value.state_digest)!;
   if (phase === "replan_handoff" && (value.replan_instruction_digest === null || value.evaluation_digest === null)) throw new AutonomousWorkflowCyclePersistenceError("workflow cycle replan handoff requires evaluation and instruction digests");
-  if (phase === "settlement_pending" && value.evaluation_digest === null) throw new AutonomousWorkflowCyclePersistenceError("workflow cycle settlement pending requires an evaluation digest");
+  if (phase === "settlement_pending" && value.evaluation_digest === null && value.planning_evaluation_digest === null) throw new AutonomousWorkflowCyclePersistenceError("workflow cycle settlement pending requires an evaluation digest");
   if (phase === "terminal" && value.terminal_status === null) throw new AutonomousWorkflowCyclePersistenceError("terminal workflow cycle state requires a terminal status");
   inspectMetadata(value, "workflow cycle state");
   if (bytes(value) > 8_000_000) throw new AutonomousWorkflowCyclePersistenceError("workflow cycle state exceeds its byte capacity");
   if (await digestJson(digestDescriptor(value as unknown as AutonomousWorkflowCycleState)) !== stateDigest) throw new AutonomousWorkflowCyclePersistenceError("workflow cycle state digest does not match its metadata");
-  return clone({ ...value, cycle_id: cycleId, task_digest: taskDigest, domain, root_job_id: rootJobId, current_job_id: currentJobId, max_replans: maxReplans, attempt, phase, attempts, evaluations, learning_episode_ids: learningEpisodeIds, settlement_digests: settlementDigests, trajectory_ids: trajectoryIds, context_digests: contextDigests, generation, previous_state_digest: previousStateDigest, state_digest: stateDigest }) as AutonomousWorkflowCycleState;
+  return clone({ ...value, cycle_id: cycleId, task_digest: taskDigest, domain, root_job_id: rootJobId, current_job_id: currentJobId, max_replans: maxReplans, attempt, phase, attempts, evaluations, ...(Object.prototype.hasOwnProperty.call(value, "planner_evaluations") ? { planner_evaluations: plannerEvaluations } : {}), learning_episode_ids: learningEpisodeIds, settlement_digests: settlementDigests, trajectory_ids: trajectoryIds, context_digests: contextDigests, generation, previous_state_digest: previousStateDigest, state_digest: stateDigest }) as AutonomousWorkflowCycleState;
 }
 
 export async function sealAutonomousWorkflowCycleState(value: Omit<AutonomousWorkflowCycleState, "state_digest">): Promise<AutonomousWorkflowCycleState> {
