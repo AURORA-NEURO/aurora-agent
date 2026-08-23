@@ -79,6 +79,10 @@ test("effect journal persistence validates the chain and fences stale workers", 
   const restored = new AutonomousEffectPersistenceCoordinator(new InMemoryAutonomousEffectJournal(), persistence);
   const recovered = await restored.restore();
   assert.equal(recovered.snapshot_digest, first.snapshot_digest);
+  const canonical = encoded;
+  encoded = JSON.stringify(JSON.parse(canonical), null, 2);
+  await assert.rejects(() => persistence.read(), /canonical/);
+  encoded = canonical;
   encoded = "{invalid";
   await assert.rejects(() => persistence.read(), /invalid/);
 });

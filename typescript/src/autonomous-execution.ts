@@ -549,6 +549,7 @@ export class JsonAutonomousExecutionSnapshotPersistence implements AutonomousExe
     if (new TextEncoder().encode(encoded).byteLength > AUTONOMOUS_EXECUTION_MAX_JOURNAL_BYTES) throw new AutonomousExecutionError("execution JSON exceeds its byte bound");
     let parsed: unknown;
     try { parsed = JSON.parse(encoded); } catch { throw new AutonomousExecutionError("execution JSON is invalid"); }
+    if (canonicalJson(parsed) !== encoded) throw new AutonomousExecutionError("execution JSON is not canonical");
     return validateAutonomousExecutionJournalSnapshot(parsed);
   }
 

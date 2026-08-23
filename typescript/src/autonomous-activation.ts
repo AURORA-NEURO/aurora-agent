@@ -582,6 +582,7 @@ export class JsonAutonomousCapabilityActivationSnapshotPersistence implements Au
     if (new TextEncoder().encode(encoded).byteLength > MAX_ACTIVATION_STORE_BYTES) throw new AutonomousActivationError("activation JSON exceeds its byte bound");
     let parsed: unknown;
     try { parsed = JSON.parse(encoded); } catch { throw new AutonomousActivationError("activation JSON is invalid"); }
+    if (canonicalJson(parsed) !== encoded) throw new AutonomousActivationError("activation JSON is not canonical");
     return validateAutonomousCapabilityActivationSnapshot(parsed);
   }
 

@@ -678,6 +678,7 @@ export class JsonAutonomousConnectorWorkQueueSnapshotPersistence implements Auto
     let parsed: unknown;
     try { parsed = JSON.parse(encoded); } catch { throw new ArgumentError("connector work JSON is invalid"); }
     if (!isObject(parsed)) throw new ArgumentError("connector work JSON must be an object");
+    if (canonicalJson(parsed) !== encoded) throw new ArgumentError("connector work JSON is not canonical");
     return parsed as unknown as AutonomousConnectorWorkQueueSnapshot;
   }
 

@@ -342,6 +342,7 @@ export class JsonAutonomousDecisionCycleSnapshotPersistence implements Autonomou
     if (new TextEncoder().encode(encoded).byteLength > AUTONOMOUS_DECISION_CYCLE_MAX_SNAPSHOT_BYTES) throw new ArgumentError("decision-cycle JSON exceeds its byte bound");
     let parsed: unknown;
     try { parsed = JSON.parse(encoded); } catch { throw new ArgumentError("decision-cycle JSON is invalid"); }
+    if (canonicalJson(parsed) !== encoded) throw new ArgumentError("decision-cycle JSON is not canonical");
     return validateAutonomousDecisionCycleSnapshot(parsed);
   }
 

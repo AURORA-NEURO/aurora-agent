@@ -387,6 +387,7 @@ export class JsonAutonomousModelInventorySnapshotPersistence implements Autonomo
     if (new TextEncoder().encode(encoded).byteLength > AUTONOMOUS_MODEL_INVENTORY_MAX_SNAPSHOT_BYTES) throw new ArgumentError("model inventory JSON exceeds its byte bound");
     let parsed: unknown;
     try { parsed = JSON.parse(encoded); } catch { throw new ArgumentError("model inventory JSON is invalid"); }
+    if (canonicalJson(parsed) !== encoded) throw new ArgumentError("model inventory JSON is not canonical");
     return validateAutonomousModelInventorySnapshot(parsed);
   }
 

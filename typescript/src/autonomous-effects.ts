@@ -481,6 +481,7 @@ export class JsonAutonomousEffectSnapshotPersistence implements AutonomousEffect
     if (new TextEncoder().encode(encoded).byteLength > AUTONOMOUS_EFFECT_MAX_JOURNAL_BYTES) throw new AutonomousEffectError("effect JSON exceeds its byte bound");
     let parsed: unknown;
     try { parsed = JSON.parse(encoded); } catch { throw new AutonomousEffectError("effect JSON is invalid"); }
+    if (canonicalJson(parsed) !== encoded) throw new AutonomousEffectError("effect JSON is not canonical");
     return validateAutonomousEffectJournalSnapshot(parsed);
   }
 

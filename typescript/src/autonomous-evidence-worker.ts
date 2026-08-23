@@ -648,6 +648,7 @@ export class JsonAutonomousEvidenceWorkQueueSnapshotPersistence implements Auton
     let parsed: unknown;
     try { parsed = JSON.parse(encoded); } catch { throw new ArgumentError("evidence work JSON is invalid"); }
     if (!isObject(parsed)) throw new ArgumentError("evidence work JSON must be an object");
+    if (canonicalJson(parsed) !== encoded) throw new ArgumentError("evidence work JSON is not canonical");
     if (bytes(canonicalJson(parsed)) > MAX_AUTONOMOUS_EVIDENCE_WORK_SNAPSHOT_BYTES) throw new ArgumentError("evidence work JSON exceeds its byte bound");
     return parsed as unknown as AutonomousEvidenceWorkQueueSnapshot;
   }

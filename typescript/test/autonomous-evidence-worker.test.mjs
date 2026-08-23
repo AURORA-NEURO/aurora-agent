@@ -152,6 +152,10 @@ test("evidence work queue JSON persistence fences stale workers", async () => {
   const restored = new AutonomousEvidenceWorkQueuePersistenceCoordinator(new InMemoryAutonomousEvidenceWorkQueue(), persistence);
   const receipt = await restored.restore();
   assert.equal(receipt.items, 1);
+  const canonical = encoded;
+  encoded = JSON.stringify(JSON.parse(canonical), null, 2);
+  await assert.rejects(() => persistence.read(), /canonical/);
+  encoded = canonical;
   encoded = "{invalid";
   await assert.rejects(() => persistence.read(), /invalid/);
 });
