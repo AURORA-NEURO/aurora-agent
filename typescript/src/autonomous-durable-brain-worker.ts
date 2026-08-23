@@ -117,6 +117,7 @@ const RETENTION = "remote_job_metadata_only;private_brain_values_transient_to_ca
 const SECRET_MATERIAL = "never_returned" as const;
 const PRIVATE_KEYS = new Set(["task", "prompt", "credentials", "credential", "password", "secret", "token", "response", "content", "provider_response", "tool_arguments", "tool_output"]);
 const APPROVAL_STATUSES = new Set(["approval_required", "route_review_required", "plan_review_required", "connector_blocked"]);
+const TERMINAL_JOB_STATES = new Set(["succeeded", "failed", "dead_lettered", "cancelled", "reconciliation_required"]);
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -275,7 +276,8 @@ export class AutonomousDurableBrainJobWorker {
   }
 
   async status(jobId: string): Promise<BrainJobStatusResult> {
-    return project<BrainJobStatusResult>(await this.apiClient.brainJobStatus({ job_id: boundedIdentifier("durable brain job_id", jobId) }), "brain job status");
+    const result = project<BrainJobStatusResult>(await this.apiClient.brainJobStatus({ job_id: boundedIdentifier("durable brain job_id", jobId) }), "brain job status");
+    return { ...result, job: validateJob(result.job) };
   }
 
   async approval(jobId: string, action: BrainJobApprovalAction, options: { reason?: string; authorizationDigest?: string } = {}): Promise<BrainJobApprovalResult> {
@@ -299,8 +301,8 @@ export class AutonomousDurableBrainJobWorker {
       if (!next.claimed || next.job === null) return null;
     }
     const job = validateJob(claimed.job);
+    if (TERMINAL_JOB_STATES.has(job.state)) return this.envelope(job, "already_terminal", null, null, null, null, null, null);
     if (!job.lease_owner || job.lease_owner !== this.workerId || !["leased", "running"].includes(job.state)) throw new ProviderRuntimeError("durable brain control plane returned a job without an executable lease", { code: "protocol" });
-    if (["succeeded", "failed", "dead_lettered", "cancelled", "reconciliation_required"].includes(job.state)) return this.envelope(job, "already_terminal", null, null, null, null, null, null);
 
     let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
     let heartbeatRunning = false;
@@ -384,15 +386,15 @@ export class AutonomousDurableBrainJobWorker {
       }
       if (status === "reconciliation_required") {
         await this.checkpoint(job.job_id, { phase: status, checkpointDigest: resultDigest(result, trace), sideEffectBoundary: "unknown" });
-        const quarantined = await this.fail(job.job_id, "durable brain execution requires caller reconciliation", false);
+        const quarantined = await this.fail(job, "durable brain execution requires caller reconciliation", false);
         return this.envelope(quarantined, "reconciliation_required", resolution.mode, result, null, null, trace, null);
       }
       if (status !== "completed") {
         await this.checkpoint(job.job_id, { phase: `terminal_${status}`, checkpointDigest: resultDigest(result, trace), sideEffectBoundary: "unknown" });
-        const failed = await this.fail(job.job_id, `durable brain execution ended with ${status}`, false);
+        const failed = await this.fail(job, `durable brain execution ended with ${status}`, false);
         return this.envelope(failed, failed.state === "reconciliation_required" ? "reconciliation_required" : "failed", resolution.mode, result, null, null, trace, null);
       }
-      const completed = await this.complete(job.job_id, resultDigest(result, trace));
+      const completed = await this.complete(job, resultDigest(result, trace));
       return this.envelope(completed, "succeeded", resolution.mode, result, null, null, trace, null);
     } catch (error) {
       const projection = errorProjection(error);
@@ -400,7 +402,7 @@ export class AutonomousDurableBrainJobWorker {
         const boundary = executionStarted ? "unknown" : planCompiled ? "preflight" : "not_started";
         await this.checkpoint(job.job_id, { phase: "worker_execution_error", checkpointDigest: digestJsonSync({ error_class: projection.errorClass, failure_code: projection.failureCode }), sideEffectBoundary: boundary });
         const retryable = !executionStarted && this.retryPreflightFailures && error instanceof ProviderRuntimeError && error.retryable;
-        const failed = await this.fail(job.job_id, executionStarted ? "durable brain execution outcome is uncertain; reconciliation required" : retryable ? "durable brain preflight retry scheduled" : "durable brain execution failed before dispatch", retryable);
+        const failed = await this.fail(job, executionStarted ? "durable brain execution outcome is uncertain; reconciliation required" : retryable ? "durable brain preflight retry scheduled" : "durable brain execution failed before dispatch", retryable);
         return this.envelope(failed, failed.state === "reconciliation_required" ? "reconciliation_required" : failed.state === "queued" ? "retry_scheduled" : "failed", resolution?.mode ?? null, null, null, null, trace, projection);
       } catch (settlementError) {
         const wrapped = new ProviderRuntimeError("durable brain worker failure could not be settled", { code: "configuration" });
@@ -462,14 +464,24 @@ export class AutonomousDurableBrainJobWorker {
     return validateJob(result.job);
   }
 
-  private async complete(jobId: string, resultDigestValue: string): Promise<BrainJobRecord> {
-    const result = project<BrainJobLifecycleResult>(await this.apiClient.brainJobComplete({ job_id: jobId, worker_id: this.workerId, result_digest: resultDigestValue }), "brain job complete");
-    return validateJob(result.job);
+  private async complete(expected: BrainJobRecord, resultDigestValue: string): Promise<BrainJobRecord> {
+    const result = project<BrainJobLifecycleResult>(await this.apiClient.brainJobComplete({ job_id: expected.job_id, worker_id: this.workerId, result_digest: resultDigestValue }), "brain job complete");
+    const settled = this.assertSettlement(expected, result.job, "complete");
+    if (settled.state !== "succeeded" || settled.result_digest !== resultDigestValue) throw new ProviderRuntimeError("durable brain completion did not persist the exact successful result digest", { code: "protocol" });
+    return settled;
   }
 
-  private async fail(jobId: string, reason: string, retryable: boolean): Promise<BrainJobRecord> {
-    const result = project<BrainJobLifecycleResult>(await this.apiClient.brainJobFail({ job_id: jobId, worker_id: this.workerId, reason, retryable }), "brain job fail");
-    return validateJob(result.job);
+  private async fail(expected: BrainJobRecord, reason: string, retryable: boolean): Promise<BrainJobRecord> {
+    const result = project<BrainJobLifecycleResult>(await this.apiClient.brainJobFail({ job_id: expected.job_id, worker_id: this.workerId, reason, retryable }), "brain job fail");
+    const settled = this.assertSettlement(expected, result.job, "fail");
+    if (!["queued", "failed", "dead_lettered", "reconciliation_required"].includes(settled.state)) throw new ProviderRuntimeError("durable brain failure settlement returned a non-terminal or non-queued state", { code: "protocol" });
+    return settled;
+  }
+
+  private assertSettlement(expected: BrainJobRecord, candidate: unknown, operation: string): BrainJobRecord {
+    const settled = validateJob(candidate);
+    if (settled.job_id !== expected.job_id || settled.spec_digest !== expected.spec_digest) throw new ProviderRuntimeError(`durable brain ${operation} settlement changed the leased job identity`, { code: "protocol" });
+    return settled;
   }
 
   private assertCredentialFreeResolution(value: AutonomousDurableBrainJobResolution): void {

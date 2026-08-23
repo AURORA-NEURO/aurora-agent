@@ -389,3 +389,45 @@ test("remote brain worker fails closed on spec drift and retains retryable prefl
   assert.equal(scheduled.error_retryable, true);
   assert.equal(api.jobs.get(retry.job.job_id).state, "queued");
 });
+
+test("remote brain worker reports already-terminal claims before requiring a lease", async () => {
+  const runtime = makeBrain();
+  const api = remoteBrainApi();
+  const worker = new AutonomousDurableBrainJobWorker({
+    brain: runtime.brain,
+    apiClient: api,
+    workerId: "terminal-observer",
+    resolve: () => { throw new Error("terminal jobs must not rehydrate private work"); },
+  });
+  const request = { task: tasks.coding, domain: "coding", capability: "bounded_task" };
+  const submission = await worker.submit({ idempotencyKey: "remote-terminal", request, mode: "execute", policyDigest: policy("d") });
+  const terminal = { ...api.jobs.get(submission.job.job_id), state: "succeeded", lease_owner: null, lease_expires_ns: null, result_digest: "c".repeat(64) };
+  api.brainJobClaim = async (args) => response({ schema: "brain-job-claim", ok: true, operation: "claim", idempotent: false, job: terminal, event: null, retention: "metadata_only", durability: "durable" });
+  const observed = await worker.runOnce(submission.job.job_id);
+  assert.equal(observed.status, "already_terminal");
+  assert.equal(runtime.providerCalls, 0);
+});
+
+test("remote brain worker quarantines a settlement response that changes the job specification", async () => {
+  const runtime = makeBrain();
+  const api = remoteBrainApi();
+  const worker = new AutonomousDurableBrainJobWorker({
+    brain: runtime.brain,
+    apiClient: api,
+    workerId: "settlement-fence",
+    resolve: ({ job }) => ({ specDigest: job.spec_digest, policyDigest: policy("e"), request: { task: tasks.coding, domain: "coding", capability: "bounded_task" }, mode: "execute" }),
+  });
+  const request = { task: tasks.coding, domain: "coding", capability: "bounded_task" };
+  const submission = await worker.submit({ idempotencyKey: "remote-settlement-fence", request, mode: "execute", policyDigest: policy("e") });
+  await worker.runOnce(submission.job.job_id);
+  await worker.approval(submission.job.job_id, "approve", { authorizationDigest: "a".repeat(64) });
+  const originalComplete = api.brainJobComplete;
+  api.brainJobComplete = async (args) => {
+    const projected = await originalComplete(args);
+    projected.mcp.result.structuredContent.job = { ...projected.mcp.result.structuredContent.job, spec_digest: "b".repeat(64) };
+    return projected;
+  };
+  const quarantined = await worker.runOnce(submission.job.job_id);
+  assert.equal(quarantined.status, "reconciliation_required");
+  assert.equal(runtime.providerCalls, 1);
+});

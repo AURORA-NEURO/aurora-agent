@@ -15,9 +15,12 @@ import { canonicalJson, digestJsonSync } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
 /** Durable metadata-only orchestration for caller-owned evidence runtimes. */
-export const AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA = "bioprism-typescript-autonomous-evidence-work-item/0.1" as const;
-export const AUTONOMOUS_EVIDENCE_WORK_QUEUE_SCHEMA = "bioprism-typescript-autonomous-evidence-work-queue/0.1" as const;
-export const AUTONOMOUS_EVIDENCE_WORKER_SCHEMA = "bioprism-typescript-autonomous-evidence-worker/0.1" as const;
+export const AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA = "bioprism-typescript-autonomous-evidence-work-item/0.2" as const;
+export const AUTONOMOUS_EVIDENCE_WORK_QUEUE_SCHEMA = "bioprism-typescript-autonomous-evidence-work-queue/0.2" as const;
+export const AUTONOMOUS_EVIDENCE_WORKER_SCHEMA = "bioprism-typescript-autonomous-evidence-worker/0.2" as const;
+const LEGACY_AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA = "bioprism-typescript-autonomous-evidence-work-item/0.1" as const;
+const LEGACY_AUTONOMOUS_EVIDENCE_WORK_QUEUE_SCHEMA = "bioprism-typescript-autonomous-evidence-work-queue/0.1" as const;
+const AUTONOMOUS_EVIDENCE_WORK_ACCEPTANCE_SCHEMA = "bioprism-typescript-autonomous-evidence-work-acceptance/0.1" as const;
 export const MAX_AUTONOMOUS_EVIDENCE_WORK_ITEMS = 4_096;
 export const MAX_AUTONOMOUS_EVIDENCE_WORK_ATTEMPTS = 32;
 export const MAX_AUTONOMOUS_EVIDENCE_WORK_BATCH = 128;
@@ -42,6 +45,8 @@ export type AutonomousEvidenceWorkFailureClass =
   | "projection_failed"
   | "evaluation_pending"
   | "evaluation_rejected"
+  | "result_reconciliation_required"
+  | "result_invalid"
   | "executor_error"
   | "transport_error"
   | "unknown";
@@ -56,6 +61,8 @@ const WORK_FAILURE_CLASSES: readonly (AutonomousEvidenceWorkFailureClass | null)
   "projection_failed",
   "evaluation_pending",
   "evaluation_rejected",
+  "result_reconciliation_required",
+  "result_invalid",
   "executor_error",
   "transport_error",
   "unknown",
@@ -207,6 +214,7 @@ export interface AutonomousEvidenceWorkItem extends JsonObject {
   receipt_digest: string | null;
   assessment_digest: string | null;
   result_digest: string | null;
+  acceptance_digest: string | null;
   failure_class: AutonomousEvidenceWorkFailureClass | null;
   last_error_class: AutonomousEvidenceWorkFailureClass | null;
   created_at: number;
@@ -268,6 +276,7 @@ function validateItem(raw: unknown): AutonomousEvidenceWorkItem {
     receipt_digest: digest("autonomous evidence work receipt_digest", raw.receipt_digest, true),
     assessment_digest: digest("autonomous evidence work assessment_digest", raw.assessment_digest, true),
     result_digest: digest("autonomous evidence work result_digest", raw.result_digest, true),
+    acceptance_digest: digest("autonomous evidence work acceptance_digest", raw.acceptance_digest, true),
     failure_class: raw.failure_class === null ? null : workFailure(raw.failure_class),
     last_error_class: raw.last_error_class === null ? null : workFailure(raw.last_error_class),
     created_at: timestamp("autonomous evidence work created_at", raw.created_at),
@@ -278,8 +287,25 @@ function validateItem(raw: unknown): AutonomousEvidenceWorkItem {
   } satisfies AutonomousEvidenceWorkItem;
   if (item.attempts > item.max_attempts || (item.status === "leased") !== (item.lease_owner !== null && item.lease_until !== null)) throw new ArgumentError("autonomous evidence work lease state is inconsistent");
   if (item.status !== "awaiting_evaluation" && item.status !== "reconciliation_required" && item.status !== "failed" && item.status !== "cancelled" && item.failure_class !== null) throw new ArgumentError("autonomous evidence work active item cannot retain a terminal failure class");
+  if ((item.status === "completed") !== (item.acceptance_digest !== null)) throw new ArgumentError("autonomous evidence work completion must retain an acceptance digest");
   if (item.item_digest !== itemDigest(item)) throw new ArgumentError("autonomous evidence work item digest is invalid");
   return item;
+}
+
+function migrateLegacyItem(raw: unknown): AutonomousEvidenceWorkItem {
+  if (!isObject(raw) || raw.schema !== LEGACY_AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA) throw new ArgumentError("autonomous evidence legacy work item is malformed");
+  const { item_digest: observed, ...legacyPayload } = raw;
+  if (typeof observed !== "string" || digestJsonSync(legacyPayload) !== observed) throw new ArgumentError("autonomous evidence legacy work item digest is invalid");
+  const upgraded = { ...raw, schema: AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA, acceptance_digest: null, item_digest: "" } as unknown as AutonomousEvidenceWorkItem;
+  if (upgraded.status === "completed") {
+    upgraded.status = "reconciliation_required";
+    upgraded.failure_class = "result_reconciliation_required";
+    upgraded.last_error_class = "result_reconciliation_required";
+    upgraded.lease_owner = null;
+    upgraded.lease_until = null;
+  }
+  upgraded.item_digest = itemDigest(upgraded);
+  return validateItem(upgraded);
 }
 
 function refresh(item: AutonomousEvidenceWorkItem, updates: Partial<AutonomousEvidenceWorkItem>, now: number): AutonomousEvidenceWorkItem {
@@ -292,14 +318,15 @@ function nowMs(value: number | undefined): number {
   return timestamp("time", value ?? Date.now());
 }
 
-function resultMetadata(item: AutonomousEvidenceWorkItem, result: AutonomousEvidenceRuntimeResult): { resultDigest: string; receiptDigest: string; assessmentDigest: string | null; receiptStatus: string; evaluatorStatus: string } {
+function resultMetadata(item: AutonomousEvidenceWorkItem, result: AutonomousEvidenceRuntimeResult): { resultDigest: string; receiptDigest: string; assessmentDigest: string | null; receiptStatus: string; evaluatorStatus: string; replay: "fresh" | "replayed"; acceptanceDigest: string | null } {
   if (!result || typeof result.toJSON !== "function") throw new ArgumentError("evidence work result must be a typed runtime result");
   const json = result.toJSON();
   if (!isObject(json) || json.schema !== "bioprism-typescript-autonomous-evidence-runtime/0.1") throw new ArgumentError("evidence work result schema is invalid");
   if (!isObject(json.plan) || !Array.isArray(json.receipts)) throw new ArgumentError("evidence work result plan identity is stale");
   const receipt = json.receipts.find((candidate) => isObject(candidate) && candidate.request_digest === item.request_digest);
   if (!isObject(receipt) || typeof receipt.receipt_digest !== "string") throw new ArgumentError("evidence work result does not contain the queued request");
-  if (receipt.plan_digest !== item.plan_digest) throw new ArgumentError("evidence work result receipt belongs to a different plan");
+  if (receipt.plan_digest !== item.plan_digest || receipt.requirement_id !== item.requirement_id || receipt.domain !== item.domain || receipt.workflow_id !== item.workflow_id || receipt.workflow_digest !== item.workflow_digest || receipt.stage_id !== item.stage_id || receipt.source_id !== item.source_id || receipt.source_digest !== item.source_digest) throw new ArgumentError("evidence work result receipt identity conflicts with the queued request");
+  if (receipt.replay !== "fresh" && receipt.replay !== "replayed") throw new ArgumentError("evidence work result receipt replay state is invalid");
   const resultDigest = digest("evidence work result result_digest", json.result_digest) as string;
   const resultDescriptor = {
     schema: json.schema,
@@ -317,7 +344,20 @@ function resultMetadata(item: AutonomousEvidenceWorkItem, result: AutonomousEvid
   };
   if (digestJsonSync(resultDescriptor) !== resultDigest) throw new ArgumentError("evidence work result digest is invalid");
   const assessment = Array.isArray(json.assessments) ? json.assessments.find((candidate) => isObject(candidate) && candidate.requirement_id === item.requirement_id) : undefined;
-  return { resultDigest, receiptDigest: digest("evidence work result receipt_digest", receipt.receipt_digest) as string, assessmentDigest: assessment && typeof assessment.assessment_digest === "string" ? digest("evidence work result assessment_digest", assessment.assessment_digest) : null, receiptStatus: String(receipt.status), evaluatorStatus: String(receipt.evaluator_status) };
+  const receiptDigest = digest("evidence work result receipt_digest", receipt.receipt_digest) as string;
+  const { receipt_digest: _receiptDigest, ...receiptDescriptor } = receipt;
+  if (digestJsonSync(receiptDescriptor) !== receiptDigest) throw new ArgumentError("evidence work result receipt digest is invalid");
+  const assessmentDigest = assessment && typeof assessment.assessment_digest === "string" ? digest("evidence work result assessment_digest", assessment.assessment_digest) : null;
+  if (assessment && assessmentDigest !== null) {
+    const { assessment_digest: _assessmentDigest, ...assessmentDescriptor } = assessment;
+    if (digestJsonSync(assessmentDescriptor) !== assessmentDigest) throw new ArgumentError("evidence work result assessment digest is invalid");
+  }
+  const evaluatorStatus = String(receipt.evaluator_status);
+  const { receipt_digest: _finalReceiptDigest, ...baseReceiptDescriptor } = receipt;
+  const baseReceiptDigest = digestJsonSync({ ...baseReceiptDescriptor, evaluator_status: "not_evaluated", assessment_digest: null });
+  const accepted = receipt.status !== "failed" && (receipt.status === "observed" || receipt.status === "partial") && evaluatorStatus === "accepted" && assessmentDigest !== null && isObject(assessment) && assessment.receipt_digest === baseReceiptDigest && assessment.requirement_id === item.requirement_id && assessment.verdict === "accepted" && Array.isArray(json.completed_requirement_ids) && json.completed_requirement_ids.includes(item.requirement_id);
+  const acceptanceDigest = accepted ? digestJsonSync({ schema: AUTONOMOUS_EVIDENCE_WORK_ACCEPTANCE_SCHEMA, work_id: item.work_id, item_digest: item.item_digest, plan_digest: item.plan_digest, request_digest: item.request_digest, requirement_id: item.requirement_id, source_id: item.source_id, source_digest: item.source_digest, receipt_digest: receiptDigest, assessment_digest: assessmentDigest, result_digest: resultDigest, replay: receipt.replay, status: "accepted" }) : null;
+  return { resultDigest, receiptDigest, assessmentDigest, receiptStatus: String(receipt.status), evaluatorStatus, replay: receipt.replay, acceptanceDigest };
 }
 
 /** Thread-safe in-memory queue suitable for tests and single-process deployments. */
@@ -366,6 +406,7 @@ export class InMemoryAutonomousEvidenceWorkQueue {
       receipt_digest: null,
       assessment_digest: null,
       result_digest: null,
+      acceptance_digest: null,
       failure_class: null,
       last_error_class: null,
       created_at: time,
@@ -432,7 +473,8 @@ export class InMemoryAutonomousEvidenceWorkQueue {
     const json = result.toJSON();
     const metadata = resultMetadata(item, result);
     if (json.status !== "completed" && !(json.status === "awaiting_evaluation" && metadata.evaluatorStatus === "accepted")) throw new ArgumentError("autonomous evidence work completion requires an accepted queued requirement");
-    const next = refresh(item, { status: "completed", lease_owner: null, lease_until: null, receipt_digest: metadata.receiptDigest, assessment_digest: metadata.assessmentDigest, result_digest: metadata.resultDigest, failure_class: null }, time);
+    if (metadata.acceptanceDigest === null || metadata.evaluatorStatus !== "accepted") throw new ArgumentError("autonomous evidence work completion requires a digest-bound accepted assessment");
+    const next = refresh(item, { status: "completed", lease_owner: null, lease_until: null, receipt_digest: metadata.receiptDigest, assessment_digest: metadata.assessmentDigest, result_digest: metadata.resultDigest, acceptance_digest: metadata.acceptanceDigest, failure_class: null, last_error_class: null }, time);
     this.items.set(id, next);
     return clone(next);
   }
@@ -445,7 +487,7 @@ export class InMemoryAutonomousEvidenceWorkQueue {
     if (!item || item.status !== "leased" || item.lease_owner !== worker || item.lease_until === null || item.lease_until <= time) throw new ArgumentError("autonomous evidence evaluation handoff is fenced by an expired or foreign lease");
     if (result.toJSON().status !== "awaiting_evaluation") throw new ArgumentError("autonomous evidence evaluation handoff requires an awaiting_evaluation runtime result");
     const metadata = resultMetadata(item, result);
-    const next = refresh(item, { status: "awaiting_evaluation", lease_owner: null, lease_until: null, receipt_digest: metadata.receiptDigest, assessment_digest: metadata.assessmentDigest, result_digest: metadata.resultDigest, failure_class: "evaluation_pending", last_error_class: "evaluation_pending" }, time);
+    const next = refresh(item, { status: "awaiting_evaluation", lease_owner: null, lease_until: null, receipt_digest: metadata.receiptDigest, assessment_digest: metadata.assessmentDigest, result_digest: metadata.resultDigest, acceptance_digest: null, failure_class: "evaluation_pending", last_error_class: "evaluation_pending" }, time);
     this.items.set(id, next);
     return clone(next);
   }
@@ -468,6 +510,7 @@ export class InMemoryAutonomousEvidenceWorkQueue {
       receipt_digest: metadata?.receiptDigest ?? item.receipt_digest,
       assessment_digest: metadata?.assessmentDigest ?? item.assessment_digest,
       result_digest: metadata?.resultDigest ?? item.result_digest,
+      acceptance_digest: null,
       failure_class: canRetry ? null : failure,
       last_error_class: failure,
     }, time);
@@ -527,14 +570,15 @@ export class InMemoryAutonomousEvidenceWorkQueue {
   }
 
   restore(snapshot: AutonomousEvidenceWorkQueueSnapshot): void {
-    if (!isObject(snapshot) || snapshot.schema !== AUTONOMOUS_EVIDENCE_WORK_QUEUE_SCHEMA || !Array.isArray(snapshot.items)) throw new ArgumentError("autonomous evidence work queue snapshot is malformed");
+    const snapshotSchema: string | null = isObject(snapshot) && typeof snapshot.schema === "string" ? String(snapshot.schema) : null;
+    if (!isObject(snapshot) || (snapshotSchema !== AUTONOMOUS_EVIDENCE_WORK_QUEUE_SCHEMA && snapshotSchema !== LEGACY_AUTONOMOUS_EVIDENCE_WORK_QUEUE_SCHEMA) || !Array.isArray(snapshot.items)) throw new ArgumentError("autonomous evidence work queue snapshot is malformed");
     if (snapshot.retention !== "metadata_only_request_and_values_caller_owned" || snapshot.secret_material !== "never_returned") throw new ArgumentError("autonomous evidence work queue snapshot retention is invalid");
     const { snapshot_digest: observed, ...descriptor } = snapshot;
     if (digestJsonSync(descriptor) !== observed) throw new ArgumentError("autonomous evidence work queue snapshot digest is invalid");
     if (snapshot.items.length > this.maxItems) throw new ArgumentError("autonomous evidence work queue snapshot exceeds maxItems");
     const restored = new Map<string, AutonomousEvidenceWorkItem>();
     for (const raw of snapshot.items) {
-      const item = validateItem(raw);
+      const item = snapshotSchema === LEGACY_AUTONOMOUS_EVIDENCE_WORK_QUEUE_SCHEMA ? migrateLegacyItem(raw) : validateItem(raw);
       if (restored.has(item.work_id)) throw new ArgumentError("autonomous evidence work queue snapshot contains duplicate work ids");
       restored.set(item.work_id, item);
     }
@@ -599,7 +643,7 @@ export interface AutonomousEvidenceWorkerRun extends JsonObject {
 }
 
 function row(item: AutonomousEvidenceWorkItem, outcome: AutonomousEvidenceWorkerRow["outcome"], errorClass: AutonomousEvidenceWorkFailureClass | null = null): AutonomousEvidenceWorkerRow {
-  return { work_id: item.work_id, outcome, attempts: item.attempts, receipt_digest: item.receipt_digest, assessment_digest: item.assessment_digest, result_digest: item.result_digest, value_retained: false, error_class: errorClass };
+  return { work_id: item.work_id, outcome, attempts: item.attempts, receipt_digest: item.receipt_digest, assessment_digest: item.assessment_digest, result_digest: item.result_digest, acceptance_digest: item.acceptance_digest, value_retained: false, error_class: errorClass };
 }
 
 /** Runs one queued evidence request through a caller-owned runtime and rehydration boundary. */
@@ -644,8 +688,8 @@ export class AutonomousEvidenceWorker {
           const waiting = this.queue.awaitEvaluation(claimed.work_id, workerId, result, currentTime());
           rows.push(row(waiting, "awaiting_evaluation", "evaluation_pending"));
         } else if (result.json.status === "reconciliation_required") {
-          const reconciled = this.queue.reconcile(claimed.work_id, workerId, "rehydration_missing", currentTime());
-          rows.push(row(reconciled, "reconciliation_required", "rehydration_missing"));
+          const reconciled = this.queue.reconcile(claimed.work_id, workerId, "result_reconciliation_required", currentTime());
+          rows.push(row(reconciled, "reconciliation_required", "result_reconciliation_required"));
         } else {
           const failure = result.json.receipts.some((receipt) => receipt.evidence_status === "projection_failed") ? "projection_failed" : "acquisition_failed";
           const failed = this.queue.fail(claimed.work_id, workerId, failure, true, currentTime(), result);
@@ -653,7 +697,7 @@ export class AutonomousEvidenceWorker {
         }
       } catch (error) {
         const failure = this.classify(error);
-        if (["rehydration_missing", "rehydration_invalid", "identity_conflict"].includes(failure)) {
+        if (["rehydration_missing", "rehydration_invalid", "identity_conflict", "result_reconciliation_required", "result_invalid"].includes(failure)) {
           const reconciled = this.queue.reconcile(claimed.work_id, workerId, failure, currentTime());
           rows.push(row(reconciled, "reconciliation_required", failure));
         } else {
@@ -684,6 +728,8 @@ export class AutonomousEvidenceWorker {
     if (message.includes("projection")) return "projection_failed";
     if (message.includes("transport")) return "transport_error";
     if (message.includes("acquisition")) return "acquisition_failed";
+    if (message.includes("completion requires") || message.includes("acceptance") || message.includes("receipt identity") || message.includes("result digest")) return "result_invalid";
+    if (message.includes("reconciliation_required") || message.includes("requires rehydration")) return "result_reconciliation_required";
     if (message.includes("evaluator")) return "evaluation_rejected";
     if (message.includes("executor")) return "executor_error";
     return "unknown";

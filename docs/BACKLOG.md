@@ -539,6 +539,14 @@ and private policy digest to the durable job spec; the worker enforces durable a
 lease renewal, planned execution, direct/cycle/adaptive tracing, all-domain route checks, and
 post-dispatch reconciliation. It closes the local worker handoff without claiming multi-host
 consensus, provider idempotency, or secret-manager ownership.
+The evidence-worker queue now adds a digest-bound acceptance proof at completion: exact queued
+requirement/source/workflow identity, receipt and assessment content hashes, accepted evaluator
+verdict, completed-requirement membership, replay state, and leased item digest are all bound into
+`acceptance_digest`. Queue schema `0.2` migrates old metadata snapshots while quarantining legacy
+completed items whose acceptance proof was never persisted. Remote brain settlement also verifies
+job/spec identity and exact successful result digests, and handles already-terminal claims before
+lease validation. This closes local false-success and stale-settlement gaps; external source truth,
+distributed CAS, and provider idempotency remain deployment-owned.
 The TypeScript scheduler persistence seam now also includes bounded JSON adapters for text-backed
 stores, a browser Web Storage single-writer adapter, and an optional atomic compare-and-swap fence.
 The coordinator serializes local flushes and refuses stale restored workers before provider

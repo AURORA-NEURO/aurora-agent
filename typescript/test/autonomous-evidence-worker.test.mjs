@@ -11,6 +11,7 @@ import {
   AutonomousEvidenceWorkQueuePersistenceCoordinator,
   buildAutonomousEvidencePlan,
   builtinAutonomousDomainProfiles,
+  digestJsonSync,
 } from "../dist/index.js";
 
 function requestFor(requirement, index = 0) {
@@ -71,6 +72,8 @@ test("evidence worker executes one accepted request for every autonomous domain"
   assert.equal(queue.rows().every((item) => item.status === "completed"), true);
   assert.equal(run.rows.every((row) => row.value_retained === false), true);
   assert.equal(run.rows.every((row) => row.result_digest && row.receipt_digest), true);
+  assert.equal(run.rows.every((row) => row.acceptance_digest && row.acceptance_digest.length === 64), true);
+  assert.equal(queue.rows().every((item) => item.acceptance_digest && item.acceptance_digest.length === 64), true);
 });
 
 test("worker handoff is explicit for evaluator-pending work and resumes after restart without reacquisition", async () => {
@@ -156,4 +159,51 @@ test("work queue rejects credential-shaped metadata before persistence", async (
     }),
     /credential-shaped metadata/,
   );
+});
+
+test("completion requires the exact queued requirement to have a digest-valid accepted assessment", async () => {
+  const plan = await singleDomainPlan("science");
+  const request = requestFor(plan.requirements[0]);
+  const queue = new InMemoryAutonomousEvidenceWorkQueue();
+  const item = queue.enqueue({ workId: "unaccepted-evidence", plan, request, now: 7_000 });
+  const runtime = new AutonomousEvidenceRuntime({ plan });
+  const result = await runtime.execute([request], { acquirer: adapters([]).acquirer, projector: adapters([]).projector });
+  assert.equal(result.json.status, "awaiting_evaluation");
+  assert.ok(queue.claim(item.work_id, "worker-a", 30_000, 7_000));
+  assert.throws(() => queue.complete(item.work_id, "worker-a", result, 7_001), /accepted queued requirement/);
+  assert.equal(queue.get(item.work_id).status, "leased");
+});
+
+test("legacy queue snapshots migrate conservatively and completed legacy work is quarantined", async () => {
+  const plan = await singleDomainPlan("coding");
+  const request = requestFor(plan.requirements[0]);
+  const queue = new InMemoryAutonomousEvidenceWorkQueue();
+  const item = queue.enqueue({ workId: "legacy-evidence", plan, request, now: 8_000 });
+  const current = queue.snapshot();
+  const legacyItems = current.items.map((row) => {
+    const { acceptance_digest: _acceptanceDigest, ...withoutAcceptance } = row;
+    const legacy = { ...withoutAcceptance, schema: "bioprism-typescript-autonomous-evidence-work-item/0.1", item_digest: "" };
+    const { item_digest: _itemDigest, ...payload } = legacy;
+    return { ...legacy, item_digest: digestJsonSync(payload) };
+  });
+  const legacyDescriptor = {
+    schema: "bioprism-typescript-autonomous-evidence-work-queue/0.1",
+    items: legacyItems,
+    retention: "metadata_only_request_and_values_caller_owned",
+    secret_material: "never_returned",
+  };
+  const legacySnapshot = { ...legacyDescriptor, snapshot_digest: digestJsonSync(legacyDescriptor) };
+  const restored = new InMemoryAutonomousEvidenceWorkQueue();
+  restored.restore(legacySnapshot);
+  assert.equal(restored.get(item.work_id).schema, "bioprism-typescript-autonomous-evidence-work-item/0.2");
+  assert.equal(restored.get(item.work_id).status, "queued");
+
+  const completedLegacy = { ...legacyItems[0], status: "completed" };
+  const { item_digest: _completedDigest, ...completedPayload } = completedLegacy;
+  completedLegacy.item_digest = digestJsonSync(completedPayload);
+  const completedDescriptor = { ...legacyDescriptor, items: [completedLegacy] };
+  const completedSnapshot = { ...completedDescriptor, snapshot_digest: digestJsonSync(completedDescriptor) };
+  const quarantined = new InMemoryAutonomousEvidenceWorkQueue();
+  quarantined.restore(completedSnapshot);
+  assert.equal(quarantined.get(item.work_id).status, "reconciliation_required");
 });

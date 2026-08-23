@@ -4865,6 +4865,16 @@ value and explicitly call `requeue(...)` after deciding that reevaluation is saf
 conflicting rehydration is quarantined as `reconciliation_required`, which prevents duplicate source
 acquisition after a restart or uncertain external side effect.
 
+Completion is now an explicit acceptance proof, not merely a runtime status. The worker checks that
+the returned receipt matches the queued plan, requirement, domain, workflow, stage, source, and
+source digest; validates the receipt and assessment content digests; requires an accepted assessment
+for that exact requirement; and requires the runtime result's completed-requirement projection to
+include it. A completed queue item stores an `acceptance_digest` bound to the leased item digest,
+receipt digest, assessment digest, result digest, and replay state. Pending, failed, and reconciliation
+outcomes never receive that digest. Queue schema `0.2` migrates `0.1` snapshots, but legacy completed
+items are conservatively moved to `reconciliation_required` because an acceptance proof cannot be
+reconstructed from metadata that was not persisted at the time.
+
 ```python
 from prism_sdk import (
     AutonomousEvidenceWorker,
@@ -5142,6 +5152,14 @@ retry, failure, or reconciliation. Cross-domain jobs use the same path for speci
 and synthesis; they are represented by the metadata domain `cross_domain` and require the
 cross-domain plan to be present. The worker's returned brain/cycle values remain transient to the
 caller; only job metadata and result/trace digests cross the control plane.
+
+Settlement is fenced as strictly as dispatch. A completion response must preserve the claimed job
+ID and specification digest, transition to `succeeded`, and persist exactly the result digest that
+the worker computed from the plan, route, status, and optional trace. A failure response must retain
+the same job identity and may only produce `queued`, `failed`, `dead_lettered`, or
+`reconciliation_required`. Terminal observations are handled before lease validation, so a restart
+or duplicate claim of an already-settled job is reported as `already_terminal` rather than being
+misclassified as a missing lease.
 
 ```typescript
 const submission = await brainWorker.submit({
