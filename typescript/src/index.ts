@@ -327,7 +327,11 @@ export {
   MAX_AUTONOMOUS_RUN_TRACE_QUERY_LIMIT,
   AutonomousRunTraceSession,
   InMemoryAutonomousRunTraceStore,
+  JsonAutonomousRunTracePersistence,
+  TransactionalJsonAutonomousRunTracePersistence,
+  WebStorageAutonomousRunTraceTextStore,
   AutonomousRunTracePersistenceCoordinator,
+  validateAutonomousRunTraceSnapshot,
   autonomousRunTraceStatus,
 } from "./autonomous-run-trace.js";
 export type {
@@ -339,6 +343,8 @@ export type {
   AutonomousRunTraceSnapshot,
   AutonomousRunTraceStore,
   AutonomousRunTracePersistence,
+  AutonomousRunTraceTextStore,
+  AutonomousRunTraceTransactionalTextStore,
   AutonomousRunTraceSummary,
   AutonomousRunTraceSessionInput,
   AutonomousRunTraceCompletion,

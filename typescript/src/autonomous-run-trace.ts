@@ -124,6 +124,18 @@ export interface AutonomousRunTraceStore {
 export interface AutonomousRunTracePersistence {
   read(): Promise<AutonomousRunTraceSnapshot | null> | AutonomousRunTraceSnapshot | null;
   write(snapshot: AutonomousRunTraceSnapshot): Promise<void> | void;
+  writeIfUnchanged?(expectedSnapshotDigest: string | null, snapshot: AutonomousRunTraceSnapshot): Promise<boolean> | boolean;
+}
+
+/** Portable text contract implemented by browser storage, HTTP stores, databases, or files. */
+export interface AutonomousRunTraceTextStore {
+  read(): Promise<string | null> | string | null;
+  write(value: string): Promise<void> | void;
+}
+
+/** Text contract with an atomic snapshot-digest fence for multi-worker trace writers. */
+export interface AutonomousRunTraceTransactionalTextStore extends AutonomousRunTraceTextStore {
+  writeIfUnchanged(expectedSnapshotDigest: string | null, value: string): Promise<boolean> | boolean;
 }
 
 export interface AutonomousRunTraceSummary extends JsonObject {
@@ -299,6 +311,73 @@ function validateSnapshot(value: unknown, maximumEvents: number, maximumBytes: n
   return structuredClone(snapshot);
 }
 
+/** Validate an external run-trace snapshot before it can alter a live trace journal. */
+export function validateAutonomousRunTraceSnapshot(raw: unknown, options: { maxEvents?: number; maxBytes?: number } = {}): AutonomousRunTraceSnapshot {
+  const maxEvents = options.maxEvents ?? MAX_AUTONOMOUS_RUN_TRACE_EVENTS;
+  const maxBytes = options.maxBytes ?? MAX_AUTONOMOUS_RUN_TRACE_SNAPSHOT_BYTES;
+  if (!Number.isSafeInteger(maxEvents) || maxEvents < 1 || maxEvents > MAX_AUTONOMOUS_RUN_TRACE_EVENTS) throw new ArgumentError("autonomous run trace validation maxEvents is outside its bounds");
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < MAX_AUTONOMOUS_RUN_TRACE_EVENT_BYTES || maxBytes > MAX_AUTONOMOUS_RUN_TRACE_SNAPSHOT_BYTES) throw new ArgumentError("autonomous run trace validation maxBytes is outside its bounds");
+  return validateSnapshot(raw, maxEvents, maxBytes);
+}
+
+/** JSON persistence for any bounded text store, including the HTTP snapshot transport. */
+export class JsonAutonomousRunTracePersistence implements AutonomousRunTracePersistence {
+  protected readonly store: AutonomousRunTraceTextStore;
+  readonly maxEvents: number;
+  readonly maxBytes: number;
+
+  constructor(store: AutonomousRunTraceTextStore, options: { maxEvents?: number; maxBytes?: number } = {}) {
+    if (!store || typeof store.read !== "function" || typeof store.write !== "function") throw new ArgumentError("autonomous run trace JSON persistence requires a text store");
+    this.store = store;
+    this.maxEvents = options.maxEvents ?? MAX_AUTONOMOUS_RUN_TRACE_EVENTS;
+    this.maxBytes = options.maxBytes ?? MAX_AUTONOMOUS_RUN_TRACE_SNAPSHOT_BYTES;
+    if (!Number.isSafeInteger(this.maxEvents) || this.maxEvents < 1 || this.maxEvents > MAX_AUTONOMOUS_RUN_TRACE_EVENTS) throw new ArgumentError("autonomous run trace JSON persistence maxEvents is outside its bounds");
+    if (!Number.isSafeInteger(this.maxBytes) || this.maxBytes < MAX_AUTONOMOUS_RUN_TRACE_EVENT_BYTES || this.maxBytes > MAX_AUTONOMOUS_RUN_TRACE_SNAPSHOT_BYTES) throw new ArgumentError("autonomous run trace JSON persistence maxBytes is outside its bounds");
+  }
+
+  async read(): Promise<AutonomousRunTraceSnapshot | null> {
+    const text = await this.store.read();
+    if (text === null) return null;
+    if (new TextEncoder().encode(text).byteLength > this.maxBytes) throw new ArgumentError("autonomous run trace JSON exceeds its byte bound");
+    let parsed: unknown;
+    try { parsed = JSON.parse(text); } catch { throw new ArgumentError("autonomous run trace JSON is invalid"); }
+    return validateSnapshot(parsed, this.maxEvents, this.maxBytes);
+  }
+
+  async write(snapshot: AutonomousRunTraceSnapshot): Promise<void> {
+    const validated = validateSnapshot(snapshot, this.maxEvents, this.maxBytes);
+    await this.store.write(canonicalJson(validated));
+  }
+}
+
+/** JSON persistence variant that carries the trace head through an atomic compare-and-swap. */
+export class TransactionalJsonAutonomousRunTracePersistence extends JsonAutonomousRunTracePersistence implements AutonomousRunTracePersistence {
+  declare protected readonly store: AutonomousRunTraceTransactionalTextStore;
+
+  constructor(store: AutonomousRunTraceTransactionalTextStore, options: { maxEvents?: number; maxBytes?: number } = {}) {
+    super(store, options);
+    this.store = store;
+    if (typeof store.writeIfUnchanged !== "function") throw new ArgumentError("autonomous run trace transactional persistence requires writeIfUnchanged");
+  }
+
+  async writeIfUnchanged(expectedSnapshotDigest: string | null, snapshot: AutonomousRunTraceSnapshot): Promise<boolean> {
+    if (expectedSnapshotDigest !== null && !/^[0-9a-f]{64}$/.test(expectedSnapshotDigest)) throw new ArgumentError("autonomous run trace expected snapshot digest is invalid");
+    const validated = validateSnapshot(snapshot, this.maxEvents, this.maxBytes);
+    return this.store.writeIfUnchanged(expectedSnapshotDigest, canonicalJson(validated));
+  }
+}
+
+/** Browser-compatible local text storage for trace snapshots. */
+export class WebStorageAutonomousRunTraceTextStore implements AutonomousRunTraceTextStore {
+  constructor(readonly storage: { getItem(key: string): string | null; setItem(key: string, value: string): void }, readonly key: string) {
+    if (!storage || typeof storage.getItem !== "function" || typeof storage.setItem !== "function") throw new ArgumentError("autonomous run trace Web Storage adapter is malformed");
+    boundedText("autonomous run trace storage key", key, 256);
+  }
+
+  read(): string | null { return this.storage.getItem(this.key); }
+  write(value: string): void { this.storage.setItem(this.key, value); }
+}
+
 /** Bounded in-memory journal suitable for local workers and caller-owned persistence adapters. */
 export class InMemoryAutonomousRunTraceStore implements AutonomousRunTraceStore {
   private readonly eventsValue: AutonomousRunTraceEvent[] = [];
@@ -372,6 +451,7 @@ export class InMemoryAutonomousRunTraceStore implements AutonomousRunTraceStore 
 export class AutonomousRunTracePersistenceCoordinator {
   readonly store: AutonomousRunTraceStore;
   readonly persistence: AutonomousRunTracePersistence;
+  private expectedSnapshotDigest: string | null = null;
 
   constructor(store: AutonomousRunTraceStore, persistence: AutonomousRunTracePersistence) {
     if (!store || typeof store.append !== "function" || typeof store.events !== "function" || typeof store.snapshot !== "function" || typeof store.restore !== "function") throw new ArgumentError("autonomous run trace persistence requires a complete trace store");
@@ -382,14 +462,21 @@ export class AutonomousRunTracePersistenceCoordinator {
 
   async restore(): Promise<AutonomousRunTraceSnapshot | null> {
     const snapshot = await this.persistence.read();
-    if (snapshot === null) return null;
+    if (snapshot === null) {
+      this.expectedSnapshotDigest = null;
+      return null;
+    }
     await this.store.restore(snapshot);
+    this.expectedSnapshotDigest = snapshot.snapshot_digest;
     return structuredClone(snapshot);
   }
 
   async flush(): Promise<AutonomousRunTraceSnapshot> {
     const snapshot = await this.store.snapshot();
-    await this.persistence.write(snapshot);
+    if (typeof this.persistence.writeIfUnchanged === "function") {
+      if (!await this.persistence.writeIfUnchanged(this.expectedSnapshotDigest, snapshot)) throw new ArgumentError("autonomous run trace persistence compare-and-swap conflict");
+    } else await this.persistence.write(snapshot);
+    this.expectedSnapshotDigest = snapshot.snapshot_digest;
     return snapshot;
   }
 }

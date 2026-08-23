@@ -6588,6 +6588,31 @@ Trace status is intentionally weaker than task truth: `completed` means the revi
 boundary completed, not that an evaluator, source, clinical, scientific, or operational claim is
 correct. Independent evaluation and learning remain separate gates.
 
+Run traces now also have portable JSON, browser, and transactional persistence adapters:
+`JsonAutonomousRunTracePersistence`, `TransactionalJsonAutonomousRunTracePersistence`, and
+`WebStorageAutonomousRunTraceTextStore`. The transactional variant carries the complete
+snapshot digest through the persistence coordinator, so a restarted worker restores the verified
+hash chain and a stale worker cannot overwrite a newer trace image. It can be backed directly by
+`AutonomousHttpSnapshotTextStore`:
+
+```typescript
+const tracePersistence = new TransactionalJsonAutonomousRunTracePersistence(
+  new AutonomousHttpSnapshotTextStore({
+    endpoint: "https://state.example.internal/v1/snapshots/traces",
+    allowedHosts: ["state.example.internal"],
+    resource: "tenant-opaque/trace-journal",
+    headerResolver: ({ resource }) => deploymentHeaders({ resource }),
+  }),
+);
+const traceCoordinator = new AutonomousRunTracePersistenceCoordinator(traceStore, tracePersistence);
+await traceCoordinator.restore();
+await traceCoordinator.flush();
+```
+
+The trace validator rechecks every event digest, sequence, retention marker, and chain link before
+restore. Persistence retains only the bounded metadata trace; the remote service still owns
+atomic CAS, access control, encryption, retention, and operational export policy.
+
 `AutonomousConnectorRegistry.select_for_domains()` is the explicit decision stage for connector
 routing. It produces a deterministic, digest-bound selection plan for every requested
 domain/capability, preserves all candidate connector and manifest digests for review, and never

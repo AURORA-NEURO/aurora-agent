@@ -6,9 +6,13 @@ import {
   AutonomousAgent,
   AutonomousRunTraceSession,
   AutonomousRunTracePersistenceCoordinator,
+  JsonAutonomousRunTracePersistence,
   InMemoryAutonomousRunTraceStore,
   LLMRuntime,
   autonomousRunTraceStatus,
+  TransactionalJsonAutonomousRunTracePersistence,
+  WebStorageAutonomousRunTraceTextStore,
+  validateAutonomousRunTraceSnapshot,
 } from "../dist/index.js";
 
 const taskFor = (domain) => `produce a bounded, reviewable result for ${domain}`;
@@ -95,6 +99,60 @@ test("run trace snapshot rehydrates atomically and rejects tampering", async () 
   tampered.events[0].status = "failed";
   assert.throws(() => restored.restore(tampered), /digest|hash chain|invalid/);
   assert.deepEqual(restored.snapshot(), snapshot, "failed restore must leave live state unchanged");
+});
+
+test("run trace JSON, browser, and CAS persistence survive all-domain restart without stale overwrite", async () => {
+  const source = new InMemoryAutonomousRunTraceStore({ clock: () => 100 });
+  for (const [index, domain] of AUTONOMOUS_DOMAIN_NAMES.entries()) {
+    const session = new AutonomousRunTraceSession(source, { run_id: `persist-${domain}`, task_digest: digest((index + 1).toString(16)), domains: [domain] });
+    await session.started();
+    await session.complete({ status: "completed", detail_digest: digest("a") });
+  }
+  const snapshot = source.snapshot();
+  let remoteText = null;
+  const remoteStore = {
+    read: () => remoteText,
+    write: (value) => { remoteText = value; },
+    writeIfUnchanged: (expected, value) => {
+      const observed = remoteText === null ? null : JSON.parse(remoteText).snapshot_digest;
+      if (observed !== expected) return false;
+      remoteText = value;
+      return true;
+    },
+  };
+  const transactional = new TransactionalJsonAutonomousRunTracePersistence(remoteStore);
+  const coordinator = new AutonomousRunTracePersistenceCoordinator(source, transactional);
+  await coordinator.flush();
+  assert.equal(JSON.parse(remoteText).events.length, AUTONOMOUS_DOMAIN_NAMES.length * 2);
+
+  const restartedStore = new InMemoryAutonomousRunTraceStore({ clock: () => 200 });
+  const restartedCoordinator = new AutonomousRunTracePersistenceCoordinator(restartedStore, transactional);
+  const restored = await restartedCoordinator.restore();
+  assert.equal(restored.snapshot_digest, snapshot.snapshot_digest);
+  assert.equal(restartedStore.verifyIntegrity().events, AUTONOMOUS_DOMAIN_NAMES.length * 2);
+  await restartedCoordinator.flush();
+
+  const staleStore = new InMemoryAutonomousRunTraceStore({ clock: () => 300 });
+  const staleCoordinator = new AutonomousRunTracePersistenceCoordinator(staleStore, transactional);
+  await staleCoordinator.restore();
+  const freshSession = new AutonomousRunTraceSession(restartedStore, { run_id: "persist-fresh", task_digest: digest("f"), domains: ["evaluation"] });
+  await freshSession.started();
+  await freshSession.complete({ status: "completed" });
+  await restartedCoordinator.flush();
+  const staleSession = new AutonomousRunTraceSession(staleStore, { run_id: "persist-stale", task_digest: digest("e"), domains: ["evaluation"] });
+  await staleSession.started();
+  await staleSession.complete({ status: "completed" });
+  await assert.rejects(() => staleCoordinator.flush(), /compare-and-swap conflict/);
+
+  const browser = new Map();
+  const browserTextStore = new WebStorageAutonomousRunTraceTextStore({ getItem: (key) => browser.get(key) ?? null, setItem: (key, value) => browser.set(key, value) }, "run-trace");
+  const browserPersistence = new JsonAutonomousRunTracePersistence(browserTextStore);
+  await browserPersistence.write(snapshot);
+  assert.deepEqual(await browserPersistence.read(), snapshot);
+  const tampered = structuredClone(snapshot);
+  tampered.events[0].status = "failed";
+  assert.throws(() => validateAutonomousRunTraceSnapshot(tampered), /digest|hash chain|invalid/);
+  assert.doesNotMatch(remoteText, /credential|authorization|api[_ -]?key/i);
 });
 
 test("traced autonomous execution spans all domains and cross-domain fan-out without a provider key", async () => {

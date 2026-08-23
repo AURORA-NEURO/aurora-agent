@@ -119,6 +119,13 @@ schemas; conditional HTTP writes map cleanly to the existing stale-writer fence,
 header resolution is transient. The embedding service still owns atomic CAS semantics, tenant
 isolation, encryption, authorization, backups, and distributed consensus.
 
+Run-level operational traces now use the same transport safely. Strict JSON, browser, and
+transactional run-trace persistence revalidate the hash chain and carry `snapshot_digest` through
+restart and stale-writer recovery, so the deployment can retain decision/selection/provider
+failure metadata remotely without creating a second telemetry format or persisting prompts,
+responses, tools, evidence, or credentials. Collector/export policy and external observability
+remain deployment-owned.
+
 The evidence handoff now preserves that same identity explicitly. Portfolio evidence checkpoints
 use schema `0.2` and carry the nullable provider admission digest; `requireAdmission: true`
 refuses resumable evidence execution without a reviewed admission before journal replay or

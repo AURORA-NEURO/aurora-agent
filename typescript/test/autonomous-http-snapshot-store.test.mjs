@@ -6,7 +6,11 @@ import {
   AutonomousOnlineLearner,
   AutonomousOnlineLearnerPersistenceCoordinator,
   AutonomousHttpSnapshotTextStore,
+  AutonomousRunTracePersistenceCoordinator,
+  AutonomousRunTraceSession,
+  InMemoryAutonomousRunTraceStore,
   TransactionalJsonAutonomousOnlineLearnerSnapshotPersistence,
+  TransactionalJsonAutonomousRunTracePersistence,
   ArgumentError,
   ResponseTooLargeError,
   TransportError,
@@ -172,4 +176,33 @@ test("HTTP snapshot text store plugs into an existing transactional learner pers
   assert.equal((await restored.restore()).snapshot_digest, first.snapshot_digest);
   const second = await restored.flush();
   assert.match(second.snapshot_digest, /^[0-9a-f]{64}$/);
+});
+
+test("HTTP snapshot text store carries a hash-chained autonomous run trace through restart", async () => {
+  let remote = null;
+  const fetch = async (_url, init) => {
+    const headers = new Headers(init.headers);
+    if (init.method === "GET") return remote === null ? response(null, 404) : response(remote);
+    if (headers.get("if-none-match") === "*" && remote !== null) return response(null, 412);
+    if (headers.get("if-match") !== null && (remote === null || JSON.parse(remote).snapshot_digest !== headers.get("if-match").replaceAll('"', ""))) return response(null, 412);
+    remote = String(init.body);
+    return response(null, 204);
+  };
+  const textStore = new AutonomousHttpSnapshotTextStore({
+    endpoint: "https://snapshots.test/traces",
+    allowedHosts: ["snapshots.test"],
+    resource: "all-domains/run-trace",
+    fetch,
+  });
+  const traceStore = new InMemoryAutonomousRunTraceStore({ clock: () => 10 });
+  const session = new AutonomousRunTraceSession(traceStore, { run_id: "http-trace", task_digest: "a".repeat(64), domains: AUTONOMOUS_DOMAIN_NAMES });
+  await session.started();
+  await session.complete({ status: "completed" });
+  const coordinator = new AutonomousRunTracePersistenceCoordinator(traceStore, new TransactionalJsonAutonomousRunTracePersistence(textStore));
+  await coordinator.flush();
+  const restartedStore = new InMemoryAutonomousRunTraceStore({ clock: () => 20 });
+  const restarted = new AutonomousRunTracePersistenceCoordinator(restartedStore, new TransactionalJsonAutonomousRunTracePersistence(textStore));
+  await restarted.restore();
+  assert.equal(restartedStore.verifyIntegrity().events, 2);
+  assert.deepEqual(restartedStore.snapshot(), traceStore.snapshot());
 });
