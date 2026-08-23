@@ -6,8 +6,14 @@ import {
   AutonomousAgent,
   AutonomousLearningController,
   AutonomousLearningFeedbackWorker,
+  AutonomousLearningFeedbackOutboxPersistenceCoordinator,
   AutonomousOnlineLearner,
+  InMemoryAutonomousLearningFeedbackOutboxStore,
+  JsonAutonomousLearningFeedbackOutboxPersistence,
   LLMRuntime,
+  TransactionalJsonAutonomousLearningFeedbackOutboxPersistence,
+  WebStorageAutonomousLearningFeedbackOutboxTextStore,
+  validateAutonomousLearningFeedbackOutboxSnapshot,
 } from "../dist/index.js";
 
 const model = {
@@ -122,4 +128,69 @@ test("learning feedback worker preserves terminal settlement failures as metadat
   assert.equal(result.rows[0].error_class, "ArgumentError");
   assert.equal(result.remaining, 0);
   assert.equal((await learning.episodes.pending()).length, 1);
+});
+
+test("durable learning feedback outbox survives restart across every domain without provider replay", async () => {
+  let encoded = null;
+  const values = new Map();
+  const storage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+  };
+  const textStore = new WebStorageAutonomousLearningFeedbackOutboxTextStore(storage, "aurora-feedback-outbox");
+  const persistence = new TransactionalJsonAutonomousLearningFeedbackOutboxPersistence({
+    read: () => encoded,
+    write: (value) => { encoded = value; },
+    writeIfUnchanged: (expectedDigest, value) => {
+      const observedDigest = encoded === null ? null : JSON.parse(encoded).snapshot_digest;
+      if (observedDigest !== expectedDigest) return false;
+      encoded = value;
+      return true;
+    },
+  });
+  const primaryOutbox = new AutonomousLearningFeedbackOutboxPersistenceCoordinator(new InMemoryAutonomousLearningFeedbackOutboxStore(), persistence);
+  assert.equal(await primaryOutbox.restore(), null);
+  const agent = agentFor();
+  const learning = new AutonomousLearningController(agent, { feedbackOutbox: primaryOutbox });
+  await enqueueAll(learning);
+  const persisted = await persistence.read();
+  assert.equal(persisted.commands.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.doesNotMatch(encoded, /private worker task|private feedback worker provider output/);
+  const browserPersistence = new JsonAutonomousLearningFeedbackOutboxPersistence(textStore);
+  await browserPersistence.write(persisted);
+  assert.deepEqual(await browserPersistence.read(), persisted);
+
+  const staleOutbox = new AutonomousLearningFeedbackOutboxPersistenceCoordinator(new InMemoryAutonomousLearningFeedbackOutboxStore(), persistence);
+  await staleOutbox.restore();
+  const claimNow = Date.now() + 1_000;
+  await primaryOutbox.claim("worker-command-coding", "worker-a", 1_000, claimNow);
+  await assert.rejects(() => staleOutbox.claim("worker-command-coding", "worker-b", 1_000, claimNow), /compare-and-swap conflict/);
+
+  const restartedOutbox = new AutonomousLearningFeedbackOutboxPersistenceCoordinator(new InMemoryAutonomousLearningFeedbackOutboxStore(), persistence);
+  const restored = await restartedOutbox.restore();
+  assert.equal(restored.commands.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  const restartedLearning = new AutonomousLearningController(agent, {
+    episodes: learning.episodes,
+    settlementReceipts: learning.settlementReceipts,
+    feedbackOutbox: restartedOutbox,
+  });
+  const worker = new AutonomousLearningFeedbackWorker(restartedLearning);
+  const result = await worker.run({ workerId: "restarted-feedback-worker", limit: AUTONOMOUS_DOMAIN_NAMES.length, maxRounds: 2, maxCommands: AUTONOMOUS_DOMAIN_NAMES.length, now: claimNow + 2_000 });
+  assert.equal(result.status, "drained");
+  assert.equal(result.applied, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(result.remaining, 0);
+  assert.equal((await learning.episodes.pending()).length, 0);
+});
+
+test("feedback outbox snapshots reject unsupported fields and malformed command state", async () => {
+  const store = new InMemoryAutonomousLearningFeedbackOutboxStore();
+  const snapshot = store.snapshot();
+  const unsafe = structuredClone(snapshot);
+  unsafe.api_key = "never persisted";
+  assert.throws(() => validateAutonomousLearningFeedbackOutboxSnapshot(unsafe), /unsupported fields/);
+  const malformed = structuredClone(snapshot);
+  malformed.commands.push({ schema: "bad" });
+  const { snapshot_digest: _digest, ...body } = malformed;
+  malformed.snapshot_digest = "0".repeat(64);
+  assert.throws(() => validateAutonomousLearningFeedbackOutboxSnapshot(malformed), /snapshot digest does not match/);
 });

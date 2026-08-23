@@ -2410,6 +2410,18 @@ synthesis rewards remain comparable; domain-specific rubrics should be composed 
 value-only evaluator by the application. These modes intentionally trade within-run state updates
 for correct delayed credit and avoid double-counting immediate and terminal rewards.
 
+The TypeScript evaluator-feedback outbox is now restart-capable as well. Its snapshot validator
+allow-lists every command field, verifies each command digest and value-only payload, rejects
+duplicate identities and unsafe metadata, and enforces a bounded canonical byte size.
+`JsonAutonomousLearningFeedbackOutboxPersistence` and
+`WebStorageAutonomousLearningFeedbackOutboxTextStore` provide portable JSON/browser storage;
+`TransactionalJsonAutonomousLearningFeedbackOutboxPersistence` adds compare-and-swap fencing;
+and `AutonomousLearningFeedbackOutboxPersistenceCoordinator` flushes every lease, retry, and
+settlement transition. A worker can restore the outbox, continue evaluator credit across all
+twelve domains, and safely reclaim an expired lease without replaying the provider. The outbox
+contains only evaluator values, target/request digests, lease state, and settlement result digests—not
+prompts, provider responses, credentials, tool arguments, or evidence bodies.
+
 The Rust bandit state now supports three auditable policy modes. The backward-compatible default is
 `strategy: "ucb1"`; `strategy: "epsilon_greedy"` uses `epsilon` and a public `seed` to make every
 exploration draw deterministic from the caller-owned generation and replayable from the selection

@@ -16,7 +16,7 @@ import {
   validateAutonomousEvaluatorCalibrationReport,
   type AutonomousEvaluatorCalibrationReport,
 } from "./autonomous-evaluator-calibration.js";
-import { digestJson, digestJsonSync } from "./tooling.js";
+import { canonicalJson, digestJson, digestJsonSync } from "./tooling.js";
 import type {
   BrainBanditState,
   BrainBanditContext,
@@ -34,10 +34,12 @@ export const AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA = "bioprism-typescript-autono
 export const AUTONOMOUS_LEARNING_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-learning-snapshot/0.1" as const;
 export const AUTONOMOUS_LEARNING_SETTLEMENT_RECEIPT_SCHEMA = "bioprism-typescript-autonomous-learning-settlement-receipt/0.1" as const;
 export const AUTONOMOUS_LEARNING_FEEDBACK_OUTBOX_SCHEMA = "bioprism-typescript-autonomous-learning-feedback-outbox/0.1" as const;
+export const AUTONOMOUS_LEARNING_FEEDBACK_OUTBOX_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-learning-feedback-outbox-snapshot/0.1" as const;
 export const AUTONOMOUS_EVALUATOR_MESH_SCHEMA = "bioprism-typescript-autonomous-evaluator-mesh/0.1" as const;
 export const AUTONOMOUS_LEARNING_MAX_STAGES = 64;
 export const AUTONOMOUS_LEARNING_MAX_TRAJECTORY_STEPS = 32;
 export const AUTONOMOUS_LEARNING_MAX_FEEDBACK_OUTBOX = 8_192;
+export const AUTONOMOUS_LEARNING_MAX_FEEDBACK_OUTBOX_SNAPSHOT_BYTES = 4_000_000;
 
 type Digest = string;
 
@@ -247,6 +249,34 @@ export interface AutonomousLearningFeedbackOutboxStore {
   claim(commandId: string, workerId: string, leaseMs: number, now?: number): Promise<AutonomousLearningFeedbackOutboxCommand | null> | AutonomousLearningFeedbackOutboxCommand | null;
   markApplied(commandId: string, workerId: string, resultDigest: Digest, now?: number): Promise<AutonomousLearningFeedbackOutboxCommand> | AutonomousLearningFeedbackOutboxCommand;
   markFailed(commandId: string, workerId: string, errorClass: string, retryable: boolean, now?: number): Promise<AutonomousLearningFeedbackOutboxCommand> | AutonomousLearningFeedbackOutboxCommand;
+}
+
+export interface AutonomousLearningFeedbackOutboxSnapshot extends JsonObject {
+  schema: typeof AUTONOMOUS_LEARNING_FEEDBACK_OUTBOX_SNAPSHOT_SCHEMA;
+  commands: AutonomousLearningFeedbackOutboxCommand[];
+  snapshot_digest: Digest;
+  retention: typeof PRIVATE_RETENTION;
+  secret_material: "never_returned";
+}
+
+export interface AutonomousLearningFeedbackOutboxSnapshotPersistence {
+  read(): Promise<AutonomousLearningFeedbackOutboxSnapshot | null> | AutonomousLearningFeedbackOutboxSnapshot | null;
+  write(snapshot: AutonomousLearningFeedbackOutboxSnapshot): Promise<void> | void;
+  writeIfUnchanged?(expectedSnapshotDigest: Digest | null, snapshot: AutonomousLearningFeedbackOutboxSnapshot): Promise<boolean> | boolean;
+}
+
+export interface AutonomousLearningFeedbackOutboxSnapshotStore extends AutonomousLearningFeedbackOutboxStore {
+  snapshot(): AutonomousLearningFeedbackOutboxSnapshot;
+  restore(snapshot: AutonomousLearningFeedbackOutboxSnapshot): void;
+}
+
+export interface AutonomousLearningFeedbackOutboxTextStore {
+  read(): Promise<string | null> | string | null;
+  write(value: string): Promise<void> | void;
+}
+
+export interface AutonomousLearningFeedbackOutboxTransactionalTextStore extends AutonomousLearningFeedbackOutboxTextStore {
+  writeIfUnchanged(expectedSnapshotDigest: Digest | null, value: string): Promise<boolean> | boolean;
 }
 
 export interface AutonomousLearningFeedbackOutboxDispatchRow extends JsonObject {
@@ -572,6 +602,29 @@ function assertFeedbackOutboxCommandShape(value: unknown): asserts value is Auto
   const { command_digest: observed, ...descriptor } = value;
   boundedDigest("feedback outbox command_digest", observed);
   if (digestJsonSync(descriptor) !== observed) throw new ArgumentError("feedback outbox command digest does not match");
+}
+
+function assertFeedbackOutboxSnapshotShape(value: unknown): asserts value is AutonomousLearningFeedbackOutboxSnapshot {
+  if (!isObject(value) || value.schema !== AUTONOMOUS_LEARNING_FEEDBACK_OUTBOX_SNAPSHOT_SCHEMA || !Array.isArray(value.commands)) throw new ArgumentError("feedback outbox snapshot is malformed");
+  assertExactKeys(value, ["schema", "commands", "snapshot_digest", "retention", "secret_material"], "feedback outbox snapshot");
+  if (value.commands.length > AUTONOMOUS_LEARNING_MAX_FEEDBACK_OUTBOX) throw new ArgumentError("feedback outbox snapshot exceeds its command bound");
+  if (value.retention !== PRIVATE_RETENTION || value.secret_material !== "never_returned") throw new ArgumentError("feedback outbox snapshot retention contract is malformed");
+  boundedDigest("feedback outbox snapshot_digest", value.snapshot_digest);
+  const { snapshot_digest: observed, ...descriptor } = value;
+  if (digestJsonSync(descriptor) !== observed) throw new ArgumentError("feedback outbox snapshot digest does not match");
+  if (new TextEncoder().encode(canonicalJson(value)).byteLength > AUTONOMOUS_LEARNING_MAX_FEEDBACK_OUTBOX_SNAPSHOT_BYTES) throw new ArgumentError("feedback outbox snapshot exceeds its byte bound");
+  const ids = new Set<string>();
+  for (const command of value.commands) {
+    assertFeedbackOutboxCommandShape(command);
+    if (ids.has(command.command_id)) throw new ArgumentError(`feedback outbox snapshot contains duplicate command ${command.command_id}`);
+    ids.add(command.command_id);
+  }
+}
+
+/** Validate a metadata-only feedback queue restart image without mutating a live store. */
+export function validateAutonomousLearningFeedbackOutboxSnapshot(raw: unknown): AutonomousLearningFeedbackOutboxSnapshot {
+  assertFeedbackOutboxSnapshotShape(raw);
+  return clone(raw);
 }
 
 function refreshFeedbackOutboxCommand(command: AutonomousLearningFeedbackOutboxCommand): AutonomousLearningFeedbackOutboxCommand {
@@ -1082,6 +1135,159 @@ export class InMemoryAutonomousLearningFeedbackOutboxStore implements Autonomous
 
   rows(): AutonomousLearningFeedbackOutboxCommand[] {
     return [...this.commands.values()].map((command) => clone(command));
+  }
+
+  snapshot(): AutonomousLearningFeedbackOutboxSnapshot {
+    const descriptor = {
+      schema: AUTONOMOUS_LEARNING_FEEDBACK_OUTBOX_SNAPSHOT_SCHEMA,
+      commands: this.rows().sort((left, right) => left.command_id.localeCompare(right.command_id)),
+      retention: PRIVATE_RETENTION,
+      secret_material: "never_returned" as const,
+    };
+    const snapshot = { ...descriptor, snapshot_digest: digestJsonSync(descriptor) };
+    assertFeedbackOutboxSnapshotShape(snapshot);
+    return clone(snapshot);
+  }
+
+  restore(snapshot: AutonomousLearningFeedbackOutboxSnapshot): void {
+    const validated = validateAutonomousLearningFeedbackOutboxSnapshot(snapshot);
+    this.commands.clear();
+    for (const command of validated.commands) this.commands.set(command.command_id, clone(command));
+  }
+}
+
+/** Strict canonical JSON persistence for evaluator-feedback outbox snapshots. */
+export class JsonAutonomousLearningFeedbackOutboxPersistence implements AutonomousLearningFeedbackOutboxSnapshotPersistence {
+  constructor(readonly textStore: AutonomousLearningFeedbackOutboxTextStore) {
+    if (!textStore || typeof textStore.read !== "function" || typeof textStore.write !== "function") throw new ArgumentError("feedback outbox text store is malformed");
+  }
+
+  async read(): Promise<AutonomousLearningFeedbackOutboxSnapshot | null> {
+    const encoded = await this.textStore.read();
+    if (encoded === null) return null;
+    if (new TextEncoder().encode(encoded).byteLength > AUTONOMOUS_LEARNING_MAX_FEEDBACK_OUTBOX_SNAPSHOT_BYTES) throw new ArgumentError("feedback outbox JSON exceeds its byte bound");
+    let parsed: unknown;
+    try { parsed = JSON.parse(encoded); } catch { throw new ArgumentError("feedback outbox JSON is invalid"); }
+    return validateAutonomousLearningFeedbackOutboxSnapshot(parsed);
+  }
+
+  async write(snapshot: AutonomousLearningFeedbackOutboxSnapshot): Promise<void> {
+    const validated = validateAutonomousLearningFeedbackOutboxSnapshot(snapshot);
+    await this.textStore.write(canonicalJson(validated));
+  }
+}
+
+/** Canonical JSON persistence with atomic compare-and-swap support for multiple learning workers. */
+export class TransactionalJsonAutonomousLearningFeedbackOutboxPersistence extends JsonAutonomousLearningFeedbackOutboxPersistence {
+  declare readonly textStore: AutonomousLearningFeedbackOutboxTransactionalTextStore;
+
+  constructor(textStore: AutonomousLearningFeedbackOutboxTransactionalTextStore) {
+    super(textStore);
+    this.textStore = textStore;
+    if (typeof textStore.writeIfUnchanged !== "function") throw new ArgumentError("feedback outbox text store lacks compare-and-swap");
+  }
+
+  async writeIfUnchanged(expectedSnapshotDigest: Digest | null, snapshot: AutonomousLearningFeedbackOutboxSnapshot): Promise<boolean> {
+    const validated = validateAutonomousLearningFeedbackOutboxSnapshot(snapshot);
+    return this.textStore.writeIfUnchanged(expectedSnapshotDigest, canonicalJson(validated));
+  }
+}
+
+/** Browser-compatible text storage for feedback queue snapshots; the host owns encryption and lifetime. */
+export class WebStorageAutonomousLearningFeedbackOutboxTextStore implements AutonomousLearningFeedbackOutboxTextStore {
+  constructor(readonly storage: { getItem(key: string): string | null; setItem(key: string, value: string): void }, readonly key: string) {
+    if (!storage || typeof storage.getItem !== "function" || typeof storage.setItem !== "function") throw new ArgumentError("feedback outbox Web Storage adapter is malformed");
+    boundedIdentifier("feedback outbox storage key", key);
+  }
+
+  read(): string | null { return this.storage.getItem(this.key); }
+  write(value: string): void { this.storage.setItem(this.key, value); }
+}
+
+/**
+ * Restart-aware outbox facade that flushes every queue mutation and fences stale workers.
+ * Call `restore()` once before a worker begins consuming commands.
+ */
+export class AutonomousLearningFeedbackOutboxPersistenceCoordinator implements AutonomousLearningFeedbackOutboxStore {
+  private expectedSnapshotDigest: Digest | null = null;
+  private operationTail: Promise<void> = Promise.resolve();
+
+  constructor(readonly store: AutonomousLearningFeedbackOutboxSnapshotStore, readonly persistence: AutonomousLearningFeedbackOutboxSnapshotPersistence) {
+    if (!store || typeof store.snapshot !== "function" || typeof store.restore !== "function") throw new ArgumentError("feedback outbox snapshot store is malformed");
+    if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new ArgumentError("feedback outbox snapshot persistence is malformed");
+  }
+
+  async restore(): Promise<AutonomousLearningFeedbackOutboxSnapshot | null> {
+    return this.enqueue(async () => {
+      const raw = await this.persistence.read();
+      if (raw === null) {
+        const empty = new InMemoryAutonomousLearningFeedbackOutboxStore().snapshot();
+        this.store.restore(empty);
+        this.expectedSnapshotDigest = null;
+        return null;
+      }
+      const snapshot = validateAutonomousLearningFeedbackOutboxSnapshot(raw);
+      this.store.restore(snapshot);
+      this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      return clone(snapshot);
+    });
+  }
+
+  async flush(): Promise<AutonomousLearningFeedbackOutboxSnapshot> {
+    return this.enqueue(() => this.flushCurrent());
+  }
+
+  async load(commandId: string): Promise<AutonomousLearningFeedbackOutboxCommand | null> {
+    return this.enqueue(() => this.store.load(commandId));
+  }
+
+  async save(command: AutonomousLearningFeedbackOutboxCommand): Promise<void> {
+    await this.mutate(() => this.store.save(command));
+  }
+
+  async pending(limit?: number, now?: number): Promise<AutonomousLearningFeedbackOutboxCommand[]> {
+    return this.enqueue(() => this.store.pending(limit, now));
+  }
+
+  async claim(commandId: string, workerId: string, leaseMs: number, now?: number): Promise<AutonomousLearningFeedbackOutboxCommand | null> {
+    return this.mutate(() => this.store.claim(commandId, workerId, leaseMs, now));
+  }
+
+  async markApplied(commandId: string, workerId: string, resultDigest: Digest, now?: number): Promise<AutonomousLearningFeedbackOutboxCommand> {
+    return this.mutate(() => this.store.markApplied(commandId, workerId, resultDigest, now));
+  }
+
+  async markFailed(commandId: string, workerId: string, errorClass: string, retryable: boolean, now?: number): Promise<AutonomousLearningFeedbackOutboxCommand> {
+    return this.mutate(() => this.store.markFailed(commandId, workerId, errorClass, retryable, now));
+  }
+
+  private async flushCurrent(): Promise<AutonomousLearningFeedbackOutboxSnapshot> {
+    const snapshot = validateAutonomousLearningFeedbackOutboxSnapshot(this.store.snapshot());
+    if (typeof this.persistence.writeIfUnchanged === "function") {
+      if (!await this.persistence.writeIfUnchanged(this.expectedSnapshotDigest, snapshot)) throw new ArgumentError("feedback outbox persistence compare-and-swap conflict");
+    } else await this.persistence.write(snapshot);
+    this.expectedSnapshotDigest = snapshot.snapshot_digest;
+    return clone(snapshot);
+  }
+
+  private async mutate<T>(operation: () => T | Promise<T>): Promise<T> {
+    return this.enqueue(async () => {
+      const before = this.store.snapshot();
+      const result = await operation();
+      try {
+        await this.flushCurrent();
+        return result;
+      } catch (error) {
+        this.store.restore(before);
+        throw error;
+      }
+    });
+  }
+
+  private enqueue<T>(operation: () => Promise<T> | T): Promise<T> {
+    const queued = this.operationTail.then(operation);
+    this.operationTail = queued.then(() => undefined, () => undefined);
+    return queued;
   }
 }
 

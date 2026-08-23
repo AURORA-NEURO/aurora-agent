@@ -71,6 +71,14 @@ statistics plus credited evaluator outcome digests. This persists adaptation met
 persisting prompts, provider output, credentials, or evidence; evaluator authority, reward quality,
 and multi-process storage ownership remain deployment concerns.
 
+Evaluator feedback now has the same durable handoff. The TypeScript outbox snapshot is canonical,
+digest-checked, duplicate-resistant, byte-bounded, and command-shape validated; JSON, browser,
+transactional CAS, and a mutation-flushing persistence coordinator are exported. Leases, retries,
+terminal failures, applied status, and settlement result digests survive a worker restart, and stale workers are
+fenced before they can overwrite another learner's queue. This closes local evaluator-credit
+recovery across all domains without persisting prompts, provider output, credentials, tool arguments,
+or evidence; the embedding deployment still owns the backing store and distributed scheduling.
+
 The objective layer now has the same restart discipline. Goal snapshots are strictly allow-listed,
 canonical-digest validated, hash-chain checked, retention checked, and bounded before restore;
 `JsonAutonomousGoalPersistence`, `TransactionalJsonAutonomousGoalPersistence`, and
