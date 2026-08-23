@@ -221,9 +221,19 @@ def test_evidence_reconciliation_receipts_are_idempotent_and_bound_safe_requeue(
     queued = queue.requeue(no_effect.work_id, reconciliation_digest=observed.reconciliation_digest, now=4_304)
     assert queued.status == "queued"
     assert queued.execution_phase == "not_started"
+    assert queued.reconciliation_digest is None
+    assert queued.reconciliation_history == (observed.reconciliation_digest,)
+    queue.claim(no_effect.work_id, "worker-a", lease_ms=100, now=4_305)
+    queue.begin_execution(no_effect.work_id, "worker-a", now=4_306)
+    queue.reclaim_expired(now=4_406)
+    second_observed = queue.settle_reconciliation(no_effect.work_id, outcome="not_executed", evidence_digest="e" * 64, now=4_407)
+    assert second_observed.reconciliation_digest != observed.reconciliation_digest
+    assert second_observed.reconciliation_history == (observed.reconciliation_digest,)
+    assert queue.settle_reconciliation(no_effect.work_id, outcome="not_executed", evidence_digest="e" * 64, now=4_408) == second_observed
     restored = InMemoryAutonomousEvidenceWorkQueue()
     restored.restore(queue.snapshot())
-    assert restored.get(no_effect.work_id).item_digest == queued.item_digest
+    assert restored.get(no_effect.work_id).reconciliation_digest == second_observed.reconciliation_digest
+    assert restored.get(no_effect.work_id).reconciliation_history == (observed.reconciliation_digest,)
 
 
 def test_worker_never_retries_a_runtime_failure_after_execution_begins():

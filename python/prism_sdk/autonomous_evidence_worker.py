@@ -29,10 +29,10 @@ from .domain_tools import AUTONOMOUS_DOMAIN_NAMES, _identifier
 from .errors import ArgumentError
 
 
-AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA = "bioprism-python-autonomous-evidence-work-item/0.2"
-AUTONOMOUS_EVIDENCE_WORK_QUEUE_SCHEMA = "bioprism-python-autonomous-evidence-work-queue/0.2"
-AUTONOMOUS_EVIDENCE_WORKER_SCHEMA = "bioprism-python-autonomous-evidence-worker/0.2"
-AUTONOMOUS_EVIDENCE_WORK_QUEUE_SQLITE_SCHEMA = "bioprism-python-autonomous-evidence-work-queue-sqlite/0.2"
+AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA = "bioprism-python-autonomous-evidence-work-item/0.3"
+AUTONOMOUS_EVIDENCE_WORK_QUEUE_SCHEMA = "bioprism-python-autonomous-evidence-work-queue/0.3"
+AUTONOMOUS_EVIDENCE_WORKER_SCHEMA = "bioprism-python-autonomous-evidence-worker/0.3"
+AUTONOMOUS_EVIDENCE_WORK_QUEUE_SQLITE_SCHEMA = "bioprism-python-autonomous-evidence-work-queue-sqlite/0.3"
 MAX_AUTONOMOUS_EVIDENCE_WORK_ITEMS = 4_096
 MAX_AUTONOMOUS_EVIDENCE_WORK_ATTEMPTS = 32
 MAX_AUTONOMOUS_EVIDENCE_WORK_BATCH = 128
@@ -222,6 +222,7 @@ class AutonomousEvidenceWorkItem:
     reconciliation_evidence_kind: str | None = None
     reconciliation_operator: str | None = None
     reconciliation_effect_absent: bool | None = None
+    reconciliation_history: tuple[str, ...] = ()
     item_digest: str = ""
 
     def __post_init__(self) -> None:
@@ -302,6 +303,14 @@ class AutonomousEvidenceWorkItem:
                 effect_absent=self.reconciliation_effect_absent,
             ):
                 raise ArgumentError("autonomous evidence work reconciliation digest is invalid")
+        reconciliation_history = _digests(
+            "autonomous evidence work reconciliation_history",
+            self.reconciliation_history,
+            MAX_AUTONOMOUS_EVIDENCE_WORK_ATTEMPTS,
+        )
+        if len(reconciliation_history) != len(set(reconciliation_history)):
+            raise ArgumentError("autonomous evidence work reconciliation_history contains duplicates")
+        object.__setattr__(self, "reconciliation_history", reconciliation_history)
         if self.item_digest:
             _digest("autonomous evidence work item_digest", self.item_digest)
             if self.item_digest != self.computed_digest:
@@ -344,6 +353,7 @@ class AutonomousEvidenceWorkItem:
             "reconciliation_evidence_kind": self.reconciliation_evidence_kind,
             "reconciliation_operator": self.reconciliation_operator,
             "reconciliation_effect_absent": self.reconciliation_effect_absent,
+            "reconciliation_history": list(self.reconciliation_history),
             "retention": "metadata_only_request_and_values_caller_owned",
             "secret_material": "never_returned",
         }
@@ -364,7 +374,7 @@ def _work_item_from_mapping(value: Mapping[str, Any]) -> AutonomousEvidenceWorkI
         "assessment_digest", "result_digest", "failure_class", "last_error_class", "created_at", "updated_at",
         "execution_phase", "reconciliation_digest", "reconciliation_observed_item_digest", "reconciliation_outcome",
         "reconciliation_evidence_digest", "reconciliation_evidence_kind", "reconciliation_operator", "reconciliation_effect_absent",
-        "item_digest", "retention", "secret_material",
+        "reconciliation_history", "item_digest", "retention", "secret_material",
     }
     if not isinstance(value, Mapping) or set(value) != expected or value.get("schema") != AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA:
         raise ArgumentError("autonomous evidence work item is malformed")
@@ -383,7 +393,7 @@ def _work_item_from_mapping(value: Mapping[str, Any]) -> AutonomousEvidenceWorkI
         reconciliation_digest=value.get("reconciliation_digest"), reconciliation_observed_item_digest=value.get("reconciliation_observed_item_digest"),
         reconciliation_outcome=value.get("reconciliation_outcome"), reconciliation_evidence_digest=value.get("reconciliation_evidence_digest"),
         reconciliation_evidence_kind=value.get("reconciliation_evidence_kind"), reconciliation_operator=value.get("reconciliation_operator"),
-        reconciliation_effect_absent=value.get("reconciliation_effect_absent"), item_digest=value.get("item_digest"),
+        reconciliation_effect_absent=value.get("reconciliation_effect_absent"), reconciliation_history=tuple(value.get("reconciliation_history", ())), item_digest=value.get("item_digest"),
     )
 
 
@@ -777,7 +787,27 @@ class InMemoryAutonomousEvidenceWorkQueue:
                     raise ArgumentError("evidence requeue requires the matching reconciliation digest")
             elif reconciliation_digest is not None:
                 _digest("autonomous evidence reconciliation_digest", reconciliation_digest)
-            queued = self._refresh(item, current, status="queued", execution_phase="not_started", available_at=current, failure_class=None, last_error_class=item.last_error_class)
+            history = item.reconciliation_history
+            updates: dict[str, Any] = {
+                "status": "queued",
+                "execution_phase": "not_started",
+                "available_at": current,
+                "failure_class": None,
+                "last_error_class": item.last_error_class,
+            }
+            if item.status == "reconciliation_required":
+                history = (*history, item.reconciliation_digest)
+                updates.update({
+                    "reconciliation_digest": None,
+                    "reconciliation_observed_item_digest": None,
+                    "reconciliation_outcome": None,
+                    "reconciliation_evidence_digest": None,
+                    "reconciliation_evidence_kind": None,
+                    "reconciliation_operator": None,
+                    "reconciliation_effect_absent": None,
+                })
+            updates["reconciliation_history"] = history
+            queued = self._refresh(item, current, **updates)
             self._items[work_id] = queued
             return queued
 
