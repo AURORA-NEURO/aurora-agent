@@ -111,6 +111,10 @@ test("brain facade previews provider-free model selection for every built-in dom
     assert.equal(preview.secret_material, "never_returned");
     assert.equal(preview.selection_context_digest.length, 64);
     assert.equal(preview.execution_plan_digest.length, 64);
+    assert.equal(preview.task_intent_digest.length, 64);
+    assert.equal(preview.task_decision_digest.length, 64);
+    assert.ok(["admitted", "review_required", "blocked"].includes(preview.task_decision_posture));
+    assert.equal(preview.selection_contract.task_decision_digest, preview.task_decision_digest);
     assert.ok(!JSON.stringify(preview).includes(task), domain);
   }
   assert.equal(runtime.providerStatus("offline").attempts, beforeAttempts);
@@ -125,6 +129,24 @@ test("brain facade previews provider-free model selection for every built-in dom
   assert.equal(refused.status, "refused_no_eligible_model");
   assert.equal(refused.eligible_candidate_count, 0);
   assert.equal(refused.review.next_action, "resolve_model_provider_or_credential_gates");
+});
+
+test("brain facade blocks approved provider dispatch when task posture is forbidden", async () => {
+  const runtime = localRuntime();
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+  const task = "deploy the biomedical report and verify safety";
+  const preview = await brain.modelSelectionPreview({ task, domain: "biomedical" });
+  assert.equal(preview.status, "selected");
+  assert.equal(preview.task_decision_posture, "blocked");
+  assert.equal(preview.review.next_action, "resolve_task_decision_block");
+  const attempts = runtime.providerStatus("offline").attempts;
+  await assert.rejects(
+    () => brain.executeApprovedSelection({ task, domain: "biomedical" }, preview),
+    /blocked by the task decision posture/,
+  );
+  assert.equal(runtime.providerStatus("offline").attempts, attempts);
 });
 
 test("brain facade revalidates approved model previews and invokes one exact local arm across every domain", async () => {

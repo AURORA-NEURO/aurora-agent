@@ -1331,6 +1331,7 @@ def test_builtin_domain_registry_covers_every_autonomous_domain_and_blueprint_re
             "autonomy-domain-policy",
             "autonomy-task-lens",
             "autonomy-task-intent",
+            "autonomy-task-decision",
             "autonomy-domain-pack",
             "autonomy-capability-contract",
             "autonomy-workflow-contract",
@@ -1421,6 +1422,10 @@ def test_model_selection_preview_is_keyless_provider_free_and_covers_every_domai
             assert preview["execution"].startswith("preview_only")
             assert len(preview["selection_context_digest"]) == 64
             assert len(preview["execution_plan_digest"]) == 64
+            assert len(preview["task_intent_digest"]) == 64
+            assert len(preview["task_decision_digest"]) == 64
+            assert preview["task_decision_posture"] in {"admitted", "review_required", "blocked"}
+            assert preview["selection_contract"]["task_decision_digest"] == preview["task_decision_digest"]
             assert task not in json.dumps(preview)
 
         focused = agent.model_selection_preview(
@@ -1528,6 +1533,55 @@ def test_approved_model_selection_revalidates_and_invokes_one_credentialless_arm
             credentials={},
         )
     assert calls == ["offline-model"] * len(AUTONOMOUS_DOMAINS)
+
+
+def test_blocked_task_decision_changes_preview_and_prevents_provider_dispatch():
+    class OfflineWorkspace(_Workspace):
+        def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+            report = super().tool(name, arguments)
+            if name == "brain_model_select_contextual":
+                selection = dict(report["selection"])
+                selection["selected_model"] = {"provider": "offline", "model": "offline-model"}
+                selection["ranking"] = [
+                    {
+                        "model_id": "offline/offline-model",
+                        "eligible": True,
+                        "reasons": [],
+                        "base_score": 1.0,
+                        "exploration_bonus": 0.0,
+                        "score": 1.0,
+                        "observed_pulls": 0,
+                    }
+                ]
+                report["selection"] = selection
+            return report
+
+    calls: list[str] = []
+    runtime = LLMRuntime()
+    runtime.register_in_memory_provider(
+        "offline",
+        lambda request: calls.append(request.model) or {"output_text": "must not run"},
+    )
+    candidate = dict(_model()[0])
+    candidate.update({"provider": "offline", "model": "offline-model", "requires_credential": False})
+    agent = AutonomousAgent(
+        OfflineWorkspace(),
+        runtime,
+        model_catalogue=ModelCatalogue([candidate]),
+    )
+    task = "deploy the biomedical report and verify safety"
+    preview = agent.model_selection_preview(task=task, domain="biomedical", credentials={})
+    assert preview["status"] == "selected"
+    assert preview["task_decision_posture"] == "blocked"
+    assert preview["review"]["next_action"] == "resolve_task_decision_block"
+    with pytest.raises(BrainRunError, match="blocked by the task decision posture"):
+        agent.run_approved_model_selection(
+            task=task,
+            domain="biomedical",
+            selection_preview=preview,
+            credentials={},
+        )
+    assert calls == []
 
 
 def test_provider_free_router_covers_every_domain_and_abstains_without_evidence():

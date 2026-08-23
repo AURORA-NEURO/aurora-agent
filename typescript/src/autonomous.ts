@@ -168,6 +168,11 @@ import {
   inferAutonomousTaskIntent,
   type AutonomousTaskIntent,
 } from "./autonomous-task-intent.js";
+import {
+  autonomousTaskDecisionPromptContract,
+  inferAutonomousTaskDecision,
+  type AutonomousTaskDecision,
+} from "./autonomous-task-decision.js";
 import { ToolCatalogue, canonicalJson, digestBytesSync, digestCanonicalJsonText, digestCanonicalJsonTextSync, digestJson, digestJsonSync } from "./tooling.js";
 import {
   autonomousDomainPolicy,
@@ -506,6 +511,10 @@ export interface AutonomousPlan extends JsonObject {
   response_contract_digest?: string;
   /** Digest of the provider-free domain policy bound to this plan. */
   domain_policy_digest: string;
+  /** Digest of the provider-free task intent bound to this plan. */
+  task_intent_digest: string;
+  /** Digest of the intent-to-action decision bound to this plan. */
+  task_decision_digest: string;
   plan_digest: string;
   does_not_claim: string[];
 }
@@ -617,6 +626,9 @@ export interface AutonomousModelSelectionContract extends JsonObject {
   domain: AutonomousDomainName;
   capability: string;
   risk_class: string;
+  task_intent_digest: string;
+  task_decision_digest: string;
+  task_decision_posture: AutonomousTaskDecision["posture"];
   required_model_capabilities: string[];
   candidate_ids: string[];
   input_tokens: number;
@@ -643,6 +655,9 @@ export interface AutonomousModelSelectionPreview extends JsonObject {
   workflow_id: string;
   workflow_digest: string;
   domain_pack_digest: string;
+  task_intent_digest: string;
+  task_decision_digest: string;
+  task_decision_posture: AutonomousTaskDecision["posture"];
   selection_context_digest: string;
   execution_plan_digest: string;
   required_model_capabilities: string[];
@@ -654,7 +669,7 @@ export interface AutonomousModelSelectionPreview extends JsonObject {
     provider_call: "not_started";
     domain_tools: "not_started";
     caller_approval_required: true;
-    next_action: "review_selection_and_approve_provider_call" | "resolve_model_provider_or_credential_gates";
+    next_action: "review_selection_and_approve_provider_call" | "resolve_model_provider_or_credential_gates" | "resolve_task_decision_block";
   };
   execution: "preview_only; no_provider_or_domain_tool_invocation";
   authority_posture: "selection_review_only; preview_does_not_authorize_provider_or_effects";
@@ -681,6 +696,8 @@ export interface AutonomousTaskBlueprint extends JsonObject {
   task_lens: AutonomousDomainTaskLens;
   /** Provider-free task interpretation; classification metadata never authorizes execution. */
   task_intent: AutonomousTaskIntent;
+  /** Intent-to-action posture; guidance metadata never authorizes execution. */
+  task_decision: AutonomousTaskDecision;
   prompt: AutonomousPromptResult;
   plan: AutonomousPlan;
   /** Present only when the caller explicitly enables the reviewed structured domain response. */
@@ -2606,6 +2623,12 @@ async function buildTaskBlueprint(
     workflowId: profile.workflow.workflow_id,
     lens: taskLens,
   });
+  const taskDecision = inferAutonomousTaskDecision({
+    intent: taskIntent,
+    lens: taskLens,
+    policy: domainPolicy,
+    requiredModelCapabilities: profile.required_model_capabilities,
+  });
   const pack = await buildDomainPack(profile);
   const evidencePlan = await buildAutonomousEvidencePlan([profile.workflow]);
   const responseContract = options.structuredDomainResponse === true
@@ -2641,6 +2664,12 @@ async function buildTaskBlueprint(
     task_intent_requested_effect: taskIntent.requested_effect,
     task_intent_evidence_mode: taskIntent.evidence_mode,
     task_intent_ambiguity_flags: [...taskIntent.ambiguity_flags],
+    task_decision_id: taskDecision.decision_id,
+    task_decision_digest: taskDecision.decision_digest,
+    task_decision_posture: taskDecision.posture,
+    task_decision_recommended_path: taskDecision.recommended_path,
+    task_decision_approval_requirements: [...taskDecision.approval_requirements],
+    task_decision_review_reasons: [...taskDecision.review_reasons],
   };
   // Match the Rust/Python context identity byte-for-byte: field order is part of this
   // cross-language value contract, while task text and provider payloads stay outside it.
@@ -2668,6 +2697,7 @@ async function buildTaskBlueprint(
     domain_policy: domainPolicy,
     task_lens: taskLens,
     task_intent: taskIntent,
+    task_decision: taskDecision,
     prompt,
     plan,
     ...(responseContract ? { response_contract: responseContract } : {}),
@@ -3063,9 +3093,16 @@ export async function assembleAutonomousPrompt(
     workflowId: profile.workflow.workflow_id,
     lens: taskLens,
   });
+  const taskDecision = inferAutonomousTaskDecision({
+    intent: taskIntent,
+    lens: taskLens,
+    policy: autonomousDomainPolicy(profile.domain),
+    requiredModelCapabilities: profile.required_model_capabilities,
+  });
   const system = `${profile.system_instructions}\n\nGuardrails:\n${profile.guardrails.map((guardrail) => `- ${guardrail}`).join("\n")}`;
   const intentPrompt = maxInputTokens < 1_024 ? "" : `\nTask intent: ${JSON.stringify(autonomousTaskIntentPromptContract(taskIntent, maxInputTokens < 2_048))}`;
-  const developer = `Domain: ${profile.domain}\nRisk class: ${profile.risk_class}\nCapability: ${profile.default_capability}\nWorkflow: ${profile.workflow.workflow_id}\nStages: ${stageIds.join(", ")}\nTask lens: ${JSON.stringify(autonomousTaskLensPromptContract(taskLens, maxInputTokens < 2_048))}${intentPrompt}\n\n${outputContract}`;
+  const decisionPrompt = maxInputTokens < 1_024 ? "" : `\nTask decision: ${JSON.stringify(autonomousTaskDecisionPromptContract(taskDecision, maxInputTokens < 2_048))}`;
+  const developer = `Domain: ${profile.domain}\nRisk class: ${profile.risk_class}\nCapability: ${profile.default_capability}\nWorkflow: ${profile.workflow.workflow_id}\nStages: ${stageIds.join(", ")}\nTask lens: ${JSON.stringify(autonomousTaskLensPromptContract(taskLens, maxInputTokens < 2_048))}${intentPrompt}${decisionPrompt}\n\n${outputContract}`;
   const requiredMessages: AutonomousPromptMessage[] = [
     { role: "system", content: system, source_id: "domain-system" },
     { role: "developer", content: developer, source_id: "domain-developer" },
@@ -3291,6 +3328,7 @@ export async function compileAutonomousPlan(
   const taskDigest = options.taskDigest ?? await digestJson({ task: taskText });
   const intentTaskDigest = await digestJson({ task: taskText });
   const taskLens = autonomousDomainTaskLens(profile.domain);
+  const taskPolicy = autonomousDomainPolicy(profile.domain);
   const taskIntent = inferAutonomousTaskIntent({
     task: taskText,
     taskDigest: intentTaskDigest,
@@ -3299,6 +3337,12 @@ export async function compileAutonomousPlan(
     riskClass: profile.risk_class,
     workflowId: profile.workflow.workflow_id,
     lens: taskLens,
+  });
+  const taskDecision = inferAutonomousTaskDecision({
+    intent: taskIntent,
+    lens: taskLens,
+    policy: taskPolicy,
+    requiredModelCapabilities: profile.required_model_capabilities,
   });
   const active = new Set(options.activeToolNames ?? []);
   const selected = new Set(options.selectedToolNames ?? []);
@@ -3318,7 +3362,7 @@ export async function compileAutonomousPlan(
       id: stage.id,
       objective: stage.objective,
       tool: binding?.name ?? "provider.invoke",
-      arguments: { domain: profile.domain, capability: profile.default_capability, stage_id: stage.id, task_digest: taskDigest, task_lens_id: taskLens.lens_id, task_lens_digest: taskLens.lens_digest, task_intent_id: taskIntent.intent_id, task_intent_digest: taskIntent.intent_digest, task_intent_action_mode: taskIntent.action_mode, task_intent_requested_effect: taskIntent.requested_effect, task_intent_evidence_mode: taskIntent.evidence_mode, task_intent_ambiguity_flags: [...taskIntent.ambiguity_flags] },
+      arguments: { domain: profile.domain, capability: profile.default_capability, stage_id: stage.id, task_digest: taskDigest, task_lens_id: taskLens.lens_id, task_lens_digest: taskLens.lens_digest, task_intent_id: taskIntent.intent_id, task_intent_digest: taskIntent.intent_digest, task_intent_action_mode: taskIntent.action_mode, task_intent_requested_effect: taskIntent.requested_effect, task_intent_evidence_mode: taskIntent.evidence_mode, task_intent_ambiguity_flags: [...taskIntent.ambiguity_flags], task_decision_id: taskDecision.decision_id, task_decision_digest: taskDecision.decision_digest, task_decision_posture: taskDecision.posture, task_decision_recommended_path: taskDecision.recommended_path, task_decision_approval_requirements: [...taskDecision.approval_requirements], task_decision_review_reasons: [...taskDecision.review_reasons] },
       depends_on: [...stage.depends_on],
       effect,
       estimated_cost: index + 1,
@@ -3336,9 +3380,10 @@ export async function compileAutonomousPlan(
     requires_approval: true,
     execution: "not_started" as const,
     ...(options.responseContractDigest === undefined ? {} : { response_contract_digest: boundedModelDigest("autonomous plan response contract digest", options.responseContractDigest) }),
-    domain_policy_digest: autonomousDomainPolicy(profile.domain).policy_digest,
+    domain_policy_digest: taskPolicy.policy_digest,
     task_lens_digest: taskLens.lens_digest,
     task_intent_digest: taskIntent.intent_digest,
+    task_decision_digest: taskDecision.decision_digest,
     does_not_claim: ["the plan has not executed any provider or tool", "tool registration is not authorization", "a provider response is not external-effect evidence"],
   };
   return { ...descriptor, plan_digest: await digestJson(descriptor) };
@@ -4878,6 +4923,9 @@ export class AutonomousAgent {
       workflow_id: blueprint.workflow.workflow_id,
       workflow_digest: blueprint.workflow.workflow_digest,
       domain_pack_digest: blueprint.domain_pack.pack_digest,
+      task_intent_digest: blueprint.task_intent.intent_digest,
+      task_decision_digest: blueprint.task_decision.decision_digest,
+      task_decision_posture: blueprint.task_decision.posture,
       selection_context_digest: blueprint.learning_context_digest,
       execution_plan_digest: executionPlanDigest,
       required_model_capabilities: [...blueprint.required_capabilities],
@@ -4888,6 +4936,9 @@ export class AutonomousAgent {
         domain: blueprint.domain_profile.domain,
         capability: blueprint.selection_context.capability,
         risk_class: blueprint.domain_profile.risk_class,
+        task_intent_digest: blueprint.task_intent.intent_digest,
+        task_decision_digest: blueprint.task_decision.decision_digest,
+        task_decision_posture: blueprint.task_decision.posture,
         required_model_capabilities: [...blueprint.required_capabilities],
         candidate_ids: candidates.map((candidate) => `${candidate.provider}/${candidate.model}`),
         input_tokens: estimatedInputTokens,
@@ -4902,7 +4953,9 @@ export class AutonomousAgent {
         provider_call: "not_started",
         domain_tools: "not_started",
         caller_approval_required: true,
-        next_action: selected ? "review_selection_and_approve_provider_call" : "resolve_model_provider_or_credential_gates",
+        next_action: blueprint.task_decision.posture === "blocked"
+          ? "resolve_task_decision_block"
+          : selected ? "review_selection_and_approve_provider_call" : "resolve_model_provider_or_credential_gates",
       },
       execution: "preview_only; no_provider_or_domain_tool_invocation",
       authority_posture: "selection_review_only; preview_does_not_authorize_provider_or_effects",
@@ -4933,6 +4986,9 @@ export class AutonomousAgent {
     const taskText = boundedText("approved autonomous task", task, 32_000);
     if (!isObject(preview) || preview.schema !== AUTONOMOUS_MODEL_SELECTION_PREVIEW_SCHEMA || preview.status !== "selected") {
       throw new ProviderRuntimeError("approved model selection preview is invalid or not selected");
+    }
+    if (preview.task_decision_posture === "blocked") {
+      throw new ProviderRuntimeError("approved model selection is blocked by the task decision posture");
     }
     if (!options || !AUTONOMOUS_DOMAIN_NAMES.includes(options.domain)) throw new ArgumentError("approved model selection requires a built-in domain");
     const contract = preview.selection_contract;
@@ -4991,6 +5047,9 @@ export class AutonomousAgent {
       "workflow_id",
       "workflow_digest",
       "domain_pack_digest",
+      "task_intent_digest",
+      "task_decision_digest",
+      "task_decision_posture",
       "selection_context_digest",
       "execution_plan_digest",
       "required_model_capabilities",

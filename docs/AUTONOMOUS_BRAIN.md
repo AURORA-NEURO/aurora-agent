@@ -2295,6 +2295,36 @@ and plan projection so the evidence contract still fits. Plan steps carry the in
 selection context carries the action/effect/evidence/ambiguity projection, and replay or episodic
 memory can retain the digest without retaining the task or provider response.
 
+### Intent-to-action decision posture
+
+Task intent is descriptive by itself. The next decision layer derives a separate
+`bioprism-autonomous-task-decision/0.1` projection from the intent, domain policy, and task lens.
+It answers the operational question “what should happen next?” without turning that answer into
+authority. Every decision emits an `admitted`, `review_required`, or `blocked` posture, a bounded
+recommended path (`provider`, `evidence_first`, `workflow`, `planning`, or `cross_domain`), required
+model capabilities, preferred capability hints, approval requirements, review reasons, blocking
+reasons, and safe next actions.
+
+The decision layer is intentionally conservative. Required evidence adds an explicit evidence
+dispatch gate; workflow, planning, and cross-domain paths add plan acceptance; local or external
+effects add effect approval when policy permits them; a forbidden effect becomes `blocked` before
+provider dispatch. Intent ambiguity and domain risk remain visible as review reasons. Evaluator
+settlement is retained as a post-run lifecycle requirement, never inferred from transport success.
+The decision is guidance-only and cannot grant provider, source, tool, credential, or effect
+authority.
+
+The decision digest binds the task, intent, lens, policy, path, capability posture, and approval
+requirements. Both SDKs carry it through the blueprint, prompt, plan-step arguments, model
+selection context and selection preview contract, and Python episodic-memory provenance. Approved
+selection revalidation compares the decision digest and posture along with the existing task,
+catalogue, policy, and ranking identities. This prevents a changed interpretation or policy from
+being treated as the same reviewed model choice after restart.
+
+All twelve built-in domains use the same decision algorithm with domain policy and lens inputs;
+their evidence mode, effect posture, specialist boundaries, capability hints, and evaluator
+requirements remain domain-specific. The projection contains no task text, provider response,
+prompt, credential, source value, tool argument, or external authorization.
+
 ### Provider-assisted mission ordering with replay-safe acceptance
 
 Mission execution now has the same planner boundary as workflow and portfolio execution. The

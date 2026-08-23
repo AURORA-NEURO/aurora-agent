@@ -111,6 +111,18 @@ export {
   inferAutonomousTaskIntent,
 } from "./autonomous-task-intent.js";
 export type { AutonomousTaskIntent } from "./autonomous-task-intent.js";
+export {
+  AUTONOMOUS_TASK_DECISION_SCHEMA,
+  AUTONOMOUS_TASK_DECISION_VERSION,
+  AUTONOMOUS_TASK_DECISION_POSTURES,
+  AUTONOMOUS_TASK_DECISION_PATHS,
+  AUTONOMOUS_TASK_DECISION_APPROVALS,
+  MAX_AUTONOMOUS_TASK_DECISION_ITEMS,
+  autonomousTaskDecisionDigest,
+  autonomousTaskDecisionPromptContract,
+  inferAutonomousTaskDecision,
+} from "./autonomous-task-decision.js";
+export type { AutonomousTaskDecision } from "./autonomous-task-decision.js";
 export { parseSse } from "./sse.js";
 export {
   CREDENTIAL_ONBOARDING_SCHEMA,

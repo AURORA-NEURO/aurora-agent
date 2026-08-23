@@ -59,6 +59,11 @@ from .autonomous_task_intent import (
     AutonomousTaskIntent,
     infer_autonomous_task_intent,
 )
+from .autonomous_task_decision import (
+    AUTONOMOUS_TASK_DECISION_SCHEMA,
+    AutonomousTaskDecision,
+    infer_autonomous_task_decision,
+)
 from .brain import (
     AutonomousBrain,
     BRAIN_CONTEXT_LEARNING_STATE_SCHEMA,
@@ -3189,6 +3194,8 @@ class AutonomousTaskBlueprint:
     task_lens: AutonomousDomainTaskLens | None = None
     # Provider-free task interpretation; this is classification metadata, not authority.
     task_intent: AutonomousTaskIntent | None = None
+    # Intent-to-action posture; guidance metadata never authorizes execution.
+    task_decision: AutonomousTaskDecision | None = None
 
     def evidence_plan(self) -> AutonomousEvidencePlan:
         """Return the deterministic evidence contract for this blueprint's workflow."""
@@ -3246,6 +3253,26 @@ class AutonomousTaskBlueprint:
                     desired_outputs=self.spec.desired_outputs,
                 )
             ).to_dict(),
+            "task_decision": (
+                self.task_decision
+                or infer_autonomous_task_decision(
+                    intent=self.task_intent
+                    or infer_autonomous_task_intent(
+                        task=self.spec.task,
+                        task_digest=self.spec.task_digest,
+                        domain=self.spec.domain,
+                        capability=self.spec.capability,
+                        risk_class=self.spec.risk_class,
+                        workflow_id=self.workflow.workflow_id,
+                        lens=self.task_lens or autonomous_domain_task_lens(self.profile.domain),
+                        constraints=self.spec.constraints,
+                        desired_outputs=self.spec.desired_outputs,
+                    ),
+                    lens=self.task_lens or autonomous_domain_task_lens(self.profile.domain),
+                    policy=self.domain_policy or autonomous_domain_policy(self.profile.domain),
+                    required_model_capabilities=self.required_capabilities,
+                )
+            ).to_dict(),
             "prompt": prompt_public,
             "plan": plan_public,
             "execution": "not_started",
@@ -3259,7 +3286,7 @@ def _memory_selection_context(blueprint: AutonomousTaskBlueprint) -> dict[str, A
     return {
         key: value
         for key, value in blueprint.selection_context.items()
-        if not key.startswith(("task_lens_", "task_intent_"))
+        if not key.startswith(("task_lens_", "task_intent_", "task_decision_"))
     }
 
 
@@ -3282,6 +3309,29 @@ def _memory_task_intent_digest(blueprint: AutonomousTaskBlueprint) -> str:
             desired_outputs=blueprint.spec.desired_outputs,
         )
     ).intent_digest
+
+
+def _memory_task_decision_digest(blueprint: AutonomousTaskBlueprint) -> str:
+    return (
+        blueprint.task_decision
+        or infer_autonomous_task_decision(
+            intent=blueprint.task_intent
+            or infer_autonomous_task_intent(
+                task=blueprint.spec.task,
+                task_digest=blueprint.spec.task_digest,
+                domain=blueprint.spec.domain,
+                capability=blueprint.spec.capability,
+                risk_class=blueprint.spec.risk_class,
+                workflow_id=blueprint.workflow.workflow_id,
+                lens=blueprint.task_lens or autonomous_domain_task_lens(blueprint.spec.domain),
+                constraints=blueprint.spec.constraints,
+                desired_outputs=blueprint.spec.desired_outputs,
+            ),
+            lens=blueprint.task_lens or autonomous_domain_task_lens(blueprint.spec.domain),
+            policy=blueprint.domain_policy or autonomous_domain_policy(blueprint.spec.domain),
+            required_model_capabilities=blueprint.required_capabilities,
+        )
+    ).decision_digest
 
 
 @dataclass(frozen=True, slots=True)
@@ -6463,6 +6513,12 @@ class AutonomousPromptBuilder:
             constraints=spec.constraints,
             desired_outputs=spec.desired_outputs,
         )
+        task_decision = infer_autonomous_task_decision(
+            intent=task_intent,
+            lens=task_lens,
+            policy=domain_policy,
+            required_model_capabilities=profile.required_model_capabilities,
+        )
         context: list[dict[str, Any]] = [
             {
                 "id": "autonomy-domain-policy",
@@ -6505,6 +6561,15 @@ class AutonomousPromptBuilder:
                 "content": _json_text(task_intent.prompt_contract()),
                 "required": True,
                 "priority": 997,
+            }
+        )
+        context.append(
+            {
+                "id": "autonomy-task-decision",
+                "role": "developer",
+                "content": _json_text(task_decision.prompt_contract()),
+                "required": True,
+                "priority": 996,
             }
         )
         if domain_pack is not None:
@@ -6738,6 +6803,16 @@ class AutonomousPlanBuilder:
                 raise BrainRunError("domain_pack must be an AutonomousDomainPack or None")
             if domain_pack.domain != spec.domain or domain_pack.workflow_id != workflow.workflow_id:
                 raise BrainRunError("domain_pack must align with the task and workflow")
+        task_decision = infer_autonomous_task_decision(
+            intent=task_intent,
+            lens=task_lens,
+            policy=domain_policy,
+            required_model_capabilities=(
+                domain_pack.model_capabilities
+                if domain_pack is not None
+                else ("reasoning",)
+            ),
+        )
         return {
             "objective": spec.task,
             "workflow_id": workflow.workflow_id,
@@ -6778,6 +6853,12 @@ class AutonomousPlanBuilder:
                         "task_intent_requested_effect": task_intent.requested_effect,
                         "task_intent_evidence_mode": task_intent.evidence_mode,
                         "task_intent_ambiguity_flags": list(task_intent.ambiguity_flags),
+                        "task_decision_id": task_decision.decision_id,
+                        "task_decision_digest": task_decision.decision_digest,
+                        "task_decision_posture": task_decision.posture,
+                        "task_decision_recommended_path": task_decision.recommended_path,
+                        "task_decision_approval_requirements": list(task_decision.approval_requirements),
+                        "task_decision_review_reasons": list(task_decision.review_reasons),
                     },
                     "depends_on": [],
                     "effect": "provider_call",
@@ -6789,6 +6870,7 @@ class AutonomousPlanBuilder:
             "domain_policy_digest": domain_policy.policy_digest,
             "task_lens_digest": task_lens.lens_digest,
             "task_intent_digest": task_intent.intent_digest,
+            "task_decision_digest": task_decision.decision_digest,
             "require_approval_for_effects": True,
         }
 
@@ -8178,6 +8260,12 @@ class AutonomousTaskOrchestrator:
             constraints=spec.constraints,
             desired_outputs=spec.desired_outputs,
         )
+        task_decision = infer_autonomous_task_decision(
+            intent=task_intent,
+            lens=task_lens,
+            policy=autonomous_domain_policy(spec.domain),
+            required_model_capabilities=required,
+        )
         selection_context = {
             "schema": AUTONOMY_SCHEMA,
             "workflow": "autonomous_task",
@@ -8195,6 +8283,12 @@ class AutonomousTaskOrchestrator:
             "task_intent_requested_effect": task_intent.requested_effect,
             "task_intent_evidence_mode": task_intent.evidence_mode,
             "task_intent_ambiguity_flags": list(task_intent.ambiguity_flags),
+            "task_decision_id": task_decision.decision_id,
+            "task_decision_digest": task_decision.decision_digest,
+            "task_decision_posture": task_decision.posture,
+            "task_decision_recommended_path": task_decision.recommended_path,
+            "task_decision_approval_requirements": list(task_decision.approval_requirements),
+            "task_decision_review_reasons": list(task_decision.review_reasons),
             "execution_mode": spec.execution_mode,
             "domain_capabilities": list(profile.capabilities),
             "domain_pack_id": domain_pack.pack_id,
@@ -8264,6 +8358,7 @@ class AutonomousTaskOrchestrator:
             domain_policy=autonomous_domain_policy(spec.domain),
             task_lens=task_lens,
             task_intent=task_intent,
+            task_decision=task_decision,
         )
 
     def evidence_plan(
@@ -9174,6 +9269,7 @@ class AutonomousTaskOrchestrator:
                 domain_policy=blueprint.domain_policy,
                 task_lens=blueprint.task_lens,
                 task_intent=blueprint.task_intent,
+                task_decision=blueprint.task_decision,
             )
         else:
             replacement = blueprint
@@ -11132,6 +11228,7 @@ class AutonomousTaskOrchestrator:
                             "evaluator_version": decision.evaluator_version,
                             "task_lens_digest": _memory_task_lens_digest(blueprint),
                             "task_intent_digest": _memory_task_intent_digest(blueprint),
+                            "task_decision_digest": _memory_task_decision_digest(blueprint),
                         },
                         memory=memory_store,
                     )
@@ -11364,6 +11461,7 @@ class AutonomousTaskOrchestrator:
                             "evaluator_version": decision.evaluator_version,
                             "task_lens_digest": _memory_task_lens_digest(blueprint),
                             "task_intent_digest": _memory_task_intent_digest(blueprint),
+                            "task_decision_digest": _memory_task_decision_digest(blueprint),
                         },
                         memory=memory_store,
                     )
@@ -11924,6 +12022,7 @@ class AutonomousTaskOrchestrator:
                     "evaluator_version": decision.evaluator_version,
                     "task_lens_digest": _memory_task_lens_digest(blueprint_item),
                     "task_intent_digest": _memory_task_intent_digest(blueprint_item),
+                    "task_decision_digest": _memory_task_decision_digest(blueprint_item),
                 },
                 memory=memory_store,
             )
@@ -12255,6 +12354,7 @@ class AutonomousTaskOrchestrator:
                     "evaluator_version": decision.evaluator_version,
                     "task_lens_digest": _memory_task_lens_digest(blueprint_item),
                     "task_intent_digest": _memory_task_intent_digest(blueprint_item),
+                    "task_decision_digest": _memory_task_decision_digest(blueprint_item),
                 },
                 memory=memory_store,
             )
@@ -12419,6 +12519,7 @@ class AutonomousTaskOrchestrator:
                     "evaluator_version": decision.evaluator_version,
                     "task_lens_digest": _memory_task_lens_digest(blueprint_item),
                     "task_intent_digest": _memory_task_intent_digest(blueprint_item),
+                    "task_decision_digest": _memory_task_decision_digest(blueprint_item),
                 },
                 memory=memory_store,
             )
@@ -12888,6 +12989,7 @@ class AutonomousTaskOrchestrator:
                     "evaluator_version": decision.evaluator_version,
                     "task_lens_digest": _memory_task_lens_digest(blueprint),
                     "task_intent_digest": _memory_task_intent_digest(blueprint),
+                    "task_decision_digest": _memory_task_decision_digest(blueprint),
                 },
                 memory=store,
             )
@@ -14814,6 +14916,9 @@ class AutonomousAgent:
             "workflow_id": blueprint.workflow.workflow_id,
             "workflow_digest": blueprint.workflow.workflow_digest,
             "domain_pack_digest": blueprint.domain_pack.pack_digest,
+            "task_intent_digest": blueprint.task_intent.intent_digest if blueprint.task_intent is not None else None,
+            "task_decision_digest": blueprint.task_decision.decision_digest if blueprint.task_decision is not None else None,
+            "task_decision_posture": blueprint.task_decision.posture if blueprint.task_decision is not None else None,
             "selection_context_digest": _context_identity_digest(selection_context),
             "execution_plan_digest": content_digest(execution_plan["plans"]),
             "capability_contract_digest": capability_contract_digest,
@@ -14825,6 +14930,9 @@ class AutonomousAgent:
                 "domain": blueprint.spec.domain,
                 "capability": blueprint.spec.capability,
                 "risk_class": blueprint.spec.risk_class,
+                "task_intent_digest": blueprint.task_intent.intent_digest if blueprint.task_intent is not None else None,
+                "task_decision_digest": blueprint.task_decision.decision_digest if blueprint.task_decision is not None else None,
+                "task_decision_posture": blueprint.task_decision.posture if blueprint.task_decision is not None else None,
                 "required_model_capabilities": list(blueprint.required_capabilities),
                 "candidate_ids": [
                     f"{candidate['provider']}/{candidate['model']}"
@@ -14843,7 +14951,9 @@ class AutonomousAgent:
                 "domain_tools": "not_started",
                 "caller_approval_required": True,
                 "next_action": (
-                    "review_selection_and_approve_provider_call"
+                    "resolve_task_decision_block"
+                    if blueprint.task_decision is not None and blueprint.task_decision.posture == "blocked"
+                    else "review_selection_and_approve_provider_call"
                     if audit["selection_status"] == "selected"
                     else "resolve_model_provider_or_credential_gates"
                 ),
@@ -14891,6 +15001,8 @@ class AutonomousAgent:
             raise BrainRunError("approved model selection preview schema is invalid")
         if selection_preview.get("status") != "selected":
             raise BrainRunError("approved model selection preview is not selected")
+        if selection_preview.get("task_decision_posture") == "blocked":
+            raise BrainRunError("approved model selection is blocked by the task decision posture")
         contract = selection_preview.get("selection_contract")
         audit = selection_preview.get("selection_audit")
         if not isinstance(contract, Mapping) or not isinstance(audit, Mapping):
@@ -14930,6 +15042,9 @@ class AutonomousAgent:
             "domain": domain,
             "capability": contract.get("capability"),
             "risk_class": contract.get("risk_class"),
+            "task_intent_digest": contract.get("task_intent_digest"),
+            "task_decision_digest": contract.get("task_decision_digest"),
+            "task_decision_posture": contract.get("task_decision_posture"),
             "required_model_capabilities": list(contract.get("required_model_capabilities", ())),
             "candidate_ids": resolved_ids,
             "input_tokens": input_tokens,
@@ -14962,7 +15077,8 @@ class AutonomousAgent:
         )
         for field in (
             "task_digest", "domain", "capability", "risk_class", "workflow_id",
-            "workflow_digest", "domain_pack_digest", "selection_context_digest",
+            "workflow_digest", "domain_pack_digest", "task_intent_digest", "task_decision_digest",
+            "task_decision_posture", "selection_context_digest",
             "execution_plan_digest", "required_model_capabilities", "selection_contract",
             "selection_audit",
         ):
@@ -19202,6 +19318,7 @@ __all__ = [
     "AUTONOMOUS_DOMAIN_LEARNING_STATE_SCHEMA",
     "AUTONOMOUS_TASK_LENS_SCHEMA",
     "AUTONOMOUS_TASK_INTENT_SCHEMA",
+    "AUTONOMOUS_TASK_DECISION_SCHEMA",
     "AUTONOMOUS_EXECUTION_PLAN_STATUSES",
     "MAX_AUTONOMOUS_EXECUTION_PLAN_BYTES",
     "AUTONOMOUS_CAPABILITY_CONTRACT_SCHEMA",
@@ -19246,6 +19363,8 @@ __all__ = [
     "AutonomousTaskRouter",
     "AutonomousTaskIntent",
     "infer_autonomous_task_intent",
+    "AutonomousTaskDecision",
+    "infer_autonomous_task_decision",
     "AutonomousDomainTool",
     "AutonomousDomainToolBinding",
     "AutonomousDomainToolRegistry",

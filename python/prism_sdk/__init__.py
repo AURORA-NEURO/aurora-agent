@@ -375,6 +375,16 @@ from .autonomous_task_intent import (
     AutonomousTaskIntent,
     infer_autonomous_task_intent,
 )
+from .autonomous_task_decision import (
+    AUTONOMOUS_TASK_DECISION_SCHEMA,
+    AUTONOMOUS_TASK_DECISION_VERSION,
+    AUTONOMOUS_TASK_DECISION_POSTURES,
+    AUTONOMOUS_TASK_DECISION_PATHS,
+    AUTONOMOUS_TASK_DECISION_APPROVALS,
+    MAX_AUTONOMOUS_TASK_DECISION_ITEMS,
+    AutonomousTaskDecision,
+    infer_autonomous_task_decision,
+)
 from .autonomy_scenarios import (
     AUTONOMOUS_OFFLINE_SCENARIO_SCHEMA,
     AUTONOMOUS_OFFLINE_SCENARIO_REPLAY_SCHEMA,
@@ -5474,6 +5484,14 @@ __all__ = [
     "MAX_AUTONOMOUS_TASK_INTENT_ITEMS",
     "AutonomousTaskIntent",
     "infer_autonomous_task_intent",
+    "AUTONOMOUS_TASK_DECISION_SCHEMA",
+    "AUTONOMOUS_TASK_DECISION_VERSION",
+    "AUTONOMOUS_TASK_DECISION_POSTURES",
+    "AUTONOMOUS_TASK_DECISION_PATHS",
+    "AUTONOMOUS_TASK_DECISION_APPROVALS",
+    "MAX_AUTONOMOUS_TASK_DECISION_ITEMS",
+    "AutonomousTaskDecision",
+    "infer_autonomous_task_decision",
     "AutonomousDomainRegistry",
     "AutonomousDomainPack",
     "AutonomousDomainPackRegistry",

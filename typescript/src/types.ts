@@ -209,6 +209,12 @@ export interface BrainModelSelectionContext extends JsonObject {
   task_intent_requested_effect?: string;
   task_intent_evidence_mode?: string;
   task_intent_ambiguity_flags?: string[];
+  task_decision_id?: string;
+  task_decision_digest?: string;
+  task_decision_posture?: string;
+  task_decision_recommended_path?: string;
+  task_decision_approval_requirements?: string[];
+  task_decision_review_reasons?: string[];
 }
 
 export interface BrainContextualModelObservation extends JsonObject {
