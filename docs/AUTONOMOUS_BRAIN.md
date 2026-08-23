@@ -4515,6 +4515,61 @@ discover models, collect keys, invent a source query, or decide whether a model-
 is true. `ProviderSetup`/`CredentialSession` owns protected key intake, and the evidence projector
 and evaluator remain responsible for provenance, source interpretation, and domain acceptance.
 
+### Source truth, freshness, and provenance admission
+
+`createAutonomousEvidenceSourceAcquirer` is the strict source-truth boundary for adapters that
+need more than a generic `source_digest`. It binds one reviewed provider contract to an explicit
+source descriptor callback. The callback declares source authority (`provider_observed`,
+`human_verified`, `derived`, or `caller_declared`), observation time, optional expiry, source and
+citation digests, status, and bounded limitations. The gate verifies that source identity matches
+the evidence request, that the provider contract has not changed, and that its declared freshness
+mode is satisfied. Realtime observations are age-bounded; bounded caches require a non-expired
+expiry; historical sources remain source-digest-bound; caller-declared or missing source identity
+is `unverified` unless the caller explicitly opts into that posture. Partial, stale, unavailable,
+future-dated, and refused observations remain distinct and fail closed by default.
+
+Every admitted or refused attempt can be appended to `AutonomousEvidenceSourceLedger`. The
+ledger is a metadata-only hash chain containing request/plan/contract/adapter identities,
+value/source/citation digests, freshness and authority decisions, timestamps, limitations, and
+decision reasons. It never stores the source value, locator, prompt, provider response, or
+credential. The caller can restore the chain from a persistence adapter and verify sequence,
+previous-entry, receipt, and ledger digests before replay. The existing evidence runtime still
+receives only the transient raw value for projection; the source receipt is independently
+correlated by its request digest.
+
+```typescript
+const sourceLedger = new AutonomousEvidenceSourceLedger(sourcePersistence);
+const sourceAcquirer = createAutonomousEvidenceSourceAcquirer({
+  providerContracts: contracts,
+  adapterId: "literature-adapter",
+  domain: "science",
+  policy: new AutonomousEvidenceSourcePolicy({ maxAgeMs: 15 * 60_000 }),
+  ledger: sourceLedger,
+  describeSource: ({ now_ms }) => ({
+    authority: "provider_observed",
+    status: "observed",
+    sourceDigest: callerSourceDigest,
+    observedAtMs: now_ms,
+    expiresAtMs: now_ms + 15 * 60_000,
+    citationDigest: callerCitationDigest,
+    limitations: ["provider freshness is bounded by the caller policy"],
+  }),
+});
+```
+
+The same boundary can be applied inside the reviewed adapter selector and bounded failover path
+by passing `sourceBoundary: { policy, ledger, describeSource }` to
+`AutonomousEvidenceExecutionController.execute`. The guard is installed separately for each
+candidate, so source receipts retain the actual adapter and contract identity even when a reviewed
+retry/failover candidate is selected. A source admission refusal is non-retryable by default;
+transport failures still follow the reviewed retry/failover policy before source metadata is
+recorded.
+
+This layer is deliberately explicit rather than inferring truth from HTTP success or an LLM
+answer. It applies identically to coding, browser, data, science, biomedical, neuroscience,
+operations, enterprise, multi-agent, multimodal, cross-domain, and evaluation workflows; a
+domain-specific adapter or evaluator still owns the meaning of its source.
+
 ## Durable evidence acquisition workers
 
 The evidence runtime is intentionally caller-owned: it owns the transient acquirer input, projected

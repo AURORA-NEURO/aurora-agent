@@ -16,6 +16,13 @@ import {
   type AutonomousEvidenceRetryAttempt,
   type AutonomousEvidenceRetryClassifier,
 } from "./autonomous-evidence-retry.js";
+import {
+  createAutonomousEvidenceSourceGuard,
+  type AutonomousEvidenceSourceDescriptorContext,
+  type AutonomousEvidenceSourceDescriptorInput,
+  type AutonomousEvidenceSourceLedger,
+  type AutonomousEvidenceSourcePolicy,
+} from "./autonomous-evidence-source.js";
 import type { AutonomousEvidenceAcquirer, AutonomousEvidenceAcquisitionContext } from "./autonomous-evidence-runtime.js";
 import type { AutonomousEvidenceProviderContractRegistry } from "./autonomous-evidence-provider-contract.js";
 import type { JsonObject, JsonValue } from "./types.js";
@@ -62,6 +69,13 @@ export interface AutonomousEvidenceFailoverAcquirerOptions extends AutonomousEvi
   observeAttempt?: (attempt: AutonomousEvidenceRetryAttempt) => void | Promise<void>;
   clock?: () => number;
   sleep?: AutonomousEvidenceRetryAcquirerOptions["sleep"];
+  /** Optional strict provenance/freshness gate applied inside each reviewed candidate route. */
+  sourceBoundary?: {
+    policy: AutonomousEvidenceSourcePolicy;
+    ledger?: AutonomousEvidenceSourceLedger;
+    sourceKind?: string;
+    describeSource: (input: AutonomousEvidenceSourceDescriptorContext) => AutonomousEvidenceSourceDescriptorInput | Promise<AutonomousEvidenceSourceDescriptorInput>;
+  };
 }
 
 export class AutonomousEvidenceFailoverPolicy {
@@ -144,6 +158,10 @@ export function createAutonomousEvidenceAdapterFailoverAcquirer(
   const policy = new AutonomousEvidenceFailoverPolicy(options);
   if (options.classify !== undefined && typeof options.classify !== "function") throw new ArgumentError("evidence failover classifier is malformed");
   if (options.observeFailover !== undefined && typeof options.observeFailover !== "function") throw new ArgumentError("evidence failover observer is malformed");
+  if (options.sourceBoundary !== undefined) {
+    if (!options.providerContracts) throw new ArgumentError("source-bound failover requires a provider contract registry");
+    if (!options.sourceBoundary.policy || typeof options.sourceBoundary.describeSource !== "function") throw new ArgumentError("source-bound failover requires a policy and source descriptor callback");
+  }
   const rows = new Map<AutonomousDomainName, AutonomousEvidenceAdapterSelectionRow>(typedPlan.rows.map((row) => [row.domain, row]));
   return {
     acquire: async (context: AutonomousEvidenceAcquisitionContext): Promise<JsonValue> => {
@@ -157,9 +175,22 @@ export function createAutonomousEvidenceAdapterFailoverAcquirer(
       for (let candidateIndex = 0; candidateIndex < candidates.length && candidateIndex <= policy.max_failovers; candidateIndex += 1) {
         const candidateId = candidates[candidateIndex]!;
         const manifest = routeFor(registry, row, candidateId);
-        const candidateAcquirer = options.providerContracts
+        let candidateAcquirer = options.providerContracts
           ? options.providerContracts.createAcquirerForAdapter(candidateId, row.domain)
           : registry.createAcquirer({ adapterIdForDomain: { [row.domain]: candidateId } as Partial<Record<AutonomousDomainName, string>> });
+        if (options.sourceBoundary) {
+          const contract = options.providerContracts!.contractForAdapter(candidateId, row.domain);
+          const sourceKind = options.sourceBoundary.sourceKind ?? (contract.source_kinds.length === 1 ? contract.source_kinds[0]! : (() => { throw new ArgumentError(`source-bound failover requires sourceKind for ${contract.contract_id}`); })());
+          candidateAcquirer = createAutonomousEvidenceSourceGuard(candidateAcquirer, {
+            contract,
+            adapterId: candidateId,
+            domain: row.domain,
+            sourceKind,
+            policy: options.sourceBoundary.policy,
+            ...(options.sourceBoundary.ledger === undefined ? {} : { ledger: options.sourceBoundary.ledger }),
+            describeSource: options.sourceBoundary.describeSource,
+          });
+        }
         const resilient = createAutonomousEvidenceRetryingAcquirer(candidateAcquirer, {
           policy: policy.retry_policy,
           classify: options.classify,

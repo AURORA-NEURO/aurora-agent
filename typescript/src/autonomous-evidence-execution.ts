@@ -33,6 +33,7 @@ import {
 import {
   AutonomousEvidenceProviderContractRegistry,
 } from "./autonomous-evidence-provider-contract.js";
+import { AutonomousEvidenceSourcePolicy } from "./autonomous-evidence-source.js";
 import {
   AutonomousEvidenceFailoverPolicy,
   createAutonomousEvidenceAdapterFailoverAcquirer,
@@ -63,6 +64,8 @@ export interface AutonomousEvidenceExecutionPlanJSON extends JsonObject {
   domains: AutonomousDomainName[];
   registry_digest: string;
   provider_contract_registry_digest: string | null;
+  source_policy_digest: string | null;
+  source_kind: string | null;
   selection_plan: ReturnType<SelectionPlan["toJSON"]>;
   readiness: ReturnType<AutonomousEvidenceReadinessReport["toJSON"]>;
   readiness_policy: ReturnType<AutonomousEvidenceReadinessPolicy["toJSON"]>;
@@ -86,6 +89,10 @@ export interface AutonomousEvidenceExecutionPrepareOptions {
   retryPolicy?: AutonomousEvidenceRetryPolicy;
   failoverPolicy?: AutonomousEvidenceFailoverPolicy;
   providerContracts?: AutonomousEvidenceProviderContractRegistry;
+  sourceBoundary?: {
+    policy: AutonomousEvidenceSourcePolicy;
+    sourceKind?: string;
+  };
   allowDegradedDispatch?: boolean;
 }
 
@@ -104,6 +111,7 @@ export interface AutonomousEvidenceExecutionOptions {
   observeAttempt?: (attempt: AutonomousEvidenceRetryAttempt) => void | Promise<void>;
   clock?: AutonomousEvidenceFailoverAcquirerOptions["clock"];
   sleep?: AutonomousEvidenceFailoverAcquirerOptions["sleep"];
+  sourceBoundary?: AutonomousEvidenceFailoverAcquirerOptions["sourceBoundary"];
 }
 
 export interface AutonomousEvidenceExecutionResultJSON extends JsonObject {
@@ -142,6 +150,12 @@ function bool(name: string, value: unknown, fallback: boolean): boolean {
   return value;
 }
 
+function optionalSourceKind(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string" || !value.trim() || value.length > 256 || !/^[A-Za-z0-9_.:+-]+$/.test(value)) throw new ArgumentError("evidence execution sourceKind is malformed");
+  return value;
+}
+
 function clone<T>(value: T): T {
   return structuredClone(value);
 }
@@ -157,6 +171,8 @@ interface AutonomousEvidenceExecutionPlanPayload extends JsonObject {
   readiness_policy: ReturnType<AutonomousEvidenceReadinessPolicy["toJSON"]>;
   retry_policy: ReturnType<AutonomousEvidenceRetryPolicy["toJSON"]>;
   failover_policy: ReturnType<AutonomousEvidenceFailoverPolicy["toJSON"]>;
+  source_policy_digest: string | null;
+  source_kind: string | null;
   degraded_dispatch_allowed: boolean;
   status: AutonomousEvidenceExecutionPlanStatus;
   approval_required: true;
@@ -175,6 +191,8 @@ function executionPlanPayload(input: {
   readinessPolicy: ReturnType<AutonomousEvidenceReadinessPolicy["toJSON"]>;
   retryPolicy: ReturnType<AutonomousEvidenceRetryPolicy["toJSON"]>;
   failoverPolicy: ReturnType<AutonomousEvidenceFailoverPolicy["toJSON"]>;
+  sourcePolicyDigest: string | null;
+  sourceKind: string | null;
   degradedDispatchAllowed: boolean;
   status: AutonomousEvidenceExecutionPlanStatus;
 }): AutonomousEvidenceExecutionPlanPayload {
@@ -184,6 +202,8 @@ function executionPlanPayload(input: {
     domains: [...input.domains],
     registry_digest: input.registryDigest,
     provider_contract_registry_digest: input.providerContractRegistryDigest,
+    source_policy_digest: input.sourcePolicyDigest,
+    source_kind: input.sourceKind,
     selection_plan: clone(input.selectionPlan),
     readiness: clone(input.readiness),
     readiness_policy: clone(input.readinessPolicy),
@@ -204,6 +224,8 @@ export class AutonomousEvidenceExecutionPlan {
   readonly domains: AutonomousDomainName[];
   readonly registry_digest: string;
   readonly provider_contract_registry_digest: string | null;
+  readonly source_policy_digest: string | null;
+  readonly source_kind: string | null;
   readonly selection_plan: SelectionPlan;
   readonly readiness: AutonomousEvidenceReadinessReport;
   readonly readiness_policy: AutonomousEvidenceReadinessPolicy;
@@ -221,6 +243,7 @@ export class AutonomousEvidenceExecutionPlan {
     retryPolicy: AutonomousEvidenceRetryPolicy;
     failoverPolicy: AutonomousEvidenceFailoverPolicy;
     providerContracts?: AutonomousEvidenceProviderContractRegistry;
+    sourceBoundary?: AutonomousEvidenceExecutionPrepareOptions["sourceBoundary"];
     allowDegradedDispatch?: boolean;
   }) {
     if (!(input.evidencePlan instanceof AutonomousEvidencePlan)) throw new ArgumentError("evidence execution plan requires a typed evidence plan");
@@ -235,7 +258,13 @@ export class AutonomousEvidenceExecutionPlan {
     this.domains = requested;
     this.registry_digest = digest("evidence execution registry digest", input.selectionPlan.registry_digest);
     if (input.providerContracts !== undefined && !(input.providerContracts instanceof AutonomousEvidenceProviderContractRegistry)) throw new ArgumentError("evidence execution provider contract registry is malformed");
+    if (input.sourceBoundary !== undefined) {
+      if (!(input.sourceBoundary.policy instanceof AutonomousEvidenceSourcePolicy)) throw new ArgumentError("evidence execution source boundary policy is malformed");
+      if (!input.providerContracts) throw new ArgumentError("evidence execution source boundary requires provider contracts");
+    }
     this.provider_contract_registry_digest = input.providerContracts?.toJSON().registry_digest ?? null;
+    this.source_policy_digest = input.sourceBoundary?.policy.policy_digest === undefined ? null : digest("evidence execution source policy digest", input.sourceBoundary.policy.policy_digest);
+    this.source_kind = optionalSourceKind(input.sourceBoundary?.sourceKind);
     this.selection_plan = input.selectionPlan;
     this.readiness = input.readiness;
     this.readiness_policy = input.readinessPolicy;
@@ -252,6 +281,8 @@ export class AutonomousEvidenceExecutionPlan {
       domains: this.domains,
       registryDigest: this.registry_digest,
       providerContractRegistryDigest: this.provider_contract_registry_digest,
+      sourcePolicyDigest: this.source_policy_digest,
+      sourceKind: this.source_kind,
       selectionPlan: this.selection_plan.toJSON(),
       readiness: this.readiness.toJSON(),
       readinessPolicy: this.readiness_policy.toJSON(),
@@ -262,7 +293,7 @@ export class AutonomousEvidenceExecutionPlan {
     }));
   }
 
-  verify(registry: AutonomousEvidenceAdapterRegistry, evidencePlan: AutonomousEvidencePlan, providerContracts?: AutonomousEvidenceProviderContractRegistry): this {
+  verify(registry: AutonomousEvidenceAdapterRegistry, evidencePlan: AutonomousEvidencePlan, providerContracts?: AutonomousEvidenceProviderContractRegistry, sourceBoundary?: AutonomousEvidenceExecutionOptions["sourceBoundary"]): this {
     if (!(registry instanceof AutonomousEvidenceAdapterRegistry)) throw new ArgumentError("evidence execution verification requires a typed adapter registry");
     if (!(evidencePlan instanceof AutonomousEvidencePlan)) throw new ArgumentError("evidence execution verification requires a typed evidence plan");
     if (evidencePlan.plan_digest !== this.evidence_plan_digest) throw new ArgumentError("evidence execution evidence plan is stale or tampered");
@@ -272,6 +303,13 @@ export class AutonomousEvidenceExecutionPlan {
       if (providerContracts.toJSON().registry_digest !== this.provider_contract_registry_digest) throw new ArgumentError("evidence execution provider contract registry is stale or tampered");
     } else if (providerContracts !== undefined) {
       throw new ArgumentError("evidence execution plan was not prepared with a provider contract registry");
+    }
+    if (this.source_policy_digest !== null) {
+      if (!sourceBoundary || !(sourceBoundary.policy instanceof AutonomousEvidenceSourcePolicy)) throw new ArgumentError("evidence execution requires its bound source boundary policy");
+      if (sourceBoundary.policy.policy_digest !== this.source_policy_digest) throw new ArgumentError("evidence execution source boundary policy changed after planning");
+      if (optionalSourceKind(sourceBoundary.sourceKind) !== this.source_kind) throw new ArgumentError("evidence execution source boundary source kind changed after planning");
+    } else if (sourceBoundary !== undefined) {
+      throw new ArgumentError("evidence execution plan was not prepared with a source boundary");
     }
     if (!sameDomains(evidencePlan.domains, this.domains)) throw new ArgumentError("evidence execution evidence plan domains changed");
     this.selection_plan.verify(registry);
@@ -286,6 +324,8 @@ export class AutonomousEvidenceExecutionPlan {
       domains: this.domains,
       registryDigest: this.registry_digest,
       providerContractRegistryDigest: this.provider_contract_registry_digest,
+      sourcePolicyDigest: this.source_policy_digest,
+      sourceKind: this.source_kind,
       selectionPlan: this.selection_plan.toJSON(),
       readiness: this.readiness.toJSON(),
       readinessPolicy: this.readiness_policy.toJSON(),
@@ -362,6 +402,8 @@ export class AutonomousEvidenceExecutionController {
     const failoverPolicy = options.failoverPolicy ?? new AutonomousEvidenceFailoverPolicy({ retryPolicy });
     if (!(failoverPolicy instanceof AutonomousEvidenceFailoverPolicy)) throw new ArgumentError("evidence execution failover policy is malformed");
     const allowDegradedDispatch = bool("evidence execution allowDegradedDispatch", options.allowDegradedDispatch, false);
+    if (options.sourceBoundary !== undefined && !(options.sourceBoundary.policy instanceof AutonomousEvidenceSourcePolicy)) throw new ArgumentError("evidence execution source boundary policy is malformed");
+    if (options.sourceBoundary !== undefined && options.providerContracts === undefined) throw new ArgumentError("evidence execution source boundary requires provider contracts");
     if (options.providerContracts !== undefined) {
       if (!(options.providerContracts instanceof AutonomousEvidenceProviderContractRegistry)) throw new ArgumentError("evidence execution provider contract registry is malformed");
       options.providerContracts.verify();
@@ -373,7 +415,7 @@ export class AutonomousEvidenceExecutionController {
       retryPolicy,
       failoverPolicy,
     });
-    return new AutonomousEvidenceExecutionPlan({ evidencePlan, selectionPlan, readiness, readinessPolicy: policy, retryPolicy, failoverPolicy, providerContracts: options.providerContracts, allowDegradedDispatch });
+    return new AutonomousEvidenceExecutionPlan({ evidencePlan, selectionPlan, readiness, readinessPolicy: policy, retryPolicy, failoverPolicy, providerContracts: options.providerContracts, sourceBoundary: options.sourceBoundary, allowDegradedDispatch });
   }
 
   async execute(
@@ -384,7 +426,7 @@ export class AutonomousEvidenceExecutionController {
   ): Promise<AutonomousEvidenceExecutionResult> {
     if (!(executionPlan instanceof AutonomousEvidenceExecutionPlan)) throw new ArgumentError("evidence execution requires a typed execution plan");
     if (!(evidencePlan instanceof AutonomousEvidencePlan)) throw new ArgumentError("evidence execution requires a typed evidence plan");
-    executionPlan.verify(this.registry, evidencePlan, options.providerContracts);
+    executionPlan.verify(this.registry, evidencePlan, options.providerContracts, options.sourceBoundary);
     if (options.approveSourceDispatch !== true) throw new ArgumentError("evidence source dispatch requires explicit approval");
     if (executionPlan.status !== "ready_for_review") throw new ArgumentError("evidence execution plan is blocked by its readiness posture");
     if (!Array.isArray(requests) || requests.length < 1 || requests.length > MAX_AUTONOMOUS_EVIDENCE_EXECUTION_REQUESTS) throw new ArgumentError("evidence execution requests are outside their bound");
@@ -406,6 +448,7 @@ export class AutonomousEvidenceExecutionController {
       observeAttempt: options.observeAttempt,
       clock: options.clock,
       sleep: options.sleep,
+      ...(options.sourceBoundary === undefined ? {} : { sourceBoundary: options.sourceBoundary }),
     };
     const acquirer = createAutonomousEvidenceAdapterFailoverAcquirer(this.registry, executionPlan.selection_plan, failoverOptions);
     const runtime = new AutonomousEvidenceRuntime({ plan: evidencePlan, journal: options.journal });

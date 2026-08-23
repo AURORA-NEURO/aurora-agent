@@ -99,6 +99,19 @@ offline tests exercise the bridge across all twelve autonomous domains. This clo
 evidence invocation without claiming source retrieval, model discovery, source truth, or domain
 evaluation; those remain explicit caller-owned boundaries.
 
+The TypeScript evidence boundary now also has a strict source-truth admission layer. A
+`createAutonomousEvidenceSourceAcquirer` route binds one provider contract to explicit source
+authority, status, observation/expiry timestamps, source/citation digests, and limitations. Its
+freshness policy distinguishes accepted, partial, stale, unverified, and refused observations and
+fails closed on future timestamps, missing required source identity, expired bounded caches, and
+contract drift. `AutonomousEvidenceSourceLedger` provides a restart-verifiable metadata-only hash
+chain for every admitted or refused attempt; raw values, locators, prompts, responses, and keys
+remain caller-owned. Offline tests exercise all twelve domains plus stale/unverified/future,
+multi-source-kind, digest-mismatch, tampered-chain, and reviewed-failover paths. The same gate can
+now be installed inside each selected/fallback candidate, preserving the actual adapter and
+contract identity in its source receipt. This closes the provenance/freshness composition gap
+while preserving explicit domain evaluators and source authority boundaries.
+
 The portfolio now also has a bounded evidence supervisor. It verifies successful provider items,
 rejects cross-domain requests, scopes each evidence runtime to its item's domain, preserves direct
 predecessor evidence digests, and executes acquisition/projection/evaluation in the portfolio's
