@@ -11,9 +11,9 @@ import { canonicalJson, digestJson, digestJsonSync } from "./tooling.js";
 import type { AgentMissionArgs, JsonObject } from "./types.js";
 
 /** Metadata-only remote handoff queue for one caller-owned mission replan cycle. */
-export const AUTONOMOUS_MISSION_REPLAN_JOB_QUEUE_SCHEMA = "bioprism-typescript-autonomous-mission-replan-job-queue/0.2" as const;
-export const AUTONOMOUS_MISSION_REPLAN_JOB_SCHEMA = "bioprism-typescript-autonomous-mission-replan-job/0.2" as const;
-export const AUTONOMOUS_MISSION_REPLAN_REMOTE_WORKER_SCHEMA = "bioprism-typescript-autonomous-mission-replan-remote-worker/0.2" as const;
+export const AUTONOMOUS_MISSION_REPLAN_JOB_QUEUE_SCHEMA = "bioprism-typescript-autonomous-mission-replan-job-queue/0.3" as const;
+export const AUTONOMOUS_MISSION_REPLAN_JOB_SCHEMA = "bioprism-typescript-autonomous-mission-replan-job/0.3" as const;
+export const AUTONOMOUS_MISSION_REPLAN_REMOTE_WORKER_SCHEMA = "bioprism-typescript-autonomous-mission-replan-remote-worker/0.3" as const;
 export const MAX_AUTONOMOUS_MISSION_REPLAN_JOBS = 4_096;
 export const MAX_AUTONOMOUS_MISSION_REPLAN_JOB_ATTEMPTS = 8;
 export const MAX_AUTONOMOUS_MISSION_REPLAN_JOB_LEASE_MS = 300_000;
@@ -70,6 +70,7 @@ export interface AutonomousMissionReplanRemoteJob extends JsonObject {
   reconciliation_evidence_kind: string | null;
   reconciliation_operator: string | null;
   reconciliation_effect_absent: boolean | null;
+  reconciliation_history: string[];
   failure_class: AutonomousMissionReplanRemoteJobFailureClass | null;
   failure_code: string | null;
   job_digest: string;
@@ -192,6 +193,13 @@ function digest(name: string, value: unknown, allowNull = false): string | null 
   return value;
 }
 
+function reconciliationHistory(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > MAX_AUTONOMOUS_MISSION_REPLAN_JOB_ATTEMPTS) throw new ArgumentError(`mission remote reconciliation_history must contain at most ${MAX_AUTONOMOUS_MISSION_REPLAN_JOB_ATTEMPTS} entries`);
+  const result = value.map((entry, index) => digest(`mission remote reconciliation_history[${index}]`, entry) as string);
+  if (new Set(result).size !== result.length) throw new ArgumentError("mission remote reconciliation_history must not contain duplicates");
+  return result;
+}
+
 function integer(name: string, value: unknown, minimum: number, maximum: number, fallback?: number): number {
   if (value === undefined && fallback !== undefined) return fallback;
   if (!Number.isSafeInteger(value) || (value as number) < minimum || (value as number) > maximum) throw new ArgumentError(`${name} must be an integer in [${minimum}, ${maximum}]`);
@@ -297,6 +305,7 @@ function validateJob(value: unknown): AutonomousMissionReplanRemoteJob {
   if (job.reconciliation_evidence_kind !== null) identifier("mission remote reconciliation_evidence_kind", job.reconciliation_evidence_kind);
   if (job.reconciliation_operator !== null) identifier("mission remote reconciliation_operator", job.reconciliation_operator);
   if (job.reconciliation_effect_absent !== null && typeof job.reconciliation_effect_absent !== "boolean") throw new ArgumentError("mission remote reconciliation_effect_absent must be boolean or null");
+  reconciliationHistory(job.reconciliation_history);
   const reconciliationFields = [job.reconciliation_observed_job_digest, job.reconciliation_outcome, job.reconciliation_evidence_digest, job.reconciliation_evidence_kind, job.reconciliation_operator, job.reconciliation_effect_absent];
   if (job.reconciliation_digest === null && reconciliationFields.some((field) => field !== null)) throw new ArgumentError("mission remote reconciliation metadata requires a reconciliation digest");
   if (job.reconciliation_digest !== null && reconciliationFields.some((field) => field === null)) throw new ArgumentError("mission remote reconciliation digest requires complete receipt metadata");
@@ -367,6 +376,7 @@ export class InMemoryAutonomousMissionReplanRemoteJobQueue implements Autonomous
       reconciliation_evidence_kind: null,
       reconciliation_operator: null,
       reconciliation_effect_absent: null,
+      reconciliation_history: [],
       failure_class: null,
       failure_code: null,
       job_digest: "0".repeat(64),
@@ -500,7 +510,28 @@ export class InMemoryAutonomousMissionReplanRemoteJobQueue implements Autonomous
     const nextStatus = options.planningStatus === undefined ? job.planning_status : planningStatus(options.planningStatus);
     const nextPlanDigest = digest("mission remote requeue planRefinementDigest", options.planRefinementDigest ?? job.plan_refinement_digest, true);
     if (nextStatus === "accepted" && nextPlanDigest === null) throw new ArgumentError("accepted mission remote requeue requires a plan refinement digest");
-    const next = refresh(job, { status: "queued", execution_phase: "not_started", planning_status: nextStatus, plan_refinement_digest: nextPlanDigest, planner_learning_settlement_digest: null, result_digest: null, failure_class: null, failure_code: null, lease_owner: null, lease_until: null, available_at: timestamp("mission remote requeue availableAt", options.availableAt, now) }, now);
+    const history = job.status === "reconciliation_required" ? [...job.reconciliation_history, job.reconciliation_digest!] : job.reconciliation_history;
+    const next = refresh(job, {
+      status: "queued",
+      execution_phase: "not_started",
+      planning_status: nextStatus,
+      plan_refinement_digest: nextPlanDigest,
+      planner_learning_settlement_digest: null,
+      result_digest: null,
+      reconciliation_digest: null,
+      reconciliation_observed_job_digest: null,
+      reconciliation_outcome: null,
+      reconciliation_evidence_digest: null,
+      reconciliation_evidence_kind: null,
+      reconciliation_operator: null,
+      reconciliation_effect_absent: null,
+      reconciliation_history: history,
+      failure_class: null,
+      failure_code: null,
+      lease_owner: null,
+      lease_until: null,
+      available_at: timestamp("mission remote requeue availableAt", options.availableAt, now),
+    }, now);
     this.jobs.set(id, next);
     return clone(next);
   }

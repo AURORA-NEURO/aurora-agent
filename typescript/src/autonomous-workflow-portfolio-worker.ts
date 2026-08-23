@@ -18,9 +18,9 @@ import { canonicalJson, digestJson, digestJsonSync } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
 /** Metadata-only remote handoff queue for one reviewed autonomous portfolio. */
-export const AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_QUEUE_SCHEMA = "bioprism-typescript-autonomous-workflow-portfolio-job-queue/0.2" as const;
-export const AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_SCHEMA = "bioprism-typescript-autonomous-workflow-portfolio-job/0.2" as const;
-export const AUTONOMOUS_WORKFLOW_PORTFOLIO_REMOTE_WORKER_SCHEMA = "bioprism-typescript-autonomous-workflow-portfolio-remote-worker/0.2" as const;
+export const AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_QUEUE_SCHEMA = "bioprism-typescript-autonomous-workflow-portfolio-job-queue/0.3" as const;
+export const AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_SCHEMA = "bioprism-typescript-autonomous-workflow-portfolio-job/0.3" as const;
+export const AUTONOMOUS_WORKFLOW_PORTFOLIO_REMOTE_WORKER_SCHEMA = "bioprism-typescript-autonomous-workflow-portfolio-remote-worker/0.3" as const;
 export const MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_JOBS = 4_096;
 export const MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_ITEMS = 64;
 export const MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_LEASE_MS = 300_000;
@@ -77,6 +77,7 @@ export interface AutonomousWorkflowPortfolioRemoteJob extends JsonObject {
   reconciliation_evidence_kind: string | null;
   reconciliation_operator: string | null;
   reconciliation_effect_absent: boolean | null;
+  reconciliation_history: string[];
   status: AutonomousWorkflowPortfolioRemoteJobStatus;
   max_attempts: number;
   attempts: number;
@@ -181,6 +182,13 @@ function optionalDigest(name: string, value: unknown): string | null {
   return digest(name, value);
 }
 
+function digestHistory(name: string, value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_ATTEMPTS) throw new ArgumentError(`${name} must contain at most ${MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_ATTEMPTS} entries`);
+  const result = value.map((entry, index) => digest(`${name}[${index}]`, entry));
+  if (new Set(result).size !== result.length) throw new ArgumentError(`${name} must not contain duplicates`);
+  return result;
+}
+
 function timestamp(name: string, value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > Number.MAX_SAFE_INTEGER) throw new ArgumentError(`${name} must be a finite non-negative timestamp`);
   return value;
@@ -257,7 +265,7 @@ function refresh(job: AutonomousWorkflowPortfolioRemoteJob, patch: Partial<Auton
 
 function validateJob(raw: unknown): AutonomousWorkflowPortfolioRemoteJob {
   if (!isObject(raw) || raw.schema !== AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_SCHEMA) throw new ArgumentError("portfolio remote job schema is invalid");
-  const allowed = new Set(["schema", "job_id", "plan_digest", "admission_digest", "require_admission", "trace_id", "item_ids", "request_digests", "checkpoint_digest", "result_digest", "trace_digest", "execution_phase", "reconciliation_digest", "reconciliation_observed_job_digest", "reconciliation_outcome", "reconciliation_evidence_digest", "reconciliation_evidence_kind", "reconciliation_operator", "reconciliation_effect_absent", "status", "max_attempts", "attempts", "available_at", "lease_owner", "lease_until", "failure_class", "failure_code", "created_at", "updated_at", "job_digest", "retention", "secret_material"]);
+  const allowed = new Set(["schema", "job_id", "plan_digest", "admission_digest", "require_admission", "trace_id", "item_ids", "request_digests", "checkpoint_digest", "result_digest", "trace_digest", "execution_phase", "reconciliation_digest", "reconciliation_observed_job_digest", "reconciliation_outcome", "reconciliation_evidence_digest", "reconciliation_evidence_kind", "reconciliation_operator", "reconciliation_effect_absent", "reconciliation_history", "status", "max_attempts", "attempts", "available_at", "lease_owner", "lease_until", "failure_class", "failure_code", "created_at", "updated_at", "job_digest", "retention", "secret_material"]);
   if (Object.keys(raw).some((key) => !allowed.has(key))) throw new ArgumentError("portfolio remote job contains unsupported fields");
   const value = raw as unknown as AutonomousWorkflowPortfolioRemoteJob;
   const itemIds = Array.isArray(value.item_ids) ? value.item_ids.map((item, index) => identifier(`portfolio remote job item_ids[${index}]`, item)) : [];
@@ -282,6 +290,7 @@ function validateJob(raw: unknown): AutonomousWorkflowPortfolioRemoteJob {
     reconciliation_evidence_kind: value.reconciliation_evidence_kind === null ? null : identifier("portfolio remote job reconciliation_evidence_kind", value.reconciliation_evidence_kind),
     reconciliation_operator: value.reconciliation_operator === null ? null : identifier("portfolio remote job reconciliation_operator", value.reconciliation_operator),
     reconciliation_effect_absent: value.reconciliation_effect_absent === null ? null : value.reconciliation_effect_absent,
+    reconciliation_history: digestHistory("portfolio remote job reconciliation_history", value.reconciliation_history),
     status: value.status,
     max_attempts: boundedInteger("portfolio remote job max_attempts", value.max_attempts, 1, MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_ATTEMPTS),
     attempts: boundedInteger("portfolio remote job attempts", value.attempts, 0, MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_ATTEMPTS),
@@ -394,6 +403,7 @@ export class InMemoryAutonomousWorkflowPortfolioRemoteJobQueue {
       reconciliation_evidence_kind: null,
       reconciliation_operator: null,
       reconciliation_effect_absent: null,
+      reconciliation_history: [],
       status: "queued" as const,
       max_attempts: maxAttempts,
       attempts: 0,
@@ -590,7 +600,22 @@ export class InMemoryAutonomousWorkflowPortfolioRemoteJobQueue {
       if (current.reconciliation_digest === null || current.reconciliation_outcome !== "not_executed" || current.reconciliation_effect_absent !== true) throw new ArgumentError("portfolio remote requeue requires a matching no-effect reconciliation receipt");
       if (options.reconciliationDigest !== current.reconciliation_digest) throw new ArgumentError("portfolio remote requeue requires the matching reconciliation digest");
     }
-    const next = refresh(current, { status: "queued", execution_phase: "not_started", available_at: time, failure_class: null, failure_code: null }, time);
+    const history = current.status === "reconciliation_required" ? [...current.reconciliation_history, current.reconciliation_digest!] : current.reconciliation_history;
+    const next = refresh(current, {
+      status: "queued",
+      execution_phase: "not_started",
+      available_at: time,
+      failure_class: null,
+      failure_code: null,
+      reconciliation_digest: null,
+      reconciliation_observed_job_digest: null,
+      reconciliation_outcome: null,
+      reconciliation_evidence_digest: null,
+      reconciliation_evidence_kind: null,
+      reconciliation_operator: null,
+      reconciliation_effect_absent: null,
+      reconciliation_history: history,
+    }, time);
     this.jobs.set(id, next);
     return clone(next);
   }

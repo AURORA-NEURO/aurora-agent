@@ -277,10 +277,13 @@ test("remote portfolio execution quarantines in-flight expiry and requires evide
   const notExecuted = queue.settleReconciliation(job.job_id, { outcome: "not_executed", evidenceDigest: "b".repeat(64), evidenceKind: "idempotency_probe", operator: "operator-1", effectAbsent: true }, 16);
   const reopened = queue.requeue(job.job_id, 17, { reconciliationDigest: notExecuted.reconciliation_digest });
   assert.equal(reopened.status, "queued");
-  assert.equal(reopened.reconciliation_outcome, "not_executed");
+  assert.equal(reopened.reconciliation_digest, null);
+  assert.equal(reopened.reconciliation_outcome, null);
+  assert.deepEqual(reopened.reconciliation_history, [notExecuted.reconciliation_digest]);
   const restored = new InMemoryAutonomousWorkflowPortfolioRemoteJobQueue();
   restored.restore(queue.snapshot());
   assert.equal(restored.get(job.job_id).reconciliation_digest, reopened.reconciliation_digest);
+  assert.deepEqual(restored.get(job.job_id).reconciliation_history, [notExecuted.reconciliation_digest]);
   queue.claim(job.job_id, "reconcile-worker-2", 10, 18);
   queue.beginExecution(job.job_id, "reconcile-worker-2", 19);
   queue.fail(job.job_id, "reconcile-worker-2", "transport_error", true, "transport", 20);

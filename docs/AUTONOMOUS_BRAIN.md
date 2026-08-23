@@ -2173,8 +2173,12 @@ persists no raw evidence, prompts, provider responses, credentials, or operator 
 the receipt digest is chained to the observed job digest. This prevents a crashed worker from
 turning an uncertain external effect into an automatic duplicate dispatch.
 
-The receipt fields are part of the `0.2` remote mission queue/job/worker schemas; older snapshots
-are rejected rather than silently interpreted with weaker execution guarantees.
+The receipt fields and bounded `reconciliation_history` chain are part of the `0.3` remote mission
+queue/job/worker schemas; older snapshots are rejected rather than silently interpreted with weaker
+execution guarantees. Requeue consumes the current no-effect receipt, clears the active receipt
+fields for the fresh attempt, and retains the prior receipt digest in a bounded, duplicate-free
+history. This makes repeated crash/reconcile/requeue cycles auditable without treating an old
+receipt as authorization for the new attempt.
 Cancellation is likewise refused while a lease is active or the execution phase is uncertain;
 the caller must first settle the boundary through reconciliation.
 
@@ -2392,8 +2396,11 @@ quarantined as `reconciliation_required`. `settleReconciliation()` stores only a
 bounded evidence/operator labels, and the outcome. `unknown` remains quarantined, `succeeded` or
 `failed` settles without replay, and only `not_executed` with `effectAbsent: true` plus the exact
 receipt digest can authorize `requeue()`. Active or uncertain jobs cannot be cancelled. These
-execution-phase and receipt fields are part of the remote portfolio `0.2` schemas, so older queue
-snapshots fail closed rather than losing side-effect guarantees. The worker accepts any structural
+execution-phase, receipt, and bounded reconciliation-history fields are part of the remote
+portfolio `0.3` schemas, so older queue snapshots fail closed rather than losing side-effect
+guarantees. Requeue clears the active receipt while chaining the consumed receipt digest into the
+job history, preserving a per-attempt audit trail without persisting evidence bodies or operator
+explanations. The worker accepts any structural
 queue adapter implementing the exported contract, allowing a deployment-owned database or queue
 transport to replace the in-memory reference.
 

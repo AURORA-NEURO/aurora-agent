@@ -271,10 +271,13 @@ test("remote mission queue quarantines expired in-flight execution until explici
   const reopened = await queue.requeue("in-flight-job", { reconciliationDigest: notExecuted.reconciliation_digest }, 204);
   assert.equal(reopened.status, "queued");
   assert.equal(reopened.execution_phase, "not_started");
-  assert.equal(reopened.reconciliation_outcome, "not_executed");
+  assert.equal(reopened.reconciliation_digest, null);
+  assert.equal(reopened.reconciliation_outcome, null);
+  assert.deepEqual(reopened.reconciliation_history, [notExecuted.reconciliation_digest]);
   const restored = new InMemoryAutonomousMissionReplanRemoteJobQueue();
   await restored.restore(await queue.snapshot());
   assert.equal((await restored.load("in-flight-job")).reconciliation_digest, reopened.reconciliation_digest);
+  assert.deepEqual((await restored.load("in-flight-job")).reconciliation_history, [notExecuted.reconciliation_digest]);
 });
 
 test("remote reconciliation can settle a completed external effect without replay", async () => {
