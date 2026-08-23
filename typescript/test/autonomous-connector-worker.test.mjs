@@ -126,6 +126,100 @@ test("the work queue is metadata-only, fenced, recoverable, retry-bounded, and t
   assert.throws(() => queue.enqueue({ work_id: "work-1", operation_id: "coding.repository_change_analysis", request: request(plan, { dispatch_id: "other-dispatch" }), now: 3_000 }), /identity conflicts/);
 });
 
+test("connector expiry distinguishes pre-dispatch reclaim from in-flight reconciliation", () => {
+  const fixtureData = fixture();
+  const plan = fixtureData.connectorRegistry.selectForDomains(["coding"], { capability: "review" });
+  const queue = new InMemoryAutonomousConnectorWorkQueue(fixtureData.operationRegistry);
+  const preDispatch = queue.enqueue({ work_id: "pre-dispatch-connector", operation_id: "coding.repository_change_analysis", request: request(plan, { dispatch_id: "pre-dispatch" }), now: 2_000 });
+  queue.claim(preDispatch.work_id, "worker-a", 10, 2_000);
+  const reclaimed = queue.reclaimExpired(128, 2_010);
+  assert.equal(reclaimed[0].status, "queued");
+  assert.equal(reclaimed[0].execution_phase, "not_started");
+  assert.deepEqual(queue.pending(8, 2_010).map((item) => item.work_id), [preDispatch.work_id]);
+
+  const inFlight = queue.enqueue({ work_id: "in-flight-connector", operation_id: "coding.repository_change_analysis", request: request(plan, { dispatch_id: "in-flight", call_id: "in-flight-call" }), now: 2_000 });
+  queue.claim(inFlight.work_id, "worker-a", 10, 2_000);
+  queue.beginExecution(inFlight.work_id, "worker-a", 2_005);
+  const expired = queue.reclaimExpired(128, 2_015).find((item) => item.work_id === inFlight.work_id);
+  assert.equal(expired.status, "reconciliation_required");
+  assert.equal(expired.execution_phase, "running");
+  assert.throws(() => queue.requeue(inFlight.work_id, {}, 2_020), /no-effect reconciliation/);
+  assert.throws(() => queue.cancel(inFlight.work_id, "unknown", 2_020), /active or uncertain/);
+});
+
+test("connector reconciliation receipts are idempotent and gate exact no-effect requeue", () => {
+  const fixtureData = fixture();
+  const plan = fixtureData.connectorRegistry.selectForDomains(["coding"], { capability: "review" });
+  const queue = new InMemoryAutonomousConnectorWorkQueue(fixtureData.operationRegistry);
+  const successful = queue.enqueue({ work_id: "connector-reconcile-success", operation_id: "coding.repository_change_analysis", request: request(plan, { dispatch_id: "reconcile-success", call_id: "success-call" }), now: 2_100 });
+  queue.claim(successful.work_id, "worker-a", 100, 2_100);
+  queue.beginExecution(successful.work_id, "worker-a", 2_101);
+  queue.reclaimExpired(128, 2_201);
+  const settled = queue.settleReconciliation(successful.work_id, { outcome: "succeeded", evidenceDigest: "a".repeat(64) }, 2_202);
+  assert.equal(settled.status, "completed");
+  assert.equal(settled.execution_phase, "settled");
+  assert.deepEqual(queue.settleReconciliation(successful.work_id, { outcome: "succeeded", evidenceDigest: "a".repeat(64) }, 2_203), settled);
+  assert.throws(() => queue.settleReconciliation(successful.work_id, { outcome: "failed", evidenceDigest: "b".repeat(64) }, 2_204), /conflicts/);
+
+  const noEffect = queue.enqueue({ work_id: "connector-reconcile-no-effect", operation_id: "coding.repository_change_analysis", request: request(plan, { dispatch_id: "reconcile-no-effect", call_id: "no-effect-call" }), now: 2_100 });
+  queue.claim(noEffect.work_id, "worker-a", 100, 2_100);
+  queue.beginExecution(noEffect.work_id, "worker-a", 2_101);
+  queue.reclaimExpired(128, 2_201);
+  const observed = queue.settleReconciliation(noEffect.work_id, { outcome: "not_executed", evidenceDigest: "c".repeat(64) }, 2_202);
+  assert.equal(observed.reconciliation_effect_absent, true);
+  assert.throws(() => queue.requeue(noEffect.work_id, { reconciliationDigest: "d".repeat(64) }, 2_203), /matching reconciliation digest/);
+  const queued = queue.requeue(noEffect.work_id, { reconciliationDigest: observed.reconciliation_digest }, 2_204);
+  assert.equal(queued.status, "queued");
+  assert.equal(queued.execution_phase, "not_started");
+  const restored = new InMemoryAutonomousConnectorWorkQueue(fixtureData.operationRegistry);
+  restored.restore(queue.snapshot());
+  assert.equal(restored.get(noEffect.work_id).reconciliation_digest, queued.reconciliation_digest);
+});
+
+test("connector worker executes one reviewed operation for every autonomous domain", async () => {
+  const fixtureData = fixture();
+  const queue = new InMemoryAutonomousConnectorWorkQueue(fixtureData.operationRegistry);
+  const contexts = new Map();
+  for (const [index, domain] of AUTONOMOUS_DOMAIN_NAMES.entries()) {
+    const operation = fixtureData.operationRegistry.forDomain(domain)[0];
+    const capability = operation.capabilities[0];
+    const plan = fixtureData.connectorRegistry.selectForDomains([domain], { capability });
+    const dispatchRequest = request(plan, {
+      dispatch_id: `all-domain-dispatch-${index}`,
+      execution_id: `all-domain-execution-${index}`,
+      call_id: `all-domain-call-${index}`,
+      domains: [domain],
+      capability,
+      request: { operation_id: operation.operation_id, subject_digest: "a".repeat(64) },
+    });
+    const item = queue.enqueue({ work_id: `all-domain-work-${domain}`, operation_id: operation.operation_id, request: dispatchRequest, now: 2_500 });
+    contexts.set(item.work_id, { plan, request: dispatchRequest });
+  }
+  const result = await new AutonomousConnectorWorker(fixtureData.runtime, queue, (item) => contexts.get(item.work_id)).run({ workerId: "all-domain-worker", limit: AUTONOMOUS_DOMAIN_NAMES.length, now: 2_500 });
+  assert.equal(result.completed, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(result.reconciled, 0);
+  assert.ok(queue.rows().every((item) => item.status === "completed" && item.execution_phase === "settled"));
+  assert.ok(result.rows.every((row) => row.value_retained === false));
+});
+
+test("connector worker quarantines an executor failure after the dispatch boundary", async () => {
+  const operationRegistry = new AutonomousConnectorOperationRegistry();
+  const connectorCapabilities = [...new Set(operationRegistry.operations().flatMap((operation) => operation.capabilities))];
+  const registry = new AutonomousConnectorRegistry([
+    new AutonomousConnectorRegistration(connectorManifest(connectorCapabilities), async () => { throw new Error("caller transport failed after dispatch"); }),
+  ]);
+  const runtime = new AutonomousConnectorRuntime(registry);
+  const plan = registry.selectForDomains(["coding"], { capability: "review" });
+  const dispatchRequest = request(plan);
+  const queue = new InMemoryAutonomousConnectorWorkQueue(operationRegistry);
+  const item = queue.enqueue({ work_id: "post-dispatch-failure", operation_id: "coding.repository_change_analysis", request: dispatchRequest, now: 2_600 });
+  const result = await new AutonomousConnectorWorker(runtime, queue, () => ({ plan, request: dispatchRequest })).run({ workerId: "worker-a", now: 2_600 });
+  assert.equal(result.reconciled, 1);
+  assert.equal(result.retried, 0);
+  assert.equal(queue.get(item.work_id).status, "reconciliation_required");
+  assert.equal(queue.get(item.work_id).execution_phase, "running");
+});
+
 test("connector work queue JSON persistence fences stale workers", async () => {
   const fixtureData = fixture();
   const plan = fixtureData.connectorRegistry.selectForDomains(["coding"], { capability: "review" });

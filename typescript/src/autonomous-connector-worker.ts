@@ -24,9 +24,9 @@ import type { JsonObject, JsonValue } from "./types.js";
  */
 export const AUTONOMOUS_CONNECTOR_OPERATION_REGISTRY_SCHEMA = "bioprism-typescript-autonomous-connector-operation-registry/0.1" as const;
 export const AUTONOMOUS_CONNECTOR_OPERATION_SCHEMA = "bioprism-typescript-autonomous-connector-operation/0.1" as const;
-export const AUTONOMOUS_CONNECTOR_WORK_ITEM_SCHEMA = "bioprism-typescript-autonomous-connector-work-item/0.1" as const;
-export const AUTONOMOUS_CONNECTOR_WORK_QUEUE_SCHEMA = "bioprism-typescript-autonomous-connector-work-queue/0.1" as const;
-export const AUTONOMOUS_CONNECTOR_WORKER_SCHEMA = "bioprism-typescript-autonomous-connector-worker/0.1" as const;
+export const AUTONOMOUS_CONNECTOR_WORK_ITEM_SCHEMA = "bioprism-typescript-autonomous-connector-work-item/0.2" as const;
+export const AUTONOMOUS_CONNECTOR_WORK_QUEUE_SCHEMA = "bioprism-typescript-autonomous-connector-work-queue/0.2" as const;
+export const AUTONOMOUS_CONNECTOR_WORKER_SCHEMA = "bioprism-typescript-autonomous-connector-worker/0.2" as const;
 export const AUTONOMOUS_CONNECTOR_FEEDBACK_SCHEMA = "bioprism-typescript-autonomous-connector-feedback/0.1" as const;
 export const AUTONOMOUS_CONNECTOR_FEEDBACK_LEDGER_SCHEMA = "bioprism-typescript-autonomous-connector-feedback-ledger/0.1" as const;
 
@@ -55,11 +55,15 @@ export type AutonomousConnectorWorkFailureClass =
   | "approval_required"
   | "domain_scope"
   | "capability_scope"
+  | "reconciliation_required"
+  | "execution_in_flight"
   | "executor_error"
   | "transport_error"
   | "unknown";
 
 export type AutonomousConnectorOperationRisk = "read_only" | "side_effecting" | "human_review";
+export type AutonomousConnectorWorkExecutionPhase = "not_started" | "running" | "settled";
+export type AutonomousConnectorWorkReconciliationOutcome = "succeeded" | "failed" | "not_executed" | "unknown";
 
 function bytes(value: string): number {
   return new TextEncoder().encode(value).byteLength;
@@ -331,6 +335,14 @@ export interface AutonomousConnectorWorkItem extends JsonObject {
   last_error_class: AutonomousConnectorWorkFailureClass | null;
   created_at: number;
   updated_at: number;
+  execution_phase: AutonomousConnectorWorkExecutionPhase;
+  reconciliation_digest: string | null;
+  reconciliation_observed_item_digest: string | null;
+  reconciliation_outcome: AutonomousConnectorWorkReconciliationOutcome | null;
+  reconciliation_evidence_digest: string | null;
+  reconciliation_evidence_kind: string | null;
+  reconciliation_operator: string | null;
+  reconciliation_effect_absent: boolean | null;
   item_digest: string;
   retention: "metadata_only_request_plan_and_payload_not_retained";
   secret_material: "never_returned";
@@ -365,6 +377,27 @@ function workItemPayload(item: AutonomousConnectorWorkItem): JsonObject {
   return payload;
 }
 
+function reconciliationReceiptDigest(item: AutonomousConnectorWorkItem, options: {
+  outcome: AutonomousConnectorWorkReconciliationOutcome;
+  evidenceDigest: string;
+  evidenceKind: string;
+  operator: string;
+  effectAbsent: boolean | null;
+}): string {
+  return digestJsonSync({
+    schema: `${AUTONOMOUS_CONNECTOR_WORK_ITEM_SCHEMA}/reconciliation-receipt`,
+    work_id: item.work_id,
+    operation_digest: item.operation_digest,
+    selection_plan_digest: item.selection_plan_digest,
+    observed_item_digest: item.reconciliation_observed_item_digest ?? item.item_digest,
+    outcome: options.outcome,
+    evidence_digest: options.evidenceDigest,
+    evidence_kind: options.evidenceKind,
+    operator: options.operator,
+    effect_absent: options.effectAbsent,
+  });
+}
+
 function itemDigest(item: AutonomousConnectorWorkItem): string {
   return digestJsonSync(workItemPayload(item));
 }
@@ -374,8 +407,26 @@ function validateWorkItem(raw: unknown, operationRegistry: AutonomousConnectorOp
   if (raw.retention !== "metadata_only_request_plan_and_payload_not_retained" || raw.secret_material !== "never_returned") throw new ArgumentError("autonomous connector work item retention is invalid");
   const statuses: readonly AutonomousConnectorWorkStatus[] = ["queued", "leased", "completed", "failed", "reconciliation_required", "cancelled"];
   if (!statuses.includes(raw.status as AutonomousConnectorWorkStatus)) throw new ArgumentError("autonomous connector work item status is invalid");
-  const failureClasses: readonly (AutonomousConnectorWorkFailureClass | null)[] = [null, "rehydration_missing", "rehydration_invalid", "identity_conflict", "lease_expired", "approval_required", "domain_scope", "capability_scope", "executor_error", "transport_error", "unknown"];
+  const failureClasses: readonly (AutonomousConnectorWorkFailureClass | null)[] = [null, "rehydration_missing", "rehydration_invalid", "identity_conflict", "lease_expired", "approval_required", "domain_scope", "capability_scope", "reconciliation_required", "execution_in_flight", "executor_error", "transport_error", "unknown"];
   if (!failureClasses.includes((raw.failure_class as AutonomousConnectorWorkFailureClass | null) ?? null) || !failureClasses.includes((raw.last_error_class as AutonomousConnectorWorkFailureClass | null) ?? null)) throw new ArgumentError("autonomous connector work item failure class is invalid");
+  const executionPhases: readonly AutonomousConnectorWorkExecutionPhase[] = ["not_started", "running", "settled"];
+  if (!executionPhases.includes(raw.execution_phase as AutonomousConnectorWorkExecutionPhase)) throw new ArgumentError("autonomous connector work item execution phase is invalid");
+  const reconciliationOutcomes: readonly AutonomousConnectorWorkReconciliationOutcome[] = ["succeeded", "failed", "not_executed", "unknown"];
+  const reconciliationDigest = raw.reconciliation_digest === null ? null : digest("autonomous connector work reconciliation_digest", raw.reconciliation_digest);
+  const reconciliationObservedItemDigest = raw.reconciliation_observed_item_digest === null ? null : digest("autonomous connector work reconciliation_observed_item_digest", raw.reconciliation_observed_item_digest);
+  const reconciliationOutcome = raw.reconciliation_outcome === null ? null : raw.reconciliation_outcome as AutonomousConnectorWorkReconciliationOutcome;
+  const reconciliationEvidenceDigest = raw.reconciliation_evidence_digest === null ? null : digest("autonomous connector work reconciliation_evidence_digest", raw.reconciliation_evidence_digest);
+  const reconciliationEvidenceKind = raw.reconciliation_evidence_kind === null ? null : identifier("autonomous connector work reconciliation_evidence_kind", raw.reconciliation_evidence_kind);
+  const reconciliationOperator = raw.reconciliation_operator === null ? null : identifier("autonomous connector work reconciliation_operator", raw.reconciliation_operator);
+  const reconciliationEffectAbsent = raw.reconciliation_effect_absent === null ? null : raw.reconciliation_effect_absent as boolean;
+  if (reconciliationEffectAbsent !== null && typeof reconciliationEffectAbsent !== "boolean") throw new ArgumentError("autonomous connector work reconciliation effect_absent is invalid");
+  if (reconciliationDigest === null) {
+    if ([reconciliationObservedItemDigest, reconciliationOutcome, reconciliationEvidenceDigest, reconciliationEvidenceKind, reconciliationOperator, reconciliationEffectAbsent].some((value) => value !== null)) throw new ArgumentError("autonomous connector reconciliation metadata requires a reconciliation digest");
+  } else {
+    if (reconciliationOutcome === null || !reconciliationOutcomes.includes(reconciliationOutcome) || reconciliationObservedItemDigest === null || reconciliationEvidenceDigest === null || reconciliationEvidenceKind === null || reconciliationOperator === null) throw new ArgumentError("autonomous connector reconciliation metadata is incomplete");
+    if (reconciliationOutcome === "not_executed" && reconciliationEffectAbsent !== true) throw new ArgumentError("not_executed connector reconciliation requires effectAbsent=true");
+    if ((reconciliationOutcome === "succeeded" || reconciliationOutcome === "unknown") && reconciliationEffectAbsent === true) throw new ArgumentError("connector reconciliation effectAbsent contradicts the selected outcome");
+  }
   const item: AutonomousConnectorWorkItem = {
     schema: AUTONOMOUS_CONNECTOR_WORK_ITEM_SCHEMA,
     work_id: identifier("autonomous connector work_id", raw.work_id),
@@ -404,20 +455,38 @@ function validateWorkItem(raw: unknown, operationRegistry: AutonomousConnectorOp
     last_error_class: (raw.last_error_class as AutonomousConnectorWorkFailureClass | null) ?? null,
     created_at: timestamp("autonomous connector work created_at", raw.created_at),
     updated_at: timestamp("autonomous connector work updated_at", raw.updated_at),
+    execution_phase: raw.execution_phase as AutonomousConnectorWorkExecutionPhase,
+    reconciliation_digest: reconciliationDigest,
+    reconciliation_observed_item_digest: reconciliationObservedItemDigest,
+    reconciliation_outcome: reconciliationOutcome,
+    reconciliation_evidence_digest: reconciliationEvidenceDigest,
+    reconciliation_evidence_kind: reconciliationEvidenceKind,
+    reconciliation_operator: reconciliationOperator,
+    reconciliation_effect_absent: reconciliationEffectAbsent,
     item_digest: digest("autonomous connector work item_digest", raw.item_digest) as string,
     retention: "metadata_only_request_plan_and_payload_not_retained",
     secret_material: "never_returned",
   };
   if (typeof item.approved !== "boolean") throw new ArgumentError("autonomous connector work approved must be boolean");
   if (item.attempts > item.max_attempts || (item.status === "leased") !== (item.lease_owner !== null && item.lease_until !== null)) throw new ArgumentError("autonomous connector work lease state is inconsistent");
+  if (item.status === "queued" && item.execution_phase !== "not_started") throw new ArgumentError("queued connector work must not have crossed the execution boundary");
+  if (item.status === "reconciliation_required" && item.execution_phase !== "running") throw new ArgumentError("reconciliation-required connector work must retain a running execution phase");
+  if (item.status === "completed" && item.execution_phase !== "settled") throw new ArgumentError("completed connector work requires a settled execution phase");
   const operation = operationRegistry.resolve(item.operation_id);
   if (operation.operation_digest !== item.operation_digest || operation.domain !== item.domain || !operation.supports(item.capability)) throw new ArgumentError("autonomous connector work operation identity is stale or invalid");
   if (item.item_digest !== itemDigest(item)) throw new ArgumentError("autonomous connector work item digest is invalid");
+  if (item.reconciliation_digest !== null && item.reconciliation_digest !== reconciliationReceiptDigest(item, {
+    outcome: item.reconciliation_outcome as AutonomousConnectorWorkReconciliationOutcome,
+    evidenceDigest: item.reconciliation_evidence_digest as string,
+    evidenceKind: item.reconciliation_evidence_kind as string,
+    operator: item.reconciliation_operator as string,
+    effectAbsent: item.reconciliation_effect_absent,
+  })) throw new ArgumentError("autonomous connector work reconciliation digest is invalid");
   return item;
 }
 
 function workFailureClass(value: unknown): AutonomousConnectorWorkFailureClass {
-  const known: readonly AutonomousConnectorWorkFailureClass[] = ["rehydration_missing", "rehydration_invalid", "identity_conflict", "lease_expired", "approval_required", "domain_scope", "capability_scope", "executor_error", "transport_error", "unknown"];
+  const known: readonly AutonomousConnectorWorkFailureClass[] = ["rehydration_missing", "rehydration_invalid", "identity_conflict", "lease_expired", "approval_required", "domain_scope", "capability_scope", "reconciliation_required", "execution_in_flight", "executor_error", "transport_error", "unknown"];
   return known.includes(value as AutonomousConnectorWorkFailureClass) ? value as AutonomousConnectorWorkFailureClass : "unknown";
 }
 
@@ -479,6 +548,14 @@ export class InMemoryAutonomousConnectorWorkQueue {
       last_error_class: null,
       created_at: time,
       updated_at: time,
+      execution_phase: "not_started" as const,
+      reconciliation_digest: null,
+      reconciliation_observed_item_digest: null,
+      reconciliation_outcome: null,
+      reconciliation_evidence_digest: null,
+      reconciliation_evidence_kind: null,
+      reconciliation_operator: null,
+      reconciliation_effect_absent: null,
       item_digest: "",
       retention: "metadata_only_request_plan_and_payload_not_retained" as const,
       secret_material: "never_returned" as const,
@@ -497,10 +574,26 @@ export class InMemoryAutonomousConnectorWorkQueue {
     const time = nowMs(now);
     const boundedLimit = boundedInteger("autonomous connector work pending limit", limit, 1, Math.min(MAX_AUTONOMOUS_CONNECTOR_WORK_BATCH, this.maxItems));
     return [...this.items.values()]
-      .filter((item) => (item.status === "queued" && item.available_at <= time && item.attempts < item.max_attempts) || (item.status === "leased" && item.lease_until !== null && item.lease_until <= time && item.attempts < item.max_attempts))
+      .filter((item) => item.status === "queued" && item.available_at <= time && item.attempts < item.max_attempts)
       .sort((left, right) => left.available_at - right.available_at || left.created_at - right.created_at || left.work_id.localeCompare(right.work_id))
       .slice(0, boundedLimit)
       .map((item) => clone(item));
+  }
+
+  reclaimExpired(limit = Math.min(MAX_AUTONOMOUS_CONNECTOR_WORK_BATCH, this.maxItems), now = Date.now()): AutonomousConnectorWorkItem[] {
+    const time = nowMs(now);
+    const boundedLimit = boundedInteger("autonomous connector work reclaim limit", limit, 1, Math.min(MAX_AUTONOMOUS_CONNECTOR_WORK_BATCH, this.maxItems));
+    const expired = [...this.items.values()]
+      .filter((item) => item.status === "leased" && item.lease_until !== null && item.lease_until <= time)
+      .sort((left, right) => (left.lease_until ?? 0) - (right.lease_until ?? 0) || left.created_at - right.created_at || left.work_id.localeCompare(right.work_id))
+      .slice(0, boundedLimit);
+    return expired.map((item) => {
+      const next = refreshItem(item, item.execution_phase === "running" || item.attempts >= item.max_attempts
+        ? { status: "reconciliation_required", execution_phase: "running", lease_owner: null, lease_until: null, failure_class: "lease_expired", last_error_class: "lease_expired" }
+        : { status: "queued", execution_phase: "not_started", available_at: time, lease_owner: null, lease_until: null, failure_class: null, last_error_class: "lease_expired" }, time);
+      this.items.set(item.work_id, next);
+      return clone(next);
+    });
   }
 
   claim(workId: string, workerId: string, leaseMs = 30_000, now = Date.now()): AutonomousConnectorWorkItem | null {
@@ -508,14 +601,23 @@ export class InMemoryAutonomousConnectorWorkQueue {
     const worker = identifier("autonomous connector worker_id", workerId);
     const lease = boundedInteger("autonomous connector work lease_ms", leaseMs, 1, MAX_AUTONOMOUS_CONNECTOR_WORK_LEASE_MS);
     const time = nowMs(now);
-    const item = this.items.get(id);
+    let item = this.items.get(id);
     if (!item || item.status === "completed" || item.status === "failed" || item.status === "reconciliation_required" || item.status === "cancelled") return null;
-    if (item.status === "leased" && item.lease_until !== null && item.lease_until > time) return null;
+    if (item.status === "leased") {
+      if (item.lease_until !== null && item.lease_until > time) return null;
+      if (item.execution_phase === "running") {
+        const expired = refreshItem(item, { status: "reconciliation_required", execution_phase: "running", failure_class: "lease_expired", last_error_class: "lease_expired", lease_owner: null, lease_until: null }, time);
+        this.items.set(id, expired);
+        return null;
+      }
+      item = refreshItem(item, { status: "queued", execution_phase: "not_started", available_at: time, lease_owner: null, lease_until: null, failure_class: null, last_error_class: "lease_expired" }, time);
+      this.items.set(id, item);
+    }
     if (item.attempts >= item.max_attempts) {
-      this.items.set(id, refreshItem(item, { status: "reconciliation_required", failure_class: "lease_expired", last_error_class: "lease_expired", lease_owner: null, lease_until: null }, time));
+      this.items.set(id, refreshItem(item, { status: "reconciliation_required", execution_phase: "running", failure_class: "lease_expired", last_error_class: "lease_expired", lease_owner: null, lease_until: null }, time));
       return null;
     }
-    const next = refreshItem(item, { status: "leased", attempts: item.attempts + 1, lease_owner: worker, lease_until: time + lease, last_error_class: null }, time);
+    const next = refreshItem(item, { status: "leased", execution_phase: "not_started", attempts: item.attempts + 1, lease_owner: worker, lease_until: time + lease, failure_class: null, last_error_class: null }, time);
     this.items.set(id, next);
     return clone(next);
   }
@@ -532,6 +634,18 @@ export class InMemoryAutonomousConnectorWorkQueue {
     return clone(next);
   }
 
+  beginExecution(workId: string, workerId: string, now = Date.now()): AutonomousConnectorWorkItem {
+    const id = identifier("autonomous connector work_id", workId);
+    const worker = identifier("autonomous connector worker_id", workerId);
+    const time = nowMs(now);
+    const item = this.items.get(id);
+    if (!item || item.status !== "leased" || item.lease_owner !== worker || item.lease_until === null || item.lease_until <= time) throw new ArgumentError("autonomous connector execution cannot begin across an expired or foreign lease");
+    if (item.execution_phase !== "not_started") throw new ArgumentError("autonomous connector execution boundary has already been crossed");
+    const next = refreshItem(item, { execution_phase: "running" }, time);
+    this.items.set(id, next);
+    return clone(next);
+  }
+
   complete(workId: string, workerId: string, receipt: AutonomousConnectorDispatchReceipt, now = Date.now()): AutonomousConnectorWorkItem {
     const id = identifier("autonomous connector work_id", workId);
     const worker = identifier("autonomous connector worker_id", workerId);
@@ -539,8 +653,9 @@ export class InMemoryAutonomousConnectorWorkQueue {
     const time = nowMs(now);
     const item = this.items.get(id);
     if (!item || item.status !== "leased" || item.lease_owner !== worker || item.lease_until === null || item.lease_until <= time) throw new ArgumentError("autonomous connector work completion is fenced by an expired or foreign lease");
+    if (item.execution_phase !== "running") throw new ArgumentError("autonomous connector work completion requires a crossed execution boundary");
     if (receipt.request_digest !== item.request_digest || receipt.dispatch_id !== item.dispatch_id || receipt.execution_id !== item.execution_id || receipt.call_id !== item.call_id || receipt.connector_id !== item.connector_id) throw new ArgumentError("autonomous connector work receipt identity conflicts with the work item");
-    const next = refreshItem(item, { status: "completed", lease_owner: null, lease_until: null, receipt_digest: digestJsonSync(receipt.toJSON()), payload_digest: receipt.payload_digest }, time);
+    const next = refreshItem(item, { status: "completed", execution_phase: "settled", lease_owner: null, lease_until: null, receipt_digest: digestJsonSync(receipt.toJSON()), payload_digest: receipt.payload_digest }, time);
     this.items.set(id, next);
     return clone(next);
   }
@@ -552,11 +667,13 @@ export class InMemoryAutonomousConnectorWorkQueue {
     const time = nowMs(now);
     const item = this.items.get(id);
     if (!item || item.status !== "leased" || item.lease_owner !== worker || item.lease_until === null || item.lease_until <= time) throw new ArgumentError("autonomous connector work failure is fenced by an expired or foreign lease");
+    if (item.execution_phase !== "not_started") throw new ArgumentError("post-dispatch connector failures require reconciliation");
     if (receipt !== null && !(receipt instanceof AutonomousConnectorDispatchReceipt)) throw new ArgumentError("autonomous connector work failure receipt must be typed");
     const canRetry = retryable && item.attempts < item.max_attempts;
     const delay = Math.min(3_600_000, 1_000 * (2 ** Math.max(0, item.attempts - 1)));
     const next = refreshItem(item, {
       status: canRetry ? "queued" : "failed",
+      execution_phase: "not_started",
       available_at: canRetry ? time + delay : item.available_at,
       lease_owner: null,
       lease_until: null,
@@ -576,7 +693,65 @@ export class InMemoryAutonomousConnectorWorkQueue {
     const time = nowMs(now);
     const item = this.items.get(id);
     if (!item || item.status !== "leased" || item.lease_owner !== worker || item.lease_until === null || item.lease_until <= time) throw new ArgumentError("autonomous connector reconciliation is fenced by an expired or foreign lease");
-    const next = refreshItem(item, { status: "reconciliation_required", lease_owner: null, lease_until: null, failure_class: failure, last_error_class: failure }, time);
+    const next = refreshItem(item, { status: "reconciliation_required", execution_phase: "running", lease_owner: null, lease_until: null, failure_class: failure, last_error_class: failure }, time);
+    this.items.set(id, next);
+    return clone(next);
+  }
+
+  settleReconciliation(workId: string, options: {
+    outcome: AutonomousConnectorWorkReconciliationOutcome;
+    evidenceDigest: string;
+    evidenceKind?: string;
+    operator?: string;
+    effectAbsent?: boolean | null;
+  }, now = Date.now()): AutonomousConnectorWorkItem {
+    const id = identifier("autonomous connector work_id", workId);
+    const time = nowMs(now);
+    const outcomes: readonly AutonomousConnectorWorkReconciliationOutcome[] = ["succeeded", "failed", "not_executed", "unknown"];
+    if (!outcomes.includes(options.outcome)) throw new ArgumentError("autonomous connector reconciliation outcome is invalid");
+    const evidenceDigest = digest("autonomous connector reconciliation evidenceDigest", options.evidenceDigest) as string;
+    const evidenceKind = identifier("autonomous connector reconciliation evidenceKind", options.evidenceKind ?? "caller_observation");
+    const operator = identifier("autonomous connector reconciliation operator", options.operator ?? "caller");
+    const effectAbsent = options.effectAbsent === undefined ? (options.outcome === "not_executed" ? true : null) : options.effectAbsent;
+    if (effectAbsent !== null && typeof effectAbsent !== "boolean") throw new ArgumentError("autonomous connector reconciliation effectAbsent must be boolean or omitted");
+    if (options.outcome === "not_executed" && effectAbsent !== true) throw new ArgumentError("not_executed connector reconciliation requires effectAbsent=true");
+    if ((options.outcome === "succeeded" || options.outcome === "unknown") && effectAbsent === true) throw new ArgumentError("connector reconciliation effectAbsent contradicts the selected outcome");
+    const item = this.items.get(id);
+    if (!item) throw new ArgumentError("autonomous connector work was not found");
+    if (item.reconciliation_digest !== null) {
+      if (item.reconciliation_outcome === options.outcome && item.reconciliation_evidence_digest === evidenceDigest && item.reconciliation_evidence_kind === evidenceKind && item.reconciliation_operator === operator && item.reconciliation_effect_absent === effectAbsent) return clone(item);
+      throw new ArgumentError("autonomous connector reconciliation receipt conflicts with the existing receipt");
+    }
+    if (item.status !== "reconciliation_required") throw new ArgumentError("autonomous connector work is not awaiting reconciliation");
+    const receipt = reconciliationReceiptDigest(item, { outcome: options.outcome, evidenceDigest, evidenceKind, operator, effectAbsent });
+    const next = refreshItem(item, {
+      status: options.outcome === "succeeded" ? "completed" : options.outcome === "failed" ? "failed" : "reconciliation_required",
+      execution_phase: options.outcome === "succeeded" || options.outcome === "failed" ? "settled" : "running",
+      failure_class: options.outcome === "succeeded" ? null : "reconciliation_required",
+      last_error_class: options.outcome === "succeeded" ? null : item.last_error_class,
+      reconciliation_digest: receipt,
+      reconciliation_observed_item_digest: item.item_digest,
+      reconciliation_outcome: options.outcome,
+      reconciliation_evidence_digest: evidenceDigest,
+      reconciliation_evidence_kind: evidenceKind,
+      reconciliation_operator: operator,
+      reconciliation_effect_absent: effectAbsent,
+      lease_owner: null,
+      lease_until: null,
+    }, time);
+    this.items.set(id, next);
+    return clone(next);
+  }
+
+  requeue(workId: string, options: { reconciliationDigest?: string } = {}, now = Date.now()): AutonomousConnectorWorkItem {
+    const id = identifier("autonomous connector work_id", workId);
+    const time = nowMs(now);
+    const item = this.items.get(id);
+    if (!item || item.status !== "reconciliation_required") throw new ArgumentError("autonomous connector work is not awaiting explicit reconciliation requeue");
+    if (item.attempts >= item.max_attempts) throw new ArgumentError("autonomous connector work has exhausted its attempts");
+    if (item.reconciliation_digest === null || item.reconciliation_outcome !== "not_executed" || item.reconciliation_effect_absent !== true) throw new ArgumentError("connector requeue requires a matching no-effect reconciliation receipt");
+    if (options.reconciliationDigest !== item.reconciliation_digest) throw new ArgumentError("connector requeue requires the matching reconciliation digest");
+    const next = refreshItem(item, { status: "queued", execution_phase: "not_started", available_at: time, failure_class: null, last_error_class: item.last_error_class }, time);
     this.items.set(id, next);
     return clone(next);
   }
@@ -585,8 +760,8 @@ export class InMemoryAutonomousConnectorWorkQueue {
     const id = identifier("autonomous connector work_id", workId);
     const time = nowMs(now);
     const item = this.items.get(id);
-    if (!item || item.status === "completed" || item.status === "failed" || item.status === "reconciliation_required" || item.status === "cancelled") throw new ArgumentError("autonomous connector work cannot be cancelled in its current state");
-    const next = refreshItem(item, { status: "cancelled", lease_owner: null, lease_until: null, failure_class: workFailureClass(reason), last_error_class: workFailureClass(reason) }, time);
+    if (!item || item.status === "completed" || item.status === "failed" || item.status === "reconciliation_required" || item.status === "cancelled" || item.execution_phase === "running") throw new ArgumentError("autonomous connector work cannot be cancelled across an active or uncertain execution boundary");
+    const next = refreshItem(item, { status: "cancelled", execution_phase: "settled", lease_owner: null, lease_until: null, failure_class: workFailureClass(reason), last_error_class: workFailureClass(reason) }, time);
     this.items.set(id, next);
     return clone(next);
   }
@@ -718,6 +893,7 @@ export interface AutonomousConnectorWorkerRow extends JsonObject {
   value_retained: false;
   payload_digest: string | null;
   error_class: AutonomousConnectorWorkFailureClass | null;
+  reconciliation_digest: string | null;
 }
 
 export interface AutonomousConnectorWorkerRun extends JsonObject {
@@ -743,6 +919,7 @@ function workerRow(item: AutonomousConnectorWorkItem, outcome: AutonomousConnect
     value_retained: false,
     payload_digest: receipt?.payload_digest ?? item.payload_digest,
     error_class: errorClass,
+    reconciliation_digest: item.reconciliation_digest,
   };
 }
 
@@ -763,6 +940,7 @@ export class AutonomousConnectorWorker {
     if (normalizedWorkIds !== null && (normalizedWorkIds.length < 1 || normalizedWorkIds.length > MAX_AUTONOMOUS_CONNECTOR_WORK_BATCH || new Set(normalizedWorkIds).size !== normalizedWorkIds.length)) throw new ArgumentError("autonomous connector worker workIds are outside their bound");
     const time = nowMs(options.now);
     const currentTime = () => options.now === undefined ? Date.now() : time;
+    this.queue.reclaimExpired(Math.min(MAX_AUTONOMOUS_CONNECTOR_WORK_BATCH, this.queue.maxItems), time);
     const pending = this.queue.pending(normalizedWorkIds === null ? limit : MAX_AUTONOMOUS_CONNECTOR_WORK_BATCH, time);
     const candidates = pending.filter((item) => normalizedWorkIds === null || normalizedWorkIds.includes(item.work_id)).slice(0, limit);
     const rows: AutonomousConnectorWorkerRow[] = [];
@@ -773,6 +951,7 @@ export class AutonomousConnectorWorker {
         rows.push(workerRow(candidate, "leased_elsewhere"));
         continue;
       }
+      let executionStarted = false;
       try {
         const hydrated = await this.rehydrate(claimed);
         if (!hydrated || !(hydrated.request instanceof AutonomousConnectorDispatchRequest)) {
@@ -783,6 +962,8 @@ export class AutonomousConnectorWorker {
         const plan = hydrated.plan instanceof AutonomousConnectorSelectionPlan ? hydrated.plan : AutonomousConnectorSelectionPlan.fromJSON(hydrated.plan);
         const request = hydrated.request;
         this.assertHydratedIdentity(claimed, plan, request);
+        this.queue.beginExecution(claimed.work_id, workerId, currentTime());
+        executionStarted = true;
         const result = await this.runtime.dispatchFromPlan(plan, request, { traceEventCallback: options.traceEventCallback });
         if (result.receipt.status === "observed" || result.receipt.status === "partial") {
           const finished = this.queue.complete(claimed.work_id, workerId, result.receipt, currentTime());
@@ -790,12 +971,12 @@ export class AutonomousConnectorWorker {
           rows.push(workerRow(finished, outcome, result.receipt));
         } else {
           const classification = workFailureClass(result.receipt.failure_class);
-          const failed = this.queue.fail(claimed.work_id, workerId, classification, result.receipt.status === "error" || result.receipt.status === "unknown", currentTime(), result.receipt);
-          rows.push(workerRow(failed, failed.status === "queued" ? "retry_scheduled" : "failed", result.receipt, classification));
+          const reconciled = this.queue.reconcile(claimed.work_id, workerId, classification, currentTime());
+          rows.push(workerRow(reconciled, "reconciliation_required", result.receipt, classification));
         }
       } catch (error) {
         const classification = this.classify(error);
-        if (classification === "rehydration_missing" || classification === "rehydration_invalid" || classification === "identity_conflict") {
+        if (executionStarted || classification === "rehydration_missing" || classification === "rehydration_invalid" || classification === "identity_conflict") {
           const reconciled = this.queue.reconcile(claimed.work_id, workerId, classification, currentTime());
           rows.push(workerRow(reconciled, "reconciliation_required", null, classification));
         } else {

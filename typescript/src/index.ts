@@ -1626,6 +1626,8 @@ export {
 export type {
   AutonomousConnectorWorkStatus,
   AutonomousConnectorWorkFailureClass,
+  AutonomousConnectorWorkExecutionPhase,
+  AutonomousConnectorWorkReconciliationOutcome,
   AutonomousConnectorOperationRisk,
   AutonomousConnectorWorkItem,
   AutonomousConnectorWorkQueueSnapshot,

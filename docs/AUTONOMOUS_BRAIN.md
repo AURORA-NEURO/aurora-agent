@@ -7243,12 +7243,13 @@ quarantined as `reconciliation_required`. Retryable pre-dispatch failures use bo
 backoff and stop at the configured attempt ceiling. Non-rehydratable, identity-conflicting, or
 post-dispatch work is never silently re-dispatched.
 
-The Python connector worker's `settle_reconciliation(...)` stores only a content-addressed receipt
-containing caller evidence digest, outcome, evidence kind, operator, and the `effect_absent`
-assertion. Only a matching `not_executed + effect_absent=True` receipt and exact
-`reconciliation_digest` can authorize `requeue(...)`; `succeeded`, `failed`, and `unknown` outcomes
-cannot be treated as a convenient retry signal. Connector work-item and queue schemas are `0.2`,
-and old snapshots are rejected rather than guessed into the new execution model.
+Both connector workers expose settlement with a content-addressed receipt containing caller evidence
+digest, outcome, evidence kind, operator, and the `effect_absent` assertion
+(`settleReconciliation(...)` in TypeScript and `settle_reconciliation(...)` in Python). Only a
+matching `not_executed + effect_absent=True` receipt and exact `reconciliation_digest` can authorize
+`requeue(...)`; `succeeded`, `failed`, and `unknown` outcomes cannot be treated as a convenient
+retry signal. Connector work-item, queue, and worker schemas are `0.2`, and old snapshots are
+rejected rather than guessed into the new execution model.
 
 ```typescript
 const operations = new AutonomousConnectorOperationRegistry();
@@ -8236,9 +8237,9 @@ should make `read`/`write` atomic with its job transaction and should serialize 
 snapshot without adding application fields to the signed image.
 
 Leases are fencing tokens, not advisory locks. `claim` increments the bounded attempt counter and
-sets an owner and expiry. `renew`, `begin_execution`, `complete`, `fail`, and `reconcile` reject a
-missing, foreign, or expired owner. The Python queue's `reclaim_expired` distinguishes a lease that
-expired before dispatch (`queued`) from one that expired after dispatch
+sets an owner and expiry. `renew`, `beginExecution`/`begin_execution`, `complete`, `fail`, and
+`reconcile` reject a missing, foreign, or expired owner. `reclaimExpired`/`reclaim_expired`
+distinguishes a lease that expired before dispatch (`queued`) from one that expired after dispatch
 (`reconciliation_required`). Retryable failures use bounded exponential backoff; exhausted work
 is quarantined rather than replayed. A missing or identity-conflicting plan/request becomes
 `reconciliation_required` and must be repaired by caller-owned state. An idempotent enqueue with the
