@@ -8001,6 +8001,12 @@ cycle_coordinator.restore()
 cycle_coordinator.flush()
 ```
 
+The TypeScript boundary exposes the same guarantees through
+`TransactionalJsonAutonomousDecisionCycleSnapshotPersistence`. Its coordinator serializes
+overlapping operations, carries the last verified `snapshot_digest`, and raises a typed
+compare-and-swap conflict when a route/plan/evaluation worker is stale. The plain `write` adapter
+remains supported for applications that already enforce single-writer ordering outside the SDK.
+
 `GET` returns `200` with a JSON object or `404` for an absent snapshot. Unconditional `PUT`
 accepts a successful 2xx response. Conditional writes send `If-Match: "<snapshot_digest>"`, or
 `If-None-Match: *` for first creation; `409` and `412` become a clean CAS miss (`false`). The

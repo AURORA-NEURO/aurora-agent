@@ -12,6 +12,7 @@ import {
   CredentialStore,
   AutonomousDecisionCyclePersistenceCoordinator,
   InMemoryAutonomousDecisionCycleStateStore,
+  TransactionalJsonAutonomousDecisionCycleSnapshotPersistence,
   InMemoryAutonomousCycleReplanStateStore,
   LLMRuntime,
   openaiCompatibleProvider,
@@ -349,6 +350,24 @@ test("ordinary decision cycles persist a metadata-only restart barrier across ev
   });
   const restored = await restoredCoordinator.restore();
   assert.equal(restored?.snapshot_digest, flushed.snapshot_digest);
+
+  let encodedCycle = null;
+  const transactionalTextStore = {
+    read: () => encodedCycle,
+    write: (value) => { encodedCycle = value; },
+    writeIfUnchanged: (expected, value) => {
+      const observed = encodedCycle === null ? null : JSON.parse(encodedCycle).snapshot_digest;
+      if (observed !== expected) return false;
+      encodedCycle = value;
+      return true;
+    },
+  };
+  const transactionalPersistence = new TransactionalJsonAutonomousDecisionCycleSnapshotPersistence(transactionalTextStore);
+  const transactionalCoordinator = new AutonomousDecisionCyclePersistenceCoordinator(store, transactionalPersistence);
+  await transactionalCoordinator.flush();
+  const staleCoordinator = new AutonomousDecisionCyclePersistenceCoordinator(new InMemoryAutonomousDecisionCycleStateStore(), transactionalPersistence);
+  await assert.rejects(() => staleCoordinator.flush(), /compare-and-swap/);
+
   const restarted = cycleAgent();
   for (const domain of domains) {
     const cycleId = `ordinary-${domain}`;

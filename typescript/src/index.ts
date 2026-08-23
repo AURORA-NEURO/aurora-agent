@@ -2046,8 +2046,10 @@ export {
   AUTONOMOUS_DECISION_CYCLE_MAX_SNAPSHOT_BYTES,
   AUTONOMOUS_DECISION_CYCLE_MAX_STATES,
   AutonomousDecisionCyclePersistenceCoordinator,
+  JsonAutonomousDecisionCycleSnapshotPersistence,
   InMemoryAutonomousDecisionCycleStateStore,
   sealAutonomousDecisionCycleState,
+  TransactionalJsonAutonomousDecisionCycleSnapshotPersistence,
   validateAutonomousDecisionCycleSnapshot,
   validateAutonomousDecisionCycleState,
 } from "./autonomous-decision-persistence.js";
@@ -2057,6 +2059,8 @@ export type {
   AutonomousDecisionCycleRehydrationContext,
   AutonomousDecisionCycleSnapshot,
   AutonomousDecisionCycleSnapshotPersistence,
+  AutonomousDecisionCycleSnapshotTextStore,
+  AutonomousDecisionCycleTransactionalSnapshotTextStore,
   AutonomousDecisionCycleState,
   AutonomousDecisionCycleStateStore,
 } from "./autonomous-decision-persistence.js";

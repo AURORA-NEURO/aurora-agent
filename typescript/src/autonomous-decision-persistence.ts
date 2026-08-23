@@ -1,5 +1,5 @@
 import { ArgumentError } from "./errors.js";
-import { digestJson } from "./tooling.js";
+import { canonicalJson, digestJson } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
 /** Metadata-only state for a single provider decision cycle. */
@@ -53,6 +53,16 @@ export interface AutonomousDecisionCycleStateStore {
 export interface AutonomousDecisionCycleSnapshotPersistence {
   read(): Promise<AutonomousDecisionCycleSnapshot | null> | AutonomousDecisionCycleSnapshot | null;
   write(snapshot: AutonomousDecisionCycleSnapshot): Promise<void> | void;
+  writeIfUnchanged?(expectedSnapshotDigest: string | null, snapshot: AutonomousDecisionCycleSnapshot): Promise<boolean> | boolean;
+}
+
+export interface AutonomousDecisionCycleSnapshotTextStore {
+  read(): Promise<string | null> | string | null;
+  write(value: string): Promise<void> | void;
+}
+
+export interface AutonomousDecisionCycleTransactionalSnapshotTextStore extends AutonomousDecisionCycleSnapshotTextStore {
+  writeIfUnchanged(expectedSnapshotDigest: string | null, value: string): Promise<boolean> | boolean;
 }
 
 export interface AutonomousDecisionCycleRehydrationContext extends JsonObject {
@@ -281,22 +291,78 @@ export class InMemoryAutonomousDecisionCycleStateStore implements AutonomousDeci
 
 /** Coordinates hash-bound decision-cycle state with caller-owned durable storage. */
 export class AutonomousDecisionCyclePersistenceCoordinator {
+  private expectedSnapshotDigest: string | null = null;
+  private operationTail: Promise<void> = Promise.resolve();
+
   constructor(readonly store: AutonomousDecisionCycleStateStore, readonly persistence: AutonomousDecisionCycleSnapshotPersistence) {
     if (!store || typeof store.snapshot !== "function" || typeof store.restore !== "function") throw new ArgumentError("decision-cycle persistence requires a snapshot-capable store");
     if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new ArgumentError("decision-cycle persistence adapter is malformed");
   }
 
   async flush(): Promise<AutonomousDecisionCycleSnapshot> {
-    const snapshot = await this.store.snapshot();
-    await this.persistence.write(snapshot);
-    return snapshot;
+    return this.enqueue(async () => {
+      const snapshot = await this.store.snapshot();
+      if (typeof this.persistence.writeIfUnchanged === "function") {
+        if (!await this.persistence.writeIfUnchanged(this.expectedSnapshotDigest, snapshot)) throw new ArgumentError("decision-cycle persistence compare-and-swap conflict");
+      } else await this.persistence.write(snapshot);
+      this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      return snapshot;
+    });
   }
 
   async restore(): Promise<AutonomousDecisionCycleSnapshot | null> {
-    const raw = await this.persistence.read();
-    if (raw === null) return null;
+    return this.enqueue(async () => {
+      const raw = await this.persistence.read();
+      if (raw === null) {
+        this.expectedSnapshotDigest = null;
+        return null;
+      }
+      const snapshot = await validateAutonomousDecisionCycleSnapshot(raw);
+      await this.store.restore(snapshot);
+      this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      return snapshot;
+    });
+  }
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const queued = this.operationTail.then(() => operation());
+    this.operationTail = queued.then(() => undefined, () => undefined);
+    return queued;
+  }
+}
+
+export class JsonAutonomousDecisionCycleSnapshotPersistence implements AutonomousDecisionCycleSnapshotPersistence {
+  constructor(readonly textStore: AutonomousDecisionCycleSnapshotTextStore) {
+    if (!textStore || typeof textStore.read !== "function" || typeof textStore.write !== "function") throw new ArgumentError("decision-cycle text store is malformed");
+  }
+
+  async read(): Promise<AutonomousDecisionCycleSnapshot | null> {
+    const encoded = await this.textStore.read();
+    if (encoded === null) return null;
+    if (new TextEncoder().encode(encoded).byteLength > AUTONOMOUS_DECISION_CYCLE_MAX_SNAPSHOT_BYTES) throw new ArgumentError("decision-cycle JSON exceeds its byte bound");
+    let parsed: unknown;
+    try { parsed = JSON.parse(encoded); } catch { throw new ArgumentError("decision-cycle JSON is invalid"); }
+    return validateAutonomousDecisionCycleSnapshot(parsed);
+  }
+
+  async write(raw: AutonomousDecisionCycleSnapshot): Promise<void> {
     const snapshot = await validateAutonomousDecisionCycleSnapshot(raw);
-    await this.store.restore(snapshot);
-    return snapshot;
+    await this.textStore.write(canonicalJson(snapshot));
+  }
+}
+
+export class TransactionalJsonAutonomousDecisionCycleSnapshotPersistence extends JsonAutonomousDecisionCycleSnapshotPersistence {
+  declare readonly textStore: AutonomousDecisionCycleTransactionalSnapshotTextStore;
+
+  constructor(textStore: AutonomousDecisionCycleTransactionalSnapshotTextStore) {
+    super(textStore);
+    this.textStore = textStore;
+    if (typeof textStore.writeIfUnchanged !== "function") throw new ArgumentError("decision-cycle text store lacks compare-and-swap");
+  }
+
+  async writeIfUnchanged(expectedSnapshotDigest: string | null, raw: AutonomousDecisionCycleSnapshot): Promise<boolean> {
+    if (expectedSnapshotDigest !== null && !/^[0-9a-f]{64}$/.test(expectedSnapshotDigest)) throw new ArgumentError("decision-cycle expected snapshot digest is invalid");
+    const snapshot = await validateAutonomousDecisionCycleSnapshot(raw);
+    return this.textStore.writeIfUnchanged(expectedSnapshotDigest, canonicalJson(snapshot));
   }
 }
