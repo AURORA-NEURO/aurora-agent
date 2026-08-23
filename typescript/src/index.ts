@@ -689,6 +689,24 @@ export type {
   AutonomousDomainHttpEvidenceProviderContract,
   AutonomousDomainHttpEvidenceSourceRegistration,
 } from "./autonomous-domain-http-source.js";
+export {
+  AUTONOMOUS_DOMAIN_HTTP_SOURCE_PRESET_SCHEMA,
+  AUTONOMOUS_DOMAIN_HTTP_SOURCE_PRESET_REGISTRATION_SCHEMA,
+  AUTONOMOUS_DOMAIN_HTTP_SOURCE_MATRIX_SCHEMA,
+  MAX_AUTONOMOUS_DOMAIN_HTTP_SOURCE_PRESETS,
+  MAX_AUTONOMOUS_DOMAIN_HTTP_SOURCE_MATRIX_ENTRIES,
+  builtinAutonomousDomainHttpSourcePresets,
+  registerAutonomousDomainHttpSourcePreset,
+  registerAutonomousDomainHttpSourceMatrix,
+} from "./autonomous-domain-source-presets.js";
+export type {
+  AutonomousDomainHttpSourcePreset,
+  AutonomousDomainHttpSourcePresetRegistrationOptions,
+  AutonomousDomainHttpSourcePresetRegistration,
+  AutonomousDomainHttpSourceMatrixEntry,
+  AutonomousDomainHttpSourceMatrixOptions,
+  AutonomousDomainHttpSourceMatrixRegistration,
+} from "./autonomous-domain-source-presets.js";
 export type {
   AutonomousDomainEvidenceFreshnessMode,
   AutonomousDomainEvidenceAuthMode,

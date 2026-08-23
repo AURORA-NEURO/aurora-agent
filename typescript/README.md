@@ -217,6 +217,16 @@ trajectories to the same reviewed domain contract.
 
 ## Autonomous orchestration across all domains
 
+The evidence integration surface also includes `builtinAutonomousDomainHttpSourcePresets()` and
+`registerAutonomousDomainHttpSourceMatrix()`. These provide one digest-bound, provider-neutral
+HTTP source contract for each of the twelve autonomous domains, including source kinds,
+capabilities, operations, freshness, pagination, auth posture, normalizer identity, limitations,
+and default adapter/contract identities. A matrix requires one route per domain by default and
+can bind the shared adapter/provider-contract registries without dispatching. The caller still
+supplies endpoint and request resolvers, short-lived headers or credential lookup, fetch,
+response interpretation, host policy, and approval. No preset claims a provider URL or source
+truth; route metadata never retains resolver output, requests, responses, or credentials.
+
 ### Keyless readiness audit
 
 `AutonomousAgent.readiness()` is the TypeScript-side preflight for the complete autonomous

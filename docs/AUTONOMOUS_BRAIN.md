@@ -875,6 +875,19 @@ deployment should resolve a short-lived credential session inside `header_resolv
 put a raw key in the connector request, URL, task, prompt, or durable state. Local tests can inject
 an in-process opener/fetch and explicitly enable loopback without contacting an external service.
 
+For application setup, the TypeScript SDK adds `builtinAutonomousDomainHttpSourcePresets()` and
+`registerAutonomousDomainHttpSourceMatrix()` above this transport. The presets provide one
+digest-bound, provider-neutral source contract for coding, browser, data, science, biomedical,
+neuroscience, operations, enterprise, multi-agent, multimodal, cross-domain, and evaluation.
+They bind each exact evidence profile to source kinds, capabilities, operations, freshness,
+pagination, auth posture, normalizer identity, limitations, and default adapter/contract
+identities. Matrix registration requires one route per built-in domain by default, rejects stale
+profile bindings and duplicate source identities, can auto-bind the matching provider contracts,
+and still never dispatches HTTP. The caller supplies the endpoint resolver, request builder,
+short-lived header/credential resolver, fetch implementation, response projector, and explicit
+approval. Presets are an integration scaffold, not a provider directory or a truth claim; route
+metadata contains no resolver output, requests, responses, or credentials.
+
 For sources that paginate, compose `create_autonomous_http_paginated_connector_executor()` with
 the same policy and header resolvers. The default parser accepts either a top-level JSON array or
 `{"items": [...], "next_cursor": "..."}`. Provider-specific envelopes must provide an explicit

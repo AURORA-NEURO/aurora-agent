@@ -701,6 +701,7 @@ async function workflowExecutionContractDigest(agent: AutonomousAgent, options: 
     max_cost_per_million_tokens: options.maxCostPerMillionTokens ?? null,
     max_latency_ms: options.maxLatencyMs ?? null,
     min_quality: options.minQuality ?? null,
+    min_selection_confidence: options.minSelectionConfidence ?? null,
     aggregate_cost_limit: options.costBudget?.maxCostUnits ?? options.maxTotalCostUnits ?? null,
     // A workflow owns its stage contract. Caller schemas cannot weaken or replace it,
     // so custom responseSchema/requireJson values do not create replay identities.
@@ -780,6 +781,7 @@ function runOptions(options: AutonomousWorkflowExecuteOptions, stage: Autonomous
     maxCostPerMillionTokens: options.maxCostPerMillionTokens,
     maxLatencyMs: options.maxLatencyMs,
     minQuality: options.minQuality,
+    minSelectionConfidence: options.minSelectionConfidence,
     maxTotalCostUnits: options.costBudget ? undefined : options.maxTotalCostUnits,
     costBudget: options.costBudget,
     requireJson: true,

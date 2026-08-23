@@ -512,6 +512,36 @@ test("workflow stages preserve structured output and selection constraints", asy
   assert.equal(refusedCalls.length, 0, "workflow budget refusal must happen before provider dispatch");
 });
 
+test("workflow stages forward and persist the selection confidence floor", async () => {
+  let calls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      calls += 1;
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify(workflowStagePayload()) }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("workflow-confidence-a", "https://workflow-confidence-a.test", { requiresCredential: false }));
+  llm.registerProvider(openaiCompatibleProvider("workflow-confidence-b", "https://workflow-confidence-b.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  const candidateA = { ...model(), provider: "workflow-confidence-a", model: "same-prior-model" };
+  const candidateB = { ...model(), provider: "workflow-confidence-b", model: "same-prior-model" };
+  agent.registerModel(candidateA);
+  agent.registerModel(candidateB);
+  const result = await new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore()).start("Do not dispatch an ambiguous workflow.", {
+    domain: "coding",
+    jobId: "workflow-confidence-floor-1",
+    candidates: [candidateA, candidateB],
+    approveProviderCall: true,
+    maxStages: 1,
+    minSelectionConfidence: 0.1,
+  });
+  assert.equal(result.status, "failed");
+  assert.equal(calls, 0, "selection confidence abstention must happen before provider dispatch");
+  assert.equal(result.checkpoint.stage_outcomes[0].error_class, "ProviderRuntimeError");
+  assert.equal(result.checkpoint.stage_outcomes[0].error_code, "provider_error");
+});
+
 test("workflow checkpoint snapshots restore a paused job without admitting payloads", async () => {
   let calls = 0;
   const llm = new LLMRuntime({
